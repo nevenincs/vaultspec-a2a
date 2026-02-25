@@ -1,35 +1,30 @@
 ---
-title: A2A Python SDK Tutorial: Building an A2A Agent
+title: A2A Python SDK Tutorial
 source: https://a2a-protocol.org/latest/tutorials/python/
 relevance: 10
 ---
 
 # A2A Python SDK Tutorial: Building an A2A Agent
 
-This tutorial provides a comprehensive guide to building and interacting with A2A-compliant agents using the Python SDK. It covers everything from environment setup to advanced streaming and multi-turn interactions.
+This tutorial walks through building an A2A-compliant agent using the Python SDK, from setup to advanced streaming and multi-turn interactions.
 
-## 1. Introduction
+## 1. Introduction[1]
+This tutorial demonstrates the concepts and components of an A2A server, starting with a simple "echo" example and progressing to an LLM-integrated agent.
 
-Welcome to the Agent2Agent (A2A) Python Quickstart Tutorial! This guide introduces the fundamental concepts and components of an A2A server using a simple "echo" example, followed by a more advanced integration with a Large Language Model (LLM).
-
-**Key Learning Objectives:**
-- Basic concepts of the A2A protocol.
-- Setting up a Python environment for A2A development.
-- Describing agents using Agent Skills and Agent Cards.
-- Handling tasks with an A2A server.
-- Interacting with an A2A server using a client.
-- Implementing streaming and multi-turn interactions.
-- Integrating LLMs into A2A agents.
+### Key Concepts
+- **Agent:** An autonomous system capable of reasoning and using tools.
+- **Protocol:** Defines how agents communicate (A2A).
+- **Skills & Cards:** How agents advertise their capabilities.
+- **Executor:** The runtime logic of the agent.
 
 ---
 
-## 2. Setup Your Environment
+## 2. Setup[2]
 
 ### Prerequisites
-- Python 3.10 or higher.
-- Terminal/Command Prompt access.
-- Git (for cloning the repository).
-- Code editor (e.g., VS Code).
+- Python 3.10+
+- Terminal access
+- Git
 
 ### Clone the Repository
 ```powershell
@@ -37,21 +32,22 @@ git clone https://github.com/a2aproject/a2a-samples.git -b main --depth 1
 cd a2a-samples
 ```
 
-### Python Environment & SDK Installation
-It is recommended to use a virtual environment. The A2A Python SDK supports `uv` and `pip`.
+### Create Environment
+Using `venv` is recommended.
 
-**Using venv:**
+**Windows:**
 ```powershell
-# Windows
 python -m venv .venv
 .\.venv\Scripts\activate
+```
 
-# Mac/Linux
+**Mac/Linux:**
+```bash
 python -m venv .venv
 source .venv/bin/activate
 ```
 
-**Install Dependencies:**
+### Install Dependencies
 ```powershell
 pip install -r samples/python/requirements.txt
 ```
@@ -63,14 +59,13 @@ python -c "import a2a; print('A2A SDK imported successfully')"
 
 ---
 
-## 3. Agent Skills & Agent Card
+## 3. Agent Skills & Agent Card[3]
 
-Agents must define their capabilities (Skills) and how they can be discovered (Agent Card).
+Agents must define what they can do (Skills) and how they are discovered (Card).
 
-### Agent Skills
-An `AgentSkill` describes a specific function. Key attributes include `id`, `name`, `description`, `tags`, `examples`, and `inputModes`/`outputModes`.
+### Define a Skill
+An `AgentSkill` describes a discrete capability.
 
-**Example Skill Definition:**
 ```python
 from a2a.types import AgentSkill
 
@@ -80,13 +75,14 @@ skill = AgentSkill(
     description='just returns hello world',
     tags=['hello world'],
     examples=['hi', 'hello world'],
+    input_modes=['text'],  # Expected input MIME type (e.g., text/plain)
+    output_modes=['text'], # Expected output MIME type
 )
 ```
 
-### Agent Card
-The Agent Card is a JSON document (typically at `.well-known/agent-card.json`) acting as a digital business card.
+### Define the Agent Card
+The `AgentCard` acts as the agent's manifest.
 
-**Example Agent Card Definition:**
 ```python
 from a2a.types import AgentCard, AgentCapabilities
 
@@ -97,7 +93,11 @@ public_agent_card = AgentCard(
     version='1.0.0',
     default_input_modes=['text'],
     default_output_modes=['text'],
-    capabilities=AgentCapabilities(streaming=True),
+    capabilities=AgentCapabilities(
+        streaming=True,            # Supports SSE streaming
+        push_notifications=False,  # Supports Webhooks
+        extended_agent_card=True   # Supports authenticated card retrieval
+    ),
     skills=[skill],
     supports_authenticated_extended_card=True,
 )
@@ -105,16 +105,13 @@ public_agent_card = AgentCard(
 
 ---
 
-## 4. The Agent Executor
+## 4. The Agent Executor[4]
 
-The `AgentExecutor` handles the core logic of processing requests and generating responses.
+The `AgentExecutor` implements the agent's logic. You must subclass `a2a.server.agent_execution.AgentExecutor` and implement `execute` and `cancel`.
 
-### AgentExecutor Interface
-You must implement the `a2a.server.agent_execution.AgentExecutor` abstract base class:
-- `async def execute(self, context: RequestContext, event_queue: EventQueue)`: Processes inputs and enqueues events (Messages, Tasks, Status Updates).
-- `async def cancel(self, context: RequestContext, event_queue: EventQueue)`: Handles task cancellation.
+### Implementation: Hello World Agent
+This executor simply echoes "Hello World".
 
-### HelloWorld Agent Executor Implementation
 ```python
 from a2a.server.agent_execution import AgentExecutor
 from a2a.server.context import RequestContext
@@ -122,6 +119,7 @@ from a2a.server.events import EventQueue
 from a2a.server.utils import new_agent_text_message
 
 class HelloWorldAgent:
+    """Mock agent logic."""
     async def invoke(self) -> str:
         return 'Hello World'
 
@@ -130,123 +128,168 @@ class HelloWorldAgentExecutor(AgentExecutor):
         self.agent = HelloWorldAgent()
 
     async def execute(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """
+        Main execution loop.
+        1. Invokes the agent logic.
+        2. Wraps the result in an A2A Message.
+        3. Enqueues the message to be sent to the client.
+        """
         result = await self.agent.invoke()
-        await event_queue.enqueue_event(new_agent_text_message(result))
+        
+        # Create a standard text message response
+        message_event = new_agent_text_message(result)
+        
+        # Enqueue the event for delivery
+        await event_queue.enqueue_event(message_event)
 
     async def cancel(self, context: RequestContext, event_queue: EventQueue) -> None:
+        """Handle cancellation requests."""
         raise Exception('cancel not supported')
 ```
 
 ---
 
-## 5. Starting the Server
+## 5. Starting the Server[5]
 
-The SDK provides `A2AStarletteApplication` to run an A2A-compliant HTTP server.
+The SDK provides `A2AStarletteApplication` to serve the agent over HTTP.
 
-### Server Setup (`__main__.py`)
+### Server Script (`__main__.py`)
+
 ```python
 import uvicorn
 from a2a.server.apps import A2AStarletteApplication
 from a2a.server.request_handlers import DefaultRequestHandler
 from a2a.server.tasks import InMemoryTaskStore
-from agent_executor import HelloWorldAgentExecutor
+# Import your executor and card definitions here
+# from agent_executor import HelloWorldAgentExecutor
+# from definitions import public_agent_card
 
-# ... (Skill and AgentCard definitions from Section 3)
-
+# 1. Initialize Request Handler
+# DefaultRequestHandler manages task persistence and execution flow.
 request_handler = DefaultRequestHandler(
     agent_executor=HelloWorldAgentExecutor(),
-    task_store=InMemoryTaskStore(),
+    task_store=InMemoryTaskStore(), # Stores tasks in RAM (lost on restart)
 )
 
+# 2. Configure the Application
 server = A2AStarletteApplication(
     agent_card=public_agent_card,
     http_handler=request_handler,
-    extended_agent_card=specific_extended_agent_card, # Optional
+    # extended_agent_card=... (Optional: for authenticated clients)
 )
 
+# 3. Run with Uvicorn
 if __name__ == '__main__':
     uvicorn.run(server.build(), host='0.0.0.0', port=9999)
 ```
 
-### Running the Server
+Run the server:
 ```powershell
 python samples/python/agents/helloworld/__main__.py
 ```
+*The server will start at `http://0.0.0.0:9999`.*
 
 ---
 
-## 6. Interacting with the Server
+## 6. Interacting with the Server[6]
 
-Use `A2AClient` to simplify interactions.
+The `A2AClient` simplifies communication. It handles card resolution and RPC calls.
 
-### Fetching Card & Initializing Client
+### Client Setup
 ```python
 from a2a.client import A2AClient, A2ACardResolver
 import httpx
 
 base_url = 'http://localhost:9999'
-async with httpx.AsyncClient() as httpx_client:
-    resolver = A2ACardResolver(httpx_client=httpx_client, base_url=base_url)
-    # ... resolver fetches card and initializes client
+
+async def main():
+    async with httpx.AsyncClient() as httpx_client:
+        # 1. Resolve the Agent Card
+        resolver = A2ACardResolver(httpx_client=httpx_client, base_url=base_url)
+        client = await resolver.resolve()
+        
+        print(f"Connected to: {client.agent_card.name}")
 ```
 
-### Sending a Message (Non-Streaming)
+### Sending a Message (Task)
 ```python
 from a2a.types import SendMessageRequest, MessageSendParams
 from uuid import uuid4
 
+# ... inside async function ...
+
+# Create payload
 send_message_payload = {
     'message': {
         'role': 'user',
-        'parts': [{'kind': 'text', 'text': 'how much is 10 USD in INR?'}],
+        'parts': [{'kind': 'text', 'text': 'Hello?'}],
         'messageId': uuid4().hex,
     },
 }
-request = SendMessageRequest(id=str(uuid4()), params=MessageSendParams(**send_message_payload))
+
+# Wrap in Request object
+request = SendMessageRequest(
+    id=str(uuid4()), 
+    params=MessageSendParams(**send_message_payload)
+)
+
+# Send and await response
 response = await client.send_message(request)
-print(response.model_dump(mode='json', exclude_none=True))
+print("Response:", response.model_dump(mode='json', exclude_none=True))
 ```
 
-### Sending a Streaming Message
+---
+
+## 7. Streaming and Multi-Turn (Advanced)[7]
+
+Real-world agents often stream partial results and require multiple turns (e.g., clarifying questions).
+
+### Streaming
+Use `SendStreamingMessageRequest` to receive chunks.
+
 ```python
 from a2a.types import SendStreamingMessageRequest
 
-streaming_request = SendStreamingMessageRequest(id=str(uuid4()), params=MessageSendParams(**send_message_payload))
+streaming_request = SendStreamingMessageRequest(
+    id=str(uuid4()), 
+    params=MessageSendParams(**send_message_payload)
+)
+
 stream_response = client.send_message_streaming(streaming_request)
+
 async for chunk in stream_response:
-    print(chunk.model_dump(mode='json', exclude_none=True))
+    # Chunk can be a TaskStatusUpdate, ArtifactUpdate, or Message
+    print("Chunk:", chunk.model_dump(mode='json', exclude_none=True))
 ```
 
----
+### Multi-Turn Logic (LangGraph Example)
+The SDK supports multi-turn workflows where the agent pauses for input (`INPUT_REQUIRED`).
 
-## 7. Streaming & Multi-Turn Interactions (LangGraph Example)
+1.  **Agent Pauses:** Returns `TaskState.input_required` when it needs clarification.
+2.  **Client Responds:** Sends a new message with the **same `taskId`** and `contextId`.
+3.  **Agent Resumes:** The `AgentExecutor` retrieves the task history and continues.
 
-For advanced features, refer to the LangGraph example in `samples/python/agents/langgraph/`.
-
-### Key Concepts Demonstrated:
-1.  **LLM Integration**: Uses `ChatGoogleGenerativeAI` and LangGraph's `create_react_agent`.
-2.  **Task State Management**: Uses `InMemoryTaskStore` to persist state across interactions.
-3.  **Streaming Events**:
-    - `TaskStatusUpdateEvent`: Intermediate updates (e.g., "Looking up exchange rates...").
-    - `TaskArtifactUpdateEvent`: Final answer chunks.
-4.  **Multi-Turn Conversation**:
-    - Agent returns `TaskState.input_required` for ambiguous queries.
-    - Client continues the task by providing `taskId` and `contextId` in subsequent messages.
-
-### Running the LangGraph Server:
-1.  Set `GOOGLE_API_KEY` in a `.env` file.
-2.  Run `python __main__.py` in the langgraph app directory.
-3.  Test with `python test_client.py`.
+**Example Flow:**
+1.  User: "Book a flight."
+2.  Agent (Stream): `TaskStatusUpdate(state='working')` -> `TaskStatusUpdate(state='input_required')` -> `Message("Where to?")`.
+3.  User: (Sends message with `taskId` from step 2) "To Paris."
+4.  Agent: `TaskStatusUpdate(state='completed')` -> `Message("Booked flight to Paris.")`.
 
 ---
 
-## 8. Next Steps
+## 8. Next Steps[8]
 
-Congratulations! You have built a foundation for A2A development.
+- **Explore Samples:** `samples/python/agents/` contains robust examples like `langgraph` (LLM integration) and `autogen`.
+- **Read the Spec:** Understand the underlying protocol messages.
+- **Implement Persistence:** Replace `InMemoryTaskStore` with a database-backed store for production.
+- **Add Push Notifications:** Implement webhooks for long-running tasks.
 
-**Where to Go From Here:**
-- **Explore Samples**: Check `a2a-samples` for complex integrations.
-- **Deepen Knowledge**: Read the [A2A Protocol Specification](https://a2a-protocol.org/latest/specification/).
-- **Build Custom Agents**: Integrate frameworks like LangChain, CrewAI, or AutoGen.
-- **Advanced Features**: Implement persistent `TaskStore`, push notifications, and complex input/output modalities (file/data Parts).
-- **Contribute**: Join the A2A community on GitHub.
+Sources:
+[1] https://a2a-protocol.org/latest/tutorials/python/1-introduction
+[2] https://a2a-protocol.org/latest/tutorials/python/2-setup/
+[3] https://a2a-protocol.org/latest/tutorials/python/3-agent-skills-and-card/
+[4] https://a2a-protocol.org/latest/tutorials/python/4-agent-executor/
+[5] https://a2a-protocol.org/latest/tutorials/python/5-start-server/
+[6] https://a2a-protocol.org/latest/tutorials/python/6-interact-with-server/
+[7] https://a2a-protocol.org/latest/tutorials/python/7-streaming-and-multiturn/
+[8] https://a2a-protocol.org/latest/tutorials/python/8-next-steps/

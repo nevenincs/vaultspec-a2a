@@ -18,6 +18,10 @@ Protocol (ACP), and related SDKs.
   - Example implementations demonstrating various A2A patterns.
   - Includes "hello world" agents and complex task management scenarios.
 
+- **[A2A Walkthrough](https://github.com/holtskinner/A2AWalkthrough)**
+  - A step-by-step educational walkthrough of A2A and MCP concepts.
+  - Includes Jupyter notebooks and specialized agent examples.
+
 ## Client & IDE Protocols
 
 - **[Agent Client Protocol (ACP) Python SDK](https://github.com/agentclientprotocol/python-sdk)**

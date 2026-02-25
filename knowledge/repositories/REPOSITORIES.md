@@ -1,6 +1,8 @@
 # A2A Universe Repositories
 
-This directory contains references and local clones of the core repositories that define and implement the Agent-to-Agent (A2A) ecosystem, the Agent Client Protocol (ACP), and related SDKs.
+This directory contains references and local clones of the core repositories
+that define and implement the Agent-to-Agent (A2A) ecosystem, the Agent Client
+Protocol (ACP), and related SDKs.
 
 ## Core A2A Repositories
 
@@ -26,9 +28,11 @@ This directory contains references and local clones of the core repositories tha
   - Protocol for connecting AI models to local data and tools.
 
 - **[Claude Agent SDK](https://github.com/anthropics/claude-agent-sdk-python)**
-  - Anthropic's SDK for building agents with Claude, including MCP integration.
+  - Anthropic's SDK for building agents with Claude, including MCP
+    integration.
 
 ## Companion Repositories
 
 - **[vaultspec](Y:\code\vaultspec-worktrees\main)**
-  - The companion repository for this project, providing the governed development framework.
+  - The companion repository for this project, providing the governed
+    development framework.

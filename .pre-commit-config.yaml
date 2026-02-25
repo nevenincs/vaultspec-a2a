@@ -47,5 +47,6 @@ repos:
         name: Lint Markdown style (markdownlint)
         entry: npx --yes markdownlint-cli
         language: system
-        args: ["--config", ".markdownlint.json", "--fix", "README.md"]
+        args: ["--config", ".markdownlint.json", "README.md", "knowledge/*.md", ".gemini/*.md"]
         types: [markdown]
+        pass_filenames: false

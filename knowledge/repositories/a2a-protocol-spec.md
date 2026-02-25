@@ -7,7 +7,8 @@
 
 ### Agent Card
 
-A JSON document describing an agent's identity, version, skills, and endpoints.
+A JSON document describing an agent's identity, version, skills, and
+endpoints.
 
 - `name`: Human-readable name.
 - `skills`: List of capabilities (functions/tools) the agent provides.
@@ -23,5 +24,7 @@ A JSON document describing an agent's identity, version, skills, and endpoints.
 ### Communication
 
 - **Request/Response:** Standard HTTP for task creation and status checks.
-- **Streaming:** Server-Sent Events (SSE) for real-time task progress and intermediate results.
-- **Authentication:** Supported via standard HTTP mechanisms (Bearer tokens, etc.).
+- **Streaming:** Server-Sent Events (SSE) for real-time task progress and
+  intermediate results.
+- **Authentication:** Supported via standard HTTP mechanisms (Bearer tokens,
+  etc.).

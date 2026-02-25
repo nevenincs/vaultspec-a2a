@@ -4,15 +4,24 @@ source: https://a2a-protocol.org/latest/topics/key-concepts/
 relevance: 10
 ---
 
-# CORE CONCEPTS AND COMPONENTS IN A2A
+## Core Concepts and Components in A2A
 
-A2A uses a set of core concepts that define how agents interact. Understand these core building blocks to develop or integrate with A2A-compliant systems.
+ that define how agents interact. Understand
+these core building blocks to develop or integrate with A2A-compliant systems.
 
 ## CORE ACTORS IN A2A INTERACTIONS
 
-* **User**: The end user, which can be a human operator or an automated service. The user initiates a request or defines a goal that requires assistance from one or more AI agents.
-* **A2A Client (Client Agent)**: An application, service, or another AI agent that acts on behalf of the user. The client initiates communication using the A2A protocol.
-* **A2A Server (Remote Agent)**: An AI agent or an agentic system that exposes an HTTP endpoint implementing the A2A protocol. It receives requests from clients, processes tasks, and returns results or status updates. From the client's perspective, the remote agent operates as an opaque (black-box) system, meaning its internal workings, memory, or tools are not exposed.
+* **User**: The end user, which can be a human operator or an automated service.
+  The user initiates a request or defines a goal that requires assistance from
+  one or more AI agents.
+* **A2A Client (Client Agent)**: An application, service, or another AI agent
+  that acts on behalf of the user. The client initiates communication using the
+  A2A protocol.
+* **A2A Server (Remote Agent)**: An AI agent or an agentic system that exposes
+  an HTTP endpoint implementing the A2A protocol. It receives requests from
+  clients, processes tasks, and returns results or status updates. From the
+  client's perspective, the remote agent operates as an opaque (black-box)
+  system, meaning its internal workings, memory, or tools are not exposed.
 
 ## FUNDAMENTAL COMMUNICATION ELEMENTS
 
@@ -26,45 +35,80 @@ A2A uses a set of core concepts that define how agents interact. Understand thes
 
 ## INTERACTION MECHANISMS
 
-The A2A Protocol supports various interaction patterns to accommodate different needs for responsiveness and persistence. These mechanisms ensure that agents can exchange information efficiently and reliably, regardless of the task's complexity or duration:
+The A2A Protocol supports various interaction patterns to accommodate different
+needs for responsiveness and persistence. These mechanisms ensure that agents
+can exchange information efficiently and reliably, regardless of the task's
+complexity or duration:
 
-* **Request/Response (Polling)**: Clients send a request and the server responds. For long-running tasks, the client periodically polls the server for updates.
-* **Streaming with Server-Sent Events (SSE)**: Clients initiate a stream to receive real-time, incremental results or status updates from the server over an open HTTP connection.
-* **Push Notifications**: For very long-running tasks or disconnected scenarios, the server can actively send asynchronous notifications to a client-provided webhook when significant task updates occur.
+* **Request/Response (Polling)**: Clients send a request and the server
+  responds. For long-running tasks, the client periodically polls the server for
+  updates.
+* **Streaming with Server-Sent Events (SSE)**: Clients initiate a stream to
+  receive real-time, incremental results or status updates from the server over
+  an open HTTP connection.
+* **Push Notifications**: For very long-running tasks or disconnected scenarios,
+  the server can actively send asynchronous notifications to a client-provided
+  webhook when significant task updates occur.
 
-## AGENT CARDS
+## THE AGENT CARD
 
-The Agent Card is a JSON document that serves as a digital business card for initial discovery and interaction setup. It provides essential metadata about an agent. Clients parse this information to determine if an agent is suitable for a given task, how to structure requests, and how to communicate securely. Key information includes identity, service endpoint (URL), A2A capabilities, authentication requirements, and a list of skills.
+The Agent Card is a JSON document that serves as a digital business card for
+initial discovery and interaction setup. It provides essential metadata about an
+agent. Clients parse this information to determine if an agent is suitable for a
+given task, how to structure requests, and how to communicate securely. Key
+information includes identity, service endpoint (URL), A2A capabilities,
+authentication requirements, and a list of skills.
 
 ## MESSAGES AND PARTS
 
-A message represents a single turn of communication between a client and an agent. It includes a role ("user" or "agent") and a unique `messageId`. It contains one or more `Part` objects, which are granular containers for the actual content. This design allows A2A to be modality independent.
+A message represents a single turn of communication between a client and an
+agent. It includes a role ("user" or "agent") and a unique `messageId`. It
+contains one or more `Part` objects, which are granular containers for the
+actual content. This design allows A2A to be modality independent.
 
-The `Part` object is a flexible container that can hold different types of content using a `oneof` field structure. A `Part` must contain exactly one of the following content fields:
+The `Part` object is a flexible container that can hold different types of
+content using a `oneof` field structure. A `Part` must contain exactly one of
+the following content fields:
 
 * **text**: A string containing plain textual content.
 * **raw**: A byte array containing binary file data (inline).
 * **url**: A string URI referencing external file content.
-* **data**: A structured JSON value (e.g., object, array) for machine-readable data.
+* **data**: A structured JSON value (e.g., object, array) for machine-readable
+  data.
 
 Additionally, every `Part` can include:
 
-* **mediaType**: The MIME type of the content (e.g., "text/plain", "image/png", "application/json").
+* **mediaType**: The MIME type of the content (e.g., "text/plain", "image/png",
+  "application/json").
 * **filename**: An optional name for the file or content.
 * **metadata**: A key-value map for additional context.
 
 ## ARTIFACTS
 
-An artifact represents a tangible output or a concrete result generated by a remote agent during task processing. Unlike general messages, artifacts are the actual deliverables. An artifact has a unique `artifactId`, a human-readable name, and consists of one or more `part` objects. Artifacts are closely tied to the task lifecycle and can be streamed incrementally to the client.
+An artifact represents a tangible output or a concrete result generated by a
+remote agent during task processing. Unlike general messages, artifacts are the
+actual deliverables. An artifact has a unique `artifactId`, a human-readable
+name, and consists of one or more `part` objects. Artifacts are closely tied to
+the task lifecycle and can be streamed incrementally to the client.
 
 ## AGENT RESPONSE: TASK OR MESSAGE
 
-The agent response can be a new **Task** (when the agent needs to perform a long-running operation) or a **Message** (when the agent can respond immediately).
+The agent response can be a new **Task** (when the agent needs to perform a
+long-running operation) or a **Message** (when the agent can respond
+immediately).
 
 ## OTHER IMPORTANT CONCEPTS
 
-* **Context (contextId)**: A server-generated identifier that can be used to logically group multiple related Task objects, providing context across a series of interactions.
-* **Transport and Format**: A2A communication occurs over HTTP(S). JSON-RPC 2.0 is used as the payload format for all requests and responses.
-* **Authentication & Authorization**: A2A relies on standard web security practices. Authentication requirements are declared in the Agent Card, and credentials (e.g., OAuth tokens, API keys) are typically passed through HTTP headers, separate from the A2A protocol messages themselves.
-* **Agent Discovery**: The process by which clients find Agent Cards to learn about available A2A Servers and their capabilities.
-* **Extensions**: A2A allows agents to declare custom protocol extensions as part of their AgentCard.
+* **Context (contextId)**: A server-generated identifier that can be used to
+  logically group multiple related Task objects, providing context across a
+  series of interactions.
+* **Transport and Format**: A2A communication occurs over HTTP(S). JSON-RPC 2.0
+  is used as the payload format for all requests and responses.
+* **Authentication & Authorization**: A2A relies on standard web security
+  practices. Authentication requirements are declared in the Agent Card, and
+  credentials (e.g., OAuth tokens, API keys) are typically passed through HTTP
+  headers, separate from the A2A protocol messages themselves.
+* **Agent Discovery**: The process by which clients find Agent Cards to learn
+  about available A2A Servers and their capabilities.
+* **Extensions**: A2A allows agents to declare custom protocol extensions as
+  part of their AgentCard.

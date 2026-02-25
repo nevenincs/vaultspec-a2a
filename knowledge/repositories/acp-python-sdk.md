@@ -5,11 +5,13 @@
 
 ## Overview
 
-ACP is designed for local and remote communication between coding agents and editors. It uses JSON-RPC as the primary transport.
+ACP is designed for local and remote communication between coding agents and
+editors. It uses JSON-RPC as the primary transport.
 
 ## Key Features
 
-- **Pydantic Models:** Strictly typed models for all ACP messages and schema objects.
+- **Pydantic Models:** Strictly typed models for all ACP messages and schema
+  objects.
 - **Transports:**
   - `StdioTransport`: For local agents running as subprocesses.
   - `HttpTransport`: For remote agents communicating via JSON-RPC over HTTP.
@@ -19,4 +21,5 @@ ACP is designed for local and remote communication between coding agents and edi
 
 - **Initialization:** Handshake process to negotiate capabilities.
 - **Task Delegation:** IDEs delegate coding tasks to agents.
-- **Tool Use:** Agents can call tools provided by the IDE (e.g., `read_file`, `edit_file`).
+- **Tool Use:** Agents can call tools provided by the IDE (e.g., `read_file`,
+  `edit_file`).

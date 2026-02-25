@@ -4,9 +4,10 @@ source: https://a2a-protocol.org/latest/definitions/
 relevance: 10
 ---
 
-# A2A Protocol Technical Specifications (v1)
+## A2A Protocol Technical Specifications (v1)
 
-This document summarizes the normative A2A protocol definitions based on the `proto3` specification.
+ the normative A2A protocol definitions based on the
+`proto3` specification.
 
 ## 1. Core Service Operations (A2AService)
 
@@ -18,7 +19,7 @@ This document summarizes the normative A2A protocol definitions based on the `pr
 | `ListTasks` | `ListTasksRequest` | `ListTasksResponse` | Lists tasks with filtering/pagination. |
 | `CancelTask` | `CancelTaskRequest` | `Task` | Cancels an active task. |
 | `SubscribeToTask` | `SubscribeToTaskRequest` | `stream StreamResponse` | Subscribes to real-time task updates. |
-| `GetExtendedAgentCard`| `GetExtendedAgentCardRequest`| `AgentCard` | Returns detailed card for authenticated agents. |
+| `GetExtendedAgentCard` | `GetExtendedAgentCardRequest` | `AgentCard` | Returns detailed card for authenticated agents. |
 
 ## 2. Core Data Structures
 

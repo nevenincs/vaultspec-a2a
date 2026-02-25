@@ -868,6 +868,7 @@ dependencies = [
     { name = "sse-starlette" },
     { name = "starlette" },
     { name = "uvicorn" },
+    { name = "winfcntl" },
 ]
 
 [package.optional-dependencies]
@@ -915,6 +916,7 @@ requires-dist = [
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.15" },
     { name = "uvicorn", specifier = ">=0.41.0" },
+    { name = "winfcntl", specifier = ">=1.1.9" },
 ]
 provides-extras = ["dev"]
 
@@ -928,4 +930,13 @@ dev = [
     { name = "pytest-timeout", specifier = ">=2.4.0" },
     { name = "ruff", specifier = ">=0.15.2" },
     { name = "ty", specifier = ">=0.0.15" },
+]
+
+[[package]]
+name = "winfcntl"
+version = "1.1.9"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/c7/8a/a801f742c0887bcc4ff199d769c4ca562f1f940b6b61d8084d613bef225b/winfcntl-1.1.9.tar.gz", hash = "sha256:23971ceeafee9872227cbccdeaa9d6c5836130c1c8aa8445ba54b273adee98b1", size = 3626, upload-time = "2024-08-31T03:27:12.291Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/98/cb/f79055ee11e5adf4e12164bb1c445270cfb87c188b48681b79cf20b8f662/winfcntl-1.1.9-py3-none-any.whl", hash = "sha256:efa93c1ef8d1b804be2a6ec307ed2f480d1b7fc8367771e622e1e1d3251b76ff", size = 4888, upload-time = "2024-08-31T03:27:10.563Z" },
 ]

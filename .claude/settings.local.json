@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(find \"Y:\\\\code\\\\vaultspec-a2a-worktrees\\\\main\\\\knowledge\\\\repositories\\\\mcp-python-sdk\\\\examples\" -name \"README.md\" | xargs grep -l \"task\" 2>/dev/null)",
+      "Bash(find Y:\\\\code\\\\vaultspec-a2a-worktrees\\\\main\\\\knowledge\\\\repositories\\\\mcp-python-sdk\\\\docs:*)",
+      "Bash(find:*)",
+      "WebSearch"
+    ]
+  }
+}

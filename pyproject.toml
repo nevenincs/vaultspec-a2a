@@ -19,6 +19,7 @@ dependencies = [
   "sse-starlette>=3.2.0",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
+  "winfcntl>=1.1.9",
 ]
 
 [project.optional-dependencies]

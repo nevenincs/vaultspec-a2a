@@ -2,7 +2,7 @@
 name: "Control Surface Gaps Research"
 date: 2026-25-02
 type: research
-summary: "Rigorous technical decisions for SvelteKit agent rendering, replacing experimental tech with robust Server-Side Replay and @humanspeak token caching."
+summary: "Rigorous technical decisions for SvelteKit agent rendering, replacing experimental tech with robust Server-Side Replay, @humanspeak token caching, and resolving Tailwind v4 styling conflicts."
 ---
 
 # Control Surface Gaps Research
@@ -76,3 +76,38 @@ term.onDrain(() => {
 
 **Rationale**:
 The UI should be a stateless projection. The Orchestrator's SQLite database must maintain a rolling ring-buffer (e.g., the last 2000 lines) of raw ANSI bytes emitted by the agent process. On UI mount, the Svelte client requests this buffer via REST, pipes it into a fresh `xterm.js` instance, and then opens the WebSocket for live updates. This guarantees 100% accurate terminal reconstruction without relying on experimental frontend serialization.
+
+## 4. Tailwind CSS v4 vs. xterm.js UI Breakage (Gap G4)
+
+**Architectural Problem**: The project leverages Tailwind CSS v4. Tailwind's global reset (`Preflight`) forces `box-sizing: border-box` and strips all native margins/paddings. `xterm.js` requires strict `content-box` dimensioning for accurate cursor alignment and canvas drawing. Injecting Tailwind globally will immediately break the terminal interface.
+
+**Implementation Reference (CSS Layers & WebGL)**:
+We must explicitly isolate the terminal container from Tailwind's influence and offload rendering to the GPU.
+```css
+/* app.css */
+@import "tailwindcss";
+@import "xterm/css/xterm.css";
+
+/* Force CSS specificity to override Tailwind's Preflight inside the terminal */
+@layer utilities {
+  .xterm-container * {
+    box-sizing: content-box !important;
+  }
+  .xterm-viewport {
+    background-color: transparent !important;
+  }
+}
+```
+**Mandate**: The Svelte application *must* initialize `xterm.js` using the `@xterm/addon-webgl` plugin to bypass DOM-styling conflicts entirely, drastically improving rendering performance.
+
+## 5. shadcn-svelte vs. Streaming Block Reactivity (Gap G5)
+
+**Architectural Problem**: `shadcn-svelte` provides high-quality components, but its Code Block component is tightly coupled with `Shiki` (a heavy WASM syntax highlighter). If integrated naively into `@humanspeak/svelte-markdown`, Shiki will attempt to synchronously re-highlight the entire code block on the main thread during *every incoming WebSocket chunk*, causing the stream to freeze to <10 FPS.
+
+**Inclusion/Exclusion Decision**:
+- **Excluded**: Synchronous inline syntax highlighting via Shiki during an active stream.
+- **Included**: Asynchronous Web Worker offloading for Shiki, or deferred rendering.
+
+**Rationale**:
+To maintain 60 FPS during a fast LLM code generation stream, the markdown parser must emit raw `<pre><code>` blocks without syntax highlighting. 
+The UI must implement an `IntersectionObserver` or a stream-completion hook (e.g., waiting for the `TaskArtifactUpdateEvent` indicating `last_chunk: true`) before passing the complete string to Shiki for colorization.

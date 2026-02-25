@@ -1,0 +1,21 @@
+# Local knowledgebase and references
+knowledgebase/
+
+logs/
+temp/
+
+*.log
+*.tmp
+*.bak
+*.swp
+*.swo
+*.DS_Store
+
+# Python specific
+*.pyc
+__pycache__/
+
+# Virtual environment
+venv/
+.venv/
+.env/

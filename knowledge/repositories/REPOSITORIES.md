@@ -43,6 +43,9 @@ Protocol (ACP), and related SDKs.
 - **[LangGraph](https://github.com/langchain-ai/langgraph)**
   - Engine for building stateful, multi-agent collaborative workflows.
 
+- **[DeepAgents](https://github.com/langchain-ai/deepagents)**
+  - Blueprints for advanced autonomous reasoning and planning agents.
+
 ## Companion Repositories
 
 - **[vaultspec](Y:\code\vaultspec-worktrees\main)**

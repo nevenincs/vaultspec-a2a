@@ -1,10 +1,12 @@
 ---
-title: Life of a Task
-source: https://a2a-protocol.org/latest/topics/life-of-a-task/
-relevance: 10
+name: "A2A Life of a Task"
+date: 2026-25-02
+type: reference
+summary: "Task lifecycle patterns covering stateless vs stateful responses, contextId grouping, parallel follow-ups, and artifact mutation tracking."
+maturity: 80
 ---
 
-## Life of a Task
+# Life of a Task
 
 , interactions can range from simple, stateless
 exchanges to complex, long-running processes. When an agent receives a message

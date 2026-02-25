@@ -1,3 +1,11 @@
+---
+name: "Coding Teams Architecture"
+date: 2026-25-02
+type: research
+summary: "End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design."
+maturity: 35
+---
+
 # Research: Architecture & App Considerations for Coding Agent Teams
 
 **Date**: 2026-02-25

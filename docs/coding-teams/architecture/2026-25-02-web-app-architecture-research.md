@@ -1,3 +1,11 @@
+---
+name: "Web App Architecture"
+date: 2026-25-02
+type: research
+summary: "Backend and frontend framework comparison covering FastAPI vs Starlette, SvelteKit evaluation, state management strategies, and deployment model."
+maturity: 30
+---
+
 # Phase 3 Research: Web Application Architecture for Agent Team Control Surface
 
 **Date**: 2026-02-25

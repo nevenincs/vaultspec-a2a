@@ -1,3 +1,11 @@
+---
+name: "Control Surface Research Plan"
+date: 2026-25-02
+type: plan
+summary: "Eight-phase research roadmap from protocol foundations through architecture decision records for the agent team control surface."
+maturity: 30
+---
+
 # Research Plan: Agent Team Control Surface
 
 **Date**: 2026-02-25

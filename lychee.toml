@@ -1,0 +1,5 @@
+## Lychee link checker configuration
+## See: https://lychee.cli.rs/configuration/
+
+# Accept 403 (many sites block automated checkers)
+accept = [200, 403]

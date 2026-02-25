@@ -1,10 +1,12 @@
 ---
-title: Enterprise Features
-source: https://a2a-protocol.org/latest/topics/enterprise-ready/
-relevance: 10
+name: "A2A Enterprise Readiness"
+date: 2026-25-02
+type: reference
+summary: "Enterprise implementation guidance covering TLS, OAuth2/OIDC authentication, authorization, data privacy compliance, and OpenTelemetry tracing."
+maturity: 75
 ---
 
-## Enterprise Implementation of A2A
+# Enterprise Implementation of A2A
 
  is designed with enterprise requirements at its
 core. Rather than inventing new, proprietary standards for security and

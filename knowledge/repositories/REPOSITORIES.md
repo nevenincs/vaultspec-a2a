@@ -1,3 +1,11 @@
+---
+name: "Repository Index"
+date: 2026-25-02
+type: index
+summary: "Catalog of cloned repositories and their reference notes covering A2A, ACP, MCP, and orchestration frameworks."
+maturity: 60
+---
+
 # A2A Universe Repositories
 
 This directory contains references and local clones of the core repositories

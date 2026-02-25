@@ -1,10 +1,12 @@
 ---
-title: Agent Discovery
-source: https://a2a-protocol.org/latest/topics/agent-discovery/
-relevance: 10
+name: "A2A Agent Discovery"
+date: 2026-25-02
+type: reference
+summary: "Discovery strategies including well-known URI, curated registries, direct configuration, and security considerations for Agent Cards."
+maturity: 80
 ---
 
-## A2A Agent Discovery Reference
+# A2A Agent Discovery Reference
 
 To collaborate using the Agent2Agent (A2A) protocol, AI agents need to first
 find each other and understand their capabilities. A2A standardizes agent

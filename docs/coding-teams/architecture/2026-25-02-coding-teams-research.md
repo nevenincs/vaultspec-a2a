@@ -1,3 +1,11 @@
+---
+name: "Coding Teams Research"
+date: 2026-25-02
+type: research
+summary: "Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams."
+maturity: 30
+---
+
 # Research: Coding Agent Teams via A2A Orchestration
 
 **Date**: 2026-02-25

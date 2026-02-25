@@ -1,10 +1,12 @@
 ---
-title: A2A and MCP - Detailed Comparison and Integration
-source: https://a2a-protocol.org/latest/topics/a2a-and-mcp/
-relevance: 10
+name: "A2A and MCP Integration"
+date: 2026-25-02
+type: reference
+summary: "Comparison of A2A and MCP protocols, their complementary roles, and patterns for representing A2A agents as MCP resources."
+maturity: 75
 ---
 
-## A2A and MCP: Detailed Comparison and Integration
+# A2A and MCP: Detailed Comparison and Integration
 
 , two key protocol types facilitate interoperability: one
 connects agents to tools/resources (MCP), and the other enables agent-to-agent

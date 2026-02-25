@@ -1,3 +1,11 @@
+---
+name: "Codex Agent Support"
+date: 2026-25-02
+type: research
+summary: "Provider analysis for OpenAI Codex CLI covering authentication, MCP support, experimental multi-agent mode, and Windows reliability concerns."
+maturity: 25
+---
+
 # Phase 3 Research: Codex Agent Support and Specificities
 
 **Date**: 2026-02-25

@@ -1,7 +1,9 @@
 ---
-title: A2A Python SDK Repository Guide
-source: knowledge/repositories/a2a-python
-relevance: 10
+name: "A2A Python SDK Guide"
+date: 2026-25-02
+type: reference
+summary: "Detailed repository guide covering architecture, directory map, key data flows, extension points, and critical module identification."
+maturity: 65
 ---
 
 # A2A Python SDK Repository Guide

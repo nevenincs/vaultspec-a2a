@@ -1,3 +1,11 @@
+---
+name: "UI Terminal Dashboard Survey"
+date: 2026-25-02
+type: research
+summary: "Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations."
+maturity: 20
+---
+
 # Phase 7: Agent UI, Terminal-in-Browser, and Real-time Dashboard Survey
 
 **Date**: 2026-02-25

@@ -1,3 +1,11 @@
+---
+name: "A2A Spec Repository Reference"
+date: 2026-25-02
+type: reference
+summary: "Summary of the A2A protocol specification repository covering Agent Card structure, task lifecycle, and communication mechanisms."
+maturity: 60
+---
+
 # A2A Protocol Specification Reference
 
 - **Source:** [https://github.com/a2aproject/A2A](https://github.com/a2aproject/A2A)

@@ -1,3 +1,11 @@
+---
+name: "Monitoring and Observability"
+date: 2026-25-02
+type: research
+summary: "Survey of AgentOps, Langfuse, and CrewAI observability solutions with hierarchical telemetry model and real-time dashboard UX requirements."
+maturity: 25
+---
+
 # Research: External Control and Monitoring Surface for Active A2A Teams
 
 **Date**: 2026-02-25

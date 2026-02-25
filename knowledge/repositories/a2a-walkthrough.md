@@ -1,7 +1,9 @@
 ---
-title: A2A Walkthrough Deep Dive
-source: knowledge/repositories/A2AWalkthrough
-relevance: 9
+name: "A2A Walkthrough Guide"
+date: 2026-25-02
+type: reference
+summary: "Multi-framework orchestration walkthrough covering vanilla A2A SDK, Google ADK, LangGraph+MCP, and BeeAI implementation patterns."
+maturity: 55
 ---
 
 # A2A Walkthrough: Multi-Framework Orchestration Guide

@@ -1,3 +1,11 @@
+---
+name: "ACP Python SDK Reference"
+date: 2026-25-02
+type: reference
+summary: "Agent Client Protocol SDK overview covering Pydantic models, stdio/HTTP transports, agent base class, and protocol highlights."
+maturity: 55
+---
+
 # Agent Client Protocol (ACP) Python SDK Reference
 
 - **Source:** [https://github.com/agentclientprotocol/python-sdk](https://github.com/agentclientprotocol/python-sdk)

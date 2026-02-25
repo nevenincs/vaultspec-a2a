@@ -1,3 +1,11 @@
+---
+name: "Agent Process Lifecycle"
+date: 2026-25-02
+type: research
+summary: "Windows-specific process management research covering asyncio subprocess patterns, graceful shutdown, health checks, state machines, and zombie prevention."
+maturity: 30
+---
+
 # Phase 4 Research: Agent Process Lifecycle Management
 
 **Date:** 2026-02-25

@@ -1,3 +1,11 @@
+---
+name: "Protocol Foundations"
+date: 2026-25-02
+type: research
+summary: "Phase 1 deliverable covering A2A SSE event-to-UI render mapping, ACP web-native host feasibility, and WebSocket multiplexing protocol design."
+maturity: 45
+---
+
 # Phase 1 Deliverable: Protocol Foundations for Control Surface
 
 **Date**: 2026-02-25

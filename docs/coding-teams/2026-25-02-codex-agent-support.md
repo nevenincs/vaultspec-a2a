@@ -8,33 +8,33 @@
 
 ## 1. Authentication Process
 **Local CLI vs. Direct Online APIs**
-Unlike Gemini and Claude, OpenAI does not provide an official, monolithic "Codex CLI" agent. "Codex" models (and their modern successors like `gpt-4o`) are exposed purely as direct online APIs.
+OpenAI provides an official **Codex CLI** (built in Rust). This completely changes the orchestration dynamic, as it provides a first-party local agent to wrap.
 
 **Authentication Methods:**
-- **API Keys**: Authentication is handled exclusively via the `OPENAI_API_KEY` environment variable.
-- **Organization/Project IDs**: For enterprise usage, `OPENAI_ORG_ID` and `OPENAI_PROJECT_ID` headers are used to scope billing and access.
+- **Interactive Local CLI (Subscription Bypass)**: When running the CLI for the first time, users are prompted to sign in via a browser. You can authenticate using your **ChatGPT account** (Plus, Pro, Business, Edu, or Enterprise). This allows the CLI to leverage your flat-rate subscription instead of a pay-as-you-go API key.
+- **Direct Online APIs (Token-based)**: For headless or automated environments, the CLI also supports authenticating via a standard `OPENAI_API_KEY`.
 
-**Emerging Consensus:** Because there is no official local CLI, the consensus is to run these agents against direct online APIs. Orchestrators must build or utilize open-source agent wrappers (such as those built with LangChain, LangGraph, or the `a2a-python` SDK) that call the OpenAI API directly.
+**Emerging Consensus:** For cost-effective orchestration, the consensus is to authenticate the Codex CLI using a ChatGPT Plus ($20/mo) or ChatGPT Pro ($200/mo) account via the interactive login, which generates a cached session token. This bypasses per-token API billing.
 
 ## 2. Agent Client Protocol (ACP) Support
-- **No Native Support**: Since there is no official CLI, there is no native ACP support.
-- **Custom Wrapper Requirement**: To integrate an OpenAI model into an ACP-compliant IDE or orchestrator, a custom ACP server must be written. This server would accept ACP JSON-RPC commands via stdio or WebSocket and translate them into OpenAI API calls (using functions/tool-calling to emulate local actions).
+- **Adapter-based Integration**: The Codex CLI documentation does not explicitly mention native ACP support. 
+- **Community Bridges**: Similar to Claude Code, integrating the Codex CLI into an ACP-compliant IDE (like Zed) or an ACP-based orchestrator will require a custom ACP wrapper. This wrapper must translate ACP JSON-RPC requests into Codex CLI commands or terminal streams.
 
 ## 3. Agent-to-Agent (A2A) Support
-- **Custom A2A Server**: Integrating OpenAI models into an A2A ecosystem requires building an A2A server using a framework like the `a2a-python` SDK.
-- **Implementation**: The A2A server would define an `AgentCard`, expose skills, and run an `AgentExecutor` that manages the conversational state and forwards requests to the OpenAI API.
-- **Tool Usage**: The custom A2A server must also implement its own tool execution environment (e.g., executing code in a Docker container) since the OpenAI API only returns tool-call requests, not their actual execution.
+- **MCP as the Gateway**: The Codex CLI natively supports the **Model Context Protocol (MCP)**. This allows it to access third-party tools and contexts.
+- **A2A Integration**: Because it supports MCP, A2A integration can be achieved using an **A2A-MCP bridge server**. The Codex CLI can be configured to use this bridge, allowing it to discover and delegate tasks to other A2A-compliant agents on the network.
+- **Native Multi-Agent**: The CLI also features an experimental "Multi-agent" mode for parallelizing complex tasks and a "Local code review" feature where a separate Codex agent reviews changes, indicating foundational support for agentic collaboration.
 
 ## 4. Technical Requirements for Integration
 To successfully integrate Codex/OpenAI into the proposed coding-teams framework:
-- **Auth**: The orchestrator must provide the `OPENAI_API_KEY` to the custom agent wrapper.
-- **A2A Server Implementation**: A lightweight Python A2A server must be deployed to wrap the OpenAI API. This server will handle the `Task` lifecycle, stream chunks via SSE, and translate OpenAI's tool-calling format into A2A artifacts or MCP tool executions.
-- **State Management**: The A2A server wrapper must manage the conversation context and task history, as the OpenAI API is fundamentally stateless.
+- **Auth Strategy**: The orchestrator must be able to securely store and inject the Codex CLI's OAuth/session token to utilize the ChatGPT subscription.
+- **ACP Wrapper**: Since there is no native ACP server, an ACP adapter must be written or sourced to wrap the Codex CLI process, granting the orchestrator rich streaming and permission flows.
+- **A2A Delegation**: Inject an A2A-MCP bridge into the Codex CLI's MCP configuration to allow it to communicate with the broader A2A agent team.
+- **CRITICAL - OS Compatibility Constraints**: The Codex CLI is primarily optimized for macOS and Linux. **Windows support is experimental**, and OpenAI explicitly recommends using it within WSL. **Given our strict operating environment (Windows 11 PWSH, no WSL access)**, running the Codex CLI natively may encounter pathing, terminal emulation, or execution bugs. We must thoroughly test the native Windows binary or write resilient error-handling wrappers.
 
 ## 5. Pricing & API Usage
 **Subscriptions vs. API Billing**
-OpenAI enforces a strict separation between consumer subscriptions and developer APIs.
-- **Interactive/Subscription Model**: The **ChatGPT Plus** ($20/month) subscription provides access to models like GPT-4o exclusively through the ChatGPT web and mobile interfaces.
-- **API Model**: To build automated agents and orchestrators, developers must use the **OpenAI API**.
-- **API Keys Do Not Use Subscriptions**: API keys generated via the OpenAI Platform require a separate, prepaid cash balance. They do not draw from or benefit from a ChatGPT Plus subscription. API usage is billed strictly on a pay-as-you-go basis per million tokens.
-- **Summary**: A ChatGPT Plus subscription provides no utility for an A2A orchestrator. A developer must establish an OpenAI Platform account, add funds, and use a dedicated API key for agent integration.
+The introduction of the Codex CLI bridges the gap between OpenAI's consumer subscriptions and developer tools.
+- **The OAuth Bypass (Using Subscriptions for CLI)**: By logging into the Codex CLI with a **ChatGPT Plus ($20/mo)** or **ChatGPT Pro ($200/mo)** account, all token usage generated by the CLI is absorbed by the subscription's limits. This effectively provides a flat-rate coding agent.
+- **Developer API (Pay-as-you-go)**: If a user opts to authenticate the CLI using an `OPENAI_API_KEY` (or builds a custom wrapper bypassing the CLI entirely), they will be billed on the standard per-token, pay-as-you-go model.
+- **Summary**: For the A2A orchestrator, wrapping the official Codex CLI and authenticating it via a ChatGPT subscription is the optimal path. It allows OpenAI models to operate at a fixed monthly cost alongside Gemini and Claude, drastically reducing orchestration expenses.

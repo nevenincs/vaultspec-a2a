@@ -37,7 +37,8 @@ To successfully integrate Claude into the proposed coding-teams framework:
 ## 5. Pricing & API Usage
 **Subscriptions vs. API Billing**
 The **Claude Pro** consumer subscription and the **Anthropic API** are entirely separate platforms.
-- **Interactive/Subscription Model**: The $20/month Claude Pro subscription covers usage on Claude.ai and allows interactive use of the **Claude Code CLI** tool at no additional cost (it operates under Claude Pro's rate limits).
-- **API Model**: If developers wish to use Anthropic's models inside third-party orchestrators, custom agents, or IDEs (like Cursor or the proposed A2A framework), they must use the **Anthropic API**.
-- **API Keys Do Not Use Subscriptions**: API keys generated from the Anthropic Developer Console operate on a pre-paid, pay-as-you-go token model ($3.00/1M input tokens for Sonnet 3.7, for instance). An existing Claude Pro subscription does not provide free or discounted API keys.
-- **Summary**: While human developers can use the Claude Code CLI wrapped in their Pro subscription, a multi-agent framework relying on API calls will require an Anthropic API key with a separate, usage-based billing balance.
+- **The OAuth Bypass (Using Subscriptions for CLI)**: You *can* bypass API billing and use a **Claude Pro** ($20/mo) or Max/Enterprise subscription to power the Claude Code CLI. By running `claude setup-token`, you generate a long-lived OAuth token. 
+- **Headless Execution**: If you set this token as the `CLAUDE_CODE_OAUTH_TOKEN` (or `CLAUDE_TOKEN`) environment variable and explicitly unset `ANTHROPIC_API_KEY`, the CLI will run headlessly and draw entirely from your consumer subscription limits (e.g., the 5-hour rolling limit).
+- **Enterprise / Team Plans**: Anthropic offers Claude Team ($25-$30/seat) and Enterprise plans. Furthermore, they introduced **Premium Seats** ($150/user/month) which provide massive, dedicated usage limits specifically for the Claude Code CLI.
+- **Developer API (Pay-as-you-go)**: If you bypass the official Claude Code CLI and write your own custom agent scripts, you *must* use an Anthropic API key, which is billed separately per-token and does not benefit from Pro subscriptions.
+- **Summary**: For the A2A orchestrator, if you wrap the official `claude` binary (e.g., via an ACP adapter), you can authenticate it using the `CLAUDE_CODE_OAUTH_TOKEN`. This successfully routes all traffic through the user's flat-rate Claude Pro/Enterprise subscription, bypassing the pay-as-you-go API entirely.

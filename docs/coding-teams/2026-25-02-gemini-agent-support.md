@@ -37,8 +37,10 @@ To successfully integrate Gemini into the proposed coding-teams framework:
 
 ## 5. Pricing & API Usage
 **Subscriptions vs. API Billing**
-The **Gemini Advanced** consumer subscription (part of Google One AI Premium) and the **Gemini API** are completely separate billing systems.
-- **Interactive/Subscription Model**: The $20/month Gemini Advanced subscription gives users premium access to the chat UI and Google apps integrations. However, **this subscription does not grant API access or API keys**.
-- **API Model**: Programmatic access (required for agent orchestration) uses the **Gemini API** via Google AI Studio. This is a separate, usage-based (pay-as-you-go) billing system.
-- **Free Tier**: The Gemini API offers a robust free tier with rate limits, which developers can use without cost. However, the paid tier ensures data privacy (not used for training).
-- **Summary**: To run the Gemini CLI as an automated agent, developers must generate an API key in Google AI Studio and rely on either the free tier or the pay-as-you-go plan. A monthly consumer subscription does not cover API key usage.
+The **Gemini Advanced** consumer subscription (part of Google One AI Premium) and the **Gemini API** are completely separate billing systems, though the highest tiers now offer a bridge.
+- **Interactive/Subscription Model (OAuth Bypass)**: You *can* power the Gemini CLI using a consumer subscription. When you authenticate via "Login with Google" (OAuth), the CLI caches a refresh token. The backend automatically applies your account's subscription tier. If you have **Google AI Pro** (~$20/mo) or **Google AI Ultra** (~$250/mo), the CLI inherits the massive usage limits of those subscriptions natively.
+- **API Credits Included**: Beyond native CLI limits, these subscriptions also include developer credits for custom apps. Google AI Pro includes **$10/mo**, and Google AI Ultra includes **$100/mo** in Google Cloud credits applicable to the Gemini API via AI Studio/Vertex.
+- **Developer API (Pay-as-you-go)**: Alternatively, developers can use a standard `GEMINI_API_KEY` (which has a robust free tier).
+- **Summary**: For orchestration, you have two valid paths: 
+  1. Use an API Key (billed separately or offset by the $10/$100 Cloud credits from Pro/Ultra).
+  2. **Bypass API Billing**: Extract and supply the OAuth refresh token from a Gemini Advanced user. The CLI will natively route traffic through the subscription's generous consumer quota without hitting a developer API balance.

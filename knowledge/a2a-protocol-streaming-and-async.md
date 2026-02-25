@@ -1,10 +1,12 @@
 ---
-title: A2A Streaming and Asynchronous Operations
-source: https://a2a-protocol.org/latest/topics/streaming-and-async/
-relevance: 10
+name: "A2A Streaming and Async"
+date: 2026-25-02
+type: reference
+summary: "SSE streaming protocol specifics, push notification webhooks, and security architecture including JWT verification and JWKS key management."
+maturity: 80
 ---
 
-## A2A Streaming and Asynchronous Operations
+# A2A Streaming and Asynchronous Operations
 
  long-running tasks through two primary mechanisms:
 **Server-Sent Events (SSE)** for continuous connections and **Push Notifications

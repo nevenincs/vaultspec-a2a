@@ -1,10 +1,12 @@
 ---
-title: What is A2A?
-source: https://a2a-protocol.org/latest/topics/what-is-a2a/
-relevance: 10
+name: "A2A Protocol Introduction"
+date: 2026-25-02
+type: reference
+summary: "Overview of why A2A exists, its core benefits, design principles, agent stack positioning, and the four-step request lifecycle."
+maturity: 80
 ---
 
-## Introduction to A2A
+# Introduction to A2A
 
 The A2A protocol is an open standard that enables seamless communication and
 collaboration between AI agents. It provides a common language for agents built

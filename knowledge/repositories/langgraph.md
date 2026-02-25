@@ -1,3 +1,11 @@
+---
+name: "LangGraph Reference"
+date: 2026-25-02
+type: reference
+summary: "LangGraph reference covering state graphs, nodes, edges, and checkpointers for building stateful multi-actor agent applications."
+maturity: 55
+---
+
 # LangGraph Reference
 
 - **Source:** [https://github.com/langchain-ai/langgraph](https://github.com/langchain-ai/langgraph)

@@ -1,10 +1,12 @@
 ---
-title: A2A Protocol Specification (Release Candidate V1.0)
-source: https://a2a-protocol.org/latest/specification/
-relevance: 10
+name: "A2A Protocol Specification"
+date: 2026-25-02
+type: reference
+summary: "Technical specification reference for A2A RC v1.0 covering the three-layer architecture, protocol bindings, error handling, and service parameters."
+maturity: 85
 ---
 
-## A2A Protocol Technical Specification Reference
+# A2A Protocol Technical Specification Reference
 
 The Agent2Agent (A2A) Protocol is an open standard for interoperability between
 independent AI agent systems. It enables discovery, task management, and secure

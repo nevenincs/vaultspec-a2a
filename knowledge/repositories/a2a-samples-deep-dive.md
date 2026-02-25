@@ -1,3 +1,11 @@
+---
+name: "A2A Samples Deep Dive"
+date: 2026-25-02
+type: reference
+summary: "Analysis of a2a-samples repository patterns including local tool integration, host orchestration, coding agents, and self-orchestrating teams."
+maturity: 60
+---
+
 # A2A Samples Deep Dive: Orchestration & Local Tools
 
 - **Scope:** analysis of `a2a_mcp`, `a2a_multiagent_host`, `github-agent`, and `langgraph` samples.

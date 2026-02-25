@@ -1,3 +1,11 @@
+---
+name: "Control Surface Rendering"
+date: 2026-25-02
+type: research
+summary: "Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output."
+maturity: 25
+---
+
 # Research Phase 2: Terminal Emulation, Syntax Highlighting, and Agent Output Rendering
 
 **Date**: 2026-02-25

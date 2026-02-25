@@ -1,3 +1,11 @@
+---
+name: "DeepAgents Reference"
+date: 2026-25-02
+type: reference
+summary: "LangChain DeepAgents framework reference covering planning, reasoning loops, and evaluation blueprints for autonomous agents."
+maturity: 50
+---
+
 # DeepAgents Reference
 
 - **Source:** [https://github.com/langchain-ai/deepagents](https://github.com/langchain-ai/deepagents)

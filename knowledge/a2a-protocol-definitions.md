@@ -1,10 +1,12 @@
 ---
-title: A2A Protocol Definition Summary
-source: https://a2a-protocol.org/latest/definitions/
-relevance: 10
+name: "A2A Protocol Definitions"
+date: 2026-25-02
+type: reference
+summary: "Technical reference for A2A v1 service operations, core data structures, enums, task states, and Agent Card schema."
+maturity: 85
 ---
 
-## A2A Protocol Technical Specifications (v1)
+# A2A Protocol Technical Specifications (v1)
 
  the normative A2A protocol definitions based on the
 `proto3` specification.

@@ -1,10 +1,12 @@
 ---
-title: Extensions in A2A
-source: https://a2a-protocol.org/latest/topics/extensions/
-relevance: 10
+name: "A2A Protocol Extensions"
+date: 2026-25-02
+type: reference
+summary: "Extension system covering scope, declaration in Agent Cards, activation via headers, versioning, and Python implementation examples."
+maturity: 75
 ---
 
-## A2A Protocol Extensions Reference
+# A2A Protocol Extensions Reference
 
 The Agent2Agent (A2A) protocol provides a strong foundation for inter-agent
 communication. However, specific domains or advanced use cases often require

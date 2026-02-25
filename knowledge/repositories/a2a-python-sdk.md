@@ -1,3 +1,11 @@
+---
+name: "A2A Python SDK Reference"
+date: 2026-25-02
+type: reference
+summary: "Overview of the a2a-sdk package modules including server, client, models, executor, and updater components."
+maturity: 55
+---
+
 # A2A Python SDK Reference
 
 - **Source:** [https://github.com/a2aproject/a2a-python](https://github.com/a2aproject/a2a-python)

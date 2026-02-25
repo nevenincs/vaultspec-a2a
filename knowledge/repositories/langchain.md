@@ -1,3 +1,11 @@
+---
+name: "LangChain Reference"
+date: 2026-25-02
+type: reference
+summary: "Core LangChain library reference covering model abstraction, prompts, tools, agents, and memory for provider-agnostic integration."
+maturity: 50
+---
+
 # LangChain Reference
 
 - **Source:** [https://github.com/langchain-ai/langchain](https://github.com/langchain-ai/langchain)

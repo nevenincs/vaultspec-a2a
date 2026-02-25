@@ -1,3 +1,11 @@
+---
+name: "Scope Assessment"
+date: 2026-25-02
+type: assessment
+summary: "Component inventory with complexity tiers, dependency graph, risk register, and sizing estimates for the coding teams implementation."
+maturity: 35
+---
+
 # Scope Assessment: Agent Team Control Surface
 
 **Date**: 2026-02-25

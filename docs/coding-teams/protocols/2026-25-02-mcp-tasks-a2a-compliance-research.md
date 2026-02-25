@@ -1,3 +1,11 @@
+---
+name: "MCP Tasks A2A Compliance"
+date: 2026-25-02
+type: research
+summary: "Analysis of MCP experimental async tasks, A2A state mapping, bridge architecture options, and recommendation to build on stable MCP tools."
+maturity: 40
+---
+
 # Research: MCP Async Tasks — A2A Compliance, Risk, and Stack Implications
 
 **Date**: 2026-02-25

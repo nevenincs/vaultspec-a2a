@@ -1,10 +1,12 @@
 ---
-title: Core Concepts and Components in A2A
-source: https://a2a-protocol.org/latest/topics/key-concepts/
-relevance: 10
+name: "A2A Key Concepts"
+date: 2026-25-02
+type: reference
+summary: "Core actors, fundamental elements (Agent Card, Task, Message, Part, Artifact), and interaction mechanisms in the A2A protocol."
+maturity: 80
 ---
 
-## Core Concepts and Components in A2A
+# Core Concepts and Components in A2A
 
  that define how agents interact. Understand
 these core building blocks to develop or integrate with A2A-compliant systems.

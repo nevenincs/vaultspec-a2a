@@ -1,7 +1,9 @@
 ---
-title: Toad ACP Implementation Deep Audit
-source: https://github.com/batrachianai/toad
-relevance: 10
+name: "Toad ACP Implementation Audit"
+date: 2026-25-02
+type: audit
+summary: "Deep audit of ACP implementation in Zed's toad repository covering agent management, authentication, bidirectional messaging, and tool safety."
+maturity: 65
 ---
 
 # Toad ACP Implementation Deep Audit

@@ -24,6 +24,7 @@ System-level design, component inventory, and integration analysis.
 | [web-app-architecture](architecture/2026-25-02-web-app-architecture-research.md) | 30 | FastAPI vs Starlette, SvelteKit, state management |
 | [scope-assessment](architecture/2026-25-02-scope-assessment.md) | 35 | Component tiers, dependency graph, risk register |
 | [integration-assessment](architecture/2026-25-02-phase6-integration-assessment.md) | 45 | Data flow, tech boundaries, MVP scope, tech stack |
+| [gap-analysis-audit](architecture/2026-25-02-gap-analysis-audit.md) | 50 | 10 critical gaps: provider adapter, LLM layer, process mgr, events |
 
 ## Agent Providers
 

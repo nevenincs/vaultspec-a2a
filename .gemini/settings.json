@@ -1,0 +1,24 @@
+{
+  "experimental": {
+    "plan": true
+  },
+  "ui": {
+    "useAlternateBuffer": false,
+    "footer": {
+      "hideContextPercentage": false
+    },
+    "inlineThinkingMode": "full",
+    "hideBanner": true,
+    "showMemoryUsage": true,
+    "showCitations": true
+  },
+  "general": {
+    "enablePromptCompletion": true
+  },
+  "mcpServers": {
+    "playwright": {
+      "command": "npx",
+      "args": ["@playwright/mcp@latest"]
+    }
+  }
+}

@@ -1,5 +1,6 @@
-# Local knowledgebase and references
-knowledgebase/
+# Local knowledge references (ignore clones, keep markdown)
+knowledge/repositories/*/
+!knowledge/repositories/*.md
 
 logs/
 temp/

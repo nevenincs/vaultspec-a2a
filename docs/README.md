@@ -52,7 +52,6 @@ UI rendering, terminal emulation, and dashboard research.
 
 | File | Maturity | Summary |
 | ------ | :--------: | --------- |
-| [research-plan](control-surface/2026-25-02-control-surface-research-plan.md) | 30 | Eight-phase research roadmap |
 | [ui-dashboard-survey](control-surface/2026-25-02-agent-ui-terminal-dashboard-research.md) | 20 | Agent UIs, terminal-in-browser, dashboards |
 | [rendering](control-surface/2026-25-02-control-surface-rendering-research.md) | 25 | xterm.js, syntax highlighting, streaming markdown |
 
@@ -68,7 +67,16 @@ Agent lifecycle management, monitoring, and observability.
 ## ADRs
 
 _No architecture decision records yet._ Documents above will be distilled into
-ADRs in `../adr/` as decisions mature past the 60+ threshold.
+ADRs in `adr/` as decisions mature past the 60+ threshold.
+
+## Plans
+
+Plans live separately in [`../plans/`](../plans/) to keep research and
+roadmaps distinct.
+
+| File | Maturity | Summary |
+| ------ | :--------: | --------- |
+| [control-surface-research-plan](../plans/2026-25-02-control-surface-research-plan.md) | 30 | Eight-phase research roadmap |
 
 ## Maturity Scale
 

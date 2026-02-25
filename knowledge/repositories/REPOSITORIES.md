@@ -35,6 +35,14 @@ Protocol (ACP), and related SDKs.
   - Anthropic's SDK for building agents with Claude, including MCP
     integration.
 
+## Orchestration Frameworks
+
+- **[LangChain](https://github.com/langchain-ai/langchain)**
+  - Fundamental library for LLM abstractions and tool-calling primitives.
+
+- **[LangGraph](https://github.com/langchain-ai/langgraph)**
+  - Engine for building stateful, multi-agent collaborative workflows.
+
 ## Companion Repositories
 
 - **[vaultspec](Y:\code\vaultspec-worktrees\main)**

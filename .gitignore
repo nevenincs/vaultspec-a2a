@@ -20,3 +20,6 @@ __pycache__/
 venv/
 .venv/
 .env/
+
+# antigravity
+.profile

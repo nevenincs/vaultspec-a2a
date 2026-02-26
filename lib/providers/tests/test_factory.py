@@ -1,4 +1,7 @@
+"""Tests for the provider factory."""
+
 import pytest
+
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -24,11 +27,11 @@ def test_provider_factory_gemini_creates_acp() -> None:
     """Verify Gemini provider creates AcpChatModel with the correct ACP command."""
     model = ProviderFactory.create(Provider.GEMINI)
     assert isinstance(model, AcpChatModel)
-    assert model.command == ["gemini", "--experimental-acp"]
+    assert model.command == ["gemini", "--model", Model.GEMINI_3_FLASH_PREVIEW.value, "--experimental-acp"]
 
 
 def test_provider_factory_gemini_no_credential_injection() -> None:
-    """Verify Gemini uses zero credential injection (relies on local OAuth creds file)."""
+    """Verify Gemini uses zero credential injection (local OAuth creds)."""
     model = ProviderFactory.create(Provider.GEMINI)
     assert isinstance(model, AcpChatModel)
     assert model.env_vars == {}
@@ -37,7 +40,11 @@ def test_provider_factory_gemini_no_credential_injection() -> None:
 def test_provider_factory_explicit_string_model() -> None:
     """Verify that factory accepts string model names for OpenAI."""
     custom_model = "experimental-model-2026"
-    model = ProviderFactory.create(Provider.OPENAI, model=custom_model, api_key="static-test-key")
+    model = ProviderFactory.create(
+        Provider.OPENAI,
+        model=custom_model,
+        api_key="static-test-key",
+    )
     assert get_model_attr(model) == custom_model
     assert isinstance(model, ChatOpenAI)
 

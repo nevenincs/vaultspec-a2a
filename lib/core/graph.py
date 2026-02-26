@@ -1,3 +1,5 @@
+"""LangGraph orchestration engine for agent teams."""
+
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -13,7 +15,7 @@ def compile_team_graph(
     supervisor_model: BaseChatModel,
     worker_models: dict[str, BaseChatModel],
     checkpointer: AsyncSqliteSaver | None = None,
-) -> Any:
+) -> Any:  # noqa: ANN401
     """Compile the LangGraph orchestration engine with dynamic workers.
 
     Args:

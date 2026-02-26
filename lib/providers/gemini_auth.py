@@ -1,5 +1,4 @@
-"""
-Programmatic refresh of the Gemini CLI's OAuth credentials.
+"""Programmatic refresh of the Gemini CLI's OAuth credentials.
 
 Background
 ----------
@@ -25,7 +24,7 @@ gemini-cli source (``packages/core/src/code_assist/oauth2.ts``).  This is
 standard OAuth 2.0 for Installed Applications — the client_secret is
 intentionally public per Google's specification.
 
-References
+References:
 ----------
 - gemini-cli issue #13853: Silent hang on headless token refresh
 - gemini-cli issue #12042: ACP mode prompts for login from Python subprocess
@@ -37,6 +36,7 @@ References
 import json
 import logging
 import time
+
 from pathlib import Path
 
 import httpx
@@ -51,9 +51,7 @@ logger = logging.getLogger(__name__)
 # not secret (Google "installed application" OAuth 2.0 pattern).
 # Source: gemini-cli/packages/core/src/code_assist/oauth2.ts
 # ---------------------------------------------------------------------------
-_CLIENT_ID = (
-    "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
-)
+_CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 _CLIENT_SECRET = "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"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 
@@ -62,6 +60,9 @@ _TOKEN_URI = "https://oauth2.googleapis.com/token"
 _EXPIRY_BUFFER_S = 120
 
 _CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
+
+# HTTP status code for success.
+_HTTP_OK = 200
 
 
 def _is_expired(creds: dict) -> bool:
@@ -125,7 +126,7 @@ def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
         timeout=15.0,
     )
 
-    if response.status_code != 200:
+    if response.status_code != _HTTP_OK:
         raise RuntimeError(
             f"Gemini token refresh failed ({response.status_code}): {response.text}"
         )
@@ -133,9 +134,7 @@ def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
     token_data = response.json()
 
     creds["access_token"] = token_data["access_token"]
-    creds["expiry_date"] = int(
-        (time.time() + token_data["expires_in"]) * 1000
-    )
+    creds["expiry_date"] = int((time.time() + token_data["expires_in"]) * 1000)
     if "token_type" in token_data:
         creds["token_type"] = token_data["token_type"]
     # Google may rotate the refresh token — preserve the new one if provided.

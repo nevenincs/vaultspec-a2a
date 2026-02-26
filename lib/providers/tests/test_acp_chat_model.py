@@ -9,10 +9,14 @@ Requirements:
 """
 
 import pytest
+
 from langchain_core.messages import HumanMessage
 
 from ...core.config import settings
+from ...utils.enums import Model
 from ..acp_chat_model import AcpChatModel
+
+_GEMINI_COMMAND = ["gemini", "--model", Model.GEMINI_3_FLASH_PREVIEW.value, "--experimental-acp"]
 
 
 @pytest.mark.asyncio
@@ -34,7 +38,9 @@ async def test_acp_claude_streaming() -> None:
         env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
     )
 
-    messages = [HumanMessage(content="Reply with only the word 'Hello'. No other text.")]
+    messages = [
+        HumanMessage(content="Reply with only the word 'Hello'. No other text.")
+    ]
 
     chunks = []
     async for chunk in model.astream(messages):
@@ -59,11 +65,13 @@ async def test_acp_gemini_streaming() -> None:
       - The assembled response contains the expected word
     """
     model = AcpChatModel(
-        command=["gemini", "--experimental-acp"],
+        command=_GEMINI_COMMAND,
         env_vars={},
     )
 
-    messages = [HumanMessage(content="Reply with only the word 'Hello'. No other text.")]
+    messages = [
+        HumanMessage(content="Reply with only the word 'Hello'. No other text.")
+    ]
 
     chunks = []
     async for chunk in model.astream(messages):
@@ -105,7 +113,7 @@ async def test_acp_claude_ainvoke() -> None:
 async def test_acp_gemini_ainvoke() -> None:
     """Test that Gemini AcpChatModel.ainvoke accumulates the full streaming response."""
     model = AcpChatModel(
-        command=["gemini", "--experimental-acp"],
+        command=_GEMINI_COMMAND,
         env_vars={},
     )
 

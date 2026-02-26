@@ -1,3 +1,5 @@
+"""Worker node for LangGraph agent task execution."""
+
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -25,7 +27,7 @@ def create_worker_node(
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
-        messages = [SystemMessage(content=system_prompt)] + list(state["messages"])
+        messages = [SystemMessage(content=system_prompt), *state["messages"]]
         response = await model.ainvoke(messages)
         # Attribute the message to the worker so the supervisor doesn't get confused
         response.name = name

@@ -1,3 +1,5 @@
+"""Core state schema for LangGraph agent orchestration."""
+
 from typing import Annotated, TypedDict
 
 from langchain_core.messages import BaseMessage

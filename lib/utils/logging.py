@@ -1,9 +1,11 @@
 import json
 import logging
 import sys
+
 from typing import TYPE_CHECKING, Any
 
 from .enums import LogLevel
+
 
 if TYPE_CHECKING:
     from ..core.config import Settings
@@ -31,7 +33,6 @@ def setup_logging(
     settings_override: "Settings | None" = None,
 ) -> None:
     """Configure structured JSON logging or rich terminal logging."""
-
     from ..core.config import settings as core_settings
 
     active_settings = settings_override or core_settings

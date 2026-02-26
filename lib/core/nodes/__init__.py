@@ -1,1 +1,1 @@
-# Node definitions
+"""Node definitions for LangGraph agent orchestration."""

@@ -1,3 +1,6 @@
+"""Exception types for the A2A Orchestrator."""
+
+
 class GitWorkspaceError(Exception):
     """Base exception for all Git Workspace operations."""
 

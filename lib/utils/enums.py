@@ -54,6 +54,7 @@ class Model(StrEnum):
     GEMINI_3_1_PRO = "gemini-3.1-pro"
     GEMINI_3_PRO = "gemini-3-pro"
     GEMINI_3_FLASH = "gemini-3-flash"
+    GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
 
     # OpenAI
     GPT_5_2_CODEX = "gpt-5.2-codex"
@@ -70,7 +71,7 @@ class Model(StrEnum):
 # Default model mapping to avoid logic duplication in factory
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.CLAUDE: Model.CLAUDE_4_6_SONNET,
-    Provider.GEMINI: Model.GEMINI_3_1_PRO,
+    Provider.GEMINI: Model.GEMINI_3_FLASH_PREVIEW,
     Provider.OPENAI: Model.GPT_5_2_CODEX,
     Provider.ZHIPU: Model.GLM_5,
 }

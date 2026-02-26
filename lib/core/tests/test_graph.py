@@ -1,5 +1,6 @@
 import pytest
 import pytest_asyncio
+
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
@@ -33,9 +34,9 @@ async def test_compile_team_graph(checkpointer: AsyncSqliteSaver) -> None:
 @pytest.mark.asyncio
 async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
     """Verify end-to-end execution, routing, and checkpointer state persistence."""
-    supervisor_model = ProviderFactory.create(Provider.GEMINI)
-    # Use Gemini for core routing test
-    worker_model = ProviderFactory.create(Provider.GEMINI)
+    # Use empty mcp_servers to prevent agents from attempting to run bash/tests
+    supervisor_model = ProviderFactory.create(Provider.CLAUDE, mcp_servers=[])
+    worker_model = ProviderFactory.create(Provider.CLAUDE, mcp_servers=[])
 
     graph = compile_team_graph(
         supervisor_model=supervisor_model,
@@ -46,7 +47,7 @@ async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
     initial_state = {
         "messages": [
             HumanMessage(
-                content="Tell the echo_worker to say exactly 'HelloWorldFromGraph' and then you should FINISH the task."
+                content="Calculate 25 * 4 and have the echo_worker return the expected numerical result. Then immediately FINISH."
             )
         ],
     }
@@ -80,7 +81,7 @@ async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
 
     # Check that the worker successfully emitted the phrase
     found_phrase = any(
-        "helloworldfromgraph" in str(msg.content).lower()
+        "100" in str(msg.content)
         for msg in messages
         if msg.type == "ai"
     )

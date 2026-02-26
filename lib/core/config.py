@@ -1,3 +1,5 @@
+"""Configuration settings for the A2A Orchestrator."""
+
 from pathlib import Path
 
 from pydantic import AliasChoices, Field

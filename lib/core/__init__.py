@@ -12,6 +12,7 @@ from .permissions import PermissionEngine
 from .registry import Registry
 from .state import TeamState
 
+
 __all__ = [
     "AgentProcessError",
     "ConfigError",

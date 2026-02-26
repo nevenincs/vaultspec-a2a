@@ -258,10 +258,7 @@ The UI survey recommends "Redis for PUB/SUB and session management" (proven
 by Open WebUI, Dify). The architecture decision is SQLite-only for v1 with no
 Redis.
 
-**Resolution**: These are not strictly contradictory — Redis is recommended for
-production horizontal scaling, while our v1 is a single-user local tool.
-SQLite is correct for v1. Redis becomes relevant if/when multi-user or
-multi-process deployment is needed.
+**Status**: ✅ Confirmed by ADR-007. We strictly mandate SQLite for v1, making Redis out of scope.
 
 ### C2: Per-Terminal WebSocket vs Multiplexed
 
@@ -269,10 +266,7 @@ The survey notes Theia uses per-terminal WebSocket connections for isolation,
 and suggests this might be "likely better" for agent terminals. The
 architecture settles on a single multiplexed WebSocket (Grafana pattern).
 
-**Partially resolved**: Multiplexing is chosen for connection efficiency and
-simpler reconnection. Terminal data is tagged with `agent_id` for routing.
-The trade-off is that a slow consumer on one terminal can theoretically affect
-others — backpressure management in the multiplexer is needed.
+**Status**: ✅ Resolved by ADR-004. A central Event Aggregator multiplexes the entire LangGraph state over a single WebSocket. Backpressure is managed server-side.
 
 ---
 
@@ -285,14 +279,16 @@ handle flow control automatically — custom implementations are recommended for
 production use." No specification for the custom flow control exists. This
 matters when agents produce high-volume output (e.g., verbose build logs).
 
+**Status**: ✅ Mitigated by ADR-004. The primary render target shifts away from raw xterm.js to structured Svelte components reading the LangGraph state. Terminal emulation becomes purely auxiliary.
+
 ### G2: Streaming Markdown Library Maturity for Svelte
 
 Incremark is "newer, less battle-tested" and its Svelte renderer is the least
 documented of its framework bindings. If it has stability issues, the fallback
 is `svelte-markdown` + `marked.js` with O(n²) performance.
 
+**Status**: ✅ Resolved by ADR-005. Incremark was abandoned. We officially adopted `@humanspeak/svelte-markdown` which natively handles intelligent token caching securely.
+
 ### G3: Terminal Serialize/Reconnect in Production
 
-> **Resolved**: The gaps research rejected `@xterm/addon-serialize` entirely.
-> ADR-004 formalizes **Server-Side Replay (Event Sourcing)** using a 2000-line
-> ANSI ring buffer from the SQLite event log to reconstruct terminal state.
+**Status**: ✅ Resolved by ADR-004. The gaps research rejected `@xterm/addon-serialize` entirely. ADR-004 formalizes **Server-Side Replay (Event Sourcing)** using the `langgraph-checkpoint-sqlite` to reconstruct the UI state on reconnect.

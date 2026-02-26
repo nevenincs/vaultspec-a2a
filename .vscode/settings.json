@@ -1,0 +1,11 @@
+{
+  "python.defaultInterpreterPath": ".venv/Scripts/python.exe",
+  "python.testing.pytestEnabled": true,
+  "python.testing.pytestArgs": ["lib", "tests"],
+  "python.analysis.extraPaths": ["./lib"],
+  "python.analysis.autoImportCompletions": true,
+  "python.analysis.typeCheckingMode": "basic",
+  "editor.rule": [88],
+  "editor.formatOnSave": true,
+  "editor.defaultFormatter": "charliermarsh.ruff"
+}

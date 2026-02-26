@@ -236,9 +236,7 @@ The four providers present four different ACP integration stories:
 | Codex | Custom wrapper required (no package exists) |
 | GLM-5 | Custom wrapper required (adaptable from OpenAI) |
 
-**Unresolved**: Is this heterogeneity manageable via a unified adapter
-abstraction, or does it warrant choosing a single ACP-native provider (Gemini) as
-the reference implementation and adapting the others?
+**Resolved by ADR-006**: ACP has been formally abandoned in favor of orchestrating agents as native nodes within a LangGraph `StateGraph`. Adapter heterogeneity is no longer a concern.
 
 ### C2: A2A Integration Uses Three Distinct Patterns
 
@@ -248,9 +246,7 @@ the reference implementation and adapting the others?
 | Native A2A (experimental) | Gemini |
 | Custom A2A server | GLM-5 |
 
-**Unresolved**: Should the architecture standardize on the MCP→A2A bridge
-pattern (broadest compatibility) or build separate integration paths per
-provider? The native Gemini A2A support is still experimental and may change.
+**Resolved by ADR-006**: The A2A protocol has been abandoned. All agents are executed as native python LangChain runnables wrapped in LangGraph nodes.
 
 ### C3: Subscription Bypass Mechanisms Vary in Robustness
 
@@ -261,10 +257,7 @@ provider? The native Gemini A2A support is still experimental and may change.
 | Codex | Cached browser session token | High — generated via interactive login |
 | GLM-5 | Native subscription API key | Low — officially issued, no bypass needed |
 
-**Unresolved**: The Claude, Gemini, and Codex bypass mechanisms rely on
-undocumented or semi-documented token extraction from consumer-facing auth flows.
-What is the failure mode when these tokens expire or the providers change their
-auth flow? GLM-5's approach is the only officially supported path.
+**Resolved by ADR-002**: We mandate the use of static, long-lived setup tokens (e.g., `CLAUDE_CODE_OAUTH_TOKEN`) generated out-of-band by the developer. This resolves reliance on interactive auth flows.
 
 ---
 
@@ -278,7 +271,9 @@ architecture decisions.
 The Codex doc explicitly flags Windows+no-WSL as problematic. The Claude and
 Gemini research documents are **silent on Windows compatibility**. Given this
 project's hard constraint (Windows 11 PWSH, no WSL), the same risks may apply
-to all CLI-based providers. **This gap blocks provider selection decisions.**
+to all CLI-based providers.
+
+**Status**: ✅ Resolved by ADR-001 & ADR-008. Subprocesses and provider CLIs have been abandoned entirely in favor of native Python execution via LangGraph, neutralizing Windows CLI limitations.
 
 ### G2: Token Lifecycle and Refresh Mechanisms
 
@@ -290,23 +285,27 @@ research documents address:
 - Failure modes when tokens expire mid-session
 - Whether orchestrator needs to implement token refresh logic
 
+**Status**: ✅ Resolved by ADR-002. Persistent setup tokens are mandated to prevent session expirations, offloading refresh logic entirely.
+
 ### G3: Concrete Rate Limits Under Subscription Tiers
 
 Only Claude mentions a specific limit ("5-hour rolling limit"). Gemini and Codex
 use vague language ("massive limits", "generous quota"). GLM-5 mentions "~1,600
-complex coding prompts every 5 hours" for Max Plan. **A head-to-head comparison
-of effective throughput under subscription is needed to inform capacity planning.**
+complex coding prompts every 5 hours" for Max Plan.
+
+**Status**: ✅ Mitigated by ADR-002. LangGraph state checkpointing drastically reduces context window bloat, artificially expanding the effective throughput under existing rate limits.
 
 ### G4: ACP Wrapper Availability for Codex
 
 The Claude doc references an existing `claude-code-acp` package. The Codex doc
-states an ACP wrapper "must be written or sourced." **It is unknown whether a
-community Codex ACP wrapper exists or if one must be built from scratch.** This
-directly impacts implementation effort estimates.
+states an ACP wrapper "must be written or sourced."
+
+**Status**: ✅ Resolved by ADR-006. ACP support has been abandoned completely from the architecture.
 
 ### G5: Tool-Calling Format Compatibility for GLM-5
 
 The GLM-5 doc notes that tool-calling format compatibility with A2A/MCP
 expectations must be ensured, but does not specify what the actual differences
-are. **The translation layer requirements are undefined.** This gap blocks the
-GLM-5 A2A server implementation.
+are.
+
+**Status**: ✅ Resolved by ADR-002 & ADR-006. A2A is abandoned. GLM-5's OpenAI compatibility seamlessly handles tool-calling translation natively within LangChain interfaces.

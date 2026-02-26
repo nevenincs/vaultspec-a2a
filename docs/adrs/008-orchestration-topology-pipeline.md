@@ -36,6 +36,8 @@ The orchestrator must structure the execution pipeline of the multi-agent team. 
 ## 4. Rejected Alternatives
 
 * **Ephemeral Subprocesses (Original Design):** Rejected. The overhead of port-juggling, managing `CTRL_BREAK_EVENT` signals on Windows, and attempting to parse unstructured standard out from 3 different provider CLIs was deemed a Tier-3 catastrophic implementation risk.
+* **CrewAI / Alternate Frameworks:** Rejected in favor of LangGraph. LangGraph's explicit graph-based state machine provides necessary fine-grained control and checkpointer serialization capabilities over the "black box" of other agentic frameworks.
+* **LiteLLM:** Rejected. While LiteLLM was considered as a general LLM API abstraction, migrating to LangGraph inherently coupled the stack to LangChain's `BaseChatModel` ecosystem (`ChatAnthropic`, `ChatGoogleGenerativeAI`), which provides much tighter integration for tool-calling within the graph nodes.
 
 ## 5. Implementation Constraints & Pitfalls
 

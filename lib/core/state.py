@@ -1,7 +1,10 @@
-"""Team state and context management."""
+from collections.abc import Sequence
+from typing import Annotated, TypedDict
 
-__all__ = ["TeamState"]
+from langchain_core.messages import BaseMessage
 
 
-class TeamState:
-    pass
+class TeamState(TypedDict):
+    """Core state for LangGraph orchestration."""
+
+    messages: Annotated[Sequence[BaseMessage], lambda x, y: x + y]

@@ -1,23 +1,21 @@
 ---
 adr_id: 007
 title: Tech Stack & Deployment Strategy
-date: 2026-02-25
+date: 2026-02-26
 status: Proposed
 related:
   - docs/distilled/2026-25-02-architecture-distilled.md
-  - docs/distilled/2026-25-02-web-app-architecture-research.md
-  - docs/distilled/2026-25-02-control-surface-distilled.md
-  - docs/distilled/2026-25-02-process-distilled.md
+  - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
 # ADR-007: Tech Stack & Deployment Strategy
 
-**Date:** 2026-02-25  
+**Date:** 2026-02-26  
 **Status:** Proposed
 
 ## 1. Context & Problem Statement
 
-The A2A orchestrator must manage highly concurrent, async-heavy workloads (spawning subprocesses, multiplexing WebSockets, parsing SSE streams) while remaining simple to install and run for end-users. It must provide both a REST API (for CLI tools) and a rich real-time UI (Control Surface) without requiring users to configure complex infrastructure like Postgres, Redis, or Docker.
+The LangGraph orchestrator must manage highly concurrent, async-heavy workloads (managing native LangGraph execution threads, multiplexing WebSockets, parsing LangChain streams) while remaining simple to install and run for end-users. It must provide both a REST API (for CLI tools) and a rich real-time UI (Control Surface) without requiring users to configure complex infrastructure like Postgres, Redis, or Docker.
 
 ## 2. The Decision
 
@@ -39,7 +37,7 @@ We formalize the following technology stack and deployment architecture:
 
 * **Raw Starlette:** Rejected. The "lightweight" argument is irrelevant because FastAPI adds no overhead to WebSocket paths, and we need the robust REST routing for the MCP/CLI bridge.
 * **Postgres & Redis:** Rejected for v1. While powerful, they require external server processes, violating the requirement for a frictionless, zero-config local setup.
-* **Docker as Primary Deployment:** Rejected. The orchestrator must spawn local OS processes (agents) and directly manipulate local git repositories. Running the orchestrator inside a Docker container introduces severe volume-mounting friction and breaks native subprocess execution.
+* **Docker as Primary Deployment:** Rejected. The orchestrator must directly manipulate local Git repositories and local filesystem workspaces seamlessly. Running the orchestrator inside a Docker container introduces severe volume-mounting friction for casual local users.
 
 ## 5. Implementation Constraints & Pitfalls
 
@@ -54,13 +52,11 @@ We formalize the following technology stack and deployment architecture:
 
 ## 7. References
 
-### 7.1 Local Research & Distilled Docs
+* [LangGraph Gap Audit Research](../research/2026-26-02-langgraph-gap-audit-research.md)
 * [Architecture Domain - Distilled](../distilled/2026-25-02-architecture-distilled.md)
-* [Web App Architecture Research](../architecture/2026-25-02-web-app-architecture-research.md)
-* [Control Surface Domain - Distilled](../distilled/2026-25-02-control-surface-distilled.md)
-* [Process Domain - Distilled](../distilled/2026-25-02-process-distilled.md)
 
 ### 7.2 Codebase Modules & Patterns
+
 * **Backend Framework:** `FastAPI` for REST APIs and WebSockets.
 * **ASGI Server:** `Uvicorn` for running FastAPI applications.
 * **Async Database Access:** `aiosqlite` for asynchronous SQLite interactions.
@@ -71,6 +67,7 @@ We formalize the following technology stack and deployment architecture:
 * **Frontend Build:** `vite build` (via SvelteKit) for compiling static SPA assets.
 
 ### 7.3 Online Reference Implementation
+
 * **FastAPI Documentation:** [FastAPI.tiangolo.com](https://fastapi.tiangolo.com/) (referenced for async endpoints, Dependency Injection, WebSockets, and `StaticFiles`).
 * **Uvicorn Documentation:** [Uvicorn.org](https://www.uvicorn.org/) (referenced for ASGI server configuration).
 * **aiosqlite GitHub:** [github.com/omnilib/aiosqlite](https://github.com/omnilib/aiosqlite) (referenced for asynchronous SQLite usage).

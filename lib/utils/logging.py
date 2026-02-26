@@ -1,6 +1,5 @@
 import json
 import logging
-import os
 import sys
 from typing import TYPE_CHECKING, Any
 
@@ -56,8 +55,8 @@ def setup_logging(
         root_logger.removeHandler(handler)
 
     is_interactive = sys.stdout.isatty() and sys.stderr.isatty()
-    disable_color = os.environ.get("NO_COLOR", "") != ""
-    ci_mode = os.environ.get("CI", "").lower() in ("true", "1")
+    disable_color = active_settings.no_color
+    ci_mode = active_settings.ci
     force_json = not active_settings.is_dev
 
     log_handler: logging.Handler

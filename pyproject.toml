@@ -3,6 +3,7 @@ name = "vaultspec-a2a"
 version = "0.1.0"
 description = "A2A Agent Orchestration Implementation"
 requires-python = ">=3.13,<3.14"
+
 dependencies = [
   "PyYAML>=6.0.3",
   "a2a-sdk>=0.3.24",
@@ -16,6 +17,8 @@ dependencies = [
   "langchain-google-genai>=4.2.1",
   "langchain-mcp-adapters>=0.2.1",
   "langchain-openai>=1.1.10",
+  "langgraph>=0.2.16",
+  "langgraph-checkpoint-sqlite>=2.0.0",
   "mcp>=1.26.0",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
@@ -74,30 +77,59 @@ timeout = "300"
 
 [tool.ruff]
 line-length = 88
+indent-width = 4
 target-version = "py313"
+
 
 [tool.ruff.lint]
 select = [
-  "E",  # pycodestyle errors
-  "W",  # pycodestyle warnings
-  "F",  # pyflakes
-  "I",  # isort
-  "B",  # bugbear
-  "C4",  # comprehensions
-  "UP",  # pyupgrade
-  "ARG",  # unused-arguments
-  "SIM",  # simplify
-  "TC",  # type-checking
-  "RUF",  # ruff-specific rules
-  "N",  # pep8-naming
-  "PT",  # pytest-style
-  "T20",  # print statements
-  "ERA",  # commented-out code
-  "TRY",  # exception handling
-  "PLE",  # pylint errors
-  "PLW",  # pylint warnings
+  "E",  # pycodestyle errors (PEP 8)
+  "W",  # pycodestyle warnings (PEP 8)
+  "F",  # Pyflakes (logical errors, unused imports/variables)
+  "I",  # isort (import sorting - Google Style §3.1.2)
+  "D",  # pydocstyle (docstring conventions - Google Style §3.8)
+  "N",  # pep8-naming (naming conventions - Google Style §3.16)
+  "UP", # pyupgrade (use modern Python syntax)
+  "ANN",# flake8-annotations (type hint usage/style - Google Style §2.22)
+  "A",  # flake8-builtins (avoid shadowing builtins)
+  "B",  # flake8-bugbear (potential logic errors & style issues - incl. mutable defaults B006, B008)
+  "C4", # flake8-comprehensions (unnecessary list/set/dict comprehensions)
+  "ISC",# flake8-implicit-str-concat (disallow implicit string concatenation across lines)
+  "T20",# flake8-print (discourage `print` - prefer logging)
+  "SIM",# flake8-simplify (simplify code, e.g., `if cond: return True else: return False`)
+  "PTH",# flake8-use-pathlib (use pathlib instead of os.path where possible)
+  "PL", # Pylint rules ported to Ruff (PLC, PLE, PLR, PLW)
+  "PIE",# flake8-pie (misc code improvements, e.g., no-unnecessary-pass)
+  "RUF",# Ruff-specific rules (e.g., RUF001-003 ambiguous unicode)
+  "RET",# flake8-return (consistency in return statements)
+  "SLF",# flake8-self (check for private member access via `self`)
+  "TID",# flake8-tidy-imports (relative imports, banned imports - configure if needed)
+  "YTT",# flake8-boolean-trap (checks for boolean positional arguments, truthiness tests - Google Style §3.10)
+  "TD", # flake8-todos (check TODO format - Google Style §3.7)
 ]
 unfixable = ["B"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.isort]
+#force-sort-within-sections = true
+#combine-as-imports = true
+case-sensitive = true
+#force-single-line = false
+#known-first-party = []
+#known-third-party = []
+lines-after-imports = 2
+lines-between-types = 1
+#no-lines-before = ["LOCALFOLDER"]
+#required-imports = []
+#section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+
+[tool.ruff.format]
+docstring-code-format = true
+docstring-code-line-length = "dynamic" # Or set to 80
+quote-style = "double"
+indent-style = "space"
 
 [tool.ty.environment]
 python-version = "3.13"

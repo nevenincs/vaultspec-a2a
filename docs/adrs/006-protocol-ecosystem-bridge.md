@@ -56,9 +56,10 @@ protocol:
    * **Claude:** Invoked as `node.exe <resolved dist/index.js path>` —
      never via the `.CMD` shim or `cmd.exe /c`. `CLAUDE_CODE_OAUTH_TOKEN`
      injected via subprocess `env`.
-   * **Gemini:** Invoked as `gemini.exe --experimental-acp` resolved via
-     `shutil.which("gemini")` (safe — Gemini deploys as a native `.exe`,
-     not a `.cmd` shim).
+   * **Gemini:** Invoked as `gemini --experimental-acp` via
+     `create_subprocess_shell`. Gemini deploys as a `.CMD` npm shim
+     (not a native `.exe`), but the shell resolves it natively. Zero
+     credential injection — Gemini CLI uses `~/.gemini/oauth_creds.json`.
    * **Zero PTY:** Both CLIs are spawned with `stdin=PIPE, stdout=PIPE,
      stderr=PIPE` and no terminal allocation. `cmd.exe` is never in the
      process chain.
@@ -141,19 +142,31 @@ implementors **must** follow them exactly:
 
 6. **ACP session lifecycle:**
    * `initialize` → await response (stores `agentCapabilities`,
-     `authMethods`)
-   * `session/new` → await response (stores `sessionId`)
+     `authMethods`). **Critical:** the `loadSession` capability must be
+     checked before attempting `session/load`.
+   * `session/new` → await response (stores `sessionId`, extracts `modes`
+     including `currentModeId` and `availableModes`).
    * `session/prompt` → await response → `{"stopReason": "end_turn"}`
-     signals generation complete
+     signals generation complete.
    * Streaming content arrives as `session/update` **notifications** (no
      `id` field), not as the response to `session/prompt`.
+   * `session/cancel` → send as a **proper RPC** (not a notification),
+     with a 3-second timeout wait. This matches Toad's `agent.py` line
+     795 — `await response.wait()`, not fire-and-forget.
 
-7. **`end_turn` detection:** The `session/prompt` **response** (not a
+7. **Tool call tracking:** Agent `session/update` notifications with
+   `"sessionUpdate": "tool_call"` must be stored in a dict keyed by
+   `toolCallId`. Subsequent `tool_call_update` messages are **merged**
+   into the original entry (non-None values overwrite). The agent may
+   send a `tool_call_update` without a prior `tool_call` — handle by
+   creating a synthetic entry (Toad line 277).
+
+8. **`end_turn` detection:** The `session/prompt` **response** (not a
    notification) contains `{"result": {"stopReason": "end_turn"}}`. This is
    the signal that generation is complete. Other valid stop reasons:
    `max_tokens`, `max_turn_requests`, `refusal`, `cancelled`.
 
-8. **Windows pipe cleanup (`_ProactorBasePipeTransport.__del__` fix):** After
+9. **Windows pipe cleanup (`_ProactorBasePipeTransport.__del__` fix):** After
    terminating the subprocess, call `process._transport.close()` directly.
    Using `process.wait()` alone leaves pipe transports open until GC,
    triggering a spurious `ValueError: I/O operation on closed pipe` from

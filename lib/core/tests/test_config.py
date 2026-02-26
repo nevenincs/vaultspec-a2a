@@ -1,5 +1,6 @@
-import os
 from pathlib import Path
+
+import pytest
 
 from ...utils import Environment, LogLevel
 from ..config import Settings
@@ -12,36 +13,37 @@ def test_config_default_values() -> None:
     assert settings.workspace_root == Path("./workspaces")
 
 
-def test_config_vaultspec_env_prefix() -> None:
-    # Save original state to preserve test purity
-    orig_env = os.environ.get("VAULTSPEC_ENVIRONMENT")
-    orig_level = os.environ.get("VAULTSPEC_LOG_LEVEL")
-    orig_root = os.environ.get("VAULTSPEC_WORKSPACE_ROOT")
+def test_config_vaultspec_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    test_path = str(Path("./test_workspace_override").absolute())
+    monkeypatch.setenv("VAULTSPEC_ENVIRONMENT", Environment.PRODUCTION.value)
+    monkeypatch.setenv("VAULTSPEC_LOG_LEVEL", LogLevel.ERROR.value)
+    monkeypatch.setenv("VAULTSPEC_WORKSPACE_ROOT", test_path)
 
-    try:
-        test_path = str(Path("./test_workspace_override").absolute())
-        os.environ["VAULTSPEC_ENVIRONMENT"] = "production"
-        os.environ["VAULTSPEC_LOG_LEVEL"] = "error"
-        os.environ["VAULTSPEC_WORKSPACE_ROOT"] = test_path
+    # Initialize settings - it should automatically bind VAULTSPEC_ variables
+    settings = Settings()
+    assert settings.environment == Environment.PRODUCTION
+    assert settings.log_level == LogLevel.ERROR
+    assert settings.workspace_root == Path(test_path)
 
-        # Initialize settings - it should automatically bind VAULTSPEC_ variables
-        settings = Settings()
-        assert settings.environment == Environment.PRODUCTION
-        assert settings.log_level == LogLevel.ERROR
-        assert settings.workspace_root == Path(test_path)
-    finally:
-        # Restore environment state
-        if orig_env is not None:
-            os.environ["VAULTSPEC_ENVIRONMENT"] = orig_env
-        else:
-            os.environ.pop("VAULTSPEC_ENVIRONMENT", None)
 
-        if orig_level is not None:
-            os.environ["VAULTSPEC_LOG_LEVEL"] = orig_level
-        else:
-            os.environ.pop("VAULTSPEC_LOG_LEVEL", None)
+def test_config_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Test that standard ecosystem names (without VAULTSPEC_ prefix) are picked up via AliasChoices
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-test")
+    monkeypatch.setenv("CI", "true")
+    monkeypatch.setenv("NO_COLOR", "1")
 
-        if orig_root is not None:
-            os.environ["VAULTSPEC_WORKSPACE_ROOT"] = orig_root
-        else:
-            os.environ.pop("VAULTSPEC_WORKSPACE_ROOT", None)
+    settings = Settings()
+    assert settings.anthropic_api_key == "sk-anthropic-test"
+    assert settings.ci is True
+    assert settings.no_color is True
+
+    # Verify that VAULTSPEC_ prefix correctly takes precedence over standard ecosystem names.
+    # This behavior is guaranteed by the order in AliasChoices in lib/core/config.py.
+    monkeypatch.setenv("VAULTSPEC_ANTHROPIC_API_KEY", "sk-vaultspec-priority")
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-standard-ignored")
+    monkeypatch.setenv("VAULTSPEC_CI", "false")
+    monkeypatch.setenv("CI", "true")
+
+    settings = Settings()
+    assert settings.anthropic_api_key == "sk-vaultspec-priority"
+    assert settings.ci is False

@@ -1,3 +1,4 @@
+import logging
 import os
 from typing import Any
 
@@ -7,7 +8,9 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from ..core.config import settings
-from ..utils.enums import Provider
+from ..utils.enums import PROVIDER_DEFAULT_MODELS, Model, Provider
+
+logger = logging.getLogger(__name__)
 
 
 class ProviderFactory:
@@ -15,13 +18,13 @@ class ProviderFactory:
 
     @classmethod
     def create(
-        cls, provider: Provider, model_name: str | None = None, **kwargs: Any
+        cls, provider: Provider, model: "Model | str | None" = None, **kwargs: Any
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
 
         Args:
             provider: The LLM provider (e.g., Provider.CLAUDE, Provider.GEMINI).
-            model_name: Optional explicit model string.
+            model: Optional explicit model string or Model enum.
             kwargs: Additional overrides for the specific provider.
 
         Returns:
@@ -29,45 +32,62 @@ class ProviderFactory:
         """
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
 
-        if provider == Provider.CLAUDE:
-            # Requires ANTHROPIC_API_KEY.
-            default_model = "claude-3-7-sonnet-20250219"
-            return ChatAnthropic(
-                model=model_name or default_model,
-                timeout=timeout,
-                max_retries=2,
-                **kwargs,
-            )
-        elif provider == Provider.GEMINI:
-            # Requires GEMINI_API_KEY.
-            default_model = "gemini-2.5-pro"
-            return ChatGoogleGenerativeAI(
-                model=model_name or default_model,
-                timeout=timeout,
-                max_retries=2,
-                **kwargs,
-            )
-        elif provider == Provider.GLM5:
-            # Requires ZHIPU_API_KEY. Maps through OpenAI compatibility.
-            default_model = "glm-4-plus"
-            # GLM-5 isn't technically out for general API yet, we map to 4 or "glm-5".
-            return ChatOpenAI(
-                model=model_name or default_model,
-                base_url="https://open.bigmodel.cn/api/paas/v4/",
-                api_key=os.environ.get("ZHIPU_API_KEY"),
-                timeout=timeout,
-                max_retries=2,
-                **kwargs,
-            )
-        elif provider == Provider.CODEX:
-            # Requires OPENAI_API_KEY.
-            default_model = "gpt-4o"
-            return ChatOpenAI(
-                model=model_name or default_model,
-                timeout=timeout,
-                max_retries=2,
-                **kwargs,
-            )
+        # Resolve model name
+        if model is None:
+            model_name = PROVIDER_DEFAULT_MODELS[provider].value
+        elif isinstance(model, Model):
+            model_name = model.value
         else:
-            msg = f"Unsupported provider: {provider}"
-            raise ValueError(msg)
+            model_name = model
+
+        logger.info(
+            f"Instantiating ProviderFactory for provider={provider}, resolved_model={model_name}"
+        )
+
+        if provider == Provider.CLAUDE:
+            api_key = (
+                kwargs.pop("api_key", None)
+                or os.environ.get("ANTHROPIC_API_KEY")
+                or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+            )
+            if api_key:
+                kwargs["api_key"] = api_key
+            return ChatAnthropic(
+                model=model_name, timeout=timeout, max_retries=2, **kwargs
+            )
+
+        elif provider == Provider.GEMINI:
+            api_key = (
+                kwargs.pop("api_key", None)
+                or os.environ.get("GEMINI_API_KEY")
+                or os.environ.get("GOOGLE_API_KEY")
+            )
+            if api_key:
+                kwargs["api_key"] = api_key
+            return ChatGoogleGenerativeAI(
+                model=model_name, timeout=timeout, max_retries=2, **kwargs
+            )
+
+        elif provider == Provider.ZHIPU:
+            api_key = kwargs.pop("api_key", None) or os.environ.get("ZHIPU_API_KEY")
+            if api_key:
+                kwargs["api_key"] = api_key
+            return ChatOpenAI(
+                model=model_name,
+                base_url="https://open.bigmodel.cn/api/paas/v4/",
+                timeout=timeout,
+                max_retries=2,
+                **kwargs,
+            )
+
+        elif provider == Provider.OPENAI:
+            api_key = kwargs.pop("api_key", None) or os.environ.get("OPENAI_API_KEY")
+            if api_key:
+                kwargs["api_key"] = api_key
+            return ChatOpenAI(
+                model=model_name, timeout=timeout, max_retries=2, **kwargs
+            )
+
+        else:
+            logger.error(f"Failed to instantiate: Unsupported provider {provider}")
+            raise ValueError(f"Unsupported provider: {provider}")

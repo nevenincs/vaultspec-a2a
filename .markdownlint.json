@@ -4,5 +4,8 @@
     "line_length": 80,
     "code_blocks": false,
     "tables": false
+  },
+  "MD025": {
+    "front_matter_title": ""
   }
 }

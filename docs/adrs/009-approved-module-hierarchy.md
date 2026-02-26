@@ -22,7 +22,11 @@ related:
 
 ## 1. Context & Problem Statement
 
-The A2A Orchestrator bridges the A2A protocol, MCP, and now serves as a host for a native **LangGraph** execution engine. To prevent architectural drift, we require a strictly defined module hierarchy enforcing the separation between the execution graphs, the frontend (SvelteKit), and external protocol bridges.
+The A2A Orchestrator bridges the A2A protocol, MCP, and now serves as a
+host for a native **LangGraph** execution engine. To prevent architectural
+drift, we require a strictly defined module hierarchy enforcing the
+separation between the execution graphs, the frontend (SvelteKit), and
+external protocol bridges.
 
 ## 2. The Decision
 
@@ -31,8 +35,8 @@ We formalize the following repository and module structure.
 ### 2.1 Top-Level Topology
 
 The Python package root is `lib/` (matching `pyproject.toml`'s
-`packages = ["lib"]`). The frontend lives at `src/ui/`. All Python
-import paths begin with `lib.*`.
+`packages = ["lib"]`). The frontend lives at `src/ui/`. All Python import
+paths begin with `lib.*`.
 
 ```text
 ├── lib/                     # Backend Python package (import as lib.*)
@@ -43,7 +47,9 @@ import paths begin with `lib.*`.
 
 ### 2.2 Backend Module Hierarchy (`lib/`)
 
-Organized by orchestration domain, isolating protocols from the LangGraph core. Each domain directory contains a `tests/` subdirectory for Rust-style co-located unit tests (per GEMINI.md testing mandate).
+Organized by orchestration domain, isolating protocols from the LangGraph
+core. Each domain directory contains a `tests/` subdirectory for Rust-style
+co-located unit tests (per GEMINI.md testing mandate).
 
 ```text
 lib/
@@ -140,24 +146,36 @@ lib/core/nodes/tests/test_tools.py
 ...
 ```
 
-All tests use `pytest` with real processes and network calls. No mocks, patches, stubs, or skips.
+All tests use `pytest` with real processes and network calls. No mocks,
+patches, stubs, or skips.
 
 ## 3. Rationale
 
-- **Graph Over Process:** Shifting strictly to LangGraph nodes prevents the orchestrator from being a massive, bespoke process juggling framework and instead leans on peer-reviewed, production-ready LangChain state machine primitives.
-- **Provider Abstraction:** Injecting `ChatAnthropic` natively solves the crippling "CLI binary" Windows problem immediately.
+- **Graph Over Process:** Shifting strictly to LangGraph nodes prevents the
+  orchestrator from being a massive, bespoke process juggling framework and
+  instead leans on peer-reviewed, production-ready LangChain state machine
+  primitives.
+- **Provider Abstraction:** Injecting `ChatAnthropic` natively solves the
+  crippling "CLI binary" Windows problem immediately.
 
 ## 4. Implementation Constraints
 
-- **Async Strictness:** All node logic in `core/nodes/` must be `async def` and use `ainvoke()` to avoid blocking the main Uvicorn event loop.
-- **State Typings:** The `state.py` TypedDict must serialize cleanly to SQLite via the checkpointer.
+- **Async Strictness:** All node logic in `core/nodes/` must be `async def`
+  and use `ainvoke()` to avoid blocking the main Uvicorn event loop.
+- **State Typings:** The `state.py` TypedDict must serialize cleanly to
+  SQLite via the checkpointer.
 
 ## 5. Facade Pattern & Public API Exposure
 
-1. **Top-Level Independence**: Sub-modules in `lib/` (API, Core, Protocols, etc.) must be designed as independent units that are independently testable.
-2. **Sub-Module Facades**: The `__init__.py` file of each sub-module must act as a facade.
-3. **Strict `__all__` Mandate**: Every sub-sub-module must define a `__all__` list.
-4. **Relative Internal Imports**: All imports *within* the `lib/` package must use relative import syntax (e.g., `from ..api import schemas`).
+1. **Top-Level Independence**: Sub-modules in `lib/` (API, Core, Protocols,
+   etc.) must be designed as independent units that are independently
+   testable.
+2. **Sub-Module Facades**: The `__init__.py` file of each sub-module must
+   act as a facade.
+3. **Strict `__all__` Mandate**: Every sub-sub-module must define a `__all__`
+   list.
+4. **Relative Internal Imports**: All imports *within* the `lib/` package
+   must use relative import syntax (e.g., `from ..api import schemas`).
 
 ## 6. References
 

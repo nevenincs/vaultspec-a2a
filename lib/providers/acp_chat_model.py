@@ -32,6 +32,7 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
+from langchain_core.language_models.chat_models import generate_from_stream
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from pydantic import Field
 
@@ -599,6 +600,21 @@ class AcpChatModel(BaseChatModel):
             self._active_session_id = None
             self._tool_calls = {}
 
+    async def _agenerate(
+        self,
+        messages: list[BaseMessage],
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        """Collect _astream chunks into a ChatResult for ainvoke/agenerate callers."""
+        chunks: list[ChatGenerationChunk] = []
+        async for chunk in self._astream(
+            messages, stop=stop, run_manager=run_manager, **kwargs
+        ):
+            chunks.append(chunk)
+        return generate_from_stream(iter(chunks))
+
     def _generate(
         self,
         messages: list[BaseMessage],
@@ -608,7 +624,7 @@ class AcpChatModel(BaseChatModel):
     ) -> ChatResult:
         """Synchronous generate not supported; orchestration is fully async."""
         raise NotImplementedError(
-            "AcpChatModel only supports async generation (_astream, _agenerate)."
+            "AcpChatModel only supports async generation. Use ainvoke or astream."
         )
 
     @property

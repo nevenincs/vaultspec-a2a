@@ -41,37 +41,49 @@ class Provider(StrEnum):
 
 class Model(StrEnum):
     """
-    LLM Model version tags as of March 2026.
-    Centralized here to avoid hardcoded strings throughout the codebase.
+    LLM capability levels.
+    Abstracts specific version strings to reduce maintenance burden.
     """
 
-    # Anthropic
-    CLAUDE_4_6_OPUS = "claude-4.6-opus"
-    CLAUDE_4_6_SONNET = "claude-4.6-sonnet"
-    CLAUDE_4_5_HAIKU = "claude-4.5-haiku"
-
-    # Google
-    GEMINI_3_1_PRO = "gemini-3.1-pro"
-    GEMINI_3_PRO = "gemini-3-pro"
-    GEMINI_3_FLASH = "gemini-3-flash"
-    GEMINI_3_FLASH_PREVIEW = "gemini-3-flash-preview"
-
-    # OpenAI
-    GPT_5_2_CODEX = "gpt-5.2-codex"
-    GPT_5_2_PRO = "gpt-5.2-pro"
-    GPT_5_MINI = "gpt-5-mini"
-    GPT_5_NANO = "gpt-5-nano"
-
-    # Zhipu AI (GLM)
-    GLM_5 = "glm-5"
-    GLM_4_7_FLAGSHIP = "glm-4.7-flagship"
-    GLM_4_7_FLASH = "glm-4.7-flash"
+    LOW = "low"
+    MID = "mid"
+    HIGH = "high"
+    MAX = "max"
 
 
-# Default model mapping to avoid logic duplication in factory
+# Concrete model name mapping as of February 2026
+MODEL_MAP: dict[Provider, dict[Model, str]] = {
+    Provider.CLAUDE: {
+        Model.LOW: "claude-4.5-haiku",
+        Model.MID: "claude-4.6-sonnet",
+        Model.HIGH: "claude-4.6-opus",
+        Model.MAX: "claude-4.6-opus",
+    },
+    Provider.GEMINI: {
+        Model.LOW: "gemini-2.5-flash",
+        Model.MID: "gemini-3-flash-preview",
+        Model.HIGH: "gemini-3.1-pro-preview",
+        Model.MAX: "gemini-3.1-pro-preview",
+    },
+    Provider.OPENAI: {
+        Model.LOW: "gpt-5-mini",
+        Model.MID: "gpt-5.2-pro",
+        Model.HIGH: "gpt-5.3-codex",
+        Model.MAX: "gpt-5.3-codex",
+    },
+    Provider.ZHIPU: {
+        Model.LOW: "glm-4.7-flash",
+        Model.MID: "glm-4.7-flagship",
+        Model.HIGH: "glm-5",
+        Model.MAX: "glm-5",
+    },
+}
+
+
+# Default model mapping (capability level per provider)
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
-    Provider.CLAUDE: Model.CLAUDE_4_6_SONNET,
-    Provider.GEMINI: Model.GEMINI_3_FLASH_PREVIEW,
-    Provider.OPENAI: Model.GPT_5_2_CODEX,
-    Provider.ZHIPU: Model.GLM_5,
+    Provider.CLAUDE: Model.MID,
+    Provider.GEMINI: Model.MID,
+    Provider.OPENAI: Model.HIGH,
+    Provider.ZHIPU: Model.HIGH,
 }

@@ -13,10 +13,10 @@ import pytest
 from langchain_core.messages import HumanMessage
 
 from ...core.config import settings
-from ...utils.enums import Model
+from ...utils.enums import MODEL_MAP, Model, Provider
 from ..acp_chat_model import AcpChatModel
 
-_GEMINI_COMMAND = ["gemini", "--model", Model.GEMINI_3_FLASH_PREVIEW.value, "--experimental-acp"]
+_GEMINI_COMMAND = ["gemini", "--model", MODEL_MAP[Provider.GEMINI][Model.MID], "--experimental-acp"]
 
 
 @pytest.mark.asyncio

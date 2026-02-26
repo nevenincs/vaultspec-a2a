@@ -8,7 +8,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ..core.config import settings
-from ..utils.enums import PROVIDER_DEFAULT_MODELS, Model, Provider
+from ..utils.enums import PROVIDER_DEFAULT_MODELS, MODEL_MAP, Model, Provider
 from .acp_chat_model import AcpChatModel
 
 
@@ -43,9 +43,10 @@ class ProviderFactory:
 
         # Resolve model name
         if model is None:
-            model_name = PROVIDER_DEFAULT_MODELS[provider].value
+            model_level = PROVIDER_DEFAULT_MODELS[provider]
+            model_name = MODEL_MAP[provider][model_level]
         elif isinstance(model, Model):
-            model_name = model.value
+            model_name = MODEL_MAP[provider][model]
         else:
             model_name = model
 

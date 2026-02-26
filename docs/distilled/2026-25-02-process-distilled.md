@@ -11,6 +11,10 @@ sources:
 
 # Process Domain — Distilled
 
+> [!WARNING]
+> **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
+> The process management strategies described in this document (Subprocess Management, OS-level signaling, CLI Wrappers) have been superseded by the native LangGraph architecture running within the main Uvicorn event loop. This document remains for historical context. Please refer to ADR-001 for the current binding architecture.
+
 **Date**: 2026-02-25
 **Status**: Distilled from process lifecycle + monitoring research
 **Scope**: Agent subprocess management on Windows 11 with Python 3.13

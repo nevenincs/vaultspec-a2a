@@ -11,6 +11,10 @@ sources:
 
 # Protocols Domain — Distilled
 
+> [!WARNING]
+> **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
+> The protocol strategies described in this document (A2A SSE streaming, ACP translation) have been superseded by native LangGraph streaming (`astream_events`) and MCP tools. This document remains for historical context. Please refer to ADR-003, ADR-004, and ADR-006 for the current binding architecture.
+
 **Date**: 2026-02-25
 **Status**: Distilled from Phase 1 protocol foundations + MCP/A2A compliance
 **Scope**: Wire-level protocol mechanics (not architectural decisions — see

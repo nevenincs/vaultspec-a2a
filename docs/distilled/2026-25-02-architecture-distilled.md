@@ -15,6 +15,10 @@ sources:
 
 # Architecture Domain — Distilled
 
+> [!WARNING]
+> **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
+> The architecture described in this document (A2A, Ephemeral Subprocesses, Manual Process Management) has been superseded by the native LangGraph architecture. This document remains for historical context. Please refer to ADRs 001-009 for the current binding architecture.
+
 **Date**: 2026-02-25
 **Status**: Distilled from Phases 1–6 research + gap analysis audit
 **Scope**: Full system architecture for A2A agent team orchestration

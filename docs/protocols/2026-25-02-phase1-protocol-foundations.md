@@ -61,6 +61,7 @@ Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n
 **One SSE connection per task.** No multiplexing.
 
 For a multi-agent control surface, this means:
+
 - N agents with M concurrent tasks = up to M SSE connections
 - Each connection must be independently managed
 - The orchestrator (not the web client) should maintain these connections
@@ -84,6 +85,7 @@ any missed state changes.
 `EventQueue.tap()` creates child queues that receive all future events.
 Multiple server-side consumers can subscribe to the same task's events.
 This enables the orchestrator to:
+
 - Maintain its own event processing
 - Fan out to multiple web clients
 - Log/persist events independently
@@ -190,6 +192,7 @@ WebSocket.
 ### 3.2 Message format (preliminary)
 
 **Server → Browser (events):**
+
 ```json
 {
   "type": "agent_event",
@@ -200,6 +203,7 @@ WebSocket.
 ```
 
 **Server → Browser (permissions):**
+
 ```json
 {
   "type": "permission_request",
@@ -214,6 +218,7 @@ WebSocket.
 ```
 
 **Browser → Server (commands):**
+
 ```json
 {
   "type": "send_message",
@@ -250,6 +255,7 @@ exactly the abstractions a control surface needs. A2A's SSE streaming is
 simpler but less structured.
 
 The recommended approach:
+
 - **Agent processes**: Speak ACP (for rich streaming) or A2A (for protocol
   compliance). The control surface server adapts both.
 - **Control surface server**: Maintains per-agent connections, runs

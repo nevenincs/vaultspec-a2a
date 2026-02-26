@@ -36,6 +36,7 @@ CLI ◄──SSE: TaskStatusUpdate────  "completed"
 ```
 
 **What the a2a-samples CLI host actually does** (`cli/__main__.py`):
+
 - Opens async SSE stream via `send_message_streaming()`
 - Iterates events in a `async for` loop
 - Prints raw JSON for each event
@@ -43,6 +44,7 @@ CLI ◄──SSE: TaskStatusUpdate────  "completed"
 - Handles multi-turn via `contextId` carry-forward
 
 **Problems for coding teams**:
+
 - CLI is frozen during work. User can't do anything else in that terminal.
 - If the connection drops, the team keeps working but the CLI loses visibility.
 - No way to see what multiple agents are doing simultaneously — SSE is one
@@ -68,12 +70,14 @@ Orchestrator ──POST /notify──► CLI webhook listener
 ```
 
 **What the a2a-samples CLI host does for push notifications**:
+
 - Starts a Starlette server in a daemon thread on a separate port
 - Listens on `/notify` endpoint
 - Validates via GET with `validationToken`
 - Prints notifications to stdout as they arrive
 
 **Problems for coding teams**:
+
 - Fire-and-forget: no mid-stream user input without polling back
 - No guaranteed delivery or retry logic in the samples
 - User must run a local HTTP server to receive callbacks
@@ -100,6 +104,7 @@ CLI ◄──{status: "completed", result: {...}}
 ```
 
 **This is the most promising pattern** because:
+
 - CLI is NOT blocked — it gets a task ID and can do other work
 - Progress is available via polling (server suggests poll interval)
 - Mid-task user input works via elicitation callbacks
@@ -107,6 +112,7 @@ CLI ◄──{status: "completed", result: {...}}
 - Multiple concurrent tasks trackable via `list_tasks()`
 
 **Problems**:
+
 - Experimental MCP feature — API may change
 - Polling is inherently less responsive than SSE streaming
 - No rich real-time view of agent internals (just status messages)
@@ -122,6 +128,7 @@ architectural necessity for team orchestration. The samples confirm this:
 ### 2.1 What Exists in the Samples
 
 **a2a_gui** (`samples/python/hosts/a2a_gui/`):
+
 - FastAPI proxy backend + vanilla JS frontend
 - Fetches Agent Card and displays capabilities
 - Chat interface with real-time SSE streaming
@@ -131,6 +138,7 @@ architectural necessity for team orchestration. The samples confirm this:
 - **Limitation**: Single agent view, no team dashboard
 
 **Airbnb Planner Gradio UI** (`airbnb_planner_multiagent/host_agent/`):
+
 - Gradio ChatInterface on port 8083
 - Shows tool calls with function names and arguments
 - Shows tool responses as formatted JSON
@@ -141,6 +149,7 @@ architectural necessity for team orchestration. The samples confirm this:
 ### 2.2 What's Missing (And Needed)
 
 Neither sample provides:
+
 - **Multi-agent parallel view**: See what each team member is doing
 - **Per-agent streaming**: Individual progress streams per coding agent
 - **Permission aggregation**: Handle approval requests from multiple agents
@@ -260,6 +269,7 @@ The walkthrough documents port ranges: agents on `9999-9996`, infrastructure
 on separate ranges.
 
 **What's NOT provided by any sample**:
+
 - Process supervisor / auto-restart
 - Dynamic port allocation
 - Health check endpoints (one Azure sample has a custom `/health`)
@@ -661,6 +671,7 @@ Each coding agent would be:
 ### 8.1 Single Orchestrator or Distributed?
 
 **Single orchestrator** (recommended for v1):
+
 - One process manages everything
 - Spawns agent subprocesses
 - Aggregates all events
@@ -668,6 +679,7 @@ Each coding agent would be:
 - Simpler to debug, deploy, and reason about
 
 **Distributed** (future):
+
 - Orchestrator is itself an A2A agent that other orchestrators can call
 - Agents can run on different machines
 - Requires service discovery, distributed task store, network auth
@@ -675,11 +687,13 @@ Each coding agent would be:
 ### 8.2 Agent Persistence Model
 
 **Ephemeral agents** (recommended for v1):
+
 - Spawned per task, killed when done
 - No state between tasks
 - Simpler lifecycle management
 
 **Long-lived agents** (future):
+
 - Run continuously, accept multiple tasks
 - Maintain learned context (project conventions, file layout)
 - Better performance (no cold start) but more complex management
@@ -687,6 +701,7 @@ Each coding agent would be:
 ### 8.3 How Many Ports?
 
 Minimum viable:
+
 - 1 port for orchestrator (MCP server + web UI + A2A client)
 - 1 port per active agent (A2A server)
 - Or: agents communicate via stdio instead of HTTP (eliminates ports
@@ -695,6 +710,7 @@ Minimum viable:
 ### 8.4 MCP Task Maturity Risk
 
 The experimental MCP task system is the ideal CLI bridge but:
+
 - API explicitly marked experimental
 - No persistence layer beyond in-memory
 - Not yet widely supported in CLI tools
@@ -708,6 +724,7 @@ If MCP tasks break, we can fall back to simple tool calls with polling.
 ## 9. Sources
 
 ### Implementation Details
+
 - **CLI streaming**: `a2a-samples/samples/python/hosts/cli/__main__.py`
 - **GUI host**: `a2a-samples/samples/python/hosts/a2a_gui/`
 - **Multi-agent host**: `a2a-samples/samples/python/hosts/multiagent/`
@@ -715,12 +732,14 @@ If MCP tasks break, we can fall back to simple tool calls with polling.
 - **Airbnb routing**: `a2a-samples/samples/python/agents/airbnb_planner_multiagent/`
 
 ### Protocol Internals
+
 - **EventQueue**: `a2a-python/src/a2a/server/events/event_queue.py`
 - **Client streaming**: `a2a-python/src/a2a/client/base_client.py`
 - **Task tracking**: `a2a-python/src/a2a/client/client_task_manager.py`
 - **MCP tasks**: `mcp-python-sdk/src/mcp/shared/experimental/tasks/`
 
 ### Control Patterns
+
 - **ACP streaming**: `acp-python-sdk/src/acp/agent/connection.py`
 - **SessionAccumulator**: `acp-python-sdk/src/acp/contrib/session_state.py`
 - **PermissionBroker**: `acp-python-sdk/src/acp/contrib/permissions.py`

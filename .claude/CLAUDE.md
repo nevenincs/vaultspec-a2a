@@ -66,3 +66,6 @@ All commands should use native PWSH syntax and tools.
   investigating implementation details. This directory contains code snippets
   and notes from various repos that are relevant to the implementation of the
   a2a agent orchestration system.
+- Project ADRs can be found at `docs/adrs/`.
+- ADRs are binding and must be strictly followed.
+- Before starting any coding task, it is obligatory to internalize all ADRs, all distilled documents, and all related research identified in the ADRs.

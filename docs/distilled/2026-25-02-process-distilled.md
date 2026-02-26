@@ -37,6 +37,7 @@ Agent subprocess
 ```
 
 **Key considerations:**
+
 - Set `PYTHONUNBUFFERED=1` on Uvicorn subprocesses (pipe-connected stdout
   switches to block buffering otherwise)
 - Use `process.stdout.readline()` in a loop, never `communicate()` (which waits
@@ -94,6 +95,7 @@ info['BasicLimitInformation']['LimitFlags'] |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOS
 ```
 
 **Secondary defenses:**
+
 - `atexit` handler iterating all managed processes
 - `asyncio.TaskGroup` for structured concurrency (cancel on scope exit)
 - Always `await process.wait()` after termination
@@ -247,6 +249,7 @@ effect immediately — no agent restart needed.
 ### 4.3 ACP Permission Pattern (Reference)
 
 ACP's `PermissionBroker` provides user-facing options:
+
 - "Approve" (allow_once)
 - "Approve for session" (allow_always)
 - "Reject" (reject_once)

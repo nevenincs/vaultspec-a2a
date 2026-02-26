@@ -2,8 +2,8 @@
 name: "Control Surface Domain - Distilled"
 date: 2026-25-02
 type: distilled
-summary: "Consolidated rendering stack decisions: terminal emulation (xterm.js), syntax highlighting (Shiki + CodeMirror 6), streaming markdown (Incremark), diff rendering (diff2html). Memory budgets and architecture patterns from survey of 17 reference projects."
-maturity: 40
+summary: "Consolidated rendering stack decisions: Tailwind v4 + shadcn-svelte, terminal emulation (xterm.js), syntax highlighting (Shiki + CodeMirror 6), streaming markdown (Incremark), diff rendering (diff2html). Memory budgets and architecture patterns from survey of 17 reference projects."
+maturity: 45
 sources:
   - docs/control-surface/2026-25-02-agent-ui-terminal-dashboard-research.md
   - docs/control-surface/2026-25-02-control-surface-rendering-research.md
@@ -19,9 +19,22 @@ distilled doc.
 
 ---
 
-## 1. Terminal Emulation
+## 1. UI Framework & Design System
 
-### 1.1 Decision: xterm.js v5
+### 1.1 Decision: shadcn-svelte + Tailwind CSS v4
+
+The project explicitly deviates from the initial "Vanilla CSS" preference to adopt **Tailwind CSS v4** and **shadcn-svelte**.
+
+- **Tailwind v4 (Oxide Engine):** Provides microsecond incremental builds via a Rust-based engine, eliminates `tailwind.config.js` in favor of CSS-first variables (`@theme`), and supports modern features like container queries natively.
+- **shadcn-svelte + Bits UI:** Entirely Svelte 5 Runes-native. Provides the highly readable, data-dense "Vercel aesthetic" necessary for complex monitoring dashboards, without the overhead of monolithic libraries.
+
+**Rationale:** The development velocity gained by using pre-built, accessible, keyboard-navigable primitives (Modals, Resizable Panes, Dropdowns) outweighs the benefits of strict Vanilla CSS. Carbon Components was evaluated but rejected due to its reliance on Svelte 4 legacy syntax (`on:click`, `bind:value`), which conflicts with the project's modern Svelte 5 Runes architecture.
+
+---
+
+## 2. Terminal Emulation
+
+### 2.1 Decision: xterm.js v5
 
 xterm.js (`@xterm/xterm`) is the only viable option. Used by VS Code, Theia,
 code-server, JupyterLab, and every major web terminal project.
@@ -38,7 +51,7 @@ code-server, JupyterLab, and every major web terminal project.
 
 **SvelteKit integration**: `xterm-svelte` provides a maintained wrapper.
 
-### 1.2 Memory Budget
+### 2.2 Memory Budget
 
 | Metric | Value |
 |--------|-------|
@@ -51,12 +64,13 @@ code-server, JupyterLab, and every major web terminal project.
 **Multi-agent impact**: 5 agents at 5K scrollback = ~170MB for terminals alone.
 
 **Mitigation strategy**:
+
 - Cap scrollback at 1–2K lines (not 5K)
 - Use `@xterm/addon-serialize` to persist historical output to SQLite
 - Lazy terminal creation (only instantiate when tab is active)
 - Disable truecolor if memory is a concern
 
-### 1.3 WebSocket Integration Pattern
+### 2.3 WebSocket Integration Pattern
 
 ```
 Browser (xterm.js) ←—WebSocket—→ Backend Server ←—stdio—→ Agent Process
@@ -66,7 +80,7 @@ Each agent's stdout/stderr is relayed over the multiplexed WebSocket to its
 xterm.js instance. The `@xterm/addon-attach` provides basic WebSocket
 attachment but lacks flow control — custom implementation needed for production.
 
-### 1.4 Session Reconnection
+### 2.4 Session Reconnection
 
 The `@xterm/addon-serialize` can serialize terminal framebuffer (colors, flags,
 content) to a string. On reconnect, feed serialized state into a new terminal
@@ -75,9 +89,9 @@ Still experimental.
 
 ---
 
-## 2. Syntax Highlighting
+## 3. Syntax Highlighting
 
-### 2.1 Decision: Layered Approach
+### 3.1 Decision: Layered Approach
 
 Three rendering contexts, each with its own highlighting strategy:
 
@@ -87,7 +101,7 @@ Three rendering contexts, each with its own highlighting strategy:
 | Code blocks in agent messages | Shiki (lazy-loaded) | VS Code-grade highlighting via TextMate grammars + WASM. ~250KB + WASM, so must be lazy-loaded. |
 | Code viewer / artifact inspector | CodeMirror 6 | 124KB bundle (vs Monaco's 2MB+). Read-only mode, efficient incremental updates via transactions. Supports search, folding. |
 
-### 2.2 What Was Eliminated
+### 3.2 What Was Eliminated
 
 | Library | Reason |
 |---------|--------|
@@ -95,7 +109,7 @@ Three rendering contexts, each with its own highlighting strategy:
 | Prism.js | No longer actively maintained. |
 | Tree-sitter (browser) | Interesting for structural parsing but overkill for highlighting. Deferred to future. |
 
-### 2.3 ANSI + Structured Highlighting Coexistence
+### 3.3 ANSI + Structured Highlighting Coexistence
 
 Agent processes may emit ANSI-highlighted output (via `bat`, `rich`, or native
 CLI formatting). This renders correctly in xterm.js. Structured markdown
@@ -104,16 +118,16 @@ rendering contexts — never mix ANSI codes into HTML rendering.
 
 ---
 
-## 3. Streaming Markdown
+## 4. Streaming Markdown
 
-### 3.1 The Core Problem
+### 4.1 The Core Problem
 
 LLM output arrives as character/word chunks. Markdown syntax elements span
 multiple chunks (e.g., code fence opens in one chunk, closes many chunks
 later). Traditional parsers (marked, markdown-it) re-parse the entire
 accumulated document on each chunk: O(n²) performance.
 
-### 3.2 Decision: Incremark
+### 4.2 Decision: Incremark
 
 | Criteria | Incremark | Streamdown |
 |----------|-----------|------------|
@@ -128,7 +142,7 @@ never re-parsed.
 
 If the project were React-based, Streamdown would be the alternative.
 
-### 3.3 Chrome's Official Best Practices
+### 4.3 Chrome's Official Best Practices
 
 1. Never use `textContent` (destroys/recreates all child nodes)
 2. Use purpose-built streaming parsers (not marked/markdown-it)
@@ -137,9 +151,9 @@ If the project were React-based, Streamdown would be the alternative.
 
 ---
 
-## 4. Code Viewing
+## 5. Code Viewing
 
-### 4.1 Decision: CodeMirror 6
+### 5.1 Decision: CodeMirror 6
 
 For the artifact viewer / code review panel. Key properties:
 
@@ -153,9 +167,9 @@ For the artifact viewer / code review panel. Key properties:
 
 ---
 
-## 5. Diff Rendering
+## 6. Diff Rendering
 
-### 5.1 Decision: diff2html
+### 6.1 Decision: diff2html
 
 Framework-agnostic (works with Svelte). Converts git unified diff output to
 HTML. Uses highlight.js for syntax highlighting within diffs. Side-by-side and
@@ -166,7 +180,7 @@ is unmaintained (6 years since last publish).
 
 ---
 
-## 6. Agent Output Rendering Architecture
+## 7. Agent Output Rendering Architecture
 
 ```
 Agent Backend (A2A protocol)
@@ -193,7 +207,7 @@ Control Surface Frontend
           +-- For artifact inspection / code review
 ```
 
-### 6.1 Content Type Dispatch
+### 7.1 Content Type Dispatch
 
 Agent events carry typed content. The renderer dispatches based on type:
 
@@ -208,9 +222,9 @@ uses `useLLMOutput` pattern matching.
 
 ---
 
-## 7. Reference Project Insights
+## 8. Reference Project Insights
 
-### 7.1 Most Relevant References
+### 8.1 Most Relevant References
 
 | Project | Stars | Key Pattern Learned |
 |---------|-------|-------------------|
@@ -221,7 +235,7 @@ uses `useLLMOutput` pattern matching.
 | AutoGen Studio | ~42K | Inner monologue rendering; cost tracking per task |
 | Portainer | ~32K | Lightweight agent pattern for remote process management |
 
-### 7.2 Patterns Not Adopted
+### 8.2 Patterns Not Adopted
 
 | Pattern | Projects | Why Not |
 |---------|----------|---------|
@@ -233,7 +247,7 @@ uses `useLLMOutput` pattern matching.
 
 ---
 
-## 8. Open Contradictions
+## 9. Open Contradictions
 
 ### C1: Redis Recommended by Survey, Rejected by Architecture
 
@@ -259,7 +273,7 @@ others — backpressure management in the multiplexer is needed.
 
 ---
 
-## 9. Knowledge Gaps
+## 10. Knowledge Gaps
 
 ### G1: xterm.js Flow Control for Production
 

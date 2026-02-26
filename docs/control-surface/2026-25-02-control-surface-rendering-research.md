@@ -30,7 +30,7 @@ maturity: 25
 xterm.js is the dominant web-based terminal emulator, powering VS Code's integrated
 terminal, Hyper, code-server, and numerous cloud IDE products.
 
-**Repository**: https://github.com/xtermjs/xterm.js
+**Repository**: <https://github.com/xtermjs/xterm.js>
 **Current Version**: v5.x (scoped as `@xterm/xterm` on npm)
 **License**: MIT
 
@@ -169,8 +169,8 @@ persist historical output to disk/database.
 
 ### 2.1 Shiki
 
-**Repository**: https://github.com/shikijs/shiki
-**Website**: https://shiki.style
+**Repository**: <https://github.com/shikijs/shiki>
+**Website**: <https://shiki.style>
 **Current Version**: v1.x (complete rewrite from v0.x)
 
 #### Architecture
@@ -211,7 +211,7 @@ block rendering.
 
 ### 2.2 Prism.js
 
-**Website**: https://prismjs.com
+**Website**: <https://prismjs.com>
 **Bundle size**: ~2KB core + per-language plugins
 
 - Fastest of the three major highlighters (benchmark leader).
@@ -223,7 +223,7 @@ block rendering.
 
 ### 2.3 highlight.js
 
-**Website**: https://highlightjs.org
+**Website**: <https://highlightjs.org>
 **Bundle size**: ~30KB core
 
 - About half the speed of Prism.js.
@@ -246,8 +246,8 @@ block rendering.
 
 ### 2.5 Monaco Editor as Read-Only Viewer
 
-**Repository**: https://github.com/microsoft/monaco-editor
-**Website**: https://microsoft.github.io/monaco-editor
+**Repository**: <https://github.com/microsoft/monaco-editor>
+**Website**: <https://microsoft.github.io/monaco-editor>
 
 Monaco IS the VS Code editor extracted as a library. It provides the best
 possible code editing and viewing experience, but at significant cost:
@@ -265,7 +265,7 @@ Shiki.
 
 ### 2.6 CodeMirror 6
 
-**Website**: https://codemirror.net
+**Website**: <https://codemirror.net>
 **Current Version**: v6
 **Bundle size**: ~124KB minified + gzipped (basic setup); ~300KB with common
 extensions
@@ -325,7 +325,7 @@ contexts and do not conflict.
 
 ### 2.8 Tree-sitter WASM
 
-**Repository**: https://github.com/tree-sitter/tree-sitter
+**Repository**: <https://github.com/tree-sitter/tree-sitter>
 **Browser Package**: `web-tree-sitter`
 
 #### Architecture
@@ -451,7 +451,7 @@ later). This makes naive per-chunk parsing impossible.
 
 #### Chrome's Official Best Practices
 
-Source: https://developer.chrome.com/docs/ai/render-llm-responses
+Source: <https://developer.chrome.com/docs/ai/render-llm-responses>
 
 1. **Do not use `textContent`**: Setting `textContent` destroys and recreates all
    child nodes on every update.
@@ -473,8 +473,8 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### Streamdown (Vercel)
 
-**Repository**: https://github.com/vercel/streamdown
-**Website**: https://streamdown.ai
+**Repository**: <https://github.com/vercel/streamdown>
+**Website**: <https://streamdown.ai>
 **Version**: v2
 
 - Drop-in replacement for `react-markdown`, designed for AI streaming.
@@ -486,7 +486,7 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### Incremark
 
-**Website**: https://www.incremark.com
+**Website**: <https://www.incremark.com>
 **Packages**: `@incremark/core`, `@incremark/react`, `@incremark/vue`,
 `@incremark/svelte`, `@incremark/solid`
 
@@ -500,8 +500,8 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### marked.js
 
-**Repository**: https://github.com/markedjs/marked
-**Website**: https://marked.js.org
+**Repository**: <https://github.com/markedjs/marked>
+**Website**: <https://marked.js.org>
 
 - "Built for speed" -- fast one-shot parsing.
 - Used by Open WebUI as the base parser.
@@ -511,7 +511,7 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### markdown-it
 
-**Repository**: https://github.com/markdown-it/markdown-it
+**Repository**: <https://github.com/markdown-it/markdown-it>
 
 - Consistent performance for 5K-100K character documents.
 - Plugin ecosystem for math, footnotes, etc.
@@ -531,7 +531,7 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### svelte-markdown
 
-**Repository**: https://github.com/pablo-abc/svelte-markdown
+**Repository**: <https://github.com/pablo-abc/svelte-markdown>
 
 - Inspired by react-markdown.
 - Accepts `source` prop (string or pre-parsed tokens).
@@ -540,8 +540,8 @@ Source: https://developer.chrome.com/docs/ai/render-llm-responses
 
 #### llm-ui (React)
 
-**Repository**: https://github.com/richardgill/llm-ui
-**Website**: https://llm-ui.com
+**Repository**: <https://github.com/richardgill/llm-ui>
+**Website**: <https://llm-ui.com>
 
 Purpose-built React library for rendering LLM output:
 
@@ -558,7 +558,7 @@ Purpose-built React library for rendering LLM output:
 
 #### react-diff-view
 
-**Repository**: https://github.com/otakustay/react-diff-view
+**Repository**: <https://github.com/otakustay/react-diff-view>
 **Version**: v3.3.2 (actively maintained)
 
 - Consumes git unified diff output.
@@ -568,7 +568,7 @@ Purpose-built React library for rendering LLM output:
 
 #### diff2html
 
-**Website**: https://diff2html.xyz
+**Website**: <https://diff2html.xyz>
 
 - Framework-agnostic: converts diff output to HTML.
 - Uses highlight.js for syntax highlighting within diffs.
@@ -577,7 +577,7 @@ Purpose-built React library for rendering LLM output:
 
 #### react-diff-viewer
 
-**Repository**: https://github.com/praneshr/react-diff-viewer
+**Repository**: <https://github.com/praneshr/react-diff-viewer>
 **Version**: v3.1.1 (last published 6 years ago -- effectively unmaintained)
 
 - Simple API but abandoned.
@@ -615,6 +615,7 @@ in the wild:
 **Recommendation: xterm.js v5 (`@xterm/xterm`)**
 
 No real alternatives exist at this quality level. Key addons to include:
+
 - `@xterm/addon-fit` (required -- auto-resize)
 - `@xterm/addon-webgl` (required -- GPU rendering)
 - `@xterm/addon-search` (useful for agent output search)
@@ -714,6 +715,7 @@ Control Surface Frontend
 ## Sources
 
 ### xterm.js
+
 - [xterm.js GitHub Repository](https://github.com/xtermjs/xterm.js)
 - [xterm.js Official Site](https://xtermjs.org/)
 - [xterm.js Addon Guide](https://xtermjs.org/docs/guides/using-addons/)
@@ -728,6 +730,7 @@ Control Surface Frontend
 - [xterm.js Serialize Addon](https://github.com/xtermjs/xterm.js/tree/master/addons/addon-serialize)
 
 ### Syntax Highlighting
+
 - [Shiki GitHub Repository](https://github.com/shikijs/shiki)
 - [Shiki Documentation](https://shiki.style/guide/)
 - [Shiki v1.0 Evolution (Nuxt Blog)](https://nuxt.com/blog/shiki-v1)
@@ -741,6 +744,7 @@ Control Surface Frontend
 - [bat Terminal Output (DeepWiki)](https://deepwiki.com/sharkdp/bat/5.3-terminal-output-and-ansi-processing)
 
 ### Agent Output Rendering
+
 - [How Claude Code is Built (Pragmatic Engineer)](https://newsletter.pragmaticengineer.com/p/how-claude-code-is-built)
 - [Claude Code Dependencies Analysis](https://www.southbridge.ai/blog/claude-code-an-analysis-dependencies)
 - [Open WebUI Content Rendering Pipeline (DeepWiki)](https://deepwiki.com/open-webui/open-webui/5.2-application-layout)

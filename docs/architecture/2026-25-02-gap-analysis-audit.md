@@ -414,8 +414,8 @@ A2A: API keys/JWT).
 
 ### During Implementation
 
-6. **Error Taxonomy** — Classify errors, define recovery per class.
-7. **Database Schema** — Tables, indices, migration strategy.
-8. **Testing Strategy** — Fixtures, real service setup, CI/CD.
-9. **Git Integration Spec** — Merge strategy, conflict resolution.
-10. **Context Management** — Overflow handling, cross-agent transfer.
+1. **Error Taxonomy** — Classify errors, define recovery per class.
+2. **Database Schema** — Tables, indices, migration strategy.
+3. **Testing Strategy** — Fixtures, real service setup, CI/CD.
+4. **Git Integration Spec** — Merge strategy, conflict resolution.
+5. **Context Management** — Overflow handling, cross-agent transfer.

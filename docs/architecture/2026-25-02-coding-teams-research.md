@@ -72,6 +72,7 @@ Cards and exchange work via Tasks.
 | contextId    | Groups related tasks into a logical session        |
 
 **Interaction modes**:
+
 - Request/Response (polling)
 - Streaming via SSE
 - Push notifications (webhooks for long-running work)
@@ -86,6 +87,7 @@ or model powers each agent — only that they speak HTTP and JSON-RPC.
 (the ACP host) for IDE/terminal integration.
 
 **Relevant features**:
+
 - Streaming agent output (`session/update` notifications)
 - Permission request flows (human-in-the-loop)
 - Terminal creation and management
@@ -102,6 +104,7 @@ we build the orchestration layer as an ACP-compatible agent, any ACP host
 discover capabilities and invoke them.
 
 **Relevant features**:
+
 - Tool registration with JSON schema
 - Resource discovery
 - Experimental async tasks (working → input_required → completed)
@@ -171,6 +174,7 @@ build tools).
 **Source**: `knowledge/repositories/a2a-samples/samples/python/agents/airbnb_planner_multiagent/`
 
 Advanced routing with:
+
 - Async factory pattern for agent initialization
 - Dynamic instruction generation from agent roster
 - Active agent tracking for session continuity
@@ -229,6 +233,7 @@ integration vector:
 ```
 
 **The Team Orchestrator** is exposed as an MCP server with tools like:
+
 - `delegate_task(description, constraints)` — send work to the team
 - `check_task_status(task_id)` — poll progress
 - `get_artifacts(task_id)` — retrieve completed work
@@ -368,6 +373,7 @@ provisions them.
 
 A2A agents are model-agnostic by design. Each agent can use whatever model
 suits its task:
+
 - Planner: Claude Opus / Gemini 2.5 Pro (deep reasoning)
 - Coder: Claude Sonnet / GPT-4.1 (fast, capable coding)
 - Reviewer: Claude Opus (thorough analysis)
@@ -378,6 +384,7 @@ suits its task:
 ## 7. Sources and References
 
 ### Protocol Specifications
+
 - **A2A Protocol**: `knowledge/repositories/A2A/docs/` — Full protocol docs,
   tutorials, ADRs
 - **A2A Python SDK**: `knowledge/repositories/a2a-python/` — SDK source with
@@ -388,12 +395,14 @@ suits its task:
   with experimental async tasks
 
 ### Implementation Examples
+
 - **a2a-samples multiagent host**: `knowledge/repositories/a2a-samples/samples/python/hosts/multiagent/` — Supervisor pattern
 - **a2a-samples CLI host**: `knowledge/repositories/a2a-samples/samples/python/hosts/cli/` — Client reference
 - **a2a-samples JS coder**: `knowledge/repositories/a2a-samples/samples/js/src/agents/coder/` — Coding agent with streaming artifacts
 - **Airbnb routing agent**: `knowledge/repositories/a2a-samples/samples/python/agents/airbnb_planner_multiagent/` — Advanced routing
 
 ### Framework References
+
 - **Claude Agent SDK**: `knowledge/repositories/claude-agent-sdk/` — Hooks,
   permissions, custom tools
 - **LangGraph**: `knowledge/repositories/langgraph/` — State graphs,
@@ -402,6 +411,7 @@ suits its task:
   tool interfaces
 
 ### Custom Analysis
+
 - **A2A Walkthrough**: `knowledge/repositories/a2a-walkthrough.md` — Four
   framework integration patterns
 - **Toad ACP Audit**: `knowledge/repositories/toad-acp-audit.md` — ACP host

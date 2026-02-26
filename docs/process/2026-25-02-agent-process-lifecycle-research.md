@@ -84,6 +84,7 @@ uses `anyio` (which wraps asyncio) to manage subprocess I/O:
    streaming.
 
 3. **Concurrent reading pattern:**
+
    ```python
    # Pseudocode — do NOT implement yet
    async def stream_output(process, websocket_broadcast):
@@ -179,6 +180,7 @@ parent hasn't called `wait()`). However, Windows has analogous problems:
 1. **Job Objects:** Create a Windows Job Object and assign all child processes to it. When
    the job is closed (or the parent exits), all children are automatically terminated.
    This is the most robust approach.
+
    ```python
    # Available via pywin32 or ctypes
    import win32job
@@ -209,6 +211,7 @@ listening and ready to accept HTTP requests?
    could change.
 
 2. **TCP connect probe:** Repeatedly attempt to connect to the target port.
+
    ```python
    # Pseudocode
    async def wait_for_port(host, port, timeout=10.0):
@@ -239,6 +242,7 @@ a natural health check — if it responds, the agent is fully operational.
 ### 1.7 Dynamic Port Allocation
 
 **Option A: Find free port, then pass to Uvicorn:**
+
 ```python
 import socket
 def find_free_port() -> int:
@@ -246,6 +250,7 @@ def find_free_port() -> int:
         s.bind(('', 0))
         return s.getsockname()[1]
 ```
+
 **Risk:** Race condition — between finding the port and Uvicorn binding to it, another
 process could claim it. In practice this is rare but possible.
 
@@ -280,6 +285,7 @@ From the A2A protocol's perspective (per the A2A spec and `knowledge/repositorie
   agent kills those connections. Clients must reconnect.
 
 **What happens to pending tasks:**
+
 - Tasks in `working` state: **Lost** unless the agent uses persistent task storage.
 - Tasks in `submitted` but not started: Can be re-submitted to the new agent.
 - Tasks in `input-required`: Client loses the dialogue context.
@@ -358,6 +364,7 @@ Kubernetes rolling updates provide useful conceptual patterns:
 | preStop hook | Drain initiation signal |
 
 **Relevant patterns to adopt:**
+
 - Readiness vs Liveness distinction: An agent can be alive (process running) but not
   ready (still loading, or in error state).
 - Rolling update with maxSurge=1: Start new before killing old.
@@ -387,6 +394,7 @@ HALF-OPEN (testing):
 ```
 
 **Configuration recommendations:**
+
 - `fail_max`: 3 consecutive failures (not cumulative)
 - `reset_timeout`: 15 seconds for development tool (short since we want fast recovery)
 - Track: HTTP 5xx responses, connection refused, response timeouts > 30s
@@ -418,6 +426,7 @@ Agent SDK's permission model or the ACP SDK's permission broker.
 From `knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/types.py`:
 
 **PermissionMode** (set at agent startup, governs the overall stance):
+
 ```python
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 ```
@@ -430,6 +439,7 @@ PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 | `"bypassPermissions"` | Allow everything without asking |
 
 **CanUseTool callback** (invoked at runtime per tool call):
+
 ```python
 CanUseTool = Callable[
     [str, dict[str, Any], ToolPermissionContext],
@@ -438,15 +448,18 @@ CanUseTool = Callable[
 ```
 
 This callback receives:
+
 - `tool_name`: The tool being invoked (e.g., "Bash", "Edit", "Write")
 - `input_data`: The tool's input parameters (e.g., file path, command)
 - `context`: Contains `suggestions` (list of `PermissionUpdate` objects)
 
 And returns either:
+
 - `PermissionResultAllow(updated_input=...)` — allow, optionally modify input
 - `PermissionResultDeny(message=...)` — deny with reason
 
 **PermissionUpdate** (runtime permission changes):
+
 ```python
 @dataclass
 class PermissionUpdate:
@@ -466,6 +479,7 @@ in-memory config, or API to make decisions.
 
 **The SDK also supports runtime permission mode changes** via the
 `SDKControlSetPermissionModeRequest` control message:
+
 ```python
 class SDKControlSetPermissionModeRequest(TypedDict):
     subtype: Literal["set_permission_mode"]
@@ -477,6 +491,7 @@ class SDKControlSetPermissionModeRequest(TypedDict):
 From `knowledge/repositories/acp-python-sdk/src/acp/contrib/permissions.py` and `schema.py`:
 
 **PermissionOption** (what the user sees):
+
 ```python
 PermissionOptionKind = Literal["allow_once", "allow_always", "reject_once", "reject_always"]
 
@@ -487,6 +502,7 @@ class PermissionOption(BaseModel):
 ```
 
 **Default permission options:**
+
 ```python
 ("Approve", "allow_once"),
 ("Approve for session", "allow_always"),
@@ -494,12 +510,14 @@ class PermissionOption(BaseModel):
 ```
 
 **PermissionBroker** — the runtime permission handler:
+
 - Constructed with a `session_id` and an async `requester` callback
 - The `request_for()` method issues a permission request for a specific tool call
 - Presents options to the user and returns their decision
 - Supports custom options per request (override defaults)
 
 **RequestPermissionResponse:**
+
 ```python
 class RequestPermissionResponse(BaseModel):
     outcome: DeniedOutcome | AllowedOutcome
@@ -513,12 +531,14 @@ request that goes through the broker to the user (or an automated policy).
 **How a web UI should expose per-agent tool permissions:**
 
 **Tier 1: Agent-Level Permission Mode** (simple toggle per agent)
+
 ```
 Agent: "coder"
   Permission Mode: [default ▼]  (default | acceptEdits | plan | bypassPermissions)
 ```
 
 **Tier 2: Tool-Level Allow/Deny Rules** (per agent)
+
 ```
 Agent: "coder"
   Tools:
@@ -530,6 +550,7 @@ Agent: "coder"
 ```
 
 **Tier 3: Directory Scope** (per agent)
+
 ```
 Agent: "coder"
   Allowed Directories:
@@ -592,6 +613,7 @@ Supervisord defines the most well-established process lifecycle model:
 | UNKNOWN | 1000 | Supervisor lost track of process |
 
 **Key configuration parameters:**
+
 - `startsecs`: How long process must run after start to be considered RUNNING (default: 1)
 - `startretries`: Max retries before FATAL (default: 3)
 - `stopwaitsecs`: Timeout for graceful stop before SIGKILL (default: 10)
@@ -625,12 +647,14 @@ PM2 process states (simplified from its internal model):
 | No restart | One-shot script | `autorestart: false` |
 
 **PM2 Exponential backoff details:**
+
 - Base delay configurable (e.g., 100ms)
 - Increases exponentially up to max 15,000ms (15s)
 - Resets to 0ms after 30 seconds of stable uptime
 - Process shows "waiting restart" status during backoff
 
 **PM2 Graceful shutdown:**
+
 1. Sends SIGINT first
 2. If process doesn't exit within 1.6 seconds, sends SIGKILL
 3. Customizable via `kill_timeout` parameter
@@ -685,6 +709,7 @@ class RestartPolicy:
 ```
 
 **Backoff calculation:**
+
 ```
 delay = min(backoff_base_ms * (backoff_multiplier ^ retry_count), backoff_max_ms)
 ```
@@ -698,22 +723,26 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 ### 4.5 Health Check Patterns
 
 **Layer 1: Process Alive**
+
 - Check `process.returncode is None`
 - Frequency: Every 1 second
 - Failure: Process has exited → transition to EXITED
 
 **Layer 2: Port Listening (TCP)**
+
 - Attempt TCP connection to agent's port
 - Frequency: Every 5 seconds (or on startup, every 100ms)
 - Failure: Port not reachable after N checks → mark unhealthy
 
 **Layer 3: HTTP Health (Application)**
+
 - GET `http://localhost:{port}/.well-known/agent.json`
 - Frequency: Every 10 seconds
 - Failure: Non-200 response or timeout → mark unhealthy
 - This confirms the ASGI app is loaded and the A2A stack is functional
 
 **Layer 4: Task Health (Operational)**
+
 - Track task success/failure ratio over a sliding window
 - If >50% of tasks fail in last 5 minutes → trip circuit breaker
 - This catches "running but broken" agents (e.g., LLM API key expired)
@@ -723,6 +752,7 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 ## Summary of Recommendations for Windows 11 / Python 3.13
 
 ### Subprocess Management
+
 1. Use `asyncio.create_subprocess_exec` with `CREATE_NEW_PROCESS_GROUP` flag
 2. Use `PYTHONUNBUFFERED=1` for Uvicorn subprocesses
 3. Read stdout/stderr with dedicated asyncio tasks, relay to WebSocket via bounded queues
@@ -730,17 +760,20 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 5. Use Windows Job Objects for automatic orphan cleanup (via `pywin32`)
 
 ### Agent Hot-Swap
+
 1. Implement drain pattern with configurable timeout per agent type
 2. Blue-green available but not required — simple stop/start is default
 3. Circuit breaker on agent health (3 failures, 15s cooldown)
 
 ### Permission Management
+
 1. Use Claude Agent SDK's `CanUseTool` callback for runtime permission control
 2. Web UI exposes: permission mode per agent, tool-level allow/deny, directory scope
 3. Changes take effect immediately — no agent restart needed
 4. ACP SDK's `PermissionBroker` provides an alternative pattern with user-facing options
 
 ### Process State Machine
+
 1. 10-state model: CREATED → STARTING → READY → RUNNING → DRAINING → STOPPING → STOPPED
    (plus EXITED, BACKOFF, FATAL)
 2. Restart policies: always, on_failure, never — with exponential backoff
@@ -752,17 +785,19 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 ## Sources
 
 ### Part 1: Subprocess Management
+
 - [Platform Support — Python 3.14 docs](https://docs.python.org/3/library/asyncio-platforms.html)
 - [Subprocesses — Python 3.14 docs](https://docs.python.org/3/library/asyncio-subprocess.html)
 - [Asyncio Windows: Python Proactor Loop 2025](https://www.johal.in/asyncio-windows-python-proactor-loop-2025/)
 - [asyncio.create_subprocess_exec main thread issue — cpython#79816](https://github.com/python/cpython/issues/79816)
-- [BaseSubprocessTransport.__del__ orphan leak — cpython#114177](https://github.com/python/cpython/issues/114177)
+- [BaseSubprocessTransport.**del** orphan leak — cpython#114177](https://github.com/python/cpython/issues/114177)
 - [Python Subprocess Termination Strategies](https://sqlpey.com/python/python-subprocess-termination-strategies/)
 - [How to kill child processes on Windows](https://gist.github.com/jizhilong/6687481)
 - [Subprocess management — Python 3.14 docs](https://docs.python.org/3/library/subprocess.html)
 - [TerminateProcess via os.kill on Windows — discuss.python.org](https://discuss.python.org/t/terminateprocess-via-os-kill-on-windows/30882)
 
 ### Part 1: Uvicorn Shutdown and Port Allocation
+
 - [Uvicorn graceful shutdown PR#853](https://github.com/encode/uvicorn/pull/853)
 - [Uvicorn Process Management — DeepWiki](https://deepwiki.com/encode/uvicorn/4.2-process-management)
 - [Uvicorn Settings](https://www.uvicorn.org/settings/)
@@ -771,6 +806,7 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 - [Stream subprocess output with asyncio](https://gist.github.com/gh640/50953484edfa846fda9a95374df57900)
 
 ### Part 2: Deployment Patterns
+
 - [Rolling vs Blue-Green Deployments — Harness](https://www.harness.io/blog/difference-between-rolling-and-blue-green-deployments)
 - [What is Blue-Green Deployment — Red Hat](https://www.redhat.com/en/topics/devops/what-is-blue-green-deployment)
 - [Circuit Breaker Pattern in Microservices — GeeksforGeeks](https://www.geeksforgeeks.org/system-design/what-is-circuit-breaker-pattern-in-microservices/)
@@ -779,6 +815,7 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 - [circuitbreaker — PyPI](https://pypi.org/project/circuitbreaker/)
 
 ### Part 3: MCP Permissions
+
 - [Dynamic Tool Updates in Spring AI MCP](https://spring.io/blog/2025/05/04/spring-ai-dynamic-tool-updates-with-mcp/)
 - [MCP Permissions — Cerbos](https://www.cerbos.dev/blog/mcp-permissions-securing-ai-agent-access-to-tools)
 - [MCP Authorization — Cerbos](https://www.cerbos.dev/blog/mcp-authorization)
@@ -786,6 +823,7 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 - [MCP Architecture Overview](https://modelcontextprotocol.io/docs/learn/architecture)
 
 ### Part 4: Process Lifecycle
+
 - [Supervisord Subprocess States](https://supervisord.org/subprocess.html)
 - [Supervisord Configuration](https://supervisord.org/configuration.html)
 - [Supervisord Events](https://supervisord.org/events.html)
@@ -795,6 +833,7 @@ process that occasionally crashes after hours of uptime from accumulating retrie
 - [Complete Guide to PM2 — AppSignal](https://blog.appsignal.com/2022/03/09/a-complete-guide-to-nodejs-process-management-with-pm2.html)
 
 ### Repository References (Local Knowledge)
+
 - `knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/types.py` — PermissionMode, CanUseTool, PermissionUpdate
 - `knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/_internal/transport/subprocess_cli.py` — Subprocess management reference
 - `knowledge/repositories/claude-agent-sdk/examples/tool_permission_callback.py` — Permission callback example

@@ -50,3 +50,33 @@ repos:
         args: ["--config", ".markdownlint.json", "README.md", "knowledge/*.md", ".gemini/*.md"]
         types: [markdown]
         pass_filenames: false
+
+      # ── Frontend Hooks ──────────────────────────────────────────
+
+      - id: eslint
+        name: Lint JS/TS/Svelte (ESLint)
+        entry: npx eslint --fix
+        language: system
+        types_or: [javascript, ts, svelte]
+        pass_filenames: true
+
+      - id: prettier
+        name: Format JS/TS/Svelte/CSS (Prettier)
+        entry: npx prettier --write --ignore-unknown
+        language: system
+        types_or: [javascript, ts, svelte, css, html, json]
+        pass_filenames: true
+
+      - id: stylelint
+        name: Lint CSS / Tailwind (Stylelint)
+        entry: npx stylelint --fix
+        language: system
+        types: [css]
+        pass_filenames: true
+
+      - id: svelte-check
+        name: Type-check Svelte codebase
+        entry: npx svelte-check --fail-on-warnings
+        language: system
+        types: [svelte]
+        pass_filenames: false

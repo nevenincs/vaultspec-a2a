@@ -1,0 +1,19 @@
+{
+  "private": true,
+  "name": "vaultspec-a2a",
+  "description": "Dev health tooling for vaultspec A2A orchestration frontend",
+  "type": "module",
+  "devDependencies": {
+    "eslint": "latest",
+    "eslint-plugin-svelte": "latest",
+    "typescript-eslint": "latest",
+    "prettier": "latest",
+    "prettier-plugin-svelte": "latest",
+    "prettier-plugin-tailwindcss": "latest",
+    "stylelint": "latest",
+    "@dreamsicle.io/stylelint-config-tailwindcss": "latest",
+    "svelte-check": "latest",
+    "svelte": "latest",
+    "typescript": "latest"
+  }
+}

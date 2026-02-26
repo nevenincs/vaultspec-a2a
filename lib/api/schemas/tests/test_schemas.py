@@ -189,7 +189,7 @@ def _team_status() -> TeamStatusEvent:
                 node_name="coder",
                 state=AgentLifecycleState.WORKING,
                 provider=Provider.CLAUDE,
-                model=Model.CLAUDE_4_6_SONNET,
+                model=Model.MID,
             ),
         ],
         active_thread_ids=["thread-1"],
@@ -365,7 +365,7 @@ class TestRESTModels:
         req = CreateThreadRequest(
             initial_message="Hello",
             provider=Provider.CLAUDE,
-            model=Model.CLAUDE_4_6_SONNET,
+            model=Model.MID,
         )
         data = req.model_dump()
         restored = CreateThreadRequest.model_validate(data)

@@ -139,6 +139,11 @@ class AcpChatModel(BaseChatModel):
         env = os.environ.copy()
         env.update(self.env_vars)
 
+        # claude-agent-acp refuses to start a session when CLAUDECODE is set,
+        # because it detects a nested Claude Code session and aborts.
+        # We are the orchestrator — safe to unset this for our subprocess.
+        env.pop("CLAUDECODE", None)
+
         # Pre-flight: refresh Gemini OAuth token before spawning the subprocess.
         # gemini-cli v0.18.0 regression (#13853): expired token causes silent hang
         # in headless/piped mode because the CLI tries a browser auth flow on stdin.
@@ -176,6 +181,7 @@ class AcpChatModel(BaseChatModel):
             body = json.dumps(req).encode("utf-8")
             process.stdin.write(b"%s\n" % body)  # Toad: stdin.write(b"%s\n" % body)
             response_futures[request_id] = asyncio.get_running_loop().create_future()
+            logger.debug("ACP TX [%d] → %s", request_id, method)
             return request_id
 
         def send_notification(method: str, params: dict) -> None:
@@ -190,11 +196,14 @@ class AcpChatModel(BaseChatModel):
             }
             body = json.dumps(notif).encode("utf-8")
             process.stdin.write(b"%s\n" % body)
+            logger.debug("ACP TX [notif] → %s", method)
 
         async def read_stderr() -> None:
             assert process.stderr is not None
-            while _ := await process.stderr.readline():
-                pass  # Silently consume stderr; errors surface via JSON-RPC
+            while line := await process.stderr.readline():
+                text = line.decode("utf-8", errors="replace").rstrip()
+                if text:
+                    logger.debug("ACP STDERR: %s", text)
 
         stderr_task = asyncio.create_task(read_stderr())
 
@@ -220,9 +229,12 @@ class AcpChatModel(BaseChatModel):
                     except Exception:
                         continue
 
+                    logger.debug("ACP RX raw: %s", line_str.rstrip())
+
                     try:
                         agent_data: dict = json.loads(line_str)
                     except Exception:
+                        logger.warning("ACP RX non-JSON line: %s", line_str.rstrip())
                         continue
 
                     if not isinstance(agent_data, dict):
@@ -237,17 +249,22 @@ class AcpChatModel(BaseChatModel):
                         # Check if this is the session/prompt response with stopReason
                         result = agent_data.get("result", {})
                         if isinstance(result, dict) and "stopReason" in result:
+                            stop_reason = result["stopReason"]
+                            logger.debug(
+                                "ACP RX [%s] ← response: stopReason=%s", rid, stop_reason
+                            )
                             prompt_done.set()
-                        elif (
-                            "error" in agent_data
-                            and prompt_id_ref
-                            and rid == prompt_id_ref[0]
-                        ):
-                            # session/prompt returned an error (e.g. quota exhausted).
-                            # The agent process may stay alive, so the EOF sentinel
-                            # would never arrive. Surface it immediately.
-                            prompt_error_ref.append(agent_data["error"])
-                            await chunk_queue.put(None)
+                        elif "error" in agent_data:
+                            err = agent_data["error"]
+                            logger.debug("ACP RX [%s] ← error: %s", rid, err)
+                            if prompt_id_ref and rid == prompt_id_ref[0]:
+                                # session/prompt returned an error (e.g. quota exhausted).
+                                # The agent process may stay alive, so the EOF sentinel
+                                # would never arrive. Surface it immediately.
+                                prompt_error_ref.append(err)
+                                await chunk_queue.put(None)
+                        else:
+                            logger.debug("ACP RX [%s] ← response ok", rid)
                         continue
 
                     method = agent_data.get("method", "")
@@ -256,14 +273,21 @@ class AcpChatModel(BaseChatModel):
 
                     # (B) Server-to-client RPC — agent is calling us, expects response
                     if rpc_id is not None and method:
+                        logger.debug("ACP RX [%s] ← server RPC: %s", rpc_id, method)
                         await _handle_server_rpc(method, rpc_id, params)
                         continue
 
                     # (C) Notification — no id, no response needed
                     if method == "session/update":
+                        update = params.get("update", {})
+                        update_type = update.get("sessionUpdate", "?")
+                        logger.debug("ACP RX ← notif: session/update type=%s", update_type)
                         await _handle_session_update(params)
+                    else:
+                        logger.debug("ACP RX ← unhandled notif: %s", method)
             finally:
                 # Subprocess exited or reader cancelled. Avoid hanging waiters.
+                logger.debug("ACP stdout reader exiting — resolving %d pending futures", len(response_futures))
                 for fut in response_futures.values():
                     if not fut.done():
                         fut.set_exception(
@@ -451,6 +475,7 @@ class AcpChatModel(BaseChatModel):
                 self._agent_capabilities,
                 self._auth_methods,
             )
+            logger.debug("ACP initialize complete: protocolVersion=%s", init_result.get("protocolVersion"))
 
             # Step 2: Session setup — load existing or create new
             # Ref: acp-python-sdk ClientSideConnection.load_session / new_session
@@ -485,12 +510,14 @@ class AcpChatModel(BaseChatModel):
                     },
                 )
             await process.stdin.drain()
+            logger.debug("ACP waiting for session response (timeout=60s)...")
             session_resp = await asyncio.wait_for(
                 response_futures[session_rpc_id], timeout=60
             )
             if "error" in session_resp:
                 raise RuntimeError(f"ACP session setup failed: {session_resp['error']}")
             _active_session_id = session_resp["result"]["sessionId"]
+            logger.info("ACP session created: %s", _active_session_id)
 
             # Extract modes from session response (Toad lines 689-698)
             session_result = session_resp.get("result", {})
@@ -528,6 +555,7 @@ class AcpChatModel(BaseChatModel):
             prompt_future = response_futures[prompt_id]
             # Allow process_stdout to detect prompt errors
             prompt_id_ref.append(prompt_id)
+            logger.debug("ACP prompt sent: id=%d session=%s", prompt_id, _active_session_id)
 
             while not prompt_done.is_set():
                 try:

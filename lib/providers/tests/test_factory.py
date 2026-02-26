@@ -6,7 +6,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
-from ...utils.enums import Model, Provider
+from ...utils.enums import MODEL_MAP, Model, Provider
 from ..acp_chat_model import AcpChatModel
 from ..factory import ProviderFactory
 
@@ -27,7 +27,8 @@ def test_provider_factory_gemini_creates_acp() -> None:
     """Verify Gemini provider creates AcpChatModel with the correct ACP command."""
     model = ProviderFactory.create(Provider.GEMINI)
     assert isinstance(model, AcpChatModel)
-    assert model.command == ["gemini", "--model", Model.GEMINI_3_FLASH_PREVIEW.value, "--experimental-acp"]
+    expected_model = MODEL_MAP[Provider.GEMINI][Model.MID]
+    assert model.command == ["gemini", "--model", expected_model, "--experimental-acp"]
 
 
 def test_provider_factory_gemini_no_credential_injection() -> None:
@@ -52,7 +53,8 @@ def test_provider_factory_explicit_string_model() -> None:
 def test_provider_factory_zhipu_mapping() -> None:
     """Verify Zhipu AI (GLM) mapping to OpenAI-compatible ChatOpenAI."""
     model = ProviderFactory.create(Provider.ZHIPU, api_key="static-test-key")
-    assert get_model_attr(model) == Model.GLM_5.value
+    expected_model = MODEL_MAP[Provider.ZHIPU][Model.HIGH]
+    assert get_model_attr(model) == expected_model
     assert isinstance(model, ChatOpenAI)
     assert "bigmodel.cn" in str(model.openai_api_base)
 

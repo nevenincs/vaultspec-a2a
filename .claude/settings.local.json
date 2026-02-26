@@ -4,7 +4,18 @@
       "Bash(find \"Y:\\\\code\\\\vaultspec-a2a-worktrees\\\\main\\\\knowledge\\\\repositories\\\\mcp-python-sdk\\\\examples\" -name \"README.md\" | xargs grep -l \"task\" 2>/dev/null)",
       "Bash(find Y:\\\\code\\\\vaultspec-a2a-worktrees\\\\main\\\\knowledge\\\\repositories\\\\mcp-python-sdk\\\\docs:*)",
       "Bash(find:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(fd:*)",
+      "Bash(powershell -Command \"Get-ChildItem ''Y:\\\\code\\\\vaultspec-a2a-worktrees\\\\main'' | Select-Object -First 5 -ExpandProperty Name\")",
+      "Bash(xargs:*)",
+      "Bash(.venv/Scripts/python.exe:*)",
+      "Bash(..venvScriptsActivate.ps1)",
+      "Bash(python -m pytest:*)",
+      "Bash(powershell -Command \"& { .\\\\.venv\\\\Scripts\\\\Activate.ps1; python -m pytest lib/core/tests/test_graph.py::test_graph_execution_routing -v -s }\")",
+      "Bash(powershell -Command \"& { which claude-agent-acp 2>&1; claude-agent-acp --version 2>&1 | head -3 }\")",
+      "Bash(powershell -Command:*)",
+      "Bash(powershell.exe -Command \"& { . .\\\\.venv\\\\Scripts\\\\Activate.ps1; python -m pytest lib/core/tests/test_graph.py::test_graph_execution_routing -v -s 2>&1 }\")",
+      "Bash(powershell.exe -Command \"gemini --version 2>&1\")"
     ]
   }
 }

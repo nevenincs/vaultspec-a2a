@@ -1,14 +1,16 @@
+"""
+LLM Provider factory
+"""
+
 import logging
-import os
 from typing import Any
 
-from langchain_anthropic import ChatAnthropic
 from langchain_core.language_models import BaseChatModel
-from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_openai import ChatOpenAI
 
 from ..core.config import settings
 from ..utils.enums import PROVIDER_DEFAULT_MODELS, Model, Provider
+from .acp_chat_model import AcpChatModel
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +34,13 @@ class ProviderFactory:
         """
         timeout = kwargs.pop("timeout", settings.provider_timeout_seconds)
 
+        # Guard unsupported providers before model resolution to produce a clear error
+        # (PROVIDER_DEFAULT_MODELS lookup raises KeyError for unknown providers).
+        supported = {Provider.CLAUDE, Provider.GEMINI, Provider.ZHIPU, Provider.OPENAI}
+        if provider not in supported:
+            logger.error(f"Failed to instantiate: Unsupported provider {provider}")
+            raise ValueError(f"Unsupported provider: {provider}")
+
         # Resolve model name
         if model is None:
             model_name = PROVIDER_DEFAULT_MODELS[provider].value
@@ -45,33 +54,48 @@ class ProviderFactory:
         )
 
         if provider == Provider.CLAUDE:
-            api_key = (
-                kwargs.pop("api_key", None)
-                or os.environ.get("ANTHROPIC_API_KEY")
-                or os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")
+            oauth_token = settings.claude_code_oauth_token
+            logger.debug(
+                f"[{provider}] Instantiating ACP Wrapper. OAuth Token present: {bool(oauth_token)}"
             )
-            if api_key:
-                kwargs["api_key"] = api_key
-            return ChatAnthropic(
-                model=model_name, timeout=timeout, max_retries=2, **kwargs
+
+            return AcpChatModel(
+                command=["claude-agent-acp"],
+                env_vars={"CLAUDE_CODE_OAUTH_TOKEN": oauth_token}
+                if oauth_token
+                else {},
             )
 
         elif provider == Provider.GEMINI:
-            api_key = (
-                kwargs.pop("api_key", None)
-                or os.environ.get("GEMINI_API_KEY")
-                or os.environ.get("GOOGLE_API_KEY")
-            )
-            if api_key:
-                kwargs["api_key"] = api_key
-            return ChatGoogleGenerativeAI(
-                model=model_name, timeout=timeout, max_retries=2, **kwargs
+            logger.debug(f"[{provider}] Instantiating ACP Wrapper.")
+            # Bare command string — create_subprocess_shell resolves the CMD
+            # shim natively via PATH (ADR-006 §5.1 point 1, TOAD reference).
+            # Zero credential injection — Gemini CLI manages OAuth from
+            # ~/.gemini/oauth_creds.json (ADR-002).
+            return AcpChatModel(
+                command=["gemini", "--experimental-acp"],
+                env_vars={},
             )
 
         elif provider == Provider.ZHIPU:
-            api_key = kwargs.pop("api_key", None) or os.environ.get("ZHIPU_API_KEY")
-            if api_key:
-                kwargs["api_key"] = api_key
+            auth_resolved = (
+                "kwargs"
+                if "api_key" in kwargs
+                else "ZHIPU_API_KEY"
+                if settings.zhipu_api_key
+                else None
+            )
+            api_key = kwargs.pop("api_key", None) or settings.zhipu_api_key
+
+            if not api_key:
+                logger.error(
+                    f"Failed to authenticate {provider}: Missing ZHIPU_API_KEY"
+                )
+                raise ValueError(f"Authentication required for {provider}")
+
+            logger.debug(f"[{provider}] Resolved authentication via: {auth_resolved}")
+            kwargs["api_key"] = api_key
+
             return ChatOpenAI(
                 model=model_name,
                 base_url="https://open.bigmodel.cn/api/paas/v4/",
@@ -81,9 +105,24 @@ class ProviderFactory:
             )
 
         elif provider == Provider.OPENAI:
-            api_key = kwargs.pop("api_key", None) or os.environ.get("OPENAI_API_KEY")
-            if api_key:
-                kwargs["api_key"] = api_key
+            auth_resolved = (
+                "kwargs"
+                if "api_key" in kwargs
+                else "OPENAI_API_KEY"
+                if settings.openai_api_key
+                else None
+            )
+            api_key = kwargs.pop("api_key", None) or settings.openai_api_key
+
+            if not api_key:
+                logger.error(
+                    f"Failed to authenticate {provider}: Missing OPENAI_API_KEY"
+                )
+                raise ValueError(f"Authentication required for {provider}")
+
+            logger.debug(f"[{provider}] Resolved authentication via: {auth_resolved}")
+            kwargs["api_key"] = api_key
+
             return ChatOpenAI(
                 model=model_name, timeout=timeout, max_retries=2, **kwargs
             )

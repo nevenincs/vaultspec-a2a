@@ -4,4 +4,5 @@ __all__ = ["Registry"]
 
 
 class Registry:
-    pass
+    """Agent id to state mapping registry."""
+

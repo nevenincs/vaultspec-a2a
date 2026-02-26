@@ -19,6 +19,7 @@ import logging
 import os
 
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from contextlib import suppress
 from pathlib import Path
 from typing import Any
 
@@ -125,8 +126,9 @@ class AcpChatModel(BaseChatModel):
         prompt_blocks: list[dict[str, str]] = []
         for msg in messages:
             if isinstance(
-                msg, (HumanMessage, SystemMessage, ChatMessage)
-            ) or isinstance(msg, AIMessageChunk):
+                msg,
+                (HumanMessage, SystemMessage, ChatMessage, AIMessageChunk),
+            ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
         # Toad uses get_os_matrix() to get a single command string,
@@ -142,12 +144,12 @@ class AcpChatModel(BaseChatModel):
         if "gemini" in self.command:
             refresh_gemini_token()
 
-        PIPE = asyncio.subprocess.PIPE
+        pipe = asyncio.subprocess.PIPE
         process = await asyncio.create_subprocess_shell(
             shell_command,
-            stdin=PIPE,
-            stdout=PIPE,
-            stderr=PIPE,
+            stdin=pipe,
+            stdout=pipe,
+            stderr=pipe,
             env=env,
             cwd=str(Path.cwd()),
             limit=10 * 1024 * 1024,  # Toad line 490: 10MB buffer
@@ -190,7 +192,7 @@ class AcpChatModel(BaseChatModel):
 
         async def read_stderr() -> None:
             assert process.stderr is not None
-            while line := await process.stderr.readline():
+            while _ := await process.stderr.readline():
                 pass  # Silently consume stderr; errors surface via JSON-RPC
 
         stderr_task = asyncio.create_task(read_stderr())
@@ -549,7 +551,8 @@ class AcpChatModel(BaseChatModel):
                     if prompt_future.done():
                         resp = prompt_future.result()
                         if "error" in resp:
-                            raise RuntimeError(f"ACP prompt failed: {resp['error']}")
+                            msg = f"ACP prompt failed: {resp['error']}"
+                            raise RuntimeError(msg) from None
                     continue
 
             # Drain any remaining chunks in the queue
@@ -579,10 +582,8 @@ class AcpChatModel(BaseChatModel):
             stdout_task.cancel()
             stderr_task.cancel()
 
-            try:
+            with suppress(OSError):
                 process.terminate()
-            except OSError:
-                pass
 
             # Close the subprocess transport directly to prevent the
             # Windows ProactorEventLoop __del__ ValueError. The warning

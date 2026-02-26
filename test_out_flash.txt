@@ -1,0 +1,101 @@
+============================= test session starts =============================
+platform win32 -- Python 3.13.11, pytest-9.0.2, pluggy-1.6.0 -- Y:\code\vaultspec-a2a-worktrees\main\.venv\Scripts\python.exe
+cachedir: .pytest_cache
+rootdir: Y:\code\vaultspec-a2a-worktrees\main
+configfile: pyproject.toml
+plugins: anyio-4.12.1, langsmith-0.7.7, asyncio-1.3.0, timeout-2.4.0
+asyncio: mode=Mode.STRICT, debug=False, asyncio_default_fixture_loop_scope=function, asyncio_default_test_loop_scope=function
+timeout: 300.0s
+timeout method: thread
+timeout func_only: False
+collecting ... collected 2 items / 1 deselected / 1 selected
+
+lib/core/tests/test_graph.py::test_graph_execution_routing 
+-------------------------------- live log call --------------------------------
+INFO     lib.providers.factory:factory.py:52 Instantiating ProviderFactory for provider=gemini, resolved_model=gemini-3.0-flash
+INFO     lib.providers.factory:factory.py:52 Instantiating ProviderFactory for provider=gemini, resolved_model=gemini-3.0-flash
+STDOUT: {"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1,"authMethods":[{"id":"oauth-personal","name":"Log in with Google","description":null},{"id":"gemini-api-key","name":"Use Gemini API key","description":"Requires setting the `GEMINI_API_KEY` environment variable"},{"id":"vertex-ai","name":"Vertex AI","description":null}],"agentCapabilities":{"loadSession":true,"promptCapabilities":{"image":true,"audio":true,"embeddedContext":true},"mcpCapabilities":{"http":true,"sse":true}}}}
+INFO     lib.providers.acp_chat_model:acp_chat_model.py:428 Agent initialized: caps={'loadSession': True, 'promptCapabilities': {'image': True, 'audio': True, 'embeddedContext': True}, 'mcpCapabilities': {'http': True, 'sse': True}}, auth=[{'id': 'oauth-personal', 'name': 'Log in with Google', 'description': None}, {'id': 'gemini-api-key', 'name': 'Use Gemini API key', 'description': 'Requires setting the `GEMINI_API_KEY` environment variable'}, {'id': 'vertex-ai', 'name': 'Vertex AI', 'description': None}]
+STDOUT: {"jsonrpc":"2.0","id":2,"result":{"sessionId":"a21c5caf-2c89-48b3-a757-9ba80b3a00d4"}}
+STDOUT: {"jsonrpc":"2.0","id":3,"error":{"code":500,"message":"You have exhausted your capacity on this model. Your quota will reset after 17h3m17s."}}
+STDOUT: {"jsonrpc":"2.0","id":4,"error":{"code":-32601,"message":"\"Method not found\": session/cancel","data":{"method":"session/cancel"}}}
+Graph execution stopped: ACP prompt failed: {'code': 500, 'message': 'You have exhausted your capacity on this model. Your quota will reset after 17h3m17s.'}
+FAILED
+
+================================== FAILURES ===================================
+________________________ test_graph_execution_routing _________________________
+
+checkpointer = <langgraph.checkpoint.sqlite.aio.AsyncSqliteSaver object at 0x0000027782B33770>
+
+    @pytest.mark.asyncio
+    async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
+        """Verify end-to-end execution, routing, and checkpointer state persistence."""
+        supervisor_model = ProviderFactory.create(Provider.GEMINI)
+        # Use Gemini for core routing test
+        worker_model = ProviderFactory.create(Provider.GEMINI)
+    
+        graph = compile_team_graph(
+            supervisor_model=supervisor_model,
+            worker_models={"echo_worker": worker_model},
+            checkpointer=checkpointer,
+        )
+    
+        initial_state = {
+            "messages": [
+                HumanMessage(
+                    content="Tell the echo_worker to say exactly 'HelloWorldFromGraph' and then you should FINISH the task."
+                )
+            ],
+        }
+    
+        config = {
+            "configurable": {"thread_id": "test_routing_thread"},
+            "recursion_limit": 5,
+        }
+    
+        # Execute the graph and collect nodes that finished
+        executed_nodes = []
+        try:
+            async for event in graph.astream_events(initial_state, config, version="v2"):
+                if event["event"] == "on_chain_end":
+                    node_name = event["name"]
+                    if node_name in ("supervisor", "echo_worker"):
+                        print(f"Node {node_name} finished!")
+                        executed_nodes.append(node_name)
+        except Exception as e:
+            print(f"Graph execution stopped: {e}")
+    
+        # Validate state was checkpointed
+        saved_state = await checkpointer.aget(config)
+        assert saved_state is not None
+        channel_values = saved_state["channel_values"]
+        assert "messages" in channel_values
+    
+        # We expect supervisor to run, then worker, then maybe supervisor evaluates FINISH
+>       assert "supervisor" in executed_nodes
+E       AssertionError: assert 'supervisor' in []
+
+channel_values = {'branch:to:supervisor': None, 'messages': [HumanMessage(content="Tell the echo_worker to say exactly 'HelloWorldFromG... you should FINISH the task.", additional_kwargs={}, response_metadata={}, id='d839ae00-a5dc-490b-8b8d-ace50bcc232e')]}
+checkpointer = <langgraph.checkpoint.sqlite.aio.AsyncSqliteSaver object at 0x0000027782B33770>
+config     = {'configurable': {'thread_id': 'test_routing_thread'}, 'recursion_limit': 5}
+event      = {'data': {'input': {'messages': [[SystemMessage(content='You are a supervisor managing a team of expert assistants. Yo..., 'langgraph_node': 'supervisor', 'langgraph_path': ('__pregel_pull', 'supervisor'), ...}, 'name': 'AcpChatModel', ...}
+executed_nodes = []
+graph      = <langgraph.graph.state.CompiledStateGraph object at 0x0000027782C3C830>
+initial_state = {'messages': [HumanMessage(content="Tell the echo_worker to say exactly 'HelloWorldFromGraph' and then you should FINISH the task.", additional_kwargs={}, response_metadata={}, id='d839ae00-a5dc-490b-8b8d-ace50bcc232e')]}
+saved_state = {'channel_values': {'branch:to:supervisor': None, 'messages': [HumanMessage(content="Tell the echo_worker to say exact...002.0.39154118360255696'}, 'id': '1f113449-8e8b-615e-8000-01d7f6e95db9', 'ts': '2026-02-26T18:54:36.928642+00:00', ...}
+supervisor_model = AcpChatModel(command=['gemini', '--experimental-acp'], env_vars={}, mcp_servers=[])
+worker_model = AcpChatModel(command=['gemini', '--experimental-acp'], env_vars={}, mcp_servers=[])
+
+lib\core\tests\test_graph.py:79: AssertionError
+------------------------------ Captured log call ------------------------------
+INFO     lib.providers.factory:factory.py:52 Instantiating ProviderFactory for provider=gemini, resolved_model=gemini-3.0-flash
+INFO     lib.providers.factory:factory.py:52 Instantiating ProviderFactory for provider=gemini, resolved_model=gemini-3.0-flash
+INFO     lib.providers.acp_chat_model:acp_chat_model.py:428 Agent initialized: caps={'loadSession': True, 'promptCapabilities': {'image': True, 'audio': True, 'embeddedContext': True}, 'mcpCapabilities': {'http': True, 'sse': True}}, auth=[{'id': 'oauth-personal', 'name': 'Log in with Google', 'description': None}, {'id': 'gemini-api-key', 'name': 'Use Gemini API key', 'description': 'Requires setting the `GEMINI_API_KEY` environment variable'}, {'id': 'vertex-ai', 'name': 'Vertex AI', 'description': None}]
+============================ slowest 10 durations =============================
+18.89s call     lib/core/tests/test_graph.py::test_graph_execution_routing
+0.01s setup    lib/core/tests/test_graph.py::test_graph_execution_routing
+
+(1 durations < 0.005s hidden.  Use -vv to show these durations.)
+=========================== short test summary info ===========================
+FAILED lib/core/tests/test_graph.py::test_graph_execution_routing - Assertion...
+====================== 1 failed, 1 deselected in 19.97s =======================

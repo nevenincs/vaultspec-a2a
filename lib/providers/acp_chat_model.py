@@ -1,9 +1,8 @@
-"""
-AcpChatModel: A LangChain BaseChatModel that wraps ACP-compatible CLIs.
+r"""AcpChatModel: A LangChain BaseChatModel that wraps ACP-compatible CLIs.
 
 Architecture:
   - Spawns CLI via `asyncio.create_subprocess_shell`
-  - Sends JSON-RPC requests on stdin using `b"%s\\n"` format
+  - Sends JSON-RPC requests on stdin using `b"%s\n"` format
   - Reads stdout in a walrus readline loop
   - Dispatches responses to asyncio.Future-based waiters
   - Handles bidirectional RPCs (session/request_permission)
@@ -18,7 +17,9 @@ import asyncio
 import json
 import logging
 import os
+
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
@@ -35,6 +36,7 @@ from pydantic import Field
 
 from .gemini_auth import refresh_gemini_token
 
+
 __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
@@ -49,11 +51,10 @@ PermissionCallback = Callable[
 
 
 class AcpChatModel(BaseChatModel):
-    """
-    A custom LangChain ChatModel that communicates with an ACP-compatible CLI
-    (like `claude-agent-acp` or `gemini --experimental-acp`) via JSON-RPC over
-    a subprocess stdio pipe.
+    """A custom LangChain ChatModel that wraps ACP-compatible CLI agents.
 
+    Communicates with ACP CLI agents (like `claude-agent-acp` or
+    `gemini --experimental-acp`) via JSON-RPC over a subprocess stdio pipe.
     """
 
     command: list[str] = Field(
@@ -101,10 +102,13 @@ class AcpChatModel(BaseChatModel):
     _send_rpc: Any = None
     _send_notification: Any = None
     _response_futures: dict[int, asyncio.Future] | None = None
-    _agent_capabilities: dict[str, Any] = {}
-    _auth_methods: list[dict[str, Any]] = []
-    _agent_modes: dict[str, Any] = {}
-    _tool_calls: dict[str, dict[str, Any]] = {}
+
+    def model_post_init(self, __context: Any) -> None:
+        """Initialize mutable instance attributes after Pydantic validation."""
+        self._agent_capabilities = {}
+        self._auth_methods = []
+        self._agent_modes = {}
+        self._tool_calls = {}
 
     @property
     def _llm_type(self) -> str:
@@ -118,7 +122,6 @@ class AcpChatModel(BaseChatModel):
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
-
         prompt_blocks: list[dict[str, str]] = []
         for msg in messages:
             if isinstance(
@@ -146,7 +149,7 @@ class AcpChatModel(BaseChatModel):
             stdout=PIPE,
             stderr=PIPE,
             env=env,
-            cwd=os.getcwd(),
+            cwd=str(Path.cwd()),
             limit=10 * 1024 * 1024,  # Toad line 490: 10MB buffer
         )
 
@@ -188,7 +191,7 @@ class AcpChatModel(BaseChatModel):
         async def read_stderr() -> None:
             assert process.stderr is not None
             while line := await process.stderr.readline():
-                print(f"STDERR: {line.decode('utf-8', errors='ignore').strip()}")
+                pass  # Silently consume stderr; errors surface via JSON-RPC
 
         stderr_task = asyncio.create_task(read_stderr())
 
@@ -196,6 +199,11 @@ class AcpChatModel(BaseChatModel):
         # to bridge between the stdout reader task and the generator.
         chunk_queue: asyncio.Queue[ChatGenerationChunk | None] = asyncio.Queue()
         prompt_done = asyncio.Event()
+
+        # Mutable refs so process_stdout (defined before prompt_id is assigned)
+        # can see the prompt request id and surface errors back to the main loop.
+        prompt_id_ref: list[int] = []
+        prompt_error_ref: list[dict] = []
 
         async def process_stdout() -> None:
             """Read stdout and dispatch responses/notifications/RPCs."""
@@ -206,7 +214,6 @@ class AcpChatModel(BaseChatModel):
 
                     try:
                         line_str = line.decode("utf-8")
-                        print(f"STDOUT: {line_str.strip()}")
                     except Exception:
                         continue
 
@@ -228,6 +235,16 @@ class AcpChatModel(BaseChatModel):
                         result = agent_data.get("result", {})
                         if isinstance(result, dict) and "stopReason" in result:
                             prompt_done.set()
+                        elif (
+                            "error" in agent_data
+                            and prompt_id_ref
+                            and rid == prompt_id_ref[0]
+                        ):
+                            # session/prompt returned an error (e.g. quota exhausted).
+                            # The agent process may stay alive, so the EOF sentinel
+                            # would never arrive. Surface it immediately.
+                            prompt_error_ref.append(agent_data["error"])
+                            await chunk_queue.put(None)
                         continue
 
                     method = agent_data.get("method", "")
@@ -246,7 +263,9 @@ class AcpChatModel(BaseChatModel):
                 # Subprocess exited or reader cancelled. Avoid hanging waiters.
                 for fut in response_futures.values():
                     if not fut.done():
-                        fut.set_exception(RuntimeError("Subprocess stdout closed before response"))
+                        fut.set_exception(
+                            RuntimeError("Subprocess stdout closed before response")
+                        )
 
             # EOF — subprocess exited. If prompt_done was never set the streaming
             # loop would poll forever. Inject a None sentinel to break it.
@@ -274,16 +293,12 @@ class AcpChatModel(BaseChatModel):
                         )
                     except Exception:
                         logger.exception("Permission callback failed, auto-granting")
-                        option_id = (
-                            options[0]["optionId"] if options else "allow_once"
-                        )
+                        option_id = options[0]["optionId"] if options else "allow_once"
                 else:
                     # Headless orchestrator: auto-grant the first option.
                     # ACP PermissionOption uses "optionId" (camelCase)
                     # Ref: toad/acp/protocol.py:338, acp-python-sdk/schema.py
-                    option_id = (
-                        options[0]["optionId"] if options else "allow_once"
-                    )
+                    option_id = options[0]["optionId"] if options else "allow_once"
 
                 response = {
                     "jsonrpc": "2.0",
@@ -324,9 +339,7 @@ class AcpChatModel(BaseChatModel):
                 content = update.get("content", {})
                 text = content.get("text", "")
                 if text:
-                    chunk = ChatGenerationChunk(
-                        message=AIMessageChunk(content=text)
-                    )
+                    chunk = ChatGenerationChunk(message=AIMessageChunk(content=text))
                     await chunk_queue.put(chunk)
 
             # Tool call start → track + emit ToolCallChunk (Toad line 253)
@@ -376,9 +389,7 @@ class AcpChatModel(BaseChatModel):
                 # Emit status for LangGraph observability
                 status = update.get("status", "")
                 if status:
-                    logger.debug(
-                        "Tool %s status: %s", tool_call_id, status
-                    )
+                    logger.debug("Tool %s status: %s", tool_call_id, status)
 
             # Plan steps (Toad line 260: uses "entries")
             elif update_type == "plan":
@@ -388,9 +399,7 @@ class AcpChatModel(BaseChatModel):
             # Available commands (Toad line 291: "availableCommands")
             elif update_type == "available_commands_update":
                 commands = update.get("availableCommands", [])
-                logger.debug(
-                    "Available commands updated: %d commands", len(commands)
-                )
+                logger.debug("Available commands updated: %d commands", len(commands))
 
             # Mode change (Toad line 296: direct "currentModeId")
             elif update_type == "current_mode_update":
@@ -409,10 +418,8 @@ class AcpChatModel(BaseChatModel):
         stdout_task = asyncio.create_task(process_stdout())
 
         try:
-
-
             # Step 1: Initialize (Toad acp_initialize, line 635)
-            working_dir = self.cwd or str(os.getcwd())
+            working_dir = self.cwd or str(Path.cwd())
             init_id = send_rpc(
                 "initialize",
                 {
@@ -430,9 +437,7 @@ class AcpChatModel(BaseChatModel):
             # Store agent capabilities (Toad line 658)
             # Critical: Gemini/Claude advertise different capabilities
             if "error" in init_resp:
-                raise RuntimeError(
-                    f"ACP initialize failed: {init_resp['error']}"
-                )
+                raise RuntimeError(f"ACP initialize failed: {init_resp['error']}")
             init_result = init_resp.get("result", {})
             if agent_caps := init_result.get("agentCapabilities"):
                 self._agent_capabilities = agent_caps
@@ -481,9 +486,7 @@ class AcpChatModel(BaseChatModel):
                 response_futures[session_rpc_id], timeout=60
             )
             if "error" in session_resp:
-                raise RuntimeError(
-                    f"ACP session setup failed: {session_resp['error']}"
-                )
+                raise RuntimeError(f"ACP session setup failed: {session_resp['error']}")
             _active_session_id = session_resp["result"]["sessionId"]
 
             # Extract modes from session response (Toad lines 689-698)
@@ -519,12 +522,21 @@ class AcpChatModel(BaseChatModel):
             )
             await process.stdin.drain()
 
+            prompt_future = response_futures[prompt_id]
+            # Allow process_stdout to detect prompt errors
+            prompt_id_ref.append(prompt_id)
 
             while not prompt_done.is_set():
                 try:
                     chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.1)
                     if chunk is None:
-                        # Sentinel: process exited before end_turn (Toad §EOF handling)
+                        # Sentinel: process exited before end_turn
+                        # Maybe the prompt future has an error?
+                        if prompt_future.done():
+                            resp = prompt_future.result()
+                            if "error" in resp:
+                                err_msg = f"ACP prompt failed: {resp['error']}"
+                                raise RuntimeError(err_msg)
                         raise RuntimeError(
                             "ACP subprocess exited before end_turn"
                         )
@@ -534,6 +546,10 @@ class AcpChatModel(BaseChatModel):
                         )
                     yield chunk
                 except TimeoutError:
+                    if prompt_future.done():
+                        resp = prompt_future.result()
+                        if "error" in resp:
+                            raise RuntimeError(f"ACP prompt failed: {resp['error']}")
                     continue
 
             # Drain any remaining chunks in the queue
@@ -547,20 +563,16 @@ class AcpChatModel(BaseChatModel):
                     yield chunk
 
         finally:
-            # Send session/cancel as proper RPC before cleanup (Toad line 795)
-            # Toad sends cancel as an RPC with response wait, not a notification
+            # Send session/cancel as a notification (no id, no response expected).
+            # Ref: Toad api.py line 38 — @API.notification(name="session/cancel")
             if _active_session_id and not prompt_done.is_set():
                 try:
-                    cancel_id = send_rpc(
+                    send_notification(
                         "session/cancel",
                         {"sessionId": _active_session_id},
                     )
                     await process.stdin.drain()
-                    # Best-effort wait — don't block cleanup on agent response
-                    await asyncio.wait_for(
-                        response_futures[cancel_id], timeout=3
-                    )
-                except (TimeoutError, Exception):
+                except Exception:
                     pass  # Best-effort; process may already be dead
 
             # Cancel reader tasks first so they release the streams
@@ -679,9 +691,7 @@ class AcpChatModel(BaseChatModel):
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
-    async def set_config_option(
-        self, key: str, value: Any
-    ) -> dict[str, Any]:
+    async def set_config_option(self, key: str, value: Any) -> dict[str, Any]:
         """Set a session-level configuration option.
 
         Ref: acp-python-sdk (session/set_config_option)

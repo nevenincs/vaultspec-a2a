@@ -1,8 +1,7 @@
-"""
-LLM Provider factory
-"""
+"""LLM Provider factory"""
 
 import logging
+
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -11,6 +10,7 @@ from langchain_openai import ChatOpenAI
 from ..core.config import settings
 from ..utils.enums import PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
+
 
 logger = logging.getLogger(__name__)
 
@@ -66,18 +66,18 @@ class ProviderFactory:
                 else {},
             )
 
-        elif provider == Provider.GEMINI:
-            logger.debug(f"[{provider}] Instantiating ACP Wrapper.")
+        if provider == Provider.GEMINI:
+            logger.debug(f"[{provider}] Instantiating ACP Wrapper with model={model_name}.")
             # Bare command string — create_subprocess_shell resolves the CMD
             # shim natively via PATH (ADR-006 §5.1 point 1, TOAD reference).
             # Zero credential injection — Gemini CLI manages OAuth from
             # ~/.gemini/oauth_creds.json (ADR-002).
             return AcpChatModel(
-                command=["gemini", "--experimental-acp"],
+                command=["gemini", "--model", model_name, "--experimental-acp"],
                 env_vars={},
             )
 
-        elif provider == Provider.ZHIPU:
+        if provider == Provider.ZHIPU:
             auth_resolved = (
                 "kwargs"
                 if "api_key" in kwargs
@@ -104,7 +104,7 @@ class ProviderFactory:
                 **kwargs,
             )
 
-        elif provider == Provider.OPENAI:
+        if provider == Provider.OPENAI:
             auth_resolved = (
                 "kwargs"
                 if "api_key" in kwargs
@@ -127,6 +127,5 @@ class ProviderFactory:
                 model=model_name, timeout=timeout, max_retries=2, **kwargs
             )
 
-        else:
-            logger.error(f"Failed to instantiate: Unsupported provider {provider}")
-            raise ValueError(f"Unsupported provider: {provider}")
+        logger.error(f"Failed to instantiate: Unsupported provider {provider}")
+        raise ValueError(f"Unsupported provider: {provider}")

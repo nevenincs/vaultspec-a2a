@@ -1,3 +1,5 @@
+"""Supervisor node for LangGraph agent routing."""
+
 from collections.abc import Callable, Coroutine
 from typing import Any
 
@@ -22,7 +24,7 @@ def create_supervisor_node(
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    options = workers + ["FINISH"]
+    options = [*workers, "FINISH"]
 
     # Append routing instructions to ensure structured text output
     routing_instructions = (
@@ -34,7 +36,7 @@ def create_supervisor_node(
 
     async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
-        messages = [SystemMessage(content=full_prompt)] + list(state["messages"])
+        messages = [SystemMessage(content=full_prompt), *state["messages"]]
         response = await model.ainvoke(messages)
 
         # Parse text safely to derive next route

@@ -4,4 +4,4 @@ __all__ = ["PermissionEngine"]
 
 
 class PermissionEngine:
-    pass
+    """Runtime policy engine for tool and workspace permissions."""

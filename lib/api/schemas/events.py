@@ -10,7 +10,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
-from lib.utils.enums import Model, Provider
+from ...utils.enums import Model, Provider
 
 from .base import EventEnvelope
 from .enums import (

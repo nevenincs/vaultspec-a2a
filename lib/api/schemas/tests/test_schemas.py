@@ -11,7 +11,7 @@ import pytest
 
 from pydantic import TypeAdapter
 
-from lib.api.schemas import (
+from .. import (
     AgentControlAction,
     AgentControlCommand,
     AgentLifecycleState,
@@ -59,7 +59,7 @@ from lib.api.schemas import (
     ToolKind,
     UnsubscribeCommand,
 )
-from lib.utils.enums import Model, Provider
+from ....utils.enums import Model, Provider
 
 
 NOW = datetime.now(tz=UTC)

@@ -18,8 +18,7 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["@playwright/mcp@latest"],
-      "disabledTools": ["browser_file_upload", "browser_fill_form"]
+      "args": ["@playwright/mcp@latest"]
     },
     "svelte": {
       "command": "npx",

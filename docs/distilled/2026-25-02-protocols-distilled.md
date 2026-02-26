@@ -370,10 +370,7 @@ both."
 The settled architecture (see architecture distilled doc) says: "A2A + MCP are
 the implementation pair. ACP concepts ported as patterns, not as transport."
 
-**Unresolved**: If agents speak only A2A, we lose 11 rich update types
-(thoughts, tool calls, plans) at the wire level and must reconstruct them from
-generic A2A `Message.parts[]`. If agents speak ACP, we gain richness but add a
-second protocol to the agent process.
+**Status**: ✅ Resolved by ADR-003 and ADR-006. We abandoned both A2A and ACP in favor of native LangGraph execution. Richness is preserved via LangGraph's `astream_events` API (yielding `on_chat_model_stream`, `on_tool_start`, etc.), mapped directly to the UI.
 
 ### C2: ACP Richness Gap Is Acknowledged but Not Addressed
 
@@ -383,9 +380,7 @@ richness gap will be bridged. The SessionAccumulator port to A2A event types
 will lose the typed discrimination between thoughts, messages, tool calls, and
 plan updates.
 
-**Needs resolution**: Define how A2A's generic `Message.parts[]` will be
-structured to preserve the semantic richness that ACP provides natively (e.g.,
-via metadata conventions, part type hints, or a custom extension).
+**Status**: ✅ Resolved by ADR-003. `astream_events` from LangGraph provides granular, typed events (Thought, Tool Call, System Prompt, Message). The UI consumes these natively over the multiplexed WebSocket, completely bypassing the A2A richness degradation.
 
 ---
 
@@ -393,17 +388,15 @@ via metadata conventions, part type hints, or a custom extension).
 
 ### G1: CLI Support for MCP Tasks [CRITICAL]
 
-Zero confirmation that any major CLI (Claude, Gemini, Cursor, Windsurf)
-implements `call_tool_as_task`. The only confirmed client is the MCP SDK's own
-client library. If CLIs don't support it, the MCP task bridge is unusable.
-The stable-MCP-tools fallback mitigates this but at the cost of losing
-non-blocking delegation and native elicitation.
+**Status**: ✅ Mitigated by ADR-003. We removed "agent as an MCP tool" from the v1 scope. All MCP usage is strictly for boundary execution (agents calling MCP tools, not users calling agents via MCP). This sidesteps CLI compatibility issues.
 
 ### G2: Multi-Agent Status Aggregation
 
 When the orchestrator maps N A2A tasks to 1 MCP task (or 1 dashboard session),
 how is the aggregate status computed? Example: 1 agent completed, 2 working,
 1 waiting = what overall status? No aggregation logic is defined.
+
+**Status**: ✅ Resolved by ADR-004. LangGraph inherently manages state for the entire multi-agent graph as a single monolithic state dictionary. The UI renders the aggregate graph state centrally.
 
 ### G3: Concurrent Elicitation Handling
 
@@ -412,9 +405,13 @@ simultaneously enter `INPUT_REQUIRED`, the requests must be queued or
 serialized. No queuing strategy is defined. This directly impacts the
 permission flow and user experience.
 
+**Status**: ✅ Resolved by ADR-004. LangGraph's native `interrupt()` feature pauses graph execution natively. Concurrent interruptions are handled by the graph's internal node resolution mechanics.
+
 ### G4: AUTH_REQUIRED Through MCP
 
 A2A's `AUTH_REQUIRED` expects out-of-band credential exchange. MCP has no
 equivalent. The orchestrator must either collapse it into generic elicitation
 ("please provide token") losing the semantic distinction, or handle auth flows
 entirely within the orchestrator. Neither approach is specified.
+
+**Status**: ✅ Obsolete per ADR-006. A2A is abandoned. External auth flows, if needed, are pushed to the frontend/dashboard level or managed via statically loaded environment variables.

@@ -302,10 +302,7 @@ The monitoring research lists "time-travel inspector" and "cost & latency
 matrix" as dashboard requirements derived from ecosystem analysis. The
 architecture v1 scope defers both cost/token tracking and session replay to v2.
 
-**Resolution**: These are aspirational requirements from the ecosystem survey,
-not v1 commitments. The distilled position is: v1 covers real-time control
-only (parallel stream view + permission gate). Historical debugging and cost
-analysis are v2 features enabled by OTel export.
+**Status**: ✅ Confirmed by ADR-010. The bespoke UI provides real-time control (streaming, permissions), while historical debugging and cost analysis are fully delegated to OpenTelemetry backends.
 
 ---
 
@@ -318,6 +315,8 @@ compatibility with Python 3.13 has not been verified. If it's unreliable, the
 fallback is `ctypes` bindings (more code, same functionality) or accepting the
 risk of orphan processes with `atexit` cleanup only.
 
+**Status**: ✅ Obsolete per ADR-001. The LangGraph migration removed subprocesses entirely. All agents run as async coroutines within the main event loop, eliminating orphan processes and the need for Job Objects.
+
 ### G2: Startup Stability Threshold Undefined
 
 The state machine defines STARTING → READY → RUNNING but the threshold for
@@ -325,13 +324,13 @@ confirming RUNNING (supervisord's `startsecs`) is not specified. How long must
 an agent survive after health check passes to be considered stable? This
 affects restart policy behavior.
 
+**Status**: ✅ Obsolete per ADR-001. Process state machines are no longer applicable. Agent health is implicitly tied to the main Uvicorn process health. LangGraph natively handles node execution state.
+
 ### G3: OpenTelemetry Integration Timing
 
 **Gap**: When do we integrate OpenTelemetry for tracing agent activity?
 
-**Impact**: Tracing async subprocesses across multiple protocols is highly
+**Impact**: Tracing complex LLM flows across a distributed architecture is highly
 complex. A blind deployment without tracing is a severe risk.
 
-**Resolution**: OpenTelemetry must be integrated in **v1**. The system is
-too distributed and complex (A2A, MCP, WebSockets, Job Objects) to safely
-operate without distributed tracing from day one.
+**Status**: ✅ Resolved by ADR-010. OpenTelemetry is strictly mandated from day one for tracing all LangGraph node executions and external tool calls.

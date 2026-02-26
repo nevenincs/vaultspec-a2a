@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 from pydantic import Field
@@ -13,14 +12,16 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
+        env_prefix="VAULTSPEC_",
         extra="ignore",
     )
 
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     log_level: LogLevel = Field(default=LogLevel.INFO)
     database_url: str = Field(default="sqlite+aiosqlite:///vaultspec.db")
-    workspace_root: Path = Field(
-        default_factory=lambda: Path(os.environ.get("WORKSPACE_ROOT", "./workspaces"))
+    workspace_root: Path = Field(default=Path("./workspaces"))
+    provider_timeout_seconds: int = Field(
+        default=120, description="Global timeout for LLM provider API calls."
     )
 
     @property

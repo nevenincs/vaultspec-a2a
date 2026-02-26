@@ -416,9 +416,7 @@ Architecture research rejects SSE streaming for user-facing control (Mode A:
 agent→orchestrator communication without justifying why the same problems
 don't apply internally.
 
-**Needs resolution**: Articulate why internal SSE connections (managed by the
-orchestrator with reconnection logic) are acceptable while user-facing SSE
-(blocking the CLI) is not.
+**Resolved by ADR-004 & ADR-006**: Internal SSE and A2A have been completely abandoned. All agents run natively in-memory as LangGraph nodes.
 
 ### C2: Subprocess Spawning — Solved Baseline vs Novel Tier 3
 
@@ -427,8 +425,7 @@ baseline (Option C hybrid is "closest to what samples do"). The scope
 assessment marks Process Manager as Tier 3 complexity with "no direct
 reference" in the ecosystem.
 
-**Needs resolution**: Acknowledge that agent spawning on Windows is novel work
-and size the effort accordingly.
+**Resolved by ADR-001**: Subprocess spawning has been abandoned to avoid this exact catastrophic risk. Agents are now native async Python coroutines within LangGraph.
 
 ### C3: SQLite Only vs Postgres Mentioned
 
@@ -436,8 +433,7 @@ Web app architecture recommends SQLite exclusively for v1. The architecture
 research mentions Postgres in passing. No migration path from SQLite to
 Postgres is defined.
 
-**Needs resolution**: Either commit to SQLite for both v1 and v2, or define the
-migration path.
+**Resolved by ADR-007**: We formally commit to SQLite (in WAL mode) exclusively for v1.
 
 ### C4: Ephemeral Agents Assumed Without Cold-Start Data
 
@@ -445,7 +441,7 @@ Architecture recommends ephemeral agents ("spawned per task, killed when done")
 for v1. Cold-start cost (spawning a Uvicorn subprocess, LLM client init) is
 never measured.
 
-**Needs resolution**: Benchmark agent spawn time to validate the ephemeral model.
+**Resolved by ADR-008**: The ephemeral subprocess model has been abandoned. LangGraph loads agents in-memory instantly, neutralizing cold-start latency.
 
 ### C5: MCP Tasks — Most Promising vs Deferred
 
@@ -453,7 +449,7 @@ Architecture research calls MCP async tasks "the most promising pattern"
 (Mode C) for CLI integration. Phase 6 then defers it: "Stable MCP tools as
 CLI bridge... No dependency on experimental features."
 
-**Settled position**: Use stable MCP tools for v1. The contradiction is
+**Settled position**: Use stable MCP tools for v1. Confirmed in ADR-003. The contradiction is
 resolved in favor of Phase 6's conservative approach. MCP tasks can be
 layered later if the API stabilizes.
 
@@ -464,15 +460,14 @@ Coding-teams research says "Leaning toward: Vanilla A2A SDK for orchestrator
 - LangGraph internally for agents that need stateful reasoning loops." No
 subsequent document confirms or rejects this.
 
-**Needs resolution**: Evaluate LangGraph for agent internals (checkpointing,
-conditional routing) vs keeping everything in vanilla A2A SDK.
+**Resolved by ADR-008**: LangGraph is officially adopted as the core orchestrator engine. Vanilla A2A SDK is abandoned.
 
 ### C7: CrewAI and LiteLLM — Listed but Never Evaluated
 
 Both appear in options tables but are never discussed. CrewAI was listed as
 an agent framework candidate; LiteLLM as an LLM provider abstraction.
 
-**Needs resolution**: Either formally evaluate or formally discard.
+**Resolved by ADR-008**: Formally discarded. LangGraph's checkpointer model and integration with LangChain's `BaseChatModel` (rejecting LiteLLM) are superior for our use case.
 
 ---
 
@@ -487,10 +482,14 @@ but no unified `AgentAdapter` protocol exists. No standard launch command
 patterns, credential injection mechanism, or common `LLMClient` interface.
 Without this, each provider is a one-off integration.
 
+**Status**: ✅ Resolved by ADR-002 & ADR-006. Native LangChain ChatModels provide the adapter protocol.
+
 **G2: LLM Integration Layer Missing** — Token counting, prompt templates,
 context overflow handling, tool-calling translation, retry logic, model
 selection, multi-turn state, and cost attribution are all undefined. This is
 the core of agent behavior.
+
+**Status**: ✅ Resolved by ADR-008. The LangGraph StateGraph acts as the integration layer.
 
 ### HIGH (blocks confident design)
 
@@ -499,28 +498,42 @@ thresholds, port allocation range, graceful drain behavior, zombie prevention
 (Windows Job Objects), cascading failure handling, and orchestrator restart
 behavior are all undefined.
 
+**Status**: ✅ Resolved by ADR-001. The Process Manager is obsolete; subprocesses are abandoned.
+
 **G4: Event Aggregator Reliability Undefined** — SSE reconnection strategy,
 event ordering across concurrent streams, deduplication, backpressure,
 delivery semantics (at-least-once vs at-most-once), and failure recovery are
 all unspecified.
 
+**Status**: ✅ Resolved by ADR-004. LangGraph's checkpointer (SQLite) combined with Server-Side Replay over WebSocket solves SSE dropouts.
+
 **G5: Permission Flow Granularity Absent** — Approval granularity (per-call?
 per-tool? per-session?), concurrent request handling, timeout, escalation,
 persistence, and dangerous tool policy are undefined.
+
+**Status**: ✅ Resolved by ADR-003 & ADR-006. Native LangGraph `interrupt` handles permissions with precise graph-node granularity.
 
 **G6: Error Recovery Strategy Absent** — No error taxonomy (transient vs
 permanent), no retry logic per error type, no guidance on agent failure
 mid-task, partial completion handling, or permission denial recovery.
 
+**Status**: ✅ Resolved by ADR-001. Handled natively within the Python event loop using `asyncio.TaskGroup`.
+
 **G8: Testing Strategy Absent** — Architecture docs contain zero testing
 guidance. The "no mocks" mandate combined with complex infrastructure
 (subprocesses, WebSockets, SSE) creates an unaddressed challenge.
 
+**Status**: ✅ Resolved by ADR-009 & `GEMINI.md`. Integration-only pytest strategy mandated.
+
 **G9: Context Window Management Unaddressed** — No strategy for token limit
 overflow, cross-agent context transfer, or cumulative token accounting.
 
+**Status**: ✅ Resolved by ADR-002. LangGraph state checkpointing prevents runaway contexts by aggressively trimming history between graph nodes.
+
 **G11: LangGraph Decision Unmade** — Whether to use LangGraph for agent
 internal state management (checkpointing, conditional routing) is open.
+
+**Status**: ✅ Resolved by ADR-008. LangGraph is explicitly mandated.
 
 ### MEDIUM (blocks detailed implementation)
 
@@ -528,6 +541,10 @@ internal state management (checkpointing, conditional routing) is open.
 tasks/sessions/artifacts/permissions, no recovery protocol after restart, no
 migration strategy.
 
+**Status**: ✅ Resolved by ADR-004. Defers schema complexity natively to `langgraph-checkpoint-sqlite`.
+
 **G10: Merge Conflict Strategy Missing** — No merge strategy (fast-forward?
 rebase?), no conflict handling for concurrent coders, no worktree cleanup on
 failure, no branch naming convention.
+
+**Status**: ✅ Resolved by ADR-001. Global Git mutex implemented to prevent concurrent `.git/` corruption, enforcing sequential access.

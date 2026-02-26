@@ -2,9 +2,12 @@ import json
 import logging
 import os
 import sys
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .enums import LogLevel
+
+if TYPE_CHECKING:
+    from ..core.config import Settings
 
 
 class JSONFormatter(logging.Formatter):
@@ -24,13 +27,25 @@ class JSONFormatter(logging.Formatter):
         return json.dumps(log_data)
 
 
-def setup_logging(level: LogLevel | str = LogLevel.INFO) -> None:
+def setup_logging(
+    level: LogLevel | str | None = None,
+    settings_override: "Settings | None" = None,
+) -> None:
     """Configure structured JSON logging or rich terminal logging."""
+
+    from ..core.config import settings as core_settings
+
+    active_settings = settings_override or core_settings
+
+    if level is None:
+        level = active_settings.log_level
 
     if isinstance(level, str):
         level = level.upper()
+    elif level is not None:
+        level = level.value.upper()
 
-    numeric_level = getattr(logging, level, logging.INFO)
+    numeric_level = getattr(logging, str(level) if level else "INFO", logging.INFO)
 
     # Configure root logger
     root_logger = logging.getLogger()
@@ -43,9 +58,10 @@ def setup_logging(level: LogLevel | str = LogLevel.INFO) -> None:
     is_interactive = sys.stdout.isatty() and sys.stderr.isatty()
     disable_color = os.environ.get("NO_COLOR", "") != ""
     ci_mode = os.environ.get("CI", "").lower() in ("true", "1")
+    force_json = not active_settings.is_dev
 
     log_handler: logging.Handler
-    if is_interactive and not disable_color and not ci_mode:
+    if is_interactive and not disable_color and not ci_mode and not force_json:
         from rich.logging import RichHandler
 
         log_handler = RichHandler(

@@ -121,6 +121,7 @@ async def lifespan(app: FastAPI):
 ```
 
 Key considerations:
+
 - `anyio.create_task_group()` provides structured concurrency for managing
   agent subprocesses.
 - Starlette lifespan state is shared to requests via `request.state`.
@@ -132,6 +133,7 @@ Key considerations:
 ### Recommendation: FastAPI
 
 **Choose FastAPI** for these reasons:
+
 1. DI system simplifies WebSocket auth, session management, shared state.
 2. REST API endpoints benefit from automatic OpenAPI docs, validation, typing.
 3. Zero performance cost for WebSocket-heavy workloads (same Starlette core).
@@ -149,6 +151,7 @@ overhead for WebSocket paths, and we want the REST API features.
 ### SvelteKit
 
 **Architecture (as used by Open WebUI):**
+
 - Open WebUI uses SvelteKit frontend + FastAPI backend (three-tier architecture).
 - File-based routing with nested layouts for initialization (root layout handles
   WebSocket/auth/theming, app layout loads models/tools/settings).
@@ -158,6 +161,7 @@ overhead for WebSocket paths, and we want the REST API features.
 - `src/routes/` for page definitions.
 
 **Svelte 5 Runes for Real-Time State:**
+
 - Svelte 5's runes (`$state`, `$derived`, `$effect`) provide signal-based
   fine-grained reactivity. Only the specific DOM nodes dependent on changed data
   re-render -- no virtual DOM diffing.
@@ -169,6 +173,7 @@ overhead for WebSocket paths, and we want the REST API features.
 - Bundle size: 3-10KB for small apps (vs React's 40-100KB baseline).
 
 **WebSocket Integration:**
+
 - SvelteKit is adding native WebSocket support (currently in testing).
 - Current stable approach: plain WebSocket API in `onMount()` with Svelte stores
   or runes for reactive state distribution.
@@ -176,6 +181,7 @@ overhead for WebSocket paths, and we want the REST API features.
   works naturally with Svelte's reactivity.
 
 **xterm.js Integration:**
+
 - `xterm-svelte` is an actively maintained SvelteKit wrapper for xterm.js.
 - Handles addon management and stays current with both SvelteKit and xterm.js
   releases.
@@ -188,12 +194,14 @@ at scale.
 ### React / Next.js
 
 **Architecture (as used by AutoGen Studio):**
+
 - AutoGen Studio uses React frontend (Gatsby-based) + FastAPI backend.
 - WebSocket communication via `WorkflowManager` class wrapping agent
   interactions.
 - State management via React hooks; streaming via WebSocket event handlers.
 
 **State Management for Streaming:**
+
 - React's virtual DOM is fundamentally at odds with high-frequency updates.
   Every state change triggers component re-rendering and DOM diffing.
 - Workarounds: `useMemo`, `useCallback`, `React.memo` to prevent cascading
@@ -204,6 +212,7 @@ at scale.
   is the wrong abstraction.
 
 **xterm.js Integration:**
+
 - `xterm-react` and `react-xtermjs` provide React wrappers.
 - React's lifecycle management (useEffect cleanup, ref forwarding) adds
   complexity to xterm.js integration compared to Svelte's simpler model.
@@ -218,17 +227,20 @@ we pay for it in bundle size and complexity.
 ### HTMX + Alpine.js
 
 **Architecture:**
+
 - Server-rendered HTML with HTMX handling server-driven updates and Alpine.js
   for client-side interactivity (dropdowns, tabs, filters).
 - Combined bundle: ~29KB (14KB HTMX + 15KB Alpine).
 - No build step required.
 
 **WebSocket/SSE Support:**
+
 - HTMX has a WebSocket extension (`hx-ws`) for bidirectional communication.
 - SSE support is native and more idiomatic for the HTMX model.
 - Server pushes HTML fragments that HTMX swaps into the DOM.
 
 **Limitations for Our Use Case:**
+
 - Complex state synchronization between many interactive panels becomes
   unwieldy. Real-world reports cite "complex data flow and synchronization
   issues" with Alpine.js reactive variables in dashboard contexts.
@@ -249,18 +261,21 @@ multi-panel real-time dashboards.
 ### Solid.js
 
 **Architecture:**
+
 - Fine-grained reactivity via signals (similar concept to Svelte 5 runes).
 - No virtual DOM -- updates the exact DOM nodes that depend on changed data.
 - JSX syntax (React-like) but with fundamentally different rendering model.
 - Bundle size: ~7KB baseline.
 
 **Performance:**
+
 - Lighthouse score: 98 (vs Svelte 96, React ~85).
 - Fastest runtime performance in JS framework benchmarks.
 - Ideal for high-frequency DOM updates -- each signal change updates only
   its subscribers.
 
 **Limitations:**
+
 - Smallest ecosystem of all options. Limited component libraries.
 - No xterm.js wrapper exists -- would need to build custom integration.
 - SolidStart (SSR framework) is less mature than SvelteKit or Next.js.
@@ -273,6 +288,7 @@ custom integration code.
 ### Frontend Recommendation: SvelteKit
 
 **Choose SvelteKit (Svelte 5)** for these reasons:
+
 1. Fine-grained reactivity via runes handles high-frequency streaming without
    performance tricks.
 2. Proven architecture: Open WebUI demonstrates SvelteKit + FastAPI at scale.
@@ -305,6 +321,7 @@ of server state. All mutations go through the server.
 ### WebSocket Reconnection and State Recovery
 
 **Reconnection Strategy:**
+
 - Exponential backoff with jitter: start 1s, double each attempt, max 30s,
   random jitter to prevent thundering herd.
 - Heartbeat/ping-pong to detect stale connections (Uvicorn provides this via
@@ -315,6 +332,7 @@ of server state. All mutations go through the server.
 This is the critical design challenge. Two approaches:
 
 **Approach A: Event Replay with Sequence Numbers**
+
 - Server assigns monotonically increasing sequence numbers to all events.
 - Client tracks last received sequence number.
 - On reconnect, client sends last sequence number; server replays missed events.
@@ -323,6 +341,7 @@ This is the critical design challenge. Two approaches:
   long disconnections.
 
 **Approach B: Snapshot + Live Stream (Recommended)**
+
 - On reconnect, server sends a full state snapshot (current agent statuses,
   recent terminal output, task states).
 - Client replaces its entire state with the snapshot, then resumes live
@@ -332,6 +351,7 @@ This is the critical design challenge. Two approaches:
 - Cons: Snapshot generation must be efficient; brief "flash" as UI rehydrates.
 
 **Hybrid (Best):**
+
 - Server maintains a rolling event buffer (last N events per agent).
 - On reconnect: if client's last sequence is within the buffer, replay from
   there. Otherwise, send full snapshot.
@@ -340,6 +360,7 @@ This is the critical design challenge. Two approaches:
   in-memory is sufficient.
 
 **Jupyter's Lesson:**
+
 - Jupyter has struggled with state recovery across page reloads. A new session
   ID is generated on every page load, making reconnection to existing kernel
   sessions impossible without workarounds. Their kernel message replay system
@@ -350,6 +371,7 @@ This is the critical design challenge. Two approaches:
 ### Event Sourcing for Agent Events
 
 **Pattern:**
+
 - All agent events (output lines, status changes, task updates, errors) are
   appended to an ordered event log.
 - Current state is derived by replaying events (or maintained as a projection
@@ -358,6 +380,7 @@ This is the critical design challenge. Two approaches:
   reconnect, historical analysis of agent runs.
 
 **Implementation:**
+
 ```
 Event schema:
   - id: auto-increment integer
@@ -387,6 +410,7 @@ connected WebSocket clients.
 | Query capability | Full SQL | Key-value + data structures | Full SQL |
 
 **SQLite advantages for our use case:**
+
 - Zero external dependencies. Comes with Python.
 - Single-file database simplifies backup, reset, and portability.
 - WAL mode enables concurrent reads during writes (important for streaming
@@ -416,6 +440,7 @@ simpler and sufficient.
 ### Option A: `pip install` + `uvicorn` (Recommended)
 
 **Pattern (as used by Jupyter, Open WebUI):**
+
 ```bash
 pip install vaultspec-control-surface
 # or: uv pip install vaultspec-control-surface
@@ -423,6 +448,7 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 ```
 
 **How Open WebUI does it:**
+
 - Published on PyPI as `open-webui`.
 - SvelteKit frontend is compiled to static assets and included in the Python
   package.
@@ -431,20 +457,25 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 - Minimal dependency set (~40 packages) available for lightweight deployments.
 
 **Implementation:**
+
 1. SvelteKit app compiled with `vite build` producing `build/` directory of
    static assets (HTML, CSS, JS).
 2. Static assets included in Python package via `pyproject.toml` package data.
 3. FastAPI serves static files from the bundled directory:
+
    ```python
    app.mount("/", StaticFiles(directory=static_dir, html=True))
    ```
+
 4. CLI entry point starts uvicorn programmatically:
+
    ```python
    import uvicorn
    uvicorn.run("vaultspec.ui:app", host="127.0.0.1", port=8420)
    ```
 
 **Pros:**
+
 - Familiar Python installation workflow.
 - Works with `uv`, `pip`, `pipx`.
 - Easy to develop: run frontend dev server + backend dev server separately.
@@ -452,12 +483,14 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 - No system-level dependencies beyond Python.
 
 **Cons:**
+
 - Requires Python installed on system (acceptable for our user base).
 - Frontend build step during package creation (CI handles this).
 
 ### Option B: Single Binary (PyInstaller / Nuitka)
 
 **PyInstaller:**
+
 - Packages Python app + interpreter + dependencies into a single executable.
 - Cross-platform (Windows, Linux, macOS).
 - Produces large binaries (50-200MB+ depending on dependencies).
@@ -466,12 +499,14 @@ vaultspec-ui  # CLI entry point that starts uvicorn
   Windows.
 
 **Nuitka:**
+
 - Compiles Python to C, then to native binary.
 - Better runtime performance than PyInstaller.
 - Even larger build times and complexity.
 - Requires C compiler toolchain.
 
 **shiv:**
+
 - Creates self-contained Python zip apps (.pyz files).
 - Requires Python on the target system (like pip install, but as a single file).
 - Fastest of the "single file" options but still needs Python runtime.
@@ -484,16 +519,19 @@ as primary distribution method; consider as future enhancement if needed.
 ### Option C: Docker
 
 **Pattern (as used by Dify, Open WebUI):**
+
 ```bash
 docker run -p 8420:8420 vaultspec/control-surface
 ```
 
 **Pros:**
+
 - Completely self-contained: Python, dependencies, everything.
 - Reproducible across platforms.
 - Easy to add supporting services (if needed later).
 
 **Cons:**
+
 - Requires Docker installed (heavier requirement than Python for dev tools).
 - Adds latency to startup.
 - Awkward for a local dev tool that needs to access local filesystems, spawn
@@ -507,6 +545,7 @@ core use case.
 ### Static Asset Bundling Strategy
 
 **Vite (via SvelteKit):**
+
 - SvelteKit uses Vite as its build tool.
 - `vite build` produces optimized, hashed static assets.
 - Tree-shaking, code splitting, CSS extraction handled automatically.
@@ -514,6 +553,7 @@ core use case.
 - Output: `build/` directory with `index.html`, JS chunks, CSS, assets.
 
 **Integration with Python package:**
+
 - Build frontend during CI/CD or as a pre-build step.
 - Include `build/` directory in Python package as package data.
 - FastAPI `StaticFiles` mount serves the built assets.
@@ -609,6 +649,7 @@ FastAPI (uvicorn)
 ## Sources
 
 ### Part 1: Backend
+
 - [FastAPI WebSocket Docs](https://fastapi.tiangolo.com/advanced/websockets/)
 - [Starlette in 2026: Building Fast Async Services](https://thelinuxcode.com/python-starlette-in-2026-building-fast-async-services-with-clear-architecture/)
 - [WebSocket Servers in Python with FastAPI or Starlette](https://teachmeidea.com/websocket-servers-in-python-with-fastapi-or-starlette/)
@@ -618,6 +659,7 @@ FastAPI (uvicorn)
 - [Realtime Channels with FastAPI + Broadcaster](https://dev.to/sangarshanan/realtime-channels-with-fastapi-broadcaster-47jh)
 
 ### Part 2: Frontend
+
 - [Open WebUI Architecture (DeepWiki)](https://deepwiki.com/open-webui/open-webui/2-architecture)
 - [Open WebUI Frontend Structure (DeepWiki)](https://deepwiki.com/open-webui/open-webui/2.1-frontend-structure)
 - [Building a Real-time Dashboard with FastAPI and Svelte](https://testdriven.io/blog/fastapi-svelte/)
@@ -631,6 +673,7 @@ FastAPI (uvicorn)
 - [AutoGen Agent Integration with FastAPI + WebSockets](https://newsletter.victordibia.com/p/integrating-autogen-agents-into-your)
 
 ### Part 3: State Management
+
 - [WebSocket Reconnection Logic (2026)](https://oneuptime.com/blog/post/2026-01-27-websocket-reconnection/view)
 - [WebSocket Architecture Best Practices (Ably)](https://ably.com/topic/websocket-architecture-best-practices)
 - [Grafana Live Setup](https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-live/)
@@ -641,6 +684,7 @@ FastAPI (uvicorn)
 - [SSE Beat WebSockets for 95% of Apps](https://dev.to/polliog/server-sent-events-beat-websockets-for-95-of-real-time-apps-heres-why-a4l)
 
 ### Part 4: Deployment
+
 - [Open WebUI on PyPI](https://pypi.org/project/open-webui/)
 - [Open WebUI Installation Methods (DeepWiki)](https://deepwiki.com/open-webui/open-webui/3.1-installation-methods)
 - [Open WebUI Build System (DeepWiki)](https://deepwiki.com/open-webui/open-webui/16.3-redis-integration-for-distribution)

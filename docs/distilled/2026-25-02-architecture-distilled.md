@@ -168,7 +168,7 @@ lifecycle.
 - **Event sourcing to SQLite** — all agent events appended to ordered log;
   current state derived as a projection
 - **WebSocket reconnection** — hybrid: rolling event buffer (last N per agent)
-  + full snapshot fallback
+  - full snapshot fallback
 - **Single multiplexed WebSocket** per browser client (Grafana Live pattern)
 - **Client-local state** — UI-only: selected panel, scroll position, layout
 
@@ -199,6 +199,7 @@ flow.
 | Backend framework | FastAPI | DI, auto-docs, same Starlette WebSocket core |
 | ASGI server | Uvicorn | Standard, used by all A2A samples |
 | Frontend framework | SvelteKit (Svelte 5) | Runes reactivity, xterm-svelte, proven with FastAPI |
+| UI Component System | shadcn-svelte + Tailwind v4 | High-readability primitives, fast CSS engine, overrides Vanilla CSS mandate |
 | Terminal emulator | xterm.js via xterm-svelte | Universal standard |
 | Code viewer | CodeMirror 6 | 124KB vs Monaco 2MB, read-only, incremental updates |
 | Syntax highlighting | Shiki | VS Code quality, WASM-based |
@@ -455,7 +456,7 @@ layered later if the API stabilizes.
 ### C6: LangGraph — Leaned Toward but Never Decided
 
 Coding-teams research says "Leaning toward: Vanilla A2A SDK for orchestrator
-+ LangGraph internally for agents that need stateful reasoning loops." No
+- LangGraph internally for agents that need stateful reasoning loops." No
 subsequent document confirms or rejects this.
 
 **Needs resolution**: Evaluate LangGraph for agent internals (checkpointing,

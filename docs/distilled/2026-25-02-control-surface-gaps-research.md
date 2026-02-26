@@ -3,6 +3,7 @@ name: "Control Surface Gaps Research"
 date: 2026-25-02
 type: research
 summary: "Rigorous technical decisions for SvelteKit agent rendering, replacing experimental tech with robust Server-Side Replay, @humanspeak token caching, and resolving Tailwind v4 styling conflicts."
+maturity: 65
 ---
 
 # Control Surface Gaps Research
@@ -15,14 +16,16 @@ summary: "Rigorous technical decisions for SvelteKit agent rendering, replacing 
 **Architectural Problem**: LLMs stream markdown via WebSockets character-by-character. Standard parsers (`marked.js`) re-parse the entire accumulated string on every new chunk, resulting in an $O(n^2)$ CPU spike that freezes the browser on long documents (e.g., 50k+ tokens).
 
 **Inclusion/Exclusion Decision**:
+
 - **Excluded**: `svelte-markdown` (legacy). Uses standard reactivity; suffers catastrophic $O(n^2)$ lag.
 - **Excluded**: `Incremark`. While it achieves $O(n)$ via a custom parser, it is marked as experimental, has sparse documentation for Svelte bindings, and uses non-standard rendering paths.
-- **Included**: `@humanspeak/svelte-markdown`. 
+- **Included**: `@humanspeak/svelte-markdown`.
 
 **Rationale**:
 It is explicitly built for Svelte 5 Runes. It solves the performance penalty not by replacing the parser, but via **Intelligent Token Caching**. It caches `Marked.js` AST tokens for completed blocks (like paragraphs or code blocks) and only re-renders the "active" tail node. This yields a 50–200x performance increase while retaining full compatibility with the massive `Marked.js` plugin ecosystem.
 
 **Implementation Reference (Svelte 5 Runes)**:
+
 ```svelte
 <script lang="ts">
   import Markdown from '@humanspeak/svelte-markdown';
@@ -71,6 +74,7 @@ term.onDrain(() => {
 **Architectural Problem**: When the user refreshes the browser, the active terminal UI is destroyed. We need to restore the agent's historical `stdout` formatting (colors, cursors).
 
 **Inclusion/Exclusion Decision**:
+
 - **Excluded**: `@xterm/addon-serialize`. The official NPM registry explicitly marks this as *"⚠️ experimental... under construction ⚠️"*. It attempts to read the DOM/Canvas to guess the terminal state. It routinely fails to restore private modes, alternate screen buffers (like `vim`), and complex cursor states.
 - **Included**: **Server-Side Replay (Event Sourcing)**.
 
@@ -83,6 +87,7 @@ The UI should be a stateless projection. The Orchestrator's SQLite database must
 
 **Implementation Reference (CSS Layers & WebGL)**:
 We must explicitly isolate the terminal container from Tailwind's influence and offload rendering to the GPU.
+
 ```css
 /* app.css */
 @import "tailwindcss";
@@ -98,6 +103,7 @@ We must explicitly isolate the terminal container from Tailwind's influence and 
   }
 }
 ```
+
 **Mandate**: The Svelte application *must* initialize `xterm.js` using the `@xterm/addon-webgl` plugin to bypass DOM-styling conflicts entirely, drastically improving rendering performance.
 
 ## 5. shadcn-svelte vs. Streaming Block Reactivity (Gap G5)
@@ -105,9 +111,10 @@ We must explicitly isolate the terminal container from Tailwind's influence and 
 **Architectural Problem**: `shadcn-svelte` provides high-quality components, but its Code Block component is tightly coupled with `Shiki` (a heavy WASM syntax highlighter). If integrated naively into `@humanspeak/svelte-markdown`, Shiki will attempt to synchronously re-highlight the entire code block on the main thread during *every incoming WebSocket chunk*, causing the stream to freeze to <10 FPS.
 
 **Inclusion/Exclusion Decision**:
+
 - **Excluded**: Synchronous inline syntax highlighting via Shiki during an active stream.
 - **Included**: Asynchronous Web Worker offloading for Shiki, or deferred rendering.
 
 **Rationale**:
-To maintain 60 FPS during a fast LLM code generation stream, the markdown parser must emit raw `<pre><code>` blocks without syntax highlighting. 
+To maintain 60 FPS during a fast LLM code generation stream, the markdown parser must emit raw `<pre><code>` blocks without syntax highlighting.
 The UI must implement an `IntersectionObserver` or a stream-completion hook (e.g., waiting for the `TaskArtifactUpdateEvent` indicating `last_chunk: true`) before passing the complete string to Shiki for colorization.

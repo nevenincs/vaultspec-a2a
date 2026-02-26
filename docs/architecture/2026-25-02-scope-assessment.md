@@ -16,6 +16,7 @@ maturity: 35
 ## What We're Assessing
 
 A system with two faces:
+
 1. **CLI bridge** — MCP tools that let any CLI delegate work to a coding team
 2. **Control surface** — Web app for monitoring, messaging, and managing agents
 
@@ -246,6 +247,7 @@ Workspace Manager
 ### 1. Windows process management
 
 Every sample runs on Linux/Mac. Windows subprocess lifecycle is different:
+
 - `process.terminate()` is SIGKILL (no grace period)
 - Need CTRL_BREAK_EVENT with CREATE_NEW_PROCESS_GROUP for graceful
 - ProactorEventLoop (IOCP) is required and has limitations
@@ -259,6 +261,7 @@ This is the single biggest platform risk.
 The orchestrator must maintain N concurrent SSE connections (one per agent
 task). Each can drop, stall, or produce events faster than the WebSocket
 can relay. Must handle:
+
 - Connection pooling with httpx
 - Reconnection via tasks/resubscribe (events during disconnect are lost)
 - Backpressure (bounded EventQueue, 1024 items)

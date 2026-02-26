@@ -16,7 +16,7 @@ maturity: 25
 
 ## 1. The Observability Gap
 
-While the A2A protocol provides robust primitives for agent discovery and task delegation, the current ecosystem (including `a2a-samples` and `mcp-python-sdk`) lacks a comprehensive "Control Plane" or monitoring surface for multi-agent orchestration. 
+While the A2A protocol provides robust primitives for agent discovery and task delegation, the current ecosystem (including `a2a-samples` and `mcp-python-sdk`) lacks a comprehensive "Control Plane" or monitoring surface for multi-agent orchestration.
 
 Previous research established the need for a **Team Dashboard** (a UI showing parallel agent panels, streaming artifacts, and permission queues), but lacked empirical backing. To bridge this gap, we analyzed leading ecosystem tools to derive a reference architecture for A2A team monitoring.
 
@@ -27,16 +27,19 @@ Previous research established the need for a **Team Dashboard** (a UI showing pa
 The broader agentic ecosystem relies heavily on specialized observability tools to solve the "black box" problem of autonomous teams. We evaluated three primary reference models:
 
 ### 2.1 AgentOps (Behavioral Debugging)
+
 - **Focus**: Agent-centric time-travel debugging and execution tracing.
 - **Key Mechanics**: Tracks "Chain of Thought" and tool-use hierarchically.
 - **A2A Relevance**: Demonstrates the necessity of a hierarchical span model (`Session` > `Agent` > `Task` > `Tool Call`). For A2A, this maps perfectly to `ContextID` > `Agent Card` > `TaskID` > `MCP Tool Execution`.
 
 ### 2.2 Langfuse (OpenTelemetry & LLM Ops)
+
 - **Focus**: Tracing, prompt management, and cost evaluation.
 - **Key Mechanics**: OpenTelemetry (OTel) based, utilizing ClickHouse for high-scale analytical queries and a UI for prompt iteration.
 - **A2A Relevance**: Proves that the orchestrator must not just stream text, but emit structured, OTel-compatible spans. Langfuse's self-hostable nature aligns with the secure, local-first requirements of an A2A coding team.
 
 ### 2.3 CrewAI Control Plane / Studio
+
 - **Focus**: Enterprise observability for static "crews".
 - **Key Mechanics**: Specialized dashboards visualizing token usage, latency, and step-by-step agent interactions.
 - **A2A Relevance**: Highlights the UX requirement for real-time cost tracking and a dependency graph visualization showing which agent is blocking another.
@@ -94,7 +97,7 @@ Based on the capabilities of AgentOps and Langfuse, the local A2A Dashboard must
 
 ## 4. Conclusion & Next Steps
 
-The lack of empirical backing for the A2A monitoring surface is resolved by adopting the **OTel/Hierarchical Span model** used by Langfuse/AgentOps, combined with the **SessionAccumulator** pattern from Toad. 
+The lack of empirical backing for the A2A monitoring surface is resolved by adopting the **OTel/Hierarchical Span model** used by Langfuse/AgentOps, combined with the **SessionAccumulator** pattern from Toad.
 
 **Architectural Decision required:**
 Should the A2A Orchestrator attempt to build its own bespoke time-series database for the Dashboard, or should it rely on exporting OpenTelemetry data to a self-hosted Langfuse container for the historical view, restricting the bespoke Python UI to *strictly* real-time (ephemeral) orchestration?

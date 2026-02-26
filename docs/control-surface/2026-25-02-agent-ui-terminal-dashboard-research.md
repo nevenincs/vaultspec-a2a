@@ -18,9 +18,10 @@ maturity: 20
 
 ### 1. Open WebUI (formerly Ollama WebUI)
 
-**GitHub**: https://github.com/open-webui/open-webui (~45k+ stars)
+**GitHub**: <https://github.com/open-webui/open-webui> (~45k+ stars)
 
 **Tech Stack**:
+
 - **Frontend**: SvelteKit (migrated from earlier Svelte)
 - **Backend**: Python FastAPI
 - **Database**: SQLAlchemy with SQLite (default, with optional encryption), PostgreSQL
@@ -32,11 +33,13 @@ maturity: 20
 
 **Architecture**:
 Three-tier architecture with clear frontend/backend separation:
+
 1. **Connection Layer**: Socket.IO client managed in root layout
 2. **Event Processing Layer**: Event handlers in Chat.svelte processing incoming stream chunks
 3. **Display Layer**: ResponseMessage.svelte components rendering streaming content incrementally
 
 **Streaming Implementation**:
+
 - Uses a **hybrid SSE + WebSocket** approach
 - SSE stream opens when `stream=True`, with heartbeats emitted while processing
 - Backend responds via WebSocket, instructing frontend to send SSE request for direct connection
@@ -45,23 +48,27 @@ Three-tier architecture with clear frontend/backend separation:
 - Plugin/function system can emit custom chat events
 
 **Plugin System**:
+
 - Plugin Market with community plugins
 - Plugins are independent functional modules or integrated with agents
 - Plugin Gateway is a backend service with Edge Function deployment
 - Assistants automatically identify user input and route to suitable plugins
 
 **Multi-Agent Handling**:
+
 - Supports multiple model backends (Ollama, OpenAI-compatible APIs)
 - RAG integration with 9 vector database options
 - No native multi-agent conversation visualization -- designed primarily as a chat UI
 
 **What We Can Learn**:
+
 - The SSE + WebSocket hybrid is powerful: SSE for model streaming, WebSocket for chat events and control messages
 - Redis-backed WebSocket manager pattern is essential for horizontal scaling
 - SvelteKit + FastAPI is a proven pairing for AI UIs
 - Socket.IO multiplexing keeps connection count manageable
 
 **Limitations**:
+
 - Primarily a chat interface, not a multi-agent orchestration UI
 - No built-in agent-to-agent conversation visualization
 - Plugin system is chat-oriented, not workflow-oriented
@@ -70,9 +77,10 @@ Three-tier architecture with clear frontend/backend separation:
 
 ### 2. AutoGen Studio (Microsoft)
 
-**GitHub**: https://github.com/microsoft/autogen (~42k+ stars for main repo)
+**GitHub**: <https://github.com/microsoft/autogen> (~42k+ stars for main repo)
 
 **Tech Stack**:
+
 - **Frontend**: React (Gatsby framework) + TailwindCSS
 - **Backend**: Python (FastAPI-based API)
 - **Database**: SQLModel (Pydantic + SQLAlchemy) -- supports SQLite, PostgreSQL, MySQL, Oracle, MSSQL
@@ -80,6 +88,7 @@ Three-tier architecture with clear frontend/backend separation:
 - **Configuration**: Declarative JSON-based agent/workflow specification
 
 **Architecture**:
+
 - Backend provides Web API, Python API, and CLI interfaces
 - Frontend provides three high-level sections:
   1. **Build**: Drag-and-drop interface for agent workflow specification (skills, models, agents, workflows)
@@ -87,6 +96,7 @@ Three-tier architecture with clear frontend/backend separation:
   3. **Gallery**: View of chat history from published sessions
 
 **Multi-Agent Conversation Visualization**:
+
 - Renders the "inner monologue" of agents during execution
 - Displays message count exchanged between agents
 - Shows cost tracking per task execution
@@ -94,6 +104,7 @@ Three-tier architecture with clear frontend/backend separation:
 - Designed to "gradually include tools for visualizing, observing, and debugging agent behaviors"
 
 **What We Can Learn**:
+
 - Declarative JSON-based agent specification is powerful for UI-driven configuration
 - The Build/Playground/Gallery separation is a clean UX pattern for agent development
 - Inner monologue rendering gives visibility into agent reasoning
@@ -101,6 +112,7 @@ Three-tier architecture with clear frontend/backend separation:
 - Session-based organization with publish-to-gallery is a good workflow pattern
 
 **Limitations**:
+
 - Gatsby is a heavy framework choice for what is essentially a dashboard
 - Real-time streaming details are not well documented in the public architecture
 - The 0.4 rewrite (Jan 2025) introduced breaking changes; architecture still stabilizing
@@ -110,9 +122,10 @@ Three-tier architecture with clear frontend/backend separation:
 
 ### 3. Dify
 
-**GitHub**: https://github.com/langgenius/dify (~100k+ stars)
+**GitHub**: <https://github.com/langgenius/dify> (~100k+ stars)
 
 **Tech Stack**:
+
 - **Frontend**: Next.js (React) with React Flow for visual workflow orchestration
 - **Backend**: Python Flask
 - **Database**: PostgreSQL (primary), Redis (caching + session management)
@@ -123,11 +136,13 @@ Three-tier architecture with clear frontend/backend separation:
 
 **Architecture**:
 Microservices-oriented with three core components:
+
 1. **LLM Orchestration**: Connect/switch between LLM providers
 2. **Visual Studio**: Drag-and-drop workflow design (React Flow), agent training, RAG configuration
 3. **Deployment Hub**: One-click deployment as APIs, chatbots, or internal tools
 
 **Real-Time Execution Monitoring**:
+
 - LLMOps monitoring: analyze application logs and performance over time
 - Token usage statistics with separate input/output token tracking
 - Asynchronous, non-blocking database write operations for performance
@@ -135,6 +150,7 @@ Microservices-oriented with three core components:
 - Production data annotations for continuous improvement
 
 **What We Can Learn**:
+
 - React Flow is the go-to library for visual workflow/DAG editors
 - Flask + Celery is a battle-tested pattern for async workflow execution
 - Separate token tracking (input vs output) is important for cost management
@@ -142,6 +158,7 @@ Microservices-oriented with three core components:
 - The visual workflow canvas is essential for orchestration platforms
 
 **Limitations**:
+
 - Flask (not async-native) may limit real-time streaming performance vs FastAPI
 - Heavy infrastructure requirements (PostgreSQL + Redis + Celery + Nginx)
 - Enterprise features are behind commercial licensing
@@ -150,11 +167,12 @@ Microservices-oriented with three core components:
 
 ### 4. CrewAI Studio / Visualizer
 
-**GitHub (Studio)**: https://github.com/strnad/CrewAI-Studio (community, Streamlit-based)
-**GitHub (Visualizer)**: https://github.com/Eng-Elias/CrewAI-Visualizer (community, Next.js-based)
+**GitHub (Studio)**: <https://github.com/strnad/CrewAI-Studio> (community, Streamlit-based)
+**GitHub (Visualizer)**: <https://github.com/Eng-Elias/CrewAI-Visualizer> (community, Next.js-based)
 **Official**: Crew Studio is part of CrewAI Enterprise (not open source)
 
 **Tech Stack (Visualizer)**:
+
 - **Frontend**: Next.js + TypeScript
 - **Backend**: Node.js with `node-calls-python` to execute Python code
 - **Database**: PostgreSQL + Prisma ORM
@@ -162,23 +180,27 @@ Microservices-oriented with three core components:
 - **Agent Framework**: CrewAI Python package
 
 **Tech Stack (Studio - Community)**:
+
 - **Frontend/Backend**: Streamlit (Python)
 - **Environment**: Supports Conda and virtual environments
 - **No-code**: GUI for managing and running CrewAI agents
 
 **Crew Execution Visualization**:
+
 - Role-based agent design (roles, goals, tools per agent)
 - Task management with dynamic agent assignment
 - Sequential and hierarchical process execution modes
 - Visual representation of crew structure and task flow
 
 **What We Can Learn**:
+
 - `node-calls-python` bridge pattern is interesting but fragile
 - GraphQL is a good fit for complex agent relationship queries
 - Streamlit is quick for prototyping but not production-grade for rich UIs
 - The official enterprise version being closed-source shows the commercial value in visualization
 
 **Limitations**:
+
 - Community tools are not actively maintained at production quality
 - The `node-calls-python` bridge adds complexity and potential failure points
 - No real-time streaming of execution progress in the open-source versions
@@ -188,9 +210,10 @@ Microservices-oriented with three core components:
 
 ### 5. LobeChat
 
-**GitHub**: https://github.com/lobehub/lobe-chat (~55k+ stars estimated)
+**GitHub**: <https://github.com/lobehub/lobe-chat> (~55k+ stars estimated)
 
 **Tech Stack**:
+
 - **Frontend**: Next.js 16 + React 19
 - **State Management**: Zustand
 - **Data Fetching**: SWR (client-side), tRPC (end-to-end type-safe API)
@@ -200,23 +223,27 @@ Microservices-oriented with three core components:
 - **Architecture**: Monorepo (@lobechat/ namespace)
 
 **Architecture Evolution (v2.0)**:
+
 - Moved from SSR to full SPA (Single Page Application)
 - Reason: RSC architecture caused high-frequency network round-trips even for lightweight interactions (conversation switching)
 - Result: Better performance for interactive AI chat experiences
 
 **Real-Time Patterns**:
+
 - Streaming responses from LLM providers
 - Plugin Gateway as Edge Function (POST /api/v1/runner)
 - Automatic plugin identification and routing during conversations
 - Real-time information retrieval via plugin system
 
 **Plugin System**:
+
 - Plugin Market for extensibility
 - Plugins can be standalone or integrated with agents
 - Agent Market for pre-configured agent profiles
 - Plugins process real-time information (web search, etc.)
 
 **What We Can Learn**:
+
 - **Zustand** is preferred over Redux/MobX for AI chat state management (lightweight, simple)
 - **tRPC** provides excellent end-to-end type safety for API communication
 - **Drizzle ORM** is a modern, type-safe alternative to Prisma/SQLAlchemy
@@ -225,6 +252,7 @@ Microservices-oriented with three core components:
 - Edge Functions for plugin gateway reduce latency
 
 **Limitations**:
+
 - Primarily a chat interface, not an agent orchestration platform
 - No multi-agent workflow visualization
 - The v2.0 rewrite indicates architectural instability in earlier versions
@@ -233,9 +261,10 @@ Microservices-oriented with three core components:
 
 ### 6. Langflow
 
-**GitHub**: https://github.com/langflow-ai/langflow (~100k stars)
+**GitHub**: <https://github.com/langflow-ai/langflow> (~100k stars)
 
 **Tech Stack**:
+
 - **Frontend**: React with React Flow (node-based visual editor)
 - **Backend**: Python (FastAPI-based)
 - **Execution**: Each component has a `build()` method executed sequentially
@@ -244,6 +273,7 @@ Microservices-oriented with three core components:
 - **License**: Open source
 
 **Architecture**:
+
 - Drag-and-drop canvas with sidebar component palette
 - Node-based workspace where connections replace boilerplate code
 - Components are Python classes that can be customized
@@ -251,12 +281,14 @@ Microservices-oriented with three core components:
 - Playground panel shows execution results with step-by-step control
 
 **Execution Visualization**:
+
 - Interactive playground for immediate testing
 - Step-by-step execution control
 - Async/streaming response handling between nodes
 - Data passing between nodes is managed by the execution engine
 
 **What We Can Learn**:
+
 - React Flow is the dominant library for visual flow editors in AI
 - "Components as Python code" pattern gives full transparency
 - JSON export of flows enables portability and version control
@@ -264,6 +296,7 @@ Microservices-oriented with three core components:
 - MCP server deployment option is forward-thinking
 
 **Limitations**:
+
 - Version stability issues (v1.7.0 yanked due to critical bugs)
 - Visual editor can become unwieldy for complex multi-agent workflows
 - Execution visualization is basic (playground panel, not rich real-time dashboards)
@@ -273,9 +306,10 @@ Microservices-oriented with three core components:
 
 ### 7. Flowise
 
-**GitHub**: https://github.com/FlowiseAI/Flowise (~15k+ stars)
+**GitHub**: <https://github.com/FlowiseAI/Flowise> (~15k+ stars)
 
 **Tech Stack**:
+
 - **Frontend**: React (with React Flow for node editor)
 - **Backend**: Node.js + Express
 - **Database**: SQLite (default), with support for others
@@ -283,11 +317,13 @@ Microservices-oriented with three core components:
 
 **Architecture**:
 Three distinct visual builders:
+
 1. **Assistant**: Beginner-friendly guided setup
 2. **Chatflow**: Single-agent systems, chatbots, RAG, Graph RAG
 3. **Agentflow**: Multi-agent orchestration with branching, looping, routing
 
 **Comparison with Langflow**:
+
 | Aspect | Langflow | Flowise |
 |--------|----------|---------|
 | Backend | Python (FastAPI) | Node.js (Express) |
@@ -297,12 +333,14 @@ Three distinct visual builders:
 | Skill Level | Assumes AI familiarity | Graduated complexity (Assistant/Chatflow/Agentflow) |
 
 **What We Can Learn**:
+
 - The graduated complexity model (Assistant -> Chatflow -> Agentflow) is excellent UX
 - Node.js backend enables better WebSocket handling and concurrent connections
 - Branching/looping/routing in Agentflow is the right abstraction for orchestration
 - Template system accelerates user onboarding
 
 **Limitations**:
+
 - Fewer stars and smaller community than Langflow/Dify
 - Node.js limits access to the Python AI ecosystem (requires bridging)
 - Less source-level customization than Langflow
@@ -313,9 +351,10 @@ Three distinct visual builders:
 
 ### 1. xterm.js
 
-**GitHub**: https://github.com/xtermjs/xterm.js (~18k+ stars estimated)
+**GitHub**: <https://github.com/xtermjs/xterm.js> (~18k+ stars estimated)
 
 **Tech Stack**:
+
 - **Language**: TypeScript
 - **Rendering**: Canvas/WebGL2
 - **Protocol**: Supports full VT terminal emulation
@@ -323,29 +362,34 @@ Three distinct visual builders:
 
 **Architecture**:
 Three-layer architecture:
+
 1. **Frontend (Browser)**: xterm.js handles character encoding, keystroke capture, ANSI escape code rendering
 2. **WebSocket Transport**: Bidirectional real-time communication
 3. **Backend PTY**: Process output fed into xterm.js, browser input passed to PTY via WebSocket
 
 **Key Addons**:
+
 - `@xterm/addon-attach`: WebSocket attachment for shell API communication
 - `@xterm/addon-fit`: Auto-resize terminal to container
 - `@xterm/addon-webgl`: GPU-accelerated rendering
 - `@xterm/addon-search`: Text search within terminal buffer
 
 **Real-World Usage**:
+
 - VS Code (integrated terminal)
 - Proxmox VE (container terminals)
 - HashiCorp Nomad (remote task connections)
 - JupyterLab, Theia IDE, code-server
 
 **What's Reusable**:
+
 - This is THE library for terminal-in-browser. Every other project in this section uses it.
 - Addon architecture is extensible
 - WebGL rendering handles high-throughput output
 - Well-maintained, active development
 
 **Limitations**:
+
 - Pure frontend library -- requires backend PTY management separately
 - No built-in WebSocket server or PTY spawning
 - Addon ecosystem requires careful version management
@@ -354,9 +398,10 @@ Three-layer architecture:
 
 ### 2. Wetty
 
-**GitHub**: https://github.com/butlerx/wetty
+**GitHub**: <https://github.com/butlerx/wetty>
 
 **Tech Stack**:
+
 - **Frontend**: xterm.js
 - **Backend**: Node.js
 - **Protocol**: WebSocket (not Ajax like predecessors)
@@ -364,23 +409,27 @@ Three-layer architecture:
 - **Authentication**: SSH-based (password, OAuth, LDAP configurable)
 
 **Architecture**:
+
 - Node.js server acts as WebSocket-to-SSH bridge
 - Browser connects via WebSocket to Wetty server
 - Wetty server opens SSH connection to target host
 - Bidirectional relay between WebSocket and SSH streams
 
 **Security Model**:
+
 - MUST be behind HTTPS reverse proxy for production use
 - Inherits SSH server authentication mechanisms
 - Supports OAuth/LDAP integration for authentication
 - Without TLS, all input (passwords, commands) is visible in transit
 
 **What's Reusable**:
+
 - The WebSocket-to-SSH bridge pattern is clean and well-proven
 - Configuration model for SSH targets is straightforward
 - Docker deployment is well-supported
 
 **Limitations**:
+
 - SSH-only -- cannot connect to arbitrary processes/PTYs
 - No built-in TLS (requires reverse proxy)
 - Single-purpose tool, not a library
@@ -389,9 +438,10 @@ Three-layer architecture:
 
 ### 3. ttyd
 
-**GitHub**: https://github.com/tsl0922/ttyd (~8k+ stars)
+**GitHub**: <https://github.com/tsl0922/ttyd> (~8k+ stars)
 
 **Tech Stack**:
+
 - **Language**: C
 - **Libraries**: libwebsockets + libuv
 - **Frontend**: xterm.js (with CJK/IME support)
@@ -400,6 +450,7 @@ Three-layer architecture:
 - **File Transfer**: ZMODEM integration (lrzsz)
 
 **Architecture**:
+
 - C-based server for maximum performance
 - libwebsockets handles WebSocket protocol
 - libuv provides cross-platform async I/O
@@ -408,6 +459,7 @@ Three-layer architecture:
 - Default port 7681
 
 **Security Model**:
+
 - Built-in basic authentication
 - Built-in SSL/TLS support (no reverse proxy required)
 - Read-only mode option
@@ -415,12 +467,14 @@ Three-layer architecture:
 - Cross-platform: macOS, Linux, FreeBSD, OpenWrt, Windows
 
 **What's Reusable**:
+
 - Extremely lightweight and performant (C implementation)
 - Built-in security features (auth + TLS) unlike most alternatives
 - ZMODEM file transfer is a unique capability
 - Windows support is valuable for our use case
 
 **Limitations**:
+
 - C codebase is harder to extend/customize
 - New process per connection (no built-in multiplexing)
 - Limited configuration API (primarily CLI flags)
@@ -429,9 +483,10 @@ Three-layer architecture:
 
 ### 4. code-server
 
-**GitHub**: https://github.com/coder/code-server (~70k+ stars)
+**GitHub**: <https://github.com/coder/code-server> (~70k+ stars)
 
 **Tech Stack**:
+
 - **Core**: VS Code open-source core
 - **Backend**: Node.js
 - **Frontend**: VS Code's Electron-based UI adapted for browser
@@ -439,6 +494,7 @@ Three-layer architecture:
 - **Deployment**: Docker, Kubernetes, native install
 
 **Terminal Architecture**:
+
 - VS Code's multi-process architecture: frontend in one process, backend (extensions, terminal, debugging) in separate process
 - Terminal backend uses node-pty for PTY management
 - WebSocket connection between browser and backend for terminal I/O
@@ -446,16 +502,19 @@ Three-layer architecture:
 - Each terminal instance gets its own PTY and WebSocket channel
 
 **Security Model**:
+
 - Password-based authentication (auto-generated or configured)
 - HTTPS support via reverse proxy or built-in
 - Extension sandboxing inherited from VS Code
 
 **What's Reusable**:
+
 - The multi-process architecture pattern (frontend/backend separation) is robust
 - node-pty for PTY management is the standard Node.js approach
 - VS Code's terminal implementation is the most battle-tested web terminal
 
 **Limitations**:
+
 - Massive codebase -- extracting just the terminal component is impractical
 - Tied to VS Code's architecture and extension system
 - Heavy resource usage for just terminal functionality
@@ -464,9 +523,10 @@ Three-layer architecture:
 
 ### 5. Theia IDE
 
-**GitHub**: https://github.com/eclipse-theia/theia (~20k+ stars)
+**GitHub**: <https://github.com/eclipse-theia/theia> (~20k+ stars)
 
 **Tech Stack**:
+
 - **Language**: TypeScript (full stack)
 - **Frontend**: Browser-based UI
 - **Backend**: Node.js
@@ -476,6 +536,7 @@ Three-layer architecture:
 - **Architecture**: Modular, not a VS Code fork
 
 **Terminal Architecture**:
+
 - Each terminal gets its own WebSocket connection
 - JSON-RPC protocol for structured communication
 - Different WebSocket connections for different purposes (LSP, DAP, terminal, etc.)
@@ -483,12 +544,14 @@ Three-layer architecture:
 - Clean frontend/backend separation with Node.js backend
 
 **What's Reusable**:
+
 - **JSON-RPC over WebSocket** is an excellent protocol pattern for structured terminal communication
 - Per-terminal WebSocket connections provide isolation
 - Modular architecture allows extracting just the terminal component
 - The terminal-manager pattern for multi-terminal management is directly relevant
 
 **Limitations**:
+
 - IDE-focused -- terminal is one component among many
 - Heavier than dedicated terminal solutions
 - Extension compatibility with VS Code is not 100%
@@ -497,16 +560,18 @@ Three-layer architecture:
 
 ### 6. GoTTY
 
-**GitHub**: https://github.com/yudai/gotty (~19k+ stars, archived)
-**Active Fork**: https://github.com/sorenisanerd/gotty
+**GitHub**: <https://github.com/yudai/gotty> (~19k+ stars, archived)
+**Active Fork**: <https://github.com/sorenisanerd/gotty>
 
 **Tech Stack**:
+
 - **Language**: Go
 - **Frontend**: xterm.js + hterm
 - **Protocol**: WebSocket
 - **Default Port**: 8080
 
 **Architecture**:
+
 - Go-based WebSocket server relaying TTY output to clients
 - Bidirectional: forwards client input to TTY, sends TTY output to clients
 - New process spawned per client connection (default)
@@ -514,16 +579,19 @@ Three-layer architecture:
 - Inspired by Wetty's approach but implemented in Go
 
 **Security Model**:
+
 - TLS/SSL encryption support
 - Optional client certificate authentication
 - Basic authentication support
 
 **What's Reusable**:
+
 - Go's goroutine model handles concurrent WebSocket connections efficiently
 - Simple relay architecture is easy to understand and replicate
 - The project inspired many similar tools
 
 **Limitations**:
+
 - Original repository is archived/unmaintained
 - Active forks exist but with varying maintenance levels
 - Go dependency means separate runtime from Python backend
@@ -532,15 +600,17 @@ Three-layer architecture:
 
 ### 7. JupyterLab Terminal
 
-**GitHub**: Part of https://github.com/jupyterlab/jupyterlab
+**GitHub**: Part of <https://github.com/jupyterlab/jupyterlab>
 
 **Tech Stack**:
+
 - **Frontend**: TypeScript (Lumino widgets, uses xterm.js)
 - **Backend**: Python Tornado server
 - **Protocol**: WebSocket with custom message serialization
 - **Kernel Communication**: ZeroMQ (multiplexed into WebSocket)
 
 **Terminal Architecture**:
+
 - Python Tornado server manages terminal sessions and kernel processes
 - ZeroMQ sockets (shell, iopub, stdin channels) multiplexed into single WebSocket
 - Channel name encoded in WebSocket messages for demultiplexing
@@ -549,17 +619,20 @@ Three-layer architecture:
 - Heartbeat mechanism for connection health
 
 **Message Serialization**:
+
 - Kernel messages serialized with offset numbers for position tracking
 - UTF-8 encoded stringified JSON for message content
 - Binary buffer support for rich output (images, etc.)
 
 **What's Reusable**:
+
 - **ZeroMQ-to-WebSocket bridging** pattern is excellent for multi-channel communication
 - Channel multiplexing over single WebSocket reduces connection overhead
 - The message serialization protocol with offset-based binary is efficient
 - Python Tornado is proven for async WebSocket handling
 
 **Limitations**:
+
 - Tightly coupled to Jupyter ecosystem
 - ZeroMQ adds infrastructure complexity
 - Terminal is secondary to notebook functionality
@@ -570,9 +643,10 @@ Three-layer architecture:
 
 ### 1. Grafana
 
-**GitHub**: https://github.com/grafana/grafana (~66k+ stars)
+**GitHub**: <https://github.com/grafana/grafana> (~66k+ stars)
 
 **Tech Stack**:
+
 - **Frontend**: React + TypeScript
 - **Backend**: Go
 - **Real-time Engine**: Grafana Live (built-in, since v8.0)
@@ -580,6 +654,7 @@ Three-layer architecture:
 - **Plugin System**: Streaming data plugins
 
 **Real-Time Architecture (Grafana Live)**:
+
 - **Pub/Sub model**: Frontend subscribes to channels, receives published data
 - **All subscriptions multiplexed** into single WebSocket connection per page
 - **In-memory PUB/SUB hub** by default for handling subscriptions
@@ -587,22 +662,26 @@ Three-layer architecture:
 - **Streaming plugins**: Deliver data frames to panels without UI polling
 
 **Performance Optimization**:
+
 - WebSocket output (Telegraf v1.19.0+) avoids HTTP middleware overhead per request
 - Significant CPU reduction vs HTTP polling
 - Streaming data frames directly to panel components
 
 **Scalability Considerations**:
+
 - Default in-memory mode: dashboard changes only broadcast to users on same server instance
 - HA mode requires external PUB/SUB (Redis, NATS) for cross-instance delivery
 - Streaming data only reaches clients connected to the receiving instance without external PUB/SUB
 
 **What's Reusable**:
+
 - **Single WebSocket with channel multiplexing** is the gold standard pattern
 - **Pub/Sub model** cleanly separates data producers from UI consumers
 - **Streaming data plugins** provide extensible real-time data sources
 - **In-memory default with external PUB/SUB for HA** is a practical scaling strategy
 
 **Limitations**:
+
 - Go backend is a separate runtime from our Python stack
 - Overkill for process monitoring (designed for metrics/observability)
 - HA configuration adds significant complexity
@@ -611,15 +690,17 @@ Three-layer architecture:
 
 ### 2. Portainer
 
-**GitHub**: https://github.com/portainer/portainer (~32k+ stars)
+**GitHub**: <https://github.com/portainer/portainer> (~32k+ stars)
 
 **Tech Stack**:
+
 - **Frontend**: AngularJS (legacy) / React (migration in progress)
 - **Backend**: Go
 - **Agent**: Lightweight Go agent on each Docker host
 - **Protocol**: WebSocket for interactive container operations
 
 **Architecture**:
+
 - **Portainer Server**: Core web interface + management logic (runs as container)
 - **Portainer Agent**: Lightweight daemon on Docker hosts for remote management
 - **WebSocket Endpoints**:
@@ -628,18 +709,21 @@ Three-layer architecture:
   - Kubernetes pod exec
 
 **Real-Time Patterns**:
+
 - WebSocket for bidirectional container I/O (exec, logs, stdio)
 - Real-time container status monitoring
 - Real-time log streaming from containers
 - Agent-to-server communication for multi-host management
 
 **What's Reusable**:
+
 - **Agent pattern** for managing remote processes is directly relevant
 - WebSocket-based container exec maps well to our agent process management
 - Multi-host management via lightweight agents
 - Real-time log streaming pattern
 
 **Limitations**:
+
 - AngularJS legacy (migration ongoing)
 - Docker/Kubernetes-specific, not general process management
 - Go backend adds separate runtime
@@ -648,20 +732,23 @@ Three-layer architecture:
 
 ### 3. PM2 Web UI
 
-**GitHub**: https://github.com/Unitech/pm2 (~42k+ stars)
-**Community Web UI**: https://github.com/oxdev03/pm2.web
+**GitHub**: <https://github.com/Unitech/pm2> (~42k+ stars)
+**Community Web UI**: <https://github.com/oxdev03/pm2.web>
 
 **Tech Stack (PM2 Core)**:
+
 - **Language**: Node.js
 - **Process Model**: Cluster mode with built-in load balancer
 - **Metrics**: @pm2/io module for gathering metrics and exposing remote actions
 - **Web Dashboard**: PM2 Plus (paid SaaS) or community alternatives
 
 **Tech Stack (pm2.web - Community)**:
+
 - **Purpose**: Web-based monitoring and management dashboard
 - **Features**: Process monitoring, control, logs, server functions, access controls
 
 **Architecture**:
+
 - PM2 daemon manages processes (start, stop, restart, cluster mode)
 - @pm2/io module instruments applications for metrics collection
 - PM2 Plus provides real-time SaaS dashboard across multiple servers
@@ -669,12 +756,14 @@ Three-layer architecture:
 - IPC bus for inter-process communication
 
 **What's Reusable**:
+
 - **Process lifecycle management** patterns (start, stop, restart, reload without downtime)
 - **Cluster mode** for load-balanced process management
 - **@pm2/io instrumentation pattern** for application-level metrics
 - **IPC bus** for process communication is relevant for agent coordination
 
 **Limitations**:
+
 - Node.js-specific process manager
 - Best features (dashboard, alerting) require PM2 Plus (paid)
 - Community web UIs are not actively maintained
@@ -684,9 +773,10 @@ Three-layer architecture:
 
 ### 4. Supervisor
 
-**GitHub**: https://github.com/Supervisor/supervisor
+**GitHub**: <https://github.com/Supervisor/supervisor>
 
 **Tech Stack**:
+
 - **Language**: Python
 - **Web Server**: Built-in HTTP server
 - **API**: XML-RPC over HTTP/Unix domain socket
@@ -694,6 +784,7 @@ Three-layer architecture:
 - **Events**: Event-based notification system
 
 **Architecture**:
+
 - **supervisord**: Server daemon managing child processes
 - **supervisorctl**: CLI client connecting via Unix domain socket or TCP
 - **Web Interface**: Built-in HTTP server at configurable port (e.g., :9001)
@@ -701,12 +792,14 @@ Three-layer architecture:
 - **Event System**: Emits events for state changes (supervisor, process, communication)
 
 **Real-Time Capabilities**:
+
 - Event types: supervisor state changes, process state changes, process communication events
 - Event listeners can subscribe to specific event types
 - Process communication events enable inter-process messaging
 - Tail-f equivalent for process logs via API
 
 **What's Reusable**:
+
 - **Event-based process monitoring** is directly applicable
 - **XML-RPC API** pattern (though we'd use JSON-RPC or REST instead)
 - **Process state machine** (STARTING, RUNNING, BACKOFF, STOPPING, STOPPED, EXITED, FATAL)
@@ -715,6 +808,7 @@ Three-layer architecture:
 - Pure Python, directly integrable
 
 **Limitations**:
+
 - Web UI is extremely basic (HTML tables, no JavaScript interactivity)
 - XML-RPC is outdated (JSON-RPC or REST preferred)
 - No WebSocket support (HTTP polling only)
@@ -744,22 +838,26 @@ Three-layer architecture:
 Based on this survey, the optimal stack for a coding agent orchestration UI would be:
 
 **Frontend**:
+
 - **SvelteKit** or **Next.js** (both proven in agent UIs; SvelteKit is lighter, Next.js has larger ecosystem)
 - **xterm.js** for terminal embedding (non-negotiable -- it's the universal standard)
 - **Zustand** or Svelte stores for state management
 - React Flow if visual workflow editing is needed
 
 **Real-Time Communication**:
+
 - **WebSocket** with channel multiplexing (Grafana pattern) for control plane
 - **SSE** for LLM token streaming (Open WebUI pattern)
 - **JSON-RPC over WebSocket** for structured terminal/agent communication (Theia pattern)
 
 **Backend**:
+
 - **FastAPI** (Python, async-native, proven in Open WebUI, Langflow)
 - **Redis** for PUB/SUB and session management (proven in Open WebUI, Dify)
 - Process management inspired by Supervisor's state machine + PM2's lifecycle patterns
 
 **Terminal Integration**:
+
 - **xterm.js** (frontend) + custom WebSocket-to-PTY bridge (backend)
 - Per-terminal WebSocket connections (Theia pattern)
 - Or ttyd as an embedded terminal server (C, lightweight, Windows support)

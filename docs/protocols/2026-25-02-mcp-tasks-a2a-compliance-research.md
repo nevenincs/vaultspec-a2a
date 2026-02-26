@@ -34,6 +34,7 @@ This is not a soft label. The SDK explicitly states at every level:
   documentation (pre-alpha, in development on `main`)")
 
 There is:
+
 - **No deprecation policy** for experimental features
 - **No stability guarantee** between minor versions
 - **No documented migration path** for when/if tasks stabilize
@@ -294,6 +295,7 @@ agent inputs requires queuing or serialization.
 
 **Auth flow**: A2A's AUTH_REQUIRED expects out-of-band credential exchange.
 MCP has no equivalent. The orchestrator would need to either:
+
 - Collapse auth_required into a generic elicitation ("please provide token")
 - Handle auth flows entirely within the orchestrator
 
@@ -310,18 +312,21 @@ significant translation burden that neither protocol was designed for.
 ### 5.1 If We Use MCP Tasks as CLI Bridge
 
 **What we build**:
+
 - MCP server exposing team orchestration as tools
 - Translation layer mapping MCP task lifecycle to A2A task lifecycle
 - Aggregation logic for multi-agent → single MCP task status
 - Elicitation routing (MCP elicitation ↔ A2A input_required)
 
 **What we risk**:
+
 - MCP experimental API changes break our translation layer
 - CLI clients may not support MCP tasks at all
 - Polling latency (500ms default) adds perceived slowness
 - Sequential elicitation can't handle concurrent agent inputs
 
 **What we gain**:
+
 - CLI-agnostic integration (any MCP-supporting CLI works)
 - Non-blocking delegation (CLI gets task ID, polls for status)
 - Mid-task user input via elicitation
@@ -330,15 +335,18 @@ significant translation burden that neither protocol was designed for.
 ### 5.2 If We Skip MCP Tasks and Use A2A Directly
 
 **What we build**:
+
 - Custom CLI client that speaks A2A natively
 - OR: simple MCP tools (no async tasks) that block during execution
 
 **What we risk**:
+
 - Custom CLI client limits to our tooling only
 - Blocking MCP tools freeze the CLI during team work
 - No mid-task user input without MCP tasks
 
 **What we gain**:
+
 - No dependency on experimental features
 - Full A2A protocol fidelity (8 states, push notifications, SSE)
 - No translation layer complexity
@@ -346,17 +354,20 @@ significant translation burden that neither protocol was designed for.
 ### 5.3 If We Build Our Own Async Protocol on MCP
 
 **What we build**:
+
 - Standard (non-experimental) MCP tools that return immediately
 - Custom polling tools: `team/status(session_id)` returns progress
 - Custom input tools: `team/respond(session_id, input)` sends user input
 - All built on stable MCP tool API, no experimental dependency
 
 **What we risk**:
+
 - Reinventing what MCP tasks already provide
 - No native elicitation UX in CLIs (user must explicitly call input tool)
 - More tools = more cognitive load for the CLI's LLM to manage
 
 **What we gain**:
+
 - Zero dependency on experimental features
 - Full control over the protocol surface
 - Works with any MCP client today

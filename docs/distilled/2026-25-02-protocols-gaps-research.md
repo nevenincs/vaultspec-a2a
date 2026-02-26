@@ -3,6 +3,7 @@ name: "Protocols Gaps Research"
 date: 2026-25-02
 type: research
 summary: "Rigorous analysis of protocol bridging, focusing on state translation logic, queueing mechanics for elicitations, and MCP compliance."
+maturity: 70
 ---
 
 # Protocols Gaps Research
@@ -64,6 +65,7 @@ def aggregate_team_status(agent_states: List[A2AState]) -> MCPState:
 **Architectural Problem**: MCP protocol strictly enforces a sequential `server -> client -> server` elicitation model. However, in a multi-agent A2A team, Agent A and Agent B might both enter `TASK_STATE_INPUT_REQUIRED` simultaneously.
 
 **Inclusion/Exclusion Decision**:
+
 - **Excluded**: Dropping concurrent requests. This causes unrecoverable agent hangs.
 - **Excluded**: Merging prompts (e.g., "Agent A wants X and Agent B wants Y"). The A2A protocol requires distinct `contextId` and `taskId` correlations for responses; a merged response breaks trace integrity.
 - **Included**: An explicit `asyncio.Queue` acting as an Elicitation Serializer within the Orchestrator.
@@ -76,6 +78,7 @@ When Agent B emits an `INPUT_REQUIRED` event while an MCP elicitation for Agent 
 **Architectural Problem**: A2A supports a discrete `AUTH_REQUIRED` state. MCP has no native "Authentication" task state or protocol concept.
 
 **Inclusion/Exclusion Decision**:
+
 - **Excluded**: Out-of-band OAuth flows (e.g., opening a browser). This breaks headless CI/CD execution and violates the strict `stdio` boundaries expected by the MCP host.
 - **Included**: "Collapsed Elicitation". The orchestrator coerces the `AUTH_REQUIRED` A2A state into an MCP `input_required` state.
 

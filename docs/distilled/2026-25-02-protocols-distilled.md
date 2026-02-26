@@ -72,6 +72,7 @@ maintains these and fans out over a single WebSocket.
 
 `EventQueue.tap()` creates child queues receiving all future events. Multiple
 server-side consumers can subscribe to the same task. Enables:
+
 - Orchestrator event processing
 - Fan-out to multiple web clients
 - Independent event logging/persistence
@@ -83,6 +84,7 @@ server-side consumers can subscribe to the same task. Enables:
 `tasks/resubscribe` (JSON-RPC) or `GET /v1/tasks/{id}:subscribe` (REST).
 
 On reconnect:
+
 1. Client calls resubscribe with task ID
 2. Server returns current task state as first event
 3. Stream continues from that point
@@ -126,6 +128,7 @@ Terminal states are immutable — a new task is needed for follow-up work.
 ### 3.2 What A2A Deliberately Omits
 
 A2A is a peer-to-peer messaging protocol, not a workflow engine:
+
 - No process management
 - No dependency graphs
 - No parallelism coordination
@@ -158,6 +161,7 @@ MCP experimental tasks define 5 states:
 **MCP → A2A (clean):** All 5 MCP states map directly.
 
 **A2A → MCP (lossy):**
+
 - `SUBMITTED` → `working` + statusMessage="submitted"
 - `REJECTED` → `failed` + statusMessage="rejected"
 - `AUTH_REQUIRED` → `input_required` (collapsed to generic input request)
@@ -185,6 +189,7 @@ Direct string comparison fails. Translation layer must normalize.
 ### 5.1 Implementation Completeness
 
 Despite "experimental" labeling, the implementation is functionally complete:
+
 - Full task lifecycle
 - Bidirectional elicitation (server asks client mid-task)
 - Bidirectional sampling (server requests LLM completion from client)
@@ -196,6 +201,7 @@ Despite "experimental" labeling, the implementation is functionally complete:
 ### 5.2 Stability Risks
 
 The SDK explicitly warns at every level:
+
 - "APIs may change without notice"
 - "Draft specifications still being refined"
 - SDK is described as v2 pre-alpha
@@ -209,6 +215,7 @@ CLI ◄──MCP poll── Orchestrator ◄──A2A GetTask────── 
 ```
 
 Works cleanly for single-agent delegation. Gets complex for multi-agent teams:
+
 - Orchestrator maps N A2A tasks to 1 MCP task (status aggregation undefined)
 - Concurrent elicitation from multiple agents serializes through MCP's
   sequential elicitation

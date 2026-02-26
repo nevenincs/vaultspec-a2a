@@ -47,7 +47,23 @@ All commands should use native PWSH syntax and tools.
   `tests/` subdirectory. Only the highest level tests that exercise multiple
   modules are allowed to be placed in the global `tests/` directory.
 
-## CODING WORKFLOW
+## ARCHITECTURAL PATTERNS
+
+- **Independent Sub-modules**: `lib/` sub-modules (API, Core, Database, etc.)
+  must be independent, independently testable, and verifiable.
+- **Facade Pattern**: Sub-modules (e.g., `lib/api/`) must act as facades for
+  their sub-sub-modules. Root `__init__.py` files in these sub-modules must
+  explicitly import and expose public APIs.
+- **Public API Exposure**: All sub-sub-modules must declare `__all__`
+  containing their public, exportable APIs.
+- **Relative Imports**: All internal imports within the `lib/` package must
+  use relative import patterns (e.g., `from . import utils` or
+  `from ..core import Registry`). Absolute imports are strictly reserved for
+  external third-party dependencies.
+- **Import Policy**: Consumers should prefer importing from the sub-module root
+   (e.g., `from lib.core import Registry`) rather than deep-importing from
+   sub-sub-modules. This facilitates refactoring and decouples internal
+   hierarchy from the public interface.
 
 - Every feature implementation must be accompanied by `research`, `ADRs` (to
   articulate reasons) and a `plan`.

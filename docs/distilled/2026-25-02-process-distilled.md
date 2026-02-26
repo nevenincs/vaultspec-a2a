@@ -323,7 +323,11 @@ affects restart policy behavior.
 
 ### G3: OpenTelemetry Integration Timing
 
-Should the orchestrator emit OTel spans from v1 (enabling Langfuse/Jaeger from
-day one) or defer to v2? Emitting from v1 adds a dependency but provides
-immediate debugging value. The monitoring research recommends it; the v1 scope
-doesn't include it.
+**Gap**: When do we integrate OpenTelemetry for tracing agent activity?
+
+**Impact**: Tracing async subprocesses across multiple protocols is highly
+complex. A blind deployment without tracing is a severe risk.
+
+**Resolution**: OpenTelemetry must be integrated in **v1**. The system is
+too distributed and complex (A2A, MCP, WebSockets, Job Objects) to safely
+operate without distributed tracing from day one.

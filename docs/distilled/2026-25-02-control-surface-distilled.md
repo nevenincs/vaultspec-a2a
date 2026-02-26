@@ -127,20 +127,23 @@ multiple chunks (e.g., code fence opens in one chunk, closes many chunks
 later). Traditional parsers (marked, markdown-it) re-parse the entire
 accumulated document on each chunk: O(n²) performance.
 
-### 4.2 Decision: Incremark
+### 4.2 Decision: @humanspeak/svelte-markdown
 
-| Criteria | Incremark | Streamdown |
-|----------|-----------|------------|
-| Performance | O(n) incremental, up to 65x faster | Better than naive, details unclear |
-| Svelte support | Yes (`@incremark/svelte`) | React only |
-| Maturity | Newer, less battle-tested | Vercel-backed, production use |
-| Custom components | Supported | Supported (plugin architecture) |
+> **Superseded**: The initial recommendation of Incremark was overridden during
+> gap analysis (see control-surface-gaps-research.md §1). ADR-005 formalizes
+> `@humanspeak/svelte-markdown` as the binding choice.
 
-**Incremark wins** for our SvelteKit frontend due to native Svelte support and
-O(n) incremental parsing. Key property: once a block is marked complete, it is
-never re-parsed.
+| Criteria | @humanspeak/svelte-markdown | Incremark | Streamdown |
+|----------|-----------------------------|-----------|------------|
+| Performance | O(n) via Intelligent Token Caching | O(n) incremental | Better than naive |
+| Svelte 5 Runes | Native, first-class | Sparse documentation | React only |
+| Parser ecosystem | Full `Marked.js` plugin compat | Custom parser | Custom parser |
+| Maturity | Actively maintained | Experimental, sparse docs | Vercel-backed |
 
-If the project were React-based, Streamdown would be the alternative.
+**@humanspeak/svelte-markdown wins** because it solves the O(n²) problem via
+token caching (caching completed AST blocks, only re-rendering the active tail)
+while retaining full compatibility with the `Marked.js` plugin ecosystem and
+being built natively for Svelte 5 Runes.
 
 ### 4.3 Chrome's Official Best Practices
 
@@ -191,7 +194,7 @@ Agent Backend (A2A protocol)
 Control Surface Frontend
     |
     +-- Agent Message Renderer
-    |     +-- Streaming Markdown (Incremark)
+    |     +-- Streaming Markdown (@humanspeak/svelte-markdown)
     |     +-- Code Blocks (Shiki, lazy-loaded)
     |     +-- Tool Call Components (custom, structured dispatch)
     |     +-- Thinking Block Components (collapsible)
@@ -211,7 +214,7 @@ Control Surface Frontend
 
 Agent events carry typed content. The renderer dispatches based on type:
 
-- `text` → Streaming markdown (Incremark)
+- `text` → Streaming markdown (@humanspeak/svelte-markdown)
 - `tool_result` → Tool call component (terminal-styled, monospace)
 - `code_artifact` → CodeMirror 6 viewer
 - `thinking` → Collapsible thinking panel
@@ -290,7 +293,6 @@ is `svelte-markdown` + `marked.js` with O(n²) performance.
 
 ### G3: Terminal Serialize/Reconnect in Production
 
-The `@xterm/addon-serialize` is still experimental. No production reference
-for using it in a multi-terminal reconnection flow exists. If it proves
-unreliable, the fallback is replaying raw output from the SQLite event log
-(slower, may lose formatting).
+> **Resolved**: The gaps research rejected `@xterm/addon-serialize` entirely.
+> ADR-004 formalizes **Server-Side Replay (Event Sourcing)** using a 2000-line
+> ANSI ring buffer from the SQLite event log to reconstruct terminal state.

@@ -203,7 +203,7 @@ flow.
 | Terminal emulator | xterm.js via xterm-svelte | Universal standard |
 | Code viewer | CodeMirror 6 | 124KB vs Monaco 2MB, read-only, incremental updates |
 | Syntax highlighting | Shiki | VS Code quality, WASM-based |
-| Markdown rendering | Incremark or Streamdown | O(n) streaming, avoids O(n²) re-parse |
+| Markdown rendering | @humanspeak/svelte-markdown | Token caching O(n) streaming, avoids O(n²) re-parse |
 | State store | SQLite via aiosqlite | Zero-config, WAL mode, single-file |
 | Build tool | Vite (via SvelteKit) | Fast, standard |
 | A2A SDK | a2a-python | Official, full protocol support |
@@ -456,6 +456,7 @@ layered later if the API stabilizes.
 ### C6: LangGraph — Leaned Toward but Never Decided
 
 Coding-teams research says "Leaning toward: Vanilla A2A SDK for orchestrator
+
 - LangGraph internally for agents that need stateful reasoning loops." No
 subsequent document confirms or rejects this.
 

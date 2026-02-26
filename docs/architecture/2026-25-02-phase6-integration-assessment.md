@@ -248,7 +248,7 @@ These components have **no protocol support and no library coverage**:
 | Terminal emulator | xterm.js via xterm-svelte | Universal standard, no alternatives |
 | Code viewer | CodeMirror 6 | 124KB vs Monaco's 2MB, read-only mode, incremental updates |
 | Syntax highlighting | Shiki (for code blocks in messages) | VS Code quality, WASM |
-| Markdown rendering | Incremark or Streamdown | O(n) streaming, avoids O(n²) re-parse |
+| Markdown rendering | @humanspeak/svelte-markdown | Token caching O(n) streaming, avoids O(n²) re-parse |
 | State store | SQLite via aiosqlite | Zero-config, WAL mode, single-file |
 | Build tool | Vite (via SvelteKit) | Fast, standard |
 | A2A SDK | a2a-python | Official, full protocol |

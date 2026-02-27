@@ -1,35 +1,46 @@
 <script lang="ts">
+  import type { PermissionRequestEvent } from '$lib/api/types';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
   import { Button } from '$lib/components/ui/button';
-  import type { PermissionRequestEvent } from '$lib/api/types';
 
   let {
-    permission,
+    event,
+    queueLength = 1,
     onrespond,
   }: {
-    permission: PermissionRequestEvent;
+    event: PermissionRequestEvent;
+    queueLength?: number;
     onrespond: (optionId: string) => void;
   } = $props();
 </script>
 
 <AlertDialog.Root open={true}>
-  <AlertDialog.Content>
+  <AlertDialog.Content class="max-w-md">
     <AlertDialog.Header>
       <AlertDialog.Title>Permission Required</AlertDialog.Title>
-      <AlertDialog.Description>{permission.description}</AlertDialog.Description>
+      <AlertDialog.Description>{event.description}</AlertDialog.Description>
     </AlertDialog.Header>
-    {#if permission.tool_call}
-      <p class="text-muted-foreground text-sm">Tool call: {permission.tool_call}</p>
+    {#if event.tool_call}
+      <div class="text-muted-foreground text-sm">Tool: {event.tool_call}</div>
     {/if}
     <AlertDialog.Footer>
-      {#each permission.options as option (option.option_id)}
+      {#each event.options as option (option.option_id)}
         <Button
-          variant={option.kind.startsWith('allow') ? 'default' : 'destructive'}
+          variant={option.kind === 'allow_once'
+            ? 'default'
+            : option.kind === 'reject_once' || option.kind === 'reject_always'
+              ? 'destructive'
+              : 'secondary'}
           onclick={() => onrespond(option.option_id)}
         >
           {option.name}
         </Button>
       {/each}
     </AlertDialog.Footer>
+    {#if queueLength > 1}
+      <div class="text-muted-foreground text-center text-xs">
+        1 of {queueLength} pending
+      </div>
+    {/if}
   </AlertDialog.Content>
 </AlertDialog.Root>

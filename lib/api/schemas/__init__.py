@@ -51,6 +51,8 @@ from .rest import CreateThreadResponse as CreateThreadResponse
 from .rest import PermissionResponseRequest as PermissionResponseRequest
 from .rest import PermissionResponseResult as PermissionResponseResult
 from .rest import SendMessageRequest as SendMessageRequest
+from .rest import TeamPresetSummary as TeamPresetSummary
+from .rest import TeamPresetsResponse as TeamPresetsResponse
 from .rest import TeamStatusResponse as TeamStatusResponse
 from .rest import ThreadListResponse as ThreadListResponse
 from .rest import ThreadSummary as ThreadSummary
@@ -95,6 +97,8 @@ __all__ = [
     "ServerEvent",
     "ServerEventType",
     "SubscribeCommand",
+    "TeamPresetSummary",
+    "TeamPresetsResponse",
     "TeamStatusEvent",
     "TeamStatusResponse",
     "ThoughtChunkEvent",

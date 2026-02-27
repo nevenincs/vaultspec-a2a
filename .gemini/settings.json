@@ -35,6 +35,10 @@
     "uv": {
       "command": "uvx",
       "args": ["mcp-server-uv"]
+    },
+    "context7": {
+      "command": "npx",
+      "args": ["-y", "@upstash/context7-mcp@latest"]
     }
   }
 }

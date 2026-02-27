@@ -19,5 +19,15 @@
       "Bash(git checkout:*)",
       "Bash(pytest:*)"
     ]
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": [
+    "playwright",
+    "svelte",
+    "shadcn-ui",
+    "chrome-devtools",
+    "docs-langchain",
+    "context7",
+    "uv"
+  ]
 }

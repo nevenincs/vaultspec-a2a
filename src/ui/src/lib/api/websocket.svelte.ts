@@ -1,6 +1,6 @@
 // src/ui/src/lib/api/websocket.svelte.ts
 
-import type { ClientMessage, ServerEvent } from './types';
+import type { ClientMessage, ServerEvent, ServerEventType } from './types';
 
 type ConnectionStatus = 'disconnected' | 'connecting' | 'connected';
 type EventHandler = (event: ServerEvent) => void;
@@ -68,7 +68,7 @@ export class WebSocketClient {
    * Register an event handler for a specific event type.
    * Multiple handlers per type are supported.
    */
-  on(type: string, handler: EventHandler): void {
+  on(type: ServerEventType, handler: EventHandler): void {
     const existing = this.#handlers.get(type) ?? [];
     existing.push(handler);
     this.#handlers.set(type, existing);
@@ -77,7 +77,7 @@ export class WebSocketClient {
   /**
    * Remove an event handler.
    */
-  off(type: string, handler: EventHandler): void {
+  off(type: ServerEventType, handler: EventHandler): void {
     const existing = this.#handlers.get(type);
     if (existing) {
       this.#handlers.set(
@@ -92,7 +92,7 @@ export class WebSocketClient {
    * Used for gap detection on reconnect per ADR-011 §2.3.
    */
   getLastSequence(threadId: string): number {
-    return this.#lastSequences.get(threadId) ?? 0;
+    return this.#lastSequences.get(threadId) ?? -1;
   }
 
   /**
@@ -109,7 +109,7 @@ export class WebSocketClient {
    * Check if an event should be discarded (stale after reconnect).
    */
   isStaleEvent(threadId: string, sequence: number): boolean {
-    return sequence <= (this.#lastSequences.get(threadId) ?? 0);
+    return sequence <= (this.#lastSequences.get(threadId) ?? -1);
   }
 
   // --- Private methods ---
@@ -130,12 +130,17 @@ export class WebSocketClient {
       try {
         const event: ServerEvent = JSON.parse(ev.data as string);
 
-        // Track sequence numbers for thread-scoped events
+        // Track and filter thread-scoped events by sequence number
         if ('thread_id' in event && 'sequence' in event) {
-          this.updateSequence(
-            (event as { thread_id: string }).thread_id,
-            (event as { sequence: number }).sequence,
-          );
+          const threadId = (event as unknown as { thread_id: string }).thread_id;
+          const sequence = (event as unknown as { sequence: number }).sequence;
+
+          // Discard stale events on reconnect (ADR-011 §2.3)
+          if (this.isStaleEvent(threadId, sequence)) {
+            return;
+          }
+
+          this.updateSequence(threadId, sequence);
         }
 
         // Dispatch to registered handlers

@@ -11,6 +11,7 @@ Architecture:
   - Supports session/load for session resumption
   - Supports session/cancel notification for interruption
   - Terminates on `stopReason: "end_turn"`
+  - Propagates LangGraph GraphBubbleUp from permission_callback to caller
 """
 
 import asyncio
@@ -18,13 +19,20 @@ import json
 import logging
 import os
 
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from langchain_core.callbacks import AsyncCallbackManagerForLLMRun
-from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.callbacks import (
+    AsyncCallbackManagerForLLMRun,
+    CallbackManagerForLLMRun,
+)
+from langchain_core.language_models.chat_models import (
+    BaseChatModel,
+    generate_from_stream,
+)
 from langchain_core.messages import (
     AIMessageChunk,
     BaseMessage,
@@ -32,10 +40,17 @@ from langchain_core.messages import (
     HumanMessage,
     SystemMessage,
 )
-from langchain_core.language_models.chat_models import generate_from_stream
 from langchain_core.outputs import ChatGenerationChunk, ChatResult
-from pydantic import Field
+from langgraph.errors import GraphBubbleUp
+from pydantic import Field, PrivateAttr
 
+from ..core.team_config import AgentConfig
+from ..utils.enums import AcpRequestId
+from .acp_exceptions import (
+    AcpError,
+    AcpErrorCode,
+    AcpPromptError,
+)
 from .gemini_auth import refresh_gemini_token
 
 
@@ -43,21 +58,33 @@ __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
 
-# Type alias for permission callback.
-# Receives (tool_name, tool_input, options) → selected optionId string.
-# Ref: claude-agent-sdk CanUseTool pattern, adapted for raw ACP.
-PermissionCallback = Callable[
-    [str, dict[str, Any], list[dict[str, Any]]],
-    Awaitable[str],
-]
+
+def _log_task_exception(task: asyncio.Task) -> None:
+    """Log unhandled exceptions from fire-and-forget background RPC tasks."""
+    if not task.cancelled() and (exc := task.exception()):
+        logger.error("Background RPC task failed: %s", exc, exc_info=exc)
+
+
+@dataclass
+class _AcpSessionContext:
+    """Consolidated state for an active ACP session."""
+
+    process: asyncio.subprocess.Process
+    response_futures: dict[int, asyncio.Future]
+    chunk_queue: asyncio.Queue[ChatGenerationChunk | None]
+    prompt_done: asyncio.Event
+    prompt_id_ref: list[int]
+    prompt_error_ref: list[dict]
+    interrupt_exc: list[BaseException]
+    background_tasks: set[asyncio.Task] | None = None
+
+    def __post_init__(self) -> None:
+        if self.background_tasks is None:
+            self.background_tasks = set()
 
 
 class AcpChatModel(BaseChatModel):
-    """A custom LangChain ChatModel that wraps ACP-compatible CLI agents.
-
-    Communicates with ACP CLI agents (like `claude-agent-acp` or
-    `gemini --experimental-acp`) via JSON-RPC over a subprocess stdio pipe.
-    """
+    """A custom LangChain ChatModel that wraps ACP-compatible CLI agents."""
 
     command: list[str] = Field(
         description="The command and arguments to launch the ACP agent."
@@ -68,44 +95,40 @@ class AcpChatModel(BaseChatModel):
     )
     session_id: str | None = Field(
         default=None,
-        description=(
-            "If set, resume an existing session via session/load instead of "
-            "creating a new one via session/new. Ref: acp-python-sdk "
-            "ClientSideConnection.load_session."
-        ),
+        description="If set, resume an existing session via session/load.",
     )
     mcp_servers: list[dict[str, Any]] = Field(
         default_factory=list,
-        description=(
-            "MCP server configs to pass via session/new or session/load. "
-            "Each dict should match the ACP McpServer schema "
-            '(e.g., {"type": "stdio", "command": "mcp-server", "args": []}).'
-        ),
+        description="MCP server configs to pass via session/new or session/load.",
     )
     cwd: str | None = Field(
         default=None,
-        description=(
-            "Working directory for the agent session. Defaults to os.getcwd()."
-        ),
+        description="Working directory for the agent session.",
     )
-    permission_callback: PermissionCallback | None = Field(
+    permission_callback: object = Field(
+        default=None,
+        description="Optional async callback for custom permission handling.",
+        exclude=True,
+    )
+    agent_config: AgentConfig | None = Field(
         default=None,
         description=(
-            "Optional async callback for custom permission handling. "
-            "If None, auto-grants first option (headless mode). "
-            "Signature: async (tool_name, tool_input, options) -> optionId"
+            "Agent configuration driving ACP clientCapabilities flags. "
+            "When None, all capability flags default to False (backward-compat)."
         ),
-        exclude=True,  # Not serializable
+        exclude=True,
     )
 
-    # --- Runtime state (not model fields) ---
-    _process: Any = None
-    _active_session_id: str | None = None
-    _send_rpc: Any = None
-    _send_notification: Any = None
-    _response_futures: dict[int, asyncio.Future] | None = None
+    # --- Runtime state (private, not model fields) ---
+    _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
+    _active_session_id: str | None = PrivateAttr(default=None)
+    _response_futures: dict[int, asyncio.Future] | None = PrivateAttr(default=None)
+    _agent_capabilities: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _auth_methods: list[dict[str, Any]] = PrivateAttr(default_factory=list)
+    _agent_modes: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _tool_calls: dict[str, Any] = PrivateAttr(default_factory=dict)
 
-    def model_post_init(self, __context: Any) -> None:
+    def model_post_init(self, __context: object) -> None:
         """Initialize mutable instance attributes after Pydantic validation."""
         self._agent_capabilities = {}
         self._auth_methods = []
@@ -121,521 +144,141 @@ class AcpChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
         prompt_blocks: list[dict[str, str]] = []
         for msg in messages:
             if isinstance(
-                msg,
-                (HumanMessage, SystemMessage, ChatMessage, AIMessageChunk),
+                msg, (HumanMessage, SystemMessage, ChatMessage, AIMessageChunk)
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
-        # Toad uses get_os_matrix() to get a single command string,
-        # then passes it to create_subprocess_shell. We join our argv list.
         shell_command = " ".join(self.command)
-
         env = os.environ.copy()
         env.update(self.env_vars)
+        env.pop("CLAUDECODE", None)  # Prevent nested session abort
 
-        # claude-agent-acp refuses to start a session when CLAUDECODE is set,
-        # because it detects a nested Claude Code session and aborts.
-        # We are the orchestrator — safe to unset this for our subprocess.
-        env.pop("CLAUDECODE", None)
-
-        # Pre-flight: refresh Gemini OAuth token before spawning the subprocess.
-        # gemini-cli v0.18.0 regression (#13853): expired token causes silent hang
-        # in headless/piped mode because the CLI tries a browser auth flow on stdin.
         if "gemini" in self.command:
             refresh_gemini_token()
 
-        pipe = asyncio.subprocess.PIPE
         process = await asyncio.create_subprocess_shell(
             shell_command,
-            stdin=pipe,
-            stdout=pipe,
-            stderr=pipe,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
             env=env,
-            cwd=str(Path.cwd()),
-            limit=10 * 1024 * 1024,  # Toad line 490: 10MB buffer
+            cwd=self.cwd or str(Path.cwd()),
+            limit=10 * 1024 * 1024,
         )
 
-        assert process.stdin is not None
-        assert process.stdout is not None
+        ctx = _AcpSessionContext(
+            process=process,
+            response_futures={},
+            chunk_queue=asyncio.Queue(),
+            prompt_done=asyncio.Event(),
+            prompt_id_ref=[],
+            prompt_error_ref=[],
+            interrupt_exc=[],
+        )
 
-        request_id = 0
-        response_futures: dict[int, asyncio.Future] = {}
-        _active_session_id: str | None = None
-
-        def send_rpc(method: str, params: dict) -> int:
-            """Send a JSON-RPC request on stdin (Toad line 196)."""
-            nonlocal request_id
-            request_id += 1
-            req = {
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "method": method,
-                "params": params,
-            }
-            body = json.dumps(req).encode("utf-8")
-            process.stdin.write(b"%s\n" % body)  # Toad: stdin.write(b"%s\n" % body)
-            response_futures[request_id] = asyncio.get_running_loop().create_future()
-            logger.debug("ACP TX [%d] → %s", request_id, method)
-            return request_id
-
-        def send_notification(method: str, params: dict) -> None:
-            """Send a JSON-RPC notification (no id, no response expected).
-
-            Used for session/cancel. Ref: acp-python-sdk cancel() method.
-            """
-            notif = {
-                "jsonrpc": "2.0",
-                "method": method,
-                "params": params,
-            }
-            body = json.dumps(notif).encode("utf-8")
-            process.stdin.write(b"%s\n" % body)
-            logger.debug("ACP TX [notif] → %s", method)
-
-        async def read_stderr() -> None:
-            assert process.stderr is not None
-            while line := await process.stderr.readline():
-                text = line.decode("utf-8", errors="replace").rstrip()
-                if text:
-                    logger.debug("ACP STDERR: %s", text)
-
-        stderr_task = asyncio.create_task(read_stderr())
-
-        # We need to yield chunks from _astream, so we use an asyncio.Queue
-        # to bridge between the stdout reader task and the generator.
-        chunk_queue: asyncio.Queue[ChatGenerationChunk | None] = asyncio.Queue()
-        prompt_done = asyncio.Event()
-
-        # Mutable refs so process_stdout (defined before prompt_id is assigned)
-        # can see the prompt request id and surface errors back to the main loop.
-        prompt_id_ref: list[int] = []
-        prompt_error_ref: list[dict] = []
-
-        async def process_stdout() -> None:
-            """Read stdout and dispatch responses/notifications/RPCs."""
-            try:
-                while line := await process.stdout.readline():  # Toad line 513
-                    if not line.strip():
-                        continue
-
-                    try:
-                        line_str = line.decode("utf-8")
-                    except Exception:
-                        continue
-
-                    logger.debug("ACP RX raw: %s", line_str.rstrip())
-
-                    try:
-                        agent_data: dict = json.loads(line_str)
-                    except Exception:
-                        logger.warning("ACP RX non-JSON line: %s", line_str.rstrip())
-                        continue
-
-                    if not isinstance(agent_data, dict):
-                        continue
-
-                    # (A) Response to a client request (Toad line 534)
-                    if "result" in agent_data or "error" in agent_data:
-                        rid = agent_data.get("id")
-                        if rid in response_futures and not response_futures[rid].done():
-                            response_futures[rid].set_result(agent_data)
-
-                        # Check if this is the session/prompt response with stopReason
-                        result = agent_data.get("result", {})
-                        if isinstance(result, dict) and "stopReason" in result:
-                            stop_reason = result["stopReason"]
-                            logger.debug(
-                                "ACP RX [%s] ← response: stopReason=%s", rid, stop_reason
-                            )
-                            prompt_done.set()
-                        elif "error" in agent_data:
-                            err = agent_data["error"]
-                            logger.debug("ACP RX [%s] ← error: %s", rid, err)
-                            if prompt_id_ref and rid == prompt_id_ref[0]:
-                                # session/prompt returned an error (e.g. quota exhausted).
-                                # The agent process may stay alive, so the EOF sentinel
-                                # would never arrive. Surface it immediately.
-                                prompt_error_ref.append(err)
-                                await chunk_queue.put(None)
-                        else:
-                            logger.debug("ACP RX [%s] ← response ok", rid)
-                        continue
-
-                    method = agent_data.get("method", "")
-                    rpc_id = agent_data.get("id")
-                    params = agent_data.get("params", {})
-
-                    # (B) Server-to-client RPC — agent is calling us, expects response
-                    if rpc_id is not None and method:
-                        logger.debug("ACP RX [%s] ← server RPC: %s", rpc_id, method)
-                        await _handle_server_rpc(method, rpc_id, params)
-                        continue
-
-                    # (C) Notification — no id, no response needed
-                    if method == "session/update":
-                        update = params.get("update", {})
-                        update_type = update.get("sessionUpdate", "?")
-                        logger.debug("ACP RX ← notif: session/update type=%s", update_type)
-                        await _handle_session_update(params)
-                    else:
-                        logger.debug("ACP RX ← unhandled notif: %s", method)
-            finally:
-                # Subprocess exited or reader cancelled. Avoid hanging waiters.
-                logger.debug("ACP stdout reader exiting — resolving %d pending futures", len(response_futures))
-                for fut in response_futures.values():
-                    if not fut.done():
-                        fut.set_exception(
-                            RuntimeError("Subprocess stdout closed before response")
-                        )
-
-            # EOF — subprocess exited. If prompt_done was never set the streaming
-            # loop would poll forever. Inject a None sentinel to break it.
-            if not prompt_done.is_set():
-                await chunk_queue.put(None)
-
-        async def _handle_server_rpc(
-            method: str, rpc_id: int | str, params: dict
-        ) -> None:
-            """Handle an inbound RPC from the agent that requires a response.
-
-            Ref: Toad agent.py lines 302-468, acp-python-sdk client/router.py
-            """
-            if method == "session/request_permission":
-                options = params.get("options", [])
-                tool_call_info = params.get("toolCall", {})
-                tool_name = tool_call_info.get("title", "unknown")
-                tool_input = tool_call_info.get("input", {})
-
-                if self.permission_callback is not None:
-                    # Custom permission handling (e.g., LangGraph interrupt)
-                    try:
-                        option_id = await self.permission_callback(
-                            tool_name, tool_input, options
-                        )
-                    except Exception:
-                        logger.exception("Permission callback failed, auto-granting")
-                        option_id = options[0]["optionId"] if options else "allow_once"
-                else:
-                    # Headless orchestrator: auto-grant the first option.
-                    # ACP PermissionOption uses "optionId" (camelCase)
-                    # Ref: toad/acp/protocol.py:338, acp-python-sdk/schema.py
-                    option_id = options[0]["optionId"] if options else "allow_once"
-
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": rpc_id,
-                    "result": {
-                        "outcome": {
-                            "optionId": option_id,
-                            "outcome": "selected",
-                        }
-                    },
-                }
-            else:
-                # Unknown server RPC — return method_not_found per JSON-RPC spec
-                logger.debug("Unknown server RPC: %s", method)
-                response = {
-                    "jsonrpc": "2.0",
-                    "id": rpc_id,
-                    "error": {
-                        "code": -32601,
-                        "message": f"Method not found: {method}",
-                    },
-                }
-
-            body = json.dumps(response).encode("utf-8")
-            process.stdin.write(b"%s\n" % body)
-            await process.stdin.drain()
-
-        async def _handle_session_update(params: dict) -> None:
-            """Handle session/update notification subtypes.
-
-            Ref: Toad agent.py lines 215-300
-            """
-            update = params.get("update", {})
-            update_type = update.get("sessionUpdate")
-
-            # Text content chunks → AIMessageChunk
-            if update_type in ("agent_message_chunk", "agent_thought_chunk"):
-                content = update.get("content", {})
-                text = content.get("text", "")
-                if text:
-                    chunk = ChatGenerationChunk(message=AIMessageChunk(content=text))
-                    await chunk_queue.put(chunk)
-
-            # Tool call start → track + emit ToolCallChunk (Toad line 253)
-            elif update_type == "tool_call":
-                tool_call_id = update.get("toolCallId", "")
-                # Store in tracking dict (Toad line 257)
-                self._tool_calls[tool_call_id] = dict(update)
-                title = update.get("title", "")
-                tool_input = update.get("input")
-                args_str = json.dumps(tool_input) if tool_input else ""
-                chunk = ChatGenerationChunk(
-                    message=AIMessageChunk(
-                        content="",
-                        tool_call_chunks=[
-                            {
-                                "id": tool_call_id,
-                                "name": title,
-                                "args": args_str,
-                                "index": 0,
-                            }
-                        ],
-                    )
-                )
-                await chunk_queue.put(chunk)
-
-            # Tool call update — merge into tracked tool call (Toad line 263)
-            elif update_type == "tool_call_update":
-                tool_call_id = update.get("toolCallId", "")
-                if tool_call_id in self._tool_calls:
-                    # Merge non-None values into existing entry
-                    for key, value in update.items():
-                        if value is not None:
-                            self._tool_calls[tool_call_id][key] = value
-                else:
-                    # Orphan update — agent sent update without tool_call
-                    # (Toad line 277: "rolls eyes")
-                    synthetic: dict[str, Any] = {
-                        "sessionUpdate": "tool_call",
-                        "toolCallId": tool_call_id,
-                        "title": "Tool call",
-                    }
-                    for key, value in update.items():
-                        if value is not None:
-                            synthetic[key] = value
-                    self._tool_calls[tool_call_id] = synthetic
-
-                # Emit status for LangGraph observability
-                status = update.get("status", "")
-                if status:
-                    logger.debug("Tool %s status: %s", tool_call_id, status)
-
-            # Plan steps (Toad line 260: uses "entries")
-            elif update_type == "plan":
-                entries = update.get("entries", [])
-                logger.info("Agent plan: %d entries", len(entries))
-
-            # Available commands (Toad line 291: "availableCommands")
-            elif update_type == "available_commands_update":
-                commands = update.get("availableCommands", [])
-                logger.debug("Available commands updated: %d commands", len(commands))
-
-            # Mode change (Toad line 296: direct "currentModeId")
-            elif update_type == "current_mode_update":
-                mode_id = update.get("currentModeId", "unknown")
-                self._agent_modes["currentModeId"] = mode_id
-                logger.info("Agent mode changed to: %s", mode_id)
-
-            # User message echo — silently ignore
-            elif update_type == "user_message_chunk":
-                pass
-
-            # Rate limit event — log as warning
-            elif update_type == "rate_limit_event":
-                logger.warning("Rate limit event: %s", json.dumps(update))
-
-        stdout_task = asyncio.create_task(process_stdout())
+        stderr_task = asyncio.create_task(self._read_stderr_loop(process))
+        stdout_task = asyncio.create_task(self._process_stdout_loop(ctx))
 
         try:
-            # Step 1: Initialize (Toad acp_initialize, line 635)
-            working_dir = self.cwd or str(Path.cwd())
-            init_id = send_rpc(
-                "initialize",
-                {
-                    "protocolVersion": 1,
-                    "clientCapabilities": {
-                        "fs": {"readTextFile": False, "writeTextFile": False},
-                        "terminal": False,
-                    },
-                    "clientInfo": {"name": "vaultspec", "version": "1.0.0"},
-                },
-            )
-            await process.stdin.drain()
-            init_resp = await asyncio.wait_for(response_futures[init_id], timeout=60)
+            await self._initialize_session(ctx)
+            await self._setup_session(ctx)
+            prompt_future = await self._setup_prompt(prompt_blocks, ctx)
 
-            # Store agent capabilities (Toad line 658)
-            # Critical: Gemini/Claude advertise different capabilities
-            if "error" in init_resp:
-                raise RuntimeError(f"ACP initialize failed: {init_resp['error']}")
-            init_result = init_resp.get("result", {})
-            if agent_caps := init_result.get("agentCapabilities"):
-                self._agent_capabilities = agent_caps
-            if auth_methods := init_result.get("authMethods"):
-                self._auth_methods = auth_methods
-            logger.info(
-                "Agent initialized: caps=%s, auth=%s",
-                self._agent_capabilities,
-                self._auth_methods,
-            )
-            logger.debug("ACP initialize complete: protocolVersion=%s", init_result.get("protocolVersion"))
+            async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
+                yield chunk
+        finally:
+            await self._cleanup_session(ctx, stdout_task, stderr_task)
 
-            # Step 2: Session setup — load existing or create new
-            # Ref: acp-python-sdk ClientSideConnection.load_session / new_session
-            if self.session_id:
-                # Gate on loadSession capability (Toad line 593)
-                if not self._agent_capabilities.get("loadSession", False):
-                    logger.warning(
-                        "Agent does not advertise loadSession capability; "
-                        "falling back to session/new"
-                    )
-                    session_rpc_id = send_rpc(
-                        "session/new",
-                        {"cwd": working_dir, "mcpServers": self.mcp_servers},
-                    )
-                else:
-                    # Resume existing session
-                    session_rpc_id = send_rpc(
-                        "session/load",
-                        {
-                            "cwd": working_dir,
-                            "sessionId": self.session_id,
-                            "mcpServers": self.mcp_servers,
-                        },
-                    )
-            else:
-                # Create new session
-                session_rpc_id = send_rpc(
-                    "session/new",
-                    {
-                        "cwd": working_dir,
-                        "mcpServers": self.mcp_servers,
-                    },
-                )
-            await process.stdin.drain()
-            logger.debug("ACP waiting for session response (timeout=60s)...")
-            session_resp = await asyncio.wait_for(
-                response_futures[session_rpc_id], timeout=60
-            )
-            if "error" in session_resp:
-                raise RuntimeError(f"ACP session setup failed: {session_resp['error']}")
-            _active_session_id = session_resp["result"]["sessionId"]
-            logger.info("ACP session created: %s", _active_session_id)
-
-            # Extract modes from session response (Toad lines 689-698)
-            session_result = session_resp.get("result", {})
-            if modes := session_result.get("modes"):
-                self._agent_modes = {
-                    "currentModeId": modes.get("currentModeId"),
-                    "availableModes": modes.get("availableModes", []),
-                }
-                logger.info(
-                    "Agent modes: current=%s, available=%d",
-                    self._agent_modes["currentModeId"],
-                    len(self._agent_modes["availableModes"]),
-                )
-
-            # Reset tool call tracking
-            self._tool_calls = {}
-
-            # Expose runtime state to public session methods
-            self._process = process
-            self._send_rpc = send_rpc
-            self._send_notification = send_notification
-            self._response_futures = response_futures
-            self._active_session_id = _active_session_id
-
-            # Step 3: Send Prompt (Toad acp_session_prompt, line 728)
-            prompt_id = send_rpc(
-                "session/prompt",
-                {
-                    "sessionId": _active_session_id,
-                    "prompt": prompt_blocks,
-                },
-            )
-            await process.stdin.drain()
-
-            prompt_future = response_futures[prompt_id]
-            # Allow process_stdout to detect prompt errors
-            prompt_id_ref.append(prompt_id)
-            logger.debug("ACP prompt sent: id=%d session=%s", prompt_id, _active_session_id)
-
-            while not prompt_done.is_set():
-                try:
-                    chunk = await asyncio.wait_for(chunk_queue.get(), timeout=0.1)
-                    if chunk is None:
-                        # Sentinel: process exited before end_turn
-                        # Maybe the prompt future has an error?
-                        if prompt_future.done():
-                            resp = prompt_future.result()
-                            if "error" in resp:
-                                err_msg = f"ACP prompt failed: {resp['error']}"
-                                raise RuntimeError(err_msg)
-                        raise RuntimeError(
-                            "ACP subprocess exited before end_turn"
-                        )
-                    if run_manager:
-                        await run_manager.on_llm_new_token(
-                            chunk.message.content, chunk=chunk
-                        )
-                    yield chunk
-                except TimeoutError:
+    async def _yield_chunks(
+        self,
+        ctx: _AcpSessionContext,
+        prompt_future: asyncio.Future,
+        run_manager: AsyncCallbackManagerForLLMRun | None,
+    ) -> AsyncIterator[ChatGenerationChunk]:
+        """Poll the chunk queue and yield results."""
+        while not ctx.prompt_done.is_set():
+            try:
+                chunk = await asyncio.wait_for(ctx.chunk_queue.get(), timeout=0.1)
+                if chunk is None:
+                    if ctx.interrupt_exc:
+                        raise ctx.interrupt_exc[0]
                     if prompt_future.done():
                         resp = prompt_future.result()
                         if "error" in resp:
-                            msg = f"ACP prompt failed: {resp['error']}"
-                            raise RuntimeError(msg) from None
-                    continue
-
-            # Drain any remaining chunks in the queue
-            while not chunk_queue.empty():
-                chunk = chunk_queue.get_nowait()
-                if chunk is not None:
-                    if run_manager:
-                        await run_manager.on_llm_new_token(
-                            chunk.message.content, chunk=chunk
-                        )
-                    yield chunk
-
-        finally:
-            # Send session/cancel as a notification (no id, no response expected).
-            # Ref: Toad api.py line 38 — @API.notification(name="session/cancel")
-            if _active_session_id and not prompt_done.is_set():
-                try:
-                    send_notification(
-                        "session/cancel",
-                        {"sessionId": _active_session_id},
+                            err = resp["error"]
+                            raise AcpPromptError(
+                                f"ACP prompt failed: {err}",
+                                code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
+                                data=err.get("data"),
+                            )
+                    raise AcpError("ACP subprocess exited before end_turn")
+                if run_manager:
+                    await run_manager.on_llm_new_token(
+                        chunk.message.content, chunk=chunk
                     )
-                    await process.stdin.drain()
-                except Exception:
-                    pass  # Best-effort; process may already be dead
+                yield chunk
+            except TimeoutError:
+                if prompt_future.done():
+                    resp = prompt_future.result()
+                    if "error" in resp:
+                        err = resp["error"]
+                        raise AcpPromptError(
+                            f"ACP prompt failed: {err}",
+                            code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
+                            data=err.get("data"),
+                        ) from None
+                continue
 
-            # Cancel reader tasks first so they release the streams
-            stdout_task.cancel()
-            stderr_task.cancel()
+        while not ctx.chunk_queue.empty():
+            chunk = ctx.chunk_queue.get_nowait()
+            if chunk is not None:
+                if run_manager:
+                    await run_manager.on_llm_new_token(
+                        chunk.message.content, chunk=chunk
+                    )
+                yield chunk
 
-            with suppress(OSError):
-                process.terminate()
+    async def _cleanup_session(
+        self,
+        ctx: _AcpSessionContext,
+        stdout_task: asyncio.Task,
+        stderr_task: asyncio.Task,
+    ) -> None:
+        """Terminate subprocess and clean up tasks."""
+        if self._active_session_id and not ctx.prompt_done.is_set():
+            with suppress(Exception):
+                await self._send_notification(
+                    "session/cancel", {"sessionId": self._active_session_id}, ctx
+                )
 
-            # Close the subprocess transport directly to prevent the
-            # Windows ProactorEventLoop __del__ ValueError. The warning
-            # fires when GC finds unclosed pipe transports.
-            if process._transport is not None:
-                process._transport.close()
+        stdout_task.cancel()
+        stderr_task.cancel()
+        with suppress(OSError):
+            ctx.process.terminate()
 
-            # Clear runtime state
-            self._process = None
-            self._send_rpc = None
-            self._send_notification = None
-            self._response_futures = None
-            self._active_session_id = None
-            self._tool_calls = {}
+        transport = getattr(ctx.process, "_transport", None)
+        if transport is not None:
+            transport.close()
+
+        self._process = None
+        self._response_futures = None
+        self._active_session_id = None
+        self._tool_calls = {}
 
     async def _agenerate(
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: object,
     ) -> ChatResult:
-        """Collect _astream chunks into a ChatResult for ainvoke/agenerate callers."""
+        """Collect _astream chunks into a ChatResult."""
         chunks: list[ChatGenerationChunk] = []
         async for chunk in self._astream(
             messages, stop=stop, run_manager=run_manager, **kwargs
@@ -647,120 +290,377 @@ class AcpChatModel(BaseChatModel):
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
-        run_manager: Any | None = None,
-        **kwargs: Any,
+        run_manager: CallbackManagerForLLMRun | None = None,
+        **kwargs: object,
     ) -> ChatResult:
-        """Synchronous generate not supported; orchestration is fully async."""
-        raise NotImplementedError(
-            "AcpChatModel only supports async generation. Use ainvoke or astream."
-        )
+        """Synchronous generate not supported."""
+        raise NotImplementedError("AcpChatModel only supports async.")
 
     @property
-    def _identifying_params(self) -> Mapping[str, Any]:
-        """Get the identifying parameters."""
+    def _identifying_params(self) -> Mapping[str, object]:
         return {"command": self.command}
 
-    # ------------------------------------------------------------------
-    # Outbound session management methods
-    # Ref: acp-python-sdk/src/acp/client/connection.py
-    # ------------------------------------------------------------------
+    def _require_session(self) -> str:
+        if self._process is None or self._active_session_id is None:
+            raise RuntimeError("No active session.")
+        return self._active_session_id
 
-    def _require_session(self) -> tuple[Any, str]:
-        """Validate that a subprocess session is active."""
-        if self._send_rpc is None or self._active_session_id is None:
-            raise RuntimeError(
-                "No active session. These methods require a running "
-                "_astream context (persistent sessions not yet implemented)."
+    async def _read_stderr_loop(self, process: asyncio.subprocess.Process) -> None:
+        assert process.stderr is not None
+        while line := await process.stderr.readline():
+            text = line.decode("utf-8", errors="replace").rstrip()
+            if text:
+                logger.debug("ACP STDERR: %s", text)
+
+    async def _process_stdout_loop(self, ctx: _AcpSessionContext) -> None:
+        try:
+            while line := await ctx.process.stdout.readline():
+                if not line.strip():
+                    continue
+                try:
+                    agent_data = json.loads(line.decode("utf-8"))
+                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    logger.warning(
+                        "ACP stdout: malformed line skipped: %s | raw=%r",
+                        exc,
+                        line[:200],
+                    )
+                    continue
+                if not isinstance(agent_data, dict):
+                    continue
+                await self._dispatch_packet(agent_data, ctx)
+        finally:
+            for fut in ctx.response_futures.values():
+                if not fut.done():
+                    fut.set_exception(RuntimeError("Subprocess closed"))
+            if not ctx.prompt_done.is_set():
+                await ctx.chunk_queue.put(None)
+
+    async def _dispatch_packet(self, data: dict, ctx: _AcpSessionContext) -> None:
+        if "result" in data or "error" in data:
+            await self._handle_client_response(data, ctx)
+            return
+
+        method = data.get("method", "")
+        rpc_id = data.get("id")
+        params = data.get("params", {})
+
+        if rpc_id is not None and method:
+            t = asyncio.create_task(
+                self._handle_server_rpc(method, rpc_id, params, ctx)
             )
-        return self._send_rpc, self._active_session_id
+            ctx.background_tasks.add(t)
+            t.add_done_callback(ctx.background_tasks.discard)
+            t.add_done_callback(_log_task_exception)
+            return
+
+        if method == "session/update":
+            await self._handle_session_update(params, ctx)
+
+    async def _handle_client_response(
+        self, data: dict, ctx: _AcpSessionContext
+    ) -> None:
+        rid = data.get("id")
+        if rid in ctx.response_futures and not ctx.response_futures[rid].done():
+            ctx.response_futures[rid].set_result(data)
+
+        result = data.get("result", {})
+        if isinstance(result, dict) and result.get("stopReason") == "end_turn":
+            ctx.prompt_done.set()
+        elif "error" in data and ctx.prompt_id_ref and rid == ctx.prompt_id_ref[0]:
+            ctx.prompt_error_ref.append(data["error"])
+            await ctx.chunk_queue.put(None)
+
+    async def _handle_server_rpc(
+        self, method: str, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> None:
+        if method == "session/request_permission":
+            resp = await self._on_request_permission(rpc_id, params, ctx)
+        else:
+            resp = {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {"code": -32601, "message": "Not found"},
+            }
+
+        body = json.dumps(resp).encode("utf-8")
+        ctx.process.stdin.write(body + b"\n")
+        await ctx.process.stdin.drain()
+
+    async def _on_request_permission(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle session/request_permission RPC."""
+        options = params.get("options", [])
+        tool_call = params.get("toolCall", {})
+        name = tool_call.get("title", "unknown")
+        args = tool_call.get("input", {})
+
+        if self.permission_callback:
+            try:
+                option_id = await self.permission_callback(name, args, options)
+            except GraphBubbleUp as exc:
+                ctx.interrupt_exc.append(exc)
+                await ctx.chunk_queue.put(None)
+                return {}
+            except Exception:
+                logger.exception(
+                    "Permission callback raised; auto-granting first option"
+                )
+                option_id = options[0]["optionId"] if options else "allow_once"
+        else:
+            option_id = options[0]["optionId"] if options else "allow_once"
+
+        return {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
+        }
+
+    async def _handle_session_update(
+        self, params: dict, ctx: _AcpSessionContext
+    ) -> None:
+        update = params.get("update", {})
+        u_type = update.get("sessionUpdate")
+
+        if u_type in ("agent_message_chunk", "agent_thought_chunk"):
+            text = update.get("content", {}).get("text", "")
+            if text:
+                await ctx.chunk_queue.put(
+                    ChatGenerationChunk(message=AIMessageChunk(content=text))
+                )
+        elif u_type == "tool_call":
+            await self._on_tool_call(update, ctx)
+        elif u_type == "tool_call_update":
+            await self._on_tool_call_update(update, ctx)
+        elif u_type == "current_mode_update":
+            self._agent_modes["currentModeId"] = update.get("currentModeId")
+
+    async def _on_tool_call(self, update: dict, ctx: _AcpSessionContext) -> None:
+        tid = update.get("toolCallId", "")
+        self._tool_calls[tid] = dict(update)
+        chunk = ChatGenerationChunk(
+            message=AIMessageChunk(
+                content="",
+                tool_call_chunks=[
+                    {
+                        "id": tid,
+                        "name": update.get("title", ""),
+                        "args": json.dumps(update.get("input")),
+                        "index": 0,
+                    }
+                ],
+            )
+        )
+        await ctx.chunk_queue.put(chunk)
+
+    async def _on_tool_call_update(self, update: dict, ctx: _AcpSessionContext) -> None:
+        tid = update.get("toolCallId", "")
+        if tid in self._tool_calls:
+            for k, v in update.items():
+                if v is not None:
+                    self._tool_calls[tid][k] = v
+        if status := update.get("status"):
+            logger.debug("Tool %s status: %s", tid, status)
+
+    async def _initialize_session(self, ctx: _AcpSessionContext) -> None:
+        """Send ACP initialize request."""
+        rpc_id = AcpRequestId.INITIALIZE
+        ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": 1,
+                "clientCapabilities": {
+                    "fs": {
+                        "readTextFile": (
+                            self.agent_config.capabilities.filesystem_read
+                            if self.agent_config is not None
+                            else False
+                        ),
+                        "writeTextFile": (
+                            self.agent_config.capabilities.filesystem_write
+                            if self.agent_config is not None
+                            else False
+                        ),
+                    },
+                    "terminal": (
+                        self.agent_config.capabilities.terminal
+                        if self.agent_config is not None
+                        else False
+                    ),
+                },
+                "clientInfo": {"name": "vaultspec", "version": "1.0.0"},
+            },
+        }
+        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await ctx.process.stdin.drain()
+        resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
+        if "error" in resp:
+            raise RuntimeError(f"Init failed: {resp['error']}")
+        res = resp.get("result", {})
+        self._agent_capabilities = res.get("agentCapabilities", {})
+        self._auth_methods = res.get("authMethods", [])
+
+    async def _setup_session(self, ctx: _AcpSessionContext) -> None:
+        """Create or load an ACP session."""
+        working_dir = self.cwd or str(Path.cwd())
+        method = "session/new"
+        params: dict[str, object] = {"cwd": working_dir, "mcpServers": self.mcp_servers}
+        if self.session_id and self._agent_capabilities.get("loadSession"):
+            method = "session/load"
+            params["sessionId"] = self.session_id
+
+        rpc_id = AcpRequestId.SESSION_SETUP
+        ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await ctx.process.stdin.drain()
+        resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
+        if "error" in resp:
+            raise RuntimeError(f"Session failed: {resp['error']}")
+        res = resp["result"]
+        self._active_session_id = res["sessionId"]
+        if modes := res.get("modes"):
+            self._agent_modes = {
+                "currentModeId": modes.get("currentModeId"),
+                "availableModes": modes.get("availableModes", []),
+            }
+        self._tool_calls = {}
+        self._process = ctx.process
+        self._response_futures = ctx.response_futures
+
+    async def _setup_prompt(
+        self, blocks: list[dict], ctx: _AcpSessionContext
+    ) -> asyncio.Future:
+        """Send the initial prompt."""
+        rpc_id = AcpRequestId.SESSION_PROMPT
+        ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/prompt",
+            "params": {"sessionId": self._active_session_id, "prompt": blocks},
+        }
+        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await ctx.process.stdin.drain()
+        ctx.prompt_id_ref.append(rpc_id)
+        return ctx.response_futures[rpc_id]
+
+    async def _send_notification(
+        self, method: str, params: dict, ctx: _AcpSessionContext
+    ) -> None:
+        """Send an ACP notification."""
+        req = {"jsonrpc": "2.0", "method": method, "params": params}
+        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await ctx.process.stdin.drain()
 
     async def fork_session(self) -> str:
-        """Fork the current session into a new independent session.
-
-        Returns the new session_id. The original session remains unchanged.
-        Ref: acp-python-sdk ClientSideConnection.fork_session
-        """
-        send_rpc, session_id = self._require_session()
-        rpc_id = send_rpc(
-            "session/fork",
-            {"sessionId": session_id},
-        )
-        assert self._process is not None
-        await self._process.stdin.drain()
+        """Fork the current session."""
+        sid = self._require_session()
+        rpc_id = AcpRequestId.SESSION_FORK
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/fork",
+            "params": {"sessionId": sid},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=60)
         return resp["result"]["sessionId"]
 
-    async def list_sessions(self) -> list[dict[str, Any]]:
-        """List all available sessions.
-
-        Ref: acp-python-sdk ClientSideConnection (session/list)
-        """
-        send_rpc, _ = self._require_session()
-        rpc_id = send_rpc("session/list", {})
-        assert self._process is not None
-        await self._process.stdin.drain()
+    async def list_sessions(self) -> list[dict[str, object]]:
+        """List all sessions."""
+        self._require_session()
+        rpc_id = AcpRequestId.SESSION_LIST
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/list",
+            "params": {},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp["result"].get("sessions", [])
 
-    async def set_mode(self, mode_id: str) -> dict[str, Any]:
-        """Switch the agent's operating mode.
-
-        Ref: acp-python-sdk (session/set_mode)
-        """
-        send_rpc, session_id = self._require_session()
-        rpc_id = send_rpc(
-            "session/set_mode",
-            {"sessionId": session_id, "modeId": mode_id},
-        )
-        assert self._process is not None
-        await self._process.stdin.drain()
+    async def set_mode(self, mode_id: str) -> dict[str, object]:
+        """Set agent mode."""
+        sid = self._require_session()
+        rpc_id = AcpRequestId.SESSION_SET_MODE
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/set_mode",
+            "params": {"sessionId": sid, "modeId": mode_id},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
-    async def set_model(self, model_id: str) -> dict[str, Any]:
-        """Switch the LLM model mid-session.
-
-        Ref: acp-python-sdk (session/set_model)
-        """
-        send_rpc, session_id = self._require_session()
-        rpc_id = send_rpc(
-            "session/set_model",
-            {"sessionId": session_id, "modelId": model_id},
-        )
-        assert self._process is not None
-        await self._process.stdin.drain()
+    async def set_model(self, model_id: str) -> dict[str, object]:
+        """Set LLM model."""
+        sid = self._require_session()
+        rpc_id = AcpRequestId.SESSION_SET_MODEL
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/set_model",
+            "params": {"sessionId": sid, "modelId": model_id},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
-    async def set_config_option(self, key: str, value: Any) -> dict[str, Any]:
-        """Set a session-level configuration option.
-
-        Ref: acp-python-sdk (session/set_config_option)
-        """
-        send_rpc, session_id = self._require_session()
-        rpc_id = send_rpc(
-            "session/set_config_option",
-            {"sessionId": session_id, "key": key, "value": value},
-        )
-        assert self._process is not None
-        await self._process.stdin.drain()
+    async def set_config_option(self, key: str, value: object) -> dict[str, object]:
+        """Set config option."""
+        sid = self._require_session()
+        rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "session/set_config_option",
+            "params": {"sessionId": sid, "key": key, "value": value},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
-    async def authenticate(self, token: str) -> dict[str, Any]:
-        """Respond to an authentication challenge from the agent.
-
-        Ref: acp-python-sdk (authenticate)
-        """
-        send_rpc, _ = self._require_session()
-        rpc_id = send_rpc("authenticate", {"token": token})
-        assert self._process is not None
-        await self._process.stdin.drain()
+    async def authenticate(self, token: str) -> dict[str, object]:
+        """Authenticate session."""
+        self._require_session()
+        rpc_id = AcpRequestId.AUTHENTICATE
         assert self._response_futures is not None
+        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "authenticate",
+            "params": {"token": token},
+        }
+        assert self._process.stdin is not None
+        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await self._process.stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})

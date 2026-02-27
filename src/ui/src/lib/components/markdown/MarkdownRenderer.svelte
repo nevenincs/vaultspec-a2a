@@ -8,9 +8,13 @@
   } = $props();
 </script>
 
-<!-- Deferred: raw pre during streaming, will use Shiki for syntax highlighting on completion -->
+<!-- Placeholder: will use @humanspeak/svelte-markdown when installed -->
 <div class="prose prose-sm dark:prose-invert max-w-none">
-  <pre class="text-sm whitespace-pre-wrap">{content}{#if streaming}<span
-        class="animate-pulse">|</span
-      >{/if}</pre>
+  <div class="whitespace-pre-wrap">{content}</div>
+  {#if streaming}
+    <span
+      class="bg-foreground ml-0.5 inline-block h-4 w-0.5 animate-pulse"
+      aria-hidden="true"
+    ></span>
+  {/if}
 </div>

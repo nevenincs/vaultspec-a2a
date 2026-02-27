@@ -1,27 +1,17 @@
 <script lang="ts">
+  import type { MessageSnapshot } from '$lib/api/types';
   import * as Card from '$lib/components/ui/card';
-  import { Badge } from '$lib/components/ui/badge';
-  import type { ThreadMessage } from '$lib/stores/agent-state.svelte';
 
-  let { message }: { message: ThreadMessage } = $props();
-
-  let isUser = $derived(message.role === 'user');
-  let isThought = $derived(message.role === 'thought');
+  let { message }: { message: MessageSnapshot } = $props();
 </script>
 
-<div class="flex {isUser ? 'justify-end' : 'justify-start'}">
-  <Card.Root class="max-w-[80%] {isThought ? 'border-dashed opacity-70' : ''}">
-    <Card.Header class="pb-1">
-      <div class="flex items-center gap-2">
-        <Badge variant="secondary" class="text-xs">{message.role}</Badge>
-        <span class="text-muted-foreground text-xs">{message.timestamp}</span>
-        {#if message.finish_reason}
-          <Badge variant="outline" class="text-xs">{message.finish_reason}</Badge>
-        {/if}
-      </div>
-    </Card.Header>
-    <Card.Content>
-      <pre class="text-sm whitespace-pre-wrap">{message.content}</pre>
-    </Card.Content>
-  </Card.Root>
-</div>
+<Card.Root
+  class="mb-3 p-3 {message.role === 'user'
+    ? 'bg-primary text-primary-foreground ml-auto max-w-[80%]'
+    : 'mr-auto max-w-[80%]'}"
+>
+  {#if message.agent_id}
+    <div class="text-muted-foreground mb-1 text-xs">{message.agent_id}</div>
+  {/if}
+  <div class="text-sm whitespace-pre-wrap">{message.content}</div>
+</Card.Root>

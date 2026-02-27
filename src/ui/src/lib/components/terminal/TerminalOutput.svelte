@@ -1,6 +1,4 @@
 <script lang="ts">
-  import * as Card from '$lib/components/ui/card';
-
   let {
     terminalId,
     content = '',
@@ -10,14 +8,8 @@
   } = $props();
 </script>
 
-<Card.Root class="bg-black text-green-400">
-  <Card.Header class="pb-1">
-    <Card.Title class="text-muted-foreground font-mono text-xs">
-      Terminal: {terminalId}
-    </Card.Title>
-  </Card.Header>
-  <Card.Content>
-    <pre class="font-mono text-xs whitespace-pre-wrap">{content ||
-        'Waiting for output...'}</pre>
-  </Card.Content>
-</Card.Root>
+<!-- Placeholder: will use xterm.js when installed -->
+<div class="rounded bg-black p-3 font-mono text-xs text-green-400">
+  <div class="text-muted-foreground mb-1 text-[10px]">Terminal: {terminalId}</div>
+  <pre class="whitespace-pre-wrap">{content}</pre>
+</div>

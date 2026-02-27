@@ -1,3 +1,5 @@
+"""Logging utilities for the VaultSpec A2A project."""
+
 import json
 import logging
 import sys
@@ -15,6 +17,7 @@ class JSONFormatter(logging.Formatter):
     """Formatter that outputs JSON strings for structured logging."""
 
     def format(self, record: logging.LogRecord) -> str:
+        """Format the log record as a single-line JSON string."""
         log_data: dict[str, Any] = {
             "timestamp": self.formatTime(record, self.datefmt),
             "level": record.levelname,
@@ -23,7 +26,7 @@ class JSONFormatter(logging.Formatter):
         }
 
         if record.exc_info is not None:
-            log_data["exception"] = self.formatException(record.exc_info)  # type: ignore[arg-type]
+            log_data["exception"] = self.formatException(record.exc_info)
 
         return json.dumps(log_data)
 
@@ -33,7 +36,7 @@ def setup_logging(
     settings_override: "Settings | None" = None,
 ) -> None:
     """Configure structured JSON logging or rich terminal logging."""
-    from ..core.config import settings as core_settings
+    from ..core.config import settings as core_settings  # noqa: PLC0415
 
     active_settings = settings_override or core_settings
 
@@ -62,7 +65,7 @@ def setup_logging(
 
     log_handler: logging.Handler
     if is_interactive and not disable_color and not ci_mode and not force_json:
-        from rich.logging import RichHandler
+        from rich.logging import RichHandler  # noqa: PLC0415
 
         log_handler = RichHandler(
             level=numeric_level,

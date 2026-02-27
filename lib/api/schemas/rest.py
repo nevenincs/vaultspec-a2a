@@ -10,7 +10,6 @@ from datetime import datetime
 from pydantic import BaseModel
 
 from ...utils.enums import Model, Provider
-
 from .enums import AgentLifecycleState, PermissionOptionKind
 
 
@@ -20,6 +19,8 @@ __all__ = [
     "PermissionResponseRequest",
     "PermissionResponseResult",
     "SendMessageRequest",
+    "TeamPresetSummary",
+    "TeamPresetsResponse",
     "TeamStatusResponse",
     "ThreadListResponse",
     "ThreadSummary",
@@ -31,6 +32,9 @@ class CreateThreadRequest(BaseModel):
 
     title: str | None = None
     initial_message: str
+    # NEW: select a team preset by ID (ADR-013 §6)
+    team_preset: str | None = None
+    # DEPRECATED: kept for backward compat, ignored if team_preset is set
     provider: Provider | None = None
     model: Model | None = None
 
@@ -106,3 +110,19 @@ class PermissionResponseResult(BaseModel):
     request_id: str
     accepted: bool
     thread_id: str
+
+
+class TeamPresetSummary(BaseModel):
+    """Lightweight team preset descriptor for the team picker UI (ADR-013 §6)."""
+
+    id: str
+    display_name: str
+    description: str
+    topology: str
+    worker_count: int
+
+
+class TeamPresetsResponse(BaseModel):
+    """Response for GET /teams: list of available team presets (ADR-013 §6)."""
+
+    presets: list[TeamPresetSummary]

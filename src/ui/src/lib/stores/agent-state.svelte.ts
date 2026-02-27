@@ -8,6 +8,9 @@ import { SvelteMap } from 'svelte/reactivity';
 import {
   ServerEventType,
   type AgentLifecycleState,
+  type ToolKind,
+  type ToolCallStatus,
+  type PermissionSnapshot,
   type ServerEvent,
   type MessageChunkEvent,
   type ThoughtChunkEvent,
@@ -28,7 +31,7 @@ import { assertExhaustive } from '$lib/utils/exhaustive';
 
 export interface ThreadMessage {
   message_id: string;
-  role: 'assistant' | 'user' | 'thought' | string;
+  role: string;
   content: string;
   agent_id: string | null;
   timestamp: string;
@@ -38,8 +41,8 @@ export interface ThreadMessage {
 export interface ThreadToolCall {
   tool_call_id: string;
   title: string;
-  kind: string;
-  status: string;
+  kind: ToolKind;
+  status: ToolCallStatus;
   locations: { path: string; line: number | null }[];
   content: ToolCallStartEvent['content'];
 }
@@ -149,7 +152,7 @@ export class AgentStateStore {
     this.threads.set(threadId, thread);
   }
 
-  restoreFromSnapshot(snapshot: ThreadStateSnapshot): void {
+  restoreFromSnapshot(snapshot: ThreadStateSnapshot): PermissionSnapshot[] {
     const thread = this.getOrCreateThread(snapshot.thread_id);
 
     // Restore messages
@@ -196,10 +199,14 @@ export class AgentStateStore {
     if (snapshot.agents.length > 0) {
       thread.lifecycleState = snapshot.agents[0].state;
       thread.nodeName = snapshot.agents[0].node_name;
+      // detail is not in AgentSnapshot — reset to null
+      thread.detail = null;
     }
 
     // Re-set the map entry to trigger SvelteMap reactivity
     this.threads.set(snapshot.thread_id, thread);
+
+    return snapshot.pending_permissions;
   }
 
   // -----------------------------------------------------------------------
@@ -264,6 +271,9 @@ export class AgentStateStore {
     if (event.status !== null) existing.status = event.status;
     if (event.locations !== null) existing.locations = [...event.locations];
     if (event.content !== null) existing.content = [...event.content];
+
+    // Re-set to trigger SvelteMap reactivity (SvelteMap does not track in-place mutation)
+    thread.toolCalls.set(event.tool_call_id, existing);
   }
 
   #applyArtifactUpdate(thread: ThreadState, event: ArtifactUpdateEvent): void {
@@ -276,6 +286,9 @@ export class AgentStateStore {
       }
       existing.filename = event.filename;
       existing.complete = event.last_chunk;
+
+      // Re-set to trigger SvelteMap reactivity (SvelteMap does not track in-place mutation)
+      thread.artifacts.set(event.artifact_id, existing);
     } else {
       thread.artifacts.set(event.artifact_id, {
         artifact_id: event.artifact_id,

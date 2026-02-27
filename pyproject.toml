@@ -2,7 +2,7 @@
 name = "vaultspec-a2a"
 version = "0.1.0"
 description = "A2A Agent Orchestration Implementation"
-requires-python = ">=3.13,<3.14"
+requires-python = ">=3.13"
 
 dependencies = [
   "PyYAML>=6.0.3",
@@ -24,6 +24,7 @@ dependencies = [
   "pydantic-settings>=2.13.1",
   "pywin32>=311",
   "rich>=14.3.2",
+  "sqlalchemy[asyncio]>=2.0.40",
   "sse-starlette>=3.2.0",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
@@ -40,6 +41,13 @@ dev = [
   "prek>=0.3.2",
   "identify>=2.0.0",
   "nodeenv>=1.0.0",
+]
+telemetry = [
+  # OTel SDK + OTLP gRPC exporter (optional — falls back to no-op without these)
+  "opentelemetry-sdk>=1.39.1",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
+  # FastAPI auto-instrumentation (add to FastAPI lifespan via configure_telemetry)
+  "opentelemetry-instrumentation-fastapi>=0.60b0",
 ]
 
 [dependency-groups]
@@ -65,9 +73,14 @@ allow-direct-references = true
 packages = ["lib"]
 
 [tool.pytest]
-addopts = ["--durations=10", "--showlocals", "-ra"]
+# --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
+# Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
+# replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys"]
 log_cli = true
 log_cli_level = "INFO"
+log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
+log_cli_date_format = "%H:%M:%S"
 norecursedirs = ["knowledge", "node_modules", "ui"]
 strict_xfail = true
 testpaths = ["lib", "tests"]
@@ -107,7 +120,24 @@ select = [
   "YTT",# flake8-boolean-trap (checks for boolean positional arguments, truthiness tests - Google Style §3.10)
   "TD", # flake8-todos (check TODO format - Google Style §3.7)
 ]
+ignore = [
+  "TID251", # Custom banned imports (not used yet)
+  "TID252", # Relative imports from parent modules (Required by ADR-009)
+  "D104",   # Missing docstring in public package (__init__.py)
+]
 unfixable = ["B"]
+
+[tool.ruff.lint.per-file-ignores]
+# emit_permission_request takes 6 positional args by design (thread_id, agent_id,
+# request_id, description, options, tool_call) — collapsing them into a dataclass
+# would require a breaking API change.
+"lib/core/aggregator.py" = ["PLR0913", "PLR0912"]
+
+# process_langgraph_event dispatches 13 LangGraph event kinds inline; extracting
+# sub-handlers would obscure the mapping without reducing actual complexity.
+# git_manager.py: merge_worktree branches over 3 merge strategies + pre-flight
+# checks — each branch is a distinct git operation, not reducible.
+"lib/workspace/git_manager.py" = ["PLR0912"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

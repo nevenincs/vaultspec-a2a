@@ -1,0 +1,15 @@
+[team]
+id           = "solo-coder"
+display_name = "Solo Coder"
+description  = "Single-agent quick fixes. Routes directly to the coder with no planner or reviewer overhead. Suitable for simple, well-scoped tasks."
+
+[team.defaults]
+provider   = "claude"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["coder"]
+
+[[team.workers]]
+agent_id = "coder"

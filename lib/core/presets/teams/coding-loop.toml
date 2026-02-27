@@ -1,0 +1,23 @@
+[team]
+id           = "coding-loop"
+display_name = "Coding Loop Team"
+description  = "Iterative code → review → revise loop with up to 3 cycles. Suitable for tasks requiring quality refinement through repeated review cycles."
+
+[team.defaults]
+provider   = "claude"
+capability = "mid"
+
+[team.topology]
+type      = "pipeline_loop"
+order     = ["planner", "coder", "reviewer"]
+loop_node = "reviewer"
+max_loops = 3
+
+[[team.workers]]
+agent_id = "planner"
+
+[[team.workers]]
+agent_id = "coder"
+
+[[team.workers]]
+agent_id = "reviewer"

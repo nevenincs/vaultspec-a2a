@@ -1,31 +1,19 @@
 <script lang="ts">
+  import type { ArtifactSnapshot } from '$lib/api/types';
   import * as Card from '$lib/components/ui/card';
   import { Badge } from '$lib/components/ui/badge';
 
-  let {
-    filename,
-    content,
-    complete,
-  }: {
-    filename: string;
-    content: string;
-    complete: boolean;
-  } = $props();
+  let { artifact }: { artifact: ArtifactSnapshot } = $props();
 </script>
 
-<Card.Root>
-  <Card.Header class="pb-2">
-    <div class="flex items-center gap-2">
-      <Card.Title class="font-mono text-sm">{filename}</Card.Title>
-      {#if complete}
-        <Badge variant="default" class="text-xs">Complete</Badge>
-      {:else}
-        <Badge variant="outline" class="text-xs">Streaming...</Badge>
-      {/if}
-    </div>
-  </Card.Header>
-  <Card.Content>
-    <pre
-      class="bg-muted max-h-80 overflow-auto rounded p-3 font-mono text-xs">{content}</pre>
-  </Card.Content>
+<Card.Root class="mb-3 p-3">
+  <div class="flex items-center justify-between">
+    <span class="text-sm font-medium">{artifact.filename}</span>
+    <Badge variant={artifact.complete ? 'secondary' : 'default'}>
+      {artifact.complete ? 'complete' : 'streaming...'}
+    </Badge>
+  </div>
+  <pre class="bg-muted mt-2 overflow-x-auto rounded p-2 text-xs"><code
+      >{artifact.content}</code
+    ></pre>
 </Card.Root>

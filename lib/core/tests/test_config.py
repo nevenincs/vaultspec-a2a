@@ -1,3 +1,5 @@
+"""Tests for the core configuration settings."""
+
 from pathlib import Path
 
 import pytest
@@ -7,6 +9,7 @@ from ..config import Settings
 
 
 def test_config_default_values() -> None:
+    """Verify that Settings loads default values correctly."""
     settings = Settings()
     assert settings.environment == Environment.DEVELOPMENT
     assert settings.log_level == LogLevel.INFO
@@ -14,6 +17,7 @@ def test_config_default_values() -> None:
 
 
 def test_config_vaultspec_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Verify that VAULTSPEC_ prefixed environment variables are prioritized."""
     test_path = str(Path("./test_workspace_override").absolute())
     monkeypatch.setenv("VAULTSPEC_ENVIRONMENT", Environment.PRODUCTION.value)
     monkeypatch.setenv("VAULTSPEC_LOG_LEVEL", LogLevel.ERROR.value)
@@ -27,7 +31,11 @@ def test_config_vaultspec_env_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 def test_config_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Test that standard ecosystem names (without VAULTSPEC_ prefix) are picked up via AliasChoices
+    """Verify that standard ecosystem environment variables are picked up via aliases.
+
+    Tests that standard ecosystem names (without VAULTSPEC_ prefix) are picked
+    up via AliasChoices.
+    """
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-anthropic-test")
     monkeypatch.setenv("CI", "true")
     monkeypatch.setenv("NO_COLOR", "1")
@@ -37,8 +45,8 @@ def test_config_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.ci is True
     assert settings.no_color is True
 
-    # Verify that VAULTSPEC_ prefix correctly takes precedence over standard ecosystem names.
-    # This behavior is guaranteed by the order in AliasChoices in lib/core/config.py.
+    # Verify VAULTSPEC_ prefix takes precedence over standard ecosystem names
+    # (guaranteed by AliasChoices order in lib/core/config.py).
     monkeypatch.setenv("VAULTSPEC_ANTHROPIC_API_KEY", "sk-vaultspec-priority")
     monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-standard-ignored")
     monkeypatch.setenv("VAULTSPEC_CI", "false")

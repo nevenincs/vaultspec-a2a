@@ -1,4 +1,6 @@
-from enum import StrEnum
+"""Enums and constants for the vaultspec-a2a library."""
+
+from enum import IntEnum, StrEnum
 
 
 class AgentState(StrEnum):
@@ -40,8 +42,8 @@ class Provider(StrEnum):
 
 
 class Model(StrEnum):
-    """
-    LLM capability levels.
+    """LLM capability levels.
+
     Abstracts specific version strings to reduce maintenance burden.
     """
 
@@ -87,3 +89,17 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.OPENAI: Model.HIGH,
     Provider.ZHIPU: Model.HIGH,
 }
+
+
+class AcpRequestId(IntEnum):
+    """Reserved JSON-RPC identifiers for ACP Control Plane operations."""
+
+    INITIALIZE = 1000
+    SESSION_SETUP = 1001  # Handles session/new and session/load
+    SESSION_PROMPT = 1002
+    AUTHENTICATE = 1003
+    SESSION_FORK = 1004
+    SESSION_LIST = 1005
+    SESSION_SET_MODE = 1006
+    SESSION_SET_MODEL = 1007
+    SESSION_SET_CONFIG_OPTION = 1008

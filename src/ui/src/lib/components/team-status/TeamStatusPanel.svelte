@@ -1,33 +1,28 @@
 <script lang="ts">
-  import * as Card from '$lib/components/ui/card';
-  import { Badge } from '$lib/components/ui/badge';
-  import * as Tooltip from '$lib/components/ui/tooltip';
   import type { AgentSummary } from '$lib/api/types';
 
   let { agents }: { agents: AgentSummary[] } = $props();
 </script>
 
-<div class="space-y-2">
+<div class="space-y-1">
+  <div
+    class="text-muted-foreground mb-2 text-xs font-semibold tracking-wider uppercase"
+  >
+    Team Status
+  </div>
   {#each agents as agent (agent.agent_id)}
-    <Card.Root class="p-3">
-      <div class="flex items-center justify-between">
-        <div class="flex items-center gap-2">
-          <Tooltip.Root>
-            <Tooltip.Trigger>
-              <span class="text-sm font-medium">{agent.node_name}</span>
-            </Tooltip.Trigger>
-            <Tooltip.Content>
-              <p>{agent.agent_id}</p>
-            </Tooltip.Content>
-          </Tooltip.Root>
-        </div>
-        <div class="flex items-center gap-1">
-          <Badge variant="outline" class="text-xs">{agent.state}</Badge>
-          <Badge variant="secondary" class="text-xs">
-            {agent.provider}/{agent.model}
-          </Badge>
-        </div>
-      </div>
-    </Card.Root>
+    <div class="flex items-center gap-2 text-sm">
+      <span
+        class="h-2 w-2 rounded-full {agent.state === 'working'
+          ? 'animate-pulse bg-blue-500'
+          : agent.state === 'idle'
+            ? 'bg-green-500'
+            : agent.state === 'failed'
+              ? 'bg-red-500'
+              : 'bg-gray-400'}"
+      ></span>
+      <span class="flex-1 truncate">{agent.node_name}</span>
+      <span class="text-muted-foreground text-xs">{agent.state}</span>
+    </div>
   {/each}
 </div>

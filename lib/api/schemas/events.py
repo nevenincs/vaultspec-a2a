@@ -11,7 +11,6 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from ...utils.enums import Model, Provider
-
 from .base import EventEnvelope
 from .enums import (
     AgentLifecycleState,

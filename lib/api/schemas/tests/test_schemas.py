@@ -5,12 +5,15 @@ serializes to JSON, and deserializes back to verify Pydantic validation
 and discriminated union dispatch.
 """
 
+from collections.abc import Callable
 from datetime import UTC, datetime
+from typing import Any, TypedDict
 
 import pytest
 
 from pydantic import TypeAdapter
 
+from ....utils.enums import Model, Provider
 from .. import (
     AgentControlAction,
     AgentControlCommand,
@@ -59,13 +62,21 @@ from .. import (
     ToolKind,
     UnsubscribeCommand,
 )
-from ....utils.enums import Model, Provider
 
 
 NOW = datetime.now(tz=UTC)
 
-# Shared envelope kwargs for thread-scoped events
-ENVELOPE = {
+
+class Envelope(TypedDict):
+    """Envelope dictionary for thread-scoped events."""
+
+    thread_id: str
+    agent_id: str
+    timestamp: datetime
+    sequence: int
+
+
+ENVELOPE: Envelope = {
     "thread_id": "thread-1",
     "agent_id": "agent-1",
     "timestamp": NOW,
@@ -299,7 +310,7 @@ class TestServerEventRoundTrip:
         ALL_SERVER_EVENTS,
         ids=[f.__name__.lstrip("_") for f in ALL_SERVER_EVENTS],
     )
-    def test_round_trip(self, factory: object) -> None:
+    def test_round_trip(self, factory: Callable[[], Any]) -> None:
         """Serialize ServerEvent to JSON and deserialize back."""
         event = factory()
         json_bytes = event.model_dump_json()
@@ -312,7 +323,7 @@ class TestServerEventRoundTrip:
         ALL_SERVER_EVENTS,
         ids=[f.__name__.lstrip("_") for f in ALL_SERVER_EVENTS],
     )
-    def test_model_dump_dict(self, factory: object) -> None:
+    def test_model_dump_dict(self, factory: Callable[[], Any]) -> None:
         """Serialize ServerEvent to dict and deserialize back."""
         event = factory()
         data = event.model_dump()
@@ -328,7 +339,7 @@ class TestClientMessageRoundTrip:
         ALL_CLIENT_COMMANDS,
         ids=[f.__name__.lstrip("_") for f in ALL_CLIENT_COMMANDS],
     )
-    def test_round_trip(self, factory: object) -> None:
+    def test_round_trip(self, factory: Callable[[], Any]) -> None:
         """Serialize ClientMessage to JSON and deserialize back."""
         cmd = factory()
         json_bytes = cmd.model_dump_json()

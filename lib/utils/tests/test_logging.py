@@ -1,3 +1,5 @@
+"""Tests for the logging utility."""
+
 import logging
 
 from ...core import Settings

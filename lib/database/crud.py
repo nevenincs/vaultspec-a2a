@@ -1,0 +1,375 @@
+"""Async CRUD operations for the database layer.
+
+Provides typed create/read/update functions for all models.
+All functions accept an ``AsyncSession`` for composability with
+FastAPI's dependency injection.
+
+For create operations, callers construct model instances directly and
+pass them to the ``save_*`` functions. Convenience ``create_*`` functions
+are provided for common cases with fewer parameters.
+
+References:
+    - ADR-007: SQLite persistence
+    - ADR-009: Module hierarchy
+    - ADR-011: Wire contract data models
+"""
+
+from collections.abc import Sequence
+from uuid import uuid4
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
+
+
+__all__ = [
+    "append_cost_record",
+    "append_permission_log",
+    "create_artifact",
+    "create_thread",
+    "get_artifact",
+    "get_artifacts_by_thread",
+    "get_permission_logs_by_thread",
+    "get_thread",
+    "list_threads",
+    "save_model",
+    "sum_cost_by_agent",
+    "sum_cost_by_thread",
+    "update_thread_status",
+]
+
+
+_ModelT = ThreadModel | ArtifactModel | PermissionLogModel | CostTrackingModel
+
+
+async def save_model(session: AsyncSession, model: _ModelT) -> _ModelT:
+    """Persist any database model instance.
+
+    Args:
+        session: Active async session.
+        model: The model instance to persist.
+
+    Returns:
+        The persisted model instance (same object, flushed).
+    """
+    session.add(model)
+    await session.flush()
+    return model
+
+
+# ---------------------------------------------------------------------------
+# Thread CRUD
+# ---------------------------------------------------------------------------
+
+
+async def create_thread(
+    session: AsyncSession,
+    *,
+    title: str | None = None,
+    status: str = "submitted",
+    agent_config: str | None = None,
+    thread_id: str | None = None,
+) -> ThreadModel:
+    """Create a new orchestration thread.
+
+    Args:
+        session: Active async session.
+        title: Optional human-readable thread title.
+        status: Initial status string (default ``"submitted"``).
+        agent_config: JSON-serialised agent configuration.
+        thread_id: Optional explicit ID; auto-generated if omitted.
+
+    Returns:
+        The persisted ``ThreadModel`` instance.
+    """
+    thread = ThreadModel(
+        id=thread_id or uuid4().hex,
+        title=title,
+        status=status,
+        agent_config=agent_config,
+    )
+    return await save_model(session, thread)
+
+
+async def get_thread(
+    session: AsyncSession,
+    thread_id: str,
+) -> ThreadModel | None:
+    """Fetch a thread by its ID.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread's primary key.
+
+    Returns:
+        The ``ThreadModel`` or ``None`` if not found.
+    """
+    return await session.get(ThreadModel, thread_id)
+
+
+async def list_threads(
+    session: AsyncSession,
+    *,
+    offset: int = 0,
+    limit: int = 50,
+) -> tuple[Sequence[ThreadModel], int]:
+    """List threads with pagination.
+
+    Args:
+        session: Active async session.
+        offset: Number of rows to skip.
+        limit: Maximum number of rows to return.
+
+    Returns:
+        A tuple of ``(threads, total_count)``.
+    """
+    count_stmt = select(func.count()).select_from(ThreadModel)
+    total = (await session.execute(count_stmt)).scalar_one()
+
+    stmt = (
+        select(ThreadModel)
+        .order_by(ThreadModel.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all(), total
+
+
+async def update_thread_status(
+    session: AsyncSession,
+    thread_id: str,
+    status: str,
+) -> ThreadModel | None:
+    """Update a thread's status.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread's primary key.
+        status: New status string.
+
+    Returns:
+        The updated ``ThreadModel`` or ``None`` if not found.
+    """
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+    thread.status = status
+    await session.flush()
+    return thread
+
+
+# ---------------------------------------------------------------------------
+# Artifact CRUD
+# ---------------------------------------------------------------------------
+
+
+async def create_artifact(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    artifact_type: str,
+    path: str,
+    artifact_id: str | None = None,
+) -> ArtifactModel:
+    """Create a new file artifact record.
+
+    For additional fields (``content_hash``, ``agent_id``), construct an
+    ``ArtifactModel`` directly and use ``save_model``.
+
+    Args:
+        session: Active async session.
+        thread_id: Parent thread ID.
+        artifact_type: Type classifier (e.g. ``"file"``, ``"diff"``).
+        path: Filesystem path of the artifact.
+        artifact_id: Optional explicit ID; auto-generated if omitted.
+
+    Returns:
+        The persisted ``ArtifactModel`` instance.
+    """
+    artifact = ArtifactModel(
+        id=artifact_id or uuid4().hex,
+        thread_id=thread_id,
+        type=artifact_type,
+        path=path,
+    )
+    return await save_model(session, artifact)
+
+
+async def get_artifact(
+    session: AsyncSession,
+    artifact_id: str,
+) -> ArtifactModel | None:
+    """Fetch an artifact by its ID.
+
+    Args:
+        session: Active async session.
+        artifact_id: The artifact's primary key.
+
+    Returns:
+        The ``ArtifactModel`` or ``None`` if not found.
+    """
+    return await session.get(ArtifactModel, artifact_id)
+
+
+async def get_artifacts_by_thread(
+    session: AsyncSession,
+    thread_id: str,
+) -> Sequence[ArtifactModel]:
+    """Fetch all artifacts belonging to a thread.
+
+    Args:
+        session: Active async session.
+        thread_id: The parent thread ID.
+
+    Returns:
+        A sequence of ``ArtifactModel`` instances.
+    """
+    stmt = (
+        select(ArtifactModel)
+        .where(ArtifactModel.thread_id == thread_id)
+        .order_by(ArtifactModel.created_at)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Permission Log CRUD
+# ---------------------------------------------------------------------------
+
+
+async def append_permission_log(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    agent_id: str,
+    tool_name: str,
+    action: str,
+) -> PermissionLogModel:
+    """Append a permission decision to the audit log.
+
+    For additional fields (``option_id``), construct a
+    ``PermissionLogModel`` directly and use ``save_model``.
+
+    Args:
+        session: Active async session.
+        thread_id: Parent thread ID.
+        agent_id: ID of the agent that requested permission.
+        tool_name: Name of the tool requiring permission.
+        action: The action taken (e.g. ``"allow_once"``).
+
+    Returns:
+        The persisted ``PermissionLogModel`` instance.
+    """
+    log_entry = PermissionLogModel(
+        id=uuid4().hex,
+        thread_id=thread_id,
+        agent_id=agent_id,
+        tool_name=tool_name,
+        action=action,
+    )
+    return await save_model(session, log_entry)
+
+
+async def get_permission_logs_by_thread(
+    session: AsyncSession,
+    thread_id: str,
+) -> Sequence[PermissionLogModel]:
+    """Fetch all permission log entries for a thread.
+
+    Args:
+        session: Active async session.
+        thread_id: The parent thread ID.
+
+    Returns:
+        A sequence of ``PermissionLogModel`` instances ordered by response time.
+    """
+    stmt = (
+        select(PermissionLogModel)
+        .where(PermissionLogModel.thread_id == thread_id)
+        .order_by(PermissionLogModel.responded_at)
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
+
+
+# ---------------------------------------------------------------------------
+# Cost Tracking CRUD
+# ---------------------------------------------------------------------------
+
+
+async def append_cost_record(
+    session: AsyncSession,
+    record: CostTrackingModel,
+) -> CostTrackingModel:
+    """Persist a cost tracking record for an LLM invocation.
+
+    Callers construct a ``CostTrackingModel`` with all fields and pass
+    it here for persistence.
+
+    Args:
+        session: Active async session.
+        record: The cost tracking model instance to persist.
+
+    Returns:
+        The persisted ``CostTrackingModel`` instance.
+    """
+    return await save_model(session, record)
+
+
+async def sum_cost_by_thread(
+    session: AsyncSession,
+    thread_id: str,
+) -> dict[str, int | float]:
+    """Sum token usage and cost for an entire thread.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread to aggregate.
+
+    Returns:
+        A dict with ``input_tokens``, ``output_tokens``, and
+        ``estimated_cost`` totals.
+    """
+    stmt = select(
+        func.coalesce(func.sum(CostTrackingModel.input_tokens), 0),
+        func.coalesce(func.sum(CostTrackingModel.output_tokens), 0),
+        func.coalesce(func.sum(CostTrackingModel.estimated_cost), 0.0),
+    ).where(CostTrackingModel.thread_id == thread_id)
+
+    row = (await session.execute(stmt)).one()
+    return {
+        "input_tokens": row[0],
+        "output_tokens": row[1],
+        "estimated_cost": row[2],
+    }
+
+
+async def sum_cost_by_agent(
+    session: AsyncSession,
+    agent_id: str,
+) -> dict[str, int | float]:
+    """Sum token usage and cost for a specific agent across all threads.
+
+    Args:
+        session: Active async session.
+        agent_id: The agent to aggregate.
+
+    Returns:
+        A dict with ``input_tokens``, ``output_tokens``, and
+        ``estimated_cost`` totals.
+    """
+    stmt = select(
+        func.coalesce(func.sum(CostTrackingModel.input_tokens), 0),
+        func.coalesce(func.sum(CostTrackingModel.output_tokens), 0),
+        func.coalesce(func.sum(CostTrackingModel.estimated_cost), 0.0),
+    ).where(CostTrackingModel.agent_id == agent_id)
+
+    row = (await session.execute(stmt)).one()
+    return {
+        "input_tokens": row[0],
+        "output_tokens": row[1],
+        "estimated_cost": row[2],
+    }

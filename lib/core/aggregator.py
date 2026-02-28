@@ -43,6 +43,13 @@ from ..telemetry.instrumentation import get_meter, get_tracer
 from .exceptions import EventAggregatorError
 
 
+# M6: import GraphInterrupt for isinstance check instead of string class name comparison.
+try:
+    from langgraph.errors import GraphInterrupt as _GraphInterrupt
+except ImportError:
+    _GraphInterrupt = None  # type: ignore[assignment,misc]
+
+
 logger = logging.getLogger(__name__)
 
 
@@ -422,7 +429,18 @@ class EventAggregator:
                             )
                         except asyncio.QueueEmpty:
                             pass
-                    queue.put_nowait(event)
+                    # H2: guard put_nowait against QueueFull in case the queue
+                    # is still full after the drop-oldest attempt (race condition
+                    # or concurrent producers).  Log and skip rather than crash.
+                    try:
+                        queue.put_nowait(event)
+                    except asyncio.QueueFull:
+                        logger.warning(
+                            "Event dropped for client %s — queue still full after "
+                            "drop-oldest (concurrent producer race)",
+                            client_id,
+                        )
+                        continue
                     delivered += 1
             _events_emitted_counter.add(1, {"event.type": str(event_type)})
 
@@ -1066,6 +1084,9 @@ class EventAggregator:
         """
         start = time.monotonic()
         cancel_event = self._get_cancel_event(thread_id)
+        # H4: track whether an interrupt occurred so _emit_interrupt_events is
+        # only called when needed (avoids aget_state I/O on normal completion).
+        _is_interrupt = False
         with _tracer.start_as_current_span(
             "aggregator.ingest",
             attributes={"thread_id": thread_id, "agent_id": agent_id},
@@ -1093,11 +1114,16 @@ class EventAggregator:
                         agent_id=agent_id,
                     )
             except BaseException as exc:
+                # M6: use isinstance for GraphInterrupt detection instead of
+                # string class name comparison (robust across LangGraph versions).
                 # C1 fix: GraphInterrupt (BaseException subclass) signals a
                 # legitimate graph suspension for human-in-the-loop approval.
                 # Do NOT emit a spurious INGEST_ERROR — let the finally block
                 # call _emit_interrupt_events to surface the permission request.
-                if exc.__class__.__name__ == "GraphInterrupt":
+                _is_interrupt = (
+                    _GraphInterrupt is not None and isinstance(exc, _GraphInterrupt)
+                ) or exc.__class__.__name__ == "GraphInterrupt"
+                if _is_interrupt:
                     logger.info(
                         "Graph interrupted for thread %s (awaiting approval)",
                         thread_id,
@@ -1119,7 +1145,12 @@ class EventAggregator:
                 # Clean up cancel event and flush remaining chunks
                 self._clear_cancel_event(thread_id)
                 await self._flush_chunk_buffer(thread_id)
-                await self._emit_interrupt_events(thread_id, agent_id, graph, config)
+                # H4: only call _emit_interrupt_events when an actual interrupt
+                # occurred — skips the aget_state I/O on normal completion.
+                if _is_interrupt:
+                    await self._emit_interrupt_events(
+                        thread_id, agent_id, graph, config
+                    )
                 _ingest_duration_histogram.record(
                     time.monotonic() - start,
                     {"thread_id": thread_id},
@@ -1144,9 +1175,12 @@ class EventAggregator:
             await asyncio.gather(*self._fanout_tasks.values(), return_exceptions=True)
         self._fanout_tasks.clear()
 
-        # Cancel chunk flush tasks
-        for task in self._chunk_flush_tasks.values():
+        # Cancel chunk flush tasks and await them to ensure clean shutdown (M7).
+        chunk_flush_tasks = list(self._chunk_flush_tasks.values())
+        for task in chunk_flush_tasks:
             task.cancel()
+        if chunk_flush_tasks:
+            await asyncio.gather(*chunk_flush_tasks, return_exceptions=True)
         self._chunk_flush_tasks.clear()
 
         self._subscribers.clear()

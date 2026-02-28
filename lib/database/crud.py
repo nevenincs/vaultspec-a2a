@@ -15,6 +15,7 @@ References:
 """
 
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from enum import StrEnum
 from uuid import uuid4
 
@@ -22,9 +23,12 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# M19: database → core is the normal dependency direction (not circular).
+# M19/DB-M1: database → core is the normal dependency direction (not circular).
 # NicknameConflictError is a domain exception that belongs in core; database
 # raises it when detecting UNIQUE constraint violations on nickname.
+# NOTE (DB-M1): This cross-module import (lib/database → lib/core) is intentional
+# and follows the layered dependency direction prescribed by ADR-009. Moving this
+# exception into lib/database would create an orphan with no semantic home.
 from ..core.exceptions import NicknameConflictError
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
 
@@ -55,6 +59,7 @@ __all__ = [
     "save_model",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
+    "update_thread_metadata",
     "update_thread_status",
 ]
 
@@ -199,6 +204,35 @@ async def update_thread_status(
     if thread is None:
         return None
     thread.status = status
+    # DB-H2: onupdate=_utcnow only fires at the DB level; the in-memory object
+    # has a stale updated_at after flush when expire_on_commit=False.  Set it
+    # explicitly so callers always receive the current timestamp.
+    thread.updated_at = datetime.now(UTC)
+    await session.flush()
+    return thread
+
+
+async def update_thread_metadata(
+    session: AsyncSession,
+    thread_id: str,
+    metadata: str | None,
+) -> ThreadModel | None:
+    """Update a thread's serialised metadata JSON.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread's primary key.
+        metadata: New metadata JSON string (ADR-014), or ``None`` to clear.
+
+    Returns:
+        The updated ``ThreadModel`` or ``None`` if not found.
+    """
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+    thread.thread_metadata = metadata
+    # DB-H2: keep updated_at consistent — set explicitly to avoid stale value.
+    thread.updated_at = datetime.now(UTC)
     await session.flush()
     return thread
 

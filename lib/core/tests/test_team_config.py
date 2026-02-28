@@ -479,3 +479,59 @@ class TestTomlDecodeErrors:
         with pytest.raises(ConfigError) as exc_info:
             AgentConfig.from_toml(bad_file)
         assert isinstance(exc_info.value.__cause__, tomllib.TOMLDecodeError)
+
+
+# ---------------------------------------------------------------------------
+# load_agent_config: agent_id validation (CORE-H5)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadAgentConfigValidation:
+    """Verify agent_id is validated before path construction (CORE-H5)."""
+
+    def test_path_traversal_agent_id_raises(self) -> None:
+        """agent_id containing '..' raises ConfigError (path traversal prevention)."""
+        with pytest.raises(ConfigError, match="Invalid agent_id"):
+            load_agent_config("../../etc/passwd")
+
+    def test_agent_id_with_slash_raises(self) -> None:
+        """agent_id containing '/' raises ConfigError."""
+        with pytest.raises(ConfigError, match="Invalid agent_id"):
+            load_agent_config("foo/bar")
+
+    def test_agent_id_with_backslash_raises(self) -> None:
+        r"""agent_id containing '\' raises ConfigError."""
+        with pytest.raises(ConfigError, match="Invalid agent_id"):
+            load_agent_config("foo\\bar")
+
+    def test_agent_id_starting_with_digit_raises(self) -> None:
+        """agent_id starting with a digit raises ConfigError."""
+        with pytest.raises(ConfigError, match="Invalid agent_id"):
+            load_agent_config("1agent")
+
+    def test_valid_agent_id_passes_validation(self) -> None:
+        """Valid agent_id passes validation before config discovery."""
+        # "nonexistent_agent" is a valid id format — raises NotFound, not ConfigError
+        with pytest.raises(AgentConfigNotFoundError):
+            load_agent_config("nonexistent_valid_id")
+
+    def test_agent_id_with_hyphens_passes(self) -> None:
+        """agent_id with hyphens (allowed by pattern) passes validation."""
+        # Hyphens are allowed by _SAFE_AGENT_ID_RE — raises NotFound, not ConfigError
+        with pytest.raises(AgentConfigNotFoundError):
+            load_agent_config("valid-agent-id")
+
+    @pytest.mark.parametrize(
+        "agent_id",
+        [
+            "../../etc/passwd",
+            "../secrets",
+            "foo/bar",
+            "1agent",
+            "",
+        ],
+    )
+    def test_unsafe_agent_ids_raise_config_error(self, agent_id: str) -> None:
+        """Unsafe agent_id values raise ConfigError before any filesystem access."""
+        with pytest.raises((ConfigError, AgentConfigNotFoundError)):
+            load_agent_config(agent_id)

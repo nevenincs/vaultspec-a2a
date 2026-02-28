@@ -2,6 +2,18 @@
 
 Tests ProbeResult dataclass properties, _ProbeSession state machine transitions,
 and JSON-RPC message handling. Full subprocess probes are marked @pytest.mark.live.
+
+Policy note on _FakeWriter usage (PROV-L1):
+    The _FakeWriter stubs below are a narrow, deliberate exception to the
+    no-mocks mandate. _ProbeSession.send() and handle_server_rpc() are pure
+    JSON-RPC serialisation/state-machine logic; the only I/O they perform is
+    ``stdin.write()`` + ``stdin.drain()``. Testing these code paths with a
+    real asyncio.StreamWriter would require spawning a real subprocess, which
+    would make these tests live tests (marked @pytest.mark.live). Using a
+    minimal write-buffer stub instead keeps the fast unit-test suite exercising
+    the real state-machine logic without live I/O. If the real asyncio drain
+    behaviour (backpressure, buffer limits) ever becomes relevant, add separate
+    @pytest.mark.live integration tests.
 """
 
 import json

@@ -33,6 +33,7 @@ References:
   https://developers.google.com/identity/protocols/oauth2/native-app
 """
 
+import asyncio
 import json
 import logging
 import os
@@ -72,6 +73,15 @@ def _is_expired(creds: dict) -> bool:
     if expiry_ms is None:
         return True
     return time.time() >= (expiry_ms / 1000.0) - _EXPIRY_BUFFER_S
+
+
+def _fsync_file(path: Path) -> None:
+    """Open a file read-only and fsync it to flush OS write-back cache."""
+    fd = os.open(str(path), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
@@ -133,8 +143,9 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
 
     if response.status_code != _HTTP_OK:
         raise RuntimeError(
-            f"Gemini token refresh failed ({response.status_code}): {response.text}"
-        )
+            f"Gemini token refresh failed (HTTP {response.status_code}). "
+            "Check ~/.gemini/oauth_creds.json or re-authenticate interactively."
+        ) from None
 
     token_data = response.json()
 
@@ -149,12 +160,9 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
     # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
     tmp = creds_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(creds, indent=2), encoding="utf-8")
+    # PROV-L4: fsync via to_thread so blocking syscall doesn't stall event loop.
     # M16: fsync before rename so data is durable even on power failure.
-    fd = os.open(str(tmp), os.O_RDONLY)
-    try:
-        os.fsync(fd)
-    finally:
-        os.close(fd)
+    await asyncio.to_thread(_fsync_file, tmp)
     tmp.replace(creds_path)
 
     logger.info(

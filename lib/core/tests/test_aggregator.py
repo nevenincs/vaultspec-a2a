@@ -7,6 +7,8 @@ from typing import ClassVar, cast
 
 import pytest
 
+from langgraph.errors import GraphInterrupt
+
 from ...api.schemas.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -1034,6 +1036,24 @@ class _FakeGraph:
         return self._state
 
 
+class _FakeGraphWithInterrupt:
+    """Graph stub that raises GraphInterrupt from astream_events."""
+
+    def __init__(self, state: object) -> None:
+        self._state = state
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        # Raise a real GraphInterrupt to test the H4 guard in ingest().
+        # GraphInterrupt takes a tuple of interrupt values.
+        raise GraphInterrupt(())
+        yield  # make it an async generator
+
+    async def aget_state(self, config: object) -> object:
+        return self._state
+
+
 class TestEmitInterruptEvents:
     """Tests for _emit_interrupt_events called via ingest() finally block."""
 
@@ -1042,7 +1062,12 @@ class TestEmitInterruptEvents:
         self, aggregator: EventAggregator
     ) -> None:
         """When graph suspends with a permission_request interrupt, events are
-        emitted."""
+        emitted.
+
+        Uses _FakeGraphWithInterrupt which raises a real GraphInterrupt from
+        astream_events, triggering the H4 guard so _emit_interrupt_events is
+        called and PermissionRequestEvent is emitted.
+        """
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-interrupt"])
 
@@ -1058,7 +1083,7 @@ class TestEmitInterruptEvents:
         state = _FakeState(
             tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
         )
-        graph = _FakeGraph(state)
+        graph = _FakeGraphWithInterrupt(state)
 
         config = {"configurable": {"thread_id": "thread-interrupt"}}
         await aggregator.ingest(
@@ -1130,9 +1155,11 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-empty-interrupts"])
 
-        # Task exists but with no interrupts
+        # Task exists but with no interrupts — uses _FakeGraphWithInterrupt
+        # so _emit_interrupt_events IS called, but no events emitted since
+        # task.interrupts is empty.
         state = _FakeState(tasks=[_FakeTask("coder", [])])
-        graph = _FakeGraph(state)
+        graph = _FakeGraphWithInterrupt(state)
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
         await aggregator.ingest(
@@ -1162,7 +1189,10 @@ class TestEmitInterruptEvents:
         state = _FakeState(
             tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
         )
-        graph = _FakeGraph(state)
+        # Uses _FakeGraphWithInterrupt so GraphInterrupt is raised and
+        # _emit_interrupt_events is triggered, but the payload type is not
+        # "permission_request" so no PermissionRequestEvent should be emitted.
+        graph = _FakeGraphWithInterrupt(state)
 
         config = {"configurable": {"thread_id": "thread-other-interrupt"}}
         await aggregator.ingest(
@@ -1197,7 +1227,8 @@ class TestEmitInterruptEvents:
         state = _FakeState(
             tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
         )
-        graph = _FakeGraph(state)
+        # Uses _FakeGraphWithInterrupt so _emit_interrupt_events is called.
+        graph = _FakeGraphWithInterrupt(state)
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
         await aggregator.ingest(

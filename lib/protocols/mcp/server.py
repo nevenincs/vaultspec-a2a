@@ -39,13 +39,30 @@ logger = logging.getLogger(__name__)
 _MCP_CREATE_TIMEOUT = 30.0  # POST /api/threads (synchronous setup overhead)
 _MCP_QUERY_TIMEOUT = 15.0  # GET /api/threads/{id}/state and POST /api/messages
 
-# M28: derive known presets from the bundled preset TOML files so that adding
-# a new preset file automatically makes it available as an MCP option without
-# requiring a code change here.
+# MCP-M1: _PRESET_TEAMS_DIR uses Path(__file__)-relative navigation to locate
+# preset TOML files in the sibling core/presets/teams/ directory.  This works
+# correctly in development (editable installs) but may require adjustment when
+# the package is distributed as a wheel if the data files are not included in
+# the wheel's source tree.  In that case, use importlib.resources or a
+# settings-based override to locate the preset directory.
 _PRESET_TEAMS_DIR = Path(__file__).parent.parent.parent / "core" / "presets" / "teams"
-_KNOWN_PRESETS: frozenset[str] = frozenset(
+_HARDCODED_PRESETS: frozenset[str] = frozenset(
+    {"coding-star", "coding-pipeline", "coding-loop", "solo-coder"}
+)
+_discovered: frozenset[str] = frozenset(
     p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml")
-) or frozenset({"coding-star", "coding-pipeline", "coding-loop", "solo-coder"})
+)
+# MCP-H2: warn explicitly when falling back to hardcoded presets so that
+# packaged deployments notice missing TOML files rather than silently using
+# a stale list.
+if _discovered:
+    _KNOWN_PRESETS: frozenset[str] = _discovered
+else:
+    logger.warning(
+        "Using hardcoded preset fallback — TOML files not found at %s",
+        _PRESET_TEAMS_DIR,
+    )
+    _KNOWN_PRESETS = _HARDCODED_PRESETS
 
 mcp = FastMCP(
     name="vaultspec-orchestrator",
@@ -56,6 +73,22 @@ mcp = FastMCP(
         "'send_message' to send follow-up input into a running thread."
     ),
 )
+
+
+def _ws_url_from_api_base(api_base_url: str) -> str:
+    """Derive a WebSocket URL from the REST API base URL.
+
+    MCP-M2: Parse the URL once and reuse the parsed components.  Strip any
+    userinfo (credentials) from the netloc before exposing in tool output to
+    prevent credential leakage.
+    """
+    parsed = urlparse(api_base_url)
+    ws_scheme = "wss" if parsed.scheme == "https" else "ws"
+    # Strip credentials (user:password@host → host)
+    netloc_no_creds = parsed.hostname or ""
+    if parsed.port:
+        netloc_no_creds = f"{netloc_no_creds}:{parsed.port}"
+    return f"{ws_scheme}://{netloc_no_creds}/ws"
 
 
 @mcp.tool()
@@ -106,13 +139,21 @@ async def start_thread(
             f"Monitor: {settings.api_base_url}/\n"
             f"Status: GET {settings.api_base_url}/api/threads/{thread_id}/state"
         )
-    except httpx.HTTPStatusError as exc:
-        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
-    except httpx.RequestError as exc:
+    except httpx.ConnectError as exc:
+        # MCP-H1: network-level failure (server not running, DNS error, etc.)
         return (
-            f"Connection error "
-            f"(is the server running at {settings.api_base_url}?): {exc}"
+            f"Network error: could not connect to {settings.api_base_url}. "
+            f"Is the server running? Detail: {exc}"
         )
+    except httpx.TimeoutException as exc:
+        # MCP-H1: request timed out waiting for the server
+        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
+    except httpx.HTTPStatusError as exc:
+        # MCP-H1: server responded with an HTTP error status
+        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
+    except httpx.RequestError as exc:
+        # MCP-H1: other transport-level errors (SSL, proxy, etc.)
+        return f"Connection error (is the server running at {settings.api_base_url}?): {exc}"
 
 
 @mcp.tool()
@@ -129,6 +170,8 @@ async def get_thread_status(thread_id: str) -> str:
     Returns:
         A plain-text status summary suitable for display in an IDE.
     """
+    # MCP-M2: parse URL once and reuse; strip credentials from output.
+    ws_live_url = _ws_url_from_api_base(settings.api_base_url)
     try:
         async with httpx.AsyncClient(timeout=_MCP_QUERY_TIMEOUT) as client:
             resp = await client.get(
@@ -144,15 +187,24 @@ async def get_thread_status(thread_id: str) -> str:
             f"Status: {status}\n"
             f"Messages: {msg_count}\n"
             f"Checkpoint: {checkpoint}\n"
-            # L16/L18: derive ws/wss scheme from API base URL scheme.
-            f"Live: {'wss' if urlparse(settings.api_base_url).scheme == 'https' else 'ws'}"  # noqa: E501
-            f"://{urlparse(settings.api_base_url).netloc}/ws"
+            f"Live: {ws_live_url}"
         )
+    except httpx.ConnectError as exc:
+        # MCP-H1: network-level failure
+        return (
+            f"Network error: could not connect to {settings.api_base_url}. "
+            f"Is the server running? Detail: {exc}"
+        )
+    except httpx.TimeoutException as exc:
+        # MCP-H1: timeout
+        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
     except httpx.HTTPStatusError as exc:
+        # MCP-H1: application-level HTTP error
         if exc.response.status_code == 404:  # noqa: PLR2004
             return f"Thread {thread_id!r} not found."
-        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
+        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:
+        # MCP-H1: other transport errors
         return f"Connection error: {exc}"
 
 
@@ -179,9 +231,20 @@ async def send_message(thread_id: str, message: str) -> str:
             )
             resp.raise_for_status()
         return f"Message delivered to thread {thread_id}."
+    except httpx.ConnectError as exc:
+        # MCP-H1: network-level failure
+        return (
+            f"Network error: could not connect to {settings.api_base_url}. "
+            f"Is the server running? Detail: {exc}"
+        )
+    except httpx.TimeoutException as exc:
+        # MCP-H1: timeout
+        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
     except httpx.HTTPStatusError as exc:
+        # MCP-H1: application-level HTTP error
         if exc.response.status_code == 404:  # noqa: PLR2004
             return f"Thread {thread_id!r} not found."
-        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
+        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:
+        # MCP-H1: other transport errors (SSL, proxy, etc.)
         return f"Connection error: {exc}"

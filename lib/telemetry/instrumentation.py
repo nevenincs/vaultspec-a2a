@@ -45,11 +45,16 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# M32: These module-level env var reads are intentional.  OTel SDK configuration
-# must be determined at import time so that ``get_tracer`` and ``get_meter``
-# callers at module scope (e.g. the aggregator) receive a correctly configured
-# provider.  Changing telemetry config at runtime is explicitly out of scope for
-# this service — operators restart the process to pick up new OTel settings.
+# M32/TEL-M5: These module-level env var reads are intentional.  OTel SDK
+# configuration must be determined at import time so that ``get_tracer`` and
+# ``get_meter`` callers at module scope (e.g. the aggregator) receive a correctly
+# configured provider.  Changing telemetry config at runtime is explicitly out of
+# scope for this service — operators restart the process to pick up new settings.
+#
+# TEL-M5: _SDK_DISABLED (and other constants below) are evaluated once at import
+# time.  Tests that need to vary this behaviour must use subprocess isolation
+# (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
+# than monkeypatching the env var after import — the constant will not re-evaluate.
 _SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
 _SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", "0.1.0")
 _OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")
@@ -118,16 +123,18 @@ class TelemetryConfig:
 
 
 def _check_sdk() -> bool:
-    """Return True if opentelemetry-sdk is importable."""
-    try:
-        import opentelemetry.sdk.trace  # noqa: F401, PLC0415
-    except ImportError:
-        return False
+    """Return True — opentelemetry-sdk is a mandatory dependency (ADR-015)."""
+    import opentelemetry.sdk.trace  # noqa: F401, PLC0415
+
     return True
 
 
 def _check_otlp() -> bool:
-    """Return True if the OTLP gRPC exporter is importable."""
+    """Return True if the OTLP gRPC exporter is importable.
+
+    The OTLP exporter is optional (operators may not run a collector),
+    so we retain the ImportError guard here only for the exporter package.
+    """
     try:
         import opentelemetry.exporter.otlp.proto.grpc.trace_exporter  # noqa: F401, PLC0415
     except ImportError:
@@ -184,21 +191,20 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
 def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
     """Configure the global MeterProvider when SDK is available.
 
+    ADR-015: opentelemetry-sdk is a mandatory dependency — no ImportError guard.
+
     Args:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
     """
-    try:
-        from opentelemetry.sdk.metrics import (  # noqa: PLC0415
-            MeterProvider,
-        )
-        from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415
-            PeriodicExportingMetricReader,
-        )
-        from opentelemetry.sdk.resources import (  # noqa: PLC0415
-            Resource,
-        )
-    except ImportError:
-        return
+    from opentelemetry.sdk.metrics import (  # noqa: PLC0415
+        MeterProvider,
+    )
+    from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415
+        PeriodicExportingMetricReader,
+    )
+    from opentelemetry.sdk.resources import (  # noqa: PLC0415
+        Resource,
+    )
 
     resource = Resource.create(
         {
@@ -273,6 +279,13 @@ def configure_telemetry() -> TelemetryConfig:
             "LangSmith tracing enabled via LANGCHAIN_TRACING_V2 project=%r",
             _LANGSMITH_PROJECT,
         )
+
+    # TEL-H2: opentelemetry-instrumentation-fastapi is declared as a dependency
+    # but FastAPIInstrumentor().instrument() is intentionally NOT called here.
+    # Auto-instrumentation via FastAPIInstrumentor conflicts with our custom
+    # TelemetryMiddleware which already instruments every HTTP request with
+    # W3C traceparent propagation and semantic convention v1.23+ attributes.
+    # Using both would create duplicate spans for every request.
 
     return TelemetryConfig(
         sdk_available=sdk_available,

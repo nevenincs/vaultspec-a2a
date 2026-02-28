@@ -16,6 +16,7 @@ Discovery order for team configs:
     3. Raise TeamConfigNotFoundError
 """
 
+import re
 import tomllib
 
 from enum import StrEnum
@@ -25,6 +26,13 @@ from pydantic import BaseModel, Field, model_validator
 
 from ..utils.enums import Model, Provider
 from .exceptions import AgentConfigNotFoundError, ConfigError, TeamConfigNotFoundError
+
+
+# H5: safe agent_id pattern — alphanumeric, underscores, hyphens only.
+# Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").
+# Must be a valid Python identifier (validated in AgentConfig.validate_id_is_identifier),
+# but this pattern adds an explicit safeguard for use in load_agent_config.
+_SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
 
 
 __all__ = [
@@ -305,6 +313,14 @@ def load_agent_config(
                                    bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
+    # H5: validate agent_id before using it in path construction to prevent
+    # path traversal attacks (e.g. agent_id="../../etc/passwd").
+    if not _SAFE_AGENT_ID_RE.match(agent_id):
+        raise ConfigError(
+            f"Invalid agent_id {agent_id!r}: must match pattern "
+            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}} (alphanumeric, underscores, hyphens)."
+        )
+
     candidates: list[Path] = []
     if workspace_root is not None:
         candidates.append(workspace_root / ".vaultspec" / "agents" / f"{agent_id}.toml")

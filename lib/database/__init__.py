@@ -21,6 +21,7 @@ from .crud import list_threads as list_threads
 from .crud import save_model as save_model
 from .crud import sum_cost_by_agent as sum_cost_by_agent
 from .crud import sum_cost_by_thread as sum_cost_by_thread
+from .crud import update_thread_metadata as update_thread_metadata
 from .crud import update_thread_status as update_thread_status
 from .models import ArtifactModel as ArtifactModel
 from .models import Base as Base
@@ -60,6 +61,7 @@ __all__ = [
     "save_model",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
+    "update_thread_metadata",
     "update_thread_status",
     "verify_wal_mode",
 ]

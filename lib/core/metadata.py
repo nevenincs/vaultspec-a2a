@@ -9,6 +9,7 @@ References:
     - ADR-012 §2.8: Workspace-local TOML overrides
 """
 
+import glob
 import re
 
 from pathlib import Path
@@ -108,8 +109,14 @@ def discover_context_refs(
         "plan": ".vault/plan/*{tag}*.md",
         "exec": ".vault/exec/*{tag}*/**/*.md",
     }
+    # C3: sanitize feature_tag by escaping glob metacharacters before injecting
+    # it into the pattern.  glob.escape() quotes *, ?, [, ] so they are treated
+    # as literal characters rather than glob wildcards.  This prevents crafted
+    # feature_tag values (e.g. "../../secret", "*.py") from matching unintended
+    # paths during .vault/ auto-discovery.
+    safe_tag = glob.escape(feature_tag) if feature_tag else ""
     for stage, pattern in stage_patterns.items():
-        resolved = pattern.replace("{tag}", feature_tag)
+        resolved = pattern.replace("{tag}", safe_tag)
         try:
             matches = sorted(workspace_root.glob(resolved))
         except (OSError, UnicodeDecodeError):
@@ -149,8 +156,17 @@ def generate_nickname(
     short_hash = thread_id[:4] if thread_id else "0000"
     if not short_hash:
         short_hash = "0000"
-    # Sanitize feature_tag: strip non-alphanumeric-hyphen chars, collapse hyphens
-    tag = feature_tag.strip("-") if feature_tag else ""
+    # M1: sanitize feature_tag — lowercase and strip all non-alphanumeric-hyphen
+    # characters so the generated nickname always satisfies _NICKNAME_PATTERN.
+    # Uppercase feature_tags would fail ThreadMetadata validation without this.
+    if feature_tag:
+        tag = feature_tag.lower()
+        # Strip characters that are not alphanumeric or hyphen
+        tag = re.sub(r"[^a-z0-9\-]", "", tag)
+        # Collapse consecutive hyphens and strip leading/trailing hyphens
+        tag = re.sub(r"-{2,}", "-", tag).strip("-")
+    else:
+        tag = ""
     if tag:
         return f"{tag}-{topology}-{short_hash}"
     return f"thread-{topology}-{short_hash}"

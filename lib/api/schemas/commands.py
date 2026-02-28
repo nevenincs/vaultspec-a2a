@@ -49,7 +49,8 @@ class SendMessageCommand(ClientCommand):
 
     type: Literal[ClientCommandType.SEND_MESSAGE] = ClientCommandType.SEND_MESSAGE
     thread_id: str
-    content: str
+    # 64 KB limit prevents memory exhaustion and excessive LLM token consumption
+    content: str = Field(max_length=65536)
     agent_id: str | None = None
 
 

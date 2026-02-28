@@ -204,16 +204,26 @@ class _ProbeSession:
             return True
         return False
 
+    async def send_response(self, response: dict) -> None:
+        """Send a JSON-RPC response (reply to a server-initiated RPC).
+
+        Routes all stdin writes through a single path so that future locking
+        can be added here without touching every call site (PROV-M5).
+        """
+        if self.stdin is None:
+            raise RuntimeError(
+                "send_response() called before process stdin was initialised"
+            )
+        self.stdin.write(f"{json.dumps(response)}\n".encode())
+        await self.stdin.drain()
+
     async def handle_server_rpc(self, rid: int, method: str) -> None:
         resp = {
             "jsonrpc": "2.0",
             "id": rid,
             "error": {"code": -32601, "message": f"Not implemented: {method}"},
         }
-        if self.stdin is None:
-            raise RuntimeError("handle_server_rpc(): stdin not initialised")
-        self.stdin.write(f"{json.dumps(resp)}\n".encode())
-        await self.stdin.drain()
+        await self.send_response(resp)
         logger.debug("ACP RX [%s] <- server RPC %s: rejected", rid, method)
 
     async def run_loop(self) -> None:
@@ -256,7 +266,8 @@ class _ProbeSession:
                 await self.handle_server_rpc(rid, method)
 
     async def read_stderr(self) -> None:
-        assert self.stderr is not None
+        if self.stderr is None:
+            return
         while line := await self.stderr.readline():
             if text := line.decode("utf-8", errors="replace").rstrip():
                 logger.debug("ACP STDERR: %s", text)

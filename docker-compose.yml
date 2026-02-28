@@ -1,0 +1,50 @@
+# Development environment: fixture server + vite dev + Jaeger tracing.
+# Usage: docker compose up --build
+# Frontend: http://localhost:5173 (HMR, proxied to fixture server)
+# Jaeger UI: http://localhost:16686
+
+services:
+  fixture-server:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: python-base
+    command: uv run python src/ui/dev/fixture_server.py
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+      - /app/.venv                # exclude host .venv from mount
+    working_dir: /app
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/threads')"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+      target: node-base
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./src/ui:/app/src/ui
+      - /app/src/ui/node_modules  # exclude host node_modules from mount
+    working_dir: /app/src/ui
+    environment:
+      # Vite proxy target inside Docker network
+      VITE_API_URL: http://fixture-server:8000
+    depends_on:
+      fixture-server:
+        condition: service_healthy
+
+  jaeger:
+    image: jaegertracing/jaeger:latest
+    ports:
+      - "4317:4317"    # OTLP gRPC receiver
+      - "4318:4318"    # OTLP HTTP receiver
+      - "16686:16686"  # Jaeger trace UI

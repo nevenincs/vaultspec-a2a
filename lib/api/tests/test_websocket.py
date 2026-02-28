@@ -249,7 +249,7 @@ class TestSendMessageCommand:
 
     def test_send_message_invokes_handler(self) -> None:
         """SEND_MESSAGE command calls the registered message handler."""
-        app, aggregator, manager = _create_app()
+        app, _aggregator, manager = _create_app()
 
         received: list[tuple[str, str, str | None]] = []
 
@@ -278,11 +278,11 @@ class TestSendMessageCommand:
 
     def test_send_message_without_handler_emits_status(self) -> None:
         """SEND_MESSAGE with no handler emits SUBMITTED agent status."""
-        app, aggregator, manager = _create_app()
+        app, agg, _manager = _create_app()
 
         # Add subscriber so aggregator can route events
-        aggregator.add_subscriber("test-sub")
-        aggregator.subscribe("test-sub", ["thread-emit"])
+        agg.add_subscriber("test-sub")
+        agg.subscribe("test-sub", ["thread-emit"])
 
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
             _connected = ws.receive_json()
@@ -328,7 +328,7 @@ class TestAgentControlCommand:
 
     def test_agent_control_invokes_handler(self) -> None:
         """AGENT_CONTROL command calls the registered control handler."""
-        app, aggregator, manager = _create_app()
+        app, _aggregator, manager = _create_app()
 
         received: list[tuple[str, str, AgentControlAction]] = []
 
@@ -373,7 +373,8 @@ class TestOversizedFrame:
         app, _agg, _mgr = _create_app()
         # Craft a message slightly over the limit (JSON overhead adds bytes)
         oversized_content = "x" * (_MAX_WS_MESSAGE_BYTES + 100)
-        oversized_msg = f'{{"type":"send_message","thread_id":"t1","content":"{oversized_content}"}}'
+        msg_content = '{"type":"send_message","thread_id":"t1","content":"'
+        oversized_msg = msg_content + oversized_content + '"}}'
 
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
             _connected = ws.receive_json()

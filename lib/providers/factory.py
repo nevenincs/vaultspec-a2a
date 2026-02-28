@@ -29,7 +29,7 @@ class ProviderFactory:
         model: "Model | str | None" = None,
         agent_config: AgentConfig | None = None,
         workspace_root: Path | None = None,
-        **kwargs: Any,  # noqa: ANN401
+        **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
 

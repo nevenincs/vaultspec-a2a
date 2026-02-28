@@ -13,12 +13,14 @@ map.  Three topology types are supported (ADR-013 §2.5):
 import functools
 import logging
 
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.graph.state import CompiledStateGraph
 
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
@@ -101,14 +103,14 @@ def _build_supervisor_prompt(
     return base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
 
 
-def compile_team_graph(  # noqa: PLR0913
+def compile_team_graph(
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     checkpointer: AsyncSqliteSaver | None = None,
     supervisor_agent_config: AgentConfig | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
-) -> Any:  # noqa: ANN401
+) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
     Supports three topology types (ADR-013 §2.5):
@@ -187,7 +189,7 @@ def compile_team_graph(  # noqa: PLR0913
     )
 
 
-def _compile_star(  # noqa: PLR0913
+def _compile_star(
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
@@ -378,7 +380,7 @@ def _compile_pipeline(
     builder.add_edge(node_names[-1], END)
 
 
-def _compile_pipeline_loop(  # noqa: PLR0913
+def _compile_pipeline_loop(
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
@@ -476,10 +478,12 @@ def _compile_pipeline_loop(  # noqa: PLR0913
             # LangGraph node identification remains correct.
             _inner = worker_node
 
+            _worker_fn_t = Callable[[TeamState], Awaitable[dict[str, Any]]]
+
             @functools.wraps(_inner)
             async def _loop_node_with_counter(
                 state: TeamState,
-                _inner: Any = _inner,  # noqa: ANN401
+                _inner: _worker_fn_t = _inner,
             ) -> dict[str, Any]:
                 result = await _inner(state)
                 result["loop_count"] = state.get("loop_count", 0) + 1
@@ -506,7 +510,7 @@ def _compile_pipeline_loop(  # noqa: PLR0913
         builder.add_edge(all_sequential[i], all_sequential[i + 1])
 
     loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
-    # L2: max_loops default is 3 (set in TopologyConfig), range 1–100.
+    # L2: max_loops default is 3 (set in TopologyConfig), range 1-100.
     # Enforced in TopologyConfig via Field(ge=1, le=100).
     max_loops = team_config.topology.max_loops
 

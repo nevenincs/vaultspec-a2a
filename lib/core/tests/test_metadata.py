@@ -263,7 +263,7 @@ class TestGenerateNickname:
         assert nick == "authflow-star-a3f2"
 
     def test_feature_tag_all_special_chars_fallback(self) -> None:
-        """feature_tag that reduces to empty after sanitization falls back to 'thread-' (M1)."""
+        """feature_tag empty after sanitisation falls back to 'thread-' (M1)."""
         nick = generate_nickname("!!!", "star", "a3f2bcde")
         assert nick.startswith("thread-star-")
 
@@ -317,7 +317,7 @@ class TestDiscoverContextRefsSecurityEdgeCases:
         assert refs == []
 
     def test_glob_metachar_brackets_not_expanded(self, tmp_path: Path) -> None:
-        """feature_tag with '[a-z]' is treated literally, not as a character class (C3)."""
+        """feature_tag '[a-z]' treated literally, not as character class (C3)."""
         research_dir = tmp_path / ".vault" / "research"
         research_dir.mkdir(parents=True)
         (research_dir / "auth-flow-research.md").write_text("# Research")

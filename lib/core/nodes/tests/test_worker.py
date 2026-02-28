@@ -38,8 +38,16 @@ class _CapturingModel(FakeListChatModel):
         return super()._generate(messages, stop, run_manager, **kwargs)
 
 
-class _AcpLikeModel(FakeListChatModel):
-    """FakeListChatModel with a permission_callback field (mimics AcpChatModel)."""
+class _PermissionCallbackModel(FakeListChatModel):
+    """FakeListChatModel with a permission_callback field for testing wiring logic.
+
+    Policy exception: This test helper extends LangChain's first-party
+    FakeListChatModel with a permission_callback field to match the structural
+    interface of AcpChatModel. The tests in TestPermissionCallbackWiring verify
+    that create_worker_node correctly detects hasattr(model, "permission_callback")
+    and wires the callback via model_copy(). This is pure structural/wiring logic
+    that does not depend on ACP subprocess behaviour.
+    """
 
     permission_callback: Callable[..., Any] | None = Field(default=None)
     captured: list = Field(default_factory=list)
@@ -261,7 +269,7 @@ class TestPermissionCallbackWiring:
     @pytest.mark.asyncio
     async def test_supervised_model_copy_isolates_callback(self) -> None:
         """In supervised mode, the model is copied to avoid shared mutation (H4)."""
-        model = _AcpLikeModel(
+        model = _PermissionCallbackModel(
             responses=["Done."],
             captured=[],
             permission_callback=None,
@@ -296,7 +304,7 @@ class TestPermissionCallbackWiring:
     @pytest.mark.asyncio
     async def test_autonomous_mode_skips_callback_wiring(self) -> None:
         """In autonomous mode, permission_callback is not wired."""
-        model = _AcpLikeModel(
+        model = _PermissionCallbackModel(
             responses=["Done."],
             captured=[],
             permission_callback=None,

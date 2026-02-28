@@ -43,7 +43,7 @@ from ..telemetry.instrumentation import get_meter, get_tracer
 from .exceptions import EventAggregatorError
 
 
-# M6: import GraphInterrupt for isinstance check instead of string class name comparison.
+# M6: import GraphInterrupt for isinstance check vs string comparison.
 try:
     from langgraph.errors import GraphInterrupt as _GraphInterrupt
 except ImportError:
@@ -137,7 +137,7 @@ class _StreamableGraph(Protocol):
         """Yield raw LangGraph event dicts."""
         ...
 
-    async def aget_state(self, config: dict[str, Any]) -> Any:  # noqa: ANN401
+    async def aget_state(self, config: dict[str, Any]) -> object:
         """Return the current checkpointer state snapshot."""
         ...
 

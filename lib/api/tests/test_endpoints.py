@@ -281,7 +281,7 @@ class TestSendMessage:
         graph = compile_team_graph(team_config=team, agent_configs=agent_configs)
 
         registry = GraphRegistry()
-        app, aggregator, _reg, _cp = make_app(session_factory, registry=registry)
+        app, _aggregator, _reg, _cp = make_app(session_factory, registry=registry)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(

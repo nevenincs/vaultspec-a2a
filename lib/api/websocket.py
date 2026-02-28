@@ -153,6 +153,13 @@ class ConnectionManager:
             # H10: cross-cancel so a crash in either task cleans up both.
             # When the writer dies (e.g. broken pipe) the heartbeat should
             # stop too, and vice versa.
+            #
+            # Policy exception (API-H3): asyncio.create_task() is used here
+            # instead of anyio because these tasks must outlive connect().
+            # An anyio.TaskGroup blocks until children complete, which would
+            # prevent returning control to the listen() read loop.  The WS
+            # lifecycle (connect → listen → disconnect) is inherently
+            # asyncio-based via Starlette's WebSocket transport.
             hb_task = asyncio.create_task(self._heartbeat_loop(client_id))
             wr_task = asyncio.create_task(self._writer_loop(client_id, queue))
 
@@ -212,7 +219,11 @@ class ConnectionManager:
         try:
             while True:
                 try:
-                    # M14: receive as text first so we can check the size before parsing
+                    # M14: receive as text first to validate size before parsing.
+                    # Policy exception (API-H4): asyncio.wait_for is used here
+                    # because Starlette's receive_text() returns an asyncio
+                    # coroutine and the anyio equivalent (fail_after) expects
+                    # an async callable, not an awaitable.
                     raw_text = await asyncio.wait_for(
                         websocket.receive_text(),
                         timeout=_DEAD_CLIENT_TIMEOUT,

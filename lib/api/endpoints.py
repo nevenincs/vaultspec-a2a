@@ -20,18 +20,18 @@ import logging
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
 from uuid import uuid4
 
 from anyio.abc import TaskGroup
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.types import Command
+from langgraph.graph.state import CompiledStateGraph
+from langgraph.types import Command, StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.aggregator import EventAggregator
-from ..core.exceptions import NicknameConflictError
+from ..core.exceptions import ConfigError, NicknameConflictError
 from ..core.graph import compile_team_graph
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..core.preamble import build_context_preamble
@@ -43,6 +43,7 @@ from ..core.team_config import (
     load_team_config,
 )
 from ..database.crud import (
+    ThreadStatus,
     create_thread,
     get_thread,
     get_thread_metadata,
@@ -90,7 +91,7 @@ class GraphRegistry:
 
     def __init__(self) -> None:
         """Initialise the registry with empty graph and resume tables."""
-        self._graphs: dict[str, Any] = {}
+        self._graphs: dict[str, CompiledStateGraph] = {}
         # pending LangGraph Command(resume=...) responses keyed by request_id
         self._pending_resumes: dict[str, tuple[str, str]] = {}
         # Tracks threads currently being ingested; prevents concurrent graph
@@ -99,11 +100,11 @@ class GraphRegistry:
         # Lock guards check-then-add on _active_ingests (API-M2)
         self._ingest_lock: asyncio.Lock = asyncio.Lock()
 
-    def register(self, thread_id: str, graph: Any) -> None:  # noqa: ANN401
+    def register(self, thread_id: str, graph: CompiledStateGraph) -> None:
         """Register a compiled graph for *thread_id*."""
         self._graphs[thread_id] = graph
 
-    def get(self, thread_id: str) -> Any | None:  # noqa: ANN401
+    def get(self, thread_id: str) -> CompiledStateGraph | None:
         """Return the compiled graph for *thread_id*, or ``None``."""
         return self._graphs.get(thread_id)
 
@@ -191,21 +192,21 @@ def get_task_group(request: Request) -> TaskGroup:
 
 
 async def get_services(
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
-    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
-    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),  # noqa: B008
-    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    registry: GraphRegistry = Depends(get_graph_registry),
+    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
+    tg: TaskGroup = Depends(get_task_group),
 ) -> tuple[AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, TaskGroup]:
     """Dependency for bundling all required services into a single injection point."""
     return db, aggregator, registry, checkpointer, tg
 
 
 async def get_message_services(
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
-    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
-    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    registry: GraphRegistry = Depends(get_graph_registry),
+    tg: TaskGroup = Depends(get_task_group),
 ) -> tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup]:
     """Dependency for bundling services needed by message endpoints."""
     return db, aggregator, registry, tg
@@ -216,8 +217,109 @@ async def get_message_services(
 # ---------------------------------------------------------------------------
 
 
+def _process_metadata(
+    body: CreateThreadRequest,
+    thread_id: str,
+) -> tuple[Path | None, str | None, str | None]:
+    """Validate and enrich thread metadata (ADR-014).
+
+    Returns (workspace_root, nickname, metadata_json).
+
+    Raises:
+        HTTPException: If ``workspace_root`` is not an existing directory (422).
+    """
+    metadata = body.metadata
+    if metadata is None:
+        return None, None, None
+
+    # API-H6: resolve() prevents symlink traversal attacks
+    ws_root = Path(metadata.workspace_root).resolve()
+    if not ws_root.is_dir():
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "workspace_root is not an existing directory: "
+                f"{metadata.workspace_root!r}"
+            ),
+        )
+
+    # Auto-discover .vault/ documents if feature_tag set and context_refs empty
+    if metadata.feature_tag and not metadata.context_refs:
+        metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
+
+    # Generate nickname if not provided
+    topology = "default"
+    if body.team_preset:
+        try:
+            tc = load_team_config(body.team_preset, workspace_root=ws_root)
+            topology = tc.topology.type
+        except (ConfigError, TeamConfigNotFoundError):
+            pass  # non-critical: fall back to "default" topology for nickname
+    nickname = metadata.nickname or generate_nickname(
+        metadata.feature_tag, topology, thread_id
+    )
+    metadata.nickname = nickname
+
+    return ws_root, nickname, metadata.model_dump_json()
+
+
+def _compile_thread_graph(
+    body: CreateThreadRequest,
+    ws_root: Path | None,
+    checkpointer: AsyncSqliteSaver,
+) -> CompiledStateGraph:
+    """Load team/agent configs and compile the LangGraph graph.
+
+    Raises:
+        HTTPException: If team preset or agent config not found (422).
+    """
+    try:
+        team_config = load_team_config(body.team_preset, workspace_root=ws_root)
+    except TeamConfigNotFoundError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Team preset not found: {body.team_preset!r}",
+        ) from exc
+
+    # Resolve all worker AgentConfigs
+    agent_configs: dict[str, AgentConfig] = {}
+    for worker_ref in team_config.workers:
+        try:
+            agent_configs[worker_ref.agent_id] = load_agent_config(
+                worker_ref.agent_id, workspace_root=ws_root
+            )
+        except AgentConfigNotFoundError as exc:
+            logger.warning(
+                "Agent config not found for %s: %s",
+                worker_ref.agent_id,
+                exc,
+            )
+
+    # Resolve optional supervisor config for star/pipeline_loop topologies
+    supervisor_config: AgentConfig | None = None
+    if team_config.topology.type in ("star", "pipeline_loop"):
+        try:
+            supervisor_config = load_agent_config("supervisor", workspace_root=ws_root)
+        except AgentConfigNotFoundError:
+            logger.debug("No supervisor agent config found; using default prompt")
+
+    return compile_team_graph(
+        team_config=team_config,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_config,
+        workspace_root=ws_root,
+        autonomous=body.autonomous,
+    )
+
+
+# Guard against pipeline_loop topologies with large max_loops values
+# hitting LangGraph's default recursion_limit of 25 (ADR-013 §5).
+_GRAPH_RECURSION_LIMIT = 100
+
+
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
-async def create_thread_endpoint(  # noqa: PLR0915
+async def create_thread_endpoint(
     body: CreateThreadRequest,
     services: tuple[
         AsyncSession,
@@ -243,51 +345,17 @@ async def create_thread_endpoint(  # noqa: PLR0915
     - Threads ``workspace_root`` to config loaders and graph compilation
     """
     db, aggregator, registry, checkpointer, tg = services
-
-    # --- ADR-014: Metadata processing ---
-    metadata = body.metadata
-    ws_root: Path | None = None
-    nickname: str | None = None
-    metadata_json: str | None = None
-
-    # Pre-generate thread ID so we can use it for nickname generation
     thread_id = uuid4().hex
 
-    if metadata is not None:
-        # Validate workspace_root exists
-        ws_root = Path(metadata.workspace_root)
-        if not ws_root.is_dir():
-            raise HTTPException(
-                status_code=422,
-                detail=(
-                    "workspace_root is not an existing directory: "
-                    f"{metadata.workspace_root!r}"
-                ),
-            )
-
-        # Auto-discover .vault/ documents if feature_tag set and context_refs empty
-        if metadata.feature_tag and not metadata.context_refs:
-            metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
-
-        # Generate nickname if not provided
-        topology = "default"
-        if body.team_preset:
-            with contextlib.suppress(Exception):
-                tc = load_team_config(body.team_preset, workspace_root=ws_root)
-                topology = tc.topology.type
-        nickname = metadata.nickname or generate_nickname(
-            metadata.feature_tag, topology, thread_id
-        )
-        metadata.nickname = nickname
-
-        metadata_json = metadata.model_dump_json()
+    # --- ADR-014: Metadata processing ---
+    ws_root, nickname, metadata_json = _process_metadata(body, thread_id)
 
     # Create thread in DB
     try:
         thread = await create_thread(
             db,
             title=body.title,
-            status="submitted",
+            status=ThreadStatus.SUBMITTED,
             metadata=metadata_json,
             nickname=nickname,
             thread_id=thread_id,
@@ -311,67 +379,25 @@ async def create_thread_endpoint(  # noqa: PLR0915
 
     # Compile and register graph if a team preset was requested (ADR-013 §6)
     if body.team_preset:
-        try:
-            team_config = load_team_config(body.team_preset, workspace_root=ws_root)
-        except TeamConfigNotFoundError as exc:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Team preset not found: {body.team_preset!r}",
-            ) from exc
-
-        # Resolve all worker AgentConfigs
-        agent_configs: dict[str, AgentConfig] = {}
-        for worker_ref in team_config.workers:
-            try:
-                agent_configs[worker_ref.agent_id] = load_agent_config(
-                    worker_ref.agent_id, workspace_root=ws_root
-                )
-            except AgentConfigNotFoundError as exc:
-                logger.warning(
-                    "Agent config not found for %s: %s",
-                    worker_ref.agent_id,
-                    exc,
-                )
-
-        # Resolve optional supervisor config for star/pipeline_loop topologies
-        supervisor_config: AgentConfig | None = None
-        if team_config.topology.type in ("star", "pipeline_loop"):
-            try:
-                supervisor_config = load_agent_config(
-                    "supervisor", workspace_root=ws_root
-                )
-            except AgentConfigNotFoundError:
-                logger.debug("No supervisor agent config found; using default prompt")
-
-        graph = compile_team_graph(
-            team_config=team_config,
-            agent_configs=agent_configs,
-            checkpointer=checkpointer,
-            supervisor_agent_config=supervisor_config,
-            workspace_root=ws_root,
-            autonomous=body.autonomous,
-        )
+        graph = _compile_thread_graph(body, ws_root, checkpointer)
         registry.register(thread.id, graph)
         aggregator.register_graph(graph)
         logger.info(
-            "Compiled and registered graph for thread %s (preset=%s, topology=%s)",
+            "Compiled and registered graph for thread %s (preset=%s)",
             thread.id,
             body.team_preset,
-            team_config.topology.type,
         )
 
         # Build graph_input with optional context preamble (ADR-014 §2.3)
         messages: list[SystemMessage | HumanMessage] = []
-        if metadata is not None:
-            messages.append(build_context_preamble(metadata))
+        if body.metadata is not None:
+            messages.append(build_context_preamble(body.metadata))
         messages.append(HumanMessage(content=body.initial_message))
 
         graph_input = {"messages": messages}
         config = {
             "configurable": {"thread_id": thread.id},
-            # Guard against pipeline_loop topologies with large max_loops values
-            # hitting LangGraph's default recursion_limit of 25 (ADR-013 §5).
-            "recursion_limit": 100,
+            "recursion_limit": _GRAPH_RECURSION_LIMIT,
         }
         # API-C2: check return value — if False, a previous ingest is still active
         if not await registry.mark_ingest_active(thread.id):
@@ -410,7 +436,7 @@ async def create_thread_endpoint(  # noqa: PLR0915
 async def list_threads_endpoint(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
 ) -> ThreadListResponse:
     """List orchestration threads with pagination.
 
@@ -426,11 +452,13 @@ async def list_threads_endpoint(
         source_branch: str | None = None
         callee: str | None = None
         if t.thread_metadata:
-            with contextlib.suppress(Exception):
+            try:
                 meta_dict = json.loads(t.thread_metadata)
                 feature_tag = meta_dict.get("feature_tag") or None
                 source_branch = meta_dict.get("source_branch") or None
                 callee = meta_dict.get("callee") or None
+            except (json.JSONDecodeError, TypeError):
+                pass  # graceful fallback for legacy threads with invalid metadata
 
         summaries.append(
             ThreadSummary(
@@ -456,7 +484,7 @@ async def list_threads_endpoint(
 @router.get("/threads/{thread_id}/metadata", response_model=ThreadMetadata)
 async def get_thread_metadata_endpoint(
     thread_id: str,
-    db: AsyncSession = Depends(get_db),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
 ) -> ThreadMetadata:
     """Return the full ThreadMetadata object for a thread.
 
@@ -476,7 +504,7 @@ async def get_thread_metadata_endpoint(
 
 def _enrich_snapshot_from_state(
     snapshot: ThreadStateSnapshot,
-    state: Any,  # noqa: ANN401
+    state: StateSnapshot,
 ) -> ThreadStateSnapshot:
     """Populate snapshot fields from LangGraph checkpointer state.
 
@@ -549,9 +577,9 @@ def _enrich_snapshot_from_state(
 @router.get("/threads/{thread_id}/state", response_model=ThreadStateSnapshot)
 async def get_thread_state_endpoint(
     thread_id: str,
-    db: AsyncSession = Depends(get_db),  # noqa: B008
-    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
-    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    registry: GraphRegistry = Depends(get_graph_registry),
 ) -> ThreadStateSnapshot:
     """Return a complete thread state snapshot for client reconnection.
 
@@ -636,8 +664,8 @@ async def send_message_endpoint(
         len(body.content),
     )
 
-    # Update thread status — DB-C1: "running" is the correct ThreadStatus value
-    await update_thread_status(db, thread_id, "running")
+    # Update thread status — DB-C1: use ThreadStatus enum (DB-HIGH-02)
+    await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await db.commit()
 
     graph = registry.get(thread_id)
@@ -651,7 +679,10 @@ async def send_message_endpoint(
             )
             return SendMessageResponse(status="accepted", thread_id=thread_id)
         graph_input = {"messages": [HumanMessage(content=body.content)]}
-        config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
+        config = {
+            "configurable": {"thread_id": thread_id},
+            "recursion_limit": _GRAPH_RECURSION_LIMIT,
+        }
 
         async def _ingest_and_release_send(
             _tid: str = thread_id,
@@ -684,7 +715,7 @@ async def send_message_endpoint(
 
 @router.get("/team/status", response_model=TeamStatusResponse)
 async def get_team_status_endpoint(
-    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
+    aggregator: EventAggregator = Depends(get_aggregator),
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions.
 
@@ -709,7 +740,8 @@ async def get_team_status_endpoint(
     return TeamStatusResponse(
         agents=agents,
         active_threads=active_threads,
-        # TODO (API-M8): wire pending_permissions from the aggregator when it
+        # TODO(vaultspec): wire pending_permissions from the aggregator when it
+        # https://github.com/vaultspec/vaultspec-a2a/issues/2
         # tracks outstanding permission requests. The aggregator currently does
         # not maintain a queryable set of pending PermissionRequestEvents, so
         # this is always empty. Requires aggregator.get_pending_permissions().
@@ -771,9 +803,9 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
 async def respond_to_permission_endpoint(
     request_id: str,
     body: PermissionResponseRequest,
-    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
-    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
-    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
+    aggregator: EventAggregator = Depends(get_aggregator),
+    registry: GraphRegistry = Depends(get_graph_registry),
+    tg: TaskGroup = Depends(get_task_group),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
 

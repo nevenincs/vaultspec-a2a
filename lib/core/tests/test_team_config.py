@@ -270,15 +270,15 @@ class TestTopologyConfigValidation:
 
     def test_pipeline_loop_valid(self) -> None:
         """Valid pipeline_loop config is accepted."""
-        _EXPECTED_MAX_LOOPS = 5  # noqa: N806
+        expected_max_loops = 5
         topo = TopologyConfig(
             type=TopologyType.PIPELINE_LOOP,
             order=["planner", "coder", "reviewer"],
             loop_node="reviewer",
-            max_loops=_EXPECTED_MAX_LOOPS,
+            max_loops=expected_max_loops,
         )
         assert topo.loop_node == "reviewer"
-        assert topo.max_loops == _EXPECTED_MAX_LOOPS
+        assert topo.max_loops == expected_max_loops
 
     def test_unknown_type_raises(self) -> None:
         """An unsupported topology type raises ValidationError."""
@@ -313,11 +313,11 @@ class TestTeamConfigFromToml:
 
     def test_coding_loop_loop_node(self) -> None:
         """coding-loop has reviewer as the loop_node."""
-        _EXPECTED_MAX_LOOPS = 3  # noqa: N806
+        expected_max_loops = 3
         cfg = load_team_config("coding-loop")
         assert cfg.topology.type == TopologyType.PIPELINE_LOOP
         assert cfg.topology.loop_node == "reviewer"
-        assert cfg.topology.max_loops == _EXPECTED_MAX_LOOPS
+        assert cfg.topology.max_loops == expected_max_loops
 
     def test_solo_coder_single_worker(self) -> None:
         """solo-coder has exactly one worker: the coder."""

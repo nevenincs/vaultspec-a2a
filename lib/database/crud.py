@@ -86,11 +86,23 @@ async def save_model[
 # ---------------------------------------------------------------------------
 
 
-async def create_thread(  # noqa: PLR0913
+def _coerce_status(status: "ThreadStatus | str") -> ThreadStatus:
+    """Coerce a raw string to ``ThreadStatus``, raising ``ValueError`` if invalid."""
+    if isinstance(status, ThreadStatus):
+        return status
+    try:
+        return ThreadStatus(status)
+    except ValueError:
+        valid = ", ".join(s.value for s in ThreadStatus)
+        msg = f"Invalid thread status: {status!r}. Must be one of: {valid}"
+        raise ValueError(msg) from None
+
+
+async def create_thread(
     session: AsyncSession,
     *,
     title: str | None = None,
-    status: str = "submitted",
+    status: "ThreadStatus | str" = ThreadStatus.SUBMITTED,
     metadata: str | None = None,
     nickname: str | None = None,
     thread_id: str | None = None,
@@ -100,7 +112,10 @@ async def create_thread(  # noqa: PLR0913
     Args:
         session: Active async session.
         title: Optional human-readable thread title.
-        status: Initial status string (default ``"submitted"``).
+        status: Initial status (default ``ThreadStatus.SUBMITTED``). Raw strings
+            are accepted for backward compatibility but must be a valid
+            ``ThreadStatus`` value — ``ValueError`` is raised otherwise
+            (DB-HIGH-02).
         metadata: JSON-serialised ThreadMetadata (ADR-014).
         nickname: Optional human-friendly nickname (unique).
         thread_id: Optional explicit ID; auto-generated if omitted.
@@ -110,7 +125,9 @@ async def create_thread(  # noqa: PLR0913
 
     Raises:
         NicknameConflictError: If a thread with the given nickname already exists.
+        ValueError: If *status* is not a valid ``ThreadStatus`` value.
     """
+    coerced_status = _coerce_status(status)
     if nickname is not None:
         existing = (
             await session.execute(
@@ -123,7 +140,7 @@ async def create_thread(  # noqa: PLR0913
     thread = ThreadModel(
         id=thread_id or uuid4().hex,
         title=title,
-        status=status,
+        status=coerced_status,
         thread_metadata=metadata,
         nickname=nickname,
     )
@@ -195,15 +212,20 @@ async def update_thread_status(
     Args:
         session: Active async session.
         thread_id: The thread's primary key.
-        status: New status (prefer ``ThreadStatus`` enum values — M25).
+        status: New status — ``ThreadStatus`` enum or equivalent string value.
+            Invalid strings raise ``ValueError`` (DB-HIGH-02).
 
     Returns:
         The updated ``ThreadModel`` or ``None`` if not found.
+
+    Raises:
+        ValueError: If *status* is not a valid ``ThreadStatus`` value.
     """
+    coerced_status = _coerce_status(status)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
-    thread.status = status
+    thread.status = coerced_status
     # DB-H2: onupdate=_utcnow only fires at the DB level; the in-memory object
     # has a stale updated_at after flush when expire_on_commit=False.  Set it
     # explicitly so callers always receive the current timestamp.

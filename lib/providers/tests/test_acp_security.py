@@ -190,29 +190,27 @@ class TestEnvNamePattern:
 class TestOnTerminalCreateValidation:
     """Tests for the security validation in _on_terminal_create().
 
-    These tests call _on_terminal_create directly with a minimal fake ctx
-    to test the input validation paths without spawning a real subprocess.
+    These tests call _on_terminal_create directly with a minimal session
+    context to test the input validation paths without spawning a real
+    subprocess.
     """
 
     def _make_ctx(self) -> object:
-        """Create a minimal fake context for _on_terminal_create calls."""
+        """Create a minimal session context for _on_terminal_create calls.
 
-        class _FakeCtx:
-            """Minimal fake session context for security validation tests.
+        Policy exception: _MinimalSessionContext satisfies the structural
+        subset of _AcpSessionContext used by _on_terminal_create's validation
+        paths (allowlist check, metachar check, sandbox check). This is pure
+        logic that runs before any subprocess is spawned. The project's
+        no-mocks mandate targets mocking out network/LLM/subprocess calls;
+        this helper tests pure validation logic.
+        """
 
-            Policy exception note: _FakeCtx is used here because
-            _on_terminal_create's validation (allowlist check, metachar check,
-            sandbox check) is pure logic that runs before any subprocess is
-            spawned. Testing these paths without a live subprocess prevents
-            flaky tests while still exercising the real validation code.
-            This is distinct from the no-mocks mandate which targets mocking
-            out network/LLM calls.
-            """
-
+        class _MinimalSessionContext:
             stdin_lock = asyncio.Lock()
             terminals: dict = {}
 
-        return _FakeCtx()
+        return _MinimalSessionContext()
 
     @pytest.mark.asyncio
     async def test_rejects_command_not_in_allowlist(self, tmp_path: Path) -> None:

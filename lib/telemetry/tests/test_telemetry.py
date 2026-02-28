@@ -12,7 +12,10 @@ from __future__ import annotations
 import pytest
 
 from httpx import ASGITransport, AsyncClient
-from opentelemetry.sdk.trace import ReadableSpan
+from opentelemetry.sdk.resources import Resource
+from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
+from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from opentelemetry.trace import StatusCode
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -28,6 +31,42 @@ from .. import (
     inject_trace_context,
     ws_span,
 )
+
+
+# ---------------------------------------------------------------------------
+# Helpers: isolated TracerProvider + InMemorySpanExporter
+# ---------------------------------------------------------------------------
+
+
+def _make_recording_app(
+    exporter: InMemorySpanExporter,
+    *,
+    excluded: frozenset[str] | None = None,
+) -> Starlette:
+    """Build a Starlette app wired to a fresh SDK provider with *exporter*."""
+    provider = TracerProvider(resource=Resource.create({"service.name": "test"}))
+    provider.add_span_processor(SimpleSpanProcessor(exporter))
+
+    async def home(request: Request) -> JSONResponse:
+        return JSONResponse({"ok": True})
+
+    async def error_route(request: Request) -> JSONResponse:
+        return JSONResponse({"error": "bad"}, status_code=_HTTP_SERVER_ERROR)
+
+    routes = [Route("/", home), Route("/error", error_route)]
+    app = Starlette(routes=routes)
+    kwargs: dict = {} if excluded is None else {"excluded_paths": excluded}
+    # Override the module-level lazy tracer so TelemetryMiddleware uses our provider
+    import lib.telemetry.middleware as mw
+
+    original_tracer = mw._tracer
+    mw._tracer = provider.get_tracer("test.middleware")
+    app.add_middleware(TelemetryMiddleware, **kwargs)  # type: ignore[arg-type]
+    # Restore after the middleware is constructed (it captures the tracer at
+    # dispatch time via _get_tracer(), so we keep it patched for the test).
+    # Cleanup is handled by the test restoring original_tracer via yield fixture.
+    app._original_tracer = original_tracer  # type: ignore[attr-defined]
+    return app
 
 
 _HTTP_OK = 200
@@ -227,14 +266,29 @@ async def test_ws_span_no_thread_id() -> None:
 
 
 def test_inject_trace_context_with_active_span() -> None:
-    """inject_trace_context is callable when a span is active."""
-    tracer = get_tracer(__name__)
-    with tracer.start_as_current_span("inject-test"):
+    """inject_trace_context injects real trace context (traceparent) when a
+    span is active under the real SDK (TEL-HIGH-002)."""
+    # Use a fresh SDK provider so the span is valid and the context propagator
+    # has a real trace ID to inject.
+    provider = TracerProvider(resource=Resource.create({"service.name": "test"}))
+    tracer = provider.get_tracer(__name__)
+    with tracer.start_as_current_span("inject-test") as span:
         carrier: dict[str, str] = {}
         inject_trace_context(carrier)
-        # With no-op provider: carrier stays empty (no real trace ID generated).
-        # With real SDK: carrier contains 'traceparent'.
-        assert isinstance(carrier, dict)
+        # With the real SDK and an active sampled span, 'traceparent' must be
+        # injected into the carrier by the W3C propagator.
+        ctx = span.get_span_context()
+        if ctx.is_valid:
+            assert "traceparent" in carrier, (
+                "inject_trace_context must populate 'traceparent' when a "
+                "valid span is active"
+            )
+            # traceparent format: 00-{trace_id}-{span_id}-{flags}
+            parts = carrier["traceparent"].split("-")
+            assert len(parts) == 4, f"Malformed traceparent: {carrier['traceparent']}"
+            assert parts[0] == "00", "Version must be '00'"
+            assert len(parts[1]) == 32, "trace_id must be 32 hex chars"
+            assert len(parts[2]) == 16, "span_id must be 16 hex chars"
 
 
 def test_inject_trace_context_no_active_span() -> None:
@@ -348,3 +402,107 @@ async def test_middleware_custom_excluded_paths() -> None:
     ) as client:
         response = await client.get("/ping")
     assert response.status_code == _HTTP_OK
+
+
+# ---------------------------------------------------------------------------
+# TelemetryMiddleware — span attribute assertions (TEL-HIGH-001)
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def span_exporter():
+    """Provide a fresh InMemorySpanExporter and restore the module tracer after."""
+    import lib.telemetry.middleware as mw
+
+    original = mw._tracer
+    exporter = InMemorySpanExporter()
+    yield exporter
+    # Restore the original module tracer so other tests are not affected
+    mw._tracer = original
+
+
+@pytest.mark.asyncio
+async def test_middleware_sets_http_method_attribute(
+    span_exporter: InMemorySpanExporter,
+) -> None:
+    """Middleware records http.request.method on the span (TEL-HIGH-001)."""
+    app = _make_recording_app(span_exporter)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.get("/")
+
+    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    assert len(spans) >= 1
+    attrs = spans[-1].attributes or {}
+    assert attrs.get("http.request.method") == "GET"
+
+
+@pytest.mark.asyncio
+async def test_middleware_sets_http_route_attribute(
+    span_exporter: InMemorySpanExporter,
+) -> None:
+    """Middleware records http.route on the span (TEL-HIGH-001)."""
+    app = _make_recording_app(span_exporter)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.get("/")
+
+    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    assert len(spans) >= 1
+    attrs = spans[-1].attributes or {}
+    assert attrs.get("http.route") == "/"
+
+
+@pytest.mark.asyncio
+async def test_middleware_sets_status_code_attribute(
+    span_exporter: InMemorySpanExporter,
+) -> None:
+    """Middleware records http.response.status_code on the span (TEL-HIGH-001)."""
+    app = _make_recording_app(span_exporter)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.get("/")
+
+    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    assert len(spans) >= 1
+    attrs = spans[-1].attributes or {}
+    assert attrs.get("http.response.status_code") == _HTTP_OK
+
+
+@pytest.mark.asyncio
+async def test_middleware_500_sets_error_status_on_span(
+    span_exporter: InMemorySpanExporter,
+) -> None:
+    """Middleware sets StatusCode.ERROR on a 500 response span (TEL-HIGH-001)."""
+    app = _make_recording_app(span_exporter)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.get("/error")
+
+    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    assert len(spans) >= 1
+    span = spans[-1]
+    attrs = span.attributes or {}
+    assert attrs.get("http.response.status_code") == _HTTP_SERVER_ERROR
+    assert span.status.status_code == StatusCode.ERROR
+
+
+@pytest.mark.asyncio
+async def test_middleware_sets_server_address_attribute(
+    span_exporter: InMemorySpanExporter,
+) -> None:
+    """Middleware records server.address on the span (TEL-HIGH-001)."""
+    app = _make_recording_app(span_exporter)
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        await client.get("/")
+
+    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    assert len(spans) >= 1
+    attrs = spans[-1].attributes or {}
+    assert "server.address" in attrs

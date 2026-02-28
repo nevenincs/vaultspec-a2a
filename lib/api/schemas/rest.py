@@ -41,11 +41,11 @@ class CreateThreadRequest(BaseModel):
     team preset in the workspace or modify bundled presets.
     """
 
-    title: str | None = None
+    title: str | None = Field(default=None, max_length=200)
     # 64 KB limit prevents excessive LLM token consumption and memory pressure
     initial_message: str = Field(max_length=65536)
     # NEW: select a team preset by ID (ADR-013 §6)
-    team_preset: str | None = None
+    team_preset: str | None = Field(default=None, max_length=64)
     # NEW: thread metadata for provenance and context (ADR-014)
     metadata: ThreadMetadata | None = None
     # NEW — skip interrupts for headless runs
@@ -68,7 +68,7 @@ class SendMessageRequest(BaseModel):
 
     # 64 KB limit prevents excessive LLM token consumption and memory pressure
     content: str = Field(max_length=65536)
-    agent_id: str | None = None
+    agent_id: str | None = Field(default=None, max_length=64)
 
 
 class SendMessageResponse(BaseModel):
@@ -134,6 +134,10 @@ class PermissionResponseRequest(BaseModel):
     """Submit a permission response via REST (guaranteed delivery)."""
 
     option_id: str
+    # Forward-compatibility: ``kind`` is accepted but not yet acted upon by the
+    # endpoint handler.  It is preserved here so that future routing logic (e.g.
+    # dispatching ``ALLOW_ALWAYS`` vs ``ALLOW_ONCE`` to different persistence
+    # paths) can read it without a breaking schema change.
     kind: PermissionOptionKind | None = None
 
 

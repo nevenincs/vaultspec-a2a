@@ -12,6 +12,8 @@ API-M7 fix: shared fixtures eliminate duplicate engine/session_factory
 definitions across test files.
 """
 
+import asyncio
+
 from collections.abc import AsyncGenerator
 
 import pytest_asyncio
@@ -101,21 +103,44 @@ def make_app(session_factory, aggregator=None, registry=None):
     async def _override_get_checkpointer():
         return checkpointer
 
-    # Provide a simple task group stub via anyio
-    class _NullTaskGroup:
-        """Minimal task-group stub: start_soon schedules tasks on the event loop."""
+    # Provide a lightweight task group for test endpoints.
+    class _TestTaskGroup:
+        """Lightweight task group for API tests.
+
+        Policy exception: replaces a real anyio.abc.TaskGroup because test
+        endpoints need a task-group dependency for fire-and-forget background
+        work (e.g. graph ingestion) but don't require structured concurrency
+        semantics within the test scope.  Exceptions from background tasks
+        are logged rather than silently discarded.
+
+        Stores task references in ``_background_tasks`` to prevent premature
+        garbage collection (RUF006).
+        """
+
+        def __init__(self):
+            self._background_tasks: set[asyncio.Task] = set()
 
         def start_soon(self, coro_fn, *args, **kwargs):
-            import asyncio
+            import logging as _logging
 
-            _task = asyncio.ensure_future(coro_fn(*args, **kwargs))  # noqa: RUF006
+            async def _wrapper():
+                try:
+                    await coro_fn(*args, **kwargs)
+                except Exception:
+                    _logging.getLogger(__name__).exception(
+                        "_TestTaskGroup background task failed"
+                    )
 
-    _null_tg = _NullTaskGroup()
+            task = asyncio.get_event_loop().create_task(_wrapper())
+            self._background_tasks.add(task)
+            task.add_done_callback(self._background_tasks.discard)
+
+    _test_tg = _TestTaskGroup()
 
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
     app.dependency_overrides[get_graph_registry] = lambda: registry
     app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_task_group] = lambda: _null_tg
+    app.dependency_overrides[get_task_group] = lambda: _test_tg
 
     return app, aggregator, registry, checkpointer

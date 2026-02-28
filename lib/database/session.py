@@ -41,8 +41,8 @@ __all__ = [
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
-# Default database location
-DEFAULT_DB_PATH = Path("data/orchestrator.db")
+# Default database location — matches settings.database_url default ("vaultspec.db")
+DEFAULT_DB_PATH = Path("vaultspec.db")
 
 
 def _set_wal_mode(dbapi_conn: object, _connection_record: object) -> None:
@@ -83,23 +83,34 @@ def get_engine(
     Returns:
         The ``AsyncEngine`` instance.
     """
-    global _engine  # noqa: PLW0603
-
+    global _engine
     if _engine is not None:
         # H19: warn if called with a different path than the existing singleton,
         # since the caller will silently get the original engine back.
         requested = str(db_path)
         existing_url = str(_engine.url)
-        if requested not in (":memory:", str(DEFAULT_DB_PATH)):
-            resolved = Path(requested).resolve()
-            if str(resolved) not in existing_url and requested not in existing_url:
-                logger.warning(
-                    "get_engine() called with path %r but the engine singleton "
-                    "was already created with a different path (%r). "
-                    "Returning existing engine.",
-                    requested,
-                    existing_url,
+        if requested != ":memory:":
+            # Compare resolved absolute paths to avoid false positives from
+            # differing relative-path representations of the same file.
+            resolved_requested = Path(requested).resolve()
+            resolved_default = DEFAULT_DB_PATH.resolve()
+            if resolved_requested != resolved_default:
+                # Extract the path component from the existing engine URL for
+                # a proper resolved comparison (not a substring check).
+                existing_path_str = (
+                    existing_url.split("///", 1)[1] if "///" in existing_url else ""
                 )
+                existing_resolved = (
+                    Path(existing_path_str).resolve() if existing_path_str else None
+                )
+                if existing_resolved != resolved_requested:
+                    logger.warning(
+                        "get_engine() called with path %r but the engine singleton "
+                        "was already created with a different path (%r). "
+                        "Returning existing engine.",
+                        requested,
+                        existing_url,
+                    )
         return _engine
 
     db_path_str = str(db_path)
@@ -129,8 +140,7 @@ def get_session_factory(
     Returns:
         The ``async_sessionmaker`` instance.
     """
-    global _session_factory  # noqa: PLW0603
-
+    global _session_factory
     if _session_factory is not None and engine is None:
         return _session_factory
 
@@ -211,8 +221,7 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
 
 async def close_db() -> None:
     """Dispose the engine and reset module singletons."""
-    global _engine, _session_factory  # noqa: PLW0603
-
+    global _engine, _session_factory
     if _engine is not None:
         await _engine.dispose()
         _engine = None

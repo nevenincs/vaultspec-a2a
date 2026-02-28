@@ -15,21 +15,27 @@ See: ADR-007 (FastAPI, SPA mount)
 import asyncio
 import contextlib
 import hashlib
+import json
 import logging
 
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import anyio
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import Command
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.aggregator import EventAggregator
+from ..core.exceptions import NicknameConflictError
 from ..core.graph import compile_team_graph
+from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
+from ..core.preamble import build_context_preamble
 from ..core.team_config import (
     AgentConfig,
     AgentConfigNotFoundError,
@@ -40,6 +46,7 @@ from ..core.team_config import (
 from ..database.crud import (
     create_thread,
     get_thread,
+    get_thread_metadata,
     list_threads,
     update_thread_status,
 )
@@ -177,21 +184,23 @@ def get_task_group(request: Request) -> anyio.abc.TaskGroup:
 
 
 async def get_services(
-    db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
-    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
-    tg: anyio.abc.TaskGroup = Depends(get_task_group),
-) -> tuple[AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, anyio.abc.TaskGroup]:
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
+    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
+    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),  # noqa: B008
+    tg: anyio.abc.TaskGroup = Depends(get_task_group),  # noqa: B008
+) -> tuple[
+    AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, anyio.abc.TaskGroup
+]:
     """Dependency for bundling all required services into a single injection point."""
     return db, aggregator, registry, checkpointer, tg
 
 
 async def get_message_services(
-    db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
-    tg: anyio.abc.TaskGroup = Depends(get_task_group),
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+    aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
+    registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
+    tg: anyio.abc.TaskGroup = Depends(get_task_group),  # noqa: B008
 ) -> tuple[AsyncSession, EventAggregator, GraphRegistry, anyio.abc.TaskGroup]:
     """Dependency for bundling services needed by message endpoints."""
     return db, aggregator, registry, tg
@@ -203,9 +212,15 @@ async def get_message_services(
 
 
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
-async def create_thread_endpoint(
+async def create_thread_endpoint(  # noqa: PLR0915
     body: CreateThreadRequest,
-    services: tuple[AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, anyio.abc.TaskGroup] = Depends(get_services),  # noqa: B008
+    services: tuple[
+        AsyncSession,
+        EventAggregator,
+        GraphRegistry,
+        AsyncSqliteSaver,
+        anyio.abc.TaskGroup,
+    ] = Depends(get_services),
 ) -> CreateThreadResponse:
     """Create a new orchestration thread and compile its LangGraph graph.
 
@@ -214,26 +229,83 @@ async def create_thread_endpoint(
     compiled via ``compile_team_graph()``, and the result is stored in the
     ``GraphRegistry`` so that subsequent ``send_message`` calls can call
     ``aggregator.ingest()`` without re-compiling.
+
+    When ``metadata`` is provided (ADR-014), the endpoint:
+    - Validates ``workspace_root`` as an existing directory (422 if not)
+    - Auto-discovers ``.vault/`` documents when ``feature_tag`` is set
+    - Generates a nickname if not explicitly provided
+    - Injects a context preamble SystemMessage into the graph input
+    - Threads ``workspace_root`` to config loaders and graph compilation
     """
     db, aggregator, registry, checkpointer, tg = services
-    thread = await create_thread(
-        db,
-        title=body.title,
-        status="submitted",
-    )
+
+    # --- ADR-014: Metadata processing ---
+    metadata = body.metadata
+    ws_root: Path | None = None
+    nickname: str | None = None
+    metadata_json: str | None = None
+
+    # Pre-generate thread ID so we can use it for nickname generation
+    thread_id = uuid4().hex
+
+    if metadata is not None:
+        # Validate workspace_root exists
+        ws_root = Path(metadata.workspace_root)
+        if not ws_root.is_dir():
+            raise HTTPException(
+                status_code=422,
+                detail=(
+                    "workspace_root is not an existing directory: "
+                    f"{metadata.workspace_root!r}"
+                ),
+            )
+
+        # Auto-discover .vault/ documents if feature_tag set and context_refs empty
+        if metadata.feature_tag and not metadata.context_refs:
+            metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
+
+        # Generate nickname if not provided
+        topology = "default"
+        if body.team_preset:
+            with contextlib.suppress(Exception):
+                tc = load_team_config(body.team_preset, workspace_root=ws_root)
+                topology = tc.topology.type
+        nickname = metadata.nickname or generate_nickname(
+            metadata.feature_tag, topology, thread_id
+        )
+        metadata.nickname = nickname
+
+        metadata_json = metadata.model_dump_json()
+
+    # Create thread in DB
+    try:
+        thread = await create_thread(
+            db,
+            title=body.title,
+            status="submitted",
+            metadata=metadata_json,
+            nickname=nickname,
+            thread_id=thread_id,
+        )
+    except NicknameConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Thread nickname already exists: {exc.nickname!r}",
+        ) from exc
     await db.commit()
 
     logger.info(
-        "Created thread %s (title=%s, preset=%s)",
+        "Created thread %s (title=%s, preset=%s, nickname=%s)",
         thread.id,
         body.title,
         body.team_preset,
+        nickname,
     )
 
     # Compile and register graph if a team preset was requested (ADR-013 §6)
     if body.team_preset:
         try:
-            team_config = load_team_config(body.team_preset)
+            team_config = load_team_config(body.team_preset, workspace_root=ws_root)
         except TeamConfigNotFoundError as exc:
             raise HTTPException(
                 status_code=422,
@@ -245,7 +317,7 @@ async def create_thread_endpoint(
         for worker_ref in team_config.workers:
             try:
                 agent_configs[worker_ref.agent_id] = load_agent_config(
-                    worker_ref.agent_id
+                    worker_ref.agent_id, workspace_root=ws_root
                 )
             except AgentConfigNotFoundError as exc:
                 logger.warning(
@@ -258,7 +330,9 @@ async def create_thread_endpoint(
         supervisor_config: AgentConfig | None = None
         if team_config.topology.type in ("star", "pipeline_loop"):
             try:
-                supervisor_config = load_agent_config("supervisor")
+                supervisor_config = load_agent_config(
+                    "supervisor", workspace_root=ws_root
+                )
             except AgentConfigNotFoundError:
                 logger.debug("No supervisor agent config found; using default prompt")
 
@@ -267,6 +341,7 @@ async def create_thread_endpoint(
             agent_configs=agent_configs,
             checkpointer=checkpointer,
             supervisor_agent_config=supervisor_config,
+            workspace_root=ws_root,
         )
         registry.register(thread.id, graph)
         aggregator.register_graph(graph)
@@ -277,9 +352,13 @@ async def create_thread_endpoint(
             team_config.topology.type,
         )
 
-        # Kick off graph execution with the initial message (ADR-011 §2.2).
-        # Runs in the background so the response returns immediately.
-        graph_input = {"messages": [HumanMessage(content=body.initial_message)]}
+        # Build graph_input with optional context preamble (ADR-014 §2.3)
+        messages: list[SystemMessage | HumanMessage] = []
+        if metadata is not None:
+            messages.append(build_context_preamble(metadata))
+        messages.append(HumanMessage(content=body.initial_message))
+
+        graph_input = {"messages": messages}
         config = {
             "configurable": {"thread_id": thread.id},
             # Guard against pipeline_loop topologies with large max_loops values
@@ -301,6 +380,7 @@ async def create_thread_endpoint(
     return CreateThreadResponse(
         thread_id=thread.id,
         status=thread.status,
+        nickname=nickname,
     )
 
 
@@ -313,21 +393,63 @@ async def create_thread_endpoint(
 async def list_threads_endpoint(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    db: AsyncSession = Depends(get_db),
+    db: AsyncSession = Depends(get_db),  # noqa: B008
 ) -> ThreadListResponse:
-    """List orchestration threads with pagination."""
+    """List orchestration threads with pagination.
+
+    Enriches each thread summary with metadata fields (ADR-014) when
+    available. Legacy threads without metadata gracefully omit these fields.
+    """
     threads, total = await list_threads(db, offset=offset, limit=limit)
-    summaries = [
-        ThreadSummary(
-            thread_id=t.id,
-            title=t.title,
-            status=t.status,
-            created_at=t.created_at,
-            updated_at=t.updated_at,
+    summaries: list[ThreadSummary] = []
+    for t in threads:
+        # Parse metadata JSON for summary fields (graceful fallback for legacy threads)
+        nickname: str | None = t.nickname
+        feature_tag: str | None = None
+        source_branch: str | None = None
+        callee: str | None = None
+        if t.thread_metadata:
+            with contextlib.suppress(Exception):
+                meta_dict = json.loads(t.thread_metadata)
+                feature_tag = meta_dict.get("feature_tag") or None
+                source_branch = meta_dict.get("source_branch") or None
+                callee = meta_dict.get("callee") or None
+
+        summaries.append(
+            ThreadSummary(
+                thread_id=t.id,
+                title=t.title,
+                status=t.status,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                nickname=nickname,
+                feature_tag=feature_tag,
+                source_branch=source_branch,
+                callee=callee,
+            )
         )
-        for t in threads
-    ]
     return ThreadListResponse(threads=summaries, total=total)
+
+
+# ---------------------------------------------------------------------------
+# GET /threads/{thread_id}/metadata — Thread metadata (ADR-014)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/threads/{thread_id}/metadata")
+async def get_thread_metadata_endpoint(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),  # noqa: B008
+) -> dict:
+    """Return the full ThreadMetadata object for a thread.
+
+    Used by the inspector panel for detailed provenance display.
+    Returns 404 if the thread does not exist or has no metadata.
+    """
+    meta_json = await get_thread_metadata(db, thread_id)
+    if meta_json is None:
+        raise HTTPException(status_code=404, detail="Thread or metadata not found")
+    return ThreadMetadata.model_validate_json(meta_json).model_dump()
 
 
 # ---------------------------------------------------------------------------
@@ -381,9 +503,9 @@ def _enrich_snapshot_from_state(
         # call, breaking client-side deduplication for messages without a
         # persisted LangChain message id).
         stored_id: str | None = getattr(m, "id", None)
-        message_id = stored_id or hashlib.sha256(
-            f"{role}:{content}".encode()
-        ).hexdigest()[:32]
+        message_id = (
+            stored_id or hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:32]
+        )
 
         msgs.append(
             MessageSnapshot(
@@ -471,7 +593,9 @@ async def get_thread_state_endpoint(
 async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
-    services: tuple[AsyncSession, EventAggregator, GraphRegistry, anyio.abc.TaskGroup] = Depends(get_message_services),  # noqa: B008
+    services: tuple[
+        AsyncSession, EventAggregator, GraphRegistry, anyio.abc.TaskGroup
+    ] = Depends(get_message_services),
 ) -> dict[str, str]:
     """Send a user message into an existing thread.
 

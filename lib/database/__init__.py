@@ -15,6 +15,7 @@ from .crud import get_artifact as get_artifact
 from .crud import get_artifacts_by_thread as get_artifacts_by_thread
 from .crud import get_permission_logs_by_thread as get_permission_logs_by_thread
 from .crud import get_thread as get_thread
+from .crud import get_thread_metadata as get_thread_metadata
 from .crud import list_threads as list_threads
 from .crud import save_model as save_model
 from .crud import sum_cost_by_agent as sum_cost_by_agent
@@ -51,6 +52,7 @@ __all__ = [
     "get_permission_logs_by_thread",
     "get_session_factory",
     "get_thread",
+    "get_thread_metadata",
     "init_db",
     "list_threads",
     "save_model",

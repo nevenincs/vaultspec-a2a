@@ -20,6 +20,7 @@ from uuid import uuid4
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..core.exceptions import NicknameConflictError
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
 
 
@@ -32,6 +33,7 @@ __all__ = [
     "get_artifacts_by_thread",
     "get_permission_logs_by_thread",
     "get_thread",
+    "get_thread_metadata",
     "list_threads",
     "save_model",
     "sum_cost_by_agent",
@@ -62,12 +64,13 @@ async def save_model[
 # ---------------------------------------------------------------------------
 
 
-async def create_thread(
+async def create_thread(  # noqa: PLR0913
     session: AsyncSession,
     *,
     title: str | None = None,
     status: str = "submitted",
-    agent_config: str | None = None,
+    metadata: str | None = None,
+    nickname: str | None = None,
     thread_id: str | None = None,
 ) -> ThreadModel:
     """Create a new orchestration thread.
@@ -76,17 +79,31 @@ async def create_thread(
         session: Active async session.
         title: Optional human-readable thread title.
         status: Initial status string (default ``"submitted"``).
-        agent_config: JSON-serialised agent configuration.
+        metadata: JSON-serialised ThreadMetadata (ADR-014).
+        nickname: Optional human-friendly nickname (unique).
         thread_id: Optional explicit ID; auto-generated if omitted.
 
     Returns:
         The persisted ``ThreadModel`` instance.
+
+    Raises:
+        NicknameConflictError: If a thread with the given nickname already exists.
     """
+    if nickname is not None:
+        existing = (
+            await session.execute(
+                select(ThreadModel).where(ThreadModel.nickname == nickname)
+            )
+        ).scalar_one_or_none()
+        if existing is not None:
+            raise NicknameConflictError(nickname)
+
     thread = ThreadModel(
         id=thread_id or uuid4().hex,
         title=title,
         status=status,
-        agent_config=agent_config,
+        thread_metadata=metadata,
+        nickname=nickname,
     )
     return await save_model(session, thread)
 
@@ -157,6 +174,26 @@ async def update_thread_status(
     thread.status = status
     await session.flush()
     return thread
+
+
+async def get_thread_metadata(
+    session: AsyncSession,
+    thread_id: str,
+) -> str | None:
+    """Fetch the serialised metadata JSON for a thread.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread's primary key.
+
+    Returns:
+        The metadata JSON string, or ``None`` if the thread is missing
+        or has no metadata.
+    """
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+    return thread.thread_metadata
 
 
 # ---------------------------------------------------------------------------

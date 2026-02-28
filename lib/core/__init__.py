@@ -24,6 +24,7 @@ from .exceptions import (
     ErrorSeverity,
     EventAggregatorError,
     MergeConflictError,
+    NicknameConflictError,
     PermissionDeniedError,
     ProtocolError,
     RecoveryAction,
@@ -31,6 +32,18 @@ from .exceptions import (
     TokenBudgetExceededError,
     VaultspecError,
     WorkspaceError,
+)
+from .metadata import (
+    ContextRef as ContextRef,
+)
+from .metadata import (
+    ThreadMetadata as ThreadMetadata,
+)
+from .metadata import (
+    discover_context_refs as discover_context_refs,
+)
+from .metadata import (
+    generate_nickname as generate_nickname,
 )
 from .models import (
     ArtifactRef as ArtifactRef,
@@ -43,6 +56,9 @@ from .models import (
 )
 from .nodes.supervisor import create_supervisor_node as create_supervisor_node
 from .nodes.worker import create_worker_node as create_worker_node
+from .preamble import (
+    build_context_preamble as build_context_preamble,
+)
 from .state import TeamState
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
@@ -116,11 +132,13 @@ __all__ = [
     "ArtifactRef",
     "ConfigError",
     "ContextOverflowError",
+    "ContextRef",
     "DatabaseError",
     "ErrorSeverity",
     "EventAggregator",
     "EventAggregatorError",
     "MergeConflictError",
+    "NicknameConflictError",
     "PermissionDeniedError",
     "PlanStep",
     "ProtocolError",
@@ -131,6 +149,7 @@ __all__ = [
     "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
     "TeamState",
+    "ThreadMetadata",
     "TokenBudgetExceededError",
     "TokenUsageEntry",
     "TopologyConfig",
@@ -138,11 +157,14 @@ __all__ = [
     "WorkerOverrideConfig",
     "WorkerRef",
     "WorkspaceError",
+    "build_context_preamble",
     "compact_context",
     "compile_team_graph",
     "create_supervisor_node",
     "create_worker_node",
+    "discover_context_refs",
     "estimate_tokens",
+    "generate_nickname",
     "load_agent_config",
     "load_team_config",
     "prepare_handoff",

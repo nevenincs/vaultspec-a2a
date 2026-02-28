@@ -1,5 +1,7 @@
 """Tests for the provider factory."""
 
+from pathlib import Path
+
 import pytest
 
 from langchain_core.language_models import BaseChatModel
@@ -57,6 +59,29 @@ def test_provider_factory_zhipu_mapping() -> None:
     assert get_model_attr(model) == expected_model
     assert isinstance(model, ChatOpenAI)
     assert "bigmodel.cn" in str(model.openai_api_base)
+
+
+def test_provider_factory_claude_with_workspace_root() -> None:
+    """Verify that workspace_root kwarg is forwarded to AcpChatModel."""
+    ws = Path("Y:/code/test")
+    model = ProviderFactory.create(Provider.CLAUDE, workspace_root=ws)
+    assert isinstance(model, AcpChatModel)
+    assert model.workspace_root == str(ws)
+
+
+def test_provider_factory_gemini_with_workspace_root() -> None:
+    """Verify that workspace_root kwarg is forwarded to AcpChatModel for Gemini."""
+    ws = Path("Y:/code/test")
+    model = ProviderFactory.create(Provider.GEMINI, workspace_root=ws)
+    assert isinstance(model, AcpChatModel)
+    assert model.workspace_root == str(ws)
+
+
+def test_provider_factory_workspace_root_none_default() -> None:
+    """Verify that workspace_root defaults to None when not provided."""
+    model = ProviderFactory.create(Provider.CLAUDE)
+    assert isinstance(model, AcpChatModel)
+    assert model.workspace_root is None
 
 
 def test_provider_factory_unsupported_provider() -> None:

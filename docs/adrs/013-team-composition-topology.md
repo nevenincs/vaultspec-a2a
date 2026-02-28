@@ -493,6 +493,11 @@ class CreateThreadRequest(BaseModel):
 When `team_preset` is `None`, the system falls back to the single-agent
 behavior using `provider`/`model` with the built-in `solo-coder` preset.
 
+**Note**: When `team_preset` is specified, the `provider` and `model` fields
+are **ignored**. Models are defined statically in team TOML configuration
+(§2.3). Per-request model overrides are not supported. To use different models,
+create a custom team preset in the workspace or modify bundled presets.
+
 ### New REST Endpoint: Team Presets
 
 ```

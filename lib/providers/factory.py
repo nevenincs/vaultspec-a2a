@@ -2,6 +2,7 @@
 
 import logging
 
+from pathlib import Path
 from typing import Any
 
 from langchain_core.language_models import BaseChatModel
@@ -27,6 +28,7 @@ class ProviderFactory:
         provider: Provider,
         model: "Model | str | None" = None,
         agent_config: AgentConfig | None = None,
+        workspace_root: Path | None = None,
         **kwargs: Any,  # noqa: ANN401
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -35,6 +37,7 @@ class ProviderFactory:
             provider: The LLM provider (e.g., Provider.CLAUDE, Provider.GEMINI).
             model: Optional explicit model string or Model enum.
             agent_config: Optional agent configuration for provider initialization.
+            workspace_root: Optional workspace root for ACP sandbox scoping.
             kwargs: Additional overrides for the specific provider.
 
         Returns:
@@ -78,6 +81,7 @@ class ProviderFactory:
                 if oauth_token
                 else {},
                 agent_config=agent_config,
+                workspace_root=str(workspace_root) if workspace_root else None,
             )
 
         if provider == Provider.GEMINI:
@@ -92,6 +96,7 @@ class ProviderFactory:
                 command=["gemini", "--model", model_name, "--experimental-acp"],
                 env_vars={},
                 agent_config=agent_config,
+                workspace_root=str(workspace_root) if workspace_root else None,
             )
 
         if provider == Provider.ZHIPU:
@@ -145,7 +150,10 @@ class ProviderFactory:
             kwargs["api_key"] = api_key
 
             return ChatOpenAI(
-                model=model_name, timeout=timeout, max_retries=2, **kwargs  # type: ignore[unknown-argument]
+                model=model_name,
+                timeout=timeout,
+                max_retries=2,
+                **kwargs,  # type: ignore[unknown-argument]
             )
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)

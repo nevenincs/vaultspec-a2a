@@ -135,6 +135,11 @@ class AcpChatModel(BaseChatModel):
         ),
         exclude=True,
     )
+    workspace_root: str | None = Field(
+        default=None,
+        description="Workspace root override for CWD resolution (ADR-014).",
+        exclude=True,
+    )
 
     # --- Runtime state (private, not model fields) ---
     _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
@@ -191,7 +196,7 @@ class AcpChatModel(BaseChatModel):
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
-            cwd=self.cwd or str(Path.cwd()),
+            cwd=self.workspace_root or self.cwd or str(Path.cwd()),
             limit=10 * 1024 * 1024,
         )
 
@@ -549,7 +554,7 @@ class AcpChatModel(BaseChatModel):
 
     def _sandbox_path(self, path: str) -> Path:
         """Resolve and sandbox a path to the agent cwd."""
-        cwd = Path(self.cwd) if self.cwd else Path.cwd()
+        cwd = Path(self.workspace_root or self.cwd or str(Path.cwd()))
         resolved = (cwd / path).resolve()
         if not resolved.is_relative_to(cwd.resolve()):
             raise ValueError(f"Path {path!r} escapes sandbox")
@@ -630,12 +635,12 @@ class AcpChatModel(BaseChatModel):
             args = params.get("args") or []
 
             # Sandbox the terminal cwd: must be within the agent workspace root.
-            raw_cwd = params.get("cwd") or self.cwd or str(Path.cwd())
-            sandbox_root = (
-                Path(self.cwd).resolve()
-                if self.cwd
-                else Path.cwd().resolve()
+            raw_cwd = (
+                params.get("cwd") or self.workspace_root or self.cwd or str(Path.cwd())
             )
+            sandbox_root = Path(
+                self.workspace_root or self.cwd or str(Path.cwd())
+            ).resolve()
             resolved_cwd = Path(raw_cwd).resolve()
             if not resolved_cwd.is_relative_to(sandbox_root):
                 raise ValueError(
@@ -655,9 +660,7 @@ class AcpChatModel(BaseChatModel):
             if extra_env := params.get("env"):
                 if isinstance(extra_env, list):
                     # ACP protocol: env is list[EnvVariable] with name/value keys
-                    terminal_env.update(
-                        {v["name"]: v["value"] for v in extra_env}
-                    )
+                    terminal_env.update({v["name"]: v["value"] for v in extra_env})
                 elif isinstance(extra_env, dict):
                     terminal_env.update(extra_env)
             process = await asyncio.create_subprocess_exec(
@@ -902,7 +905,7 @@ class AcpChatModel(BaseChatModel):
 
     async def _setup_session(self, ctx: _AcpSessionContext) -> None:
         """Create or load an ACP session."""
-        working_dir = self.cwd or str(Path.cwd())
+        working_dir = self.workspace_root or self.cwd or str(Path.cwd())
         method = "session/new"
         params: dict[str, object] = {"cwd": working_dir, "mcpServers": self.mcp_servers}
         if self.session_id and self._agent_capabilities.get("loadSession"):

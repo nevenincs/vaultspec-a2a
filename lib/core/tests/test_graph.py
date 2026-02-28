@@ -1,6 +1,7 @@
 """Tests for the team graph compilation and execution."""
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -75,6 +76,25 @@ async def test_compile_solo_coder_graph(checkpointer: AsyncSqliteSaver) -> None:
         team_config=team,
         agent_configs=agent_configs,
         checkpointer=checkpointer,
+    )
+    assert graph is not None
+
+
+@pytest.mark.asyncio
+async def test_compile_team_graph_accepts_workspace_root(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Verify that compile_team_graph accepts workspace_root kwarg (ADR-014)."""
+    team = load_team_config("coding-star")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    supervisor_cfg = load_agent_config("supervisor")
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+        workspace_root=Path("Y:/code/test-workspace"),
     )
     assert graph is not None
 

@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...core.exceptions import NicknameConflictError
 from ..crud import (
     append_cost_record,
     append_permission_log,
@@ -29,6 +30,7 @@ from ..crud import (
     get_artifacts_by_thread,
     get_permission_logs_by_thread,
     get_thread,
+    get_thread_metadata,
     list_threads,
     save_model,
     sum_cost_by_agent,
@@ -126,14 +128,54 @@ class TestThreadCRUD:
         assert thread.id == "custom-id"
 
     @pytest.mark.asyncio
-    async def test_create_thread_with_agent_config(self, session: AsyncSession) -> None:
-        """agent_config should store JSON as text."""
-        config = json.dumps({"provider": "claude", "model": "max"})
-        thread = await create_thread(session, title="Configured", agent_config=config)
-        assert thread.agent_config == config
-        assert thread.agent_config is not None
-        parsed = json.loads(thread.agent_config)
-        assert parsed["provider"] == "claude"
+    async def test_create_thread_with_metadata(self, session: AsyncSession) -> None:
+        """metadata should store JSON as text (ADR-014 rename from agent_config)."""
+        meta = json.dumps(
+            {"workspace_root": "Y:/code/vaultspec", "feature_tag": "auth"},
+        )
+        thread = await create_thread(session, title="Configured", metadata=meta)
+        assert thread.thread_metadata == meta
+        assert thread.thread_metadata is not None
+        parsed = json.loads(thread.thread_metadata)
+        assert parsed["workspace_root"] == "Y:/code/vaultspec"
+
+    @pytest.mark.asyncio
+    async def test_create_thread_with_nickname(self, session: AsyncSession) -> None:
+        """nickname should be stored on the thread (ADR-014)."""
+        thread = await create_thread(
+            session, title="Named", nickname="auth-flow-star-a3f2"
+        )
+        assert thread.nickname == "auth-flow-star-a3f2"
+
+    @pytest.mark.asyncio
+    async def test_nickname_uniqueness_conflict(self, session: AsyncSession) -> None:
+        """Duplicate nicknames should raise NicknameConflictError."""
+        await create_thread(session, title="First", nickname="unique-nick-0001")
+        with pytest.raises(NicknameConflictError, match="unique-nick-0001"):
+            await create_thread(session, title="Second", nickname="unique-nick-0001")
+
+    @pytest.mark.asyncio
+    async def test_get_thread_metadata(self, session: AsyncSession) -> None:
+        """get_thread_metadata returns the metadata JSON string."""
+        meta = json.dumps({"workspace_root": "Y:/code/vaultspec"})
+        thread = await create_thread(session, title="Meta", metadata=meta)
+        result = await get_thread_metadata(session, thread.id)
+        assert result == meta
+
+    @pytest.mark.asyncio
+    async def test_get_thread_metadata_none(self, session: AsyncSession) -> None:
+        """get_thread_metadata returns None for threads without metadata."""
+        thread = await create_thread(session, title="No Meta")
+        result = await get_thread_metadata(session, thread.id)
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_get_thread_metadata_missing_thread(
+        self, session: AsyncSession
+    ) -> None:
+        """get_thread_metadata returns None for nonexistent thread."""
+        result = await get_thread_metadata(session, "nonexistent-thread")
+        assert result is None
 
     @pytest.mark.asyncio
     async def test_get_thread_found(self, session: AsyncSession) -> None:

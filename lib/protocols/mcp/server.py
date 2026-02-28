@@ -144,8 +144,9 @@ async def get_thread_status(thread_id: str) -> str:
             f"Status: {status}\n"
             f"Messages: {msg_count}\n"
             f"Checkpoint: {checkpoint}\n"
-            # L16: use urlparse instead of fragile string-split for WS URL.
-            f"Live: ws://{urlparse(settings.api_base_url).netloc}/ws"
+            # L16/L18: derive ws/wss scheme from API base URL scheme.
+            f"Live: {'wss' if urlparse(settings.api_base_url).scheme == 'https' else 'ws'}"  # noqa: E501
+            f"://{urlparse(settings.api_base_url).netloc}/ws"
         )
     except httpx.HTTPStatusError as exc:
         if exc.response.status_code == 404:  # noqa: PLR2004

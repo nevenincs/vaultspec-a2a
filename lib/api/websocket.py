@@ -353,9 +353,18 @@ class ConnectionManager:
                 )
 
     async def _handle_ping(self, client_id: str) -> None:
-        """Handle PING command."""
+        """Handle PING command by sending an immediate PONG-style heartbeat."""
         logger.debug("Client %s ping", client_id)
-        # Pings are acknowledged implicitly by heartbeat
+        websocket = self._connections.get(client_id)
+        if websocket is not None and websocket.client_state == WebSocketState.CONNECTED:
+            pong = HeartbeatEvent(
+                timestamp=datetime.now(UTC),
+                server_uptime_seconds=time.monotonic() - self._start_time,
+            )
+            try:
+                await websocket.send_json(pong.model_dump(mode="json"))
+            except Exception:
+                logger.warning("Failed to send pong to client %s", client_id)
 
     async def _handle_client_message(
         self,

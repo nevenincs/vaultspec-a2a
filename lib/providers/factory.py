@@ -86,8 +86,9 @@ class ProviderFactory:
 
             return AcpChatModel(
                 command=["claude-agent-acp"],
+                # L10: guard against empty string — only set env var if truly present
                 env_vars={"CLAUDE_CODE_OAUTH_TOKEN": oauth_token}
-                if oauth_token
+                if oauth_token and oauth_token.strip()
                 else {},
                 agent_config=agent_config,
                 workspace_root=str(workspace_root) if workspace_root else None,

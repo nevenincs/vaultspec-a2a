@@ -52,17 +52,18 @@ from ..database.crud import (
 from ..database.session import get_db
 from .schemas.enums import AgentLifecycleState
 from .schemas.rest import (
+    AgentStatusEntry,
     CreateThreadRequest,
     CreateThreadResponse,
     PermissionResponseRequest,
     PermissionResponseResult,
     SendMessageRequest,
+    SendMessageResponse,
     TeamPresetSummary,
     TeamPresetsResponse,
     TeamStatusResponse,
     ThreadListResponse,
     ThreadSummary,
-    _AgentStatusEntry,
 )
 from .schemas.snapshots import MessageSnapshot, ThreadStateSnapshot
 
@@ -593,14 +594,18 @@ async def get_thread_state_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/threads/{thread_id}/messages", status_code=202)
+@router.post(
+    "/threads/{thread_id}/messages",
+    status_code=202,
+    response_model=SendMessageResponse,
+)
 async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
     services: tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup] = Depends(
         get_message_services
     ),
-) -> dict[str, str]:
+) -> SendMessageResponse:
     """Send a user message into an existing thread.
 
     Returns 202 Accepted immediately; graph processing runs asynchronously
@@ -632,7 +637,7 @@ async def send_message_endpoint(
                 "Ingest already active for thread %s; dropping concurrent message",
                 thread_id,
             )
-            return {"status": "accepted", "thread_id": thread_id}
+            return SendMessageResponse(status="accepted", thread_id=thread_id)
         graph_input = {"messages": [HumanMessage(content=body.content)]}
         config = {"configurable": {"thread_id": thread_id}, "recursion_limit": 100}
 
@@ -657,7 +662,7 @@ async def send_message_endpoint(
             detail="Processing user message",
         )
 
-    return {"status": "accepted", "thread_id": thread_id}
+    return SendMessageResponse(status="accepted", thread_id=thread_id)
 
 
 # ---------------------------------------------------------------------------
@@ -678,7 +683,7 @@ async def get_team_status_endpoint(
     node_summaries = aggregator.get_node_summaries()
 
     agents = [
-        _AgentStatusEntry(
+        AgentStatusEntry(
             agent_id=s["agent_id"],
             node_name=s["node_name"],
             state=AgentLifecycleState.IDLE,

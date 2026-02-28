@@ -7,6 +7,7 @@ sub-modules directly::
     from lib.database import init_db, create_thread, ThreadModel
 """
 
+from .crud import ThreadStatus as ThreadStatus
 from .crud import append_cost_record as append_cost_record
 from .crud import append_permission_log as append_permission_log
 from .crud import create_artifact as create_artifact
@@ -40,6 +41,7 @@ __all__ = [
     "CostTrackingModel",
     "PermissionLogModel",
     "ThreadModel",
+    "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
     "close_db",

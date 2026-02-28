@@ -215,6 +215,10 @@ services:
       - db-data:/app/data
     environment:
       - DATABASE_URL=sqlite:////app/data/vaultspec.db
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_EXPORTER_OTLP_INSECURE=true
+    depends_on:
+      - jaeger
 
   frontend:
     image: node:22-alpine
@@ -223,6 +227,15 @@ services:
     ports: ["5173:5173"]
     volumes:
       - ./src/ui:/app/src/ui
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    ports:
+      - "4317:4317"   # OTLP gRPC receiver
+      - "4318:4318"   # OTLP HTTP receiver
+      - "16686:16686" # Jaeger UI
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
 
 volumes:
   db-data:
@@ -236,29 +249,9 @@ volumes:
 
 ### 4.5 Platform-Specific Dependencies
 
-pywin32 and winfcntl **cannot be installed in Linux containers**. Fix:
-
-```toml
-dependencies = [
-  # ... other deps ...
-  "pywin32>=311; sys_platform == 'win32'",
-  "winfcntl>=1.1.9; sys_platform == 'win32'",
-]
-```
-
-### 4.6 Git Dependency in Docker
-
-`claude-agent-sdk` requires git in the build stage:
-
-```dockerfile
-RUN apt-get update && apt-get install -y --no-install-recommends git
-```
-
-For private repos, use SSH mount:
-
-```dockerfile
-RUN --mount=type=ssh uv sync --no-dev --locked
-```
+> **Resolved by ADR-015:** pywin32, winfcntl, and claude-agent-sdk have
+> been removed entirely from `pyproject.toml` (zero imports in codebase).
+> No platform markers or git-dep handling needed in Docker.
 
 ### 4.7 Dev Container (.devcontainer)
 
@@ -389,98 +382,75 @@ Already using `pydantic-settings` with `.env` file support. Justfile's
 
 | Strategy | Complexity | User Experience | PyPI-Ready | Blocks |
 |----------|-----------|----------------|-----------|--------|
-| **A. PyPI wheel (embedded frontend)** | Medium | `pip install vaultspec-a2a` | Blocked by git dep | claude-agent-sdk on PyPI |
+| **A. PyPI wheel (embedded frontend)** | Medium | `pip install vaultspec-a2a` | Yes | Frontend build hook |
 | **B. Docker image** | Low | `docker run vaultspec-a2a` | N/A | None |
 | **C. GitHub install** | Low | `pip install git+https://...` | N/A | None |
-| **D. uvx ephemeral** | Low | `uvx --from git+... vaultspec` | N/A | None |
+| **D. uvx ephemeral** | Low | `uvx vaultspec-a2a` | Yes | PyPI publish |
 | **E. Binary (PyInstaller)** | High | Download `.exe` | N/A | Build pipeline |
 | **F. Desktop (Tauri)** | Very High | Native app | N/A | Rust toolchain |
 
+> **Update (ADR-015):** The claude-agent-sdk git dependency has been
+> removed (zero imports). pywin32 and winfcntl also removed. The PyPI
+> blocker is resolved — all remaining deps are on PyPI. CLI entry point
+> (`vaultspec` command) is implemented.
+
 ### 6.2 Recommended Phased Approach
 
-**Phase 1 (Now):** GitHub + Docker
+**Phase 1 (Now):** Developer tooling + Docker
 
-- `pip install git+https://github.com/...` for Python users
-- `docker run` for everyone else
-- Justfile for developers
+- Justfile for dev bootstrap (`just setup`, `just dev`, `just test`)
+- Dockerfile + docker-compose.yml with Jaeger
+- `.devcontainer` for Codespaces/VS Code
+- `.env.example` template
 
-**Phase 2 (When claude-agent-sdk hits PyPI):** PyPI distribution
+**Phase 2 (Next):** PyPI distribution
 
-- hatchling build hook bundles frontend
+- hatchling build hook bundles frontend (`hatch_build.py`)
 - `pip install vaultspec-a2a` / `uvx vaultspec-a2a`
-- Console script entry point
+- GitHub Actions CI + Trusted Publishing
 
 **Phase 3 (Optional):** Binary/Desktop
 
 - PyInstaller for Windows `.exe`
 - Tauri wrapper for native desktop experience
 
-### 6.3 Critical Blocker: claude-agent-sdk
-
-The git-based dependency `claude-agent-sdk @ git+https://github.com/anthropics/claude-agent-sdk-python.git@main`
-**cannot be published to PyPI**. Options:
-
-1. **Wait for PyPI release** (cleanest — monitor anthropics/claude-agent-sdk)
-2. **Vendor the source** (copy into repo, maintain as internal)
-3. **Private PyPI index** (Gemfury, GitHub Packages)
-4. **Docker-only distribution** (sidestep entirely)
-5. **GitHub-only install** (`pip install git+...` resolves transitively)
-
-### 6.4 Platform-Conditional Dependencies (Immediate Fix)
-
-Current `pyproject.toml` unconditionally requires pywin32/winfcntl — breaks
-on Linux/macOS. Fix:
-
-```toml
-dependencies = [
-  "pywin32>=311; sys_platform == 'win32'",
-  "winfcntl>=1.1.9; sys_platform == 'win32'",
-]
-```
-
-### 6.5 CLI Entry Point
-
-```toml
-[project.scripts]
-vaultspec = "lib.api.app:main"
-```
-
-```python
-# lib/api/app.py
-def main():
-    import uvicorn
-    uvicorn.run("lib.api.app:app", host="0.0.0.0", port=8000)
-```
-
-Enables: `vaultspec` CLI command after install, `uvx vaultspec-a2a`, and
-`python -m lib`.
-
 ---
 
-## 7. Immediate Action Items
+## 7. Action Items
 
-### 7.1 pyproject.toml Fixes (Do Now)
+### 7.1 Completed (ADR-015)
 
-1. Add `sys_platform == 'win32'` markers to pywin32 and winfcntl
-2. Add `[project.scripts]` entry point
-3. Consider adding `[project.urls]` for GitHub links
+- ~~Add `sys_platform == 'win32'` markers to pywin32 and winfcntl~~
+  **Removed entirely** — zero imports in codebase
+- ~~Remove claude-agent-sdk git dependency~~
+  **Removed** — PyPI blocker resolved
+- ~~Add `[project.scripts]` entry point~~
+  **Done** — `vaultspec = "lib.api.app:main"`
+- ~~Promote OTel to mandatory runtime dep~~
+  **Done** — try/except guards removed
+- ~~Add deptry to dev tooling~~
+  **Done** — zero violations
+- ~~Remove 8 additional dead deps~~
+  **Done** — 25 → 17 runtime deps, 144 → 100 resolved packages
 
-### 7.2 New Files to Create (ADR Phase)
+### 7.2 Remaining: New Files to Create
 
 1. `Justfile` — task runner for dev workflow
 2. `Dockerfile` — multi-stage build
-3. `docker-compose.yml` — development environment
+3. `docker-compose.yml` — dev environment (with Jaeger)
 4. `.devcontainer/devcontainer.json` — VS Code dev container
-5. `hatch_build.py` — frontend build hook
+5. `hatch_build.py` — frontend build hook (Phase 2)
 6. `.env.example` — environment template
 7. `.dockerignore` — exclude knowledge/, node_modules/, .venv/, etc.
 
-### 7.3 ADR Topics to Write
+### 7.3 Remaining: ADR Topics
 
-1. **ADR-015: Task Runner Selection** — Justfile over Makefile, rationale
-2. **ADR-016: Frontend Embedding Strategy** — hatchling build hook pattern
-3. **ADR-017: Containerization Strategy** — single-container vs multi-service
-4. **ADR-018: Distribution Strategy** — phased approach, PyPI blockers
+1. **ADR-016: Task Runner & Dev Bootstrap** — Justfile, `just setup`,
+   `just dev`, cross-platform recipes
+2. **ADR-017: Containerization Strategy** — Dockerfile, docker-compose,
+   devcontainer, Jaeger sidecar
+3. **ADR-018: Frontend Embedding & PyPI Distribution** — hatchling build
+   hook, GitHub Actions CI, Trusted Publishing
 
 ---
 
@@ -492,11 +462,13 @@ Enables: `vaultspec` CLI command after install, `uvx vaultspec-a2a`, and
    separate?
 3. Is the `lib` package name acceptable for PyPI, or should we rename to
    `vaultspec_a2a` for the public module?
-4. Should we vendor `claude-agent-sdk` or wait for PyPI release?
+4. ~~Should we vendor `claude-agent-sdk` or wait for PyPI release?~~
+   **Resolved** — removed entirely (ADR-015).
 5. Do we need a `langgraph.json` manifest for LangGraph CLI deployment
    compatibility?
-6. Should telemetry (OTel collector) be part of the default Docker Compose,
-   or a separate overlay?
+6. ~~Should telemetry (OTel collector) be part of the default Docker
+   Compose, or a separate overlay?~~ **Resolved** — Jaeger included in
+   default dev compose. OTel is mandatory (ADR-015).
 
 ---
 

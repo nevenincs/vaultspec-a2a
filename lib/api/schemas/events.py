@@ -114,8 +114,10 @@ class AgentSummary(BaseModel):
     agent_id: str
     node_name: str
     state: AgentLifecycleState
-    provider: Provider
-    model: Model
+    # M8: provider/model may be unknown at early lifecycle states (e.g. SUBMITTED)
+    # — keep consistent with AgentStatusEntry in rest.py
+    provider: Provider | None = None
+    model: Model | None = None
     # ADR-012 §6: metadata extracted from compiled_graph.nodes[node_name].metadata
     role: str = ""
     display_name: str = ""

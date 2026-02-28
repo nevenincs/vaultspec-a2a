@@ -153,7 +153,11 @@ class TestEventDelivery:
             t.start()
             t.join(timeout=5)
 
-            data = ws.receive_json()
+            # Skip any heartbeat messages (ping now sends a pong heartbeat)
+            for _ in range(5):
+                data = ws.receive_json()
+                if data["type"] != "heartbeat":
+                    break
             assert data["type"] == ServerEventType.AGENT_STATUS
             assert data["thread_id"] == "thread-1"
             assert data["state"] == AgentLifecycleState.WORKING
@@ -165,15 +169,19 @@ class TestEventDelivery:
 
 
 class TestPingCommand:
-    """Tests for the ping no-op command."""
+    """Tests for the ping command (responds with a heartbeat)."""
 
-    def test_ping_does_not_error(self) -> None:
-        """Sending a ping command does not disconnect or error the client."""
+    def test_ping_responds_with_heartbeat(self) -> None:
+        """Sending a ping command returns a heartbeat response."""
         app, _agg, _mgr = _create_app()
 
         with TestClient(app) as client, client.websocket_connect("/ws") as ws:
             _connected = ws.receive_json()
             ws.send_json({"type": "ping"})
+            pong = ws.receive_json()
+            assert pong["type"] == "heartbeat"
+            assert "timestamp" in pong
+            assert "server_uptime_seconds" in pong
 
 
 # ---------------------------------------------------------------------------

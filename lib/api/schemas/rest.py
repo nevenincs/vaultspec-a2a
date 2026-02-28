@@ -15,11 +15,14 @@ from .enums import AgentLifecycleState, PermissionOptionKind
 
 
 __all__ = [
+    "AgentStatusEntry",
     "CreateThreadRequest",
     "CreateThreadResponse",
+    "PendingPermission",
     "PermissionResponseRequest",
     "PermissionResponseResult",
     "SendMessageRequest",
+    "SendMessageResponse",
     "TeamPresetSummary",
     "TeamPresetsResponse",
     "TeamStatusResponse",
@@ -66,6 +69,13 @@ class SendMessageRequest(BaseModel):
     agent_id: str | None = None
 
 
+class SendMessageResponse(BaseModel):
+    """Response after accepting a user message (202 Accepted)."""
+
+    status: str
+    thread_id: str
+
+
 class ThreadSummary(BaseModel):
     """Lightweight thread descriptor for list endpoints."""
 
@@ -89,7 +99,7 @@ class ThreadListResponse(BaseModel):
     total: int
 
 
-class _AgentStatusEntry(BaseModel):
+class AgentStatusEntry(BaseModel):
     """Agent status within a team status response."""
 
     agent_id: str
@@ -102,7 +112,7 @@ class _AgentStatusEntry(BaseModel):
     description: str = ""
 
 
-class _PendingPermission(BaseModel):
+class PendingPermission(BaseModel):
     """Outstanding permission request summary."""
 
     request_id: str
@@ -113,9 +123,9 @@ class _PendingPermission(BaseModel):
 class TeamStatusResponse(BaseModel):
     """Current team status snapshot via REST."""
 
-    agents: list[_AgentStatusEntry]
+    agents: list[AgentStatusEntry]
     active_threads: list[str]
-    pending_permissions: list[_PendingPermission]
+    pending_permissions: list[PendingPermission]
 
 
 class PermissionResponseRequest(BaseModel):

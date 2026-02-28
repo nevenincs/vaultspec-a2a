@@ -339,6 +339,12 @@ class GitManager:
         wt_branch = await self._run_git(
             "rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path
         )
+        # M22: handle detached HEAD — git returns literal "HEAD" for detached state
+        if wt_branch == "HEAD":
+            raise ValueError(
+                f"Worktree at {worktree_path} is in detached HEAD state. "
+                "Cannot merge a detached HEAD; checkout a named branch first."
+            )
 
         async with _git_mutex:
             # H21: move the pre-flight conflict check inside the mutex to prevent

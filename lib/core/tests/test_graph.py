@@ -158,18 +158,15 @@ async def test_compile_unknown_topology_raises(
     team = load_team_config("coding-pipeline")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
-    # Temporarily patch the topology type
-    original_type = team.topology.type
-    team.topology.type = "unknown_topology"  # type: ignore[assignment]
-    try:
-        with pytest.raises(ValueError, match="Unknown topology type"):
-            compile_team_graph(
-                team_config=team,
-                agent_configs=agent_configs,
-                checkpointer=checkpointer,
-            )
-    finally:
-        team.topology.type = original_type
+    # M1: use model_copy instead of direct mutation (fragile if model becomes frozen)
+    bad_topology = team.topology.model_copy(update={"type": "unknown_topology"})
+    bad_team = team.model_copy(update={"topology": bad_topology})
+    with pytest.raises(ValueError, match="Unknown topology type"):
+        compile_team_graph(
+            team_config=bad_team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+        )
 
 
 # ---------------------------------------------------------------------------

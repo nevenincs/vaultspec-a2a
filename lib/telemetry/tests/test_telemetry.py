@@ -12,6 +12,7 @@ from __future__ import annotations
 import pytest
 
 from httpx import ASGITransport, AsyncClient
+from opentelemetry.sdk.trace import ReadableSpan
 from opentelemetry.trace import StatusCode
 from starlette.applications import Starlette
 from starlette.requests import Request
@@ -202,14 +203,22 @@ async def test_ws_span_propagates_exception() -> None:
 async def test_ws_span_extra_attributes() -> None:
     """ws_span passes extra kwargs as span attributes."""
     async with ws_span("ws.op", thread_id="t1", agent="coder", node="worker") as span:
+        # T2: verify span has a valid name and is recording
         assert span is not None
+        assert isinstance(span, ReadableSpan)
+        assert span.name == "ws.op"
+        assert span.is_recording()
 
 
 @pytest.mark.asyncio
 async def test_ws_span_no_thread_id() -> None:
     """ws_span works without a thread_id argument."""
     async with ws_span("ws.ping") as span:
+        # T2: verify span has a valid name and is recording
         assert span is not None
+        assert isinstance(span, ReadableSpan)
+        assert span.name == "ws.ping"
+        assert span.is_recording()
 
 
 # ---------------------------------------------------------------------------

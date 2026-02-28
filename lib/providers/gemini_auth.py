@@ -35,6 +35,7 @@ References:
 
 import json
 import logging
+import os
 import time
 
 from pathlib import Path
@@ -145,9 +146,15 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
     if "refresh_token" in token_data:
         creds["refresh_token"] = token_data["refresh_token"]
 
-    # Atomic write: write to .tmp then rename to avoid partial reads.
+    # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
     tmp = creds_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(creds, indent=2), encoding="utf-8")
+    # M16: fsync before rename so data is durable even on power failure.
+    fd = os.open(str(tmp), os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
     tmp.replace(creds_path)
 
     logger.info(

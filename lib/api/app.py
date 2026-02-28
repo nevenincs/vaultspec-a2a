@@ -47,7 +47,7 @@ try:
     from ..telemetry import configure_telemetry as _configure_telemetry
 except ImportError:
     _configure_telemetry: Callable[[], None] | None = None
-    _TelemetryMiddleware: type | None = None  # type: ignore[no-redef]
+    _TelemetryMiddleware: type | None = None
 
 
 __all__ = ["create_app"]

@@ -184,6 +184,18 @@ class MergeConflictError(WorkspaceError):
 # ---------------------------------------------------------------------------
 
 
+class NicknameConflictError(VaultspecError):
+    """Raised when a thread nickname already exists in the database."""
+
+    severity = ErrorSeverity.PERMANENT
+    recovery_action = RecoveryAction.ESCALATE_TO_USER
+
+    def __init__(self, nickname: str) -> None:
+        """Raise with a descriptive message for the conflicting nickname."""
+        super().__init__(f"Thread nickname already exists: {nickname!r}")
+        self.nickname = nickname
+
+
 class AgentConfigNotFoundError(ConfigError):
     """Raised when no agent TOML can be resolved for a given agent_id.
 
@@ -230,6 +242,7 @@ __all__ = [
     "EventAggregatorError",
     "GitWorkspaceError",
     "MergeConflictError",
+    "NicknameConflictError",
     "PermissionDeniedError",
     "ProtocolError",
     "RecoveryAction",

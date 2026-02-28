@@ -308,6 +308,7 @@ class TestAllExports:
             "EventAggregatorError",
             "GitWorkspaceError",
             "MergeConflictError",
+            "NicknameConflictError",
             "PermissionDeniedError",
             "ProtocolError",
             "RecoveryAction",

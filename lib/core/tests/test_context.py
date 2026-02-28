@@ -219,6 +219,49 @@ class TestCompactContext:
         result = compact_context(state, max_tokens=100)
         assert result["messages"] == []
 
+    def test_preserves_context_preamble_system_message(self) -> None:
+        """Regression: compact_context must preserve a leading context preamble.
+
+        ADR-014 §2.3 injects a SystemMessage context preamble as the first
+        message in graph_input. The compaction algorithm preserves all leading
+        SystemMessages before the first non-system message, so the preamble
+        must survive compaction alongside the core system prompt.
+        """
+        system_prompt = SystemMessage(content="You are a helpful assistant.")
+        context_preamble = SystemMessage(
+            content=(
+                "## Project Context\n"
+                "- **Workspace:** Y:/code/vaultspec\n"
+                "- **Feature:** auth-flow\n"
+                "\n## Available Context Documents\n"
+                "- **[research]** `.vault/research/auth-research.md`"
+            )
+        )
+        messages: list = [system_prompt, context_preamble]
+        # Add many messages to exceed the budget
+        for i in range(20):
+            messages.append(HumanMessage(content=f"Message {i} " + "x" * 200))
+            messages.append(AIMessage(content=f"Response {i} " + "y" * 200))
+
+        state: TeamState = {
+            "messages": messages,
+            "next": "",
+            "current_plan": [],
+            "artifacts": [],
+            "active_agent": "",
+            "thread_id": "",
+            "token_usage": {},
+        }
+
+        result = compact_context(state, max_tokens=200)
+
+        # Both leading SystemMessages must survive compaction
+        assert isinstance(result["messages"][0], SystemMessage)
+        assert result["messages"][0].content == system_prompt.content
+        assert isinstance(result["messages"][1], SystemMessage)
+        # The preamble content should be preserved (it is a leading SystemMessage)
+        assert "Project Context" in str(result["messages"][1].content)
+
     def test_non_message_fields_preserved(self) -> None:
         """All non-messages fields are copied unchanged into the compacted state."""
         state: TeamState = {

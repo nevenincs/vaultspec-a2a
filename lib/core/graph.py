@@ -10,6 +10,7 @@ map.  Three topology types are supported (ADR-013 §2.5):
                      routes back into the loop or finishes.
 """
 
+from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
@@ -31,6 +32,7 @@ def _resolve_model_for_worker(
     worker_ref: WorkerRef,
     agent_config: AgentConfig,
     team_config: TeamConfig,
+    workspace_root: Path | None = None,
 ) -> BaseChatModel:
     """Resolve provider + capability following ADR-013 §2.3 precedence.
 
@@ -50,10 +52,18 @@ def _resolve_model_for_worker(
         or agent_config.model.capability
         or team_config.defaults.capability
     )
-    return ProviderFactory.create(provider, model=capability, agent_config=agent_config)
+    return ProviderFactory.create(
+        provider,
+        model=capability,
+        agent_config=agent_config,
+        workspace_root=workspace_root,
+    )
 
 
-def _resolve_supervisor_model(team_config: TeamConfig) -> BaseChatModel:
+def _resolve_supervisor_model(
+    team_config: TeamConfig,
+    workspace_root: Path | None = None,
+) -> BaseChatModel:
     """Resolve the supervisor model from team config."""
     provider: Provider = (
         team_config.supervisor.provider
@@ -61,7 +71,9 @@ def _resolve_supervisor_model(team_config: TeamConfig) -> BaseChatModel:
         or Provider.CLAUDE
     )
     capability: Model = team_config.supervisor.capability or Model.MAX
-    return ProviderFactory.create(provider, model=capability)
+    return ProviderFactory.create(
+        provider, model=capability, workspace_root=workspace_root
+    )
 
 
 def _build_supervisor_prompt(
@@ -87,6 +99,7 @@ def compile_team_graph(
     agent_configs: dict[str, AgentConfig],
     checkpointer: AsyncSqliteSaver | None = None,
     supervisor_agent_config: AgentConfig | None = None,
+    workspace_root: Path | None = None,
 ) -> Any:  # noqa: ANN401
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -104,6 +117,8 @@ def compile_team_graph(
                                  persistence.
         supervisor_agent_config: Optional AgentConfig for the supervisor node.
                                  Only used for star/pipeline_loop topologies.
+        workspace_root:          Optional workspace root for ACP CWD scoping
+                                 (ADR-014 §2.7).
 
     Returns:
         The compiled StateGraph runnable.
@@ -125,12 +140,14 @@ def compile_team_graph(
     ]
 
     if topology.type == "star":
-        _compile_star(builder, team_config, agent_configs, supervisor_agent_config)
+        _compile_star(
+            builder, team_config, agent_configs, supervisor_agent_config, workspace_root
+        )
     elif topology.type == "pipeline":
-        _compile_pipeline(builder, team_config, agent_configs)
+        _compile_pipeline(builder, team_config, agent_configs, workspace_root)
     elif topology.type == "pipeline_loop":
         _compile_pipeline_loop(
-            builder, team_config, agent_configs, supervisor_agent_config
+            builder, team_config, agent_configs, supervisor_agent_config, workspace_root
         )
     else:
         raise ValueError(
@@ -149,6 +166,7 @@ def _compile_star(
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     supervisor_agent_config: AgentConfig | None,
+    workspace_root: Path | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -157,7 +175,7 @@ def _compile_star(
     worker_ids: list[str] = [w.agent_id for w in team_config.workers]
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
-    supervisor_model = _resolve_supervisor_model(team_config)
+    supervisor_model = _resolve_supervisor_model(team_config, workspace_root)
 
     if supervisor_agent_config is not None:
         supervisor_prompt = _build_supervisor_prompt(
@@ -196,7 +214,12 @@ def _compile_star(
 
     for worker_ref in team_config.workers:
         agent_cfg = agent_configs[worker_ref.agent_id]
-        model = _resolve_model_for_worker(worker_ref, agent_cfg, team_config)
+        model = _resolve_model_for_worker(
+            worker_ref,
+            agent_cfg,
+            team_config,
+            workspace_root,
+        )
         worker_node = create_worker_node(
             model, agent_cfg.persona.system_prompt, name=agent_cfg.id
         )
@@ -214,7 +237,9 @@ def _compile_star(
     route_map: dict[str, str] = {wid: wid for wid in worker_ids}
     route_map["FINISH"] = END
     builder.add_conditional_edges(
-        "supervisor", lambda state: state["next"], route_map  # type: ignore[arg-type]
+        "supervisor",
+        lambda state: state["next"],
+        route_map,  # type: ignore[arg-type]
     )
 
 
@@ -222,6 +247,7 @@ def _compile_pipeline(
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
+    workspace_root: Path | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -235,7 +261,12 @@ def _compile_pipeline(
     for agent_id in order:
         agent_cfg = agent_configs[agent_id]
         worker_ref = next(w for w in team_config.workers if w.agent_id == agent_id)
-        model = _resolve_model_for_worker(worker_ref, agent_cfg, team_config)
+        model = _resolve_model_for_worker(
+            worker_ref,
+            agent_cfg,
+            team_config,
+            workspace_root,
+        )
         worker_node = create_worker_node(
             model, agent_cfg.persona.system_prompt, name=agent_cfg.id
         )
@@ -261,6 +292,7 @@ def _compile_pipeline_loop(
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     supervisor_agent_config: AgentConfig | None,
+    workspace_root: Path | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -279,7 +311,12 @@ def _compile_pipeline_loop(
     for agent_id in order:
         agent_cfg = agent_configs[agent_id]
         worker_ref = next(w for w in team_config.workers if w.agent_id == agent_id)
-        model = _resolve_model_for_worker(worker_ref, agent_cfg, team_config)
+        model = _resolve_model_for_worker(
+            worker_ref,
+            agent_cfg,
+            team_config,
+            workspace_root,
+        )
         worker_node = create_worker_node(
             model, agent_cfg.persona.system_prompt, name=agent_cfg.id
         )

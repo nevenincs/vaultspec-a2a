@@ -54,6 +54,13 @@ def start_thread(
     Per ADR-006 §5, this tool never blocks the MCP connection — it returns
     as soon as the request is acknowledged, not when the task is complete.
 
+    **Note on Model Selection**: Models used by agents in the selected preset are
+    static, defined in the team TOML configuration. Per-request model overrides
+    are not supported via this tool. To use different models, either:
+    - Create a custom team preset in `{workspace}/.vaultspec/teams/` with the
+      desired model configurations, or
+    - Contact the system administrator to adjust the bundled presets.
+
     Args:
         initial_message: The high-level task description for the agent team.
         team_preset:     Team configuration preset to use. Available presets:

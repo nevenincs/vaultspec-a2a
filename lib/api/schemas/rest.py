@@ -9,6 +9,7 @@ from datetime import datetime
 
 from pydantic import BaseModel
 
+from ...core.metadata import ThreadMetadata
 from ...utils.enums import Model, Provider
 from .enums import AgentLifecycleState, PermissionOptionKind
 
@@ -28,12 +29,21 @@ __all__ = [
 
 
 class CreateThreadRequest(BaseModel):
-    """Create a new orchestration thread."""
+    """Create a new orchestration thread.
+
+    **Model Selection Policy**: When ``team_preset`` is specified, the ``provider``
+    and ``model`` fields are ignored. Models are defined statically in the team
+    TOML configuration (per ADR-013 §2.3). Per-request model overrides are not
+    supported for team presets. To customize models for a team, create a custom
+    team preset in the workspace or modify bundled presets.
+    """
 
     title: str | None = None
     initial_message: str
     # NEW: select a team preset by ID (ADR-013 §6)
     team_preset: str | None = None
+    # NEW: thread metadata for provenance and context (ADR-014)
+    metadata: ThreadMetadata | None = None
     # DEPRECATED: kept for backward compat, ignored if team_preset is set
     provider: Provider | None = None
     model: Model | None = None
@@ -44,6 +54,7 @@ class CreateThreadResponse(BaseModel):
 
     thread_id: str
     status: str
+    nickname: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -62,6 +73,11 @@ class ThreadSummary(BaseModel):
     agent_state: AgentLifecycleState | None = None
     created_at: datetime
     updated_at: datetime
+    # ADR-014: metadata summary fields for UI thread list
+    nickname: str | None = None
+    feature_tag: str | None = None
+    source_branch: str | None = None
+    callee: str | None = None
 
 
 class ThreadListResponse(BaseModel):

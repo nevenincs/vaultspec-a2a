@@ -37,12 +37,13 @@ alone when these servers provide authoritative, live data.
 - **context7** (`context7__*`): MUST be used to fetch up-to-date documentation
   and code examples for any third-party library before writing code against it.
   Call `resolve-library-id` first, then `query-docs`.
+
 ### Frontend Development — Mandatory for `src/ui/`
 
 All work touching `src/ui/` **must** follow this tool chain in order. Skipping
 steps is not permitted.
 
-**Step 1 — Design source (Figma)**
+#### Step 1 — Design source (Figma)
 
 - **figma** (`figma__*`) — local Figma Desktop MCP (HTTP at `127.0.0.1:3845/mcp`)
   — is the **primary and authoritative design source**. Every UI implementation
@@ -58,21 +59,21 @@ steps is not permitted.
   - If no Figma URL or node reference is available, **stop and ask the user**
     before making any layout or styling decisions.
 
-**Step 2 — Component library**
+#### Step 2 — Component library
 
 - **shadcn-ui** (`shadcn-ui__*`): MUST be queried before introducing any UI
   primitive. Use `list_shadcn_components`, `get_component_details`, and
   `get_component_examples` to get the canonical shadcn-svelte implementation.
   Do not hand-roll components that the library already provides.
 
-**Step 3 — Framework correctness**
+#### Step 3 — Framework correctness
 
 - **svelte** (`svelte__*`): MUST be consulted for all Svelte 5 syntax, Runes
   API (`$state`, `$derived`, `$effect`, `$props`), and SvelteKit patterns.
   After writing or modifying a component, call this tool again to verify
   correctness before committing.
 
-**Step 4 — Browser verification**
+#### Step 4 — Browser verification
 
 - **playwright** (`playwright__*`) or **chrome-devtools** (`chrome-devtools__*`):
   MUST be used to visually verify any UI change in a running browser. Do not

@@ -39,12 +39,15 @@ class ThreadModel(Base):
 
     __tablename__ = "threads"
 
+    __table_args__ = (Index("ix_threads_nickname", "nickname", unique=True),)
+
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
     status: Mapped[str] = mapped_column(default="submitted")
-    agent_config: Mapped[str | None] = mapped_column(Text, default=None)
+    thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
+    nickname: Mapped[str | None] = mapped_column(default=None)
 
     artifacts: Mapped[list["ArtifactModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan"

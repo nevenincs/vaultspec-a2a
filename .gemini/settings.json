@@ -32,13 +32,12 @@
       "command": "npx",
       "args": ["-y", "chrome-devtools-mcp@latest", "--no-usage-statistics"]
     },
-    "uv": {
-      "command": "uvx",
-      "args": ["mcp-server-uv"]
-    },
     "context7": {
       "command": "npx",
       "args": ["-y", "@upstash/context7-mcp@latest"]
+    },
+    "figma": {
+      "url": "http://127.0.0.1:3845/mcp"
     }
   }
 }

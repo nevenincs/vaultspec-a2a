@@ -6,6 +6,7 @@ import pytest
 import pytest_asyncio
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ..graph import compile_team_graph
@@ -78,6 +79,7 @@ async def test_compile_solo_coder_graph(checkpointer: AsyncSqliteSaver) -> None:
     assert graph is not None
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
     """Verify end-to-end execution, routing, and checkpointer state persistence."""
@@ -103,7 +105,7 @@ async def test_graph_execution_routing(checkpointer: AsyncSqliteSaver) -> None:
         ],
     }
 
-    config = {
+    config: RunnableConfig = {
         "configurable": {"thread_id": "test_routing_thread"},
         "recursion_limit": 5,
     }

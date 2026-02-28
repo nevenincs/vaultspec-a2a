@@ -68,6 +68,19 @@ class Settings(BaseSettings):
         """Check if running in development environment."""
         return self.environment == Environment.DEVELOPMENT
 
+    @property
+    def database_path(self) -> Path:
+        """Extract the plain file path from the SQLAlchemy database URL.
+
+        Parses ``sqlite+aiosqlite:///path/to/db.sqlite`` to ``Path(...)``.
+        Returns ``:memory:`` for in-memory databases.
+        """
+        url = self.database_url
+        raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
+        if raw == ":memory:":
+            return Path(":memory:")
+        return Path(raw).resolve()
+
 
 # Global settings instance
 settings = Settings()

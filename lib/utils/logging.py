@@ -13,8 +13,42 @@ if TYPE_CHECKING:
     from ..core.config import Settings
 
 
+# Standard LogRecord attributes that should not be included as extra fields.
+_STANDARD_LOG_ATTRS: frozenset[str] = frozenset(
+    {
+        "args",
+        "created",
+        "exc_info",
+        "exc_text",
+        "filename",
+        "funcName",
+        "levelname",
+        "levelno",
+        "lineno",
+        "message",
+        "module",
+        "msecs",
+        "msg",
+        "name",
+        "pathname",
+        "process",
+        "processName",
+        "relativeCreated",
+        "stack_info",
+        "thread",
+        "threadName",
+        "taskName",
+    }
+)
+
+
 class JSONFormatter(logging.Formatter):
-    """Formatter that outputs JSON strings for structured logging."""
+    """Formatter that outputs JSON strings for structured logging.
+
+    Any extra fields added via ``logging.getLogger(__name__).info(...,
+    extra={"thread_id": "...", "agent_id": "..."})`` are automatically
+    included in the JSON output, enabling structured correlation context.
+    """
 
     def format(self, record: logging.LogRecord) -> str:
         """Format the log record as a single-line JSON string."""
@@ -24,6 +58,12 @@ class JSONFormatter(logging.Formatter):
             "name": record.name,
             "message": record.getMessage(),
         }
+
+        # Include any structured extra fields (e.g. thread_id, agent_id, client_id)
+        # that callers pass via logger.info(..., extra={"thread_id": "..."}).
+        for key, value in record.__dict__.items():
+            if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
+                log_data[key] = value
 
         if record.exc_info is not None:
             log_data["exception"] = self.formatException(record.exc_info)
@@ -80,6 +120,10 @@ def setup_logging(
 
     root_logger.addHandler(log_handler)
 
-    # Intercept specific library logs if necessary (e.g., Uvicorn)
-    logging.getLogger("uvicorn.access").handlers = [log_handler]
-    logging.getLogger("uvicorn.error").handlers = [log_handler]
+    # Override library loggers to use the same handler and disable propagation
+    # so log records are not delivered twice (once via the child logger's handler
+    # and once via propagation to the root logger).
+    for lib_logger_name in ("uvicorn.access", "uvicorn.error"):
+        lib_logger = logging.getLogger(lib_logger_name)
+        lib_logger.handlers = [log_handler]
+        lib_logger.propagate = False

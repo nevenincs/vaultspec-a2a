@@ -131,6 +131,7 @@ class TestThreadCRUD:
         config = json.dumps({"provider": "claude", "model": "max"})
         thread = await create_thread(session, title="Configured", agent_config=config)
         assert thread.agent_config == config
+        assert thread.agent_config is not None
         parsed = json.loads(thread.agent_config)
         assert parsed["provider"] == "claude"
 
@@ -227,6 +228,7 @@ class TestArtifactCRUD:
             agent_id="coder-1",
         )
         saved = await save_model(session, artifact)
+        assert isinstance(saved, ArtifactModel)
         assert saved.content_hash == "abc123"
         assert saved.agent_id == "coder-1"
 
@@ -315,6 +317,7 @@ class TestPermissionLogCRUD:
             option_id="opt-42",
         )
         saved = await save_model(session, log)
+        assert isinstance(saved, PermissionLogModel)
         assert saved.option_id == "opt-42"
 
     @pytest.mark.asyncio

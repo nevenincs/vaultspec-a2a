@@ -40,10 +40,9 @@ __all__ = [
 ]
 
 
-_ModelT = ThreadModel | ArtifactModel | PermissionLogModel | CostTrackingModel
-
-
-async def save_model(session: AsyncSession, model: _ModelT) -> _ModelT:
+async def save_model[
+    M: (ThreadModel, ArtifactModel, PermissionLogModel, CostTrackingModel)
+](session: AsyncSession, model: M) -> M:
     """Persist any database model instance.
 
     Args:

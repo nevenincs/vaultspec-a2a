@@ -62,9 +62,10 @@ def test_provider_factory_zhipu_mapping() -> None:
 def test_provider_factory_unsupported_provider() -> None:
     """Verify that nonsense providers raise ValueError with useful message."""
     with pytest.raises(ValueError, match="Unsupported provider: unknown"):
-        ProviderFactory.create("unknown")
+        ProviderFactory.create("unknown")  # type: ignore[arg-type]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_factory_claude_live() -> None:
     """Test Claude end-to-end via the ACP subprocess wrapper."""
@@ -78,6 +79,7 @@ async def test_factory_claude_live() -> None:
     assert "hello" in str(response.content).lower()
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_factory_gemini_live() -> None:
     """Test Gemini end-to-end via the ACP subprocess wrapper."""
@@ -91,6 +93,7 @@ async def test_factory_gemini_live() -> None:
     assert "hello" in str(response.content).lower()
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_factory_openai_live() -> None:
     """Test OpenAI end-to-end via the ChatOpenAI SDK wrapper."""
@@ -104,6 +107,7 @@ async def test_factory_openai_live() -> None:
     assert "hello" in str(response.content).lower()
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_factory_zhipu_live() -> None:
     """Test Zhipu GLM end-to-end via the OpenAI-compatible ChatOpenAI wrapper."""

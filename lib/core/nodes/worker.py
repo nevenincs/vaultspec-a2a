@@ -7,7 +7,14 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
 from langgraph.types import interrupt
 
+from ..context import compact_context, should_compact
 from ..state import TeamState
+
+
+# Conservative context limit that fits all supported models
+# (Claude 200k, GPT-4 Turbo 128k, Gemini 1M). Compaction triggers at 80%
+# (100k tokens) to leave headroom for the generation cycle.
+_CONTEXT_LIMIT = 120_000
 
 
 __all__ = ["create_worker_node"]
@@ -16,6 +23,16 @@ __all__ = ["create_worker_node"]
 def _first_option_id(options: list[dict[str, Any]]) -> str:
     """Extract the first optionId from ACP permission options list."""
     return options[0]["optionId"] if options else "allow_once"
+
+
+def _validate_option_id(candidate: str, options: list[dict[str, Any]]) -> str:
+    """Return *candidate* if it is a valid optionId, else the first option.
+
+    Prevents a client sending an arbitrary string via ``Command(resume=...)``
+    from bypassing permission options with an unrecognised id.
+    """
+    valid_ids = {opt["optionId"] for opt in options if "optionId" in opt}
+    return candidate if candidate in valid_ids else _first_option_id(options)
 
 
 async def _interrupt_permission_callback(
@@ -54,10 +71,13 @@ async def _interrupt_permission_callback(
     )
     # resume_value is whatever the client passed in Command(resume=...).
     # Accept a plain string (raw optionId) or a dict with an "option_id" key.
+    # Validate against the known options to prevent unknown ids from reaching
+    # the ACP subprocess.
     if isinstance(resume_value, str):
-        return resume_value
+        return _validate_option_id(resume_value, options)
     if isinstance(resume_value, dict):
-        return resume_value.get("option_id", _first_option_id(options))
+        candidate = resume_value.get("option_id", _first_option_id(options))
+        return _validate_option_id(candidate, options)
     return _first_option_id(options)
 
 
@@ -91,7 +111,16 @@ def create_worker_node(
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
-        messages = [SystemMessage(content=system_prompt), *state["messages"]]
+        # Compact the conversation history for this LLM call if it is
+        # approaching the model's context limit. The full history is
+        # preserved in the LangGraph checkpointer — compaction only affects
+        # the messages passed to the model, not what is stored.
+        working_state = (
+            compact_context(state, _CONTEXT_LIMIT)
+            if should_compact(state, _CONTEXT_LIMIT)
+            else state
+        )
+        messages = [SystemMessage(content=system_prompt), *working_state["messages"]]
         # Wire interrupt-based permission approval for ACP-backed models.
         # Duck-typed: any model exposing permission_callback is supported.
         if hasattr(model, "permission_callback"):

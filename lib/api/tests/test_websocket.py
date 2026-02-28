@@ -195,6 +195,43 @@ class TestInvalidCommands:
 
 
 # ---------------------------------------------------------------------------
+# Permission response WebSocket rejection (ADR-011 §3.1)
+# ---------------------------------------------------------------------------
+
+
+class TestPermissionResponseRejection:
+    """permission_response over WebSocket must be rejected with an error frame."""
+
+    def test_permission_response_returns_error_frame(self) -> None:
+        """Sending permission_response over WebSocket triggers an error event.
+
+        ADR-011 §3.1 mandates REST-only delivery for permission responses.
+        The server must send back an explicit error frame so the client can
+        redirect to POST /threads/{id}/permission.
+        """
+        app, _agg, _mgr = _create_app()
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+
+            ws.send_json(
+                {
+                    "type": "permission_response",
+                    "request_id": "req-123",
+                    "option_id": "allow_once",
+                    "thread_id": "thread-1",
+                }
+            )
+
+            # Server must send back an error frame immediately
+            error = ws.receive_json()
+            assert error["type"] == "error"
+            assert error["code"] == "PERMISSION_RESPONSE_WS_FORBIDDEN"
+            assert error["recoverable"] is True
+            assert "REST" in error["message"]
+
+
+# ---------------------------------------------------------------------------
 # Exports
 # ---------------------------------------------------------------------------
 

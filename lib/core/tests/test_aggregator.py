@@ -2,6 +2,9 @@
 
 import asyncio
 
+from datetime import UTC, datetime
+from typing import ClassVar, cast
+
 import pytest
 
 from ...api.schemas.enums import (
@@ -293,6 +296,48 @@ class TestEventEmission:
         assert len(event.agents) == expected_agent_count
         assert event.agents[0].agent_id == "a1"
 
+    @pytest.mark.asyncio
+    async def test_emit_team_status_node_metadata(
+        self,
+        aggregator: EventAggregator,
+    ) -> None:
+        """register_graph populates metadata; emit_team_status reads it."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        # Stub satisfying the structural protocol used by register_graph.
+        class _FakeNode:
+            metadata: ClassVar[dict[str, str]] = {
+                "role": "reviewer",
+                "display_name": "Code Reviewer",
+                "description": "Reviews code for correctness",
+            }
+
+        class _FakeGraph:
+            nodes: ClassVar[dict[str, _FakeNode]] = {"worker": _FakeNode()}
+
+        aggregator.register_graph(_FakeGraph())  # type: ignore[arg-type]
+
+        await aggregator.emit_team_status(
+            thread_id="thread-1",
+            agents=[
+                {
+                    "agent_id": "a1",
+                    "node_name": "worker",
+                    "state": AgentLifecycleState.WORKING,
+                    "provider": "claude",
+                    "model": "mid",
+                },
+            ],
+            active_thread_ids=["thread-1"],
+        )
+
+        event = queue.get_nowait()
+        assert isinstance(event, TeamStatusEvent)
+        assert event.agents[0].role == "reviewer"
+        assert event.agents[0].display_name == "Code Reviewer"
+        assert event.agents[0].description == "Reviews code for correctness"
+
 
 # ---------------------------------------------------------------------------
 # Thread-scoped event isolation
@@ -372,8 +417,8 @@ class TestSequenceOnEvents:
             message_id="msg-2",
         )
 
-        e1 = queue.get_nowait()
-        e2 = queue.get_nowait()
+        e1 = cast(MessageChunkEvent, queue.get_nowait())
+        e2 = cast(MessageChunkEvent, queue.get_nowait())
         first_seq = 1
         second_seq = 2
         assert e1.sequence == first_seq
@@ -406,7 +451,7 @@ class TestSequenceOnEvents:
             message_id="msg-3",
         )
 
-        events = [queue.get_nowait() for _ in range(3)]
+        events = [cast(MessageChunkEvent, queue.get_nowait()) for _ in range(3)]
         a_events = [e for e in events if e.thread_id == "thread-a"]
         b_events = [e for e in events if e.thread_id == "thread-b"]
 
@@ -806,6 +851,106 @@ class TestToolCallUpdateDebouncing:
         event = queue.get_nowait()
         assert isinstance(event, ToolCallUpdateEvent)
         assert event.status == ToolCallStatus.IN_PROGRESS
+
+
+# ---------------------------------------------------------------------------
+# Backpressure: drop-oldest strategy
+# ---------------------------------------------------------------------------
+
+
+class TestBackpressure:
+    """Tests for the drop-oldest broadcast strategy when a client queue is full."""
+
+    @pytest.mark.asyncio
+    async def test_full_queue_drops_oldest_event(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When the subscriber queue is full, the oldest event is dropped and
+        the newest is inserted so _broadcast never blocks."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        # Fill the queue to capacity with distinct content
+        for i in range(_QUEUE_MAXSIZE):
+            await aggregator.emit_message_chunk(
+                thread_id="thread-1",
+                agent_id="agent-1",
+                content=f"msg-{i}",
+                message_id=f"id-{i}",
+            )
+
+        assert queue.full()
+
+        # One more event: should drop the oldest (msg-0) and enqueue this one
+        await aggregator.emit_message_chunk(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            content="newest",
+            message_id="id-new",
+        )
+
+        # Queue remains at capacity (not exceeding maxsize)
+        assert queue.qsize() == _QUEUE_MAXSIZE
+
+        # First event dequeued is msg-1 (msg-0 was dropped)
+        first = queue.get_nowait()
+        assert isinstance(first, MessageChunkEvent)
+        assert first.content == "msg-1"
+
+        # Last event dequeued is the newly inserted one
+        events = [queue.get_nowait() for _ in range(queue.qsize())]
+        last = events[-1]
+        assert isinstance(last, MessageChunkEvent)
+        assert last.content == "newest"
+
+    @pytest.mark.asyncio
+    async def test_slow_client_does_not_block_fast_client(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A full slow-client queue must not stall delivery to a fast client."""
+        q_fast = aggregator.add_subscriber("fast")
+        q_slow = aggregator.add_subscriber("slow")
+        aggregator.subscribe("fast", ["thread-1"])
+        aggregator.subscribe("slow", ["thread-1"])
+
+        # Pre-fill the slow queue to capacity
+        for i in range(_QUEUE_MAXSIZE):
+            q_slow.put_nowait(
+                await _make_chunk_event(aggregator, f"pre-{i}")
+            )
+
+        assert q_slow.full()
+
+        # Broadcast one more event — must not block
+        await aggregator.emit_message_chunk(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            content="new-event",
+            message_id="id-new",
+        )
+
+        # Fast client received the event
+        assert q_fast.qsize() == 1
+        fast_event = q_fast.get_nowait()
+        assert isinstance(fast_event, MessageChunkEvent)
+        assert fast_event.content == "new-event"
+
+        # Slow client still at capacity (oldest was dropped, newest inserted)
+        assert q_slow.qsize() == _QUEUE_MAXSIZE
+
+
+async def _make_chunk_event(
+    aggregator: EventAggregator, content: str
+) -> MessageChunkEvent:
+    """Helper: return a MessageChunkEvent without broadcasting it."""
+    return MessageChunkEvent(
+        thread_id="thread-1",
+        agent_id="agent-1",
+        content=content,
+        message_id="helper",
+        timestamp=datetime.now(UTC),
+        sequence=aggregator.advance_sequence("thread-1"),
+    )
 
 
 # ---------------------------------------------------------------------------

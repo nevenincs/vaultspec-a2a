@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 import time
 
 from contextlib import suppress
@@ -61,6 +62,9 @@ class _ProbeSession:
         self.step = "initialize"
         self.t0 = time.monotonic()
         self.process: asyncio.subprocess.Process | None = None
+        self.stdin: asyncio.StreamWriter | None = None
+        self.stdout: asyncio.StreamReader | None = None
+        self.stderr: asyncio.StreamReader | None = None
 
     def send(self, method: str, params: dict) -> int:
         self.request_id += 1
@@ -70,12 +74,14 @@ class _ProbeSession:
             "method": method,
             "params": params,
         }
-        self.process.stdin.write(f"{json.dumps(req)}\n".encode())
+        assert self.stdin is not None
+        self.stdin.write(f"{json.dumps(req)}\n".encode())
         logger.debug("ACP TX [%d] -> %s", self.request_id, method)
         return self.request_id
 
     async def drain(self) -> None:
-        await self.process.stdin.drain()
+        assert self.stdin is not None
+        await self.stdin.drain()
 
     async def handle_response(self, rid: int, src: str, msg: dict) -> bool:
         """Handle JSON-RPC response; return True if session complete."""
@@ -125,7 +131,8 @@ class _ProbeSession:
             "id": rid,
             "error": {"code": -32601, "message": f"Not implemented: {method}"},
         }
-        self.process.stdin.write(f"{json.dumps(resp)}\n".encode())
+        assert self.stdin is not None
+        self.stdin.write(f"{json.dumps(resp)}\n".encode())
         await self.drain()
         logger.debug("ACP RX [%s] <- server RPC %s: rejected", rid, method)
 
@@ -145,9 +152,10 @@ class _ProbeSession:
         ] = "initialize"
         await self.drain()
 
+        assert self.stdout is not None
         while True:
             line = await asyncio.wait_for(
-                self.process.stdout.readline(), timeout=self.timeout
+                self.stdout.readline(), timeout=self.timeout
             )
             if not line:
                 self.result.error = "EOF on stdout"
@@ -170,7 +178,8 @@ class _ProbeSession:
                 await self.handle_server_rpc(rid, method)
 
     async def read_stderr(self) -> None:
-        while line := await self.process.stderr.readline():
+        assert self.stderr is not None
+        while line := await self.stderr.readline():
             if text := line.decode("utf-8", errors="replace").rstrip():
                 logger.debug("ACP STDERR: %s", text)
 
@@ -189,13 +198,19 @@ async def run_probe(
 
     session = _ProbeSession(command, env, timeout, prompt)
     session.process = await asyncio.create_subprocess_shell(
-        " ".join(command),
+        subprocess.list2cmdline(command),
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
         env=env,
         limit=10 * 1024 * 1024,
     )
+    assert session.process.stdin is not None
+    assert session.process.stdout is not None
+    assert session.process.stderr is not None
+    session.stdin = session.process.stdin
+    session.stdout = session.process.stdout
+    session.stderr = session.process.stderr
 
     stderr_task = asyncio.create_task(session.read_stderr())
     try:
@@ -207,7 +222,7 @@ async def run_probe(
         with suppress(OSError):
             session.process.terminate()
         if getattr(session.process, "_transport", None):
-            session.process._transport.close()  # noqa: SLF001
+            session.process._transport.close()  # noqa: SLF001  # type: ignore[attr-defined]
         with suppress(Exception):
             await asyncio.wait_for(session.process.wait(), timeout=5)
 

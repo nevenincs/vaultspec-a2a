@@ -176,7 +176,7 @@ class TestTeamStateStructure:
     """Verify TeamState has all expected keys."""
 
     def test_has_required_keys(self) -> None:
-        """TeamState annotations include exactly the seven expected field names."""
+        """TeamState annotations include exactly the eight expected field names."""
         expected = {
             "messages",
             "next",
@@ -185,6 +185,7 @@ class TestTeamStateStructure:
             "active_agent",
             "thread_id",
             "token_usage",
+            "loop_count",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

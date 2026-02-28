@@ -18,12 +18,14 @@ import asyncio
 import json
 import logging
 import os
+import subprocess
 
-from collections.abc import AsyncIterator, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
@@ -58,6 +60,19 @@ __all__ = ["AcpChatModel"]
 
 logger = logging.getLogger(__name__)
 
+# Map RPC method -> AgentCapabilities attribute name.
+# Used for defense-in-depth capability checks at dispatch time
+# (in addition to the clientCapabilities declared at initialize time).
+_CAPABILITY_REQUIREMENTS: dict[str, str] = {
+    "fs/read_text_file": "filesystem_read",
+    "fs/write_text_file": "filesystem_write",
+    "terminal/create": "terminal",
+    "terminal/kill": "terminal",
+    "terminal/output": "terminal",
+    "terminal/wait_for_exit": "terminal",
+    "terminal/release": "terminal",
+}
+
 
 def _log_task_exception(task: asyncio.Task) -> None:
     """Log unhandled exceptions from fire-and-forget background RPC tasks."""
@@ -70,17 +85,19 @@ class _AcpSessionContext:
     """Consolidated state for an active ACP session."""
 
     process: asyncio.subprocess.Process
+    stdin: asyncio.StreamWriter
+    stdout: asyncio.StreamReader
     response_futures: dict[int, asyncio.Future]
     chunk_queue: asyncio.Queue[ChatGenerationChunk | None]
     prompt_done: asyncio.Event
     prompt_id_ref: list[int]
     prompt_error_ref: list[dict]
     interrupt_exc: list[BaseException]
-    background_tasks: set[asyncio.Task] | None = None
-
-    def __post_init__(self) -> None:
-        if self.background_tasks is None:
-            self.background_tasks = set()
+    background_tasks: set[asyncio.Task] = field(default_factory=set)
+    terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
+    # Serialises all ctx.stdin.write() + drain() calls so concurrent background
+    # RPC tasks cannot interleave writes and produce malformed JSON-RPC frames.
+    stdin_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
 
 
 class AcpChatModel(BaseChatModel):
@@ -105,7 +122,7 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="Working directory for the agent session.",
     )
-    permission_callback: object = Field(
+    permission_callback: Callable[..., Any] | None = Field(
         default=None,
         description="Optional async callback for custom permission handling.",
         exclude=True,
@@ -121,6 +138,7 @@ class AcpChatModel(BaseChatModel):
 
     # --- Runtime state (private, not model fields) ---
     _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
+    _stdin: asyncio.StreamWriter | None = PrivateAttr(default=None)
     _active_session_id: str | None = PrivateAttr(default=None)
     _response_futures: dict[int, asyncio.Future] | None = PrivateAttr(default=None)
     _agent_capabilities: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -154,7 +172,6 @@ class AcpChatModel(BaseChatModel):
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
-        shell_command = " ".join(self.command)
         env = os.environ.copy()
         env.update(self.env_vars)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
@@ -162,6 +179,12 @@ class AcpChatModel(BaseChatModel):
         if "gemini" in self.command:
             refresh_gemini_token()
 
+        # subprocess.list2cmdline() escapes each arg for cmd.exe so that args with
+        # spaces or shell metacharacters cannot be interpreted by the Windows shell
+        # (prevents command injection when model names are user-controlled).
+        # On Windows, .cmd shims (gemini.cmd, etc.) require shell=True; we keep
+        # create_subprocess_shell but use list2cmdline instead of plain join.
+        shell_command = subprocess.list2cmdline(self.command)
         process = await asyncio.create_subprocess_shell(
             shell_command,
             stdin=asyncio.subprocess.PIPE,
@@ -172,10 +195,14 @@ class AcpChatModel(BaseChatModel):
             limit=10 * 1024 * 1024,
         )
 
+        assert process.stdin is not None
+        assert process.stdout is not None
         ctx = _AcpSessionContext(
             process=process,
+            stdin=process.stdin,
+            stdout=process.stdout,
             response_futures={},
-            chunk_queue=asyncio.Queue(),
+            chunk_queue=asyncio.Queue(maxsize=1024),
             prompt_done=asyncio.Event(),
             prompt_id_ref=[],
             prompt_error_ref=[],
@@ -219,8 +246,9 @@ class AcpChatModel(BaseChatModel):
                             )
                     raise AcpError("ACP subprocess exited before end_turn")
                 if run_manager:
+                    token = chunk.message.content
                     await run_manager.on_llm_new_token(
-                        chunk.message.content, chunk=chunk
+                        token if isinstance(token, str) else "", chunk=chunk
                     )
                 yield chunk
             except TimeoutError:
@@ -239,8 +267,9 @@ class AcpChatModel(BaseChatModel):
             chunk = ctx.chunk_queue.get_nowait()
             if chunk is not None:
                 if run_manager:
+                    token = chunk.message.content
                     await run_manager.on_llm_new_token(
-                        chunk.message.content, chunk=chunk
+                        token if isinstance(token, str) else "", chunk=chunk
                     )
                 yield chunk
 
@@ -251,16 +280,45 @@ class AcpChatModel(BaseChatModel):
         stderr_task: asyncio.Task,
     ) -> None:
         """Terminate subprocess and clean up tasks."""
+        # Kill all spawned terminals before cancelling the session
+        for _tid, proc in list(ctx.terminals.items()):
+            with suppress(Exception):
+                proc.kill()
+                await proc.wait()
+        ctx.terminals.clear()
+
         if self._active_session_id and not ctx.prompt_done.is_set():
             with suppress(Exception):
-                await self._send_notification(
-                    "session/cancel", {"sessionId": self._active_session_id}, ctx
-                )
+                # ADR-006 §5.1 pt 6: session/cancel must be a proper JSON-RPC
+                # (with id) and awaited with a 3-second timeout so the subprocess
+                # has a chance to flush its state before we kill it.
+                rpc_id = AcpRequestId.SESSION_CANCEL
+                loop = asyncio.get_running_loop()
+                ctx.response_futures[rpc_id] = loop.create_future()
+                req = {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "method": "session/cancel",
+                    "params": {"sessionId": self._active_session_id},
+                }
+                async with ctx.stdin_lock:
+                    ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+                    await ctx.stdin.drain()
+                await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
 
         stdout_task.cancel()
         stderr_task.cancel()
         with suppress(OSError):
             ctx.process.terminate()
+        # Wait for the process to exit; escalate to SIGKILL after 5 seconds to
+        # prevent zombie processes when the subprocess ignores SIGTERM.
+        try:
+            await asyncio.wait_for(ctx.process.wait(), timeout=5.0)
+        except TimeoutError:
+            logger.warning("ACP process did not exit after SIGTERM; sending SIGKILL")
+            with suppress(OSError):
+                ctx.process.kill()
+            await ctx.process.wait()
 
         transport = getattr(ctx.process, "_transport", None)
         if transport is not None:
@@ -305,6 +363,11 @@ class AcpChatModel(BaseChatModel):
             raise RuntimeError("No active session.")
         return self._active_session_id
 
+    def _require_stdin(self) -> asyncio.StreamWriter:
+        if self._stdin is None:
+            raise RuntimeError("No active session stdin.")
+        return self._stdin
+
     async def _read_stderr_loop(self, process: asyncio.subprocess.Process) -> None:
         assert process.stderr is not None
         while line := await process.stderr.readline():
@@ -314,11 +377,11 @@ class AcpChatModel(BaseChatModel):
 
     async def _process_stdout_loop(self, ctx: _AcpSessionContext) -> None:
         try:
-            while line := await ctx.process.stdout.readline():
+            while line := await ctx.stdout.readline():
                 if not line.strip():
                     continue
                 try:
-                    agent_data = json.loads(line.decode("utf-8"))
+                    parsed = json.loads(line.decode("utf-8"))
                 except (json.JSONDecodeError, UnicodeDecodeError) as exc:
                     logger.warning(
                         "ACP stdout: malformed line skipped: %s | raw=%r",
@@ -326,9 +389,13 @@ class AcpChatModel(BaseChatModel):
                         line[:200],
                     )
                     continue
-                if not isinstance(agent_data, dict):
-                    continue
-                await self._dispatch_packet(agent_data, ctx)
+                # Handle batch JSON-RPC (array of messages)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        if isinstance(item, dict):
+                            await self._dispatch_packet(item, ctx)
+                elif isinstance(parsed, dict):
+                    await self._dispatch_packet(parsed, ctx)
         finally:
             for fut in ctx.response_futures.values():
                 if not fut.done():
@@ -361,8 +428,17 @@ class AcpChatModel(BaseChatModel):
         self, data: dict, ctx: _AcpSessionContext
     ) -> None:
         rid = data.get("id")
-        if rid in ctx.response_futures and not ctx.response_futures[rid].done():
-            ctx.response_futures[rid].set_result(data)
+        if rid in ctx.response_futures:
+            fut = ctx.response_futures[rid]
+            if not fut.done():
+                try:
+                    fut.set_result(data)
+                except asyncio.InvalidStateError:
+                    # wait_for() already cancelled the future (timeout fired between
+                    # the .done() check and set_result()). Discard the late response.
+                    logger.debug(
+                        "Response for rpc_id=%r arrived after timeout; discarding", rid
+                    )
 
         result = data.get("result", {})
         if isinstance(result, dict) and result.get("stopReason") == "end_turn":
@@ -374,18 +450,56 @@ class AcpChatModel(BaseChatModel):
     async def _handle_server_rpc(
         self, method: str, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
     ) -> None:
-        if method == "session/request_permission":
-            resp = await self._on_request_permission(rpc_id, params, ctx)
+        # Defense-in-depth capability check at dispatch time.
+        # The ACP subprocess was told our capabilities at initialize time, but
+        # this guard ensures a misbehaving or confused subprocess cannot invoke
+        # methods the agent config does not permit.
+        cap_attr = _CAPABILITY_REQUIREMENTS.get(method)
+        if cap_attr is not None:
+            allowed = (
+                getattr(self.agent_config.capabilities, cap_attr, False)
+                if self.agent_config is not None
+                else False
+            )
+            if not allowed:
+                resp: dict[str, object] = {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "error": {
+                        "code": -32601,
+                        "message": f"Capability not enabled: {method}",
+                    },
+                }
+                body = json.dumps(resp).encode("utf-8")
+                async with ctx.stdin_lock:
+                    ctx.stdin.write(body + b"\n")
+                    await ctx.stdin.drain()
+                return
+
+        _rpc_dispatch: dict[str, Callable[..., Any]] = {
+            "session/request_permission": self._on_request_permission,
+            "fs/read_text_file": self._on_fs_read_text_file,
+            "fs/write_text_file": self._on_fs_write_text_file,
+            "terminal/create": self._on_terminal_create,
+            "terminal/kill": self._on_terminal_kill,
+            "terminal/output": self._on_terminal_output,
+            "terminal/wait_for_exit": self._on_terminal_wait_for_exit,
+            "terminal/release": self._on_terminal_release,
+        }
+        handler = _rpc_dispatch.get(method)
+        if handler is not None:
+            resp = await handler(rpc_id, params, ctx)
         else:
             resp = {
                 "jsonrpc": "2.0",
                 "id": rpc_id,
-                "error": {"code": -32601, "message": "Not found"},
+                "error": {"code": -32601, "message": f"Method not found: {method}"},
             }
 
         body = json.dumps(resp).encode("utf-8")
-        ctx.process.stdin.write(body + b"\n")
-        await ctx.process.stdin.drain()
+        async with ctx.stdin_lock:
+            ctx.stdin.write(body + b"\n")
+            await ctx.stdin.drain()
 
     async def _on_request_permission(
         self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
@@ -405,9 +519,25 @@ class AcpChatModel(BaseChatModel):
                 return {}
             except Exception:
                 logger.exception(
-                    "Permission callback raised; auto-granting first option"
+                    "Permission callback raised; denying permission (fail-closed)"
                 )
-                option_id = options[0]["optionId"] if options else "allow_once"
+                # TOAD reference pattern: return a denial outcome (not a JSON-RPC
+                # error) so the ACP subprocess can cleanly decline the tool call.
+                # Prefer the first option whose id contains "deny"; fall back to
+                # the last option in the list (conventionally the most restrictive).
+                deny_id = next(
+                    (
+                        o["optionId"]
+                        for o in options
+                        if "deny" in o.get("optionId", "").lower()
+                    ),
+                    options[-1]["optionId"] if options else "deny",
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
+                }
         else:
             option_id = options[0]["optionId"] if options else "allow_once"
 
@@ -416,6 +546,243 @@ class AcpChatModel(BaseChatModel):
             "id": rpc_id,
             "result": {"outcome": {"optionId": option_id, "outcome": "selected"}},
         }
+
+    def _sandbox_path(self, path: str) -> Path:
+        """Resolve and sandbox a path to the agent cwd."""
+        cwd = Path(self.cwd) if self.cwd else Path.cwd()
+        resolved = (cwd / path).resolve()
+        if not resolved.is_relative_to(cwd.resolve()):
+            raise ValueError(f"Path {path!r} escapes sandbox")
+        return resolved
+
+    async def _on_fs_read_text_file(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle fs/read_text_file RPC.
+
+        Supports optional ``offset`` (byte offset) and ``limit`` (byte count)
+        params for partial reads, avoiding loading entire large files into memory.
+        Uses asyncio.to_thread so blocking I/O does not stall the event loop.
+        """
+        try:
+            file_path = self._sandbox_path(params["path"])
+            offset: int = int(params.get("offset") or 0)
+            limit: int | None = (
+                int(params["limit"]) if params.get("limit") is not None else None
+            )
+
+            def _read() -> str:
+                with file_path.open(encoding="utf-8", errors="ignore") as fh:
+                    if offset:
+                        fh.seek(offset)
+                    return fh.read(limit) if limit is not None else fh.read()
+
+            text = await asyncio.to_thread(_read)
+            return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
+        except Exception as exc:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {"code": -32603, "message": str(exc)},
+            }
+
+    async def _on_fs_write_text_file(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle fs/write_text_file RPC.
+
+        Acquires the global git mutex before writing to prevent races with
+        concurrent git operations (ADR-001 §2). Uses asyncio.to_thread so
+        blocking I/O does not stall the event loop.
+        """
+        from ..workspace.git_manager import _git_mutex  # noqa: PLC0415
+
+        try:
+            file_path = self._sandbox_path(params["path"])
+            content: str = params["content"]
+
+            def _write() -> None:
+                file_path.parent.mkdir(parents=True, exist_ok=True)
+                file_path.write_text(content, encoding="utf-8")
+
+            async with _git_mutex:
+                await asyncio.to_thread(_write)
+            return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+        except Exception as exc:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {"code": -32603, "message": str(exc)},
+            }
+
+    async def _on_terminal_create(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle terminal/create RPC.
+
+        Validates that the working directory is within the sandbox, logs
+        the command for audit purposes, then spawns the subprocess.
+        Passes optional ``env`` overrides from params on top of the current
+        environment so the subprocess inherits PATH and other required vars.
+        """
+        try:
+            command = params["command"]
+            args = params.get("args") or []
+
+            # Sandbox the terminal cwd: must be within the agent workspace root.
+            raw_cwd = params.get("cwd") or self.cwd or str(Path.cwd())
+            sandbox_root = (
+                Path(self.cwd).resolve()
+                if self.cwd
+                else Path.cwd().resolve()
+            )
+            resolved_cwd = Path(raw_cwd).resolve()
+            if not resolved_cwd.is_relative_to(sandbox_root):
+                raise ValueError(
+                    f"Terminal cwd {raw_cwd!r} escapes sandbox root {sandbox_root}"
+                )
+
+            # Audit log for all terminal commands (ADR-001 §2)
+            logger.info(
+                "terminal/create: command=%r args=%r cwd=%s",
+                command,
+                args,
+                resolved_cwd,
+            )
+
+            # Build env: start from current environment, apply any overrides
+            terminal_env = os.environ.copy()
+            if extra_env := params.get("env"):
+                if isinstance(extra_env, list):
+                    # ACP protocol: env is list[EnvVariable] with name/value keys
+                    terminal_env.update(
+                        {v["name"]: v["value"] for v in extra_env}
+                    )
+                elif isinstance(extra_env, dict):
+                    terminal_env.update(extra_env)
+            process = await asyncio.create_subprocess_exec(
+                command,
+                *args,
+                stdin=asyncio.subprocess.PIPE,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                cwd=str(resolved_cwd),
+                env=terminal_env,
+            )
+            terminal_id = uuid4().hex[:8]
+            ctx.terminals[terminal_id] = process
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "result": {"terminalId": terminal_id},
+            }
+        except Exception as exc:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {"code": -32603, "message": str(exc)},
+            }
+
+    async def _on_terminal_kill(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle terminal/kill RPC."""
+        terminal_id = params.get("terminalId", "")
+        process = ctx.terminals.get(terminal_id)
+        if process is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Unknown terminal: {terminal_id}",
+                },
+            }
+        with suppress(OSError):
+            process.kill()
+        await process.wait()
+        ctx.terminals.pop(terminal_id, None)
+        return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
+
+    async def _on_terminal_output(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle terminal/output RPC."""
+        terminal_id = params.get("terminalId", "")
+        process = ctx.terminals.get(terminal_id)
+        if process is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Unknown terminal: {terminal_id}",
+                },
+            }
+        stdout_data = b""
+        stderr_data = b""
+        if process.stdout:
+            with suppress(TimeoutError):
+                stdout_data = await asyncio.wait_for(
+                    process.stdout.read(65536), timeout=0.5
+                )
+        if process.stderr:
+            with suppress(TimeoutError):
+                stderr_data = await asyncio.wait_for(
+                    process.stderr.read(65536), timeout=0.5
+                )
+        output_result: dict[str, object] = {
+            "output": stdout_data.decode("utf-8", errors="replace")
+            + stderr_data.decode("utf-8", errors="replace"),
+            "truncated": False,
+        }
+        # Conditionally include exitStatus when the process has already exited
+        if process.returncode is not None:
+            output_result["exitStatus"] = process.returncode
+        return {"jsonrpc": "2.0", "id": rpc_id, "result": output_result}
+
+    async def _on_terminal_wait_for_exit(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle terminal/wait_for_exit RPC."""
+        terminal_id = params.get("terminalId", "")
+        process = ctx.terminals.get(terminal_id)
+        if process is None:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {
+                    "code": -32602,
+                    "message": f"Unknown terminal: {terminal_id}",
+                },
+            }
+        timeout = params.get("timeout") or 60.0
+        try:
+            await asyncio.wait_for(process.wait(), timeout=timeout)
+        except TimeoutError:
+            return {
+                "jsonrpc": "2.0",
+                "id": rpc_id,
+                "error": {"code": -32603, "message": "Timeout waiting for exit"},
+            }
+        exit_result: dict[str, object] = {"exitCode": process.returncode}
+        # On Unix, negative returncode means the process was killed by a signal
+        # (returncode == -signum). Include the signal number for completeness.
+        if process.returncode is not None and process.returncode < 0:
+            exit_result["signal"] = -process.returncode
+        return {"jsonrpc": "2.0", "id": rpc_id, "result": exit_result}
+
+    async def _on_terminal_release(
+        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+    ) -> dict[str, object]:
+        """Handle terminal/release RPC."""
+        terminal_id = params.get("terminalId", "")
+        process = ctx.terminals.pop(terminal_id, None)
+        if process is not None and process.returncode is None:
+            with suppress(OSError):
+                process.kill()
+            await process.wait()
+        return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
 
     async def _handle_session_update(
         self, params: dict, ctx: _AcpSessionContext
@@ -435,6 +802,13 @@ class AcpChatModel(BaseChatModel):
             await self._on_tool_call_update(update, ctx)
         elif u_type == "current_mode_update":
             self._agent_modes["currentModeId"] = update.get("currentModeId")
+        elif u_type == "available_commands_update":
+            self._agent_modes["availableCommands"] = update.get("commands", [])
+        elif u_type == "plan":
+            # Plan updates are metadata; log receipt and let graph-level plan
+            # handling in the supervisor/aggregator layer process them.
+            plan_steps = update.get("plan", {}).get("steps", [])
+            logger.debug("ACP plan update: %d steps received", len(plan_steps))
 
     async def _on_tool_call(self, update: dict, ctx: _AcpSessionContext) -> None:
         tid = update.get("toolCallId", "")
@@ -456,10 +830,31 @@ class AcpChatModel(BaseChatModel):
 
     async def _on_tool_call_update(self, update: dict, ctx: _AcpSessionContext) -> None:
         tid = update.get("toolCallId", "")
-        if tid in self._tool_calls:
-            for k, v in update.items():
-                if v is not None:
-                    self._tool_calls[tid][k] = v
+        if tid not in self._tool_calls:
+            # Unknown toolCallId: synthesise a tool_call entry so the update
+            # is not silently lost (TOAD reference pattern for late/out-of-order
+            # tool_call_update notifications).
+            self._tool_calls[tid] = {
+                "toolCallId": tid,
+                "title": update.get("title", tid),
+            }
+            chunk = ChatGenerationChunk(
+                message=AIMessageChunk(
+                    content="",
+                    tool_call_chunks=[
+                        {
+                            "id": tid,
+                            "name": update.get("title", tid),
+                            "args": "{}",
+                            "index": 0,
+                        }
+                    ],
+                )
+            )
+            await ctx.chunk_queue.put(chunk)
+        for k, v in update.items():
+            if v is not None:
+                self._tool_calls[tid][k] = v
         if status := update.get("status"):
             logger.debug("Tool %s status: %s", tid, status)
 
@@ -495,8 +890,9 @@ class AcpChatModel(BaseChatModel):
                 "clientInfo": {"name": "vaultspec", "version": "1.0.0"},
             },
         }
-        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.process.stdin.drain()
+        async with ctx.stdin_lock:
+            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await ctx.stdin.drain()
         resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
         if "error" in resp:
             raise RuntimeError(f"Init failed: {resp['error']}")
@@ -516,8 +912,9 @@ class AcpChatModel(BaseChatModel):
         rpc_id = AcpRequestId.SESSION_SETUP
         ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
-        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.process.stdin.drain()
+        async with ctx.stdin_lock:
+            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await ctx.stdin.drain()
         resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
         if "error" in resp:
             raise RuntimeError(f"Session failed: {resp['error']}")
@@ -530,6 +927,7 @@ class AcpChatModel(BaseChatModel):
             }
         self._tool_calls = {}
         self._process = ctx.process
+        self._stdin = ctx.stdin
         self._response_futures = ctx.response_futures
 
     async def _setup_prompt(
@@ -544,8 +942,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/prompt",
             "params": {"sessionId": self._active_session_id, "prompt": blocks},
         }
-        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.process.stdin.drain()
+        async with ctx.stdin_lock:
+            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await ctx.stdin.drain()
         ctx.prompt_id_ref.append(rpc_id)
         return ctx.response_futures[rpc_id]
 
@@ -554,8 +953,9 @@ class AcpChatModel(BaseChatModel):
     ) -> None:
         """Send an ACP notification."""
         req = {"jsonrpc": "2.0", "method": method, "params": params}
-        ctx.process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.process.stdin.drain()
+        async with ctx.stdin_lock:
+            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await ctx.stdin.drain()
 
     async def fork_session(self) -> str:
         """Fork the current session."""
@@ -569,9 +969,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/fork",
             "params": {"sessionId": sid},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=60)
         return resp["result"]["sessionId"]
 
@@ -587,9 +987,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/list",
             "params": {},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp["result"].get("sessions", [])
 
@@ -605,9 +1005,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/set_mode",
             "params": {"sessionId": sid, "modeId": mode_id},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -623,9 +1023,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/set_model",
             "params": {"sessionId": sid, "modelId": model_id},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -641,9 +1041,9 @@ class AcpChatModel(BaseChatModel):
             "method": "session/set_config_option",
             "params": {"sessionId": sid, "key": key, "value": value},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -659,8 +1059,8 @@ class AcpChatModel(BaseChatModel):
             "method": "authenticate",
             "params": {"token": token},
         }
-        assert self._process.stdin is not None
-        self._process.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await self._process.stdin.drain()
+        stdin = self._require_stdin()
+        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+        await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})

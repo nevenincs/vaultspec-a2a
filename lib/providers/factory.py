@@ -13,6 +13,8 @@ from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
 
 
+__all__ = ["ProviderFactory"]
+
 logger = logging.getLogger(__name__)
 
 
@@ -114,9 +116,9 @@ class ProviderFactory:
             kwargs["api_key"] = api_key
 
             return ChatOpenAI(
-                model=model_name,
-                base_url="https://open.bigmodel.cn/api/paas/v4/",
-                timeout=timeout,
+                model=model_name,  # type: ignore[unknown-argument]
+                base_url="https://open.bigmodel.cn/api/paas/v4/",  # type: ignore[unknown-argument]
+                timeout=timeout,  # type: ignore[unknown-argument]
                 max_retries=2,
                 **kwargs,
             )
@@ -143,7 +145,7 @@ class ProviderFactory:
             kwargs["api_key"] = api_key
 
             return ChatOpenAI(
-                model=model_name, timeout=timeout, max_retries=2, **kwargs
+                model=model_name, timeout=timeout, max_retries=2, **kwargs  # type: ignore[unknown-argument]
             )
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)

@@ -1,4 +1,4 @@
-"""Core orchestration logic, state, and permissions."""
+"""Core orchestration logic and state."""
 
 import importlib
 
@@ -36,17 +36,13 @@ from .models import (
     ArtifactRef as ArtifactRef,
 )
 from .models import (
-    PlanEntry as PlanEntry,
+    PlanStep as PlanStep,
 )
 from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
-from .permissions import PermissionAction as PermissionAction
-from .permissions import PermissionDecision as PermissionDecision
-from .permissions import PermissionEngine
-from .permissions import PermissionPolicy as PermissionPolicy
-from .permissions import PermissionRequest as PermissionRequest
-from .permissions import PermissionScope as PermissionScope
+from .nodes.supervisor import create_supervisor_node as create_supervisor_node
+from .nodes.worker import create_worker_node as create_worker_node
 from .state import TeamState
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
@@ -89,9 +85,13 @@ from .team_config import (
 )
 
 
-# Lazy imports to break circular dependency (core.aggregator <-> api.websocket)
+# Lazy imports to break circular dependencies:
+# - core.aggregator <-> api.websocket
+# - core.graph -> providers.factory -> acp_chat_model -> team_config
+# -> core.__init__
 _LAZY_IMPORTS = {
     "EventAggregator": ".aggregator",
+    "compile_team_graph": ".graph",
 }
 
 
@@ -121,14 +121,8 @@ __all__ = [
     "EventAggregator",
     "EventAggregatorError",
     "MergeConflictError",
-    "PermissionAction",
-    "PermissionDecision",
     "PermissionDeniedError",
-    "PermissionEngine",
-    "PermissionPolicy",
-    "PermissionRequest",
-    "PermissionScope",
-    "PlanEntry",
+    "PlanStep",
     "ProtocolError",
     "RecoveryAction",
     "Settings",
@@ -145,6 +139,9 @@ __all__ = [
     "WorkerRef",
     "WorkspaceError",
     "compact_context",
+    "compile_team_graph",
+    "create_supervisor_node",
+    "create_worker_node",
     "estimate_tokens",
     "load_agent_config",
     "load_team_config",

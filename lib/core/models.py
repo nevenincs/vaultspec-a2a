@@ -11,7 +11,7 @@ from dataclasses import asdict, dataclass
 
 __all__ = [
     "ArtifactRef",
-    "PlanEntry",
+    "PlanStep",
     "TokenUsageEntry",
 ]
 
@@ -45,7 +45,7 @@ class TokenUsageEntry:
 
 
 @dataclass(frozen=True, slots=True)
-class PlanEntry:
+class PlanStep:
     """A single step in the team execution plan."""
 
     step: str
@@ -57,7 +57,7 @@ class PlanEntry:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, str]) -> "PlanEntry":
+    def from_dict(cls, data: dict[str, str]) -> "PlanStep":
         """Deserialise from a plain dict."""
         return cls(
             step=data.get("step", ""),

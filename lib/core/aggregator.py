@@ -98,6 +98,7 @@ _PASSTHROUGH_EVENTS = frozenset(
         "on_chat_model_stream",
         "on_tool_start",
         "on_tool_end",
+        "on_tool_error",
         "on_custom_event",
     }
 )
@@ -106,6 +107,7 @@ _NODE_BOUNDARY_EVENTS = frozenset(
     {
         "on_chain_start",
         "on_chain_end",
+        "on_chain_error",
     }
 )
 
@@ -115,7 +117,7 @@ class _StreamableGraph(Protocol):
 
     def astream_events(
         self,
-        graph_input: dict[str, Any],
+        graph_input: dict[str, Any] | None,
         config: dict[str, Any],
         *,
         version: str,
@@ -167,6 +169,13 @@ class EventAggregator:
         self._tool_update_pending: dict[tuple[str, str], ToolCallUpdateEvent] = {}
         self._plan_update_pending: dict[str, Any] = {}
 
+        # Node metadata cache: node_name -> {role, display_name, description}
+        # Populated by register_graph() after compile_team_graph() (ADR-012 §6).
+        self._node_metadata: dict[str, dict[str, str]] = {}
+
+        # Per-thread cancellation events for ingest loops (Fix 15 / M4).
+        self._cancel_events: dict[str, asyncio.Event] = {}
+
         # Debounce flush tasks
         self._debounce_tasks: set[asyncio.Task[None]] = set()
 
@@ -192,6 +201,50 @@ class EventAggregator:
         emitting an event (e.g. to verify shutdown clears the counter table).
         """
         return self._next_sequence(thread_id)
+
+    # ------------------------------------------------------------------
+    # Graph registration (ADR-012 §6)
+    # ------------------------------------------------------------------
+
+    def register_graph(self, graph: _StreamableGraph) -> None:
+        """Cache node metadata from a compiled LangGraph graph.
+
+        Call this after ``compile_team_graph()`` so that subsequent
+        ``emit_team_status`` calls can enrich ``AgentSummary`` with
+        ``role``, ``display_name``, and ``description`` sourced from node
+        metadata set at compile time (ADR-012 §6).
+
+        Args:
+            graph: A compiled LangGraph graph.  Accessed structurally via
+                   ``graph.nodes`` — no direct langgraph import required.
+        """
+        self._node_metadata = {}
+        for node_name, node_spec in getattr(graph, "nodes", {}).items():
+            meta = getattr(node_spec, "metadata", None) or {}
+            if meta:
+                self._node_metadata[node_name] = {
+                    "role": str(meta.get("role", "")),
+                    "display_name": str(meta.get("display_name", "")),
+                    "description": str(meta.get("description", "")),
+                }
+        logger.debug(
+            "register_graph: cached metadata for %d nodes", len(self._node_metadata)
+        )
+
+    def get_node_summaries(self) -> list[dict[str, str]]:
+        """Return a list of node metadata dicts for the team status endpoint.
+
+        Each dict contains ``node_name``, ``role``, ``display_name``, and
+        ``description`` as populated by ``register_graph()``.
+        """
+        return [
+            {"node_name": name, "agent_id": name, **meta}
+            for name, meta in self._node_metadata.items()
+        ]
+
+    # ------------------------------------------------------------------
+    # Subscriber count helpers
+    # ------------------------------------------------------------------
 
     def subscriber_count(self) -> int:
         """Return the number of currently registered subscribers."""
@@ -247,14 +300,47 @@ class EventAggregator:
         return sorted(all_threads)
 
     # ------------------------------------------------------------------
+    # Thread cancellation (Fix 15 / M4)
+    # ------------------------------------------------------------------
+
+    def cancel_thread(self, thread_id: str) -> None:
+        """Signal cancellation for a running ingest on *thread_id*.
+
+        The ``ingest`` method checks the cancellation event between each
+        ``astream_events`` iteration and exits early when set.
+        """
+        event = self._cancel_events.get(thread_id)
+        if event is not None:
+            event.set()
+            logger.info("Cancellation requested for thread %s", thread_id)
+        else:
+            logger.debug(
+                "No active cancel event for thread %s (may not be ingesting)",
+                thread_id,
+            )
+
+    def _get_cancel_event(self, thread_id: str) -> asyncio.Event:
+        """Return (or create) the cancellation event for *thread_id*."""
+        if thread_id not in self._cancel_events:
+            self._cancel_events[thread_id] = asyncio.Event()
+        return self._cancel_events[thread_id]
+
+    def _clear_cancel_event(self, thread_id: str) -> None:
+        """Remove the cancellation event for *thread_id*."""
+        self._cancel_events.pop(thread_id, None)
+
+    # ------------------------------------------------------------------
     # Broadcasting
     # ------------------------------------------------------------------
 
     async def _broadcast(self, event: ServerEvent) -> None:
         """Fan out a server event to all interested subscribers.
 
-        Uses ``await queue.put()`` (never ``put_nowait``) to propagate
-        backpressure when a client is slow (research §1.5).
+        Uses a drop-oldest strategy: if a subscriber queue is full,
+        the oldest buffered event is discarded before inserting the new
+        one.  This keeps the aggregator non-blocking while bounding
+        per-client memory (research §1.5).  A slow client loses tail
+        events rather than stalling the whole broadcast path.
         """
         thread_id = getattr(event, "thread_id", None)
         event_type = getattr(event, "type", "unknown")
@@ -267,7 +353,18 @@ class EventAggregator:
             for client_id, queue in list(self._subscribers.items()):
                 client_subs = self._subscriptions.get(client_id, set())
                 if thread_id is None or thread_id in client_subs:
-                    await queue.put(event)
+                    if queue.full():
+                        try:
+                            queue.get_nowait()
+                            logger.warning(
+                                "Dropped oldest event for slow client %s "
+                                "(queue full, maxsize=%d)",
+                                client_id,
+                                queue.maxsize,
+                            )
+                        except asyncio.QueueEmpty:
+                            pass
+                    queue.put_nowait(event)
                     delivered += 1
             _events_emitted_counter.add(1, {"event.type": str(event_type)})
 
@@ -348,6 +445,18 @@ class EventAggregator:
         Per research §1.3: collect chunks, flush every 50ms OR when
         buffer reaches 4KB, whichever comes first.
         """
+        # Detect message_id change: a new LLM run started before the previous
+        # buffer was flushed (possible in multi-node topologies where node A ends
+        # and node B begins streaming before the 50ms timer fires).
+        # Flush the stale buffer immediately so its chunks carry the correct
+        # agent_id / message_id rather than being mixed with the new run.
+        existing_meta = self._chunk_buffer_meta.get(thread_id)
+        if existing_meta and existing_meta["message_id"] != message_id:
+            existing_task = self._chunk_flush_tasks.pop(thread_id, None)
+            if existing_task is not None:
+                existing_task.cancel()
+            await self._flush_chunk_buffer(thread_id)
+
         self._chunk_buffers[thread_id].append(content)
         self._chunk_buffer_meta[thread_id] = {
             "agent_id": agent_id,
@@ -584,8 +693,21 @@ class EventAggregator:
         agents: list[dict[str, Any]],
         active_thread_ids: list[str] | None = None,
     ) -> None:
-        """Emit a team status event (on transitions only, per ADR-011 §5)."""
-        agent_summaries = [AgentSummary(**agent_data) for agent_data in agents]
+        """Emit a team status event (on transitions only, per ADR-011 §5).
+
+        role/display_name/description are sourced from the node metadata cache
+        populated by ``register_graph()`` (ADR-012 §6).  Values already present
+        in each agent dict take precedence; the cache fills any gaps.
+        """
+        agent_summaries: list[AgentSummary] = []
+        for agent_data in agents:
+            data = dict(agent_data)
+            node_name = data.get("node_name", "")
+            node_meta = self._node_metadata.get(node_name, {})
+            data.setdefault("role", node_meta.get("role", ""))
+            data.setdefault("display_name", node_meta.get("display_name", ""))
+            data.setdefault("description", node_meta.get("description", ""))
+            agent_summaries.append(AgentSummary(**data))
 
         event = TeamStatusEvent(
             thread_id=thread_id,
@@ -629,6 +751,13 @@ class EventAggregator:
         metadata = event_data.get("metadata", {})
         node = metadata.get("langgraph_node")
 
+        # Attribute events to the graph node that fired them (e.g. "coder",
+        # "reviewer") rather than the outer invocation context ("supervisor").
+        # In all LangGraph topologies, the node name IS the agent_id for worker
+        # nodes; the supervisor node itself is named "supervisor" so the fallback
+        # is accurate for top-level events that lack node metadata.
+        effective_agent_id = node or agent_id
+
         # --- Passthrough events (no node filter needed for LLM/tool) ---
         if event_kind == "on_chat_model_stream":
             chunk = event_data.get("data", {}).get("chunk")
@@ -637,7 +766,7 @@ class EventAggregator:
                 if isinstance(content, str) and content:
                     await self._buffer_message_chunk(
                         thread_id=thread_id,
-                        agent_id=agent_id,
+                        agent_id=effective_agent_id,
                         content=content,
                         message_id=run_id,
                     )
@@ -648,7 +777,7 @@ class EventAggregator:
                 tool_name = event_data.get("name", "unknown_tool")
                 await self.emit_tool_call_start(
                     thread_id=thread_id,
-                    agent_id=agent_id,
+                    agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     title=tool_name,
                 )
@@ -658,9 +787,27 @@ class EventAggregator:
             if node:  # Only emit for graph-level tool calls
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
-                    agent_id=agent_id,
+                    agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     status=ToolCallStatus.COMPLETED,
+                )
+            return
+
+        if event_kind == "on_tool_error":
+            if node:  # Only emit for graph-level tool calls
+                error_data = event_data.get("data", {})
+                error_msg = str(error_data.get("error", "Tool call failed"))
+                logger.warning(
+                    "Tool error in thread %s node %s: %s",
+                    thread_id,
+                    node,
+                    error_msg,
+                )
+                await self.emit_tool_call_update(
+                    thread_id=thread_id,
+                    agent_id=effective_agent_id,
+                    tool_call_id=run_id,
+                    status=ToolCallStatus.FAILED,
                 )
             return
 
@@ -671,7 +818,7 @@ class EventAggregator:
             if content:
                 await self.emit_thought_chunk(
                     thread_id=thread_id,
-                    agent_id=agent_id,
+                    agent_id=effective_agent_id,
                     content=content,
                     message_id=run_id,
                 )
@@ -682,16 +829,32 @@ class EventAggregator:
             if event_kind == "on_chain_start":
                 await self.emit_agent_status(
                     thread_id=thread_id,
-                    agent_id=agent_id,
+                    agent_id=effective_agent_id,
                     node_name=node,
                     state=AgentLifecycleState.WORKING,
                 )
             elif event_kind == "on_chain_end":
                 await self.emit_agent_status(
                     thread_id=thread_id,
-                    agent_id=agent_id,
+                    agent_id=effective_agent_id,
                     node_name=node,
                     state=AgentLifecycleState.IDLE,
+                )
+            elif event_kind == "on_chain_error":
+                error_data = event_data.get("data", {})
+                error_msg = str(error_data.get("error", "Node execution failed"))
+                logger.warning(
+                    "Chain error in thread %s node %s: %s",
+                    thread_id,
+                    node,
+                    error_msg,
+                )
+                await self.emit_agent_status(
+                    thread_id=thread_id,
+                    agent_id=effective_agent_id,
+                    node_name=node,
+                    state=AgentLifecycleState.FAILED,
+                    detail=error_msg[:200],
                 )
             return
 
@@ -713,7 +876,7 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
         graph: _StreamableGraph,
-        graph_input: dict[str, Any],
+        graph_input: dict[str, Any] | None,
         config: dict[str, Any],
     ) -> None:
         """Start consuming ``astream_events`` from a compiled graph.
@@ -725,10 +888,12 @@ class EventAggregator:
             thread_id: LangGraph thread_id for event routing.
             agent_id: Agent identifier for event attribution.
             graph: Compiled LangGraph ``StateGraph``.
-            graph_input: Input to the graph invocation.
+            graph_input: Input to the graph invocation, or ``None`` to
+                resume from the last checkpoint.
             config: LangGraph config dict (must include ``configurable.thread_id``).
         """
         start = time.monotonic()
+        cancel_event = self._get_cancel_event(thread_id)
         with _tracer.start_as_current_span(
             "aggregator.ingest",
             attributes={"thread_id": thread_id, "agent_id": agent_id},
@@ -739,6 +904,19 @@ class EventAggregator:
                     config,
                     version="v2",
                 ):
+                    if cancel_event.is_set():
+                        logger.info(
+                            "Ingest cancelled for thread %s", thread_id
+                        )
+                        span.set_attribute("cancelled", True)
+                        await self.emit_agent_status(
+                            thread_id=thread_id,
+                            agent_id=agent_id,
+                            node_name="supervisor",
+                            state=AgentLifecycleState.CANCELLED,
+                            detail="Terminated by user",
+                        )
+                        break
                     await self.process_langgraph_event(
                         event_data=raw_event,
                         thread_id=thread_id,
@@ -755,7 +933,8 @@ class EventAggregator:
                     recoverable=False,
                 )
             finally:
-                # Flush any remaining chunk buffer
+                # Clean up cancel event and flush remaining chunks
+                self._clear_cancel_event(thread_id)
                 await self._flush_chunk_buffer(thread_id)
                 _ingest_duration_histogram.record(
                     time.monotonic() - start,
@@ -791,3 +970,4 @@ class EventAggregator:
         self._sequences.clear()
         self._chunk_buffers.clear()
         self._chunk_buffer_meta.clear()
+        self._cancel_events.clear()

@@ -93,6 +93,11 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     for msg in reversed(body):
         msg_tokens = estimate_tokens([msg])
         if kept_tokens + msg_tokens > budget:
+            # Always preserve at least the most recent message so the agent
+            # knows what was last asked of it, even if the budget is exhausted
+            # by the system prefix alone.
+            if not kept:
+                kept.insert(0, msg)
             break
         kept.insert(0, msg)
         kept_tokens += msg_tokens

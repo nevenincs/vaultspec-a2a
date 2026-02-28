@@ -191,7 +191,7 @@ def _compile_star(
         system_prompt=supervisor_prompt,
         workers=worker_ids,
     )
-    builder.add_node("supervisor", supervisor_node, metadata=sv_meta)
+    builder.add_node("supervisor", supervisor_node, metadata=sv_meta)  # type: ignore[arg-type]
     builder.add_edge(START, "supervisor")
 
     for worker_ref in team_config.workers:
@@ -202,7 +202,7 @@ def _compile_star(
         )
         builder.add_node(
             agent_cfg.id,
-            worker_node,
+            worker_node,  # type: ignore[arg-type]
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -211,9 +211,11 @@ def _compile_star(
         )
         builder.add_edge(agent_cfg.id, "supervisor")
 
-    route_map: dict[str, Any] = {wid: wid for wid in worker_ids}
+    route_map: dict[str, str] = {wid: wid for wid in worker_ids}
     route_map["FINISH"] = END
-    builder.add_conditional_edges("supervisor", lambda state: state["next"], route_map)
+    builder.add_conditional_edges(
+        "supervisor", lambda state: state["next"], route_map  # type: ignore[arg-type]
+    )
 
 
 def _compile_pipeline(
@@ -239,7 +241,7 @@ def _compile_pipeline(
         )
         builder.add_node(
             agent_cfg.id,
-            worker_node,
+            worker_node,  # type: ignore[arg-type]
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -281,9 +283,29 @@ def _compile_pipeline_loop(
         worker_node = create_worker_node(
             model, agent_cfg.persona.system_prompt, name=agent_cfg.id
         )
+
+        if agent_id == loop_node_id:
+            # Wrap the loop node so it increments loop_count on every pass.
+            # The plain worker_node returns {"messages": [...]}.  We merge in
+            # the updated counter so _loop_router sees a monotonically increasing
+            # value and can enforce max_loops (ADR-013 §5).
+            _inner = worker_node
+
+            async def _loop_node_with_counter(
+                state: TeamState,
+                _inner: Any = _inner,  # noqa: ANN401
+            ) -> dict[str, Any]:
+                result = await _inner(state)
+                result["loop_count"] = state.get("loop_count", 0) + 1
+                return result
+
+            node_fn = _loop_node_with_counter
+        else:
+            node_fn = worker_node
+
         builder.add_node(
             agent_cfg.id,
-            worker_node,
+            node_fn,  # type: ignore[arg-type]
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -301,11 +323,16 @@ def _compile_pipeline_loop(
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
-        """Route loop_node output: enforce max_loops guard."""
+        """Route loop_node output: enforce max_loops guard.
+
+        Defaults to "revise" (continue loop) when the worker does not
+        explicitly set ``next``.  Workers signal loop exit by returning
+        ``next="FINISH"``; the max_loops guard forces FINISH regardless.
+        """
         loop_count = state.get("loop_count", 0)
         if loop_count >= max_loops:
             return "FINISH"
-        return state.get("next", "FINISH")
+        return state.get("next", "revise")
 
     builder.add_conditional_edges(
         loop_node_id,

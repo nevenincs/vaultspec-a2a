@@ -72,11 +72,11 @@ allow-direct-references = true
 [tool.hatch.build.targets.wheel]
 packages = ["lib"]
 
-[tool.pytest]
+[tool.pytest.ini_options]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys"]
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live"]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
@@ -87,6 +87,9 @@ testpaths = ["lib", "tests"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
 timeout = "300"
+markers = [
+  "live: marks tests requiring live ACP backend processes (deselect with '-m not live')",
+]
 
 [tool.ruff]
 line-length = 88
@@ -138,6 +141,10 @@ unfixable = ["B"]
 # git_manager.py: merge_worktree branches over 3 merge strategies + pre-flight
 # checks — each branch is a distinct git operation, not reducible.
 "lib/workspace/git_manager.py" = ["PLR0912"]
+
+# Test files: fixtures and helper stubs don't need full type annotations or
+# docstrings, and magic status-code comparisons (e.g. == 200) are idiomatic.
+"lib/**/tests/test_*.py" = ["ANN", "D", "PLR2004"]
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

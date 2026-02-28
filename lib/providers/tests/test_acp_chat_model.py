@@ -25,6 +25,7 @@ _GEMINI_COMMAND = [
 ]
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_acp_claude_streaming() -> None:
     """End-to-end streaming test of AcpChatModel with the Claude ACP CLI.
@@ -90,6 +91,7 @@ async def test_acp_gemini_streaming() -> None:
     )
 
 
+@pytest.mark.live
 @pytest.mark.asyncio
 async def test_acp_claude_ainvoke() -> None:
     """Test that AcpChatModel.ainvoke accumulates the full streaming response.

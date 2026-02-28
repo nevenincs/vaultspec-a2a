@@ -267,7 +267,7 @@ def _make_test_app(*, excluded: frozenset[str] | None = None) -> Starlette:
         ]
     )
     kwargs = {} if excluded is None else {"excluded_paths": excluded}
-    app.add_middleware(TelemetryMiddleware, **kwargs)
+    app.add_middleware(TelemetryMiddleware, **kwargs)  # type: ignore[arg-type]
     return app
 
 
@@ -331,7 +331,7 @@ async def test_middleware_custom_excluded_paths() -> None:
 
     app = Starlette(routes=[Route("/ping", ping)])
     app.add_middleware(
-        TelemetryMiddleware,
+        TelemetryMiddleware,  # type: ignore[arg-type]
         excluded_paths=frozenset({"/ping"}),
     )
     async with AsyncClient(

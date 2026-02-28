@@ -77,8 +77,11 @@ class _AgentStatusEntry(BaseModel):
     agent_id: str
     node_name: str
     state: AgentLifecycleState
-    provider: Provider
-    model: Model
+    provider: Provider | None = None
+    model: Model | None = None
+    role: str = ""
+    display_name: str = ""
+    description: str = ""
 
 
 class _PendingPermission(BaseModel):

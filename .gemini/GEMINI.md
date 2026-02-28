@@ -26,6 +26,68 @@ All commands should use native PWSH syntax and tools.
 - Use `prek` for pre-commit hooks
 - Use `sd` for code refactors
 
+## MCP SERVER MANDATE
+
+The following MCP servers are registered in `.gemini/settings.json` and their
+use is **mandatory** when applicable. Do NOT rely on training-data knowledge
+alone when these servers provide authoritative, live data.
+
+### General Purpose (Always Available)
+
+- **context7** (`context7__*`): MUST be used to fetch up-to-date documentation
+  and code examples for any third-party library before writing code against it.
+  Call `resolve-library-id` first, then `query-docs`.
+### Frontend Development — Mandatory for `src/ui/`
+
+All work touching `src/ui/` **must** follow this tool chain in order. Skipping
+steps is not permitted.
+
+**Step 1 — Design source (Figma)**
+
+- **figma** (`figma__*`) — local Figma Desktop MCP (HTTP at `127.0.0.1:3845/mcp`)
+  — is the **primary and authoritative design source**. Every UI implementation
+  must be driven by Figma data, never invented from scratch.
+  - Before writing or modifying any component, call `get_design_context` with
+    the relevant Figma `fileKey` and `nodeId` to obtain the reference
+    implementation, screenshot, and design-token hints.
+  - Call `get_screenshot` for visual reference when needed.
+  - Call `get_variable_defs` to retrieve design tokens (colors, spacing,
+    typography). Map these to the project's Tailwind token system.
+  - Call `get_code_connect_map` to check whether a Figma component already has
+    a Code Connect mapping to a codebase component.
+  - If no Figma URL or node reference is available, **stop and ask the user**
+    before making any layout or styling decisions.
+
+**Step 2 — Component library**
+
+- **shadcn-ui** (`shadcn-ui__*`): MUST be queried before introducing any UI
+  primitive. Use `list_shadcn_components`, `get_component_details`, and
+  `get_component_examples` to get the canonical shadcn-svelte implementation.
+  Do not hand-roll components that the library already provides.
+
+**Step 3 — Framework correctness**
+
+- **svelte** (`svelte__*`): MUST be consulted for all Svelte 5 syntax, Runes
+  API (`$state`, `$derived`, `$effect`, `$props`), and SvelteKit patterns.
+  After writing or modifying a component, call this tool again to verify
+  correctness before committing.
+
+**Step 4 — Browser verification**
+
+- **playwright** (`playwright__*`) or **chrome-devtools** (`chrome-devtools__*`):
+  MUST be used to visually verify any UI change in a running browser. Do not
+  describe expected visual behaviour without confirming it. Use chrome-devtools
+  for live DOM/CSS inspection and performance analysis; use playwright for
+  interaction scripting and screenshot capture.
+
+### Workflow Rules
+
+- The canonical frontend loop is: **Figma → shadcn-ui → Svelte MCP →
+  implement → browser verification**. Each step gates the next.
+- MCP server responses override training knowledge. When there is a conflict,
+  the MCP response is authoritative.
+- Never approximate a Figma design from memory; always fetch fresh data.
+
 ## CRITICAL TESTING MANDATE
 
 - Every coding task must focus on the implementation and the code quality,

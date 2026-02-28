@@ -5,7 +5,7 @@ so the SQLite checkpointer can persist state without pickle errors
 (ADR-002, ADR-008).
 """
 
-from typing import Annotated, TypedDict
+from typing import Annotated, NotRequired, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -94,7 +94,10 @@ class TeamState(TypedDict):
     token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]
 
     # --- pipeline_loop iteration guard (ADR-013 §5) ---
-    # Plain last-write-wins int. The loop_node reads the current value, increments,
-    # and writes it back. When loop_count >= max_loops the loop_node sets next="FINISH".
-    # Existing checkpointed states default to 0 via TypedDict total=True semantics.
-    loop_count: int
+    # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
+    # on each pass.  The _loop_router conditional edge enforces the max_loops cap:
+    # when loop_count >= max_loops it returns "FINISH" regardless of state["next"].
+    # Workers signal early loop exit by returning next="FINISH"; otherwise the loop
+    # continues ("revise" is the default).
+    # NotRequired because non-pipeline_loop teams never set this key.
+    loop_count: NotRequired[int]

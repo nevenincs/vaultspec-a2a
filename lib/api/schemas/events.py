@@ -116,6 +116,10 @@ class AgentSummary(BaseModel):
     state: AgentLifecycleState
     provider: Provider
     model: Model
+    # ADR-012 §6: metadata extracted from compiled_graph.nodes[node_name].metadata
+    role: str = ""
+    display_name: str = ""
+    description: str = ""
 
 
 # ---------------------------------------------------------------------------

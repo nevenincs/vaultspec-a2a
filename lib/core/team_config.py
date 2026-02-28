@@ -30,8 +30,9 @@ from .exceptions import AgentConfigNotFoundError, ConfigError, TeamConfigNotFoun
 
 # H5: safe agent_id pattern — alphanumeric, underscores, hyphens only.
 # Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").
-# Must be a valid Python identifier (validated in AgentConfig.validate_id_is_identifier),
-# but this pattern adds an explicit safeguard for use in load_agent_config.
+# Must be a valid Python identifier (validated in
+# AgentConfig.validate_id_is_identifier), but this pattern adds an explicit
+# safeguard for use in load_agent_config.
 _SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
 
 

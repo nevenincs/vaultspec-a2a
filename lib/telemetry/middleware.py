@@ -55,7 +55,7 @@ _tracer: trace.Tracer | None = None
 
 def _get_tracer() -> trace.Tracer:
     """Return the module tracer, creating it lazily on first call."""
-    global _tracer  # noqa: PLW0603
+    global _tracer
     if _tracer is None:
         _tracer = get_tracer(__name__)
     return _tracer

@@ -35,6 +35,7 @@ async def authenticate_request(request: Request) -> None:
         @router.get("/protected")
         async def endpoint(auth=Depends(authenticate_request)): ...
     """
-    # TODO: implement authentication — validate Bearer token / API key
+    # TODO(vaultspec): implement authentication — validate Bearer token / API key
+    # https://github.com/vaultspec/vaultspec-a2a/issues/1
     # For now this is a no-op; the API is intended for local use only.
     return

@@ -60,6 +60,7 @@ class ThreadModel(Base):
     )
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return (
             f"ThreadModel(id={self.id!r}, status={self.status!r}, "
             f"nickname={self.nickname!r})"
@@ -84,6 +85,7 @@ class ArtifactModel(Base):
     __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
 
     def __repr__(self) -> str:
+        """Return developer-friendly representation."""
         return (
             f"ArtifactModel(id={self.id!r}, thread_id={self.thread_id!r}, "
             f"type={self.type!r}, path={self.path!r})"

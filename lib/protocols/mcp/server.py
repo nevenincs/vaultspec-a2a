@@ -38,6 +38,7 @@ logger = logging.getLogger(__name__)
 # located and adjusted without hunting for magic numbers in each tool function.
 _MCP_CREATE_TIMEOUT = 30.0  # POST /api/threads (synchronous setup overhead)
 _MCP_QUERY_TIMEOUT = 15.0  # GET /api/threads/{id}/state and POST /api/messages
+_HTTP_NOT_FOUND = 404
 
 # MCP-M1: _PRESET_TEAMS_DIR uses Path(__file__)-relative navigation to locate
 # preset TOML files in the sibling core/presets/teams/ directory.  This works
@@ -147,13 +148,19 @@ async def start_thread(
         )
     except httpx.TimeoutException as exc:
         # MCP-H1: request timed out waiting for the server
-        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
+        return (
+            f"Timeout: the server at {settings.api_base_url} did not respond. "
+            f"Detail: {exc}"
+        )
     except httpx.HTTPStatusError as exc:
         # MCP-H1: server responded with an HTTP error status
         return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:
         # MCP-H1: other transport-level errors (SSL, proxy, etc.)
-        return f"Connection error (is the server running at {settings.api_base_url}?): {exc}"
+        return (
+            f"Connection error (is the server running at {settings.api_base_url}?): "
+            f"{exc}"
+        )
 
 
 @mcp.tool()
@@ -197,10 +204,13 @@ async def get_thread_status(thread_id: str) -> str:
         )
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
-        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
+        return (
+            f"Timeout: the server at {settings.api_base_url} did not respond. "
+            f"Detail: {exc}"
+        )
     except httpx.HTTPStatusError as exc:
         # MCP-H1: application-level HTTP error
-        if exc.response.status_code == 404:  # noqa: PLR2004
+        if exc.response.status_code == _HTTP_NOT_FOUND:
             return f"Thread {thread_id!r} not found."
         return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:
@@ -239,10 +249,13 @@ async def send_message(thread_id: str, message: str) -> str:
         )
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
-        return f"Timeout: the server at {settings.api_base_url} did not respond. Detail: {exc}"
+        return (
+            f"Timeout: the server at {settings.api_base_url} did not respond. "
+            f"Detail: {exc}"
+        )
     except httpx.HTTPStatusError as exc:
         # MCP-H1: application-level HTTP error
-        if exc.response.status_code == 404:  # noqa: PLR2004
+        if exc.response.status_code == _HTTP_NOT_FOUND:
             return f"Thread {thread_id!r} not found."
         return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:

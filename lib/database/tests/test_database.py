@@ -1,7 +1,9 @@
 """Tests for the database layer using real in-memory SQLite.
 
 No mocks, no monkeypatching. Every test runs against a real aiosqlite
-in-memory database with full WAL mode verification.
+in-memory database. Tests cover CRUD operations, session management
+(init_db, close_db, get_session_factory, get_db), WAL mode verification,
+cross-session durability, and cascade-delete behaviour.
 """
 
 import json
@@ -14,7 +16,6 @@ import pytest
 import pytest_asyncio
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -23,7 +24,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...core.exceptions import NicknameConflictError
+from .. import session as _session_module
 from ..crud import (
+    ThreadStatus,
     append_cost_record,
     append_permission_log,
     create_artifact,
@@ -45,9 +48,15 @@ from ..models import (
     Base,
     CostTrackingModel,
     PermissionLogModel,
-    ThreadModel,
 )
-from ..session import close_db, get_engine, init_db, verify_wal_mode
+from ..session import (
+    close_db,
+    get_db,
+    get_engine,
+    get_session_factory,
+    init_db,
+    verify_wal_mode,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -74,6 +83,12 @@ async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
     async with factory() as sess:
         yield sess
         await sess.rollback()
+
+
+@pytest_asyncio.fixture
+async def session_factory(engine: AsyncEngine) -> async_sessionmaker[AsyncSession]:
+    """Provide the session factory for durability and multi-session tests."""
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
 # ---------------------------------------------------------------------------
@@ -271,41 +286,19 @@ class TestThreadCRUD:
         assert updated.updated_at >= original_updated_at
 
     @pytest.mark.asyncio
-    async def test_nickname_conflict_via_integrity_error(
+    async def test_nickname_conflict_via_create_thread(
         self, session: AsyncSession
     ) -> None:
-        """DB-H3: IntegrityError TOCTOU catch path raises NicknameConflictError.
+        """DB-MEDIUM-01: create_thread() raises NicknameConflictError on duplicate.
 
-        We simulate the TOCTOU race by bypassing the pre-check: create a thread
-        directly with a ThreadModel so the SELECT pre-check in create_thread is
-        skipped for the second insert, triggering the IntegrityError path.
+        Calls create_thread() twice with the same nickname. Verifies that the
+        SELECT pre-check in create_thread() produces NicknameConflictError.
         """
-        nickname = "toctou-race-nick-0001"
-        # First thread — inserted directly to bypass the pre-check.
-        first = ThreadModel(
-            id=uuid4().hex,
-            title="First",
-            status="submitted",
-            nickname=nickname,
-        )
-        session.add(first)
-        await session.flush()
-
-        # Second insert with the same nickname goes through create_thread whose
-        # SELECT pre-check will find the existing row and raise NicknameConflictError
-        # through the explicit check (not the IntegrityError path).
-        # To truly exercise the IntegrityError catch, we bypass the SELECT too:
-        second = ThreadModel(
-            id=uuid4().hex,
-            title="Second",
-            status="submitted",
-            nickname=nickname,
-        )
-        session.add(second)
-        with pytest.raises(IntegrityError):  # from the DB unique index
-            await session.flush()
-        # Roll back so the session is usable again
-        await session.rollback()
+        nickname = "dupe-nick-0001"
+        await create_thread(session, nickname=nickname, title="first")
+        await session.commit()
+        with pytest.raises(NicknameConflictError):
+            await create_thread(session, nickname=nickname, title="second")
 
     @pytest.mark.asyncio
     async def test_update_thread_metadata(self, session: AsyncSession) -> None:
@@ -337,6 +330,54 @@ class TestThreadCRUD:
         cleared = await update_thread_metadata(session, thread.id, None)
         assert cleared is not None
         assert cleared.thread_metadata is None
+
+    @pytest.mark.asyncio
+    async def test_create_thread_invalid_status_raises(
+        self, session: AsyncSession
+    ) -> None:
+        """DB-HIGH-02: create_thread() rejects invalid status strings."""
+        with pytest.raises(ValueError, match="Invalid thread status"):
+            await create_thread(session, title="Bad Status", status="bogus")
+
+    @pytest.mark.asyncio
+    async def test_update_thread_status_invalid_raises(
+        self, session: AsyncSession
+    ) -> None:
+        """DB-HIGH-02: update_thread_status() rejects invalid status strings."""
+        thread = await create_thread(session, title="Valid Thread")
+        with pytest.raises(ValueError, match="Invalid thread status"):
+            await update_thread_status(session, thread.id, "not-a-real-status")
+
+    @pytest.mark.asyncio
+    async def test_create_thread_all_valid_statuses(
+        self, session: AsyncSession
+    ) -> None:
+        """DB-HIGH-02: create_thread() accepts all ThreadStatus enum values."""
+        for status in ThreadStatus:
+            thread = await create_thread(
+                session, title=f"Status {status.value}", status=status.value
+            )
+            assert thread.status == status.value
+
+    @pytest.mark.asyncio
+    async def test_data_survives_commit_in_fresh_session(
+        self,
+        session_factory: async_sessionmaker,
+    ) -> None:
+        """DB-MEDIUM-03: committed data is readable from a new session.
+
+        Verifies that WAL + commit semantics are correct — data is not
+        ephemeral in the session-local state.
+        """
+        async with session_factory() as s1:
+            t = await create_thread(s1, title="durable")
+            await s1.commit()
+            tid = t.id
+
+        async with session_factory() as s2:
+            found = await get_thread(s2, tid)
+            assert found is not None
+            assert found.title == "durable"
 
 
 # ---------------------------------------------------------------------------
@@ -648,3 +689,119 @@ class TestWALMode:
         mode = await verify_wal_mode(eng)
         assert mode == "wal"
         await eng.dispose()
+
+
+# ---------------------------------------------------------------------------
+# Session Management Function Tests (DB-MEDIUM-04)
+# ---------------------------------------------------------------------------
+
+
+class TestSessionFunctions:
+    """Tests for close_db, get_session_factory, and get_db utility functions."""
+
+    @pytest_asyncio.fixture(autouse=True)
+    async def _isolate_singleton(self) -> AsyncGenerator[None]:
+        """Isolate the module singleton from other tests."""
+        await close_db()
+        yield
+        await close_db()
+
+    @pytest.mark.asyncio
+    async def test_close_db_resets_singleton(self) -> None:
+        """close_db() disposes the engine and resets the singleton state."""
+        await init_db(":memory:")
+        # Access the live singleton value via the module reference — a direct
+        # import binding would be stale after close_db() resets the global.
+        assert _session_module._engine is not None
+
+        await close_db()
+
+        assert _session_module._engine is None
+
+    @pytest.mark.asyncio
+    async def test_get_session_factory_returns_factory(self) -> None:
+        """get_session_factory() returns an async_sessionmaker."""
+        await init_db(":memory:")
+        factory = get_session_factory()
+        assert callable(factory)
+        # Verify we can actually create a session from it
+        async with factory() as session:
+            assert isinstance(session, AsyncSession)
+
+    @pytest.mark.asyncio
+    async def test_get_session_factory_with_explicit_engine(self) -> None:
+        """get_session_factory(engine) accepts an explicit engine."""
+        eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+        try:
+            factory = get_session_factory(eng)
+            assert callable(factory)
+            async with factory() as session:
+                assert isinstance(session, AsyncSession)
+        finally:
+            await eng.dispose()
+
+    @pytest.mark.asyncio
+    async def test_get_db_yields_session(self) -> None:
+        """get_db() yields an AsyncSession suitable for dependency injection."""
+        await init_db(":memory:")
+        gen = get_db()
+        session = await gen.__anext__()
+        assert isinstance(session, AsyncSession)
+        # aclose() triggers the finally block and is safe to call unconditionally
+        await gen.aclose()
+
+
+# ---------------------------------------------------------------------------
+# Cascade Delete Tests (DB-MEDIUM-05)
+# ---------------------------------------------------------------------------
+
+
+class TestCascadeDelete:
+    """Verify that cascade="all, delete-orphan" removes child records."""
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_cascades_to_artifacts(
+        self, session: AsyncSession
+    ) -> None:
+        """Deleting a thread removes all associated artifact records."""
+        thread = await create_thread(session, title="Cascade Artifacts")
+        artifact = await create_artifact(
+            session,
+            thread_id=thread.id,
+            artifact_type="file",
+            path="/src/main.py",
+        )
+        artifact_id = artifact.id
+        await session.commit()
+
+        # Reload and delete the thread
+        t = await get_thread(session, thread.id)
+        await session.delete(t)
+        await session.commit()
+
+        found = await get_artifact(session, artifact_id)
+        assert found is None, "Artifact should be deleted with its parent thread"
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_cascades_to_permission_logs(
+        self, session: AsyncSession
+    ) -> None:
+        """Deleting a thread removes all associated permission log records."""
+        thread = await create_thread(session, title="Cascade Permissions")
+        await append_permission_log(
+            session,
+            thread_id=thread.id,
+            agent_id="coder-1",
+            tool_name="bash",
+            action="allow_once",
+        )
+        await session.commit()
+
+        t = await get_thread(session, thread.id)
+        await session.delete(t)
+        await session.commit()
+
+        logs = await get_permission_logs_by_thread(session, thread.id)
+        assert len(logs) == 0, "Permission logs should be deleted with the thread"

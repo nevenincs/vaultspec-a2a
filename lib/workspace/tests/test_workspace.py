@@ -107,6 +107,25 @@ class TestWorktreeLifecycle:
         assert "main" in branches
 
     @pytest.mark.asyncio
+    async def test_main_worktree_is_main(self, manager: GitManager) -> None:
+        """list_worktrees marks the main checkout with is_main=True (WS-HIGH-003)."""
+        await manager.create_worktree("wt-main-check", base_branch="main")
+        wts = await manager.list_worktrees()
+        main_entries = [wt for wt in wts if wt.is_main]
+        assert len(main_entries) == 1, "Exactly one worktree must be is_main=True"
+        assert main_entries[0].branch == "main"
+
+    @pytest.mark.asyncio
+    async def test_agent_worktrees_are_not_main(self, manager: GitManager) -> None:
+        """Agent worktrees must have is_main=False (WS-HIGH-003)."""
+        await manager.create_worktree("not-main", base_branch="main")
+        wts = await manager.list_worktrees()
+        agent_entries = [wt for wt in wts if wt.branch != "main"]
+        assert all(not wt.is_main for wt in agent_entries), (
+            "Agent worktrees must not have is_main=True"
+        )
+
+    @pytest.mark.asyncio
     async def test_remove_worktree(self, manager: GitManager) -> None:
         """remove_worktree deletes the worktree directory from the filesystem."""
         wt_path = await manager.create_worktree("to-remove", base_branch="main")
@@ -494,6 +513,69 @@ class TestInputValidation:
 
 
 # ---------------------------------------------------------------------------
+# Path traversal protection — WS-HIGH-002
+# ---------------------------------------------------------------------------
+
+
+class TestWorktreePathValidation:
+    """Tests that adversarial worktree_path inputs are rejected (WS-HIGH-002)."""
+
+    @pytest.mark.asyncio
+    async def test_has_conflicts_rejects_relative_path(
+        self, manager: GitManager
+    ) -> None:
+        """has_conflicts rejects a relative worktree_path."""
+        with pytest.raises(WorkspaceError, match="absolute"):
+            await manager.has_conflicts(Path("relative/path"), "main")
+
+    @pytest.mark.asyncio
+    async def test_merge_worktree_rejects_relative_path(
+        self, manager: GitManager
+    ) -> None:
+        """merge_worktree rejects a relative worktree_path."""
+        with pytest.raises(WorkspaceError, match="absolute"):
+            await manager.merge_worktree(Path("../evil"), target_branch="main")
+
+    @pytest.mark.asyncio
+    async def test_has_conflicts_rejects_nonexistent_path(
+        self, manager: GitManager, tmp_path: Path
+    ) -> None:
+        """has_conflicts rejects a path that does not exist on disk."""
+        nonexistent = tmp_path / "does-not-exist"
+        with pytest.raises(WorkspaceError, match="not an existing directory"):
+            await manager.has_conflicts(nonexistent, "main")
+
+    @pytest.mark.asyncio
+    async def test_merge_worktree_rejects_nonexistent_path(
+        self, manager: GitManager, tmp_path: Path
+    ) -> None:
+        """merge_worktree rejects a path that does not exist on disk."""
+        nonexistent = tmp_path / "ghost"
+        with pytest.raises(WorkspaceError, match="not an existing directory"):
+            await manager.merge_worktree(nonexistent, target_branch="main")
+
+    @pytest.mark.asyncio
+    async def test_has_conflicts_rejects_path_outside_repo(
+        self, manager: GitManager, tmp_path: Path
+    ) -> None:
+        """has_conflicts rejects a real directory that is outside the repo root."""
+        outside = tmp_path / "outside"
+        outside.mkdir()
+        with pytest.raises(WorkspaceError, match="not under repo root"):
+            await manager.has_conflicts(outside, "main")
+
+    @pytest.mark.asyncio
+    async def test_merge_worktree_rejects_path_outside_repo(
+        self, manager: GitManager, tmp_path: Path
+    ) -> None:
+        """merge_worktree rejects a real directory that is outside the repo root."""
+        outside = tmp_path / "outside-dir"
+        outside.mkdir()
+        with pytest.raises(WorkspaceError, match="not under repo root"):
+            await manager.merge_worktree(outside, target_branch="main")
+
+
+# ---------------------------------------------------------------------------
 # MergeStrategy.REBASE — WS-H7
 # ---------------------------------------------------------------------------
 
@@ -505,7 +587,7 @@ class TestRebaseStrategy:
     async def test_rebase_strategy_lands_commit_on_target(
         self, manager: GitManager, git_repo: Path
     ) -> None:
-        """Rebase strategy replays worktree commits on target and updates target HEAD."""
+        """Rebase strategy replays worktree commits on target and updates HEAD."""
         wt_path = await manager.create_worktree("rebase-test", base_branch="main")
         # Add a new file in the worktree (no conflicts with main)
         (wt_path / "rebase_file.txt").write_text("rebased content")

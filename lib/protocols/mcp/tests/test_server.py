@@ -5,7 +5,9 @@ triggers the app lifespan) to verify MCP tool error paths and the API
 contract expected by the MCP tools.
 
 Per CLAUDE.md: no mocks, no monkeypatching.  The TestClient path runs
-the full lifespan (checkpointer, task group) using real in-memory SQLite.
+the full lifespan (checkpointer, task group) using real in-memory SQLite
+and a MemorySaver checkpointer so the production vaultspec.db is never
+created.
 
 Error-path tests (unknown preset, connection error) call MCP tool
 functions directly and rely on the known unreachable ``localhost:8000``
@@ -18,6 +20,7 @@ import pytest
 import pytest_asyncio
 
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.memory import MemorySaver
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -25,11 +28,21 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ....api.app import create_app
-from ....api.endpoints import GraphRegistry, get_aggregator, get_graph_registry
+from ....api.endpoints import (
+    GraphRegistry,
+    get_aggregator,
+    get_checkpointer,
+    get_graph_registry,
+)
 from ....core.aggregator import EventAggregator
 from ....database.models import Base
 from ....database.session import get_db
-from ..server import get_thread_status, send_message, start_thread
+from ..server import (
+    _ws_url_from_api_base,
+    get_thread_status,
+    send_message,
+    start_thread,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -54,21 +67,34 @@ async def session_factory(engine):
 
 
 def _make_test_client(session_factory, aggregator=None, registry=None) -> TestClient:
-    """Create a TestClient backed by a real app lifespan (checkpointer + task_group)."""
+    """Create a TestClient backed by a real app lifespan.
+
+    MCP-HIGH-02 fix: override ``get_checkpointer`` with a ``MemorySaver`` so
+    the real ``_lifespan`` never opens the production ``vaultspec.db``.  This
+    mirrors the pattern used in ``lib/api/tests/conftest.py``.
+    """
     app = create_app()
     if aggregator is None:
         aggregator = EventAggregator()
     if registry is None:
         registry = GraphRegistry()
 
+    # In-memory checkpointer — never touches vaultspec.db
+    checkpointer = MemorySaver()
+    app.state.checkpointer = checkpointer
+
     # Override the DB session so tests use in-memory SQLite
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
         async with session_factory() as session:
             yield session
 
+    async def _override_get_checkpointer():
+        return checkpointer
+
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
     app.dependency_overrides[get_graph_registry] = lambda: registry
+    app.dependency_overrides[get_checkpointer] = _override_get_checkpointer
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -91,7 +117,7 @@ async def test_start_thread_unknown_preset_returns_error() -> None:
 
 @pytest.mark.asyncio
 async def test_start_thread_default_preset_not_unknown() -> None:
-    """start_thread with team_preset=None uses 'coding-star' — not an unknown preset."""
+    """start_thread with team_preset=None uses 'coding-star' — not unknown."""
     # With no server running this hits a connection error — but must NOT hit
     # the unknown-preset early-return.
     result = await start_thread(initial_message="test", team_preset=None)
@@ -184,46 +210,107 @@ class TestCreateThreadViaApp:
 
 
 # ---------------------------------------------------------------------------
-# Tool function connectivity tests (server may or may not be running)
+# Tool function error-path tests (MCP-HIGH-01)
+#
+# These tests verify error-handling behaviour when the server is unavailable.
+# The success path is covered by TestCreateThreadViaApp above.
+# Test names are honest about what they test.
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_start_thread_returns_meaningful_result() -> None:
-    """start_thread returns a result indicating success or a connection error."""
+async def test_start_thread_returns_meaningful_result_for_valid_preset() -> None:
+    """start_thread with a valid preset returns a non-empty meaningful result.
+
+    MCP-HIGH-01: verifies the tool function returns a string result in all
+    cases. When server is unavailable a connection error is returned; when
+    server is running a thread ID confirmation is returned. Both are valid.
+    """
     result = await start_thread(
         initial_message="do something",
         team_preset="coding-star",
     )
     assert isinstance(result, str)
     assert len(result) > 0
-    # T1: validate the result contains meaningful content — either a thread ID
-    # indication on success or a descriptive error on connection failure.
     lower = result.lower()
-    assert "thread" in lower or "error" in lower or "connection" in lower
+    # Server unavailable → error/connection/network/timeout
+    # Server running → thread/started/preset
+    _expected_keywords = ("error", "connection", "network", "timeout", "thread")
+    assert any(kw in lower for kw in _expected_keywords)
 
 
 @pytest.mark.asyncio
-async def test_get_thread_status_returns_meaningful_result() -> None:
-    """get_thread_status returns status info or a descriptive error."""
+async def test_get_thread_status_returns_error_when_server_unavailable() -> None:
+    """get_thread_status returns a connection error or 404 for unknown threads.
+
+    MCP-HIGH-01: verifies error-handling. When the server is unavailable a
+    connection error is returned; when it is running the thread will not be
+    found (404 path). Both outcomes are valid for this test.
+    """
     result = await get_thread_status(thread_id="some-thread-id")
     assert isinstance(result, str)
     assert len(result) > 0
-    # T1: must contain either status fields (success) or error description (failure)
-    assert any(
-        kw in result.lower()
-        for kw in ("status:", "thread", "not found", "error", "connection")
-    )
+    lower = result.lower()
+    # Server unavailable → connection/network/timeout error
+    # Server running, thread absent → "not found"
+    _expected_keywords = ("error", "connection", "network", "timeout", "not found")
+    assert any(kw in lower for kw in _expected_keywords)
 
 
 @pytest.mark.asyncio
-async def test_send_message_returns_meaningful_result() -> None:
-    """send_message returns delivery confirmation or a descriptive error."""
+async def test_send_message_returns_error_when_server_unavailable() -> None:
+    """send_message returns a connection error or 404 for unknown threads.
+
+    MCP-HIGH-01: verifies error-handling. When the server is unavailable a
+    connection error is returned; when it is running the thread will not be
+    found (404 path). Both outcomes are valid for this test.
+    """
     result = await send_message(thread_id="some-thread-id", message="hello")
     assert isinstance(result, str)
     assert len(result) > 0
-    # T1: must contain either delivery confirmation or error description
-    assert any(
-        kw in result.lower()
-        for kw in ("delivered", "accepted", "not found", "error", "connection")
-    )
+    lower = result.lower()
+    # Server unavailable → connection/network/timeout error
+    # Server running, thread absent → "not found"
+    _expected_keywords = ("error", "connection", "network", "timeout", "not found")
+    assert any(kw in lower for kw in _expected_keywords)
+
+
+# ---------------------------------------------------------------------------
+# _ws_url_from_api_base unit tests (MCP-MEDIUM-01)
+# ---------------------------------------------------------------------------
+
+
+def test_ws_url_http_converts_to_ws() -> None:
+    """_ws_url_from_api_base converts http:// to ws://."""
+    result = _ws_url_from_api_base("http://localhost:8000")
+    assert result.startswith("ws://")
+    assert "localhost" in result
+    assert "8000" in result
+
+
+def test_ws_url_https_converts_to_wss() -> None:
+    """_ws_url_from_api_base converts https:// to wss://."""
+    result = _ws_url_from_api_base("https://example.com")
+    assert result.startswith("wss://")
+    assert "example.com" in result
+
+
+def test_ws_url_strips_credentials() -> None:
+    """_ws_url_from_api_base removes userinfo (user:password) from the netloc."""
+    result = _ws_url_from_api_base("http://user:pass@localhost:8000")
+    assert "user" not in result
+    assert "pass" not in result
+    assert "localhost" in result
+
+
+def test_ws_url_preserves_port() -> None:
+    """_ws_url_from_api_base keeps the port number in the output URL."""
+    result = _ws_url_from_api_base("http://localhost:9999")
+    assert "9999" in result
+
+
+def test_ws_url_no_port_omits_colon() -> None:
+    """_ws_url_from_api_base omits port suffix when not specified."""
+    result = _ws_url_from_api_base("https://api.example.com")
+    # Should not have a trailing colon with no port
+    assert ":/" not in result.replace("wss://", "").replace("ws://", "")

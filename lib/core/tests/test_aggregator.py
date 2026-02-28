@@ -7,6 +7,7 @@ from typing import ClassVar, cast
 
 import pytest
 
+from langchain_core.messages import AIMessageChunk
 from langgraph.errors import GraphInterrupt
 
 from ...api.schemas.enums import (
@@ -307,18 +308,22 @@ class TestEventEmission:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        # Stub satisfying the structural protocol used by register_graph.
-        class _FakeNode:
+        # Policy exception: register_graph() uses duck typing via getattr(graph,
+        # "nodes") and getattr(node, "metadata"). Constructing a real compiled
+        # LangGraph graph requires a full StateGraph definition, checkpointer, and
+        # channel setup — none of which are relevant to testing metadata caching.
+        # These minimal structural stubs satisfy the protocol without LLM/IO deps.
+        class _MinimalNode:
             metadata: ClassVar[dict[str, str]] = {
                 "role": "reviewer",
                 "display_name": "Code Reviewer",
                 "description": "Reviews code for correctness",
             }
 
-        class _FakeGraph:
-            nodes: ClassVar[dict[str, _FakeNode]] = {"worker": _FakeNode()}
+        class _MinimalGraph:
+            nodes: ClassVar[dict[str, _MinimalNode]] = {"worker": _MinimalNode()}
 
-        aggregator.register_graph(_FakeGraph())  # type: ignore[arg-type]
+        aggregator.register_graph(_MinimalGraph())  # type: ignore[arg-type]
 
         await aggregator.emit_team_status(
             thread_id="thread-1",
@@ -480,15 +485,12 @@ class TestLangGraphEventProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        class FakeChunk:
-            content = "Hello world"
-
         await aggregator.process_langgraph_event(
             event_data={
                 "event": "on_chat_model_stream",
                 "run_id": "run-123",
                 "metadata": {},
-                "data": {"chunk": FakeChunk()},
+                "data": {"chunk": AIMessageChunk(content="Hello world")},
             },
             thread_id="thread-1",
             agent_id="agent-1",
@@ -516,15 +518,12 @@ class TestLangGraphEventProcessing:
         # Build a chunk larger than 4KB
         large_content = "x" * (_CHUNK_BUFFER_MAX_BYTES + 100)
 
-        class BigChunk:
-            content = large_content
-
         await aggregator.process_langgraph_event(
             event_data={
                 "event": "on_chat_model_stream",
                 "run_id": "run-big",
                 "metadata": {},
-                "data": {"chunk": BigChunk()},
+                "data": {"chunk": AIMessageChunk(content=large_content)},
             },
             thread_id="thread-1",
             agent_id="agent-1",
@@ -741,15 +740,12 @@ class TestLangGraphEventProcessing:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-1"])
 
-        class EmptyChunk:
-            content = ""
-
         await aggregator.process_langgraph_event(
             event_data={
                 "event": "on_chat_model_stream",
                 "run_id": "run-000",
                 "metadata": {},
-                "data": {"chunk": EmptyChunk()},
+                "data": {"chunk": AIMessageChunk(content="")},
             },
             thread_id="thread-1",
             agent_id="agent-1",
@@ -777,16 +773,12 @@ class TestTokenChunkBatching:
         aggregator.subscribe("client-1", ["thread-1"])
 
         for token in ["Hello", " ", "world"]:
-
-            class Chunk:
-                content = token
-
             await aggregator.process_langgraph_event(
                 event_data={
                     "event": "on_chat_model_stream",
                     "run_id": "run-batch",
                     "metadata": {},
-                    "data": {"chunk": Chunk()},
+                    "data": {"chunk": AIMessageChunk(content=token)},
                 },
                 thread_id="thread-1",
                 agent_id="agent-1",
@@ -998,30 +990,56 @@ class TestExports:
 # ---------------------------------------------------------------------------
 
 
-class _FakeInterrupt:
-    """Minimal interrupt value stub."""
+class _InterruptValue:
+    """Minimal interrupt value carrier for _emit_interrupt_events testing.
+
+    Policy exception: LangGraph's real interrupt objects are created internally
+    by the graph runtime and are not publicly constructible outside a running
+    graph execution. The aggregator only accesses `interrupt_obj.value` via
+    getattr, so a plain dataclass-style object is sufficient to exercise the
+    full interrupt-detection logic without requiring a live graph.
+    """
 
     def __init__(self, value: object) -> None:
         self.value = value
 
 
-class _FakeTask:
-    """Minimal LangGraph task stub."""
+class _GraphTask:
+    """Minimal LangGraph task stub for _emit_interrupt_events testing.
 
-    def __init__(self, name: str, interrupts: list[_FakeInterrupt]) -> None:
+    Policy exception: LangGraph's PregelTask is an internal dataclass populated
+    by the graph runtime. The aggregator only reads `task.name` and
+    `task.interrupts`, making a plain two-attribute object sufficient to test
+    all interrupt-routing branches without a running graph or checkpointer.
+    """
+
+    def __init__(self, name: str, interrupts: list[_InterruptValue]) -> None:
         self.name = name
         self.interrupts = interrupts
 
 
-class _FakeState:
-    """Minimal LangGraph state snapshot stub."""
+class _GraphStateSnapshot:
+    """Minimal LangGraph state snapshot for _emit_interrupt_events testing.
 
-    def __init__(self, tasks: list[_FakeTask]) -> None:
+    Policy exception: LangGraph's StateSnapshot requires a full checkpointer
+    and channel state. The aggregator only reads `state.tasks`, so a minimal
+    one-attribute holder is sufficient to drive all branches of the interrupt
+    detection logic without I/O or LangGraph infrastructure.
+    """
+
+    def __init__(self, tasks: list[_GraphTask]) -> None:
         self.tasks = tasks
 
 
-class _FakeGraph:
-    """Minimal graph stub: astream_events yields nothing, aget_state returns state."""
+class _SilentGraph:
+    """Minimal graph stub: astream_events yields nothing, aget_state returns state.
+
+    Policy exception: A real compiled LangGraph graph requires StateGraph
+    definition, node functions, and checkpointer wiring. The ingest() tests
+    only need to verify event routing and _emit_interrupt_events behaviour;
+    a no-op async generator for astream_events and a direct aget_state return
+    are sufficient to exercise those paths without LLM or I/O dependencies.
+    """
 
     def __init__(self, state: object) -> None:
         self._state = state
@@ -1036,8 +1054,15 @@ class _FakeGraph:
         return self._state
 
 
-class _FakeGraphWithInterrupt:
-    """Graph stub that raises GraphInterrupt from astream_events."""
+class _InterruptingGraph:
+    """Graph stub that raises a real GraphInterrupt from astream_events.
+
+    Policy exception: see _SilentGraph. This variant simulates the H4 guard
+    path in ingest() — where astream_events raises GraphInterrupt — so that
+    _emit_interrupt_events is triggered. Using a real GraphInterrupt (from
+    langgraph.errors) ensures isinstance checks in the production code pass
+    correctly without needing a full graph execution.
+    """
 
     def __init__(self, state: object) -> None:
         self._state = state
@@ -1064,7 +1089,7 @@ class TestEmitInterruptEvents:
         """When graph suspends with a permission_request interrupt, events are
         emitted.
 
-        Uses _FakeGraphWithInterrupt which raises a real GraphInterrupt from
+        Uses _InterruptingGraph which raises a real GraphInterrupt from
         astream_events, triggering the H4 guard so _emit_interrupt_events is
         called and PermissionRequestEvent is emitted.
         """
@@ -1080,10 +1105,10 @@ class TestEmitInterruptEvents:
                 {"optionId": "deny_once", "label": "Deny"},
             ],
         }
-        state = _FakeState(
-            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        state = _GraphStateSnapshot(
+            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
         )
-        graph = _FakeGraphWithInterrupt(state)
+        graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-interrupt"}}
         await aggregator.ingest(
@@ -1127,8 +1152,8 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-normal"])
 
-        state = _FakeState(tasks=[])
-        graph = _FakeGraph(state)
+        state = _GraphStateSnapshot(tasks=[])
+        graph = _SilentGraph(state)
 
         config = {"configurable": {"thread_id": "thread-normal"}}
         await aggregator.ingest(
@@ -1155,11 +1180,11 @@ class TestEmitInterruptEvents:
         queue = aggregator.add_subscriber("client-1")
         aggregator.subscribe("client-1", ["thread-empty-interrupts"])
 
-        # Task exists but with no interrupts — uses _FakeGraphWithInterrupt
+        # Task exists but with no interrupts — uses _InterruptingGraph
         # so _emit_interrupt_events IS called, but no events emitted since
         # task.interrupts is empty.
-        state = _FakeState(tasks=[_FakeTask("coder", [])])
-        graph = _FakeGraphWithInterrupt(state)
+        state = _GraphStateSnapshot(tasks=[_GraphTask("coder", [])])
+        graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
         await aggregator.ingest(
@@ -1186,13 +1211,13 @@ class TestEmitInterruptEvents:
         aggregator.subscribe("client-1", ["thread-other-interrupt"])
 
         interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
-        state = _FakeState(
-            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        state = _GraphStateSnapshot(
+            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
         )
-        # Uses _FakeGraphWithInterrupt so GraphInterrupt is raised and
+        # Uses _InterruptingGraph so GraphInterrupt is raised and
         # _emit_interrupt_events is triggered, but the payload type is not
         # "permission_request" so no PermissionRequestEvent should be emitted.
-        graph = _FakeGraphWithInterrupt(state)
+        graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-other-interrupt"}}
         await aggregator.ingest(
@@ -1224,11 +1249,11 @@ class TestEmitInterruptEvents:
             "tool_input": {},
             "options": [],  # Empty options — should use defaults
         }
-        state = _FakeState(
-            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        state = _GraphStateSnapshot(
+            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
         )
-        # Uses _FakeGraphWithInterrupt so _emit_interrupt_events is called.
-        graph = _FakeGraphWithInterrupt(state)
+        # Uses _InterruptingGraph so _emit_interrupt_events is called.
+        graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-default-opts"}}
         await aggregator.ingest(

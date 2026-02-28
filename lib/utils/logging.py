@@ -79,7 +79,7 @@ def setup_logging(
     settings_override: "Settings | None" = None,
 ) -> None:
     """Configure structured JSON logging or rich terminal logging."""
-    from ..core.config import settings as core_settings  # noqa: PLC0415
+    from ..core.config import settings as core_settings
 
     active_settings = settings_override or core_settings
 
@@ -106,7 +106,7 @@ def setup_logging(
 
     log_handler: logging.Handler
     if is_interactive and not disable_color and not ci_mode and not force_json:
-        from rich.logging import RichHandler  # noqa: PLC0415
+        from rich.logging import RichHandler
 
         log_handler = RichHandler(
             level=numeric_level,

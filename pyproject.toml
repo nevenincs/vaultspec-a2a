@@ -6,6 +6,7 @@ requires-python = ">=3.13"
 
 dependencies = [
   "anyio>=4.9.0",
+  "aiosqlite>=0.20.0",
   "fastapi>=0.133.1",
   "httpx>=0.28.1",
   "langchain-core>=1.2.16",
@@ -129,9 +130,38 @@ unfixable = ["B"]
 # checks — each branch is a distinct git operation, not reducible.
 "lib/workspace/git_manager.py" = ["PLR0912"]
 
+# FastAPI endpoints use Depends() in function defaults — this IS the correct
+# FastAPI pattern, not a mutable default argument bug.
+"lib/api/endpoints.py" = ["B008"]
+# Telemetry: conditional SDK imports are inside functions because the SDK
+# may not be loaded yet at import time; logging uses lazy imports.
+"lib/telemetry/instrumentation.py" = ["PLC0415"]
+"lib/utils/logging.py" = ["PLC0415"]
+# ACP: lazy import of _git_mutex avoids circular deps; process management
+# functions legitimately use Any for subprocess/dict-based RPC messages.
+# _process_tool_result and _handle_subprocess_output have > 12 branches
+# from dispatcher logic and error handling paths.
+"lib/providers/acp_chat_model.py" = ["PLC0415", "PLR0912"]
+# Factory and printer use **kwargs: Any for delegation — genuinely untyped.
+# Factory.__init__ has 51 statements from provider initialization.
+"lib/providers/factory.py" = ["ANN401", "PLR0915"]
+"lib/utils/printer.py" = ["ANN401"]
+# Database session uses module-level global singletons for engine/factory pooling.
+# Middleware uses a module-level global for the tracer instance.
+"lib/database/session.py" = ["PLW0603"]
+"lib/telemetry/middleware.py" = ["PLW0603"]
+
 # Test files: fixtures and helper stubs don't need full type annotations or
 # docstrings, and magic status-code comparisons (e.g. == 200) are idiomatic.
-"lib/**/tests/test_*.py" = ["ANN", "D", "PLR2004"]
+# Private member access is needed for testing internal implementation details.
+# Mutable defaults are used in test helper classes (intentional).
+"lib/**/tests/test_*.py" = ["ANN", "D", "PLR2004", "SLF001", "RUF012", "PLC0415"]
+"lib/**/tests/conftest.py" = ["ANN", "D", "PLR2004", "PLC0415"]
+
+[tool.ruff.lint.pylint]
+# Default max-args=5 is too restrictive for graph compilation and CRUD
+# functions that need thread_id + session + several configuration params.
+max-args = 7
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"

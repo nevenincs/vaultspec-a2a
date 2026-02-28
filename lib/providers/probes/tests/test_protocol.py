@@ -3,14 +3,14 @@
 Tests ProbeResult dataclass properties, _ProbeSession state machine transitions,
 and JSON-RPC message handling. Full subprocess probes are marked @pytest.mark.live.
 
-Policy note on _FakeWriter usage (PROV-L1):
-    The _FakeWriter stubs below are a narrow, deliberate exception to the
+Policy note on _WriteBuffer usage (PROV-L1):
+    The _WriteBuffer helper below is a narrow, deliberate exception to the
     no-mocks mandate. _ProbeSession.send() and handle_server_rpc() are pure
     JSON-RPC serialisation/state-machine logic; the only I/O they perform is
     ``stdin.write()`` + ``stdin.drain()``. Testing these code paths with a
     real asyncio.StreamWriter would require spawning a real subprocess, which
     would make these tests live tests (marked @pytest.mark.live). Using a
-    minimal write-buffer stub instead keeps the fast unit-test suite exercising
+    minimal write-buffer helper instead keeps the fast unit-test suite exercising
     the real state-machine logic without live I/O. If the real asyncio drain
     behaviour (backpressure, buffer limits) ever becomes relevant, add separate
     @pytest.mark.live integration tests.
@@ -21,6 +21,34 @@ import json
 import pytest
 
 from .._protocol import ProbeResult, _ProbeSession
+
+
+# ---------------------------------------------------------------------------
+# Shared write-buffer helper
+# ---------------------------------------------------------------------------
+
+
+class _WriteBuffer:
+    """Minimal stdin-like write buffer for testing JSON-RPC serialisation.
+
+    Policy exception: This test helper provides controlled I/O for testing
+    pure JSON-RPC serialisation and state-machine logic which is independent
+    of real asyncio.StreamWriter backpressure behaviour. The project's
+    no-mocks mandate targets mocking out network/LLM/subprocess calls; this
+    helper tests pure serialisation/framing logic.
+    """
+
+    def __init__(self) -> None:
+        self.buffer = bytearray()
+
+    def write(self, data: bytes) -> None:
+        self.buffer.extend(data)
+
+    async def drain(self) -> None:
+        pass
+
+    def decode(self) -> str:
+        return self.buffer.decode()
 
 
 # ---------------------------------------------------------------------------
@@ -136,16 +164,8 @@ class TestProbeSessionHandleResponse:
             timeout=30.0,
             prompt="Hello",
         )
-        write_buffer = bytearray()
-
-        class _FakeWriter:
-            def write(self, data: bytes) -> None:
-                write_buffer.extend(data)
-
-            async def drain(self) -> None:
-                pass
-
-        session.stdin = _FakeWriter()  # type: ignore[assignment]
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
         session.step = "initialize"
 
         msg = {
@@ -158,8 +178,8 @@ class TestProbeSessionHandleResponse:
         assert done is False
         assert session.step == "session/new"
         # A new request should have been sent
-        assert len(write_buffer) > 0
-        sent = json.loads(write_buffer.decode().strip())
+        assert len(wb.buffer) > 0
+        sent = json.loads(wb.decode().strip())
         assert sent["method"] == "session/new"
 
     @pytest.mark.asyncio
@@ -171,16 +191,8 @@ class TestProbeSessionHandleResponse:
             timeout=30.0,
             prompt="Test prompt",
         )
-        write_buffer = bytearray()
-
-        class _FakeWriter:
-            def write(self, data: bytes) -> None:
-                write_buffer.extend(data)
-
-            async def drain(self) -> None:
-                pass
-
-        session.stdin = _FakeWriter()  # type: ignore[assignment]
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
         session.step = "session/new"
 
         msg = {"result": {"sessionId": "sess-abc-123"}}
@@ -189,7 +201,7 @@ class TestProbeSessionHandleResponse:
         assert session.step == "session/prompt"
         assert session.session_id == "sess-abc-123"
         # Should have sent session/prompt request
-        sent = json.loads(write_buffer.decode().strip())
+        sent = json.loads(wb.decode().strip())
         assert sent["method"] == "session/prompt"
         assert sent["params"]["prompt"][0]["text"] == "Test prompt"
 
@@ -245,19 +257,11 @@ class TestProbeSessionServerRPC:
             timeout=30.0,
             prompt="Hello",
         )
-        write_buffer = bytearray()
-
-        class _FakeWriter:
-            def write(self, data: bytes) -> None:
-                write_buffer.extend(data)
-
-            async def drain(self) -> None:
-                pass
-
-        session.stdin = _FakeWriter()  # type: ignore[assignment]
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
 
         await session.handle_server_rpc(42, "permission/request")
-        resp = json.loads(write_buffer.decode().strip())
+        resp = json.loads(wb.decode().strip())
         assert resp["id"] == 42
         assert resp["error"]["code"] == -32601
         assert "permission/request" in resp["error"]["message"]
@@ -280,16 +284,8 @@ class TestProbeSessionSend:
             timeout=30.0,
             prompt="Hello",
         )
-        write_buffer = bytearray()
-
-        class _FakeWriter:
-            def write(self, data: bytes) -> None:
-                write_buffer.extend(data)
-
-            async def drain(self) -> None:
-                pass
-
-        session.stdin = _FakeWriter()  # type: ignore[assignment]
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
 
         id1 = await session.send("initialize", {"version": 1})
         id2 = await session.send("session/new", {"cwd": "."})
@@ -306,19 +302,11 @@ class TestProbeSessionSend:
             timeout=30.0,
             prompt="Hello",
         )
-        write_buffer = bytearray()
-
-        class _FakeWriter:
-            def write(self, data: bytes) -> None:
-                write_buffer.extend(data)
-
-            async def drain(self) -> None:
-                pass
-
-        session.stdin = _FakeWriter()  # type: ignore[assignment]
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
 
         rid = await session.send("initialize", {"protocolVersion": 1})
-        msg = json.loads(write_buffer.decode().strip())
+        msg = json.loads(wb.decode().strip())
         assert msg["jsonrpc"] == "2.0"
         assert msg["id"] == rid
         assert msg["method"] == "initialize"

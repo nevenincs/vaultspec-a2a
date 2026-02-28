@@ -768,7 +768,7 @@ class AcpChatModel(BaseChatModel):
         concurrent git operations (ADR-001 §2). Uses asyncio.to_thread so
         blocking I/O does not stall the event loop.
         """
-        from ..workspace.git_manager import _git_mutex  # noqa: PLC0415
+        from ..workspace.git_manager import _git_mutex
 
         try:
             file_path = self._sandbox_path(params["path"])
@@ -1029,7 +1029,8 @@ class AcpChatModel(BaseChatModel):
                     )
                 except asyncio.QueueFull:
                     logger.warning(
-                        "Chunk queue full — dropping tool_call_chunk to prevent deadlock"
+                        "Chunk queue full — dropping tool_call_chunk to prevent "
+                        "deadlock"
                     )
         elif u_type == "tool_call":
             await self._on_tool_call(update, ctx)
@@ -1095,7 +1096,8 @@ class AcpChatModel(BaseChatModel):
                 ctx.chunk_queue.put_nowait(chunk)
             except asyncio.QueueFull:
                 logger.warning(
-                    "Chunk queue full — dropping tool_call_update chunk to prevent deadlock"
+                    "Chunk queue full — dropping tool_call_update chunk to "
+                    "prevent deadlock"
                 )
         for k, v in update.items():
             if v is not None:

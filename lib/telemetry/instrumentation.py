@@ -30,6 +30,8 @@ Environment variables consumed:
 
 from __future__ import annotations
 
+import dataclasses
+import importlib.util
 import logging
 import os
 
@@ -81,6 +83,7 @@ _LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in (
 _LANGSMITH_PROJECT = os.environ.get("LANGCHAIN_PROJECT", "default")
 
 
+@dataclasses.dataclass(frozen=True)
 class TelemetryConfig:
     """Runtime snapshot of the active telemetry configuration.
 
@@ -93,23 +96,12 @@ class TelemetryConfig:
         langsmith_enabled: True when LANGCHAIN_TRACING_V2=true is set.
     """
 
-    def __init__(  # noqa: PLR0913
-        self,
-        *,
-        sdk_available: bool,
-        otlp_available: bool,
-        sdk_enabled: bool,
-        service_name: str,
-        otlp_endpoint: str,
-        langsmith_enabled: bool,
-    ) -> None:
-        """Initialise immutable telemetry config snapshot."""
-        self.sdk_available = sdk_available
-        self.otlp_available = otlp_available
-        self.sdk_enabled = sdk_enabled
-        self.service_name = service_name
-        self.otlp_endpoint = otlp_endpoint
-        self.langsmith_enabled = langsmith_enabled
+    sdk_available: bool
+    otlp_available: bool
+    sdk_enabled: bool
+    service_name: str
+    otlp_endpoint: str
+    langsmith_enabled: bool
 
     def __repr__(self) -> str:
         """Return developer-friendly representation."""
@@ -124,22 +116,21 @@ class TelemetryConfig:
 
 def _check_sdk() -> bool:
     """Return True — opentelemetry-sdk is a mandatory dependency (ADR-015)."""
-    import opentelemetry.sdk.trace  # noqa: F401, PLC0415
-
-    return True
+    return importlib.util.find_spec("opentelemetry.sdk.trace") is not None
 
 
 def _check_otlp() -> bool:
     """Return True if the OTLP gRPC exporter is importable.
 
     The OTLP exporter is optional (operators may not run a collector),
-    so we retain the ImportError guard here only for the exporter package.
+    so we retain the availability check here only for the exporter package.
     """
-    try:
-        import opentelemetry.exporter.otlp.proto.grpc.trace_exporter  # noqa: F401, PLC0415
-    except ImportError:
-        return False
-    return True
+    return (
+        importlib.util.find_spec(
+            "opentelemetry.exporter.otlp.proto.grpc.trace_exporter"
+        )
+        is not None
+    )
 
 
 def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
@@ -151,13 +142,13 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
     Returns:
         A configured SDK ``TracerProvider``.
     """
-    from opentelemetry.sdk.resources import (  # noqa: PLC0415
+    from opentelemetry.sdk.resources import (
         Resource,
     )
-    from opentelemetry.sdk.trace import (  # noqa: PLC0415
+    from opentelemetry.sdk.trace import (
         TracerProvider as SdkTracerProvider,
     )
-    from opentelemetry.sdk.trace.export import (  # noqa: PLC0415
+    from opentelemetry.sdk.trace.export import (
         BatchSpanProcessor,
         ConsoleSpanExporter,
     )
@@ -171,7 +162,7 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
     provider = SdkTracerProvider(resource=resource)
 
     if otlp_available:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (
             OTLPSpanExporter,
         )
 
@@ -196,13 +187,13 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
     Args:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
     """
-    from opentelemetry.sdk.metrics import (  # noqa: PLC0415
+    from opentelemetry.sdk.metrics import (
         MeterProvider,
     )
-    from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415
+    from opentelemetry.sdk.metrics.export import (
         PeriodicExportingMetricReader,
     )
-    from opentelemetry.sdk.resources import (  # noqa: PLC0415
+    from opentelemetry.sdk.resources import (
         Resource,
     )
 
@@ -215,15 +206,12 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
     readers = []
 
     if otlp_available:
-        try:
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
-                OTLPMetricExporter,
-            )
+        from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (
+            OTLPMetricExporter,
+        )
 
-            exporter = OTLPMetricExporter(endpoint=_OTLP_ENDPOINT, insecure=_INSECURE)
-            readers.append(PeriodicExportingMetricReader(exporter))
-        except ImportError:
-            pass
+        exporter = OTLPMetricExporter(endpoint=_OTLP_ENDPOINT, insecure=_INSECURE)
+        readers.append(PeriodicExportingMetricReader(exporter))
 
     meter_provider = MeterProvider(resource=resource, metric_readers=readers)
     metrics.set_meter_provider(meter_provider)

@@ -26,6 +26,11 @@ _AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
 # Prevents shell injection and git flag injection.
 _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 
+# Index of first worktree entry in `git worktree list --porcelain` output.
+# Entry 0 is metadata line "worktree <path>", entry 1 is main worktree (git
+# lists main first), entry 2 marks the actual worktree we're processing.
+_MAIN_WORKTREE_ENTRY_INDEX = 2
+
 
 __all__ = [
     "GitManager",
@@ -239,9 +244,12 @@ class GitManager:
         for line in raw.splitlines():
             if line.startswith("worktree "):
                 # Flush previous entry.
-                # M31/H20: increment entry_index BEFORE the flush so that
-                # ``entry_index == 1`` correctly identifies the first (main)
-                # worktree when we're starting to parse the second entry.
+                # Increment entry_index BEFORE the flush so we know which
+                # entry we're currently starting.  When flushing, entry_index
+                # is the index of the NEW entry being parsed, meaning we are
+                # flushing entry (entry_index - 1).  The main worktree is
+                # entry 1 (the first entry), so it is flushed when
+                # entry_index == 2 (we just started parsing entry 2).
                 entry_index += 1
                 if current_path is not None:
                     worktrees.append(
@@ -249,11 +257,12 @@ class GitManager:
                             path=current_path,
                             branch=current_branch,
                             head_sha=current_sha,
-                            # WS-L3: entry_index is incremented BEFORE the flush,
-                            # so entry_index==1 here means we are starting the
-                            # second entry and flushing the first — the main
-                            # worktree (always listed first by git porcelain).
-                            is_main=entry_index == 1 or is_bare,
+                            # The flushed entry is #(entry_index - 1).
+                            # is_main iff that entry is #1 (the first, main
+                            # worktree listed by git porcelain).
+                            is_main=(
+                                entry_index == _MAIN_WORKTREE_ENTRY_INDEX or is_bare
+                            ),
                         )
                     )
                 current_path = Path(line.split(" ", 1)[1])
@@ -293,6 +302,30 @@ class GitManager:
     # Merge operations
     # ------------------------------------------------------------------
 
+    def _validate_worktree_path(self, worktree_path: Path) -> Path:
+        """Validate and resolve *worktree_path* for use in git operations.
+
+        Ensures the path is absolute, resolves to a real directory, and is
+        confined under the repository root to prevent path traversal attacks
+        (WS-HIGH-001).
+
+        Returns the resolved absolute path.
+        Raises ``WorkspaceError`` if any constraint is violated.
+        """
+        if not worktree_path.is_absolute():
+            msg = f"worktree_path must be an absolute path, got {worktree_path!r}"
+            raise WorkspaceError(msg)
+        resolved = worktree_path.resolve()
+        if not resolved.is_dir():
+            msg = f"worktree_path is not an existing directory: {worktree_path!r}"
+            raise WorkspaceError(msg)
+        if not resolved.is_relative_to(self._root.resolve()):
+            msg = (
+                f"worktree_path {worktree_path!r} is not under repo root {self._root!r}"
+            )
+            raise WorkspaceError(msg)
+        return resolved
+
     async def has_conflicts(
         self,
         worktree_path: Path,
@@ -308,9 +341,13 @@ class GitManager:
         mutations.  ``merge_worktree`` acquires the mutex before calling
         this method (H21 fix).
 
-        Raises ``WorkspaceError`` if *target_branch* is invalid to prevent
-        git flag injection via crafted branch names (WS-C3).
+        Raises ``WorkspaceError`` if *target_branch* or *worktree_path* is
+        invalid to prevent git flag injection and path traversal (WS-C3,
+        WS-HIGH-001).
         """
+        # WS-HIGH-001: validate worktree_path before using as cwd
+        worktree_path = self._validate_worktree_path(worktree_path)
+
         # WS-C3: validate target_branch before it touches any git command
         if not _BRANCH_NAME_RE.match(target_branch):
             msg = (
@@ -355,6 +392,9 @@ class GitManager:
         The global mutex is held for the entire merge to prevent
         concurrent merges from corrupting the branch state.
         """
+        # WS-HIGH-001: validate worktree_path before using as cwd
+        worktree_path = self._validate_worktree_path(worktree_path)
+
         # WS-C3: validate target_branch before it touches any git command
         if not _BRANCH_NAME_RE.match(target_branch):
             msg = (

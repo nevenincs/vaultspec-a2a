@@ -17,7 +17,7 @@ log = logging.getLogger(__name__)
 _console = Console(file=sys.stdout)
 
 
-def _safe_print(*args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+def _safe_print(*args: Any, **kwargs: Any) -> None:
     """Print to _console, catching only expected I/O errors.
 
     Only catches ``UnicodeEncodeError`` (terminal encoding mismatch) and
@@ -41,36 +41,36 @@ class Printer:
     """
 
     @staticmethod
-    def success(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def success(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print a successful action."""
         _safe_print(f"[bold green]✓[/bold green] {msg}", *args, **kwargs)
 
     @staticmethod
-    def error(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def error(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print a user-facing error."""
         _safe_print(f"[bold red]✗[/bold red] {msg}", *args, **kwargs)
 
     @staticmethod
-    def warn(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def warn(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print a warning."""
         _safe_print(f"[bold yellow]![/bold yellow] {msg}", *args, **kwargs)
 
     @staticmethod
-    def info(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def info(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print informational output."""
         _safe_print(f"[bold blue]i[/bold blue] {msg}", *args, **kwargs)
 
     @staticmethod
-    def step(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def step(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print a workflow step transition."""
         _safe_print(f"[bold cyan]→[/bold cyan] {msg}", *args, **kwargs)
 
     @staticmethod
-    def debug(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def debug(msg: str, *args: Any, **kwargs: Any) -> None:
         """Print debug output."""
         _safe_print(f"[dim]d[/dim] [dim]{msg}[/dim]", *args, **kwargs)
 
     @staticmethod
-    def print(*args: Any, **kwargs: Any) -> None:  # noqa: ANN401
+    def print(*args: Any, **kwargs: Any) -> None:
         """Directly expose the rich print functionality for raw styled output."""
         _safe_print(*args, **kwargs)

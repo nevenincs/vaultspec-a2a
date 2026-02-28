@@ -120,7 +120,7 @@ class TelemetryConfig:
 def _check_sdk() -> bool:
     """Return True if opentelemetry-sdk is importable."""
     try:
-        import opentelemetry.sdk.trace  # noqa: F401, PLC0415  # type: ignore[unresolved-import]
+        import opentelemetry.sdk.trace  # noqa: F401, PLC0415
     except ImportError:
         return False
     return True
@@ -129,7 +129,7 @@ def _check_sdk() -> bool:
 def _check_otlp() -> bool:
     """Return True if the OTLP gRPC exporter is importable."""
     try:
-        import opentelemetry.exporter.otlp.proto.grpc.trace_exporter  # noqa: F401, PLC0415  # type: ignore[unresolved-import]
+        import opentelemetry.exporter.otlp.proto.grpc.trace_exporter  # noqa: F401, PLC0415
     except ImportError:
         return False
     return True
@@ -144,13 +144,13 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
     Returns:
         A configured SDK ``TracerProvider``.
     """
-    from opentelemetry.sdk.resources import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+    from opentelemetry.sdk.resources import (  # noqa: PLC0415
         Resource,
     )
-    from opentelemetry.sdk.trace import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+    from opentelemetry.sdk.trace import (  # noqa: PLC0415
         TracerProvider as SdkTracerProvider,
     )
-    from opentelemetry.sdk.trace.export import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+    from opentelemetry.sdk.trace.export import (  # noqa: PLC0415
         BatchSpanProcessor,
         ConsoleSpanExporter,
     )
@@ -164,7 +164,7 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
     provider = SdkTracerProvider(resource=resource)
 
     if otlp_available:
-        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+        from opentelemetry.exporter.otlp.proto.grpc.trace_exporter import (  # noqa: PLC0415
             OTLPSpanExporter,
         )
 
@@ -188,13 +188,13 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
     """
     try:
-        from opentelemetry.sdk.metrics import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+        from opentelemetry.sdk.metrics import (  # noqa: PLC0415
             MeterProvider,
         )
-        from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+        from opentelemetry.sdk.metrics.export import (  # noqa: PLC0415
             PeriodicExportingMetricReader,
         )
-        from opentelemetry.sdk.resources import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+        from opentelemetry.sdk.resources import (  # noqa: PLC0415
             Resource,
         )
     except ImportError:
@@ -210,7 +210,7 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
 
     if otlp_available:
         try:
-            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415  # type: ignore[unresolved-import]
+            from opentelemetry.exporter.otlp.proto.grpc.metric_exporter import (  # noqa: PLC0415
                 OTLPMetricExporter,
             )
 

@@ -22,6 +22,9 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+# M19: database → core is the normal dependency direction (not circular).
+# NicknameConflictError is a domain exception that belongs in core; database
+# raises it when detecting UNIQUE constraint violations on nickname.
 from ..core.exceptions import NicknameConflictError
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
 

@@ -359,6 +359,16 @@ def _compile_pipeline_loop(  # noqa: PLR0913
     if loop_node_id is None:
         raise ValueError("pipeline_loop topology requires loop_node to be set")
 
+    # M5: warn on degenerate pipeline_loop with a single node (pointless self-loop)
+    pre_loop = [aid for aid in order if aid != loop_node_id]
+    if not pre_loop:
+        logger.warning(
+            "Pipeline_loop for team %r has only the loop_node %r — "
+            "this creates a degenerate self-loop with no pre-loop stages.",
+            team_config.id,
+            loop_node_id,
+        )
+
     # H7: validate loop_node is in the agent_configs before we try to compile it.
     worker_names = {w.agent_id for w in team_config.workers}
     if loop_node_id not in worker_names:

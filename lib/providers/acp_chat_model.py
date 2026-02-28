@@ -74,6 +74,9 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     "terminal/output": "terminal",
     "terminal/wait_for_exit": "terminal",
     "terminal/release": "terminal",
+    # M13: session/request_permission is intentionally excluded — it is a
+    # server→client RPC initiated by the agent, not a capability-gated
+    # client→server request.  No clientCapability flag governs it.
 }
 
 # M18: ACP subprocess startup timeout in seconds.
@@ -664,8 +667,11 @@ class AcpChatModel(BaseChatModel):
                     "id": rpc_id,
                     "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
                 }
+        elif options and isinstance(options[0], dict) and "optionId" in options[0]:
+            # M14: guard against malformed option dicts lacking optionId
+            option_id = options[0]["optionId"]
         else:
-            option_id = options[0]["optionId"] if options else "allow_once"
+            option_id = "allow_once"
 
         # M17: validate that option_id is among the offered options before returning.
         # Reject a callback-supplied id that is not in the options list to prevent
@@ -815,6 +821,11 @@ class AcpChatModel(BaseChatModel):
                     terminal_env.update({v["name"]: v["value"] for v in extra_env})
                 elif isinstance(extra_env, dict):
                     terminal_env.update(extra_env)
+            # M12: on Windows, use CREATE_NEW_PROCESS_GROUP so child
+            # processes don't become orphans when the terminal is killed.
+            extra_kwargs: dict[str, object] = {}
+            if sys.platform == "win32":
+                extra_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
             process = await asyncio.create_subprocess_exec(
                 command,
                 *args,
@@ -823,6 +834,7 @@ class AcpChatModel(BaseChatModel):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(resolved_cwd),
                 env=terminal_env,
+                **extra_kwargs,  # type: ignore[arg-type]
             )
             terminal_id = uuid4().hex[:8]
             ctx.terminals[terminal_id] = process

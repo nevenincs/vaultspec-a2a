@@ -968,11 +968,14 @@ class EventAggregator:
             )
             return
         except Exception:
+            # H3: log as error (not silent swallow) but do NOT re-raise because
+            # this method is called from the ``ingest()`` finally block — a raise
+            # here would mask the original graph exception.
             logger.exception(
                 "Failed to inspect state for interrupt detection on thread %s",
                 thread_id,
             )
-            raise
+            return
 
         if not state or not getattr(state, "tasks", None):
             return  # Normal completion — no pending interrupts

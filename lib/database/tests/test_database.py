@@ -7,12 +7,13 @@ in-memory database with full WAL mode verification.
 import json
 
 from collections.abc import AsyncGenerator
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
 
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -38,7 +39,7 @@ from ..crud import (
     update_thread_status,
 )
 from ..models import ArtifactModel, Base, CostTrackingModel, PermissionLogModel
-from ..session import close_db, get_engine, init_db
+from ..session import close_db, get_engine, init_db, verify_wal_mode
 
 
 # ---------------------------------------------------------------------------
@@ -223,14 +224,14 @@ class TestThreadCRUD:
         thread = await create_thread(session, title="Updatable")
         assert thread.status == "submitted"
 
-        updated = await update_thread_status(session, thread.id, "working")
+        updated = await update_thread_status(session, thread.id, "running")
         assert updated is not None
-        assert updated.status == "working"
+        assert updated.status == "running"
 
     @pytest.mark.asyncio
     async def test_update_thread_status_not_found(self, session: AsyncSession) -> None:
         """update_thread_status should return None for missing thread."""
-        result = await update_thread_status(session, "missing", "working")
+        result = await update_thread_status(session, "missing", "running")
         assert result is None
 
 
@@ -515,3 +516,31 @@ class TestCostTrackingCRUD:
         assert totals["input_tokens"] == 0
         assert totals["output_tokens"] == 0
         assert totals["estimated_cost"] == pytest.approx(0.0)
+
+
+# ---------------------------------------------------------------------------
+# WAL Mode Tests (M17: file-backed DB)
+# ---------------------------------------------------------------------------
+
+
+class TestWALMode:
+    """M17: verify WAL mode on a file-backed SQLite database."""
+
+    @pytest.mark.asyncio
+    async def test_wal_mode_on_file_db(self, tmp_path: Path) -> None:
+        """verify_wal_mode returns 'wal' on a file-backed SQLite DB."""
+        db_path = tmp_path / "test_wal.db"
+        eng = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
+
+        # WAL mode is set via the connect event listener in session.py;
+        # replicate it here for a standalone engine.
+        @event.listens_for(eng.sync_engine, "connect")
+        def _set_wal(dbapi_conn: object, _rec: object) -> None:
+            dbapi_conn.execute("PRAGMA journal_mode=WAL")  # type: ignore[union-attr]
+
+        async with eng.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+
+        mode = await verify_wal_mode(eng)
+        assert mode == "wal"
+        await eng.dispose()

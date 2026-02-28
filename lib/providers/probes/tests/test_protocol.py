@@ -257,9 +257,10 @@ class TestProbeSessionServerRPC:
 
 
 class TestProbeSessionSend:
-    """Tests for the send() method."""
+    """Tests for the send() method (now async with built-in drain)."""
 
-    def test_send_increments_request_id(self) -> None:
+    @pytest.mark.asyncio
+    async def test_send_increments_request_id(self) -> None:
         """Each send() call increments the request_id counter."""
         session = _ProbeSession(
             command=["test"],
@@ -273,15 +274,19 @@ class TestProbeSessionSend:
             def write(self, data: bytes) -> None:
                 write_buffer.extend(data)
 
+            async def drain(self) -> None:
+                pass
+
         session.stdin = _FakeWriter()  # type: ignore[assignment]
 
-        id1 = session.send("initialize", {"version": 1})
-        id2 = session.send("session/new", {"cwd": "."})
+        id1 = await session.send("initialize", {"version": 1})
+        id2 = await session.send("session/new", {"cwd": "."})
         assert id1 == 1
         assert id2 == 2
         assert session.request_id == 2
 
-    def test_send_writes_valid_jsonrpc(self) -> None:
+    @pytest.mark.asyncio
+    async def test_send_writes_valid_jsonrpc(self) -> None:
         """send() writes a valid JSON-RPC 2.0 message to stdin."""
         session = _ProbeSession(
             command=["test"],
@@ -295,9 +300,12 @@ class TestProbeSessionSend:
             def write(self, data: bytes) -> None:
                 write_buffer.extend(data)
 
+            async def drain(self) -> None:
+                pass
+
         session.stdin = _FakeWriter()  # type: ignore[assignment]
 
-        rid = session.send("initialize", {"protocolVersion": 1})
+        rid = await session.send("initialize", {"protocolVersion": 1})
         msg = json.loads(write_buffer.decode().strip())
         assert msg["jsonrpc"] == "2.0"
         assert msg["id"] == rid

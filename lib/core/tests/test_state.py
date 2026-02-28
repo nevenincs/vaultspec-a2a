@@ -159,7 +159,13 @@ class TestStateJsonRoundTrip:
         }
         # Strip messages before JSON check (LangGraph handles these)
         serializable = {k: v for k, v in state.items() if k != "messages"}
-        json.dumps(serializable)
+        # T3: actually verify the JSON round-trip produces valid output
+        result = json.dumps(serializable)
+        assert isinstance(result, str)
+        parsed = json.loads(result)
+        assert parsed["thread_id"] == ""
+        assert parsed["current_plan"] == []
+        assert parsed["artifacts"] == []
 
 
 # ---------------------------------------------------------------------------

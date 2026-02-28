@@ -189,27 +189,41 @@ class TestCreateThreadViaApp:
 
 
 @pytest.mark.asyncio
-async def test_start_thread_returns_string() -> None:
-    """start_thread always returns a string regardless of server state."""
+async def test_start_thread_returns_meaningful_result() -> None:
+    """start_thread returns a result indicating success or a connection error."""
     result = await start_thread(
         initial_message="do something",
         team_preset="coding-star",
     )
     assert isinstance(result, str)
     assert len(result) > 0
+    # T1: validate the result contains meaningful content — either a thread ID
+    # indication on success or a descriptive error on connection failure.
+    lower = result.lower()
+    assert "thread" in lower or "error" in lower or "connection" in lower
 
 
 @pytest.mark.asyncio
-async def test_get_thread_status_returns_string() -> None:
-    """get_thread_status always returns a string regardless of server state."""
+async def test_get_thread_status_returns_meaningful_result() -> None:
+    """get_thread_status returns status info or a descriptive error."""
     result = await get_thread_status(thread_id="some-thread-id")
     assert isinstance(result, str)
     assert len(result) > 0
+    # T1: must contain either status fields (success) or error description (failure)
+    assert any(
+        kw in result.lower()
+        for kw in ("status:", "thread", "not found", "error", "connection")
+    )
 
 
 @pytest.mark.asyncio
-async def test_send_message_returns_string() -> None:
-    """send_message always returns a string regardless of server state."""
+async def test_send_message_returns_meaningful_result() -> None:
+    """send_message returns delivery confirmation or a descriptive error."""
     result = await send_message(thread_id="some-thread-id", message="hello")
     assert isinstance(result, str)
     assert len(result) > 0
+    # T1: must contain either delivery confirmation or error description
+    assert any(
+        kw in result.lower()
+        for kw in ("delivered", "accepted", "not found", "error", "connection")
+    )

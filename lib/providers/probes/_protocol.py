@@ -140,7 +140,12 @@ class _ProbeSession:
         self.stdout: asyncio.StreamReader | None = None
         self.stderr: asyncio.StreamReader | None = None
 
-    def send(self, method: str, params: dict) -> int:
+    async def send(self, method: str, params: dict) -> int:
+        """Send a JSON-RPC request and drain the write buffer.
+
+        H8: combined write+drain to prevent interleaved frames and ensure
+        the data is flushed to the subprocess.
+        """
         self.request_id += 1
         req = {
             "jsonrpc": "2.0",
@@ -151,13 +156,9 @@ class _ProbeSession:
         if self.stdin is None:
             raise RuntimeError("send() called before process stdin was initialised")
         self.stdin.write(f"{json.dumps(req)}\n".encode())
+        await self.stdin.drain()
         logger.debug("ACP TX [%d] -> %s", self.request_id, method)
         return self.request_id
-
-    async def drain(self) -> None:
-        if self.stdin is None:
-            raise RuntimeError("drain() called before process stdin was initialised")
-        await self.stdin.drain()
 
     async def handle_response(self, rid: int, src: str, msg: dict) -> bool:
         """Handle JSON-RPC response; return True if session complete."""
@@ -177,13 +178,15 @@ class _ProbeSession:
                 [a.get("id") for a in res.get("authMethods", [])],
             )
             self.step = "session/new"
-            sid = self.send("session/new", {"cwd": str(Path.cwd()), "mcpServers": []})
+            sid = await self.send(
+                "session/new", {"cwd": str(Path.cwd()), "mcpServers": []}
+            )
             self.pending[sid] = "session/new"
         elif self.step == "session/new":
             self.session_id = res.get("sessionId")
             logger.info("ACP session created: %s", self.session_id)
             self.step = "session/prompt"
-            pid = self.send(
+            pid = await self.send(
                 "session/prompt",
                 {
                     "sessionId": self.session_id,
@@ -210,12 +213,12 @@ class _ProbeSession:
         if self.stdin is None:
             raise RuntimeError("handle_server_rpc(): stdin not initialised")
         self.stdin.write(f"{json.dumps(resp)}\n".encode())
-        await self.drain()
+        await self.stdin.drain()
         logger.debug("ACP RX [%s] <- server RPC %s: rejected", rid, method)
 
     async def run_loop(self) -> None:
         self.pending[
-            self.send(
+            await self.send(
                 "initialize",
                 {
                     "protocolVersion": 1,
@@ -227,7 +230,6 @@ class _ProbeSession:
                 },
             )
         ] = "initialize"
-        await self.drain()
 
         if self.stdout is None:
             raise RuntimeError("run_loop(): stdout not initialised")

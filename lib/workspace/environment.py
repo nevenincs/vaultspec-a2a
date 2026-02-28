@@ -63,7 +63,20 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     ADR-001 §5: credential injection (``CLAUDE_CODE_OAUTH_TOKEN`` etc.)
     is handled by the provider layer, never by the workspace module.
     """
-    env = dict(os.environ)
+    # M21: scrub known secret env vars to prevent credential leakage to agents.
+    # ADR-001 §5 states credential injection is handled by the provider layer.
+    scrub_keys = frozenset(
+        {
+            "ANTHROPIC_API_KEY",
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            "OPENAI_API_KEY",
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "AWS_SECRET_ACCESS_KEY",
+            "AZURE_OPENAI_API_KEY",
+        }
+    )
+    env = {k: v for k, v in os.environ.items() if k not in scrub_keys}
     # M34: use PWD (POSIX standard) instead of the non-standard CWD variable
     env["PWD"] = str(workspace_path)
 

@@ -10,6 +10,8 @@ map.  Three topology types are supported (ADR-013 §2.5):
                      routes back into the loop or finishes.
 """
 
+import logging
+
 from pathlib import Path
 from typing import Any, cast
 
@@ -22,7 +24,10 @@ from ..utils.enums import Model, Provider
 from .nodes.supervisor import create_supervisor_node
 from .nodes.worker import create_worker_node
 from .state import TeamState
-from .team_config import AgentConfig, TeamConfig, WorkerRef
+from .team_config import AgentConfig, TeamConfig, TopologyType, WorkerRef
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = ["compile_team_graph"]
@@ -94,12 +99,13 @@ def _build_supervisor_prompt(
     return base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
 
 
-def compile_team_graph(
+def compile_team_graph(  # noqa: PLR0913
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     checkpointer: AsyncSqliteSaver | None = None,
     supervisor_agent_config: AgentConfig | None = None,
     workspace_root: Path | None = None,
+    autonomous: bool = False,
 ) -> Any:  # noqa: ANN401
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -119,6 +125,9 @@ def compile_team_graph(
                                  Only used for star/pipeline_loop topologies.
         workspace_root:          Optional workspace root for ACP CWD scoping
                                  (ADR-014 §2.7).
+        autonomous:              When True, skip permission_callback wiring so
+                                 ACP models auto-approve tool calls (headless
+                                 MCP-launched runs).
 
     Returns:
         The compiled StateGraph runnable.
@@ -130,24 +139,32 @@ def compile_team_graph(
     builder = StateGraph(cast(Any, TeamState))
     topology = team_config.topology
 
-    # Collect interrupt_before nodes (ADR-013 §2.7):
-    # Any agent with a non-empty require_approval_for list gets its node interrupted.
-    interrupt_nodes: list[str] = [
-        agent_configs[w.agent_id].id
-        for w in team_config.workers
-        if w.agent_id in agent_configs
-        and agent_configs[w.agent_id].permissions.require_approval_for
-    ]
+    # interrupt_before disabled: approval flows via interrupt() inside the node only
+    # (ADR-013 §2.7 superseded by plan 2026-28-02).
+    interrupt_nodes: list[str] = []
 
-    if topology.type == "star":
+    # M5: use TopologyType enum for dispatch instead of string comparison
+    if topology.type == TopologyType.STAR:
         _compile_star(
-            builder, team_config, agent_configs, supervisor_agent_config, workspace_root
+            builder,
+            team_config,
+            agent_configs,
+            supervisor_agent_config,
+            workspace_root,
+            autonomous=autonomous,
         )
-    elif topology.type == "pipeline":
-        _compile_pipeline(builder, team_config, agent_configs, workspace_root)
-    elif topology.type == "pipeline_loop":
+    elif topology.type == TopologyType.PIPELINE:
+        _compile_pipeline(
+            builder, team_config, agent_configs, workspace_root, autonomous=autonomous
+        )
+    elif topology.type == TopologyType.PIPELINE_LOOP:
         _compile_pipeline_loop(
-            builder, team_config, agent_configs, supervisor_agent_config, workspace_root
+            builder,
+            team_config,
+            agent_configs,
+            supervisor_agent_config,
+            workspace_root,
+            autonomous=autonomous,
         )
     else:
         raise ValueError(
@@ -161,12 +178,13 @@ def compile_team_graph(
     )
 
 
-def _compile_star(
+def _compile_star(  # noqa: PLR0913
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     supervisor_agent_config: AgentConfig | None,
     workspace_root: Path | None = None,
+    autonomous: bool = False,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -209,10 +227,20 @@ def _compile_star(
         system_prompt=supervisor_prompt,
         workers=worker_ids,
     )
-    builder.add_node("supervisor", supervisor_node, metadata=sv_meta)  # type: ignore[arg-type]
+    builder.add_node("supervisor", supervisor_node, metadata=sv_meta)
     builder.add_edge(START, "supervisor")
 
+    compiled_worker_ids: list[str] = []
     for worker_ref in team_config.workers:
+        if worker_ref.agent_id not in agent_configs:
+            # H6: log a warning instead of raising so partial teams can still run.
+            logger.warning(
+                "Worker %r is listed in team %r but has no resolved AgentConfig "
+                "— skipping this worker node.",
+                worker_ref.agent_id,
+                team_config.id,
+            )
+            continue
         agent_cfg = agent_configs[worker_ref.agent_id]
         model = _resolve_model_for_worker(
             worker_ref,
@@ -221,11 +249,14 @@ def _compile_star(
             workspace_root,
         )
         worker_node = create_worker_node(
-            model, agent_cfg.persona.system_prompt, name=agent_cfg.id
+            model,
+            agent_cfg.persona.system_prompt,
+            name=agent_cfg.id,
+            autonomous=autonomous,
         )
         builder.add_node(
             agent_cfg.id,
-            worker_node,  # type: ignore[arg-type]
+            worker_node,
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -233,8 +264,17 @@ def _compile_star(
             },
         )
         builder.add_edge(agent_cfg.id, "supervisor")
+        compiled_worker_ids.append(agent_cfg.id)
 
-    route_map: dict[str, str] = {wid: wid for wid in worker_ids}
+    # M3: fail fast if no workers compiled — a supervisor with zero routes
+    # produces a trivially useless graph.
+    if not compiled_worker_ids:
+        raise ValueError(
+            f"Star topology for team {team_config.id!r} has zero compiled workers. "
+            "All worker AgentConfigs are missing or unresolvable."
+        )
+
+    route_map: dict[str, str] = {wid: wid for wid in compiled_worker_ids}
     route_map["FINISH"] = END
     builder.add_conditional_edges(
         "supervisor",
@@ -248,6 +288,7 @@ def _compile_pipeline(
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     workspace_root: Path | None = None,
+    autonomous: bool = False,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -260,7 +301,15 @@ def _compile_pipeline(
 
     for agent_id in order:
         agent_cfg = agent_configs[agent_id]
-        worker_ref = next(w for w in team_config.workers if w.agent_id == agent_id)
+        # H1: use next() with a sentinel to avoid bare StopIteration
+        worker_ref = next(
+            (w for w in team_config.workers if w.agent_id == agent_id), None
+        )
+        if worker_ref is None:
+            raise ValueError(
+                f"Pipeline node {agent_id!r} has no matching WorkerRef in "
+                f"team {team_config.id!r}."
+            )
         model = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
@@ -268,11 +317,14 @@ def _compile_pipeline(
             workspace_root,
         )
         worker_node = create_worker_node(
-            model, agent_cfg.persona.system_prompt, name=agent_cfg.id
+            model,
+            agent_cfg.persona.system_prompt,
+            name=agent_cfg.id,
+            autonomous=autonomous,
         )
         builder.add_node(
             agent_cfg.id,
-            worker_node,  # type: ignore[arg-type]
+            worker_node,
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -287,12 +339,13 @@ def _compile_pipeline(
     builder.add_edge(node_names[-1], END)
 
 
-def _compile_pipeline_loop(
+def _compile_pipeline_loop(  # noqa: PLR0913
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
     supervisor_agent_config: AgentConfig | None,
     workspace_root: Path | None = None,
+    autonomous: bool = False,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -306,11 +359,34 @@ def _compile_pipeline_loop(
     if loop_node_id is None:
         raise ValueError("pipeline_loop topology requires loop_node to be set")
 
+    # H7: validate loop_node is in the agent_configs before we try to compile it.
+    worker_names = {w.agent_id for w in team_config.workers}
+    if loop_node_id not in worker_names:
+        msg = (
+            f"pipeline_loop loop_node {loop_node_id!r} is not a known worker "
+            f"in team {team_config.id!r}. Known workers: {sorted(worker_names)}"
+        )
+        raise ValueError(msg)
+    if loop_node_id not in agent_configs:
+        msg = (
+            f"pipeline_loop loop_node {loop_node_id!r} has no resolved AgentConfig. "
+            "Ensure the agent TOML exists and is loaded before compiling the graph."
+        )
+        raise ValueError(msg)
+
     pre_loop = [aid for aid in order if aid != loop_node_id]
 
     for agent_id in order:
         agent_cfg = agent_configs[agent_id]
-        worker_ref = next(w for w in team_config.workers if w.agent_id == agent_id)
+        # H1: use next() with a sentinel to avoid bare StopIteration
+        worker_ref = next(
+            (w for w in team_config.workers if w.agent_id == agent_id), None
+        )
+        if worker_ref is None:
+            raise ValueError(
+                f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
+                f"team {team_config.id!r}."
+            )
         model = _resolve_model_for_worker(
             worker_ref,
             agent_cfg,
@@ -318,7 +394,10 @@ def _compile_pipeline_loop(
             workspace_root,
         )
         worker_node = create_worker_node(
-            model, agent_cfg.persona.system_prompt, name=agent_cfg.id
+            model,
+            agent_cfg.persona.system_prompt,
+            name=agent_cfg.id,
+            autonomous=autonomous,
         )
 
         if agent_id == loop_node_id:
@@ -342,7 +421,7 @@ def _compile_pipeline_loop(
 
         builder.add_node(
             agent_cfg.id,
-            node_fn,  # type: ignore[arg-type]
+            node_fn,
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,

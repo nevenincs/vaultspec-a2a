@@ -285,9 +285,9 @@ class TestResolveEnvVars:
     """Tests for the environment variable builder."""
 
     def test_includes_cwd(self, tmp_path: Path) -> None:
-        """CWD key is set to the stringified workspace path."""
+        """PWD key is set to the stringified workspace path (M34)."""
         env = resolve_env_vars(tmp_path)
-        assert env["CWD"] == str(tmp_path)
+        assert env["PWD"] == str(tmp_path)
 
     def test_includes_virtual_env_when_found(self, tmp_path: Path) -> None:
         """VIRTUAL_ENV and PATH are set when a .venv with Scripts/ exists."""

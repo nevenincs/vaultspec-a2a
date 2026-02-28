@@ -319,17 +319,18 @@ class TestAllExports:
         }
         assert set(_exceptions_module.__all__) == expected
 
-    def test_facade_reexports_new_exceptions(self) -> None:
-        """The core facade (__init__.py) must re-export the new types.
+    def test_facade_reexports_are_same_objects(self) -> None:
+        """Facade re-exports are identity-equal to exceptions module objects.
 
-        Verified by the module-level imports from ``..`` above; any missing
-        re-export would cause an ImportError at collection time.
+        The module-level imports from ``..`` (the core facade) must refer to
+        the exact same class objects as ``..exceptions``.  ``is`` proves
+        they are not accidental copies or shadowed names.
         """
-        assert ContextOverflowError is not None
-        assert DatabaseError is not None
-        assert ErrorSeverity is not None
-        assert EventAggregatorError is not None
-        assert MergeConflictError is not None
-        assert PermissionDeniedError is not None
-        assert RecoveryAction is not None
-        assert TokenBudgetExceededError is not None
+        assert ContextOverflowError is _exceptions_module.ContextOverflowError
+        assert DatabaseError is _exceptions_module.DatabaseError
+        assert ErrorSeverity is _exceptions_module.ErrorSeverity
+        assert EventAggregatorError is _exceptions_module.EventAggregatorError
+        assert MergeConflictError is _exceptions_module.MergeConflictError
+        assert PermissionDeniedError is _exceptions_module.PermissionDeniedError
+        assert RecoveryAction is _exceptions_module.RecoveryAction
+        assert TokenBudgetExceededError is _exceptions_module.TokenBudgetExceededError

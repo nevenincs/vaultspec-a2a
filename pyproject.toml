@@ -5,31 +5,27 @@ description = "A2A Agent Orchestration Implementation"
 requires-python = ">=3.13"
 
 dependencies = [
-  "PyYAML>=6.0.3",
-  "a2a-sdk>=0.3.24",
-  "agent-client-protocol>=0.8.1",
-  "claude-agent-sdk @ git+https://github.com/anthropics/claude-agent-sdk-python.git@main",
+  "anyio>=4.9.0",
   "fastapi>=0.133.1",
-  "fastmcp>=3.0.2",
   "httpx>=0.28.1",
-  "langchain-anthropic>=1.3.4",
   "langchain-core>=1.2.16",
-  "langchain-google-genai>=4.2.1",
-  "langchain-mcp-adapters>=0.2.1",
   "langchain-openai>=1.1.10",
   "langgraph>=0.2.16",
   "langgraph-checkpoint-sqlite>=2.0.0",
   "mcp>=1.26.0",
+  "opentelemetry-sdk>=1.39.1",
+  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
+  "opentelemetry-instrumentation-fastapi>=0.60b0",
   "pydantic>=2.12.5",
   "pydantic-settings>=2.13.1",
-  "pywin32>=311",
   "rich>=14.3.2",
   "sqlalchemy[asyncio]>=2.0.40",
-  "sse-starlette>=3.2.0",
   "starlette>=0.52.1",
   "uvicorn>=0.41.0",
-  "winfcntl>=1.1.9",
 ]
+
+[project.scripts]
+vaultspec = "lib.api.app:main"
 
 [project.optional-dependencies]
 dev = [
@@ -42,16 +38,10 @@ dev = [
   "identify>=2.0.0",
   "nodeenv>=1.0.0",
 ]
-telemetry = [
-  # OTel SDK + OTLP gRPC exporter (optional — falls back to no-op without these)
-  "opentelemetry-sdk>=1.39.1",
-  "opentelemetry-exporter-otlp-proto-grpc>=1.39.1",
-  # FastAPI auto-instrumentation (add to FastAPI lifespan via configure_telemetry)
-  "opentelemetry-instrumentation-fastapi>=0.60b0",
-]
 
 [dependency-groups]
 dev = [
+  "deptry>=0.23.0",
   "identify>=2.0.0",
   "nodeenv>=1.0.0",
   "prek>=0.3.2",
@@ -65,9 +55,6 @@ dev = [
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
-
-[tool.hatch.metadata]
-allow-direct-references = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["lib"]
@@ -167,6 +154,26 @@ docstring-code-format = true
 docstring-code-line-length = "dynamic" # Or set to 80
 quote-style = "double"
 indent-style = "space"
+
+[tool.deptry]
+extend_exclude = ["knowledge", "tests"]
+
+[tool.deptry.package_module_name_map]
+opentelemetry-sdk = "opentelemetry"
+opentelemetry-exporter-otlp-proto-grpc = "opentelemetry"
+opentelemetry-instrumentation-fastapi = "opentelemetry"
+
+[tool.deptry.per_rule_ignores]
+# DEP002: CLI tools and plugins — invoked as commands, not imported in Python
+DEP002 = [
+  "ruff",
+  "ty",
+  "prek",
+  "identify",
+  "nodeenv",
+  "pytest-timeout",
+  "deptry",
+]
 
 [tool.ty.environment]
 python-version = "3.13"

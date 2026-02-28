@@ -20,8 +20,9 @@ from pathlib import Path
 from typing import Any, cast
 
 import anyio
-from anyio.abc import TaskGroup
+import uvicorn
 
+from anyio.abc import TaskGroup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -36,22 +37,13 @@ from ..core.aggregator import EventAggregator
 from ..core.config import settings
 from ..database.session import close_db, init_db
 from ..protocols import mcp as mcp_server
+from ..telemetry import TelemetryMiddleware, configure_telemetry
 from .endpoints import GraphRegistry, router
 from .schemas.enums import AgentControlAction, AgentLifecycleState
 from .websocket import ConnectionManager
 
 
-# Telemetry is an optional extra; import once at module level so the function
-# reference is stable and the import lives at the top level (PLC0415).
-try:
-    from ..telemetry import TelemetryMiddleware as _TelemetryMiddleware
-    from ..telemetry import configure_telemetry as _configure_telemetry
-except ImportError:
-    _configure_telemetry: Callable[[], None] | None = None
-    _TelemetryMiddleware: type | None = None
-
-
-__all__ = ["create_app"]
+__all__ = ["create_app", "main"]
 
 logger = logging.getLogger(__name__)
 
@@ -226,12 +218,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Store engine ref for shutdown
         app.state.db_engine = engine
 
-        # Optional telemetry
-        if _configure_telemetry is not None:
-            _configure_telemetry()
-            logger.info("Telemetry configured")
-        else:
-            logger.debug("Telemetry packages not installed, skipping")
+        # Telemetry (ADR-010 — mandatory)
+        configure_telemetry()
+        logger.info("Telemetry configured")
 
         # Task group for background work (ADR-007 §5).
         async with anyio.create_task_group() as tg:
@@ -260,6 +249,21 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             tg.cancel_scope.cancel()
 
 
+def main() -> None:
+    """Launch the vaultspec-a2a server.
+
+    Entry point for the ``vaultspec`` CLI command defined in
+    ``[project.scripts]`` (ADR-015).
+    """
+    uvicorn.run(
+        "lib.api.app:create_app",
+        factory=True,
+        host=settings.host,
+        port=settings.port,
+        log_level="info",
+    )
+
+
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application.
 
@@ -273,30 +277,25 @@ def create_app() -> FastAPI:
     )
 
     # --- CORS Middleware ---
-    # CORS spec forbids allow_origins=["*"] combined with allow_credentials=True
-    # (browsers reject such responses). Use explicit localhost origins in dev.
-    if settings.is_dev:
-        app.add_middleware(
-            cast(Any, CORSMiddleware),
-            allow_origins=[
-                "http://localhost:5173",  # Vite dev server
-                "http://localhost:4173",  # Vite preview
-                "http://localhost:8000",  # FastAPI itself (curl/dev tools)
-                "http://127.0.0.1:5173",
-                "http://127.0.0.1:4173",
-                "http://127.0.0.1:8000",
-            ],
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
+    # Always add CORS so the SvelteKit SPA can make cross-origin requests in
+    # both dev and production (C1 fix).  CORS spec forbids allow_origins=["*"]
+    # combined with allow_credentials=True (browsers reject such responses), so
+    # we never use wildcard origins.  In dev the extra Vite origins are included;
+    # in production the deployer sets VAULTSPEC_CORS_ALLOWED_ORIGINS.
+    cors_origins: list[str] = list(settings.cors_allowed_origins)
+    app.add_middleware(
+        cast(Any, CORSMiddleware),
+        allow_origins=cors_origins,
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # --- Telemetry Middleware (ADR-010) ---
-    if _TelemetryMiddleware is not None:
-        app.add_middleware(cast(Any, _TelemetryMiddleware))
+    app.add_middleware(cast(Any, TelemetryMiddleware))
 
     # --- Cache-Control Middleware (ADR-007 §5) ---
-    app.add_middleware(_CacheControlMiddleware)
+    app.add_middleware(cast(Any, _CacheControlMiddleware))
 
     # --- REST Router ---
     app.include_router(router, prefix="/api")

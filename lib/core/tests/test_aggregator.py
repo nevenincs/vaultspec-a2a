@@ -915,9 +915,7 @@ class TestBackpressure:
 
         # Pre-fill the slow queue to capacity
         for i in range(_QUEUE_MAXSIZE):
-            q_slow.put_nowait(
-                await _make_chunk_event(aggregator, f"pre-{i}")
-            )
+            q_slow.put_nowait(await _make_chunk_event(aggregator, f"pre-{i}"))
 
         assert q_slow.full()
 
@@ -991,3 +989,232 @@ class TestExports:
     def test_facade_reexports(self) -> None:
         """lib.core re-exports EventAggregator and it is the same class."""
         assert CoreAggregator is EventAggregator
+
+
+# ---------------------------------------------------------------------------
+# Interrupt detection: _emit_interrupt_events
+# ---------------------------------------------------------------------------
+
+
+class _FakeInterrupt:
+    """Minimal interrupt value stub."""
+
+    def __init__(self, value: object) -> None:
+        self.value = value
+
+
+class _FakeTask:
+    """Minimal LangGraph task stub."""
+
+    def __init__(self, name: str, interrupts: list[_FakeInterrupt]) -> None:
+        self.name = name
+        self.interrupts = interrupts
+
+
+class _FakeState:
+    """Minimal LangGraph state snapshot stub."""
+
+    def __init__(self, tasks: list[_FakeTask]) -> None:
+        self.tasks = tasks
+
+
+class _FakeGraph:
+    """Minimal graph stub: astream_events yields nothing, aget_state returns state."""
+
+    def __init__(self, state: object) -> None:
+        self._state = state
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        return
+        yield  # make it an async generator
+
+    async def aget_state(self, config: object) -> object:
+        return self._state
+
+
+class TestEmitInterruptEvents:
+    """Tests for _emit_interrupt_events called via ingest() finally block."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_emits_permission_on_tool_interrupt(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When graph suspends with a permission_request interrupt, events are
+        emitted."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-interrupt"])
+
+        interrupt_payload = {
+            "type": "permission_request",
+            "tool_name": "fs/write_text_file",
+            "tool_input": {"path": "/tmp/test.py"},
+            "options": [
+                {"optionId": "allow_once", "label": "Allow"},
+                {"optionId": "deny_once", "label": "Deny"},
+            ],
+        }
+        state = _FakeState(
+            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        )
+        graph = _FakeGraph(state)
+
+        config = {"configurable": {"thread_id": "thread-interrupt"}}
+        await aggregator.ingest(
+            thread_id="thread-interrupt",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input=None,
+            config=config,
+        )
+
+        # Drain all events from the queue
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        # Must have at least a PermissionRequestEvent and an AgentStatusEvent
+        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        status_events = [e for e in events if isinstance(e, AgentStatusEvent)]
+
+        assert len(perm_events) >= 1, (
+            f"No PermissionRequestEvent emitted; got: {events}"
+        )
+        perm = perm_events[0]
+        assert perm.thread_id == "thread-interrupt"
+        assert perm.agent_id == "coder"
+        assert "fs/write_text_file" in perm.description
+        assert len(perm.options) == 2
+
+        assert len(status_events) >= 1
+        input_req = [
+            s for s in status_events if s.state == AgentLifecycleState.INPUT_REQUIRED
+        ]
+        assert len(input_req) >= 1
+
+    @pytest.mark.asyncio
+    async def test_ingest_no_permission_on_normal_completion(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When graph completes normally (empty tasks), no PermissionRequestEvent
+        is emitted."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-normal"])
+
+        state = _FakeState(tasks=[])
+        graph = _FakeGraph(state)
+
+        config = {"configurable": {"thread_id": "thread-normal"}}
+        await aggregator.ingest(
+            thread_id="thread-normal",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input=None,
+            config=config,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        assert len(perm_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_no_permission_on_empty_interrupt_tasks(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When a task has an empty interrupts list, no PermissionRequestEvent
+        is emitted."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-empty-interrupts"])
+
+        # Task exists but with no interrupts
+        state = _FakeState(tasks=[_FakeTask("coder", [])])
+        graph = _FakeGraph(state)
+
+        config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
+        await aggregator.ingest(
+            thread_id="thread-empty-interrupts",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input=None,
+            config=config,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        assert len(perm_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_no_permission_on_non_permission_interrupt(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Interrupts with type != 'permission_request' are silently skipped."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-other-interrupt"])
+
+        interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
+        state = _FakeState(
+            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        )
+        graph = _FakeGraph(state)
+
+        config = {"configurable": {"thread_id": "thread-other-interrupt"}}
+        await aggregator.ingest(
+            thread_id="thread-other-interrupt",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input=None,
+            config=config,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        assert len(perm_events) == 0
+
+    @pytest.mark.asyncio
+    async def test_ingest_uses_default_options_when_none_provided(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """When ACP provides no options, allow_once/deny_once defaults are used."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-default-opts"])
+
+        interrupt_payload = {
+            "type": "permission_request",
+            "tool_name": "shell_exec",
+            "tool_input": {},
+            "options": [],  # Empty options — should use defaults
+        }
+        state = _FakeState(
+            tasks=[_FakeTask("coder", [_FakeInterrupt(interrupt_payload)])]
+        )
+        graph = _FakeGraph(state)
+
+        config = {"configurable": {"thread_id": "thread-default-opts"}}
+        await aggregator.ingest(
+            thread_id="thread-default-opts",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input=None,
+            config=config,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        assert len(perm_events) == 1
+        perm = perm_events[0]
+        option_ids = {opt.option_id for opt in perm.options}
+        assert "allow_once" in option_ids
+        assert "deny_once" in option_ids

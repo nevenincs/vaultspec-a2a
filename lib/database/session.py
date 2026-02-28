@@ -9,6 +9,8 @@ References:
     - ADR-009: Module hierarchy
 """
 
+import logging
+
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -21,6 +23,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from .models import Base
+
+
+logger = logging.getLogger(__name__)
 
 
 __all__ = [
@@ -48,7 +53,17 @@ def _set_wal_mode(dbapi_conn: object, _connection_record: object) -> None:
     (ADR-007 section 5).
     """
     cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
+    # H18: check the return value — PRAGMA journal_mode returns the mode that
+    # was actually set (or the current mode on read-only filesystems).
     cursor.execute("PRAGMA journal_mode=WAL")
+    row = cursor.fetchone()
+    actual_mode = row[0] if row else None
+    if actual_mode != "wal":
+        logger.warning(
+            "Failed to enable WAL journal mode; actual mode: %r. "
+            "SQLite may be on a network or read-only filesystem.",
+            actual_mode,
+        )
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
@@ -71,6 +86,20 @@ def get_engine(
     global _engine  # noqa: PLW0603
 
     if _engine is not None:
+        # H19: warn if called with a different path than the existing singleton,
+        # since the caller will silently get the original engine back.
+        requested = str(db_path)
+        existing_url = str(_engine.url)
+        if requested not in (":memory:", str(DEFAULT_DB_PATH)):
+            resolved = Path(requested).resolve()
+            if str(resolved) not in existing_url and requested not in existing_url:
+                logger.warning(
+                    "get_engine() called with path %r but the engine singleton "
+                    "was already created with a different path (%r). "
+                    "Returning existing engine.",
+                    requested,
+                    existing_url,
+                )
         return _engine
 
     db_path_str = str(db_path)

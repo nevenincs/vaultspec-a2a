@@ -20,14 +20,32 @@ See ADR-003 §2 (Protocol Bridging), ADR-006 §5 (MCP Tool Mapping).
 
 import logging
 
+from pathlib import Path
+from urllib.parse import urlparse
+
+import httpx
+
 from mcp.server.fastmcp import FastMCP
+
+from ...core.config import settings
 
 
 __all__ = ["mcp"]
 
 logger = logging.getLogger(__name__)
 
-_KNOWN_PRESETS = ("coding-star", "coding-pipeline", "coding-loop", "solo-coder")
+# M29: MCP HTTP request timeouts (seconds) — named constants so they can be
+# located and adjusted without hunting for magic numbers in each tool function.
+_MCP_CREATE_TIMEOUT = 30.0  # POST /api/threads (synchronous setup overhead)
+_MCP_QUERY_TIMEOUT = 15.0  # GET /api/threads/{id}/state and POST /api/messages
+
+# M28: derive known presets from the bundled preset TOML files so that adding
+# a new preset file automatically makes it available as an MCP option without
+# requiring a code change here.
+_PRESET_TEAMS_DIR = Path(__file__).parent.parent.parent / "core" / "presets" / "teams"
+_KNOWN_PRESETS: frozenset[str] = frozenset(
+    p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml")
+) or frozenset({"coding-star", "coding-pipeline", "coding-loop", "solo-coder"})
 
 mcp = FastMCP(
     name="vaultspec-orchestrator",
@@ -41,106 +59,109 @@ mcp = FastMCP(
 
 
 @mcp.tool()
-def start_thread(
+async def start_thread(
     initial_message: str,
     team_preset: str | None = None,
 ) -> str:
-    """Start a new Vaultspec multi-agent coding workflow.
+    """Start a new Vaultspec agent team workflow. Returns immediately with thread_id.
 
     Launches a LangGraph orchestration thread using the specified team preset
-    and returns immediately. The workflow runs asynchronously; use the
-    returned URL or REST API to track progress on the Vaultspec control surface.
-
-    Per ADR-006 §5, this tool never blocks the MCP connection — it returns
-    as soon as the request is acknowledged, not when the task is complete.
-
-    **Note on Model Selection**: Models used by agents in the selected preset are
-    static, defined in the team TOML configuration. Per-request model overrides
-    are not supported via this tool. To use different models, either:
-    - Create a custom team preset in `{workspace}/.vaultspec/teams/` with the
-      desired model configurations, or
-    - Contact the system administrator to adjust the bundled presets.
+    and returns immediately with the thread ID.  The workflow runs
+    asynchronously in autonomous mode (no human approval interrupts).  Use
+    ``get_thread_status`` to check progress or open the control surface for
+    live streaming.
 
     Args:
         initial_message: The high-level task description for the agent team.
         team_preset:     Team configuration preset to use. Available presets:
-                         - ``coding-star``     (dynamic supervisor routing, default)
-                         - ``coding-pipeline`` (sequential plan → code → review)
-                         - ``coding-loop``     (iterative refinement with review cycles)
-                         - ``solo-coder``      (single-agent for simple tasks)
-                         Defaults to ``coding-star`` if not specified.
+                         ``coding-star``, ``coding-pipeline``, ``coding-loop``,
+                         ``solo-coder``.  Defaults to ``coding-star``.
 
     Returns:
-        A confirmation message with REST API and control surface URLs.
+        A confirmation message with the thread ID and monitoring URLs.
     """
     preset = team_preset or "coding-star"
-
-    logger.info(
-        "MCP start_thread: preset=%r, message=%r",
-        preset,
-        initial_message[:100],
-    )
-
     if preset not in _KNOWN_PRESETS:
         return (
-            f"Error: Unknown team_preset '{preset}'. "
-            f"Valid options: {', '.join(_KNOWN_PRESETS)}"
+            f"Error: Unknown preset {preset!r}. "
+            f"Valid: {', '.join(sorted(_KNOWN_PRESETS))}"
         )
-
-    return (
-        "Thread submitted to Vaultspec orchestrator.\n"
-        f"Team preset: {preset}\n"
-        "Create thread: POST http://localhost:8000/api/threads\n"
-        "List threads:  GET  http://localhost:8000/api/threads\n"
-        "Control surface: http://localhost:8000/\n\n"
-        "The team is running asynchronously. Open the control surface "
-        "to see real-time agent activity and provide any required approvals."
-    )
+    try:
+        async with httpx.AsyncClient(timeout=_MCP_CREATE_TIMEOUT) as client:
+            resp = await client.post(
+                f"{settings.api_base_url}/api/threads",
+                json={
+                    "title": initial_message[:80],
+                    "initial_message": initial_message,
+                    "team_preset": preset,
+                    "autonomous": True,
+                },
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        thread_id = data["thread_id"]
+        return (
+            f"Thread started: {thread_id}\n"
+            f"Preset: {preset}\n"
+            f"Monitor: {settings.api_base_url}/\n"
+            f"Status: GET {settings.api_base_url}/api/threads/{thread_id}/state"
+        )
+    except httpx.HTTPStatusError as exc:
+        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
+    except httpx.RequestError as exc:
+        return (
+            f"Connection error "
+            f"(is the server running at {settings.api_base_url}?): {exc}"
+        )
 
 
 @mcp.tool()
-def get_thread_status(thread_id: str) -> str:
-    """Query the status of a specific Vaultspec orchestration thread.
+async def get_thread_status(thread_id: str) -> str:
+    """Query the current status and message count of a thread.
 
     Returns a human-readable summary of the thread's current state including
-    agent lifecycle state and any pending permission requests.
-
-    For real-time streaming updates, connect to the WebSocket at
-    ws://localhost:8000/ws and subscribe to the thread.
+    message count and checkpoint ID.  For real-time streaming updates, connect
+    to the WebSocket endpoint listed in the response.
 
     Args:
-        thread_id: The thread ID returned when the thread was created.
+        thread_id: The thread ID returned by ``start_thread``.
 
     Returns:
         A plain-text status summary suitable for display in an IDE.
     """
-    logger.info("MCP get_thread_status: thread_id=%r", thread_id)
-
-    return (
-        f"Thread status for: {thread_id}\n"
-        "==============================\n"
-        f"State endpoint: GET http://localhost:8000/api/threads/{thread_id}/state\n"
-        "Control surface: http://localhost:8000/\n"
-        "WebSocket:       ws://localhost:8000/ws\n\n"
-        "Subscribe to the thread ID via WebSocket for live agent status, "
-        "tool call updates, and permission requests requiring approval."
-    )
+    try:
+        async with httpx.AsyncClient(timeout=_MCP_QUERY_TIMEOUT) as client:
+            resp = await client.get(
+                f"{settings.api_base_url}/api/threads/{thread_id}/state"
+            )
+            resp.raise_for_status()
+            data = resp.json()
+        status = data.get("status", "unknown")
+        msg_count = len(data.get("messages", []))
+        checkpoint = data.get("checkpoint_id") or "none"
+        return (
+            f"Thread: {thread_id}\n"
+            f"Status: {status}\n"
+            f"Messages: {msg_count}\n"
+            f"Checkpoint: {checkpoint}\n"
+            # L16: use urlparse instead of fragile string-split for WS URL.
+            f"Live: ws://{urlparse(settings.api_base_url).netloc}/ws"
+        )
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:  # noqa: PLR2004
+            return f"Thread {thread_id!r} not found."
+        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
+    except httpx.RequestError as exc:
+        return f"Connection error: {exc}"
 
 
 @mcp.tool()
-def send_message(thread_id: str, message: str) -> str:
-    """Send a follow-up message into an existing Vaultspec thread.
+async def send_message(thread_id: str, message: str) -> str:
+    """Send a follow-up message into an existing thread (async, returns 202).
 
     Delivers a user message to a running or paused orchestration thread.
-    Returns 202 Accepted immediately — the graph processes the message
-    asynchronously (ADR-006 §5).
-
-    Use this to:
-    - Provide clarification or additional context to a running team
-    - Resume a thread paused at an ``input_required`` state
-
-    For permission approvals (interrupt responses), use the REST endpoint
-    POST /api/permissions/{request_id}/respond instead.
+    Returns immediately — the graph processes the message asynchronously
+    (ADR-006 §5).
 
     Args:
         thread_id: The thread ID to send the message to.
@@ -149,15 +170,17 @@ def send_message(thread_id: str, message: str) -> str:
     Returns:
         A confirmation that the message was accepted.
     """
-    logger.info(
-        "MCP send_message: thread_id=%r, message=%r",
-        thread_id,
-        message[:100],
-    )
-
-    return (
-        f"Message accepted for thread: {thread_id}\n"
-        "Status: 202 Accepted — processing asynchronously.\n"
-        f"REST equivalent: POST http://localhost:8000/api/threads/{thread_id}/messages\n\n"
-        "Monitor the control surface or WebSocket for the agent's response."
-    )
+    try:
+        async with httpx.AsyncClient(timeout=_MCP_QUERY_TIMEOUT) as client:
+            resp = await client.post(
+                f"{settings.api_base_url}/api/threads/{thread_id}/messages",
+                json={"content": message},
+            )
+            resp.raise_for_status()
+        return f"Message delivered to thread {thread_id}."
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == 404:  # noqa: PLR2004
+            return f"Thread {thread_id!r} not found."
+        return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
+    except httpx.RequestError as exc:
+        return f"Connection error: {exc}"

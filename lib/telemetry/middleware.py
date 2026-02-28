@@ -58,7 +58,7 @@ _EXCLUDED_PATHS: frozenset[str] = frozenset(
     }
 )
 
-_HTTP_500 = 500
+_HTTP_SERVER_ERROR = 500
 
 
 class TelemetryMiddleware(BaseHTTPMiddleware):
@@ -68,12 +68,12 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
     incoming request headers so that distributed traces from upstream CLIs or
     the SvelteKit frontend are correctly linked.
 
-    Recorded span attributes:
-        http.method: GET, POST, etc.
+    Recorded span attributes (OTel Semantic Conventions v1.23+):
+        http.request.method: GET, POST, etc.
         http.route: Full request path.
-        http.target: Full request path + query string.
-        http.status_code: Response status code.
-        net.host.name: Server hostname.
+        url.full: Full request URL.
+        http.response.status_code: Response status code.
+        server.address: Server hostname.
 
     Args:
         app: The ASGI application to wrap.
@@ -117,24 +117,27 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                 kind=SpanKind.SERVER,
                 context=ctx,
             ) as span:
-                span.set_attribute("http.method", request.method)
-                span.set_attribute("http.target", str(request.url))
+                # H22: use OTel semantic conventions v1.23+ attribute names.
+                span.set_attribute("http.request.method", request.method)
+                span.set_attribute("url.full", str(request.url))
                 span.set_attribute("http.route", request.url.path)
-                span.set_attribute("net.host.name", request.url.hostname or "")
+                span.set_attribute("server.address", request.url.hostname or "")
+                if request.url.port:
+                    span.set_attribute("server.port", request.url.port)
 
                 response = await call_next(request)
 
-                span.set_attribute("http.status_code", response.status_code)
-                if response.status_code >= _HTTP_500:
+                span.set_attribute("http.response.status_code", response.status_code)
+                if response.status_code >= _HTTP_SERVER_ERROR:
                     span.set_status(StatusCode.ERROR, f"HTTP {response.status_code}")
                 else:
                     span.set_status(StatusCode.OK)
 
                 return response
         except Exception as exc:
-            current_span = trace.get_current_span()
-            current_span.set_status(StatusCode.ERROR, str(exc))
-            current_span.record_exception(exc)
+            # M33: use `span` directly — get_current_span() is redundant here
+            span.set_status(StatusCode.ERROR, str(exc))
+            span.record_exception(exc)
             raise
         finally:
             otel_context.detach(token)

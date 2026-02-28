@@ -9,6 +9,9 @@ from typing import TYPE_CHECKING, Any
 from .enums import LogLevel
 
 
+__all__ = ["JSONFormatter", "setup_logging"]
+
+
 if TYPE_CHECKING:
     from ..core.config import Settings
 
@@ -83,12 +86,10 @@ def setup_logging(
     if level is None:
         level = active_settings.log_level
 
-    if isinstance(level, str):
-        level = level.upper()
-    elif level is not None:
-        level = level.value.upper()
+    # M35: `level` is guaranteed non-None here; `if level else "INFO"` was dead code
+    level_str = level.upper() if isinstance(level, str) else level.value.upper()
 
-    numeric_level = getattr(logging, str(level) if level else "INFO", logging.INFO)
+    numeric_level = getattr(logging, level_str, logging.INFO)
 
     # Configure root logger
     root_logger = logging.getLogger()
@@ -123,7 +124,10 @@ def setup_logging(
     # Override library loggers to use the same handler and disable propagation
     # so log records are not delivered twice (once via the child logger's handler
     # and once via propagation to the root logger).
+    # Use handlers.clear() + addHandler() rather than direct list assignment to
+    # respect the logging module's internal locking (H23 fix).
     for lib_logger_name in ("uvicorn.access", "uvicorn.error"):
         lib_logger = logging.getLogger(lib_logger_name)
-        lib_logger.handlers = [log_handler]
+        lib_logger.handlers.clear()
+        lib_logger.addHandler(log_handler)
         lib_logger.propagate = False

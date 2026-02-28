@@ -5,7 +5,6 @@ Uses Starlette TestClient for real WebSocket connections (no mocks).
 
 import asyncio
 import threading
-import time
 
 from starlette.applications import Starlette
 from starlette.routing import WebSocketRoute
@@ -79,7 +78,8 @@ class TestSubscriptions:
                     "thread_ids": ["thread-1", "thread-2"],
                 }
             )
-            time.sleep(0.1)
+            # Ping forces the server loop past the subscribe handler
+            ws.send_json({"type": "ping"})
 
             subs = aggregator.get_subscriptions(client_id)
             assert "thread-1" in subs
@@ -99,15 +99,14 @@ class TestSubscriptions:
                     "thread_ids": ["thread-1", "thread-2"],
                 }
             )
-            time.sleep(0.1)
-
             ws.send_json(
                 {
                     "type": "unsubscribe",
                     "thread_ids": ["thread-1"],
                 }
             )
-            time.sleep(0.1)
+            # Ping forces the server loop past both handlers
+            ws.send_json({"type": "ping"})
 
             subs = aggregator.get_subscriptions(client_id)
             assert "thread-1" not in subs
@@ -135,7 +134,8 @@ class TestEventDelivery:
                     "thread_ids": ["thread-1"],
                 }
             )
-            time.sleep(0.1)
+            # Ping forces the server loop past the subscribe handler
+            ws.send_json({"type": "ping"})
 
             def emit_event() -> None:
                 loop = asyncio.new_event_loop()

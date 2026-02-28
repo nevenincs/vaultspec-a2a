@@ -6,18 +6,20 @@ All tests load real TOML files from lib/core/presets/ — no mocks or stubs.
 import tomllib
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 
 from pydantic import ValidationError
 
 from ...utils.enums import Model, Provider
-from ..exceptions import AgentConfigNotFoundError, TeamConfigNotFoundError
+from ..exceptions import AgentConfigNotFoundError, ConfigError, TeamConfigNotFoundError
 from ..team_config import (
     AgentConfig,
     AgentModelConfig,
     TeamConfig,
     TopologyConfig,
+    TopologyType,
     WorkerOverrideConfig,
     WorkerRef,
     load_agent_config,
@@ -233,35 +235,35 @@ class TestTopologyConfigValidation:
 
     def test_star_requires_no_order(self) -> None:
         """Star topology is valid with an empty order list."""
-        topo = TopologyConfig(type="star")
-        assert topo.type == "star"
+        topo = TopologyConfig(type=TopologyType.STAR)
+        assert topo.type == TopologyType.STAR
         assert topo.order == []
 
     def test_pipeline_requires_order(self) -> None:
         """Pipeline topology without order raises ValidationError."""
         with pytest.raises(ValidationError, match="order is required"):
-            TopologyConfig(type="pipeline", order=[])
+            TopologyConfig(type=TopologyType.PIPELINE, order=[])
 
     def test_pipeline_with_order_passes(self) -> None:
         """Pipeline topology with a non-empty order is valid."""
-        topo = TopologyConfig(type="pipeline", order=["planner", "coder"])
+        topo = TopologyConfig(type=TopologyType.PIPELINE, order=["planner", "coder"])
         assert topo.order == ["planner", "coder"]
 
     def test_pipeline_loop_requires_order_and_loop_node(self) -> None:
         """pipeline_loop without order raises ValidationError."""
         with pytest.raises(ValidationError, match="order is required"):
-            TopologyConfig(type="pipeline_loop", order=[])
+            TopologyConfig(type=TopologyType.PIPELINE_LOOP, order=[])
 
     def test_pipeline_loop_requires_loop_node(self) -> None:
         """pipeline_loop without loop_node raises ValidationError."""
         with pytest.raises(ValidationError, match="loop_node is required"):
-            TopologyConfig(type="pipeline_loop", order=["coder", "reviewer"])
+            TopologyConfig(type=TopologyType.PIPELINE_LOOP, order=["coder", "reviewer"])
 
     def test_pipeline_loop_loop_node_must_be_in_order(self) -> None:
         """loop_node that is not in order raises ValidationError."""
         with pytest.raises(ValidationError, match="must appear in"):
             TopologyConfig(
-                type="pipeline_loop",
+                type=TopologyType.PIPELINE_LOOP,
                 order=["coder", "reviewer"],
                 loop_node="planner",
             )
@@ -270,7 +272,7 @@ class TestTopologyConfigValidation:
         """Valid pipeline_loop config is accepted."""
         _EXPECTED_MAX_LOOPS = 5  # noqa: N806
         topo = TopologyConfig(
-            type="pipeline_loop",
+            type=TopologyType.PIPELINE_LOOP,
             order=["planner", "coder", "reviewer"],
             loop_node="reviewer",
             max_loops=_EXPECTED_MAX_LOOPS,
@@ -280,8 +282,8 @@ class TestTopologyConfigValidation:
 
     def test_unknown_type_raises(self) -> None:
         """An unsupported topology type raises ValidationError."""
-        with pytest.raises(ValidationError, match="must be 'star'"):
-            TopologyConfig(type="mesh")
+        with pytest.raises(ValidationError, match="'star'"):
+            TopologyConfig(type=cast(TopologyType, "mesh"))
 
 
 # ---------------------------------------------------------------------------
@@ -301,19 +303,19 @@ class TestTeamConfigFromToml:
     def test_coding_star_is_star_topology(self) -> None:
         """coding-star uses star topology."""
         cfg = load_team_config("coding-star")
-        assert cfg.topology.type == "star"
+        assert cfg.topology.type == TopologyType.STAR
 
     def test_coding_pipeline_order(self) -> None:
         """coding-pipeline has planner → coder → reviewer order."""
         cfg = load_team_config("coding-pipeline")
-        assert cfg.topology.type == "pipeline"
+        assert cfg.topology.type == TopologyType.PIPELINE
         assert cfg.topology.order == ["planner", "coder", "reviewer"]
 
     def test_coding_loop_loop_node(self) -> None:
         """coding-loop has reviewer as the loop_node."""
         _EXPECTED_MAX_LOOPS = 3  # noqa: N806
         cfg = load_team_config("coding-loop")
-        assert cfg.topology.type == "pipeline_loop"
+        assert cfg.topology.type == TopologyType.PIPELINE_LOOP
         assert cfg.topology.loop_node == "reviewer"
         assert cfg.topology.max_loops == _EXPECTED_MAX_LOOPS
 
@@ -468,11 +470,12 @@ class TestWorkerRef:
 
 
 class TestTomlDecodeErrors:
-    """Verify that malformed TOML files raise tomllib.TOMLDecodeError."""
+    """Verify that malformed TOML files raise ConfigError (M8 domain exception)."""
 
     def test_malformed_toml_raises(self, tmp_path: Path) -> None:
-        """A file with invalid TOML syntax raises TOMLDecodeError."""
+        """Malformed TOML raises ConfigError wrapping TOMLDecodeError."""
         bad_file = tmp_path / "bad.toml"
         bad_file.write_bytes(b"[agent\nid = missing quote")
-        with pytest.raises(tomllib.TOMLDecodeError):
+        with pytest.raises(ConfigError) as exc_info:
             AgentConfig.from_toml(bad_file)
+        assert isinstance(exc_info.value.__cause__, tomllib.TOMLDecodeError)

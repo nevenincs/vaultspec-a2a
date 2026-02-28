@@ -36,7 +36,7 @@ async def main() -> ProbeResult:
     is detected immediately rather than causing a 300-second timeout.
     """
     logger.info("Refreshing Gemini OAuth token...")
-    refresh_gemini_token()
+    await refresh_gemini_token()
     logger.info("Token OK.")
 
     model_id = MODEL_MAP[Provider.GEMINI][Model.MID]

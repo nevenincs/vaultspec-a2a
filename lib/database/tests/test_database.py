@@ -75,33 +75,33 @@ async def session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession]:
 class TestSessionManagement:
     """Tests for engine creation, WAL mode, and init_db."""
 
+    @pytest_asyncio.fixture(autouse=True)
+    async def _isolate_singleton(self) -> AsyncGenerator[None]:
+        """Ensure the module-level singleton engine is torn down.
+
+        Prevents singleton state from leaking between tests (H30 fix).
+        """
+        await close_db()
+        yield
+        await close_db()
+
     @pytest.mark.asyncio
     async def test_init_db_creates_tables(self) -> None:
         """init_db should create all tables in a fresh database."""
         engine = await init_db(":memory:")
-        try:
-            async with engine.connect() as conn:
-                result = await conn.execute(
-                    text(
-                        "SELECT name FROM sqlite_master "
-                        "WHERE type='table' ORDER BY name"
-                    )
-                )
-                tables = {row[0] for row in result}
-                assert tables >= EXPECTED_TABLES
-        finally:
-            await engine.dispose()
-            await close_db()
+        async with engine.connect() as conn:
+            result = await conn.execute(
+                text("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            )
+            tables = {row[0] for row in result}
+            assert tables >= EXPECTED_TABLES
 
     @pytest.mark.asyncio
     async def test_get_engine_returns_singleton(self) -> None:
         """get_engine should return the same instance when called twice."""
-        await close_db()
         e1 = get_engine(":memory:")
         e2 = get_engine()
         assert e1 is e2
-        await e1.dispose()
-        await close_db()
 
 
 # ---------------------------------------------------------------------------

@@ -59,7 +59,16 @@ class ProviderFactory:
         elif isinstance(model, Model):
             model_name = MODEL_MAP[provider][model]
         else:
+            # M21: raw string model_name bypasses the MODEL_MAP validation that would
+            # catch typos or unsupported models.  Log a warning so operators can see
+            # when a non-canonical model string is in use.
             model_name = model
+            logger.warning(
+                "ProviderFactory received a raw model string %r for provider=%s. "
+                "Prefer passing a Model enum value to ensure the name is valid.",
+                model_name,
+                provider,
+            )
 
         logger.info(
             "Instantiating ProviderFactory for provider=%s, resolved_model=%s",
@@ -119,14 +128,12 @@ class ProviderFactory:
                 "[%s] Resolved authentication via: %s", provider, auth_resolved
             )
             kwargs["api_key"] = api_key
+            kwargs["model"] = model_name
+            kwargs["base_url"] = "https://open.bigmodel.cn/api/paas/v4/"
+            kwargs["timeout"] = timeout
+            kwargs["max_retries"] = 2
 
-            return ChatOpenAI(
-                model=model_name,  # type: ignore[unknown-argument]
-                base_url="https://open.bigmodel.cn/api/paas/v4/",  # type: ignore[unknown-argument]
-                timeout=timeout,  # type: ignore[unknown-argument]
-                max_retries=2,
-                **kwargs,
-            )
+            return ChatOpenAI(**kwargs)
 
         if provider == Provider.OPENAI:
             auth_resolved = (
@@ -148,13 +155,11 @@ class ProviderFactory:
                 "[%s] Resolved authentication via: %s", provider, auth_resolved
             )
             kwargs["api_key"] = api_key
+            kwargs["model"] = model_name
+            kwargs["timeout"] = timeout
+            kwargs["max_retries"] = 2
 
-            return ChatOpenAI(
-                model=model_name,
-                timeout=timeout,
-                max_retries=2,
-                **kwargs,  # type: ignore[unknown-argument]
-            )
+            return ChatOpenAI(**kwargs)
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")

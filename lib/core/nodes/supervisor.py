@@ -1,7 +1,6 @@
 """Supervisor node for LangGraph agent routing."""
 
-from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -12,11 +11,21 @@ from ..state import TeamState
 __all__ = ["create_supervisor_node"]
 
 
+class SupervisorNode(Protocol):
+    """Protocol for the supervisor node callable with __name__ attribute."""
+
+    __name__: str
+
+    async def __call__(self, state: TeamState) -> dict[str, Any]:
+        """Execute the supervisor's routing task."""
+        ...
+
+
 def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
-) -> Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]:
+) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
     Args:
@@ -57,4 +66,6 @@ def create_supervisor_node(
 
         return {"next": next_route}
 
+    # Ensure __name__ is available for type checkers
+    supervisor_node.__name__ = "supervisor_node"
     return supervisor_node

@@ -1,13 +1,11 @@
 """Tests for the REST endpoints.
 
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
-EventAggregator + GraphRegistry (no mocks).  Only graph compilation is
-bypassed by pre-registering a fake compiled graph in the registry.
+EventAggregator + GraphRegistry (no mocks).  Permission tests use a real
+compiled graph pre-registered in the GraphRegistry.
 """
 
-
 from collections.abc import AsyncGenerator
-from typing import Any
 
 import pytest_asyncio
 
@@ -19,6 +17,8 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...core.aggregator import EventAggregator
+from ...core.graph import compile_team_graph
+from ...core.team_config import load_agent_config, load_team_config
 from ...database.models import Base
 from ...database.session import get_db
 from ..app import create_app
@@ -335,22 +335,14 @@ class TestPermissionRespond:
 
     def test_responds_with_graph(self, session_factory) -> None:
         """Returns accepted=True when a graph is registered for the thread."""
-
-        class _FakeGraph:
-            """Minimal graph stub that stalls ingest without real execution."""
-
-            async def astream_events(
-                self,
-                graph_input: Any,
-                config: Any,
-                *,
-                version: str,
-            ):
-                return
-                yield  # make it an async generator
+        team = load_team_config("coding-pipeline")
+        agent_configs = {
+            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
+        }
+        graph = compile_team_graph(team_config=team, agent_configs=agent_configs)
 
         registry = GraphRegistry()
-        registry.register("thread-abc", _FakeGraph())
+        registry.register("thread-abc", graph)
         app, _agg, _reg = _make_app(session_factory, registry=registry)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -368,6 +360,66 @@ class TestPermissionRespond:
 # ---------------------------------------------------------------------------
 # GraphRegistry unit tests
 # ---------------------------------------------------------------------------
+
+
+class TestCreateThreadAutonomous:
+    """Tests for the autonomous field on POST /api/threads."""
+
+    def test_create_thread_autonomous_defaults_false(self, session_factory) -> None:
+        """Creating a thread without autonomous field defaults to False (supervised)."""
+        app, _agg, _reg = _make_app(session_factory)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads",
+                json={"initial_message": "Hello, supervised mode"},
+            )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "thread_id" in data
+        # No crash = autonomous=False default accepted correctly
+
+    def test_create_thread_autonomous_true_accepted(self, session_factory) -> None:
+        """Creating a thread with autonomous=True returns 201 successfully."""
+        app, _agg, _reg = _make_app(session_factory)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads",
+                json={
+                    "initial_message": "Hello, autonomous mode",
+                    "autonomous": True,
+                },
+            )
+        assert resp.status_code == 201
+        data = resp.json()
+        assert "thread_id" in data
+        assert data["status"] == "submitted"
+
+    def test_create_thread_with_preset_autonomous_true(self, session_factory) -> None:
+        """Creating a thread with a valid preset and autonomous=True compiles
+        the graph with the correct structure."""
+        app, _agg, registry = _make_app(session_factory)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads",
+                json={
+                    "initial_message": "Run autonomously",
+                    "team_preset": "coding-pipeline",
+                    "autonomous": True,
+                },
+            )
+        assert resp.status_code == 201
+        thread_id = resp.json()["thread_id"]
+        # Graph should be compiled and registered
+        graph = registry.get(thread_id)
+        assert graph is not None
+        # Autonomous graph has the expected pipeline nodes
+        node_keys = {k for k in graph.nodes if not k.startswith("__")}
+        assert {"planner", "coder", "reviewer"} == node_keys
+        # interrupt_before empty in autonomous mode (ADR-013)
+        assert list(graph.interrupt_before_nodes) == []
 
 
 class TestGraphRegistry:

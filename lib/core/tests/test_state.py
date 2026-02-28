@@ -143,11 +143,6 @@ class TestStateJsonRoundTrip:
         decoded = json.loads(encoded)
         assert decoded == sample_state
 
-    def test_all_fields_are_primitives(self, sample_state: dict) -> None:
-        """Confirm no non-serializable types snuck in."""
-        # json.dumps will raise TypeError if anything is not serializable
-        json.dumps(sample_state)
-
     def test_messages_field_excluded_from_json_check(self) -> None:
         """Messages are handled by LangGraph's serializer, not JSON directly.
 

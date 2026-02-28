@@ -15,16 +15,30 @@ References:
 """
 
 from collections.abc import Sequence
+from enum import StrEnum
 from uuid import uuid4
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.exceptions import NicknameConflictError
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
 
 
+class ThreadStatus(StrEnum):
+    """M25: constrained thread status values to prevent invalid status strings."""
+
+    SUBMITTED = "submitted"
+    CREATED = "created"
+    RUNNING = "running"
+    COMPLETED = "completed"
+    FAILED = "failed"
+    CANCELLED = "cancelled"
+
+
 __all__ = [
+    "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
     "create_artifact",
@@ -105,7 +119,17 @@ async def create_thread(  # noqa: PLR0913
         thread_metadata=metadata,
         nickname=nickname,
     )
-    return await save_model(session, thread)
+    try:
+        return await save_model(session, thread)
+    except IntegrityError as exc:
+        # Safety net for H12/H17 TOCTOU race: two concurrent requests may both
+        # pass the SELECT pre-check above and then race on the INSERT.
+        # The unique index on ThreadModel.nickname fires an IntegrityError
+        # on the loser — convert it to NicknameConflictError so callers get a
+        # consistent exception type regardless of which check caught the conflict.
+        if nickname is not None and "nickname" in str(exc).lower():
+            raise NicknameConflictError(nickname) from exc
+        raise
 
 
 async def get_thread(
@@ -156,14 +180,14 @@ async def list_threads(
 async def update_thread_status(
     session: AsyncSession,
     thread_id: str,
-    status: str,
+    status: ThreadStatus | str,
 ) -> ThreadModel | None:
     """Update a thread's status.
 
     Args:
         session: Active async session.
         thread_id: The thread's primary key.
-        status: New status string.
+        status: New status (prefer ``ThreadStatus`` enum values — M25).
 
     Returns:
         The updated ``ThreadModel`` or ``None`` if not found.

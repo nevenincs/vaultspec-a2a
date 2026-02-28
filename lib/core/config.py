@@ -57,6 +57,32 @@ class Settings(BaseSettings):
         ),
     )
 
+    host: str = Field(
+        default="0.0.0.0",
+        description="Bind host for the uvicorn server (VAULTSPEC_HOST).",
+    )
+    port: int = Field(
+        default=8000,
+        description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
+    )
+
+    api_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Base URL of this server; used by MCP tools for loopback calls.",
+    )
+
+    cors_allowed_origins: list[str] = Field(
+        default=[
+            "http://localhost:5173",  # Vite dev server
+            "http://localhost:4173",  # Vite preview
+            "http://localhost:8000",  # FastAPI itself
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:4173",
+            "http://127.0.0.1:8000",
+        ],
+        description="Allowed CORS origins for production deployments.",
+    )
+
     # Environment Flags
     ci: bool = Field(default=False, validation_alias=AliasChoices("VAULTSPEC_CI", "CI"))
     no_color: bool = Field(

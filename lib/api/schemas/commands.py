@@ -24,17 +24,24 @@ __all__ = [
 
 
 class SubscribeCommand(ClientCommand):
-    """Subscribe to real-time events for one or more threads."""
+    """Subscribe to real-time events for one or more threads.
+
+    M15: thread_ids are validated as exact IDs (max 50 per command) to
+    prevent subscription abuse. IDs are treated as opaque strings — the
+    aggregator uses exact-match comparison, never prefix matching.
+    """
 
     type: Literal[ClientCommandType.SUBSCRIBE] = ClientCommandType.SUBSCRIBE
-    thread_ids: list[str]
+    # max_length=50 prevents a single command from subscribing to an
+    # unreasonably large number of threads at once.
+    thread_ids: list[str] = Field(max_length=50)
 
 
 class UnsubscribeCommand(ClientCommand):
     """Unsubscribe from real-time events for one or more threads."""
 
     type: Literal[ClientCommandType.UNSUBSCRIBE] = ClientCommandType.UNSUBSCRIBE
-    thread_ids: list[str]
+    thread_ids: list[str] = Field(max_length=50)
 
 
 class SendMessageCommand(ClientCommand):

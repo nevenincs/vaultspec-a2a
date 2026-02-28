@@ -99,8 +99,9 @@ lib/
 │   └── tests/
 └── utils/                   # Shared utilities
     ├── __init__.py
-    ├── ansi_buffer.py       # 2000-line ANSI ring buffer (ADR-004)
-    ├── decorators.py
+    ├── enums.py             # Provider, Model, and other shared enums
+    ├── logging.py           # Structured logging setup
+    ├── printer.py           # Console output formatting
     └── tests/
 ```
 

@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 
@@ -53,6 +54,7 @@ from .acp_exceptions import (
     AcpError,
     AcpErrorCode,
     AcpPromptError,
+    AcpSessionError,
 )
 from .gemini_auth import refresh_gemini_token
 
@@ -73,6 +75,43 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     "terminal/wait_for_exit": "terminal",
     "terminal/release": "terminal",
 }
+
+# M18: ACP subprocess startup timeout in seconds.
+# Named constant so it can be adjusted without hunting for magic numbers.
+_ACP_STARTUP_TIMEOUT = 60.0
+
+# Allowlist of permitted executable names for terminal/create.
+# Only the base name (no path component) is checked so that full paths like
+# /usr/bin/python3 or C:\Python313\python.exe are also accepted.
+_TERMINAL_COMMAND_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "python",
+        "python3",
+        "python3.13",
+        "pip",
+        "pip3",
+        "git",
+        "npm",
+        "node",
+        "npx",
+        "uv",
+        "uvicorn",
+        "ruff",
+        "mypy",
+        "pytest",
+        "bash",
+        "sh",
+        "zsh",
+        "pwsh",
+        "powershell",
+        "cmd",
+    }
+)
+
+# Shell metacharacters that must never appear in command or args strings
+# when executing via create_subprocess_exec (defense-in-depth; exec does not
+# invoke a shell but these chars indicate injection attempts).
+_SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 
 
 def _log_task_exception(task: asyncio.Task) -> None:
@@ -135,7 +174,11 @@ async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
     if sys.platform == "win32":
         try:
             killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/T", "/F", "/PID", str(process.pid),
+                "taskkill",
+                "/T",
+                "/F",
+                "/PID",
+                str(process.pid),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -228,6 +271,10 @@ class AcpChatModel(BaseChatModel):
     # --- Runtime state (private, not model fields) ---
     _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
     _stdin: asyncio.StreamWriter | None = PrivateAttr(default=None)
+    # Shared lock for _stdin writes — used both by background RPC tasks and
+    # by public methods (fork_session, list_sessions, etc.) to prevent
+    # interleaved JSON-RPC frames (H14 fix).
+    _stdin_lock: asyncio.Lock = PrivateAttr(default_factory=asyncio.Lock)
     _active_session_id: str | None = PrivateAttr(default=None)
     _response_futures: dict[int, asyncio.Future] | None = PrivateAttr(default=None)
     _agent_capabilities: dict[str, Any] = PrivateAttr(default_factory=dict)
@@ -266,7 +313,7 @@ class AcpChatModel(BaseChatModel):
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
 
         if "gemini" in self.command:
-            refresh_gemini_token()
+            await refresh_gemini_token()
 
         process = await _spawn_acp_process(
             self.command,
@@ -581,7 +628,21 @@ class AcpChatModel(BaseChatModel):
             except GraphBubbleUp as exc:
                 ctx.interrupt_exc.append(exc)
                 await ctx.chunk_queue.put(None)
-                return {}
+                # H9 fix: return a proper JSON-RPC denial response instead of
+                # an empty dict `{}` which would produce a malformed frame.
+                deny_id = next(
+                    (
+                        o["optionId"]
+                        for o in options
+                        if "deny" in o.get("optionId", "").lower()
+                    ),
+                    options[-1]["optionId"] if options else "deny",
+                )
+                return {
+                    "jsonrpc": "2.0",
+                    "id": rpc_id,
+                    "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
+                }
             except Exception:
                 logger.exception(
                     "Permission callback raised; denying permission (fail-closed)"
@@ -605,6 +666,19 @@ class AcpChatModel(BaseChatModel):
                 }
         else:
             option_id = options[0]["optionId"] if options else "allow_once"
+
+        # M17: validate that option_id is among the offered options before returning.
+        # Reject a callback-supplied id that is not in the options list to prevent
+        # sending an invalid response to the ACP subprocess.
+        valid_ids = {o.get("optionId") for o in options if isinstance(o, dict)}
+        if valid_ids and option_id not in valid_ids:
+            logger.warning(
+                "Permission callback returned option_id=%r not in valid options %r; "
+                "falling back to first option",
+                option_id,
+                sorted(valid_ids),
+            )
+            option_id = options[0]["optionId"]
 
         return {
             "jsonrpc": "2.0",
@@ -693,6 +767,24 @@ class AcpChatModel(BaseChatModel):
         try:
             command = params["command"]
             args = params.get("args") or []
+
+            # --- Security: command allowlist validation (C4) ----------------
+            # Extract the base name without directory path and .exe suffix so
+            # that both "python" and "/usr/bin/python3.13" resolve the same.
+            cmd_base = Path(command).stem.lower()
+            if cmd_base not in _TERMINAL_COMMAND_ALLOWLIST:
+                raise ValueError(
+                    f"Command {command!r} is not in the terminal allowlist. "
+                    f"Permitted executables: {sorted(_TERMINAL_COMMAND_ALLOWLIST)}"
+                )
+            # Reject shell metacharacters in the command or any argument.
+            for token in [command, *args]:
+                if _SHELL_METACHAR_RE.search(str(token)):
+                    raise ValueError(
+                        f"Shell metacharacter detected in terminal token {token!r}. "
+                        "Command injection attempt rejected."
+                    )
+            # ----------------------------------------------------------------
 
             # Sandbox the terminal cwd: must be within the agent workspace root.
             raw_cwd = (
@@ -859,6 +951,29 @@ class AcpChatModel(BaseChatModel):
                 await ctx.chunk_queue.put(
                     ChatGenerationChunk(message=AIMessageChunk(content=text))
                 )
+        elif u_type == "tool_call_chunk":
+            # M20: handle incremental tool call argument streaming.
+            # ACP agents stream partial JSON args via tool_call_chunk before the
+            # final tool_call event.  Forwarded as a streaming ToolCallChunk so
+            # LangGraph can accumulate args progressively.
+            tid = update.get("toolCallId", "")
+            args_delta = update.get("inputDelta", "")
+            if tid and args_delta:
+                await ctx.chunk_queue.put(
+                    ChatGenerationChunk(
+                        message=AIMessageChunk(
+                            content="",
+                            tool_call_chunks=[
+                                {
+                                    "id": tid,
+                                    "name": "",
+                                    "args": args_delta,
+                                    "index": 0,
+                                }
+                            ],
+                        )
+                    )
+                )
         elif u_type == "tool_call":
             await self._on_tool_call(update, ctx)
         elif u_type == "tool_call_update":
@@ -956,9 +1071,17 @@ class AcpChatModel(BaseChatModel):
         async with ctx.stdin_lock:
             ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await ctx.stdin.drain()
-        resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
+        resp = await asyncio.wait_for(
+            ctx.response_futures[rpc_id], timeout=_ACP_STARTUP_TIMEOUT
+        )
         if "error" in resp:
-            raise RuntimeError(f"Init failed: {resp['error']}")
+            # M22: use domain exception with explicit cause information
+            raise AcpSessionError(
+                f"ACP initialize failed: {resp['error']}",
+                code=resp["error"].get("code", AcpErrorCode.INTERNAL_ERROR)
+                if isinstance(resp.get("error"), dict)
+                else AcpErrorCode.INTERNAL_ERROR,
+            )
         res = resp.get("result", {})
         self._agent_capabilities = res.get("agentCapabilities", {})
         self._auth_methods = res.get("authMethods", [])
@@ -978,9 +1101,17 @@ class AcpChatModel(BaseChatModel):
         async with ctx.stdin_lock:
             ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await ctx.stdin.drain()
-        resp = await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=60)
+        resp = await asyncio.wait_for(
+            ctx.response_futures[rpc_id], timeout=_ACP_STARTUP_TIMEOUT
+        )
         if "error" in resp:
-            raise RuntimeError(f"Session failed: {resp['error']}")
+            # M22: use domain exception with explicit cause information
+            raise AcpSessionError(
+                f"ACP {method} failed: {resp['error']}",
+                code=resp["error"].get("code", AcpErrorCode.INTERNAL_ERROR)
+                if isinstance(resp.get("error"), dict)
+                else AcpErrorCode.INTERNAL_ERROR,
+            )
         res = resp["result"]
         self._active_session_id = res["sessionId"]
         if modes := res.get("modes"):
@@ -991,6 +1122,9 @@ class AcpChatModel(BaseChatModel):
         self._tool_calls = {}
         self._process = ctx.process
         self._stdin = ctx.stdin
+        # Share the session's stdin_lock so public methods (fork_session, etc.)
+        # use the same mutex as background RPC tasks (H14 fix).
+        self._stdin_lock = ctx.stdin_lock
         self._response_futures = ctx.response_futures
 
     async def _setup_prompt(
@@ -1033,8 +1167,9 @@ class AcpChatModel(BaseChatModel):
             "params": {"sessionId": sid},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=60)
         return resp["result"]["sessionId"]
 
@@ -1051,8 +1186,9 @@ class AcpChatModel(BaseChatModel):
             "params": {},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp["result"].get("sessions", [])
 
@@ -1069,8 +1205,9 @@ class AcpChatModel(BaseChatModel):
             "params": {"sessionId": sid, "modeId": mode_id},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -1087,8 +1224,9 @@ class AcpChatModel(BaseChatModel):
             "params": {"sessionId": sid, "modelId": model_id},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -1105,8 +1243,9 @@ class AcpChatModel(BaseChatModel):
             "params": {"sessionId": sid, "key": key, "value": value},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
@@ -1123,7 +1262,8 @@ class AcpChatModel(BaseChatModel):
             "params": {"token": token},
         }
         stdin = self._require_stdin()
-        stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await stdin.drain()
+        async with self._stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
         resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
         return resp.get("result", {})

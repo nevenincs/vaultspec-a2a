@@ -64,7 +64,8 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     is handled by the provider layer, never by the workspace module.
     """
     env = dict(os.environ)
-    env["CWD"] = str(workspace_path)
+    # M34: use PWD (POSIX standard) instead of the non-standard CWD variable
+    env["PWD"] = str(workspace_path)
 
     venv = resolve_venv(workspace_path)
     if venv is not None:

@@ -91,6 +91,11 @@ _CHUNK_BUFFER_MAX_BYTES = 4096  # 4KB buffer threshold
 _QUEUE_MAXSIZE = 512
 
 # ---------------------------------------------------------------------------
+# aget_state timeout — M3: was hardcoded 10s; now configurable constant
+# ---------------------------------------------------------------------------
+_AGET_STATE_TIMEOUT = 10.0
+
+# ---------------------------------------------------------------------------
 # LangGraph event filtering — research §1.2
 # ---------------------------------------------------------------------------
 _PASSTHROUGH_EVENTS = frozenset(
@@ -125,6 +130,32 @@ class _StreamableGraph(Protocol):
         """Yield raw LangGraph event dicts."""
         ...
 
+    async def aget_state(self, config: dict[str, Any]) -> Any:  # noqa: ANN401
+        """Return the current checkpointer state snapshot."""
+        ...
+
+
+def _map_acp_option_kind(option_id: str) -> PermissionOptionKind:
+    """Map an ACP option ID string to a ``PermissionOptionKind`` enum value.
+
+    Heuristic matching: looks for ``always`` + ``deny``/``reject`` keywords to
+    classify the option kind.  Defaults to ``ALLOW_ONCE`` for unrecognised ids.
+
+    Args:
+        option_id: The raw ACP option ID string (e.g. ``"allow_always"``).
+
+    Returns:
+        The matching ``PermissionOptionKind`` member.
+    """
+    oid = option_id.lower()
+    if "always" in oid and ("deny" in oid or "reject" in oid):
+        return PermissionOptionKind.REJECT_ALWAYS
+    if "always" in oid:
+        return PermissionOptionKind.ALLOW_ALWAYS
+    if "deny" in oid or "reject" in oid:
+        return PermissionOptionKind.REJECT_ONCE
+    return PermissionOptionKind.ALLOW_ONCE
+
 
 class EventAggregator:
     """Central event bus that transforms LangGraph events into wire events.
@@ -155,7 +186,12 @@ class EventAggregator:
         # Per-thread fan-out tasks
         self._fanout_tasks: dict[str, asyncio.Task[None]] = {}
 
-        # Per-thread token chunk buffers for batching (research §1.3)
+        # Per-thread token chunk buffers for batching (research §1.3).
+        # M1: key is thread_id only; two agents in the same thread with the same
+        # message_id would collide. The message_id-change detection in
+        # _buffer_message_chunk handles sequential agents; for true concurrent
+        # agents within one thread the run_id (= message_id) differs per LLM run,
+        # so the flush-on-change guard prevents cross-agent contamination.
         self._chunk_buffers: dict[str, list[str]] = defaultdict(list)
         self._chunk_buffer_meta: dict[str, dict[str, str]] = {}
         self._chunk_flush_tasks: dict[str, asyncio.Task[None]] = {}
@@ -251,12 +287,30 @@ class EventAggregator:
         return len(self._subscribers)
 
     def subscription_count(self) -> int:
-        """Return the number of currently active subscriptions (across all clients)."""
+        """Return the number of clients with active subscriptions."""
         return len(self._subscriptions)
 
     def sequence_count(self) -> int:
         """Return the number of threads that have received at least one event."""
         return len(self._sequences)
+
+    def prune_sequences(self, active_thread_ids: set[str]) -> int:
+        """Remove sequence counters for threads not in *active_thread_ids*.
+
+        M2: ``_sequences`` grows without bound as threads are created.  Call
+        this periodically (e.g. after thread completion) to reclaim memory for
+        threads that are no longer active.
+
+        Args:
+            active_thread_ids: Set of thread IDs that should be retained.
+
+        Returns:
+            The number of sequence entries removed.
+        """
+        stale = [tid for tid in self._sequences if tid not in active_thread_ids]
+        for tid in stale:
+            del self._sequences[tid]
+        return len(stale)
 
     def get_subscriptions(self, client_id: str) -> frozenset[str]:
         """Return a frozen snapshot of the thread subscriptions for *client_id*."""
@@ -293,9 +347,13 @@ class EventAggregator:
             self._subscriptions[client_id].difference_update(thread_ids)
 
     def get_active_thread_ids(self) -> list[str]:
-        """Return all thread IDs that have at least one subscriber."""
+        """Return all thread IDs that have at least one subscriber.
+
+        Takes a snapshot of subscription values before iterating to avoid
+        RuntimeError if a subscriber is added/removed concurrently (H1 fix).
+        """
         all_threads: set[str] = set()
-        for threads in self._subscriptions.values():
+        for threads in list(self._subscriptions.values()):
             all_threads.update(threads)
         return sorted(all_threads)
 
@@ -511,11 +569,17 @@ class EventAggregator:
 
         Assigns a sequence number if the event is thread-scoped
         (has a ``thread_id`` attribute), then broadcasts.
+        Uses model_copy() rather than object.__setattr__() to respect Pydantic
+        model immutability (H3 fix).
         """
         thread_id = getattr(event, "thread_id", None)
         if thread_id is not None and hasattr(event, "sequence"):
-            object.__setattr__(event, "sequence", self._next_sequence(thread_id))
-            object.__setattr__(event, "timestamp", datetime.now(UTC))
+            event = event.model_copy(
+                update={
+                    "sequence": self._next_sequence(thread_id),
+                    "timestamp": datetime.now(UTC),
+                }
+            )
         await self._broadcast(event)
 
     async def emit_agent_status(
@@ -868,6 +932,111 @@ class EventAggregator:
             )
 
     # ------------------------------------------------------------------
+    # Interrupt detection (plan 2026-28-02)
+    # ------------------------------------------------------------------
+
+    async def _emit_interrupt_events(
+        self,
+        thread_id: str,
+        agent_id: str,
+        graph: _StreamableGraph,
+        config: dict[str, Any],
+    ) -> None:
+        """Inspect graph state after astream_events ends; emit PermissionRequestEvents.
+
+        Called from the ``ingest()`` ``finally`` block after every graph run.
+        On normal completion ``state.tasks`` is empty and this method returns
+        immediately — it is a pure no-op.  When LangGraph suspends via
+        ``interrupt()`` (tool-level approval request), tasks will contain
+        pending interrupts that must be surfaced to the frontend.
+
+        Args:
+            thread_id: LangGraph thread_id for event routing.
+            agent_id:  Fallback agent identifier (overridden by task name).
+            graph:     Compiled LangGraph graph; must expose ``aget_state``.
+            config:    LangGraph config dict with ``configurable.thread_id``.
+        """
+        # M3: aget_state timeout is configurable via _AGET_STATE_TIMEOUT
+        try:
+            state = await asyncio.wait_for(
+                graph.aget_state(config), timeout=_AGET_STATE_TIMEOUT
+            )
+        except TimeoutError:
+            logger.warning(
+                "Timed out inspecting state for interrupt detection on thread %s",
+                thread_id,
+            )
+            return
+        except Exception:
+            logger.exception(
+                "Failed to inspect state for interrupt detection on thread %s",
+                thread_id,
+            )
+            raise
+
+        if not state or not getattr(state, "tasks", None):
+            return  # Normal completion — no pending interrupts
+
+        for task in state.tasks:
+            if not task.interrupts:
+                continue
+
+            for interrupt_obj in task.interrupts:
+                payload = getattr(interrupt_obj, "value", interrupt_obj)
+                if not isinstance(payload, dict):
+                    continue
+                if payload.get("type") != "permission_request":
+                    continue
+
+                request_id = f"{thread_id}:{uuid4().hex}"
+                tool_name: str = payload.get("tool_name", "unknown")
+                acp_options: list[dict[str, Any]] = payload.get("options", [])
+
+                options: list[dict[str, Any]] = [
+                    {
+                        "option_id": opt.get(
+                            "optionId", opt.get("option_id", "allow_once")
+                        ),
+                        "name": opt.get(
+                            "label", opt.get("name", opt.get("optionId", "Allow"))
+                        ),
+                        "kind": _map_acp_option_kind(
+                            opt.get("optionId", opt.get("option_id", ""))
+                        ),
+                    }
+                    for opt in acp_options
+                ]
+                if not options:
+                    options = [
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow",
+                            "kind": PermissionOptionKind.ALLOW_ONCE,
+                        },
+                        {
+                            "option_id": "deny_once",
+                            "name": "Deny",
+                            "kind": PermissionOptionKind.REJECT_ONCE,
+                        },
+                    ]
+
+                await self.emit_permission_request(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    request_id=request_id,
+                    description=f"Permission required: {tool_name}",
+                    options=options,
+                    tool_call=tool_name,
+                )
+                await self.emit_agent_status(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    node_name=task.name,
+                    state=AgentLifecycleState.INPUT_REQUIRED,
+                    detail=f"Awaiting approval for {tool_name}",
+                )
+
+    # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
     # ------------------------------------------------------------------
 
@@ -905,9 +1074,7 @@ class EventAggregator:
                     version="v2",
                 ):
                     if cancel_event.is_set():
-                        logger.info(
-                            "Ingest cancelled for thread %s", thread_id
-                        )
+                        logger.info("Ingest cancelled for thread %s", thread_id)
                         span.set_attribute("cancelled", True)
                         await self.emit_agent_status(
                             thread_id=thread_id,
@@ -922,20 +1089,34 @@ class EventAggregator:
                         thread_id=thread_id,
                         agent_id=agent_id,
                     )
-            except Exception:
-                logger.exception("Error during graph ingest for thread %s", thread_id)
-                span.set_attribute("error", True)
-                await self.emit_error(
-                    thread_id=thread_id,
-                    agent_id=agent_id,
-                    code="INGEST_ERROR",
-                    message="Graph event stream failed unexpectedly",
-                    recoverable=False,
-                )
+            except BaseException as exc:
+                # C1 fix: GraphInterrupt (BaseException subclass) signals a
+                # legitimate graph suspension for human-in-the-loop approval.
+                # Do NOT emit a spurious INGEST_ERROR — let the finally block
+                # call _emit_interrupt_events to surface the permission request.
+                if exc.__class__.__name__ == "GraphInterrupt":
+                    logger.info(
+                        "Graph interrupted for thread %s (awaiting approval)",
+                        thread_id,
+                    )
+                    span.set_attribute("interrupted", True)
+                else:
+                    logger.exception(
+                        "Error during graph ingest for thread %s", thread_id
+                    )
+                    span.set_attribute("error", True)
+                    await self.emit_error(
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        code="INGEST_ERROR",
+                        message="Graph event stream failed unexpectedly",
+                        recoverable=False,
+                    )
             finally:
                 # Clean up cancel event and flush remaining chunks
                 self._clear_cancel_event(thread_id)
                 await self._flush_chunk_buffer(thread_id)
+                await self._emit_interrupt_events(thread_id, agent_id, graph, config)
                 _ingest_duration_histogram.record(
                     time.monotonic() - start,
                     {"thread_id": thread_id},

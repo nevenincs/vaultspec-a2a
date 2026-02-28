@@ -44,6 +44,8 @@ class CreateThreadRequest(BaseModel):
     team_preset: str | None = None
     # NEW: thread metadata for provenance and context (ADR-014)
     metadata: ThreadMetadata | None = None
+    # NEW — skip interrupts for headless runs
+    autonomous: bool = False
     # DEPRECATED: kept for backward compat, ignored if team_preset is set
     provider: Provider | None = None
     model: Model | None = None

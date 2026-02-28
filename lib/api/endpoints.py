@@ -188,9 +188,7 @@ async def get_services(
     registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
     checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),  # noqa: B008
     tg: TaskGroup = Depends(get_task_group),  # noqa: B008
-) -> tuple[
-    AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, TaskGroup
-]:
+) -> tuple[AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, TaskGroup]:
     """Dependency for bundling all required services into a single injection point."""
     return db, aggregator, registry, checkpointer, tg
 
@@ -291,7 +289,9 @@ async def create_thread_endpoint(  # noqa: PLR0915
             status_code=409,
             detail=f"Thread nickname already exists: {exc.nickname!r}",
         ) from exc
-    await db.commit()
+    # NOTE: db.commit() is intentionally deferred until AFTER graph compilation
+    # (H9 fix): if compile_team_graph() raises, the session is rolled back by
+    # the get_db dependency's exception handling, preventing an orphaned thread.
 
     logger.info(
         "Created thread %s (title=%s, preset=%s, nickname=%s)",
@@ -377,6 +377,10 @@ async def create_thread_endpoint(  # noqa: PLR0915
 
         tg.start_soon(_ingest_and_release_create)
 
+    # Commit only after all synchronous setup succeeds — prevents orphaned
+    # thread rows when graph compilation or team config loading fails (H9 fix).
+    await db.commit()
+
     return CreateThreadResponse(
         thread_id=thread.id,
         status=thread.status,
@@ -436,11 +440,11 @@ async def list_threads_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/threads/{thread_id}/metadata")
+@router.get("/threads/{thread_id}/metadata", response_model=ThreadMetadata)
 async def get_thread_metadata_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),  # noqa: B008
-) -> dict:
+) -> ThreadMetadata:
     """Return the full ThreadMetadata object for a thread.
 
     Used by the inspector panel for detailed provenance display.
@@ -449,7 +453,7 @@ async def get_thread_metadata_endpoint(
     meta_json = await get_thread_metadata(db, thread_id)
     if meta_json is None:
         raise HTTPException(status_code=404, detail="Thread or metadata not found")
-    return ThreadMetadata.model_validate_json(meta_json).model_dump()
+    return ThreadMetadata.model_validate_json(meta_json)
 
 
 # ---------------------------------------------------------------------------
@@ -593,9 +597,9 @@ async def get_thread_state_endpoint(
 async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
-    services: tuple[
-        AsyncSession, EventAggregator, GraphRegistry, TaskGroup
-    ] = Depends(get_message_services),
+    services: tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup] = Depends(
+        get_message_services
+    ),
 ) -> dict[str, str]:
     """Send a user message into an existing thread.
 
@@ -774,15 +778,39 @@ async def respond_to_permission_endpoint(
     graph = registry.get(thread_id) if thread_id else None
 
     if graph is not None:
+        # H8: guard against double-resume or stale requests.
+        # mark_ingest_active returns False if an ingest is already running for
+        # this thread, which means either the graph was never interrupted or
+        # another resume is already in flight.
+        if not registry.mark_ingest_active(thread_id):
+            logger.warning(
+                "Ingest already active for thread %s — ignoring duplicate "
+                "permission response for request_id=%s",
+                thread_id,
+                request_id,
+            )
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"A graph ingest is already running for thread {thread_id!r}. "
+                    "The permission request may have already been handled."
+                ),
+            )
+
         config = {"configurable": {"thread_id": thread_id}}
-        tg.start_soon(
-            aggregator.ingest,
-            thread_id,
-            "supervisor",
-            graph,
-            Command(resume=body.option_id),
-            config,
-        )
+
+        async def _resume_and_release(
+            _tid: str = thread_id,
+            _opt: str = body.option_id,
+        ) -> None:
+            try:
+                await aggregator.ingest(
+                    _tid, "supervisor", graph, Command(resume=_opt), config
+                )
+            finally:
+                registry.mark_ingest_done(_tid)
+
+        tg.start_soon(_resume_and_release)
         logger.info(
             "Resuming graph for thread %s with option_id=%s",
             thread_id,

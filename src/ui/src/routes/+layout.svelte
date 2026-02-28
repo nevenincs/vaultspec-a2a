@@ -20,6 +20,9 @@
   import { ScrollArea } from '$lib/components/ui/scroll-area';
   import { Badge } from '$lib/components/ui/badge';
   import * as AlertDialog from '$lib/components/ui/alert-dialog';
+  import { ModeWatcher, mode, toggleMode } from 'mode-watcher';
+  import Moon from '@lucide/svelte/icons/moon';
+  import Sun from '@lucide/svelte/icons/sun';
 
   let { children } = $props();
 
@@ -122,13 +125,25 @@
   <link rel="icon" href={favicon} />
 </svelte:head>
 
+<ModeWatcher />
+
 <div class="flex h-screen w-full flex-col">
   <div class="flex flex-1 overflow-hidden">
     <!-- Sidebar: thread list + team status -->
     <aside class="flex w-60 flex-col border-r">
       <div class="flex items-center justify-between border-b p-3">
         <span class="text-sm font-semibold">VaultSpec</span>
-        <!-- Theme toggle button placeholder -->
+        <button
+          class="text-muted-foreground hover:text-foreground rounded p-1"
+          onclick={toggleMode}
+          aria-label="Toggle theme"
+        >
+          {#if mode.current === 'dark'}
+            <Sun class="h-4 w-4" />
+          {:else}
+            <Moon class="h-4 w-4" />
+          {/if}
+        </button>
       </div>
       <div class="p-2">
         <Button variant="outline" class="w-full" onclick={createNewThread}>

@@ -2,6 +2,10 @@
 
 @import 'tw-animate-css';
 
+/* Third-party component CSS — imported after Tailwind so preflight doesn't override */
+@import '@xterm/xterm/css/xterm.css';
+@import 'diff2html/bundles/css/diff2html.min.css';
+
 @custom-variant dark (&:is(.dark *));
 
 :root {

@@ -1,14 +1,21 @@
 <script lang="ts">
   import type { ToolCallContentDiff } from '$lib/api/types';
+  import { createPatch } from 'diff';
+  import * as Diff2Html from 'diff2html';
 
   let { diff }: { diff: ToolCallContentDiff } = $props();
+
+  const diffHtml = $derived(
+    Diff2Html.html(createPatch(diff.path, diff.old_text ?? '', diff.new_text, '', ''), {
+      drawFileList: false,
+      matching: 'lines',
+      outputFormat: 'line-by-line',
+      renderNothingWhenEmpty: false,
+    }),
+  );
 </script>
 
-<!-- Placeholder: will use diff2html when installed -->
-<div class="rounded border p-3 font-mono text-xs">
-  <div class="text-muted-foreground mb-1">{diff.path}</div>
-  {#if diff.old_text}
-    <pre class="mb-1 rounded bg-red-500/10 p-1 text-red-500">- {diff.old_text}</pre>
-  {/if}
-  <pre class="rounded bg-green-500/10 p-1 text-green-500">+ {diff.new_text}</pre>
+<div class="d2h-wrapper overflow-auto rounded border text-xs">
+  <!-- eslint-disable-next-line svelte/no-at-html-tags -->
+  {@html diffHtml}
 </div>

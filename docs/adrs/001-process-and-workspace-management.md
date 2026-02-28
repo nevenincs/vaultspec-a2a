@@ -19,10 +19,12 @@ The Python Orchestrator must supervise the execution of multiple
 independent agent LLM runs and manage their filesystem workspaces. This
 presents several challenges:
 
-* **Cross-Platform Process Safety:** Orchestrator must attempt to wrangle
-  native CLI binaries (Claude/Gemini) as subprocesses. This might creat
-  fragility, requiring `pywin32` Job Objects) and brittle stdout parsing
-  but it's the best we've got at the moment!
+* **Cross-Platform Process Safety:** Orchestrator must wrangle native CLI
+  binaries (Claude/Gemini) as subprocesses. On Windows, provider CLIs are
+  distributed as `.cmd` shims wrapping Node.js or native executables.
+  `process.terminate()` kills only the immediate shell child, leaving the
+  real worker process (node.exe, etc.) as an orphan. The implementation
+  must handle full process-tree teardown on each platform.
 * **Concurrent Filesystem Access:** Multiple coding agents editing the
   same repository will corrupt the `.git/index` and cross-contaminate
   test runs if they share a single working directory.
@@ -47,14 +49,20 @@ Workspace Isolation:
   entirely native Python. What is banned is the old pattern of spawning
   independent agent processes that manage their own lifecycles outside
   LangGraph's supervision.
-* **Zero PTY / Zero Batch Invocation:** All CLI subprocesses must be
-  launched without a PTY or Windows batch intermediary. For Claude,
-  `AcpChatModel` resolves the raw npm deployment path (`dist/index.js`)
-  and invokes `node.exe` directly, bypassing the `.CMD` wrapper that
-  destroys pipe semantics on Windows. For Gemini,
-  `shutil.which("gemini")` resolves `gemini.exe` natively (safe — it
-  deploys as a plain executable, not `.cmd`). `cmd.exe /c` is strictly
-  forbidden across all subprocess invocations.
+* **Platform-Specific Subprocess Spawning:** Provider CLIs on Windows are
+  distributed as `.cmd` shims (node-based for Claude, native for Gemini)
+  that require a shell to execute. Spawning strategy differs by platform:
+  * **Windows:** `asyncio.create_subprocess_shell` with
+    `creationflags=CREATE_NEW_PROCESS_GROUP`. The process group flag
+    isolates console-signal handling (Ctrl+C cannot propagate from parent
+    terminal into the subprocess group) and enables reliable process-tree
+    teardown. `subprocess.list2cmdline` escapes command arguments for
+    cmd.exe to prevent metacharacter injection.
+  * **Unix/Linux/macOS:** `asyncio.create_subprocess_exec` — no shell
+    intermediary. POSIX signals deliver directly to the target process.
+  * **PTY and bare `cmd.exe /c` wrappers are forbidden** on all
+    platforms. PTY breaks pipe semantics; a bare `cmd.exe /c` wrapper
+    (without `CREATE_NEW_PROCESS_GROUP`) prevents reliable cleanup.
 * **Crash Isolation via AsyncIO:** Because graph nodes are native async
   tasks running in the Uvicorn event loop, crash isolation is handled
   via standard Python `try/except` and `asyncio.TaskGroup` semantics.
@@ -100,10 +108,17 @@ Workspace Isolation:
   signals, was overly complex and unreliable. `AcpChatModel` supersedes
   this by owning CLI subprocesses as private, scoped stdio pipes — not
   as independent orchestration actors.
-* **cmd.exe / PTY Invocation:** Rejected. Wrapping CLI binaries via
-  `cmd.exe /c` or a PTY destroys pipe semantics on Windows, corrupting
-  JSON-RPC framing. Direct `node.exe` and `gemini.exe` invocation is
-  mandatory.
+* **Bare `cmd.exe /c` / PTY invocation:** Rejected. Wrapping CLI binaries
+  via a PTY destroys pipe semantics. Invoking `cmd.exe /c` manually
+  (without `CREATE_NEW_PROCESS_GROUP`) is also rejected because
+  `process.terminate()` kills only cmd.exe, orphaning node.exe. The
+  accepted pattern is `create_subprocess_shell` with
+  `CREATE_NEW_PROCESS_GROUP` + `taskkill /T /F` cleanup on Windows.
+* **Windows Job Objects (pywin32):** Evaluated and rejected as the primary
+  cleanup mechanism. `pywin32` compatibility with Python 3.13 is
+  unverified, and `taskkill /T /F` achieves the same outcome (full process
+  tree termination) using only builtins. Job Objects remain a viable
+  fallback if `taskkill` proves insufficient in future scenarios.
 * **Automated Worktree Teardown:** Rejected. While it keeps the disk
   clean, it is overly destructive and ruins debuggability.
 * **Standard `git checkout`:** Rejected for concurrent agents. Moving
@@ -116,12 +131,19 @@ Workspace Isolation:
   Uvicorn thread, all tools *must* be strictly asynchronous
   (`async def`). A synchronous library call inside a LangChain tool
   will block the entire host webserver.
-* **`AcpChatModel` Subprocess Hygiene:** The CLI subprocess spawned
-  inside `AcpChatModel` must have its `stdin`/`stdout` piped and
-  `stderr` captured separately. Mixing stderr into stdout will corrupt
-  the JSON-RPC framing. The process must be terminated via
-  `process.terminate()` on `BaseChatModel` teardown — never via
-  `CTRL_BREAK_EVENT`.
+* **`AcpChatModel` Subprocess Hygiene:** The CLI subprocess spawned inside
+  `AcpChatModel` must have its `stdin`/`stdout` piped and `stderr`
+  captured separately. Mixing stderr into stdout corrupts JSON-RPC
+  framing. **Process teardown must use `_kill_process_tree`:**
+  * **Windows:** `taskkill /T /F /PID {pid}` kills the entire tree
+    (cmd.exe + node.exe + grandchildren). Never use `process.terminate()`
+    alone on Windows — it kills only cmd.exe and orphans node.exe.
+  * **Unix:** `process.terminate()` (SIGTERM) with 5-second escalation to
+    `process.kill()` (SIGKILL).
+  * `CTRL_BREAK_EVENT` is never used — it applies only to Uvicorn-style
+    graceful HTTP shutdown, not ACP stdio subprocesses.
+  * Always close the asyncio transport handle after process exit to
+    prevent OS handle leaks (cpython#114177).
 * **Environment Injection Routing:** When configuring tool environments
   for an agent in Worktree Mode, developers must explicitly rewrite
   `VIRTUAL_ENV` and `PATH` to point to the parent/main repository. For

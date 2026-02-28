@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import time
 
 from contextlib import suppress
@@ -23,6 +24,77 @@ from pathlib import Path
 __all__ = ["ProbeResult", "run_probe"]
 
 logger = logging.getLogger(__name__)
+
+
+async def _spawn_acp_process(
+    command: list[str],
+    env: dict[str, str],
+    cwd: str,
+) -> asyncio.subprocess.Process:
+    """Spawn an ACP subprocess with platform-appropriate isolation.
+
+    Mirrors ``lib.providers.acp_chat_model._spawn_acp_process`` — kept
+    local so the probe module stays dependency-free.
+
+    Windows: ``create_subprocess_shell`` + ``CREATE_NEW_PROCESS_GROUP``.
+    Unix/Linux/macOS: ``create_subprocess_exec`` (no shell intermediary).
+    """
+    kwargs: dict[str, object] = {
+        "stdin": asyncio.subprocess.PIPE,
+        "stdout": asyncio.subprocess.PIPE,
+        "stderr": asyncio.subprocess.PIPE,
+        "env": env,
+        "cwd": cwd,
+        "limit": 10 * 1024 * 1024,
+    }
+    if sys.platform == "win32":
+        return await asyncio.create_subprocess_shell(
+            subprocess.list2cmdline(command),
+            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+            **kwargs,  # type: ignore[arg-type]
+        )
+    return await asyncio.create_subprocess_exec(
+        command[0], *command[1:], **kwargs  # type: ignore[arg-type]
+    )
+
+
+async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
+    """Terminate an ACP subprocess and its entire process tree.
+
+    Mirrors ``lib.providers.acp_chat_model._kill_process_tree``.
+
+    Windows: ``taskkill /T /F /PID`` kills cmd.exe + node.exe + all
+    grandchildren atomically.  ``process.terminate()`` alone only kills
+    cmd.exe and leaves node.exe as an orphan.
+
+    Unix/Linux/macOS: SIGTERM with 5-second escalation to SIGKILL.
+    """
+    if sys.platform == "win32":
+        try:
+            killer = await asyncio.create_subprocess_exec(
+                "taskkill", "/T", "/F", "/PID", str(process.pid),
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+            await asyncio.wait_for(killer.wait(), timeout=5.0)
+        except Exception:
+            with suppress(OSError):
+                process.kill()
+        with suppress(Exception):
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+    else:
+        with suppress(OSError):
+            process.terminate()
+        try:
+            await asyncio.wait_for(process.wait(), timeout=5.0)
+        except TimeoutError:
+            with suppress(OSError):
+                process.kill()
+            await process.wait()
+
+    transport = getattr(process, "_transport", None)
+    if transport is not None:
+        transport.close()
 
 
 @dataclass
@@ -197,14 +269,7 @@ async def run_probe(
     env.pop("CLAUDECODE", None)
 
     session = _ProbeSession(command, env, timeout, prompt)
-    session.process = await asyncio.create_subprocess_shell(
-        subprocess.list2cmdline(command),
-        stdin=asyncio.subprocess.PIPE,
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-        env=env,
-        limit=10 * 1024 * 1024,
-    )
+    session.process = await _spawn_acp_process(command, env, str(Path.cwd()))
     assert session.process.stdin is not None
     assert session.process.stdout is not None
     assert session.process.stderr is not None
@@ -219,12 +284,7 @@ async def run_probe(
         session.result.error = f"Timed out after {timeout}s"
     finally:
         stderr_task.cancel()
-        with suppress(OSError):
-            session.process.terminate()
-        if getattr(session.process, "_transport", None):
-            session.process._transport.close()  # noqa: SLF001  # type: ignore[attr-defined]
-        with suppress(Exception):
-            await asyncio.wait_for(session.process.wait(), timeout=5)
+        await _kill_process_tree(session.process)
 
     session.result.elapsed_ms = (time.monotonic() - session.t0) * 1000
     return session.result

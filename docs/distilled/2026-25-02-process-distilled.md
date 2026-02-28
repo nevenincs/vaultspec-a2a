@@ -12,8 +12,19 @@ sources:
 # Process Domain — Distilled
 
 > [!WARNING]
-> **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
-> The process management strategies described in this document (Subprocess Management, OS-level signaling, CLI Wrappers) have been superseded by the native LangGraph architecture running within the main Uvicorn event loop. This document remains for historical context. Please refer to ADR-001 for the current binding architecture.
+> **PARTIAL DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
+> The *orchestration-level* process management strategies (spawning independent
+> agent processes, pywin32 Job Objects for the orchestrator, CTRL_BREAK_EVENT
+> signalling) have been superseded by native LangGraph coroutines running within
+> the Uvicorn event loop.
+>
+> **Section 1 (Subprocess Management) remains binding** for `AcpChatModel`,
+> which still spawns real CLI subprocesses (node.exe / gemini) as stdio pipes.
+> The Windows orphan problem, process-tree teardown patterns, and handle-leak
+> prevention described here directly apply to that layer.
+>
+> Sections 2–5 (State Machine, Hot-Swap, etc.) are historical context only.
+> See ADR-001 for the current architecture.
 
 **Date**: 2026-02-25
 **Status**: Distilled from process lifecycle + monitoring research
@@ -85,24 +96,62 @@ Use `psutil` for reliable process tree management (`children(recursive=True)`).
 
 ### 1.5 Orphan Prevention
 
-Windows doesn't have Unix zombies but has orphan processes (children survive
-parent death).
+Windows doesn't have Unix zombies but has **orphan processes**: if the parent
+dies or calls `process.terminate()` without killing the full tree, children
+survive indefinitely. For `AcpChatModel` the tree is:
 
-**Primary defense: Windows Job Objects**
-
-```python
-# Conceptual — requires pywin32 or ctypes
-job = win32job.CreateJobObject(None, "")
-info['BasicLimitInformation']['LimitFlags'] |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-# Assign all child processes to this job
-# When job closes (or parent exits), all children auto-terminate
+```
+python.exe (uvicorn)
+  └─ cmd.exe               ← process.pid points here
+       └─ node.exe         ← actual claude-agent-acp worker
+            └─ ...         ← any grandchildren
 ```
 
-**Secondary defenses:**
+`process.terminate()` and `process.kill()` both call `TerminateProcess()` on
+**cmd.exe only**. node.exe and its descendants become orphans.
 
-- `atexit` handler iterating all managed processes
-- `asyncio.TaskGroup` for structured concurrency (cancel on scope exit)
-- Always `await process.wait()` after termination
+**Primary defense: `taskkill /T /F /PID {pid}`**
+
+```python
+# Kills the entire process tree rooted at pid — cmd.exe + node.exe + children
+killer = await asyncio.create_subprocess_exec(
+    "taskkill", "/T", "/F", "/PID", str(process.pid),
+    stdout=asyncio.subprocess.DEVNULL,
+    stderr=asyncio.subprocess.DEVNULL,
+)
+await asyncio.wait_for(killer.wait(), timeout=5.0)
+```
+
+This is implemented in `lib/providers/acp_chat_model._kill_process_tree` and
+mirrored in `lib/providers/probes/_protocol._kill_process_tree`.
+
+**Spawn-time isolation: `CREATE_NEW_PROCESS_GROUP`**
+
+```python
+process = await asyncio.create_subprocess_shell(
+    subprocess.list2cmdline(command),
+    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+    ...
+)
+```
+
+Prevents Ctrl+C in the parent terminal from propagating into the subprocess
+group, avoiding unintended partial teardown.
+
+**Always close the asyncio transport after process exit:**
+
+```python
+transport = getattr(process, "_transport", None)
+if transport is not None:
+    transport.close()
+```
+
+Prevents OS handle leaks when the event loop finalizer runs on an already-closed
+loop (cpython#114177).
+
+**Windows Job Objects** (pywin32): evaluated but not used. `taskkill /T /F`
+achieves the same outcome with no additional dependencies. pywin32 compatibility
+with Python 3.13 is unverified. Job Objects remain a viable escalation path.
 
 ### 1.6 Port Allocation
 
@@ -311,11 +360,14 @@ architecture v1 scope defers both cost/token tracking and session replay to v2.
 ### G1: pywin32 Reliability on Python 3.13
 
 Windows Job Objects require `pywin32` or raw `ctypes`. The `pywin32` package's
-compatibility with Python 3.13 has not been verified. If it's unreliable, the
-fallback is `ctypes` bindings (more code, same functionality) or accepting the
-risk of orphan processes with `atexit` cleanup only.
+compatibility with Python 3.13 has not been verified.
 
-**Status**: ✅ Obsolete per ADR-001. The LangGraph migration removed subprocesses entirely. All agents run as async coroutines within the main event loop, eliminating orphan processes and the need for Job Objects.
+**Status**: ✅ Resolved — not by elimination, but by a better alternative.
+`AcpChatModel` still spawns real CLI subprocesses (node.exe, gemini), so the
+Windows orphan problem is live. However, `taskkill /T /F /PID` achieves full
+process-tree termination using only Windows builtins — no `pywin32` required.
+Job Objects remain a valid escalation path but are not needed for the current
+implementation. See §1.5 for the implemented approach.
 
 ### G2: Startup Stability Threshold Undefined
 

@@ -40,6 +40,9 @@ def resolve_venv(workspace_path: Path) -> Path | None:
 
     # 3. Walk up to find main repo root (.git dir co-located with .venv)
     current = workspace_path.parent
+    # WS-L1: 10 levels is sufficient for any reasonable project hierarchy.
+    # A worktree is typically 2-4 levels below the repo root; 10 provides a
+    # generous upper bound while preventing unbounded filesystem traversal.
     for _ in range(10):  # bounded to prevent infinite traversal
         if (current / ".git").exists() and (current / ".venv").is_dir():
             return current / ".venv"
@@ -63,8 +66,9 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     ADR-001 §5: credential injection (``CLAUDE_CODE_OAUTH_TOKEN`` etc.)
     is handled by the provider layer, never by the workspace module.
     """
-    # M21: scrub known secret env vars to prevent credential leakage to agents.
-    # ADR-001 §5 states credential injection is handled by the provider layer.
+    # M21/WS-H1: scrub known secret env vars to prevent credential leakage to
+    # agents. ADR-001 §5 states credential injection is handled by the provider
+    # layer.  VAULTSPEC_* prefixed keys are scrubbed via a prefix check below.
     scrub_keys = frozenset(
         {
             "ANTHROPIC_API_KEY",
@@ -74,9 +78,18 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             "GOOGLE_API_KEY",
             "AWS_SECRET_ACCESS_KEY",
             "AZURE_OPENAI_API_KEY",
+            # WS-H1: additional API key providers
+            "ZHIPU_API_KEY",
+            "LANGCHAIN_API_KEY",
+            "LANGCHAIN_TRACING_V2",
         }
     )
-    env = {k: v for k, v in os.environ.items() if k not in scrub_keys}
+    env = {
+        k: v
+        for k, v in os.environ.items()
+        # Scrub both known keys and any VAULTSPEC_ prefixed secrets
+        if k not in scrub_keys and not k.startswith("VAULTSPEC_")
+    }
     # M34: use PWD (POSIX standard) instead of the non-standard CWD variable
     env["PWD"] = str(workspace_path)
 
@@ -91,5 +104,9 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
 
         current_path = env.get("PATH", "")
         env["PATH"] = f"{scripts_dir}{os.pathsep}{current_path}"
+    else:
+        # WS-M3: explicitly remove VIRTUAL_ENV when no .venv is found to
+        # prevent the caller's venv from leaking into the agent's environment.
+        env.pop("VIRTUAL_ENV", None)
 
     return env

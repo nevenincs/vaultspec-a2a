@@ -7,7 +7,7 @@ retryable endpoints for operations that require guaranteed delivery
 
 from datetime import datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ...core.metadata import ThreadMetadata
 from ...utils.enums import Model, Provider
@@ -42,7 +42,8 @@ class CreateThreadRequest(BaseModel):
     """
 
     title: str | None = None
-    initial_message: str
+    # 64 KB limit prevents excessive LLM token consumption and memory pressure
+    initial_message: str = Field(max_length=65536)
     # NEW: select a team preset by ID (ADR-013 §6)
     team_preset: str | None = None
     # NEW: thread metadata for provenance and context (ADR-014)
@@ -65,7 +66,8 @@ class CreateThreadResponse(BaseModel):
 class SendMessageRequest(BaseModel):
     """Send a user message into an existing thread via REST."""
 
-    content: str
+    # 64 KB limit prevents excessive LLM token consumption and memory pressure
+    content: str = Field(max_length=65536)
     agent_id: str | None = None
 
 

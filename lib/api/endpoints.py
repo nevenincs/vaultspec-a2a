@@ -96,6 +96,8 @@ class GraphRegistry:
         # Tracks threads currently being ingested; prevents concurrent graph
         # execution on the same thread (which would race on checkpointer state).
         self._active_ingests: set[str] = set()
+        # Lock guards check-then-add on _active_ingests (API-M2)
+        self._ingest_lock: asyncio.Lock = asyncio.Lock()
 
     def register(self, thread_id: str, graph: Any) -> None:  # noqa: ANN401
         """Register a compiled graph for *thread_id*."""
@@ -121,21 +123,26 @@ class GraphRegistry:
         """Remove and return ``(thread_id, option_id)`` for *request_id*."""
         return self._pending_resumes.pop(request_id, None)
 
-    def mark_ingest_active(self, thread_id: str) -> bool:
+    async def mark_ingest_active(self, thread_id: str) -> bool:
         """Mark *thread_id* as having an active ingest.
 
         Returns ``True`` if the mark succeeded (caller may proceed).
         Returns ``False`` if an ingest is already running for this thread
         (caller should drop the duplicate request).
-        """
-        if thread_id in self._active_ingests:
-            return False
-        self._active_ingests.add(thread_id)
-        return True
 
-    def mark_ingest_done(self, thread_id: str) -> None:
+        The internal lock makes the check-then-add atomic under asyncio
+        concurrency (API-M2).
+        """
+        async with self._ingest_lock:
+            if thread_id in self._active_ingests:
+                return False
+            self._active_ingests.add(thread_id)
+            return True
+
+    async def mark_ingest_done(self, thread_id: str) -> None:
         """Release the active-ingest mark for *thread_id*."""
-        self._active_ingests.discard(thread_id)
+        async with self._ingest_lock:
+            self._active_ingests.discard(thread_id)
 
 
 logger = logging.getLogger(__name__)
@@ -366,7 +373,12 @@ async def create_thread_endpoint(  # noqa: PLR0915
             # hitting LangGraph's default recursion_limit of 25 (ADR-013 §5).
             "recursion_limit": 100,
         }
-        registry.mark_ingest_active(thread.id)
+        # API-C2: check return value — if False, a previous ingest is still active
+        if not await registry.mark_ingest_active(thread.id):
+            raise HTTPException(
+                status_code=409,
+                detail="Thread already has an active ingest",
+            )
 
         async def _ingest_and_release_create(
             _tid: str = thread.id,
@@ -374,7 +386,7 @@ async def create_thread_endpoint(  # noqa: PLR0915
             try:
                 await aggregator.ingest(_tid, "supervisor", graph, graph_input, config)
             finally:
-                registry.mark_ingest_done(_tid)
+                await registry.mark_ingest_done(_tid)
 
         tg.start_soon(_ingest_and_release_create)
 
@@ -624,15 +636,15 @@ async def send_message_endpoint(
         len(body.content),
     )
 
-    # Update thread status
-    await update_thread_status(db, thread_id, "active")
+    # Update thread status — DB-C1: "running" is the correct ThreadStatus value
+    await update_thread_status(db, thread_id, "running")
     await db.commit()
 
     graph = registry.get(thread_id)
     agent_id = body.agent_id or "supervisor"
 
     if graph is not None:
-        if not registry.mark_ingest_active(thread_id):
+        if not await registry.mark_ingest_active(thread_id):
             logger.warning(
                 "Ingest already active for thread %s; dropping concurrent message",
                 thread_id,
@@ -648,7 +660,7 @@ async def send_message_endpoint(
             try:
                 await aggregator.ingest(_tid, _aid, graph, graph_input, config)
             finally:
-                registry.mark_ingest_done(_tid)
+                await registry.mark_ingest_done(_tid)
 
         tg.start_soon(_ingest_and_release_send)
     else:
@@ -697,6 +709,10 @@ async def get_team_status_endpoint(
     return TeamStatusResponse(
         agents=agents,
         active_threads=active_threads,
+        # TODO (API-M8): wire pending_permissions from the aggregator when it
+        # tracks outstanding permission requests. The aggregator currently does
+        # not maintain a queryable set of pending PermissionRequestEvents, so
+        # this is always empty. Requires aggregator.get_pending_permissions().
         pending_permissions=[],
     )
 
@@ -787,7 +803,7 @@ async def respond_to_permission_endpoint(
         # mark_ingest_active returns False if an ingest is already running for
         # this thread, which means either the graph was never interrupted or
         # another resume is already in flight.
-        if not registry.mark_ingest_active(thread_id):
+        if not await registry.mark_ingest_active(thread_id):
             logger.warning(
                 "Ingest already active for thread %s — ignoring duplicate "
                 "permission response for request_id=%s",
@@ -813,7 +829,7 @@ async def respond_to_permission_endpoint(
                     _tid, "supervisor", graph, Command(resume=_opt), config
                 )
             finally:
-                registry.mark_ingest_done(_tid)
+                await registry.mark_ingest_done(_tid)
 
         tg.start_soon(_resume_and_release)
         logger.info(

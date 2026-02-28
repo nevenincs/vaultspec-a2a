@@ -18,6 +18,7 @@ from .. import (
     AgentControlAction,
     AgentControlCommand,
     AgentLifecycleState,
+    AgentStatusEntry,
     AgentStatusEvent,
     AgentSummary,
     ArtifactSnapshot,
@@ -30,6 +31,7 @@ from .. import (
     HeartbeatEvent,
     MessageChunkEvent,
     MessageSnapshot,
+    PendingPermission,
     PermissionOption,
     PermissionOptionKind,
     PermissionRequestEvent,
@@ -43,6 +45,7 @@ from .. import (
     PlanUpdateEvent,
     SendMessageCommand,
     SendMessageRequest,
+    SendMessageResponse,
     ServerEvent,
     SubscribeCommand,
     TeamStatusEvent,
@@ -490,3 +493,61 @@ class TestSnapshotModels:
         assert snapshot.plan == []
         assert snapshot.agents == []
         assert snapshot.pending_permissions == []
+
+
+class TestMissingFacadeTypes:
+    """Round-trip tests for types previously missing from the schemas facade.
+
+    API-M4: SendMessageResponse, AgentStatusEntry, PendingPermission were
+    missing from schemas/__init__.py — this class verifies they are now
+    importable and round-trip correctly.
+    """
+
+    def test_send_message_response_round_trip(self) -> None:
+        """SendMessageResponse serializes and deserializes correctly."""
+        resp = SendMessageResponse(status="accepted", thread_id="t-1")
+        json_bytes = resp.model_dump_json()
+        restored = SendMessageResponse.model_validate_json(json_bytes)
+        assert restored.status == "accepted"
+        assert restored.thread_id == "t-1"
+
+    def test_agent_status_entry_round_trip(self) -> None:
+        """AgentStatusEntry serializes with optional provider/model fields."""
+        entry = AgentStatusEntry(
+            agent_id="agent-1",
+            node_name="coder",
+            state=AgentLifecycleState.WORKING,
+            provider=Provider.CLAUDE,
+            model=Model.MID,
+            role="worker",
+            display_name="Coder",
+            description="Writes code",
+        )
+        json_bytes = entry.model_dump_json()
+        restored = AgentStatusEntry.model_validate_json(json_bytes)
+        assert restored.agent_id == "agent-1"
+        assert restored.state == AgentLifecycleState.WORKING
+        assert restored.provider == Provider.CLAUDE
+
+    def test_agent_status_entry_optional_provider(self) -> None:
+        """AgentStatusEntry allows provider and model to be None."""
+        entry = AgentStatusEntry(
+            agent_id="agent-2",
+            node_name="planner",
+            state=AgentLifecycleState.IDLE,
+        )
+        assert entry.provider is None
+        assert entry.model is None
+
+    def test_pending_permission_round_trip(self) -> None:
+        """PendingPermission serializes and deserializes correctly."""
+        perm = PendingPermission(
+            request_id="req-1",
+            thread_id="t-1",
+            description="Execute shell command",
+        )
+        json_bytes = perm.model_dump_json()
+        restored = PendingPermission.model_validate_json(json_bytes)
+        assert restored.request_id == "req-1"
+        assert restored.thread_id == "t-1"
+        assert restored.description == "Execute shell command"

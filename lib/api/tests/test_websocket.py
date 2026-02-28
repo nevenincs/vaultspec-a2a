@@ -13,8 +13,8 @@ from starlette.websockets import WebSocket
 
 from ...core.aggregator import EventAggregator
 from .. import websocket as websocket_module
-from ..schemas.enums import AgentLifecycleState, ServerEventType
-from ..websocket import ConnectionManager
+from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEventType
+from ..websocket import _MAX_WS_MESSAGE_BYTES, ConnectionManager
 from ..websocket import ConnectionManager as WebSocketConnectionManager
 
 
@@ -237,6 +237,153 @@ class TestPermissionResponseRejection:
             assert error["code"] == "PERMISSION_RESPONSE_WS_FORBIDDEN"
             assert error["recoverable"] is True
             assert "REST" in error["message"]
+
+
+# ---------------------------------------------------------------------------
+# SEND_MESSAGE command dispatch (API-M5)
+# ---------------------------------------------------------------------------
+
+
+class TestSendMessageCommand:
+    """Tests for the SEND_MESSAGE command dispatch."""
+
+    def test_send_message_invokes_handler(self) -> None:
+        """SEND_MESSAGE command calls the registered message handler."""
+        app, aggregator, manager = _create_app()
+
+        received: list[tuple[str, str, str | None]] = []
+
+        async def _handler(thread_id: str, content: str, agent_id: str | None) -> None:
+            received.append((thread_id, content, agent_id))
+
+        manager.set_message_handler(_handler)
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "thread_id": "thread-1",
+                    "content": "Hello from client",
+                    "agent_id": "coder",
+                }
+            )
+            # Ping forces server to process the send_message before we check
+            ws.send_json({"type": "ping"})
+            ws.receive_json()  # pong
+
+        assert len(received) == 1
+        assert received[0] == ("thread-1", "Hello from client", "coder")
+
+    def test_send_message_without_handler_emits_status(self) -> None:
+        """SEND_MESSAGE with no handler emits SUBMITTED agent status."""
+        app, aggregator, manager = _create_app()
+
+        # Add subscriber so aggregator can route events
+        aggregator.add_subscriber("test-sub")
+        aggregator.subscribe("test-sub", ["thread-emit"])
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+
+            ws.send_json(
+                {
+                    "type": "subscribe",
+                    "thread_ids": ["thread-emit"],
+                }
+            )
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "thread_id": "thread-emit",
+                    "content": "No handler here",
+                }
+            )
+            # Ping forces processing
+            ws.send_json({"type": "ping"})
+
+            # Collect events; one should be the AGENT_STATUS/SUBMITTED
+            events = []
+            for _ in range(10):
+                data = ws.receive_json()
+                if data["type"] not in ("heartbeat",):
+                    events.append(data)
+                if len(events) >= 1:
+                    break
+
+        status_events = [e for e in events if e["type"] == ServerEventType.AGENT_STATUS]
+        assert any(
+            e.get("state") == AgentLifecycleState.SUBMITTED for e in status_events
+        )
+
+
+# ---------------------------------------------------------------------------
+# AGENT_CONTROL command dispatch (API-M5)
+# ---------------------------------------------------------------------------
+
+
+class TestAgentControlCommand:
+    """Tests for the AGENT_CONTROL command dispatch."""
+
+    def test_agent_control_invokes_handler(self) -> None:
+        """AGENT_CONTROL command calls the registered control handler."""
+        app, aggregator, manager = _create_app()
+
+        received: list[tuple[str, str, AgentControlAction]] = []
+
+        async def _ctrl(
+            thread_id: str, agent_id: str, action: AgentControlAction
+        ) -> None:
+            received.append((thread_id, agent_id, action))
+
+        manager.set_agent_control_handler(_ctrl)
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+
+            ws.send_json(
+                {
+                    "type": "agent_control",
+                    "thread_id": "thread-ctrl",
+                    "agent_id": "coder",
+                    "action": "terminate",
+                }
+            )
+            ws.send_json({"type": "ping"})
+            ws.receive_json()  # pong
+
+        assert len(received) == 1
+        assert received[0] == ("thread-ctrl", "coder", AgentControlAction.TERMINATE)
+
+
+# ---------------------------------------------------------------------------
+# Oversized frame rejection (API-M5)
+# ---------------------------------------------------------------------------
+
+
+class TestOversizedFrame:
+    """Tests that oversized WebSocket frames are rejected without crashing."""
+
+    def test_oversized_message_is_dropped(self) -> None:
+        """A message exceeding _MAX_WS_MESSAGE_BYTES is silently dropped.
+
+        The server should continue processing subsequent valid commands.
+        """
+        app, _agg, _mgr = _create_app()
+        # Craft a message slightly over the limit (JSON overhead adds bytes)
+        oversized_content = "x" * (_MAX_WS_MESSAGE_BYTES + 100)
+        oversized_msg = f'{{"type":"send_message","thread_id":"t1","content":"{oversized_content}"}}'
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+
+            ws.send_text(oversized_msg)
+            # A subsequent ping must still be processed — server did not crash
+            ws.send_json({"type": "ping"})
+            pong = ws.receive_json()
+
+        assert pong["type"] == "heartbeat"
 
 
 # ---------------------------------------------------------------------------

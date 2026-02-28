@@ -3,13 +3,13 @@
 Every test creates a fresh temporary git repo — no mocks, no monkeypatching.
 """
 
-import os
 import subprocess
 
 from pathlib import Path
 
 import pytest
 
+from ...core.exceptions import WorkspaceError
 from ..environment import resolve_env_vars, resolve_venv
 from ..git_manager import GitManager, MergeStrategy
 
@@ -300,10 +300,243 @@ class TestResolveEnvVars:
         assert str(venv_dir / "Scripts") in env["PATH"]
 
     def test_no_virtual_env_when_missing(self, tmp_path: Path) -> None:
-        """VIRTUAL_ENV is absent or inherits the process value when no .venv found."""
+        """VIRTUAL_ENV is absent when no .venv found (WS-M3)."""
         workspace = tmp_path / "no-venv"
         workspace.mkdir()
         env = resolve_env_vars(workspace)
-        assert "VIRTUAL_ENV" not in env or env.get("VIRTUAL_ENV") == os.environ.get(
-            "VIRTUAL_ENV", ""
+        # WS-M3: VIRTUAL_ENV must be explicitly removed when no .venv found
+        # to prevent the caller's venv from leaking into the agent environment.
+        assert "VIRTUAL_ENV" not in env
+
+
+# ---------------------------------------------------------------------------
+# Credential scrubbing — WS-H3
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialScrubbing:
+    """Tests verifying that known secret env vars are scrubbed (WS-H3)."""
+
+    _SECRET_KEYS = [
+        "ANTHROPIC_API_KEY",
+        "CLAUDE_CODE_OAUTH_TOKEN",
+        "OPENAI_API_KEY",
+        "GEMINI_API_KEY",
+        "GOOGLE_API_KEY",
+        "AWS_SECRET_ACCESS_KEY",
+        "AZURE_OPENAI_API_KEY",
+        "ZHIPU_API_KEY",
+        "LANGCHAIN_API_KEY",
+        "LANGCHAIN_TRACING_V2",
+    ]
+
+    @pytest.mark.parametrize("secret_key", _SECRET_KEYS)
+    def test_known_secret_is_scrubbed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret_key: str
+    ) -> None:
+        """Known secret env vars are NOT present in the returned env dict."""
+        monkeypatch.setenv(secret_key, "super-secret-value")
+        env = resolve_env_vars(tmp_path)
+        assert secret_key not in env, (
+            f"{secret_key} should be scrubbed but was present in env"
         )
+
+    def test_vaultspec_prefixed_key_is_scrubbed(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """VAULTSPEC_ prefixed keys are scrubbed regardless of suffix."""
+        monkeypatch.setenv("VAULTSPEC_SECRET_TOKEN", "should-not-leak")
+        monkeypatch.setenv("VAULTSPEC_ANOTHER_KEY", "also-secret")
+        env = resolve_env_vars(tmp_path)
+        assert "VAULTSPEC_SECRET_TOKEN" not in env
+        assert "VAULTSPEC_ANOTHER_KEY" not in env
+
+    def test_non_secret_env_vars_are_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Non-secret env vars like HOME, PATH, USER are preserved."""
+        monkeypatch.setenv("MY_SAFE_VAR", "visible-value")
+        env = resolve_env_vars(tmp_path)
+        assert env.get("MY_SAFE_VAR") == "visible-value"
+
+    def test_scrub_is_comprehensive_no_false_positives(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """All known secrets are scrubbed while PATH and PWD are preserved."""
+        for key in self._SECRET_KEYS:
+            monkeypatch.setenv(key, "secret")
+        env = resolve_env_vars(tmp_path)
+        for key in self._SECRET_KEYS:
+            assert key not in env
+        # Non-secret keys must still be present
+        assert "PWD" in env
+
+
+# ---------------------------------------------------------------------------
+# Input validation — WS-H6
+# ---------------------------------------------------------------------------
+
+
+class TestInputValidation:
+    """Tests for _AGENT_ID_RE and _BRANCH_NAME_RE validation (WS-H6)."""
+
+    # Valid agent IDs
+    @pytest.mark.parametrize(
+        "agent_id",
+        [
+            "agent1",
+            "my-agent",
+            "Agent_123",
+            "a",
+            "coder1",
+            "planner-v2",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_valid_agent_ids_accepted(
+        self, manager: GitManager, agent_id: str
+    ) -> None:
+        """Valid agent IDs pass validation in create_worktree."""
+        # Just verify no WorkspaceError is raised during validation.
+        # We can't easily create many real worktrees without branch conflicts,
+        # so we check the error is NOT a validation error.
+        try:
+            await manager.create_worktree(agent_id, base_branch="main")
+        except WorkspaceError as exc:
+            # Re-raise only if it's a validation error (message contains "invalid")
+            if "invalid" in str(exc).lower():
+                raise
+
+    # Invalid agent IDs
+    @pytest.mark.parametrize(
+        "bad_agent_id",
+        [
+            "../evil",
+            "--flag",
+            ".hidden",
+            "",
+            "-start",
+            "bad/slash",
+            "has space",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_agent_ids_rejected(
+        self, manager: GitManager, bad_agent_id: str
+    ) -> None:
+        """Invalid agent IDs raise WorkspaceError."""
+        with pytest.raises(WorkspaceError, match="invalid"):
+            await manager.create_worktree(bad_agent_id, base_branch="main")
+
+    # Valid branch names
+    @pytest.mark.parametrize(
+        "branch",
+        [
+            "main",
+            "feature/foo",
+            "v1.0.0",
+            "release-2026",
+            "hotfix/JIRA-123",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_valid_branch_names_accepted(
+        self, manager: GitManager, branch: str
+    ) -> None:
+        """Valid branch names pass validation in merge_worktree / has_conflicts."""
+        # We verify that validation doesn't raise by checking the error message.
+        # Actual git errors (branch doesn't exist) are acceptable — validation passes.
+        wt_path = await manager.create_worktree("validator-wt", base_branch="main")
+        try:
+            await manager.has_conflicts(wt_path, branch)
+        except WorkspaceError as exc:
+            assert "invalid" not in str(exc).lower(), (
+                f"Validation incorrectly rejected valid branch {branch!r}: {exc}"
+            )
+
+    # Invalid branch names
+    @pytest.mark.parametrize(
+        "bad_branch",
+        [
+            "--force",
+            "../traversal",
+            "",
+            "-bad-start",
+            ".dotfile",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_branch_names_rejected_in_merge_worktree(
+        self, manager: GitManager, bad_branch: str
+    ) -> None:
+        """Invalid branch names raise WorkspaceError in merge_worktree."""
+        wt_path = await manager.create_worktree("branch-val-wt", base_branch="main")
+        with pytest.raises(WorkspaceError, match="invalid"):
+            await manager.merge_worktree(wt_path, target_branch=bad_branch)
+
+    @pytest.mark.parametrize(
+        "bad_branch",
+        [
+            "--force",
+            "../traversal",
+            "",
+            "-bad-start",
+        ],
+    )
+    @pytest.mark.asyncio
+    async def test_invalid_branch_names_rejected_in_has_conflicts(
+        self, manager: GitManager, bad_branch: str
+    ) -> None:
+        """Invalid branch names raise WorkspaceError in has_conflicts."""
+        wt_path = await manager.create_worktree("hc-val-wt", base_branch="main")
+        with pytest.raises(WorkspaceError, match="invalid"):
+            await manager.has_conflicts(wt_path, bad_branch)
+
+
+# ---------------------------------------------------------------------------
+# MergeStrategy.REBASE — WS-H7
+# ---------------------------------------------------------------------------
+
+
+class TestRebaseStrategy:
+    """Tests for the corrected MergeStrategy.REBASE (WS-H7)."""
+
+    @pytest.mark.asyncio
+    async def test_rebase_strategy_lands_commit_on_target(
+        self, manager: GitManager, git_repo: Path
+    ) -> None:
+        """Rebase strategy replays worktree commits on target and updates target HEAD."""
+        wt_path = await manager.create_worktree("rebase-test", base_branch="main")
+        # Add a new file in the worktree (no conflicts with main)
+        (wt_path / "rebase_file.txt").write_text("rebased content")
+        await manager.run_git("add", ".", cwd=wt_path)
+        await manager.run_git("commit", "-m", "add rebase_file", cwd=wt_path)
+
+        result_sha = await manager.merge_worktree(
+            wt_path,
+            target_branch="main",
+            strategy=MergeStrategy.REBASE,
+        )
+        assert result_sha
+        # The file should now be on main
+        assert (git_repo / "rebase_file.txt").exists()
+        assert (git_repo / "rebase_file.txt").read_text() == "rebased content"
+
+    @pytest.mark.asyncio
+    async def test_rebase_strategy_leaves_target_branch_checked_out(
+        self, manager: GitManager, git_repo: Path
+    ) -> None:
+        """After a rebase merge, the main (target) branch is checked out."""
+        wt_path = await manager.create_worktree("rebase-checkout", base_branch="main")
+        (wt_path / "checkout_verify.txt").write_text("test")
+        await manager.run_git("add", ".", cwd=wt_path)
+        await manager.run_git("commit", "-m", "checkout verify", cwd=wt_path)
+
+        await manager.merge_worktree(
+            wt_path,
+            target_branch="main",
+            strategy=MergeStrategy.REBASE,
+        )
+        # Confirm we ended up on target branch
+        branch = await manager.current_branch()
+        assert branch == "main"

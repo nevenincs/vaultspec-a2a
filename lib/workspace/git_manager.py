@@ -249,9 +249,10 @@ class GitManager:
                             path=current_path,
                             branch=current_branch,
                             head_sha=current_sha,
-                            # H20: first entry (entry_index == 1 at flush time
-                            # means we just started entry 2, so we're flushing
-                            # entry 1 — the main worktree).
+                            # WS-L3: entry_index is incremented BEFORE the flush,
+                            # so entry_index==1 here means we are starting the
+                            # second entry and flushing the first — the main
+                            # worktree (always listed first by git porcelain).
                             is_main=entry_index == 1 or is_bare,
                         )
                     )
@@ -268,14 +269,20 @@ class GitManager:
             elif line == "bare":
                 is_bare = True
 
-        # Flush last entry (M31: handles single-worktree edge case correctly)
+        # WS-L3/WS-M2: Flush the last parsed entry.
+        # entry_index is the count of entries whose "worktree " header line we
+        # have seen so far.  When we flush the last entry, entry_index holds
+        # the 1-based index of that entry in the porcelain output.
+        # - entry_index == 1: only one worktree exists → it is the main worktree.
+        # - entry_index > 1: multiple worktrees → the last entry is NOT the main
+        #   worktree (the main worktree was already flushed with is_main=True).
+        # Bare repos set is_bare=True, which also marks the entry as main.
         if current_path is not None:
             worktrees.append(
                 WorktreeInfo(
                     path=current_path,
                     branch=current_branch,
                     head_sha=current_sha,
-                    # Single worktree: entry_index == 1; multi-worktree: > 1 → not main
                     is_main=entry_index == 1 or is_bare,
                 )
             )
@@ -300,7 +307,18 @@ class GitManager:
         between the three ``rev-parse`` calls and any concurrent repo
         mutations.  ``merge_worktree`` acquires the mutex before calling
         this method (H21 fix).
+
+        Raises ``WorkspaceError`` if *target_branch* is invalid to prevent
+        git flag injection via crafted branch names (WS-C3).
         """
+        # WS-C3: validate target_branch before it touches any git command
+        if not _BRANCH_NAME_RE.match(target_branch):
+            msg = (
+                f"target_branch {target_branch!r} is invalid. "
+                "Must match ^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$"
+            )
+            raise WorkspaceError(msg)
+
         # Resolve the worktree's current branch
         wt_branch = await self._run_git(
             "rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path
@@ -333,9 +351,18 @@ class GitManager:
         Returns the resulting merge commit SHA.
 
         Raises ``MergeConflictError`` if conflicts are detected.
+        Raises ``WorkspaceError`` if *target_branch* is invalid.
         The global mutex is held for the entire merge to prevent
         concurrent merges from corrupting the branch state.
         """
+        # WS-C3: validate target_branch before it touches any git command
+        if not _BRANCH_NAME_RE.match(target_branch):
+            msg = (
+                f"target_branch {target_branch!r} is invalid. "
+                "Must match ^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$"
+            )
+            raise WorkspaceError(msg)
+
         wt_branch = await self._run_git(
             "rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path
         )
@@ -364,7 +391,26 @@ class GitManager:
             if strategy == MergeStrategy.FAST_FORWARD:
                 await asyncio.shield(self._run_git("merge", "--ff-only", wt_branch))
             elif strategy == MergeStrategy.REBASE:
-                await asyncio.shield(self._run_git("rebase", wt_branch))
+                # WS-H7: correct rebase semantics for merging a worktree branch
+                # back into target_branch.
+                #
+                # The worktree's branch is already checked out in worktree_path,
+                # so we can't `git checkout wt_branch` in the main repo (git
+                # disallows checking out a branch that's live in another worktree).
+                #
+                # Instead, run `git rebase target_branch` from within the worktree
+                # directory — this rebases the worktree's branch (wt_branch) onto
+                # target_branch, replaying wt commits on top of target.
+                # Then, from the main repo (already on target_branch), fast-forward
+                # merge the rebased wt_branch tip.
+                #
+                # The previous code ran `git rebase wt_branch` while on
+                # target_branch in the main repo, which rebased target onto the
+                # worktree branch — the inverse of the intended direction.
+                await asyncio.shield(
+                    self._run_git("rebase", target_branch, cwd=worktree_path)
+                )
+                await asyncio.shield(self._run_git("merge", "--ff-only", wt_branch))
             elif strategy == MergeStrategy.MERGE_COMMIT:
                 await asyncio.shield(
                     self._run_git(

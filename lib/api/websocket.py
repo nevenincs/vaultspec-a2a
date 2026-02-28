@@ -103,6 +103,8 @@ class ConnectionManager:
         self._message_handler: MessageHandler | None = None
         # Callback for AGENT_CONTROL: (thread_id, agent_id, action) -> None
         self._agent_control_handler: AgentControlHandler | None = None
+        # Per-connection error sequence counters (API-H2: sequences start at 1)
+        self._error_sequences: dict[str, int] = {}
 
     def set_message_handler(self, handler: MessageHandler) -> None:
         """Register a callback for SEND_MESSAGE commands.
@@ -134,6 +136,7 @@ class ConnectionManager:
 
         async with ws_span("ws.connect", client_id=client_id):
             self._connections[client_id] = websocket
+            self._error_sequences[client_id] = 0
 
             # Register with the aggregator
             queue = self._aggregator.add_subscriber(client_id)
@@ -185,8 +188,9 @@ class ConnectionManager:
             # Remove from aggregator
             self._aggregator.remove_subscriber(client_id)
 
-            # Remove connection
+            # Remove connection and error sequence counter
             self._connections.pop(client_id, None)
+            self._error_sequences.pop(client_id, None)
 
         logger.info("WebSocket client %s disconnected", client_id)
 
@@ -333,6 +337,10 @@ class ConnectionManager:
         websocket = self._connections.get(client_id)
         if websocket is not None:
             try:
+                # API-H2: use a connection-scoped counter so sequences start at 1
+                self._error_sequences[client_id] = (
+                    self._error_sequences.get(client_id, 0) + 1
+                )
                 error = ErrorEvent(
                     thread_id=_thread_id,
                     agent_id=None,
@@ -343,7 +351,7 @@ class ConnectionManager:
                     ),
                     recoverable=True,
                     timestamp=datetime.now(UTC),
-                    sequence=0,
+                    sequence=self._error_sequences[client_id],
                 )
                 await websocket.send_json(error.model_dump(mode="json"))
             except Exception:

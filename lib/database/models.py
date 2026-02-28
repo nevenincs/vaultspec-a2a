@@ -59,6 +59,12 @@ class ThreadModel(Base):
         back_populates="thread", cascade="all, delete-orphan"
     )
 
+    def __repr__(self) -> str:
+        return (
+            f"ThreadModel(id={self.id!r}, status={self.status!r}, "
+            f"nickname={self.nickname!r})"
+        )
+
 
 class ArtifactModel(Base):
     """File artifact produced by an agent during a thread."""
@@ -76,6 +82,12 @@ class ArtifactModel(Base):
     thread: Mapped["ThreadModel"] = relationship(back_populates="artifacts")
 
     __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
+
+    def __repr__(self) -> str:
+        return (
+            f"ArtifactModel(id={self.id!r}, thread_id={self.thread_id!r}, "
+            f"type={self.type!r}, path={self.path!r})"
+        )
 
 
 class PermissionLogModel(Base):

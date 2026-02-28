@@ -96,7 +96,7 @@ def _create_message_handler(
                 thread_id,
             )
             return
-        if not graph_registry.mark_ingest_active(thread_id):
+        if not await graph_registry.mark_ingest_active(thread_id):
             logger.warning(
                 "Ingest already active for thread %s — dropping WS message",
                 thread_id,
@@ -113,7 +113,7 @@ def _create_message_handler(
             try:
                 await aggregator.ingest(_tid, _aid, graph, graph_input, config)
             finally:
-                graph_registry.mark_ingest_done(_tid)
+                await graph_registry.mark_ingest_done(_tid)
 
         tg.start_soon(_ingest_and_release)
 
@@ -143,7 +143,7 @@ def _create_agent_control_handler(
                         thread_id,
                     )
                     return
-                if not graph_registry.mark_ingest_active(thread_id):
+                if not await graph_registry.mark_ingest_active(thread_id):
                     logger.warning(
                         "Ingest already active for thread %s — cannot resume",
                         thread_id,
@@ -164,7 +164,7 @@ def _create_agent_control_handler(
                             config,
                         )
                     finally:
-                        graph_registry.mark_ingest_done(_tid)
+                        await graph_registry.mark_ingest_done(_tid)
 
                 tg.start_soon(_resume_and_release)
             case AgentControlAction.PAUSE:

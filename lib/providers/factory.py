@@ -55,9 +55,19 @@ class ProviderFactory:
         # Resolve model name
         if model is None:
             model_level = PROVIDER_DEFAULT_MODELS[provider]
-            model_name = MODEL_MAP[provider][model_level]
+            try:
+                model_name = MODEL_MAP[provider][model_level]
+            except KeyError:
+                raise ValueError(
+                    f"Unsupported model level {model_level!r} for provider {provider!r}"
+                ) from None
         elif isinstance(model, Model):
-            model_name = MODEL_MAP[provider][model]
+            try:
+                model_name = MODEL_MAP[provider][model]
+            except KeyError:
+                raise ValueError(
+                    f"Unsupported model level {model!r} for provider {provider!r}"
+                ) from None
         else:
             # M21: raw string model_name bypasses the MODEL_MAP validation that would
             # catch typos or unsupported models.  Log a warning so operators can see

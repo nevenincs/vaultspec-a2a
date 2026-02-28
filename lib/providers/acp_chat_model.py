@@ -116,6 +116,9 @@ _TERMINAL_COMMAND_ALLOWLIST: frozenset[str] = frozenset(
 # invoke a shell but these chars indicate injection attempts).
 _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 
+# Valid POSIX environment variable name pattern (PROV-M3).
+_ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
 
 def _log_task_exception(task: asyncio.Task) -> None:
     """Log unhandled exceptions from fire-and-forget background RPC tasks."""
@@ -221,7 +224,6 @@ class _AcpSessionContext:
     chunk_queue: asyncio.Queue[ChatGenerationChunk | None]
     prompt_done: asyncio.Event
     prompt_id_ref: list[int]
-    prompt_error_ref: list[dict]
     interrupt_exc: list[BaseException]
     background_tasks: set[asyncio.Task] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
@@ -315,7 +317,7 @@ class AcpChatModel(BaseChatModel):
         env.update(self.env_vars)
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
 
-        if "gemini" in self.command:
+        if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token()
 
         process = await _spawn_acp_process(
@@ -324,8 +326,8 @@ class AcpChatModel(BaseChatModel):
             self.workspace_root or self.cwd or str(Path.cwd()),
         )
 
-        assert process.stdin is not None
-        assert process.stdout is not None
+        if process.stdin is None or process.stdout is None:
+            raise RuntimeError("ACP subprocess failed to open stdio pipes")
         ctx = _AcpSessionContext(
             process=process,
             stdin=process.stdin,
@@ -334,7 +336,6 @@ class AcpChatModel(BaseChatModel):
             chunk_queue=asyncio.Queue(maxsize=1024),
             prompt_done=asyncio.Event(),
             prompt_id_ref=[],
-            prompt_error_ref=[],
             interrupt_exc=[],
         )
 
@@ -402,6 +403,10 @@ class AcpChatModel(BaseChatModel):
                     )
                 yield chunk
 
+        # PROV-M2: propagate any interrupt that raced with end_turn
+        if ctx.interrupt_exc:
+            raise ctx.interrupt_exc[0]
+
     async def _cleanup_session(
         self,
         ctx: _AcpSessionContext,
@@ -412,8 +417,7 @@ class AcpChatModel(BaseChatModel):
         # Kill all spawned terminals before cancelling the session
         for _tid, proc in list(ctx.terminals.items()):
             with suppress(Exception):
-                proc.kill()
-                await proc.wait()
+                await _kill_process_tree(proc)
         ctx.terminals.clear()
 
         if self._active_session_id and not ctx.prompt_done.is_set():
@@ -435,8 +439,16 @@ class AcpChatModel(BaseChatModel):
                     await ctx.stdin.drain()
                 await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
 
+        # PROV-C1: cancel all in-flight background RPC tasks before killing process
+        for task in list(ctx.background_tasks):
+            task.cancel()
+        if ctx.background_tasks:
+            await asyncio.gather(*ctx.background_tasks, return_exceptions=True)
+
+        # PROV-M1: await task cancellation before killing the process
         stdout_task.cancel()
         stderr_task.cancel()
+        await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
         await _kill_process_tree(ctx.process)
 
         self._process = None
@@ -483,8 +495,14 @@ class AcpChatModel(BaseChatModel):
             raise RuntimeError("No active session stdin.")
         return self._stdin
 
+    def _require_response_futures(self) -> dict[int, asyncio.Future]:
+        if self._response_futures is None:
+            raise RuntimeError("No active session response futures.")
+        return self._response_futures
+
     async def _read_stderr_loop(self, process: asyncio.subprocess.Process) -> None:
-        assert process.stderr is not None
+        if process.stderr is None:
+            return
         while line := await process.stderr.readline():
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
@@ -516,7 +534,12 @@ class AcpChatModel(BaseChatModel):
                 if not fut.done():
                     fut.set_exception(RuntimeError("Subprocess closed"))
             if not ctx.prompt_done.is_set():
-                await ctx.chunk_queue.put(None)
+                try:
+                    ctx.chunk_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "Chunk queue full — dropping EOF sentinel; consumer may hang"
+                    )
 
     async def _dispatch_packet(self, data: dict, ctx: _AcpSessionContext) -> None:
         if "result" in data or "error" in data:
@@ -559,8 +582,10 @@ class AcpChatModel(BaseChatModel):
         if isinstance(result, dict) and result.get("stopReason") == "end_turn":
             ctx.prompt_done.set()
         elif "error" in data and ctx.prompt_id_ref and rid == ctx.prompt_id_ref[0]:
-            ctx.prompt_error_ref.append(data["error"])
-            await ctx.chunk_queue.put(None)
+            try:
+                ctx.chunk_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                logger.warning("Chunk queue full — dropping error sentinel")
 
     async def _handle_server_rpc(
         self, method: str, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
@@ -630,7 +655,10 @@ class AcpChatModel(BaseChatModel):
                 option_id = await self.permission_callback(name, args, options)
             except GraphBubbleUp as exc:
                 ctx.interrupt_exc.append(exc)
-                await ctx.chunk_queue.put(None)
+                try:
+                    ctx.chunk_queue.put_nowait(None)
+                except asyncio.QueueFull:
+                    logger.warning("Chunk queue full — dropping interrupt sentinel")
                 # H9 fix: return a proper JSON-RPC denial response instead of
                 # an empty dict `{}` which would produce a malformed frame.
                 deny_id = next(
@@ -818,8 +846,19 @@ class AcpChatModel(BaseChatModel):
             if extra_env := params.get("env"):
                 if isinstance(extra_env, list):
                     # ACP protocol: env is list[EnvVariable] with name/value keys
+                    # PROV-M3: validate env variable names before applying
+                    for v in extra_env:
+                        if not _ENV_NAME_RE.match(v["name"]):
+                            raise ValueError(
+                                f"Invalid environment variable name: {v['name']!r}"
+                            )
                     terminal_env.update({v["name"]: v["value"] for v in extra_env})
                 elif isinstance(extra_env, dict):
+                    for name in extra_env:
+                        if not _ENV_NAME_RE.match(name):
+                            raise ValueError(
+                                f"Invalid environment variable name: {name!r}"
+                            )
                     terminal_env.update(extra_env)
             # M12: on Windows, use CREATE_NEW_PROCESS_GROUP so child
             # processes don't become orphans when the terminal is killed.
@@ -865,9 +904,7 @@ class AcpChatModel(BaseChatModel):
                     "message": f"Unknown terminal: {terminal_id}",
                 },
             }
-        with suppress(OSError):
-            process.kill()
-        await process.wait()
+        await _kill_process_tree(process)
         ctx.terminals.pop(terminal_id, None)
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
 
@@ -946,9 +983,7 @@ class AcpChatModel(BaseChatModel):
         terminal_id = params.get("terminalId", "")
         process = ctx.terminals.pop(terminal_id, None)
         if process is not None and process.returncode is None:
-            with suppress(OSError):
-                process.kill()
-            await process.wait()
+            await _kill_process_tree(process)
         return {"jsonrpc": "2.0", "id": rpc_id, "result": {}}
 
     async def _handle_session_update(
@@ -960,9 +995,14 @@ class AcpChatModel(BaseChatModel):
         if u_type in ("agent_message_chunk", "agent_thought_chunk"):
             text = update.get("content", {}).get("text", "")
             if text:
-                await ctx.chunk_queue.put(
-                    ChatGenerationChunk(message=AIMessageChunk(content=text))
-                )
+                try:
+                    ctx.chunk_queue.put_nowait(
+                        ChatGenerationChunk(message=AIMessageChunk(content=text))
+                    )
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "Chunk queue full — dropping chunk to prevent deadlock"
+                    )
         elif u_type == "tool_call_chunk":
             # M20: handle incremental tool call argument streaming.
             # ACP agents stream partial JSON args via tool_call_chunk before the
@@ -971,21 +1011,26 @@ class AcpChatModel(BaseChatModel):
             tid = update.get("toolCallId", "")
             args_delta = update.get("inputDelta", "")
             if tid and args_delta:
-                await ctx.chunk_queue.put(
-                    ChatGenerationChunk(
-                        message=AIMessageChunk(
-                            content="",
-                            tool_call_chunks=[
-                                {
-                                    "id": tid,
-                                    "name": "",
-                                    "args": args_delta,
-                                    "index": 0,
-                                }
-                            ],
+                try:
+                    ctx.chunk_queue.put_nowait(
+                        ChatGenerationChunk(
+                            message=AIMessageChunk(
+                                content="",
+                                tool_call_chunks=[
+                                    {
+                                        "id": tid,
+                                        "name": "",
+                                        "args": args_delta,
+                                        "index": 0,
+                                    }
+                                ],
+                            )
                         )
                     )
-                )
+                except asyncio.QueueFull:
+                    logger.warning(
+                        "Chunk queue full — dropping tool_call_chunk to prevent deadlock"
+                    )
         elif u_type == "tool_call":
             await self._on_tool_call(update, ctx)
         elif u_type == "tool_call_update":
@@ -1016,7 +1061,12 @@ class AcpChatModel(BaseChatModel):
                 ],
             )
         )
-        await ctx.chunk_queue.put(chunk)
+        try:
+            ctx.chunk_queue.put_nowait(chunk)
+        except asyncio.QueueFull:
+            logger.warning(
+                "Chunk queue full — dropping tool_call chunk to prevent deadlock"
+            )
 
     async def _on_tool_call_update(self, update: dict, ctx: _AcpSessionContext) -> None:
         tid = update.get("toolCallId", "")
@@ -1041,7 +1091,12 @@ class AcpChatModel(BaseChatModel):
                     ],
                 )
             )
-            await ctx.chunk_queue.put(chunk)
+            try:
+                ctx.chunk_queue.put_nowait(chunk)
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Chunk queue full — dropping tool_call_update chunk to prevent deadlock"
+                )
         for k, v in update.items():
             if v is not None:
                 self._tool_calls[tid][k] = v
@@ -1170,8 +1225,8 @@ class AcpChatModel(BaseChatModel):
         """Fork the current session."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_FORK
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1182,15 +1237,15 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=60)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=60)
         return resp["result"]["sessionId"]
 
     async def list_sessions(self) -> list[dict[str, object]]:
         """List all sessions."""
         self._require_session()
         rpc_id = AcpRequestId.SESSION_LIST
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1201,15 +1256,15 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
         return resp["result"].get("sessions", [])
 
     async def set_mode(self, mode_id: str) -> dict[str, object]:
         """Set agent mode."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODE
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1220,15 +1275,15 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
     async def set_model(self, model_id: str) -> dict[str, object]:
         """Set LLM model."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_MODEL
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1239,15 +1294,15 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
     async def set_config_option(self, key: str, value: object) -> dict[str, object]:
         """Set config option."""
         sid = self._require_session()
         rpc_id = AcpRequestId.SESSION_SET_CONFIG_OPTION
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1258,15 +1313,15 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
         return resp.get("result", {})
 
     async def authenticate(self, token: str) -> dict[str, object]:
         """Authenticate session."""
         self._require_session()
         rpc_id = AcpRequestId.AUTHENTICATE
-        assert self._response_futures is not None
-        self._response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        futures = self._require_response_futures()
+        futures[rpc_id] = asyncio.get_running_loop().create_future()
         req = {
             "jsonrpc": "2.0",
             "id": rpc_id,
@@ -1277,5 +1332,5 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(self._response_futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
         return resp.get("result", {})

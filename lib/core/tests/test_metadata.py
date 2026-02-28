@@ -247,3 +247,90 @@ class TestGenerateNickname:
         assert "star" in nick_star
         assert "pipeline" in nick_pipe
         assert "pipeline-loop" in nick_loop
+
+    # --- M1 / TEST-M4: sanitization edge cases ---
+
+    def test_uppercase_feature_tag_lowercased(self) -> None:
+        """Uppercase feature_tag is lowercased so the slug is valid (M1)."""
+        nick = generate_nickname("AUTH-FLOW", "star", "a3f2bcde")
+        # Must be all lowercase to satisfy _NICKNAME_PATTERN
+        assert nick == "auth-flow-star-a3f2"
+
+    def test_feature_tag_with_special_chars_stripped(self) -> None:
+        """Non-alphanumeric/hyphen chars in feature_tag are stripped (M1)."""
+        nick = generate_nickname("auth_flow!@#", "star", "a3f2bcde")
+        # underscores and special chars removed, leaving "authflow"
+        assert nick == "authflow-star-a3f2"
+
+    def test_feature_tag_all_special_chars_fallback(self) -> None:
+        """feature_tag that reduces to empty after sanitization falls back to 'thread-' (M1)."""
+        nick = generate_nickname("!!!", "star", "a3f2bcde")
+        assert nick.startswith("thread-star-")
+
+    def test_feature_tag_empty_string(self) -> None:
+        """Empty feature_tag falls back to 'thread-{topology}-{hash}' (TEST-M4)."""
+        nick = generate_nickname("", "star", "a3f2bcde")
+        assert nick == "thread-star-a3f2"
+
+    def test_feature_tag_with_consecutive_hyphens_collapsed(self) -> None:
+        """Consecutive hyphens in feature_tag are collapsed to single hyphen (M1)."""
+        nick = generate_nickname("auth--flow", "star", "a3f2bcde")
+        assert nick == "auth-flow-star-a3f2"
+
+    def test_feature_tag_with_leading_trailing_hyphens_stripped(self) -> None:
+        """Leading and trailing hyphens in feature_tag are stripped (M1)."""
+        nick = generate_nickname("-auth-flow-", "star", "a3f2bcde")
+        assert nick == "auth-flow-star-a3f2"
+
+    def test_empty_thread_id_uses_zero_padding(self) -> None:
+        """Empty thread_id falls back to '0000' suffix (TEST-M4)."""
+        nick = generate_nickname("feat", "star", "")
+        assert nick == "feat-star-0000"
+
+
+# ---------------------------------------------------------------------------
+# discover_context_refs: security edge cases (CORE-C3)
+# ---------------------------------------------------------------------------
+
+
+class TestDiscoverContextRefsSecurityEdgeCases:
+    """Security edge cases for glob pattern injection via feature_tag."""
+
+    def test_glob_metachar_asterisk_not_expanded(self, tmp_path: Path) -> None:
+        """feature_tag with '*' does not wildcard-match unrelated files (C3)."""
+        research_dir = tmp_path / ".vault" / "research"
+        research_dir.mkdir(parents=True)
+        (research_dir / "unrelated.md").write_text("# Unrelated")
+        # feature_tag = "*" would match everything if not escaped
+        refs = discover_context_refs(tmp_path, "*")
+        # The escaped pattern ".vault/research/*[*]*.md" matches files
+        # literally containing "*" — there are none, so empty result.
+        assert refs == []
+
+    def test_glob_metachar_question_mark_not_expanded(self, tmp_path: Path) -> None:
+        """feature_tag with '?' does not single-char-wildcard match (C3)."""
+        research_dir = tmp_path / ".vault" / "research"
+        research_dir.mkdir(parents=True)
+        (research_dir / "auth-flow-research.md").write_text("# Research")
+        refs = discover_context_refs(tmp_path, "?")
+        # "?" escaped so no match against "auth-flow-research.md"
+        assert refs == []
+
+    def test_glob_metachar_brackets_not_expanded(self, tmp_path: Path) -> None:
+        """feature_tag with '[a-z]' is treated literally, not as a character class (C3)."""
+        research_dir = tmp_path / ".vault" / "research"
+        research_dir.mkdir(parents=True)
+        (research_dir / "auth-flow-research.md").write_text("# Research")
+        refs = discover_context_refs(tmp_path, "[a-z]")
+        # "[a-z]" escaped so no match against "auth-flow-research.md"
+        assert refs == []
+
+    def test_path_traversal_attempt_blocked(self, tmp_path: Path) -> None:
+        """feature_tag with '..' does not traverse outside workspace (C3)."""
+        # Create a file outside the workspace that would be matched if traversal worked
+        secret_dir = tmp_path.parent / "secret"
+        secret_dir.mkdir(exist_ok=True)
+        (secret_dir / "secret.md").write_text("# Secret")
+        refs = discover_context_refs(tmp_path, "../secret")
+        # Path traversal blocked by glob.escape("../secret")
+        assert refs == []

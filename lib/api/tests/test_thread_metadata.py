@@ -2,79 +2,26 @@
 
 Uses FastAPI TestClient with a real in-memory SQLite database and real
 fixtures. No mocks, no monkeypatching.
+
+API-C1: uses shared make_app() from conftest.py which overrides
+get_checkpointer and get_task_group so tests never touch vaultspec.db.
 """
 
 import tempfile
 
-from collections.abc import AsyncGenerator
 from pathlib import Path
 
-import pytest_asyncio
-
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
-from ...core.aggregator import EventAggregator
-from ...database.models import Base
-from ...database.session import get_db
-from ..app import create_app
-from ..endpoints import GraphRegistry, get_aggregator, get_graph_registry
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine():
-    """In-memory async SQLAlchemy engine with tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine):
-    """Async session factory bound to the in-memory engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-@pytest_asyncio.fixture
-async def session(engine):
-    """Provide a fresh async session for direct DB assertions."""
-    factory = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    async with factory() as sess:
-        yield sess
+from .conftest import make_app as _make_app_4
 
 
 def _make_app(session_factory, aggregator=None, registry=None):
-    """Create a test FastAPI app with dependency overrides."""
-    app = create_app()
-
-    if aggregator is None:
-        aggregator = EventAggregator()
-    if registry is None:
-        registry = GraphRegistry()
-
-    app.state.aggregator = aggregator
-    app.state.graph_registry = registry
-
-    async def _override_get_db() -> AsyncGenerator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _override_get_db
-    app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_graph_registry] = lambda: registry
-
-    return app, aggregator, registry
+    """Shim: forwards to shared make_app(), dropping the checkpointer return."""
+    app, agg, reg, _cp = _make_app_4(
+        session_factory, aggregator=aggregator, registry=registry
+    )
+    return app, agg, reg
 
 
 # ---------------------------------------------------------------------------

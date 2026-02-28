@@ -46,11 +46,14 @@ from .events import ToolCallContentText as ToolCallContentText
 from .events import ToolCallLocation as ToolCallLocation
 from .events import ToolCallStartEvent as ToolCallStartEvent
 from .events import ToolCallUpdateEvent as ToolCallUpdateEvent
+from .rest import AgentStatusEntry as AgentStatusEntry
 from .rest import CreateThreadRequest as CreateThreadRequest
 from .rest import CreateThreadResponse as CreateThreadResponse
+from .rest import PendingPermission as PendingPermission
 from .rest import PermissionResponseRequest as PermissionResponseRequest
 from .rest import PermissionResponseResult as PermissionResponseResult
 from .rest import SendMessageRequest as SendMessageRequest
+from .rest import SendMessageResponse as SendMessageResponse
 from .rest import TeamPresetSummary as TeamPresetSummary
 from .rest import TeamPresetsResponse as TeamPresetsResponse
 from .rest import TeamStatusResponse as TeamStatusResponse
@@ -66,6 +69,7 @@ __all__ = [
     "AgentControlAction",
     "AgentControlCommand",
     "AgentLifecycleState",
+    "AgentStatusEntry",
     "AgentStatusEvent",
     "AgentSummary",
     "ArtifactSnapshot",
@@ -81,6 +85,7 @@ __all__ = [
     "HeartbeatEvent",
     "MessageChunkEvent",
     "MessageSnapshot",
+    "PendingPermission",
     "PermissionOption",
     "PermissionOptionKind",
     "PermissionRequestEvent",
@@ -94,6 +99,7 @@ __all__ = [
     "PlanUpdateEvent",
     "SendMessageCommand",
     "SendMessageRequest",
+    "SendMessageResponse",
     "ServerEvent",
     "ServerEventType",
     "SubscribeCommand",

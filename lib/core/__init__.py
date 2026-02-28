@@ -89,6 +89,9 @@ from .team_config import (
     TopologyConfig as TopologyConfig,
 )
 from .team_config import (
+    TopologyType as TopologyType,
+)
+from .team_config import (
     WorkerOverrideConfig as WorkerOverrideConfig,
 )
 from .team_config import (
@@ -155,6 +158,7 @@ __all__ = [
     "TokenBudgetExceededError",
     "TokenUsageEntry",
     "TopologyConfig",
+    "TopologyType",
     "VaultspecError",
     "WorkerOverrideConfig",
     "WorkerRef",

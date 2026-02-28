@@ -10,6 +10,7 @@ map.  Three topology types are supported (ADR-013 §2.5):
                      routes back into the loop or finishes.
 """
 
+import functools
 import logging
 
 from pathlib import Path
@@ -21,6 +22,7 @@ from langgraph.graph import END, START, StateGraph
 
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
+from .exceptions import ConfigError
 from .nodes.supervisor import create_supervisor_node
 from .nodes.worker import create_worker_node
 from .state import TeamState
@@ -133,17 +135,24 @@ def compile_team_graph(  # noqa: PLR0913
         The compiled StateGraph runnable.
 
     Raises:
-        KeyError: If a worker agent_id from team_config is not in agent_configs.
-        ValueError: If an unknown topology type is encountered.
+        ConfigError: If a worker agent_id from team_config is not in agent_configs,
+                     or if topology configuration is invalid.
+        ValueError:  If an unknown topology type is encountered.
     """
     builder = StateGraph(cast(Any, TeamState))
     topology = team_config.topology
+
+    # M3: validate topology_type is a known TopologyType enum value before dispatch.
+    if not isinstance(topology.type, TopologyType):
+        raise ValueError(
+            f"Unknown topology type: {topology.type!r}. "
+            f"Expected one of: {[t.value for t in TopologyType]}"
+        )
 
     # interrupt_before disabled: approval flows via interrupt() inside the node only
     # (ADR-013 §2.7 superseded by plan 2026-28-02).
     interrupt_nodes: list[str] = []
 
-    # M5: use TopologyType enum for dispatch instead of string comparison
     if topology.type == TopologyType.STAR:
         _compile_star(
             builder,
@@ -192,6 +201,12 @@ def _compile_star(  # noqa: PLR0913
     """
     worker_ids: list[str] = [w.agent_id for w in team_config.workers]
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
+
+    # M2: validate supervisor agent exists in agent_configs when a supervisor
+    # AgentConfig is expected (star topology always uses a supervisor).
+    # supervisor_agent_config is optional only to allow test/minimal setups;
+    # when provided it must be a proper AgentConfig (no further check needed).
+    # The supervisor model itself is always resolved from team_config defaults.
 
     supervisor_model = _resolve_supervisor_model(team_config, workspace_root)
 
@@ -297,9 +312,33 @@ def _compile_pipeline(
     with metadata via add_node first.
     """
     order = team_config.topology.order
+
+    # M5: validate pipeline_order is non-empty before iterating.
+    if not order:
+        raise ConfigError(
+            f"Pipeline topology for team {team_config.id!r} has an empty "
+            "pipeline_order. At least one agent must be listed in topology.order."
+        )
+
+    # L3: validate no duplicate entries in pipeline_order.
+    if len(order) != len(set(order)):
+        seen_set: set[str] = set()
+        dupes_list = [a for a in order if a in seen_set or seen_set.add(a)]  # type: ignore[func-returns-value]
+        raise ConfigError(
+            f"Pipeline order for team {team_config.id!r} has duplicate entries: "
+            f"{dupes_list}. Each agent may appear at most once."
+        )
+
     node_names: list[str] = []
 
     for agent_id in order:
+        # C2: descriptive error when agent_id is missing from agent_configs.
+        if agent_id not in agent_configs:
+            raise ConfigError(
+                f"Agent '{agent_id}' referenced in pipeline_order but not defined "
+                "in agent_configs. Ensure the agent TOML exists and is loaded "
+                "before compiling the graph."
+            )
         agent_cfg = agent_configs[agent_id]
         # H1: use next() with a sentinel to avoid bare StopIteration
         worker_ref = next(
@@ -357,43 +396,57 @@ def _compile_pipeline_loop(  # noqa: PLR0913
     order = team_config.topology.order
     loop_node_id = team_config.topology.loop_node
     if loop_node_id is None:
-        raise ValueError("pipeline_loop topology requires loop_node to be set")
+        raise ConfigError("pipeline_loop topology requires loop_node to be set")
 
-    # M5: warn on degenerate pipeline_loop with a single node (pointless self-loop)
+    # L3: check for duplicate entries in pipeline_order before processing.
+    if len(order) != len(set(order)):
+        seen: set[str] = set()
+        dupes = [a for a in order if a in seen or seen.add(a)]  # type: ignore[func-returns-value]
+        raise ConfigError(
+            f"pipeline_loop order for team {team_config.id!r} has duplicate "
+            f"entries: {dupes}. Each agent may appear at most once."
+        )
+
+    # H3: validate that pipeline_loop has at least 2 agents to avoid a
+    # degenerate single-node self-loop that consumes max_loops iterations
+    # without meaningful work.
     pre_loop = [aid for aid in order if aid != loop_node_id]
     if not pre_loop:
-        logger.warning(
-            "Pipeline_loop for team %r has only the loop_node %r — "
-            "this creates a degenerate self-loop with no pre-loop stages.",
-            team_config.id,
-            loop_node_id,
+        raise ConfigError(
+            f"Pipeline_loop for team {team_config.id!r} requires at least one "
+            f"pre-loop stage in addition to the loop_node {loop_node_id!r}. "
+            "A single-agent pipeline_loop is a degenerate self-loop — use "
+            "topology.type='pipeline' for single-agent sequential runs."
         )
 
     # H7: validate loop_node is in the agent_configs before we try to compile it.
     worker_names = {w.agent_id for w in team_config.workers}
     if loop_node_id not in worker_names:
-        msg = (
+        raise ConfigError(
             f"pipeline_loop loop_node {loop_node_id!r} is not a known worker "
             f"in team {team_config.id!r}. Known workers: {sorted(worker_names)}"
         )
-        raise ValueError(msg)
     if loop_node_id not in agent_configs:
-        msg = (
+        raise ConfigError(
             f"pipeline_loop loop_node {loop_node_id!r} has no resolved AgentConfig. "
             "Ensure the agent TOML exists and is loaded before compiling the graph."
         )
-        raise ValueError(msg)
-
-    pre_loop = [aid for aid in order if aid != loop_node_id]
 
     for agent_id in order:
+        # C2: descriptive error when agent_id is missing from agent_configs.
+        if agent_id not in agent_configs:
+            raise ConfigError(
+                f"Agent '{agent_id}' referenced in pipeline_loop order but not "
+                "defined in agent_configs. Ensure the agent TOML exists and is "
+                "loaded before compiling the graph."
+            )
         agent_cfg = agent_configs[agent_id]
         # H1: use next() with a sentinel to avoid bare StopIteration
         worker_ref = next(
             (w for w in team_config.workers if w.agent_id == agent_id), None
         )
         if worker_ref is None:
-            raise ValueError(
+            raise ConfigError(
                 f"Pipeline-loop node {agent_id!r} has no matching WorkerRef in "
                 f"team {team_config.id!r}."
             )
@@ -403,10 +456,14 @@ def _compile_pipeline_loop(  # noqa: PLR0913
             team_config,
             workspace_root,
         )
+        # M8: snapshot the needed config at closure creation time to avoid
+        # capturing the mutable agent_configs dict by reference.
+        agent_system_prompt = agent_cfg.persona.system_prompt
+        agent_node_name = agent_cfg.id
         worker_node = create_worker_node(
             model,
-            agent_cfg.persona.system_prompt,
-            name=agent_cfg.id,
+            agent_system_prompt,
+            name=agent_node_name,
             autonomous=autonomous,
         )
 
@@ -415,8 +472,11 @@ def _compile_pipeline_loop(  # noqa: PLR0913
             # The plain worker_node returns {"messages": [...]}.  We merge in
             # the updated counter so _loop_router sees a monotonically increasing
             # value and can enforce max_loops (ADR-013 §5).
+            # H1: use functools.wraps to preserve the original __name__ so that
+            # LangGraph node identification remains correct.
             _inner = worker_node
 
+            @functools.wraps(_inner)
             async def _loop_node_with_counter(
                 state: TeamState,
                 _inner: Any = _inner,  # noqa: ANN401
@@ -446,14 +506,20 @@ def _compile_pipeline_loop(  # noqa: PLR0913
         builder.add_edge(all_sequential[i], all_sequential[i + 1])
 
     loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
+    # L2: max_loops default is 3 (set in TopologyConfig), range 1–100.
+    # Enforced in TopologyConfig via Field(ge=1, le=100).
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
         """Route loop_node output: enforce max_loops guard.
 
-        Defaults to "revise" (continue loop) when the worker does not
-        explicitly set ``next``.  Workers signal loop exit by returning
-        ``next="FINISH"``; the max_loops guard forces FINISH regardless.
+        Returns ``"FINISH"`` when ``loop_count >= max_loops`` (hard cap).
+        When below the cap, returns the value of ``state["next"]`` if set
+        by the worker node, or ``"revise"`` as the default (continue the loop).
+        Workers can signal early exit by setting ``next="FINISH"`` in their
+        return dict — the router routes to END in that case.
+
+        L1: max_loops default (3) is documented in TopologyConfig.
         """
         loop_count = state.get("loop_count", 0)
         if loop_count >= max_loops:

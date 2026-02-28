@@ -160,6 +160,12 @@ async def init_db(
 
     Returns:
         The initialised ``AsyncEngine``.
+
+    DB-L3 NOTE: SQLite version compatibility is not validated here.
+    WAL mode (used by this module) requires SQLite >= 3.7.0 (released 2010).
+    aiosqlite ships its own SQLite on most platforms, so the minimum version
+    is effectively guaranteed.  If deploying on a system with a system-provided
+    SQLite, consider adding a check via ``SELECT sqlite_version()``.
     """
     engine = get_engine(db_path, echo=echo)
     get_session_factory(engine)
@@ -177,10 +183,18 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
 
         @app.get("/threads")
         async def list_threads(db: AsyncSession = Depends(get_db)): ...
+
+    DB-M3: The ``async with factory() as session`` context manager already
+    handles rollback on exception and close on exit.  We wrap in try/finally
+    to ensure ``session.close()`` is called even if the generator is abandoned
+    mid-stream (e.g. client disconnect before the generator resumes).
     """
     factory = get_session_factory()
     async with factory() as session:
-        yield session
+        try:
+            yield session
+        finally:
+            await session.close()
 
 
 async def verify_wal_mode(engine: AsyncEngine) -> str:

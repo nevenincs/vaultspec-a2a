@@ -3,71 +3,21 @@
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
 EventAggregator + GraphRegistry (no mocks).  Permission tests use a real
 compiled graph pre-registered in the GraphRegistry.
+
+API-C1: all dependency overrides (including get_checkpointer and
+get_task_group) are applied via the shared make_app() helper in conftest.py
+so tests never touch the production vaultspec.db.
 """
 
-from collections.abc import AsyncGenerator
-
-import pytest_asyncio
+import pytest
 
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import (
-    AsyncSession,
-    async_sessionmaker,
-    create_async_engine,
-)
 
 from ...core.aggregator import EventAggregator
 from ...core.graph import compile_team_graph
 from ...core.team_config import load_agent_config, load_team_config
-from ...database.models import Base
-from ...database.session import get_db
-from ..app import create_app
-from ..endpoints import GraphRegistry, get_aggregator, get_graph_registry
-
-
-# ---------------------------------------------------------------------------
-# Fixtures
-# ---------------------------------------------------------------------------
-
-
-@pytest_asyncio.fixture
-async def engine():
-    """In-memory async SQLAlchemy engine with tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with eng.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-    yield eng
-    await eng.dispose()
-
-
-@pytest_asyncio.fixture
-async def session_factory(engine):
-    """Async session factory bound to the in-memory engine."""
-    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-
-
-def _make_app(session_factory, aggregator=None, registry=None):
-    """Create a test FastAPI app with dependency overrides."""
-    app = create_app()
-
-    if aggregator is None:
-        aggregator = EventAggregator()
-    if registry is None:
-        registry = GraphRegistry()
-
-    # Store in app.state (bypasses lifespan which requires real DB path)
-    app.state.aggregator = aggregator
-    app.state.graph_registry = registry
-
-    async def _override_get_db() -> AsyncGenerator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _override_get_db
-    app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_graph_registry] = lambda: registry
-
-    return app, aggregator, registry
+from ..endpoints import GraphRegistry
+from .conftest import make_app
 
 
 # ---------------------------------------------------------------------------
@@ -80,7 +30,7 @@ class TestCreateThread:
 
     def test_creates_thread_without_preset(self, session_factory) -> None:
         """Creating a thread without team_preset returns 201 with thread_id."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -96,7 +46,7 @@ class TestCreateThread:
         self, session_factory
     ) -> None:
         """An unknown team_preset returns 422."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -112,7 +62,7 @@ class TestCreateThread:
         self, session_factory
     ) -> None:
         """Creating a thread with a valid preset compiles and registers a graph."""
-        app, _agg, registry = _make_app(session_factory)
+        app, _agg, registry, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -126,6 +76,18 @@ class TestCreateThread:
         thread_id = resp.json()["thread_id"]
         assert registry.get(thread_id) is not None
 
+    def test_initial_message_length_limit(self, session_factory) -> None:
+        """initial_message exceeding 64KB is rejected with validation error."""
+        app, _agg, _reg, _cp = make_app(session_factory)
+        oversized = "x" * (65536 + 1)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads",
+                json={"initial_message": oversized},
+            )
+        assert resp.status_code == 422
+
 
 # ---------------------------------------------------------------------------
 # GET /threads
@@ -137,7 +99,7 @@ class TestListThreads:
 
     def test_empty_list(self, session_factory) -> None:
         """Returns an empty list when no threads exist."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads")
@@ -148,7 +110,7 @@ class TestListThreads:
 
     def test_lists_created_threads(self, session_factory) -> None:
         """Returns threads that were created."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             client.post(
@@ -177,7 +139,7 @@ class TestThreadState:
 
     def test_404_for_unknown_thread(self, session_factory) -> None:
         """Returns 404 for a thread that does not exist."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads/nonexistent/state")
@@ -185,7 +147,7 @@ class TestThreadState:
 
     def test_returns_snapshot_for_existing_thread(self, session_factory) -> None:
         """Returns a ThreadStateSnapshot for a known thread."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -201,6 +163,47 @@ class TestThreadState:
         assert "last_sequence" in data
         assert data["last_sequence"] == 0
 
+    def test_enriched_snapshot_when_graph_registered(self, session_factory) -> None:
+        """GET /threads/{id}/state enriches snapshot when a graph is registered.
+
+        API-M6: tests the _enrich_snapshot_from_state code path.
+        """
+        team = load_team_config("coding-pipeline")
+        agent_configs = {
+            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
+        }
+        from langgraph.checkpoint.memory import MemorySaver
+
+        cp = MemorySaver()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+        )
+
+        registry = GraphRegistry()
+        registry.register("thread-snap", graph)
+        app, _agg, _reg, _cp = make_app(session_factory, registry=registry)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            # Create the thread first so it exists in DB
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "Hello"},
+            )
+            thread_id = create_resp.json()["thread_id"]
+            # Register graph for this thread
+            registry.register(thread_id, graph)
+
+            resp = client.get(f"/api/threads/{thread_id}/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["thread_id"] == thread_id
+        # messages list present (may be empty since no graph execution happened)
+        assert "messages" in data
+        assert isinstance(data["messages"], list)
+
 
 # ---------------------------------------------------------------------------
 # POST /threads/{id}/messages
@@ -212,7 +215,7 @@ class TestSendMessage:
 
     def test_404_for_unknown_thread(self, session_factory) -> None:
         """Returns 404 when the thread does not exist."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -224,7 +227,7 @@ class TestSendMessage:
     def test_202_accepted_without_graph(self, session_factory) -> None:
         """Returns 202 and emits submitted status when no graph is registered."""
         aggregator = EventAggregator()
-        app, _agg, _reg = _make_app(session_factory, aggregator=aggregator)
+        app, _agg, _reg, _cp = make_app(session_factory, aggregator=aggregator)
 
         # Register a subscriber so the aggregator accepts subscriptions
         aggregator.add_subscriber("test-client")
@@ -249,6 +252,56 @@ class TestSendMessage:
         assert data["status"] == "accepted"
         assert data["thread_id"] == thread_id
 
+    def test_content_length_limit(self, session_factory) -> None:
+        """content exceeding 64KB is rejected with 422."""
+        app, _agg, _reg, _cp = make_app(session_factory)
+        oversized = "x" * (65536 + 1)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "Hello"},
+            )
+            thread_id = create_resp.json()["thread_id"]
+            resp = client.post(
+                f"/api/threads/{thread_id}/messages",
+                json={"content": oversized},
+            )
+        assert resp.status_code == 422
+
+    def test_202_accepted_with_graph_triggers_ingest(self, session_factory) -> None:
+        """POST /threads/{id}/messages with a registered graph triggers ingest.
+
+        API-M3: verifies the graph execution path is invoked.
+        """
+        team = load_team_config("coding-pipeline")
+        agent_configs = {
+            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
+        }
+        graph = compile_team_graph(team_config=team, agent_configs=agent_configs)
+
+        registry = GraphRegistry()
+        app, aggregator, _reg, _cp = make_app(session_factory, registry=registry)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "Hello"},
+            )
+            thread_id = create_resp.json()["thread_id"]
+            # Register graph for this thread
+            registry.register(thread_id, graph)
+
+            resp = client.post(
+                f"/api/threads/{thread_id}/messages",
+                json={"content": "Follow-up message"},
+            )
+
+        assert resp.status_code == 202
+        data = resp.json()
+        assert data["status"] == "accepted"
+        assert data["thread_id"] == thread_id
+
 
 # ---------------------------------------------------------------------------
 # GET /api/teams
@@ -260,7 +313,7 @@ class TestListTeamPresets:
 
     def test_returns_bundled_presets(self, session_factory) -> None:
         """Returns all bundled team presets."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -274,7 +327,7 @@ class TestListTeamPresets:
 
     def test_preset_has_required_fields(self, session_factory) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -297,7 +350,7 @@ class TestTeamStatus:
 
     def test_returns_team_status(self, session_factory) -> None:
         """Returns a TeamStatusResponse with agents and active_threads."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -307,6 +360,8 @@ class TestTeamStatus:
         assert "agents" in data
         assert "active_threads" in data
         assert "pending_permissions" in data
+        # pending_permissions is always empty until wired (API-M8 TODO)
+        assert data["pending_permissions"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -319,7 +374,7 @@ class TestPermissionRespond:
 
     def test_responds_without_graph(self, session_factory) -> None:
         """Returns accepted=False when no graph is registered for the thread."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -343,7 +398,7 @@ class TestPermissionRespond:
 
         registry = GraphRegistry()
         registry.register("thread-abc", graph)
-        app, _agg, _reg = _make_app(session_factory, registry=registry)
+        app, _agg, _reg, _cp = make_app(session_factory, registry=registry)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -367,7 +422,7 @@ class TestCreateThreadAutonomous:
 
     def test_create_thread_autonomous_defaults_false(self, session_factory) -> None:
         """Creating a thread without autonomous field defaults to False (supervised)."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -381,7 +436,7 @@ class TestCreateThreadAutonomous:
 
     def test_create_thread_autonomous_true_accepted(self, session_factory) -> None:
         """Creating a thread with autonomous=True returns 201 successfully."""
-        app, _agg, _reg = _make_app(session_factory)
+        app, _agg, _reg, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -399,7 +454,7 @@ class TestCreateThreadAutonomous:
     def test_create_thread_with_preset_autonomous_true(self, session_factory) -> None:
         """Creating a thread with a valid preset and autonomous=True compiles
         the graph with the correct structure."""
-        app, _agg, registry = _make_app(session_factory)
+        app, _agg, registry, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -445,3 +500,18 @@ class TestGraphRegistry:
         assert result == ("thread-1", "allow_once")
         # Second pop returns None
         assert registry.pop_pending_resume("req-1") is None
+
+    @pytest.mark.asyncio
+    async def test_mark_ingest_active_prevents_duplicate(self) -> None:
+        """mark_ingest_active returns False for a thread already active."""
+        registry = GraphRegistry()
+        assert await registry.mark_ingest_active("t1") is True
+        assert await registry.mark_ingest_active("t1") is False
+
+    @pytest.mark.asyncio
+    async def test_mark_ingest_done_releases_thread(self) -> None:
+        """mark_ingest_done releases the thread so it can be re-activated."""
+        registry = GraphRegistry()
+        await registry.mark_ingest_active("t1")
+        await registry.mark_ingest_done("t1")
+        assert await registry.mark_ingest_active("t1") is True

@@ -35,7 +35,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp
 
-from .instrumentation import get_tracer
+from .instrumentation import _SDK_DISABLED, get_tracer
 
 
 __all__ = [
@@ -46,7 +46,20 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_tracer = get_tracer(__name__)
+# TEL-H5: _tracer is initialised lazily on first use via _get_tracer() to
+# ensure it is created after configure_telemetry() has run and the real
+# TracerProvider is installed.  A module-level tracer would bind to the
+# no-op provider if this module is imported before configure_telemetry().
+_tracer: trace.Tracer | None = None
+
+
+def _get_tracer() -> trace.Tracer:
+    """Return the module tracer, creating it lazily on first call."""
+    global _tracer  # noqa: PLW0603
+    if _tracer is None:
+        _tracer = get_tracer(__name__)
+    return _tracer
+
 
 # Paths that generate too much noise if traced at span level.
 _EXCLUDED_PATHS: frozenset[str] = frozenset(
@@ -112,7 +125,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
         span_name = f"{request.method} {request.url.path}"
 
         try:
-            with _tracer.start_as_current_span(
+            with _get_tracer().start_as_current_span(
                 span_name,
                 kind=SpanKind.SERVER,
                 context=ctx,
@@ -172,7 +185,13 @@ async def ws_span(
             aggregator.subscribe(tid, send_fn)
         ```
     """
-    with _tracer.start_as_current_span(
+    # TEL-M1: when the OTel SDK is explicitly disabled, skip real span creation
+    # and yield a no-op span to avoid unnecessary overhead.
+    if _SDK_DISABLED:
+        yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
+        return
+
+    with _get_tracer().start_as_current_span(
         operation,
         kind=SpanKind.SERVER,
     ) as span:

@@ -23,8 +23,7 @@ from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
-import anyio
-
+from anyio.abc import TaskGroup
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -175,9 +174,9 @@ def get_checkpointer(request: Request) -> AsyncSqliteSaver:
     return checkpointer
 
 
-def get_task_group(request: Request) -> anyio.abc.TaskGroup:
+def get_task_group(request: Request) -> TaskGroup:
     """FastAPI dependency for the anyio task group (ADR-007 §5)."""
-    tg: anyio.abc.TaskGroup | None = getattr(request.app.state, "task_group", None)
+    tg: TaskGroup | None = getattr(request.app.state, "task_group", None)
     if tg is None:
         raise RuntimeError("Task group not initialised in app state")
     return tg
@@ -188,9 +187,9 @@ async def get_services(
     aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
     registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
     checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),  # noqa: B008
-    tg: anyio.abc.TaskGroup = Depends(get_task_group),  # noqa: B008
+    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
 ) -> tuple[
-    AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, anyio.abc.TaskGroup
+    AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, TaskGroup
 ]:
     """Dependency for bundling all required services into a single injection point."""
     return db, aggregator, registry, checkpointer, tg
@@ -200,8 +199,8 @@ async def get_message_services(
     db: AsyncSession = Depends(get_db),  # noqa: B008
     aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
     registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
-    tg: anyio.abc.TaskGroup = Depends(get_task_group),  # noqa: B008
-) -> tuple[AsyncSession, EventAggregator, GraphRegistry, anyio.abc.TaskGroup]:
+    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
+) -> tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup]:
     """Dependency for bundling services needed by message endpoints."""
     return db, aggregator, registry, tg
 
@@ -219,7 +218,7 @@ async def create_thread_endpoint(  # noqa: PLR0915
         EventAggregator,
         GraphRegistry,
         AsyncSqliteSaver,
-        anyio.abc.TaskGroup,
+        TaskGroup,
     ] = Depends(get_services),
 ) -> CreateThreadResponse:
     """Create a new orchestration thread and compile its LangGraph graph.
@@ -342,6 +341,7 @@ async def create_thread_endpoint(  # noqa: PLR0915
             checkpointer=checkpointer,
             supervisor_agent_config=supervisor_config,
             workspace_root=ws_root,
+            autonomous=body.autonomous,
         )
         registry.register(thread.id, graph)
         aggregator.register_graph(graph)
@@ -594,7 +594,7 @@ async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
     services: tuple[
-        AsyncSession, EventAggregator, GraphRegistry, anyio.abc.TaskGroup
+        AsyncSession, EventAggregator, GraphRegistry, TaskGroup
     ] = Depends(get_message_services),
 ) -> dict[str, str]:
     """Send a user message into an existing thread.
@@ -748,7 +748,7 @@ async def respond_to_permission_endpoint(
     body: PermissionResponseRequest,
     aggregator: EventAggregator = Depends(get_aggregator),  # noqa: B008
     registry: GraphRegistry = Depends(get_graph_registry),  # noqa: B008
-    tg: anyio.abc.TaskGroup = Depends(get_task_group),  # noqa: B008
+    tg: TaskGroup = Depends(get_task_group),  # noqa: B008
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
 

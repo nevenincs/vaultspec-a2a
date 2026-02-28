@@ -5,6 +5,7 @@ export type {
   ThreadMessage,
   ThreadToolCall,
   ThreadArtifact,
+  StreamItem,
 } from './agent-state.svelte';
 export { teamState, TeamStateStore } from './team-state.svelte';
 export { permissionQueue, PermissionQueueStore } from './permission-queue.svelte';

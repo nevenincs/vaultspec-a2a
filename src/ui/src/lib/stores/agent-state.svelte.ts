@@ -54,6 +54,11 @@ export interface ThreadArtifact {
   complete: boolean;
 }
 
+export interface StreamItem {
+  kind: 'message' | 'tool' | 'artifact';
+  id: string;
+}
+
 export class ThreadState {
   lifecycleState: AgentLifecycleState | null = $state(null);
   nodeName: string | null = $state(null);
@@ -63,6 +68,8 @@ export class ThreadState {
   artifacts = new SvelteMap<string, ThreadArtifact>();
   plan: PlanEntry[] = $state([]);
   lastSequence: number = $state(-1);
+  /** Chronological insertion order across messages, tool calls, and artifacts. */
+  streamItems: StreamItem[] = $state([]);
 }
 
 // ---------------------------------------------------------------------------
@@ -195,6 +202,19 @@ export class AgentStateStore {
     // Restore sequence
     thread.lastSequence = snapshot.last_sequence;
 
+    // Reconstruct stream order from snapshot (messages first, then tools, then artifacts)
+    thread.streamItems = [
+      ...snapshot.messages.map((m) => ({ kind: 'message' as const, id: m.message_id })),
+      ...snapshot.tool_calls.map((tc) => ({
+        kind: 'tool' as const,
+        id: tc.tool_call_id,
+      })),
+      ...snapshot.artifacts.map((a) => ({
+        kind: 'artifact' as const,
+        id: a.artifact_id,
+      })),
+    ];
+
     // Restore agent state from first agent if available
     if (snapshot.agents.length > 0) {
       thread.lifecycleState = snapshot.agents[0].state;
@@ -226,6 +246,7 @@ export class AgentStateStore {
       };
       this.#messageAccumulators.set(event.message_id, acc);
       thread.messages.push(acc);
+      thread.streamItems.push({ kind: 'message', id: event.message_id });
     }
     acc.content += event.content;
     if (event.finish_reason) {
@@ -246,6 +267,7 @@ export class AgentStateStore {
       };
       this.#messageAccumulators.set(event.message_id, acc);
       thread.messages.push(acc);
+      thread.streamItems.push({ kind: 'message', id: event.message_id });
     }
     acc.content += event.content;
   }
@@ -259,6 +281,7 @@ export class AgentStateStore {
       locations: [...event.locations],
       content: [...event.content],
     });
+    thread.streamItems.push({ kind: 'tool', id: event.tool_call_id });
   }
 
   #applyToolCallUpdate(thread: ThreadState, event: ToolCallUpdateEvent): void {
@@ -296,6 +319,7 @@ export class AgentStateStore {
         content: event.content,
         complete: event.last_chunk,
       });
+      thread.streamItems.push({ kind: 'artifact', id: event.artifact_id });
     }
   }
 }

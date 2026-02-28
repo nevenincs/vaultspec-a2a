@@ -9,12 +9,22 @@ to avoid blocking the Uvicorn event loop (ADR-008).
 
 import asyncio
 import logging
+import re
 
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
 from ..core.exceptions import MergeConflictError, WorkspaceError
+
+
+# Validates agent_id: must start with alphanumeric, contain only [a-zA-Z0-9_-].
+# Prevents path traversal (../) and git flag injection (--flag).
+_AGENT_ID_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_-]*$")
+
+# Validates branch names: alphanumeric, hyphens, underscores, forward slashes.
+# Prevents shell injection and git flag injection.
+_BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 
 
 __all__ = [
@@ -26,6 +36,9 @@ __all__ = [
 log = logging.getLogger(__name__)
 
 # Global mutex serializing destructive repo-wide git operations (ADR-001 §2).
+# M37/L22: asyncio.Lock() at module level is safe in Python 3.10+ (PEP 641);
+# the deprecation warning was removed before Python 3.13.  No cross-loop risk
+# since the orchestrator runs a single-process uvicorn event loop.
 _git_mutex = asyncio.Lock()
 
 
@@ -137,7 +150,25 @@ class GitManager:
         The global mutex is held for the duration of the checkout to
         prevent concurrent ``git worktree add`` from corrupting the
         ``.git`` index.
+
+        Raises ``WorkspaceError`` if *agent_id* or *base_branch* contain
+        characters that could be used for path traversal or git flag injection.
         """
+        # --- Security: validate inputs before they touch the filesystem (C5) --
+        if not _AGENT_ID_RE.match(agent_id):
+            msg = (
+                f"agent_id {agent_id!r} is invalid. "
+                "Must match ^[a-zA-Z0-9][a-zA-Z0-9_-]*$"
+            )
+            raise WorkspaceError(msg)
+        if not _BRANCH_NAME_RE.match(base_branch):
+            msg = (
+                f"base_branch {base_branch!r} is invalid. "
+                "Must match ^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$"
+            )
+            raise WorkspaceError(msg)
+        # ----------------------------------------------------------------------
+
         branch_name = f"agent/{agent_id}"
         worktree_path = self._root / "agent" / agent_id
 
@@ -167,16 +198,33 @@ class GitManager:
 
         The global mutex is held to prevent concurrent prune/remove
         from corrupting the ``.git/worktrees/`` registry.
+
+        Raises:
+            ValueError: If *worktree_path* is not under the repository root.
         """
+        # H12: validate that worktree_path is confined to the repo root to
+        # prevent path traversal (e.g. "../../../etc") or git flag injection
+        # (e.g. "--force").
+        resolved = worktree_path.resolve()
+        if not resolved.is_relative_to(self._root.resolve()):
+            raise ValueError(
+                f"Worktree path {worktree_path} is not under repo root {self._root}"
+            )
         async with _git_mutex:
             await asyncio.shield(
-                self._run_git("worktree", "remove", str(worktree_path), "--force")
+                self._run_git("worktree", "remove", str(resolved), "--force")
             )
             await asyncio.shield(self._run_git("worktree", "prune"))
         log.info("Removed worktree at %s", worktree_path)
 
     async def list_worktrees(self) -> list[WorktreeInfo]:
-        """List all active worktrees with metadata."""
+        """List all active worktrees with metadata.
+
+        ``git worktree list --porcelain`` always lists the main worktree first.
+        The main worktree is identified by:
+        - Being the first entry in the output (H20 fix: most reliable heuristic)
+        - OR having the ``bare`` attribute (bare clones only)
+        """
         raw = await self._run_git("worktree", "list", "--porcelain")
         if not raw:
             return []
@@ -185,24 +233,32 @@ class GitManager:
         current_path: Path | None = None
         current_sha = ""
         current_branch = ""
-        is_main = False
+        is_bare = False
+        entry_index = 0
 
         for line in raw.splitlines():
             if line.startswith("worktree "):
-                # Flush previous entry
+                # Flush previous entry.
+                # M31/H20: increment entry_index BEFORE the flush so that
+                # ``entry_index == 1`` correctly identifies the first (main)
+                # worktree when we're starting to parse the second entry.
+                entry_index += 1
                 if current_path is not None:
                     worktrees.append(
                         WorktreeInfo(
                             path=current_path,
                             branch=current_branch,
                             head_sha=current_sha,
-                            is_main=is_main,
+                            # H20: first entry (entry_index == 1 at flush time
+                            # means we just started entry 2, so we're flushing
+                            # entry 1 — the main worktree).
+                            is_main=entry_index == 1 or is_bare,
                         )
                     )
                 current_path = Path(line.split(" ", 1)[1])
                 current_sha = ""
                 current_branch = ""
-                is_main = False
+                is_bare = False
             elif line.startswith("HEAD "):
                 current_sha = line.split(" ", 1)[1]
             elif line.startswith("branch "):
@@ -210,16 +266,17 @@ class GitManager:
                 ref = line.split(" ", 1)[1]
                 current_branch = ref.removeprefix("refs/heads/")
             elif line == "bare":
-                is_main = True
+                is_bare = True
 
-        # Flush last entry
+        # Flush last entry (M31: handles single-worktree edge case correctly)
         if current_path is not None:
             worktrees.append(
                 WorktreeInfo(
                     path=current_path,
                     branch=current_branch,
                     head_sha=current_sha,
-                    is_main=is_main,
+                    # Single worktree: entry_index == 1; multi-worktree: > 1 → not main
+                    is_main=entry_index == 1 or is_bare,
                 )
             )
 
@@ -238,6 +295,11 @@ class GitManager:
 
         Uses ``git merge-tree`` (available since Git 2.38) for a
         zero-side-effect simulation of merging into *target_branch*.
+
+        M30: Callers must hold ``_git_mutex`` to prevent TOCTOU races
+        between the three ``rev-parse`` calls and any concurrent repo
+        mutations.  ``merge_worktree`` acquires the mutex before calling
+        this method (H21 fix).
         """
         # Resolve the worktree's current branch
         wt_branch = await self._run_git(
@@ -278,15 +340,17 @@ class GitManager:
             "rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path
         )
 
-        # Pre-flight conflict check
-        if await self.has_conflicts(worktree_path, target_branch):
-            msg = (
-                f"Merge of {wt_branch} into {target_branch} would produce "
-                f"conflicts. Manual resolution required."
-            )
-            raise MergeConflictError(msg)
-
         async with _git_mutex:
+            # H21: move the pre-flight conflict check inside the mutex to prevent
+            # a TOCTOU race where another task modifies the repo between the
+            # has_conflicts() check and the actual merge operation.
+            if await self.has_conflicts(worktree_path, target_branch):
+                msg = (
+                    f"Merge of {wt_branch} into {target_branch} would produce "
+                    f"conflicts. Manual resolution required."
+                )
+                raise MergeConflictError(msg)
+
             # shield() prevents task cancellation from leaving the repo
             # in a half-merged state (research finding: cancellation safety).
             await asyncio.shield(self._run_git("checkout", target_branch))
@@ -307,6 +371,7 @@ class GitManager:
                 )
 
             result_sha = await asyncio.shield(self._run_git("rev-parse", "HEAD"))
+        # End of _git_mutex block
 
         log.info(
             "Merged %s into %s (strategy=%s) -> %s",

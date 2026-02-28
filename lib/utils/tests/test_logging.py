@@ -2,9 +2,26 @@
 
 import logging
 
+from collections.abc import Generator
+
+import pytest
+
 from ...core import Settings
 from ..enums import Environment, LogLevel
 from ..logging import JSONFormatter, setup_logging
+
+
+@pytest.fixture(autouse=True)
+def _clean_root_logger() -> Generator[None]:
+    """Remove all root logger handlers before and after each test.
+
+    Prevents cross-test pollution from setup_logging adding handlers
+    that accumulate across tests (H29 fix).
+    """
+    root = logging.getLogger()
+    root.handlers.clear()
+    yield
+    root.handlers.clear()
 
 
 def test_setup_logging_json_format_in_production() -> None:

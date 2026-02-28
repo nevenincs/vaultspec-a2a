@@ -18,12 +18,13 @@ Discovery order for team configs:
 
 import tomllib
 
+from enum import StrEnum
 from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
 from ..utils.enums import Model, Provider
-from .exceptions import AgentConfigNotFoundError, TeamConfigNotFoundError
+from .exceptions import AgentConfigNotFoundError, ConfigError, TeamConfigNotFoundError
 
 
 __all__ = [
@@ -38,11 +39,24 @@ __all__ = [
     "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
     "TopologyConfig",
+    "TopologyType",
     "WorkerOverrideConfig",
     "WorkerRef",
     "load_agent_config",
     "load_team_config",
 ]
+
+
+class TopologyType(StrEnum):
+    """Supported graph topology types.
+
+    M5: enum membership instead of string comparison.
+    """
+
+    STAR = "star"
+    PIPELINE = "pipeline"
+    PIPELINE_LOOP = "pipeline_loop"
+
 
 # Bundled preset directories, relative to this file.
 _PRESET_AGENTS_DIR = Path(__file__).parent / "presets" / "agents"
@@ -63,7 +77,21 @@ class AgentCapabilitiesConfig(BaseModel):
 
 
 class AgentPermissionsConfig(BaseModel):
-    """LangGraph interrupt_before configuration for an agent (ADR-013 §2.7)."""
+    """Per-agent approval requirements for ACP method calls (ADR-013 §2.7).
+
+    M4 note: ``require_approval_for`` entries are ACP method names
+    (e.g. ``"fs.writeTextFile"``) that must match the method names sent by the
+    ACP subprocess at runtime.  Because the full set of ACP tool names is
+    determined by the agent binary — not by a static schema known at config-load
+    time — pre-validation against a fixed allowlist is not practical.  Invalid
+    entries are silently ignored by the runtime dispatch layer; operators should
+    consult the agent's ACP capability documentation to confirm valid names.
+
+    Note: ``interrupt_before`` is no longer used. The graph always compiles
+    with ``interrupt_before=[]``; approval gating is handled by the
+    ``permission_callback`` closure wired into each worker node at compile
+    time (see ``lib/core/graph.py``).
+    """
 
     require_approval_for: list[str] = Field(default_factory=list)
 
@@ -120,11 +148,14 @@ class AgentConfig(BaseModel):
             Validated ``AgentConfig`` instance.
 
         Raises:
+            ConfigError: If the file is not valid TOML (M8: domain exception).
             pydantic.ValidationError: If the TOML data fails schema validation.
-            tomllib.TOMLDecodeError: If the file is not valid TOML.
         """
-        with path.open("rb") as f:
-            data = tomllib.load(f)
+        try:
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"Invalid TOML in agent config {path}: {exc}") from exc
         return cls.model_validate(data["agent"])
 
 
@@ -157,25 +188,25 @@ class TopologyConfig(BaseModel):
       triggers a conditional back-edge.
     """
 
-    type: str  # "star" | "pipeline" | "pipeline_loop"
+    # M5: use TopologyType enum for membership validation instead of string comparison
+    type: TopologyType
     order: list[str] = Field(default_factory=list)
     loop_node: str | None = None
-    max_loops: int = 3
+    # M7: max_loops range validated; must be between 1 and 100 inclusive
+    max_loops: int = Field(default=3, ge=1, le=100)
 
     @model_validator(mode="after")
     def validate_topology(self) -> "TopologyConfig":
         """Validate topology-specific required fields."""
-        if self.type not in ("star", "pipeline", "pipeline_loop"):
-            raise ValueError(
-                f"topology.type must be 'star', 'pipeline', or 'pipeline_loop', "
-                f"got: {self.type!r}"
-            )
-        if self.type in ("pipeline", "pipeline_loop") and not self.order:
+        if (
+            self.type in (TopologyType.PIPELINE, TopologyType.PIPELINE_LOOP)
+            and not self.order
+        ):
             raise ValueError(f"topology.order is required for type={self.type!r}")
-        if self.type == "pipeline_loop" and self.loop_node is None:
+        if self.type == TopologyType.PIPELINE_LOOP and self.loop_node is None:
             raise ValueError("topology.loop_node is required for type='pipeline_loop'")
         if (
-            self.type == "pipeline_loop"
+            self.type == TopologyType.PIPELINE_LOOP
             and self.loop_node is not None
             and self.loop_node not in self.order
         ):
@@ -238,11 +269,14 @@ class TeamConfig(BaseModel):
             Validated ``TeamConfig`` instance.
 
         Raises:
+            ConfigError: If the file is not valid TOML (M8: domain exception).
             pydantic.ValidationError: If the TOML data fails schema validation.
-            tomllib.TOMLDecodeError: If the file is not valid TOML.
         """
-        with path.open("rb") as f:
-            data = tomllib.load(f)
+        try:
+            with path.open("rb") as f:
+                data = tomllib.load(f)
+        except tomllib.TOMLDecodeError as exc:
+            raise ConfigError(f"Invalid TOML in team config {path}: {exc}") from exc
         return cls.model_validate(data["team"])
 
 

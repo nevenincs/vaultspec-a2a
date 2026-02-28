@@ -83,10 +83,12 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
             body.append(msg)
 
     # Keep enough recent messages to stay under budget after adding the
-    # system prefix + a summary placeholder.
+    # system prefix + a summary placeholder.  Clamp to zero so that when
+    # system messages alone exceed max_tokens the budget doesn't go negative
+    # and confuse the kept-message selection loop (H5 fix).
     summary_overhead = 50  # tokens for the inserted summary message
     system_tokens = estimate_tokens(system_msgs)
-    budget = max_tokens - system_tokens - summary_overhead
+    budget = max(0, max_tokens - system_tokens - summary_overhead)
 
     kept: list[BaseMessage] = []
     kept_tokens = 0

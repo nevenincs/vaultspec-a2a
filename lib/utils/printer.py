@@ -7,9 +7,11 @@ from typing import Any
 from rich.console import Console
 
 
-# Create a global console instance. It auto-detects TTY capabilities.
-# We explicitly write to stdout for intentional user-facing output.
-console = Console(file=sys.stdout)
+__all__ = ["Printer"]
+
+# L18/L19: underscore-prefixed singleton (internal implementation detail).
+# Consumers use Printer.success / Printer.error etc., not console directly.
+_console = Console(file=sys.stdout)
 
 
 class Printer:
@@ -23,34 +25,34 @@ class Printer:
     @staticmethod
     def success(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print a successful action."""
-        console.print(f"[bold green]✓[/bold green] {msg}", *args, **kwargs)
+        _console.print(f"[bold green]✓[/bold green] {msg}", *args, **kwargs)
 
     @staticmethod
     def error(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print a user-facing error."""
-        console.print(f"[bold red]✗[/bold red] {msg}", *args, **kwargs)
+        _console.print(f"[bold red]✗[/bold red] {msg}", *args, **kwargs)
 
     @staticmethod
     def warn(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print a warning."""
-        console.print(f"[bold yellow]![/bold yellow] {msg}", *args, **kwargs)
+        _console.print(f"[bold yellow]![/bold yellow] {msg}", *args, **kwargs)
 
     @staticmethod
     def info(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print informational output."""
-        console.print(f"[bold blue]i[/bold blue] {msg}", *args, **kwargs)
+        _console.print(f"[bold blue]i[/bold blue] {msg}", *args, **kwargs)
 
     @staticmethod
     def step(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print a workflow step transition."""
-        console.print(f"[bold cyan]→[/bold cyan] {msg}", *args, **kwargs)
+        _console.print(f"[bold cyan]→[/bold cyan] {msg}", *args, **kwargs)
 
     @staticmethod
     def debug(msg: str, *args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Print debug output."""
-        console.print(f"[dim]d[/dim] [dim]{msg}[/dim]", *args, **kwargs)
+        _console.print(f"[dim]d[/dim] [dim]{msg}[/dim]", *args, **kwargs)
 
     @staticmethod
     def print(*args: Any, **kwargs: Any) -> None:  # noqa: ANN401
         """Directly expose the rich print functionality for raw styled output."""
-        console.print(*args, **kwargs)
+        _console.print(*args, **kwargs)

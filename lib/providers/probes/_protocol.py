@@ -53,9 +53,7 @@ async def _spawn_acp_process(
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             **kwargs,  # type: ignore[arg-type]
         )
-    return await asyncio.create_subprocess_exec(
-        command[0], *command[1:], **kwargs  # type: ignore[arg-type]
-    )
+    return await asyncio.create_subprocess_exec(command[0], *command[1:], **kwargs)
 
 
 async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
@@ -72,7 +70,11 @@ async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
     if sys.platform == "win32":
         try:
             killer = await asyncio.create_subprocess_exec(
-                "taskkill", "/T", "/F", "/PID", str(process.pid),
+                "taskkill",
+                "/T",
+                "/F",
+                "/PID",
+                str(process.pid),
                 stdout=asyncio.subprocess.DEVNULL,
                 stderr=asyncio.subprocess.DEVNULL,
             )
@@ -146,13 +148,15 @@ class _ProbeSession:
             "method": method,
             "params": params,
         }
-        assert self.stdin is not None
+        if self.stdin is None:
+            raise RuntimeError("send() called before process stdin was initialised")
         self.stdin.write(f"{json.dumps(req)}\n".encode())
         logger.debug("ACP TX [%d] -> %s", self.request_id, method)
         return self.request_id
 
     async def drain(self) -> None:
-        assert self.stdin is not None
+        if self.stdin is None:
+            raise RuntimeError("drain() called before process stdin was initialised")
         await self.stdin.drain()
 
     async def handle_response(self, rid: int, src: str, msg: dict) -> bool:
@@ -203,7 +207,8 @@ class _ProbeSession:
             "id": rid,
             "error": {"code": -32601, "message": f"Not implemented: {method}"},
         }
-        assert self.stdin is not None
+        if self.stdin is None:
+            raise RuntimeError("handle_server_rpc(): stdin not initialised")
         self.stdin.write(f"{json.dumps(resp)}\n".encode())
         await self.drain()
         logger.debug("ACP RX [%s] <- server RPC %s: rejected", rid, method)
@@ -224,11 +229,10 @@ class _ProbeSession:
         ] = "initialize"
         await self.drain()
 
-        assert self.stdout is not None
+        if self.stdout is None:
+            raise RuntimeError("run_loop(): stdout not initialised")
         while True:
-            line = await asyncio.wait_for(
-                self.stdout.readline(), timeout=self.timeout
-            )
+            line = await asyncio.wait_for(self.stdout.readline(), timeout=self.timeout)
             if not line:
                 self.result.error = "EOF on stdout"
                 return
@@ -270,12 +274,12 @@ async def run_probe(
 
     session = _ProbeSession(command, env, timeout, prompt)
     session.process = await _spawn_acp_process(command, env, str(Path.cwd()))
-    assert session.process.stdin is not None
-    assert session.process.stdout is not None
-    assert session.process.stderr is not None
-    session.stdin = session.process.stdin
-    session.stdout = session.process.stdout
-    session.stderr = session.process.stderr
+    proc = session.process
+    if proc.stdin is None or proc.stdout is None or proc.stderr is None:
+        raise RuntimeError("ACP subprocess streams not available after spawn")
+    session.stdin = proc.stdin
+    session.stdout = proc.stdout
+    session.stderr = proc.stderr
 
     stderr_task = asyncio.create_task(session.read_stderr())
     try:

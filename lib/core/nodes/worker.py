@@ -1,7 +1,6 @@
 """Worker node for LangGraph agent task execution."""
 
-from collections.abc import Callable, Coroutine
-from typing import Any
+from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
@@ -18,6 +17,16 @@ _CONTEXT_LIMIT = 120_000
 
 
 __all__ = ["create_worker_node"]
+
+
+class WorkerNode(Protocol):
+    """Protocol for the worker node callable with __name__ attribute."""
+
+    __name__: str
+
+    async def __call__(self, state: TeamState) -> dict[str, Any]:
+        """Execute the worker's task."""
+        ...
 
 
 def _first_option_id(options: list[dict[str, Any]]) -> str:
@@ -85,16 +94,21 @@ def create_worker_node(
     model: BaseChatModel,
     system_prompt: str,
     name: str,
-) -> Callable[[TeamState], Coroutine[Any, Any, dict[str, Any]]]:
+    autonomous: bool = False,
+) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
     If the provided model supports ACP permission handling (exposes a
-    ``permission_callback`` attribute), the callback is wired to
-    :func:`_interrupt_permission_callback` so that tool-approval requests
-    from the ACP subprocess suspend the graph and wait for a human decision.
-    The graph stores its state in the checkpointer; on resume the node
-    re-executes and each ``interrupt()`` call returns its stored approval in
-    order.
+    ``permission_callback`` attribute) and ``autonomous`` is False, the
+    callback is wired to :func:`_interrupt_permission_callback` so that
+    tool-approval requests from the ACP subprocess suspend the graph and
+    wait for a human decision.  The graph stores its state in the
+    checkpointer; on resume the node re-executes and each ``interrupt()``
+    call returns its stored approval in order.
+
+    When ``autonomous=True``, the callback is intentionally not wired.
+    AcpChatModel's else-branch auto-approves with the first option, enabling
+    headless MCP-launched runs to complete without human intervention.
 
     For models that do not have a ``permission_callback`` attribute (e.g.
     standard :class:`~langchain_core.language_models.ChatOpenAI`), the wiring
@@ -104,6 +118,7 @@ def create_worker_node(
         model:         The LangChain chat model to use for this node.
         system_prompt: The system prompt defining the worker's behaviour.
         name:          The name of the worker, added to the generated message.
+        autonomous:    When True, skip permission_callback wiring (headless).
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -121,11 +136,22 @@ def create_worker_node(
             else state
         )
         messages = [SystemMessage(content=system_prompt), *working_state["messages"]]
-        # Wire interrupt-based permission approval for ACP-backed models.
-        # Duck-typed: any model exposing permission_callback is supported.
-        if hasattr(model, "permission_callback"):
-            model.permission_callback = _interrupt_permission_callback  # type: ignore[attr-defined]
-        response = await model.ainvoke(messages)
+        # In supervised mode: wire interrupt-based approval for ACP-backed models.
+        # Use model_copy() to avoid mutating the shared model instance — the same
+        # AcpChatModel may be reused across concurrent graph invocations, and
+        # in-place mutation would cause permission_callback cross-contamination
+        # (H4 fix).  model_copy() is a shallow copy that shares subprocess state
+        # but isolates the callback reference on this invocation's copy.
+        # In autonomous mode: leave permission_callback unwired; AcpChatModel's
+        # else-branch auto-approves with the first option.
+        effective_model = model
+        if not autonomous and hasattr(model, "permission_callback"):
+            # Type checker can't narrow after hasattr, but model_copy is
+            # a Pydantic BaseModel method
+            effective_model = model.model_copy(
+                update={"permission_callback": _interrupt_permission_callback}
+            )
+        response = await effective_model.ainvoke(messages)
         # Attribute the message to the worker so the supervisor can route correctly.
         response.name = name
         return {"messages": [response]}

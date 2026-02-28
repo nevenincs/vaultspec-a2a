@@ -76,22 +76,15 @@ class TeamState(TypedDict):
     datetime objects) to satisfy the SQLite checkpointer constraint.
     """
 
-    # --- existing fields ---
-    messages: Annotated[list[BaseMessage], add_messages]
-    next: str
-
-    # --- plan: full-replacement on each supervisor cycle ---
-    current_plan: Annotated[list[dict[str, str]], _replace_plan]
+    # L5: keys sorted alphabetically for readability.
+    # --- routing / identification ---
+    active_agent: str
 
     # --- artifacts: append-only, deduplicated by id ---
     artifacts: Annotated[list[dict[str, str]], _append_artifacts]
 
-    # --- routing / identification ---
-    active_agent: str
-    thread_id: str
-
-    # --- token accounting: additive merge per agent ---
-    token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]
+    # --- plan: full-replacement on each supervisor cycle ---
+    current_plan: Annotated[list[dict[str, str]], _replace_plan]
 
     # --- pipeline_loop iteration guard (ADR-013 §5) ---
     # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
@@ -100,4 +93,16 @@ class TeamState(TypedDict):
     # Workers signal early loop exit by returning next="FINISH"; otherwise the loop
     # continues ("revise" is the default).
     # NotRequired because non-pipeline_loop teams never set this key.
+    # M6: type is int (>= 0); negative values are prevented at write time by the
+    # _loop_node_with_counter wrapper which only increments, never decrements.
     loop_count: NotRequired[int]
+
+    # --- existing fields ---
+    messages: Annotated[list[BaseMessage], add_messages]
+    next: str
+
+    # --- routing / identification ---
+    thread_id: str
+
+    # --- token accounting: additive merge per agent ---
+    token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]

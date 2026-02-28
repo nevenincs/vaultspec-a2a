@@ -94,7 +94,16 @@ class ToolCallStatus(StrEnum):
 
 
 class PermissionOptionKind(StrEnum):
-    """User permission response options (mirrors ACP PermissionOption.kind)."""
+    """User permission response options (mirrors ACP PermissionOption.kind).
+
+    M12: Documented for OpenAPI schema generation.
+
+    Values:
+        ALLOW_ONCE: Allow the tool call this time only.
+        ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.
+        REJECT_ONCE: Deny the tool call this time only.
+        REJECT_ALWAYS: Deny all future invocations of this tool without prompting.
+    """
 
     ALLOW_ONCE = "allow_once"
     ALLOW_ALWAYS = "allow_always"

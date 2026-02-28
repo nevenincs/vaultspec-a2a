@@ -110,13 +110,17 @@ def discover_context_refs(
     }
     for stage, pattern in stage_patterns.items():
         resolved = pattern.replace("{tag}", feature_tag)
-        for match in sorted(workspace_root.glob(resolved)):
-            refs.append(
-                ContextRef(
-                    path=str(match.relative_to(workspace_root)),
-                    stage=stage,
-                )
-            )
+        try:
+            matches = sorted(workspace_root.glob(resolved))
+        except (OSError, UnicodeDecodeError):
+            # M9: handle encoding errors in filenames on exotic filesystems
+            continue
+        for match in matches:
+            try:
+                rel_path = str(match.relative_to(workspace_root))
+            except ValueError:
+                continue
+            refs.append(ContextRef(path=rel_path, stage=stage))
             if len(refs) >= _MAX_CONTEXT_REFS:
                 return refs
     return refs
@@ -140,7 +144,13 @@ def generate_nickname(
     Returns:
         A nickname string conforming to the slug pattern.
     """
-    short_hash = thread_id[:4]
-    if feature_tag:
-        return f"{feature_tag}-{topology}-{short_hash}"
+    # H2: Guard against empty/short thread_id producing trailing-hyphen slugs
+    # that violate _NICKNAME_PATTERN (must end with [a-z0-9]).
+    short_hash = thread_id[:4] if thread_id else "0000"
+    if not short_hash:
+        short_hash = "0000"
+    # Sanitize feature_tag: strip non-alphanumeric-hyphen chars, collapse hyphens
+    tag = feature_tag.strip("-") if feature_tag else ""
+    if tag:
+        return f"{tag}-{topology}-{short_hash}"
     return f"thread-{topology}-{short_hash}"

@@ -45,6 +45,11 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
+# M32: These module-level env var reads are intentional.  OTel SDK configuration
+# must be determined at import time so that ``get_tracer`` and ``get_meter``
+# callers at module scope (e.g. the aggregator) receive a correctly configured
+# provider.  Changing telemetry config at runtime is explicitly out of scope for
+# this service — operators restart the process to pick up new OTel settings.
 _SERVICE_NAME = os.environ.get("OTEL_SERVICE_NAME", "vaultspec-a2a")
 _SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", "0.1.0")
 _OTLP_ENDPOINT = os.environ.get("OTEL_EXPORTER_OTLP_ENDPOINT", "http://localhost:4317")

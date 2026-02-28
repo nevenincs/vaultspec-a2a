@@ -9,6 +9,7 @@ Implements the multiplexed WebSocket protocol from ADR-004 and ADR-011:
 """
 
 import asyncio
+import json
 import logging
 import time
 
@@ -20,7 +21,10 @@ from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from ..api.schemas.commands import (
+from ..core.aggregator import EventAggregator
+from ..telemetry.instrumentation import get_meter, get_tracer
+from ..telemetry.middleware import inject_trace_context, ws_span
+from .schemas.commands import (
     AgentControlCommand,
     ClientMessage,
     PermissionResponseCommand,
@@ -28,15 +32,12 @@ from ..api.schemas.commands import (
     SubscribeCommand,
     UnsubscribeCommand,
 )
-from ..api.schemas.enums import (
+from .schemas.enums import (
     AgentControlAction,
     AgentLifecycleState,
     ClientCommandType,
 )
-from ..api.schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent, ServerEvent
-from ..core.aggregator import EventAggregator
-from ..telemetry.instrumentation import get_meter, get_tracer
-from ..telemetry.middleware import inject_trace_context, ws_span
+from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent, ServerEvent
 
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,10 @@ _HEARTBEAT_INTERVAL = 30.0
 
 # ADR-011 §5: disconnect unresponsive clients after 90 seconds (3 missed heartbeats)
 _DEAD_CLIENT_TIMEOUT = 90.0
+
+# M14: maximum incoming WebSocket frame size (bytes) — reject oversized messages
+# to prevent memory exhaustion from malicious or buggy clients.
+_MAX_WS_MESSAGE_BYTES = 1 * 1024 * 1024  # 1 MiB
 
 _SERVER_VERSION = "0.1.0"
 
@@ -141,13 +146,25 @@ class ConnectionManager:
             )
             await websocket.send_json(connected.model_dump(mode="json"))
 
-            # Start heartbeat and writer tasks
-            self._heartbeat_tasks[client_id] = asyncio.create_task(
-                self._heartbeat_loop(client_id)
-            )
-            self._writer_tasks[client_id] = asyncio.create_task(
-                self._writer_loop(client_id, queue)
-            )
+            # Start heartbeat and writer tasks.
+            # H10: cross-cancel so a crash in either task cleans up both.
+            # When the writer dies (e.g. broken pipe) the heartbeat should
+            # stop too, and vice versa.
+            hb_task = asyncio.create_task(self._heartbeat_loop(client_id))
+            wr_task = asyncio.create_task(self._writer_loop(client_id, queue))
+
+            def _cancel_partner(
+                done_task: asyncio.Task,
+                other_task: asyncio.Task,
+            ) -> None:
+                if not other_task.done():
+                    other_task.cancel()
+
+            hb_task.add_done_callback(lambda t: _cancel_partner(t, wr_task))
+            wr_task.add_done_callback(lambda t: _cancel_partner(t, hb_task))
+
+            self._heartbeat_tasks[client_id] = hb_task
+            self._writer_tasks[client_id] = wr_task
 
         logger.info("WebSocket client %s connected", client_id)
         return client_id
@@ -191,8 +208,9 @@ class ConnectionManager:
         try:
             while True:
                 try:
-                    raw = await asyncio.wait_for(
-                        websocket.receive_json(),
+                    # M14: receive as text first so we can check the size before parsing
+                    raw_text = await asyncio.wait_for(
+                        websocket.receive_text(),
                         timeout=_DEAD_CLIENT_TIMEOUT,
                     )
                 except TimeoutError:
@@ -202,6 +220,23 @@ class ConnectionManager:
                         _DEAD_CLIENT_TIMEOUT,
                     )
                     break
+                # M14: reject oversized messages to prevent memory exhaustion
+                msg_bytes = len(raw_text.encode())
+                if msg_bytes > _MAX_WS_MESSAGE_BYTES:
+                    logger.warning(
+                        "Client %s sent oversized message (%d bytes > %d limit)",
+                        client_id,
+                        msg_bytes,
+                        _MAX_WS_MESSAGE_BYTES,
+                    )
+                    continue
+                try:
+                    raw = json.loads(raw_text)
+                except (ValueError, TypeError):
+                    logger.warning(
+                        "Client %s sent non-JSON text message, dropping", client_id
+                    )
+                    continue
                 await self._handle_client_message(client_id, raw)
         except WebSocketDisconnect:
             pass
@@ -212,9 +247,7 @@ class ConnectionManager:
     # Client command dispatch
     # ------------------------------------------------------------------
 
-    async def _handle_subscribe(
-        self, client_id: str, cmd: SubscribeCommand
-    ) -> None:
+    async def _handle_subscribe(self, client_id: str, cmd: SubscribeCommand) -> None:
         """Handle SUBSCRIBE command."""
         self._aggregator.subscribe(client_id, cmd.thread_ids)
         logger.debug(
@@ -279,8 +312,7 @@ class ConnectionManager:
             )
         else:
             logger.warning(
-                "No agent control handler registered — "
-                "ignoring %s for thread %s",
+                "No agent control handler registered — ignoring %s for thread %s",
                 cmd.action,
                 cmd.thread_id,
             )
@@ -316,8 +348,7 @@ class ConnectionManager:
                 await websocket.send_json(error.model_dump(mode="json"))
             except Exception:
                 logger.warning(
-                    "Could not send permission_response rejection "
-                    "to client %s",
+                    "Could not send permission_response rejection to client %s",
                     client_id,
                 )
 

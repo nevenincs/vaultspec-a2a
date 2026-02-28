@@ -73,13 +73,16 @@ def _is_expired(creds: dict) -> bool:
     return time.time() >= (expiry_ms / 1000.0) - _EXPIRY_BUFFER_S
 
 
-def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
+async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
     """Ensure ``~/.gemini/oauth_creds.json`` contains a valid access token.
 
     If the token is still valid this is a no-op.  If it is expired (or will
     expire within ``_EXPIRY_BUFFER_S`` seconds) a fresh token is obtained from
     Google's token endpoint using the stored ``refresh_token`` and the public
     Gemini CLI client credentials, then written back atomically.
+
+    This is an async function using ``httpx.AsyncClient`` to avoid blocking
+    the event loop (H16 fix).
 
     Args:
         creds_path: Path to the credentials file.  Defaults to
@@ -114,17 +117,18 @@ def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
 
     logger.info("Gemini OAuth token expired; refreshing via token endpoint.")
 
-    response = httpx.post(
-        _TOKEN_URI,
-        data={
-            "grant_type": "refresh_token",
-            "refresh_token": refresh_token,
-            "client_id": _CLIENT_ID,
-            "client_secret": _CLIENT_SECRET,
-        },
-        headers={"Content-Type": "application/x-www-form-urlencoded"},
-        timeout=15.0,
-    )
+    async with httpx.AsyncClient() as client:
+        response = await client.post(
+            _TOKEN_URI,
+            data={
+                "grant_type": "refresh_token",
+                "refresh_token": refresh_token,
+                "client_id": _CLIENT_ID,
+                "client_secret": _CLIENT_SECRET,
+            },
+            headers={"Content-Type": "application/x-www-form-urlencoded"},
+            timeout=15.0,
+        )
 
     if response.status_code != _HTTP_OK:
         raise RuntimeError(

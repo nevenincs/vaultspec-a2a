@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, cast
 
 import anyio
+from anyio.abc import TaskGroup
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -87,9 +88,10 @@ class _CacheControlMiddleware(BaseHTTPMiddleware):
 def _create_message_handler(
     graph_registry: GraphRegistry,
     aggregator: EventAggregator,
-    tg: anyio.abc.TaskGroup,
+    tg: TaskGroup,
 ) -> Callable:
     """Create message handler closure for graph_registry/aggregator."""
+
     async def _message_handler(
         thread_id: str,
         content: str,
@@ -129,9 +131,10 @@ def _create_message_handler(
 def _create_agent_control_handler(
     graph_registry: GraphRegistry,
     aggregator: EventAggregator,
-    tg: anyio.abc.TaskGroup,
+    tg: TaskGroup,
 ) -> Callable:
     """Create agent control handler closure."""
+
     async def _agent_control_handler(
         thread_id: str,
         agent_id: str,
@@ -235,14 +238,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             app.state.task_group = tg
 
             # Wire handlers
-            msg_handler = _create_message_handler(
-                graph_registry, aggregator, tg
-            )
+            msg_handler = _create_message_handler(graph_registry, aggregator, tg)
             connection_manager.set_message_handler(msg_handler)
 
-            ctrl_handler = _create_agent_control_handler(
-                graph_registry, aggregator, tg
-            )
+            ctrl_handler = _create_agent_control_handler(graph_registry, aggregator, tg)
             connection_manager.set_agent_control_handler(ctrl_handler)
 
             logger.info("Application startup complete")
@@ -280,9 +279,9 @@ def create_app() -> FastAPI:
         app.add_middleware(
             cast(Any, CORSMiddleware),
             allow_origins=[
-                "http://localhost:5173",   # Vite dev server
-                "http://localhost:4173",   # Vite preview
-                "http://localhost:8000",   # FastAPI itself (curl/dev tools)
+                "http://localhost:5173",  # Vite dev server
+                "http://localhost:4173",  # Vite preview
+                "http://localhost:8000",  # FastAPI itself (curl/dev tools)
                 "http://127.0.0.1:5173",
                 "http://127.0.0.1:4173",
                 "http://127.0.0.1:8000",

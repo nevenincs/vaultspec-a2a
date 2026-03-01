@@ -1,0 +1,49 @@
+# Auto-detect text files and normalise line endings (LF in repo, native on checkout)
+* text=auto eol=lf
+
+# ── Source code ──────────────────────────────────────────────────────
+*.py        text diff=python
+*.ts        text
+*.tsx       text
+*.js        text
+*.mjs       text
+*.svelte    text
+*.css       text
+*.html      text
+*.md        text diff=markdown
+*.yaml      text
+*.yml       text
+*.toml      text
+*.json      text
+*.svg       text
+
+# ── Config / dotfiles ───────────────────────────────────────────────
+*.gitignore      text
+*.gitattributes  text
+*.dockerignore   text
+*.npmrc          text
+*.prettierrc     text
+*.geminiignore   text
+.python-version  text
+Dockerfile       text
+Justfile         text
+
+# ── Lock files (exact byte-for-byte) ────────────────────────────────
+*.lock      text -diff linguist-generated
+
+# ── Build / generated (do not show in diffs by default) ─────────────
+src/ui/dist/** -diff linguist-generated
+
+# ── Binary files (never normalise) ──────────────────────────────────
+*.zip       binary
+*.db        binary
+*.png       binary
+*.jpg       binary
+*.jpeg      binary
+*.gif       binary
+*.ico       binary
+*.woff      binary
+*.woff2     binary
+*.ttf       binary
+*.eot       binary
+*.pdf       binary

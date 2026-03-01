@@ -432,7 +432,7 @@ async def test_middleware_sets_http_method_attribute(
     ) as client:
         await client.get("/")
 
-    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    spans: list[ReadableSpan] = list(span_exporter.get_finished_spans())
     assert len(spans) >= 1
     attrs = spans[-1].attributes or {}
     assert attrs.get("http.request.method") == "GET"
@@ -449,7 +449,7 @@ async def test_middleware_sets_http_route_attribute(
     ) as client:
         await client.get("/")
 
-    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    spans: list[ReadableSpan] = list(span_exporter.get_finished_spans())
     assert len(spans) >= 1
     attrs = spans[-1].attributes or {}
     assert attrs.get("http.route") == "/"
@@ -466,7 +466,7 @@ async def test_middleware_sets_status_code_attribute(
     ) as client:
         await client.get("/")
 
-    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    spans: list[ReadableSpan] = list(span_exporter.get_finished_spans())
     assert len(spans) >= 1
     attrs = spans[-1].attributes or {}
     assert attrs.get("http.response.status_code") == _HTTP_OK
@@ -483,7 +483,7 @@ async def test_middleware_500_sets_error_status_on_span(
     ) as client:
         await client.get("/error")
 
-    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    spans: list[ReadableSpan] = list(span_exporter.get_finished_spans())
     assert len(spans) >= 1
     span = spans[-1]
     attrs = span.attributes or {}
@@ -502,7 +502,7 @@ async def test_middleware_sets_server_address_attribute(
     ) as client:
         await client.get("/")
 
-    spans: list[ReadableSpan] = span_exporter.get_finished_spans()
+    spans: list[ReadableSpan] = list(span_exporter.get_finished_spans())
     assert len(spans) >= 1
     attrs = spans[-1].attributes or {}
     assert "server.address" in attrs

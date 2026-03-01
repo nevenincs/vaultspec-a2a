@@ -13,7 +13,6 @@ map.  Three topology types are supported (ADR-013 §2.5):
 import functools
 import logging
 
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 from typing import Any, cast
 
@@ -26,7 +25,7 @@ from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
 from .exceptions import ConfigError
 from .nodes.supervisor import create_supervisor_node
-from .nodes.worker import create_worker_node
+from .nodes.worker import WorkerNode, create_worker_node
 from .state import TeamState
 from .team_config import AgentConfig, TeamConfig, TopologyType, WorkerRef
 
@@ -322,10 +321,14 @@ def _compile_pipeline(
             "pipeline_order. At least one agent must be listed in topology.order."
         )
 
-    # L3: validate no duplicate entries in pipeline_order.
     if len(order) != len(set(order)):
         seen_set: set[str] = set()
-        dupes_list = [a for a in order if a in seen_set or seen_set.add(a)]  # type: ignore[func-returns-value]
+        dupes_list: list[str] = []
+        for a in order:
+            if a in seen_set:
+                dupes_list.append(a)
+            else:
+                seen_set.add(a)
         raise ConfigError(
             f"Pipeline order for team {team_config.id!r} has duplicate entries: "
             f"{dupes_list}. Each agent may appear at most once."
@@ -380,6 +383,79 @@ def _compile_pipeline(
     builder.add_edge(node_names[-1], END)
 
 
+def _validate_pipeline_loop_config(
+    team_config: TeamConfig,
+    agent_configs: dict[str, AgentConfig],
+) -> tuple[str, list[str]]:
+    """Validate pipeline_loop topology configuration.
+
+    Returns ``(loop_node_id, pre_loop)`` on success.
+
+    Raises:
+        ConfigError: On any validation failure.
+    """
+    order = team_config.topology.order
+    loop_node_id = team_config.topology.loop_node
+    if loop_node_id is None:
+        raise ConfigError("pipeline_loop topology requires loop_node to be set")
+
+    if len(order) != len(set(order)):
+        seen: set[str] = set()
+        dupes: list[str] = []
+        for a in order:
+            if a in seen:
+                dupes.append(a)
+            else:
+                seen.add(a)
+        raise ConfigError(
+            f"pipeline_loop order for team {team_config.id!r} has duplicate "
+            f"entries: {dupes}. Each agent may appear at most once."
+        )
+
+    pre_loop = [aid for aid in order if aid != loop_node_id]
+    if not pre_loop:
+        raise ConfigError(
+            f"Pipeline_loop for team {team_config.id!r} requires at least one "
+            f"pre-loop stage in addition to the loop_node {loop_node_id!r}. "
+            "A single-agent pipeline_loop is a degenerate self-loop — use "
+            "topology.type='pipeline' for single-agent sequential runs."
+        )
+
+    worker_names = {w.agent_id for w in team_config.workers}
+    if loop_node_id not in worker_names:
+        raise ConfigError(
+            f"pipeline_loop loop_node {loop_node_id!r} is not a known worker "
+            f"in team {team_config.id!r}. Known workers: {sorted(worker_names)}"
+        )
+    if loop_node_id not in agent_configs:
+        raise ConfigError(
+            f"pipeline_loop loop_node {loop_node_id!r} has no resolved AgentConfig. "
+            "Ensure the agent TOML exists and is loaded before compiling the graph."
+        )
+
+    return loop_node_id, pre_loop
+
+
+def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
+    """Wrap a worker node to increment ``loop_count`` on every pass.
+
+    The plain worker returns ``{"messages": [...]}``.  This wrapper merges in
+    the updated counter so ``_loop_router`` sees a monotonically increasing
+    value and can enforce ``max_loops`` (ADR-013 §5).
+    """
+
+    @functools.wraps(worker_node)
+    async def _loop_node_with_counter(
+        state: TeamState,
+        _inner: WorkerNode = worker_node,
+    ) -> dict[str, Any]:
+        result = await _inner(state)
+        result["loop_count"] = state.get("loop_count", 0) + 1
+        return result
+
+    return _loop_node_with_counter
+
+
 def _compile_pipeline_loop(
     builder: StateGraph,
     team_config: TeamConfig,
@@ -395,47 +471,10 @@ def _compile_pipeline_loop(
     - loop_node gets a conditional edge: revise -> last pre-loop node | FINISH -> END.
     - max_loops guard uses TeamState.loop_count.
     """
+    loop_node_id, pre_loop = _validate_pipeline_loop_config(team_config, agent_configs)
     order = team_config.topology.order
-    loop_node_id = team_config.topology.loop_node
-    if loop_node_id is None:
-        raise ConfigError("pipeline_loop topology requires loop_node to be set")
-
-    # L3: check for duplicate entries in pipeline_order before processing.
-    if len(order) != len(set(order)):
-        seen: set[str] = set()
-        dupes = [a for a in order if a in seen or seen.add(a)]  # type: ignore[func-returns-value]
-        raise ConfigError(
-            f"pipeline_loop order for team {team_config.id!r} has duplicate "
-            f"entries: {dupes}. Each agent may appear at most once."
-        )
-
-    # H3: validate that pipeline_loop has at least 2 agents to avoid a
-    # degenerate single-node self-loop that consumes max_loops iterations
-    # without meaningful work.
-    pre_loop = [aid for aid in order if aid != loop_node_id]
-    if not pre_loop:
-        raise ConfigError(
-            f"Pipeline_loop for team {team_config.id!r} requires at least one "
-            f"pre-loop stage in addition to the loop_node {loop_node_id!r}. "
-            "A single-agent pipeline_loop is a degenerate self-loop — use "
-            "topology.type='pipeline' for single-agent sequential runs."
-        )
-
-    # H7: validate loop_node is in the agent_configs before we try to compile it.
-    worker_names = {w.agent_id for w in team_config.workers}
-    if loop_node_id not in worker_names:
-        raise ConfigError(
-            f"pipeline_loop loop_node {loop_node_id!r} is not a known worker "
-            f"in team {team_config.id!r}. Known workers: {sorted(worker_names)}"
-        )
-    if loop_node_id not in agent_configs:
-        raise ConfigError(
-            f"pipeline_loop loop_node {loop_node_id!r} has no resolved AgentConfig. "
-            "Ensure the agent TOML exists and is loaded before compiling the graph."
-        )
 
     for agent_id in order:
-        # C2: descriptive error when agent_id is missing from agent_configs.
         if agent_id not in agent_configs:
             raise ConfigError(
                 f"Agent '{agent_id}' referenced in pipeline_loop order but not "
@@ -443,7 +482,6 @@ def _compile_pipeline_loop(
                 "loaded before compiling the graph."
             )
         agent_cfg = agent_configs[agent_id]
-        # H1: use next() with a sentinel to avoid bare StopIteration
         worker_ref = next(
             (w for w in team_config.workers if w.agent_id == agent_id), None
         )
@@ -458,44 +496,18 @@ def _compile_pipeline_loop(
             team_config,
             workspace_root,
         )
-        # M8: snapshot the needed config at closure creation time to avoid
-        # capturing the mutable agent_configs dict by reference.
-        agent_system_prompt = agent_cfg.persona.system_prompt
-        agent_node_name = agent_cfg.id
         worker_node = create_worker_node(
             model,
-            agent_system_prompt,
-            name=agent_node_name,
+            agent_cfg.persona.system_prompt,
+            name=agent_cfg.id,
             autonomous=autonomous,
         )
-
         if agent_id == loop_node_id:
-            # Wrap the loop node so it increments loop_count on every pass.
-            # The plain worker_node returns {"messages": [...]}.  We merge in
-            # the updated counter so _loop_router sees a monotonically increasing
-            # value and can enforce max_loops (ADR-013 §5).
-            # H1: use functools.wraps to preserve the original __name__ so that
-            # LangGraph node identification remains correct.
-            _inner = worker_node
-
-            _worker_fn_t = Callable[[TeamState], Awaitable[dict[str, Any]]]
-
-            @functools.wraps(_inner)
-            async def _loop_node_with_counter(
-                state: TeamState,
-                _inner: _worker_fn_t = _inner,
-            ) -> dict[str, Any]:
-                result = await _inner(state)
-                result["loop_count"] = state.get("loop_count", 0) + 1
-                return result
-
-            node_fn = _loop_node_with_counter
-        else:
-            node_fn = worker_node
+            worker_node = _wrap_loop_node(worker_node)
 
         builder.add_node(
             agent_cfg.id,
-            node_fn,
+            worker_node,
             metadata={
                 "display_name": agent_cfg.display_name,
                 "role": agent_cfg.role,
@@ -505,26 +517,14 @@ def _compile_pipeline_loop(
 
     all_sequential: list[str] = [*pre_loop, loop_node_id]
     builder.add_edge(START, all_sequential[0])
-    # Wire consecutive edges manually (add_sequence requires unregistered nodes)
     for i in range(len(all_sequential) - 1):
         builder.add_edge(all_sequential[i], all_sequential[i + 1])
 
     loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
-    # L2: max_loops default is 3 (set in TopologyConfig), range 1-100.
-    # Enforced in TopologyConfig via Field(ge=1, le=100).
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
-        """Route loop_node output: enforce max_loops guard.
-
-        Returns ``"FINISH"`` when ``loop_count >= max_loops`` (hard cap).
-        When below the cap, returns the value of ``state["next"]`` if set
-        by the worker node, or ``"revise"`` as the default (continue the loop).
-        Workers can signal early exit by setting ``next="FINISH"`` in their
-        return dict — the router routes to END in that case.
-
-        L1: max_loops default (3) is documented in TopologyConfig.
-        """
+        """Route loop_node output: enforce max_loops guard."""
         loop_count = state.get("loop_count", 0)
         if loop_count >= max_loops:
             return "FINISH"

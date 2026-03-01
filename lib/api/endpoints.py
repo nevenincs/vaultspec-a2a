@@ -20,6 +20,7 @@ import logging
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 from anyio.abc import TaskGroup
@@ -30,7 +31,7 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.aggregator import EventAggregator
+from ..core.aggregator import EventAggregator, StreamableGraph
 from ..core.exceptions import ConfigError, NicknameConflictError
 from ..core.graph import compile_team_graph
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
@@ -274,7 +275,9 @@ def _compile_thread_graph(
         HTTPException: If team preset or agent config not found (422).
     """
     try:
-        team_config = load_team_config(body.team_preset, workspace_root=ws_root)
+        team_config = load_team_config(
+            cast(str, body.team_preset), workspace_root=ws_root
+        )
     except TeamConfigNotFoundError as exc:
         raise HTTPException(
             status_code=422,
@@ -381,7 +384,7 @@ async def create_thread_endpoint(
     if body.team_preset:
         graph = _compile_thread_graph(body, ws_root, checkpointer)
         registry.register(thread.id, graph)
-        aggregator.register_graph(graph)
+        aggregator.register_graph(cast(StreamableGraph, graph))
         logger.info(
             "Compiled and registered graph for thread %s (preset=%s)",
             thread.id,
@@ -410,7 +413,13 @@ async def create_thread_endpoint(
             _tid: str = thread.id,
         ) -> None:
             try:
-                await aggregator.ingest(_tid, "supervisor", graph, graph_input, config)
+                await aggregator.ingest(
+                    _tid,
+                    "supervisor",
+                    cast(StreamableGraph, graph),
+                    graph_input,
+                    config,
+                )
             finally:
                 await registry.mark_ingest_done(_tid)
 
@@ -689,7 +698,9 @@ async def send_message_endpoint(
             _aid: str = agent_id,
         ) -> None:
             try:
-                await aggregator.ingest(_tid, _aid, graph, graph_input, config)
+                await aggregator.ingest(
+                    _tid, _aid, cast(StreamableGraph, graph), graph_input, config
+                )
             finally:
                 await registry.mark_ingest_done(_tid)
 
@@ -858,7 +869,11 @@ async def respond_to_permission_endpoint(
         ) -> None:
             try:
                 await aggregator.ingest(
-                    _tid, "supervisor", graph, Command(resume=_opt), config
+                    _tid,
+                    "supervisor",
+                    cast(StreamableGraph, graph),
+                    Command(resume=_opt),
+                    config,
                 )
             finally:
                 await registry.mark_ingest_done(_tid)

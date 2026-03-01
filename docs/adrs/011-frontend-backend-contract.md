@@ -5,7 +5,7 @@ date: 2026-02-26
 status: Proposed
 related:
   - docs/adrs/003-protocol-bridging-translation.md
-  - docs/adrs/004-event-aggregation-state-replay.md
+  - docs/adrs/004-event-aggregation-server-side-replay.md
   - docs/adrs/005-frontend-rendering-stack.md
   - docs/adrs/006-protocol-ecosystem-bridge.md
   - docs/adrs/007-workspace-file-management.md
@@ -20,7 +20,7 @@ related:
 
 ## 1. Context and Problem Statement
 
-The backend (LangGraph orchestrator) and frontend (SvelteKit control surface)
+The backend (LangGraph orchestrator) and frontend (React control surface)
 have no formal wire contract. ADR-004, ADR-005, and ADR-009 describe the
 architectural intent---multiplexed WebSocket, REST state replay, structured
 events---but no concrete Pydantic models or endpoint signatures exist.
@@ -113,10 +113,17 @@ delivery and idempotent semantics.
 2. FastAPI exports `/openapi.json` with discriminated unions rendered as
    `oneOf` with `propertyName` discriminators.
 3. `openapi-typescript` consumes the OpenAPI spec and generates
-   `src/ui/src/lib/api/types.ts`.
+   `src/ui/src/app/data/wire-types.ts`. *(Amended by ADR-018: path
+   changed from `src/lib/api/` to `src/app/data/`.)*
 4. The generated types are committed to the repository (not generated at
    build time) to enable frontend work without a running backend.
 5. CI validates that generated types match the current OpenAPI spec.
+6. *(ADR-018 addition)* Frontend-only presentation types live in
+   `src/ui/src/app/data/types.ts`. Mapper functions in
+   `src/ui/src/app/api/mappers.ts` translate wire types to frontend
+   types (e.g., `WireThreadSummary` → `ThreadSummary`, `in_progress` →
+   `running`). TanStack Query hooks consume wire types from REST
+   responses and map to frontend types at the query boundary.
 
 ### 2.5 Fixture and Mock Strategy for Contract-First Development
 
@@ -128,9 +135,11 @@ Frontend development proceeds before the backend is fully wired:
    builder functions that produce valid model instances for each event type.
 3. **Recorded sessions**: Integration tests record real WebSocket sessions
    to JSON files in `src/ui/tests/fixtures/` for Playwright replay.
-4. **SvelteKit mock adapter**: A `src/ui/src/lib/api/mock.ts` module
-   implements the same store interface as the real WebSocket client, driven
-   by fixture data.
+4. *(Superseded by ADR-018)* The React frontend uses a live backend
+   integration layer (`websocket-client.ts`, `rest-client.ts`) with
+   TanStack Query for REST caching and Zustand stores for real-time
+   state. Mock data stubs exist in `mock-data.ts` for offline
+   development but are not the primary development path.
 
 ## 3. Rationale
 
@@ -260,10 +269,10 @@ lib/api/schemas/
 
 - [ADR-003](003-protocol-bridging-translation.md): Protocol Bridging
   and Translation (MCP state mapping)
-- [ADR-004](004-event-aggregation-state-replay.md): Event Aggregation
+- [ADR-004](004-event-aggregation-server-side-replay.md): Event Aggregation
   and State Replay (WebSocket + checkpoint sourcing)
 - [ADR-005](005-frontend-rendering-stack.md): Frontend Rendering Stack
-  (SvelteKit, shadcn-svelte)
+  *(Superseded by ADR-018: React + shadcn/ui)*
 - [ADR-006](006-protocol-ecosystem-bridge.md): Protocol Ecosystem Bridge
   (ACP, A2A)
 - [ADR-009](009-approved-module-hierarchy.md): Approved Module Hierarchy

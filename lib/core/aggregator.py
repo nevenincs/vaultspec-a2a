@@ -53,7 +53,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["EventAggregator"]
+__all__ = ["EventAggregator", "StreamableGraph"]
 
 # ---------------------------------------------------------------------------
 # OTel instrumentation (ADR-010)
@@ -124,7 +124,7 @@ _NODE_BOUNDARY_EVENTS = frozenset(
 )
 
 
-class _StreamableGraph(Protocol):
+class StreamableGraph(Protocol):
     """Structural protocol for a compiled LangGraph graph with astream_events."""
 
     def astream_events(
@@ -249,7 +249,7 @@ class EventAggregator:
     # Graph registration (ADR-012 §6)
     # ------------------------------------------------------------------
 
-    def register_graph(self, graph: _StreamableGraph) -> None:
+    def register_graph(self, graph: StreamableGraph) -> None:
         """Cache node metadata from a compiled LangGraph graph.
 
         Call this after ``compile_team_graph()`` so that subsequent
@@ -957,7 +957,7 @@ class EventAggregator:
         self,
         thread_id: str,
         agent_id: str,
-        graph: _StreamableGraph,
+        graph: StreamableGraph,
         config: dict[str, Any],
     ) -> None:
         """Inspect graph state after astream_events ends; emit PermissionRequestEvents.
@@ -995,10 +995,11 @@ class EventAggregator:
             )
             return
 
-        if not state or not getattr(state, "tasks", None):
+        tasks = getattr(state, "tasks", None)
+        if not state or not tasks:
             return  # Normal completion — no pending interrupts
 
-        for task in state.tasks:
+        for task in tasks:
             if not task.interrupts:
                 continue
 
@@ -1065,7 +1066,7 @@ class EventAggregator:
         self,
         thread_id: str,
         agent_id: str,
-        graph: _StreamableGraph,
+        graph: StreamableGraph,
         graph_input: dict[str, Any] | None,
         config: dict[str, Any],
     ) -> None:

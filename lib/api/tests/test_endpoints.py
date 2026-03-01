@@ -9,9 +9,12 @@ get_task_group) are applied via the shared make_app() helper in conftest.py
 so tests never touch the production vaultspec.db.
 """
 
+from typing import cast
+
 import pytest
 
 from fastapi.testclient import TestClient
+from langgraph.graph.state import CompiledStateGraph
 
 from ...core.aggregator import EventAggregator
 from ...core.graph import compile_team_graph
@@ -172,13 +175,10 @@ class TestThreadState:
         agent_configs = {
             w.agent_id: load_agent_config(w.agent_id) for w in team.workers
         }
-        from langgraph.checkpoint.memory import MemorySaver
-
-        cp = MemorySaver()
         graph = compile_team_graph(
             team_config=team,
             agent_configs=agent_configs,
-            checkpointer=cp,
+            checkpointer=None,
         )
 
         registry = GraphRegistry()
@@ -483,7 +483,7 @@ class TestGraphRegistry:
     def test_register_and_get(self) -> None:
         """register() stores a graph; get() returns it."""
         registry = GraphRegistry()
-        graph = object()
+        graph = cast(CompiledStateGraph, object())
         registry.register("t1", graph)
         assert registry.get("t1") is graph
 

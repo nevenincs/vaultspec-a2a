@@ -7,6 +7,7 @@ requiring a live ACP subprocess (PROV-M6).
 import asyncio
 
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -217,57 +218,65 @@ class TestOnTerminalCreateValidation:
         """Commands not in the allowlist return an error response."""
         model = _make_model(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(  # type: ignore[arg-type]
+        resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "curl", "args": ["http://example.com"]},
-            ctx=ctx,  # type: ignore[arg-type]
+            ctx=cast(Any, ctx),
         )
-        assert "error" in resp
-        assert resp["error"]["code"] == -32603
-        assert "allowlist" in resp["error"]["message"]
+        resp_dict = cast(dict[str, Any], resp)
+        assert "error" in resp_dict
+        error_obj = cast(dict[str, Any], resp_dict["error"])
+        assert error_obj["code"] == -32603
+        assert "allowlist" in error_obj["message"]
 
     @pytest.mark.asyncio
     async def test_rejects_metachar_in_command(self, tmp_path: Path) -> None:
         """Commands with shell metacharacters return an error response."""
         model = _make_model(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(  # type: ignore[arg-type]
+        resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": ["script.py; rm -rf /"]},
-            ctx=ctx,  # type: ignore[arg-type]
+            ctx=cast(Any, ctx),
         )
-        assert "error" in resp
-        assert resp["error"]["code"] == -32603
-        assert "metacharacter" in resp["error"]["message"]
+        resp_dict = cast(dict[str, Any], resp)
+        assert "error" in resp_dict
+        error_obj = cast(dict[str, Any], resp_dict["error"])
+        assert error_obj["code"] == -32603
+        assert "metacharacter" in error_obj["message"]
 
     @pytest.mark.asyncio
     async def test_rejects_cwd_outside_sandbox(self, tmp_path: Path) -> None:
         """A cwd outside the workspace root returns an error response."""
         model = _make_model(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(  # type: ignore[arg-type]
+        resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": [], "cwd": "/etc"},
-            ctx=ctx,  # type: ignore[arg-type]
+            ctx=cast(Any, ctx),
         )
-        assert "error" in resp
-        assert resp["error"]["code"] == -32603
-        assert "sandbox" in resp["error"]["message"]
+        resp_dict = cast(dict[str, Any], resp)
+        assert "error" in resp_dict
+        error_obj = cast(dict[str, Any], resp_dict["error"])
+        assert error_obj["code"] == -32603
+        assert "sandbox" in error_obj["message"]
 
     @pytest.mark.asyncio
     async def test_rejects_invalid_env_var_name(self, tmp_path: Path) -> None:
         """Invalid env variable names return an error response."""
         model = _make_model(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(  # type: ignore[arg-type]
+        resp = await model._on_terminal_create(
             rpc_id=1,
             params={
                 "command": "python",
                 "args": [],
                 "env": [{"name": "1INVALID", "value": "x"}],
             },
-            ctx=ctx,  # type: ignore[arg-type]
+            ctx=cast(Any, ctx),
         )
-        assert "error" in resp
-        assert resp["error"]["code"] == -32603
-        assert "Invalid environment variable" in resp["error"]["message"]
+        resp_dict = cast(dict[str, Any], resp)
+        assert "error" in resp_dict
+        error_obj = cast(dict[str, Any], resp_dict["error"])
+        assert error_obj["code"] == -32603
+        assert "Invalid environment variable" in error_obj["message"]

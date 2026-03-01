@@ -33,7 +33,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
-from ..core.aggregator import EventAggregator
+from ..core.aggregator import EventAggregator, StreamableGraph
 from ..core.config import settings
 from ..database.session import close_db, init_db
 from ..protocols import mcp as mcp_server
@@ -111,7 +111,9 @@ def _create_message_handler(
 
         async def _ingest_and_release(_tid: str = thread_id) -> None:
             try:
-                await aggregator.ingest(_tid, _aid, graph, graph_input, config)
+                await aggregator.ingest(
+                    _tid, _aid, cast(StreamableGraph, graph), graph_input, config
+                )
             finally:
                 await graph_registry.mark_ingest_done(_tid)
 
@@ -159,7 +161,7 @@ def _create_agent_control_handler(
                         await aggregator.ingest(
                             _tid,
                             agent_id,
-                            graph,
+                            cast(StreamableGraph, graph),
                             None,
                             config,
                         )

@@ -39,10 +39,11 @@ TanStack + Tailwind CSS.
 6. [Bidirectional Workflow Analysis](#6-bidirectional-workflow-analysis)
 7. [React + TanStack + Tailwind Pivot](#7-react--tanstack--tailwind-pivot)
 8. [shadcn/ui Figma Ecosystem](#8-shadcnui-figma-ecosystem)
-9. [Architectural Implications](#9-architectural-implications)
-10. [Plan & Access Requirements](#10-plan--access-requirements)
-11. [Open Questions & Risks](#11-open-questions--risks)
-12. [References](#12-references)
+9. [Dev Mode Codegen Plugins](#9-dev-mode-codegen-plugins)
+10. [Architectural Implications](#10-architectural-implications)
+11. [Plan & Access Requirements](#11-plan--access-requirements)
+12. [Open Questions & Risks](#12-open-questions--risks)
+13. [References](#13-references)
 
 ---
 
@@ -692,9 +693,53 @@ For our project, the recommended approach is:
 
 ---
 
-## 9. Architectural Implications
+## 9. Dev Mode Codegen Plugins
 
-### 9.1 Dual MCP Server Configuration
+### 9.1 How Codegen Plugins Work
+
+Figma Dev Mode supports "codegen" plugins that appear in the native language
+dropdown in the Inspect panel. When a user selects a layer, the plugin
+generates code and renders it alongside Figma's native code snippets.
+
+Plugin manifest requirements:
+- `"editorType": ["dev"]`
+- `"capabilities": ["codegen"]`
+- `"codegenLanguages"` to specify supported output (e.g., React)
+- `"codegenPreferences"` for user customization options
+
+### 9.2 Relevant React Codegen Plugins
+
+| Plugin | Output | Notes |
+|--------|--------|-------|
+| **Anima** | React + Tailwind/CSS/SCSS | Variant/props support, interactive components, responsive flexbox |
+| **Builder.io** | React + Tailwind | AI-powered, trains on codebase style, chat refinement |
+| **Locofy.ai** | React / Next.js / Gatsby | Pixel-perfect, component-based, 240K+ users |
+| **Figroot** | React + Tailwind | Free, no special design file setup required |
+| **DhiWise** | React / Next.js / React Native | Auto-layout aware, variant support |
+| **Replit** | React | Direct iteration with natural language prompts |
+
+### 9.3 Codegen Plugins vs MCP Server vs Code Connect
+
+| Aspect | Codegen Plugin | MCP Server | Code Connect |
+|--------|---------------|------------|--------------|
+| Runs in | Figma Dev Mode (Inspect panel) | AI coding agent (IDE) | CLI / Figma UI |
+| Trigger | Layer selection | Agent prompt / URL | `npx figma connect publish` |
+| Output | Framework-specific code | React + Tailwind (default) | Code snippets in Dev Mode |
+| Customization | Plugin preferences | Prompt engineering | Property mappings |
+| Codebase awareness | Limited (some train on style) | Via Code Connect mappings | Direct codebase reference |
+| Direction | Design → Code | Design → Code | Code → Design (Dev Mode) |
+| AI-powered | Some (Builder.io, Anima) | Yes (agent-mediated) | No (deterministic) |
+
+**Recommendation**: Codegen plugins are useful for quick one-off conversions
+but lack the codebase awareness that MCP + Code Connect provides. For our
+workflow, the MCP server is the primary tool with Code Connect providing the
+bridge back to Figma. Codegen plugins are supplementary.
+
+---
+
+## 10. Architectural Implications
+
+### 10.1 Dual MCP Server Configuration
 
 For the full bidirectional experience, configure **both** servers:
 
@@ -716,7 +761,7 @@ For the full bidirectional experience, configure **both** servers:
 - **Remote**: For `generate_figma_design` (code → canvas), link-based prompting
 - **Desktop**: For selection-based prompting, real-time design inspection
 
-### 9.2 Code Connect Directory Structure
+### 10.2 Code Connect Directory Structure
 
 ```
 src/ui/
@@ -736,7 +781,7 @@ src/ui/
 └── ...
 ```
 
-### 9.3 Design Token Pipeline
+### 10.3 Design Token Pipeline
 
 ```
 Figma Variables (source of truth)
@@ -754,7 +799,7 @@ Component Styles
 For non-Enterprise plans, token sync is manual or plugin-assisted rather
 than automated via REST API.
 
-### 9.4 CI/CD Integration
+### 10.4 CI/CD Integration
 
 ```
 Developer pushes code
@@ -768,7 +813,7 @@ Figma Dev Mode updated with latest code snippets
 
 ---
 
-## 10. Plan & Access Requirements
+## 11. Plan & Access Requirements
 
 | Feature | Minimum Plan | Notes |
 |---------|-------------|-------|
@@ -789,9 +834,9 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 
 ---
 
-## 11. Open Questions & Risks
+## 12. Open Questions & Risks
 
-### 11.1 Open Questions
+### 12.1 Open Questions
 
 1. **Token sync without Enterprise**: What's the best plugin-based workaround
    for automated Figma Variables → Tailwind token sync on Professional plan?
@@ -815,7 +860,7 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 6. **shadcn/ui Figma kit selection**: Which community kit should we adopt?
    Need to evaluate 1:1 accuracy with latest shadcn/ui components.
 
-### 11.2 Risks
+### 12.2 Risks
 
 | Risk | Severity | Mitigation |
 |------|----------|------------|
@@ -828,7 +873,7 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 
 ---
 
-## 12. References
+## 13. References
 
 ### Official Figma Documentation
 
@@ -859,6 +904,14 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 - [figma/code-connect](https://github.com/figma/code-connect)
 - [figma/mcp-server-guide](https://github.com/figma/mcp-server-guide)
 - [@figma/code-connect npm](https://www.npmjs.com/package/@figma/code-connect)
+
+### Dev Mode Codegen Plugins
+
+- [Codegen Plugins Guide](https://developers.figma.com/docs/plugins/codegen-plugins/)
+- [Codegen Plugins Blog Post](https://www.figma.com/blog/figma-dev-mode-codegen-plugins/)
+- [figma.codegen API Reference](https://developers.figma.com/docs/plugins/api/figma-codegen/)
+- [Working in Dev Mode (Plugin Docs)](https://developers.figma.com/docs/plugins/working-in-dev-mode/)
+- [Plugin Samples Repository](https://github.com/figma/plugin-samples)
 
 ### Community & Third-Party
 

@@ -1,19 +1,18 @@
 """Worker node for LangGraph agent task execution."""
 
+import logging
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
+from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
-from ..context import compact_context, should_compact
+from ..context import CONTEXT_LIMIT, compact_context, should_compact
+from ..exceptions import WorkerExecutionError
 from ..state import TeamState
 
-
-# Conservative context limit that fits all supported models
-# (Claude 200k, GPT-4 Turbo 128k, Gemini 1M). Compaction triggers at 80%
-# (100k tokens) to leave headroom for the generation cycle.
-_CONTEXT_LIMIT = 120_000
+_logger = logging.getLogger(__name__)
 
 
 __all__ = ["create_worker_node"]
@@ -131,8 +130,8 @@ def create_worker_node(
         # preserved in the LangGraph checkpointer — compaction only affects
         # the messages passed to the model, not what is stored.
         working_state = (
-            compact_context(state, _CONTEXT_LIMIT)
-            if should_compact(state, _CONTEXT_LIMIT)
+            compact_context(state, CONTEXT_LIMIT)
+            if should_compact(state, CONTEXT_LIMIT)
             else state
         )
         messages = [SystemMessage(content=system_prompt), *working_state["messages"]]
@@ -151,7 +150,36 @@ def create_worker_node(
             effective_model = model.model_copy(
                 update={"permission_callback": _interrupt_permission_callback}
             )
-        response = await effective_model.ainvoke(messages)
+
+        model_type = type(effective_model).__name__
+        compacted = working_state is not state
+        _logger.debug(
+            "worker[%s] invoking model=%s messages=%d compacted=%s autonomous=%s",
+            name,
+            model_type,
+            len(messages),
+            compacted,
+            autonomous,
+        )
+        try:
+            response = await effective_model.ainvoke(messages)
+        except GraphBubbleUp:
+            raise  # Let GraphInterrupt/Command pass through to LangGraph untouched
+        except Exception as exc:
+            _logger.exception(
+                "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
+                name,
+                model_type,
+            )
+            raise WorkerExecutionError(
+                worker=name,
+                model=model_type,
+                message_count=len(messages),
+            ) from exc
+
+        _logger.debug(
+            "worker[%s] response len=%d", name, len(str(response.content))
+        )
         # Attribute the message to the worker so the supervisor can route correctly.
         response.name = name
         return {"messages": [response]}

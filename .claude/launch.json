@@ -1,0 +1,23 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "frontend-mock-data-service",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "python", "src/ui/dev/fixture_server.py"],
+      "port": 8000
+    },
+    {
+      "name": "frontend-dev",
+      "runtimeExecutable": "npm",
+      "runtimeArgs": ["run", "dev"],
+      "port": 5173
+    },
+    {
+      "name": "backend-real",
+      "runtimeExecutable": "uv",
+      "runtimeArgs": ["run", "uvicorn", "lib.api.app:app", "--reload", "--port", "8000"],
+      "port": 8000
+    }
+  ]
+}

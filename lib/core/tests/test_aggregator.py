@@ -1274,3 +1274,58 @@ class TestEmitInterruptEvents:
         option_ids = {opt.option_id for opt in perm.options}
         assert "allow_once" in option_ids
         assert "deny_once" in option_ids
+
+
+# ---------------------------------------------------------------------------
+# GraphRecursionError detection
+# ---------------------------------------------------------------------------
+
+
+class _RecursingGraph:
+    """Graph stub that raises GraphRecursionError from astream_events."""
+
+    async def astream_events(
+        self, graph_input: object, config: object, *, version: str
+    ):
+        from langgraph.errors import GraphRecursionError
+
+        raise GraphRecursionError("Recursion limit of 100 reached")
+        yield  # make it an async generator
+
+    async def aget_state(self, config: object) -> object:
+        return type(
+            "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
+        )()
+
+
+class TestRecursionLimitDetection:
+    """Tests for GraphRecursionError detection in ingest()."""
+
+    @pytest.mark.asyncio
+    async def test_ingest_emits_recursion_limit_error(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """GraphRecursionError produces ErrorEvent(code='RECURSION_LIMIT_EXCEEDED',
+        recoverable=False)."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-recurse"])
+
+        graph = _RecursingGraph()
+        config = {"configurable": {"thread_id": "thread-recurse"}}
+        await aggregator.ingest(
+            thread_id="thread-recurse",
+            agent_id="supervisor",
+            graph=graph,
+            graph_input={"messages": []},
+            config=config,
+        )
+
+        events = []
+        while not queue.empty():
+            events.append(queue.get_nowait())
+
+        error_events = [e for e in events if isinstance(e, ErrorEvent)]
+        assert len(error_events) >= 1
+        err = error_events[-1]
+        assert err.code == "RECURSION_LIMIT_EXCEEDED"
+        assert err.recoverable is False

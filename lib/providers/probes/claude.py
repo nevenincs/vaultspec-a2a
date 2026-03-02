@@ -16,7 +16,9 @@ import logging
 import sys
 
 from ...core.config import settings
+from ...core.exceptions import ConfigError
 from ...utils.logging import setup_logging
+from ..factory import _CLAUDE_ACP_JS
 from ._protocol import ProbeResult, run_probe
 
 
@@ -42,11 +44,18 @@ async def main() -> ProbeResult:
         )
         return ProbeResult(success=False, error="CLAUDE_CODE_OAUTH_TOKEN not set")
 
+    if not _CLAUDE_ACP_JS.exists():
+        raise ConfigError(
+            f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
+            f"Run 'npm install' to install @zed-industries/claude-agent-acp."
+        )
+
     logger.info("Starting Claude ACP probe...")
     result = await run_probe(
-        command=["claude-agent-acp"],
+        command=["node", str(_CLAUDE_ACP_JS)],
         env_overrides={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
         prompt=_PROMPT,
+        timeout=180.0,  # Claude session/new is slower than Gemini on Windows
     )
 
     if result.success:

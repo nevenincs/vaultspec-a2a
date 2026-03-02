@@ -36,7 +36,7 @@ like Makefile require Git Bash or WSL workarounds.
 ### 1.1 Reference Project Survey
 
 | Project | Task Runner | Windows Support |
-|---------|------------|-----------------|
+| --------- | ------------ | ----------------- |
 | LangChain | Makefile | Requires WSL/Git Bash |
 | LangGraph | Makefile | Requires WSL/Git Bash |
 | DeepAgents | Makefile | Requires WSL/Git Bash |
@@ -56,7 +56,7 @@ Adopt `just` (Justfile) as the project's task runner.
 **Why `just` over alternatives:**
 
 | Criterion | Makefile | Justfile | Taskfile.dev |
-|-----------|---------|----------|-------------|
+| ----------- | --------- | ---------- | ------------- |
 | Windows/PWSH native | No | Yes (`set windows-shell`) | Yes |
 | Install | Pre-installed (Unix) | `winget install Casey.Just` | Go binary |
 | Syntax | Tab-sensitive, POSIX shell | Simple, no tabs | YAML |
@@ -240,7 +240,7 @@ project root.
 ## 5. Compliance Matrix
 
 | ADR | Relationship | Status |
-|-----|-------------|--------|
+| ----- | ------------- | -------- |
 | ADR-007 (Tech Stack) | Aligns — `just` orchestrates the uv + npm stack | Compliant |
 | ADR-009 (Module Hierarchy) | No impact | N/A |
 | ADR-015 (Dep Hygiene) | Builds on — `just audit` runs `uv run deptry lib/` | Compliant |

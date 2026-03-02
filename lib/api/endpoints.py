@@ -1,4 +1,4 @@
-"""REST API endpoints for the A2A Orchestrator.
+"""REST API endpoints for the A2A Orchestrator (ADR-019 refactored).
 
 Implements the 6 REST routes from ADR-011 section 2.2:
 - POST /threads            -> CreateThreadResponse
@@ -8,8 +8,14 @@ Implements the 6 REST routes from ADR-011 section 2.2:
 - GET  /team/status        -> TeamStatusResponse
 - POST /permissions/{id}/respond -> PermissionResponseResult
 
+ADR-019: Graph compilation and ``aggregator.ingest()`` no longer run in
+the control surface.  All work is dispatched to the worker process via
+HTTP POST to ``/dispatch``.  The ``GraphRegistry`` has been removed; the
+worker owns graph lifecycle.
+
 See: ADR-007 (FastAPI, SPA mount)
      ADR-011 (Frontend-Backend Wire Contract)
+     ADR-019 (Service Separation)
 """
 
 import asyncio
@@ -20,27 +26,22 @@ import logging
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import cast
 from uuid import uuid4
 
-from anyio.abc import TaskGroup
+import httpx
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph.state import CompiledStateGraph
-from langgraph.types import Command, StateSnapshot
+from langgraph.types import StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.aggregator import EventAggregator, StreamableGraph
+from ..core.aggregator import EventAggregator
 from ..core.exceptions import ConfigError, NicknameConflictError
-from ..core.graph import compile_team_graph
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..core.preamble import build_context_preamble
 from ..core.team_config import (
-    AgentConfig,
-    AgentConfigNotFoundError,
     TeamConfigNotFoundError,
-    load_agent_config,
     load_team_config,
 )
 from ..database.crud import (
@@ -53,6 +54,7 @@ from ..database.crud import (
 )
 from ..database.session import get_db
 from .schemas.enums import AgentLifecycleState
+from .schemas.internal import DispatchRequest
 from .schemas.rest import (
     AgentStatusEntry,
     CreateThreadRequest,
@@ -71,80 +73,11 @@ from .schemas.snapshots import MessageSnapshot, ThreadStateSnapshot
 
 
 __all__ = [
-    "GraphRegistry",
     "get_aggregator",
     "get_checkpointer",
-    "get_graph_registry",
-    "get_task_group",
+    "get_worker_client",
     "router",
 ]
-
-
-class GraphRegistry:
-    """Thread-scoped registry of compiled LangGraph runnables.
-
-    Maps ``thread_id`` to a compiled graph runnable so that the
-    ``send_message`` endpoint and WebSocket handler can invoke ``ingest()``
-    without re-compiling the graph on every message.
-
-    Lifecycle: created in lifespan startup, stored in ``app.state.graph_registry``.
-    """
-
-    def __init__(self) -> None:
-        """Initialise the registry with empty graph and resume tables."""
-        self._graphs: dict[str, CompiledStateGraph] = {}
-        # pending LangGraph Command(resume=...) responses keyed by request_id
-        self._pending_resumes: dict[str, tuple[str, str]] = {}
-        # Tracks threads currently being ingested; prevents concurrent graph
-        # execution on the same thread (which would race on checkpointer state).
-        self._active_ingests: set[str] = set()
-        # Lock guards check-then-add on _active_ingests (API-M2)
-        self._ingest_lock: asyncio.Lock = asyncio.Lock()
-
-    def register(self, thread_id: str, graph: CompiledStateGraph) -> None:
-        """Register a compiled graph for *thread_id*."""
-        self._graphs[thread_id] = graph
-
-    def get(self, thread_id: str) -> CompiledStateGraph | None:
-        """Return the compiled graph for *thread_id*, or ``None``."""
-        return self._graphs.get(thread_id)
-
-    def register_pending_resume(
-        self,
-        request_id: str,
-        thread_id: str,
-        option_id: str,
-    ) -> None:
-        """Store a pending resume so the permission endpoint can retrieve it."""
-        self._pending_resumes[request_id] = (thread_id, option_id)
-
-    def pop_pending_resume(
-        self,
-        request_id: str,
-    ) -> tuple[str, str] | None:
-        """Remove and return ``(thread_id, option_id)`` for *request_id*."""
-        return self._pending_resumes.pop(request_id, None)
-
-    async def mark_ingest_active(self, thread_id: str) -> bool:
-        """Mark *thread_id* as having an active ingest.
-
-        Returns ``True`` if the mark succeeded (caller may proceed).
-        Returns ``False`` if an ingest is already running for this thread
-        (caller should drop the duplicate request).
-
-        The internal lock makes the check-then-add atomic under asyncio
-        concurrency (API-M2).
-        """
-        async with self._ingest_lock:
-            if thread_id in self._active_ingests:
-                return False
-            self._active_ingests.add(thread_id)
-            return True
-
-    async def mark_ingest_done(self, thread_id: str) -> None:
-        """Release the active-ingest mark for *thread_id*."""
-        async with self._ingest_lock:
-            self._active_ingests.discard(thread_id)
 
 
 logger = logging.getLogger(__name__)
@@ -153,7 +86,7 @@ router = APIRouter()
 
 
 # ---------------------------------------------------------------------------
-# Dependencies: EventAggregator, GraphRegistry
+# Dependencies
 # ---------------------------------------------------------------------------
 # Injected at lifespan startup via app.state; the dependencies just read it.
 
@@ -166,16 +99,8 @@ def get_aggregator(request: Request) -> EventAggregator:
     return aggregator
 
 
-def get_graph_registry(request: Request) -> GraphRegistry:
-    """FastAPI dependency for the GraphRegistry singleton."""
-    registry: GraphRegistry | None = getattr(request.app.state, "graph_registry", None)
-    if registry is None:
-        raise RuntimeError("GraphRegistry not initialised in app state")
-    return registry
-
-
 def get_checkpointer(request: Request) -> AsyncSqliteSaver:
-    """FastAPI dependency for the LangGraph checkpointer."""
+    """FastAPI dependency for the LangGraph checkpointer (read-only, ADR-019)."""
     checkpointer: AsyncSqliteSaver | None = getattr(
         request.app.state, "checkpointer", None
     )
@@ -184,37 +109,32 @@ def get_checkpointer(request: Request) -> AsyncSqliteSaver:
     return checkpointer
 
 
-def get_task_group(request: Request) -> TaskGroup:
-    """FastAPI dependency for the anyio task group (ADR-007 §5)."""
-    tg: TaskGroup | None = getattr(request.app.state, "task_group", None)
-    if tg is None:
-        raise RuntimeError("Task group not initialised in app state")
-    return tg
+def get_worker_client(request: Request) -> httpx.AsyncClient:
+    """FastAPI dependency for the httpx client pointing at the worker."""
+    client: httpx.AsyncClient | None = getattr(
+        request.app.state, "worker_client", None
+    )
+    if client is None:
+        raise RuntimeError("Worker httpx client not initialised in app state")
+    return client
 
 
 async def get_services(
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
     checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
-    tg: TaskGroup = Depends(get_task_group),
-) -> tuple[AsyncSession, EventAggregator, GraphRegistry, AsyncSqliteSaver, TaskGroup]:
-    """Dependency for bundling all required services into a single injection point."""
-    return db, aggregator, registry, checkpointer, tg
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+) -> tuple[AsyncSession, EventAggregator, AsyncSqliteSaver, httpx.AsyncClient]:
+    """Dependency for bundling all required services into a single injection point.
 
-
-async def get_message_services(
-    db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
-    tg: TaskGroup = Depends(get_task_group),
-) -> tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup]:
-    """Dependency for bundling services needed by message endpoints."""
-    return db, aggregator, registry, tg
+    ADR-019: No longer includes GraphRegistry or TaskGroup -- the worker owns
+    graph lifecycle, and the control surface does not run background agent tasks.
+    """
+    return db, aggregator, checkpointer, worker_client
 
 
 # ---------------------------------------------------------------------------
-# POST /threads — Create a new orchestration thread
+# POST /threads -- Create a new orchestration thread
 # ---------------------------------------------------------------------------
 
 
@@ -264,60 +184,8 @@ def _process_metadata(
     return ws_root, nickname, metadata.model_dump_json()
 
 
-def _compile_thread_graph(
-    body: CreateThreadRequest,
-    ws_root: Path | None,
-    checkpointer: AsyncSqliteSaver,
-) -> CompiledStateGraph:
-    """Load team/agent configs and compile the LangGraph graph.
-
-    Raises:
-        HTTPException: If team preset or agent config not found (422).
-    """
-    try:
-        team_config = load_team_config(
-            cast(str, body.team_preset), workspace_root=ws_root
-        )
-    except TeamConfigNotFoundError as exc:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Team preset not found: {body.team_preset!r}",
-        ) from exc
-
-    # Resolve all worker AgentConfigs
-    agent_configs: dict[str, AgentConfig] = {}
-    for worker_ref in team_config.workers:
-        try:
-            agent_configs[worker_ref.agent_id] = load_agent_config(
-                worker_ref.agent_id, workspace_root=ws_root
-            )
-        except AgentConfigNotFoundError as exc:
-            logger.warning(
-                "Agent config not found for %s: %s",
-                worker_ref.agent_id,
-                exc,
-            )
-
-    # Resolve optional supervisor config for star/pipeline_loop topologies
-    supervisor_config: AgentConfig | None = None
-    if team_config.topology.type in ("star", "pipeline_loop"):
-        try:
-            supervisor_config = load_agent_config("supervisor", workspace_root=ws_root)
-        except AgentConfigNotFoundError:
-            logger.debug("No supervisor agent config found; using default prompt")
-
-    return compile_team_graph(
-        team_config=team_config,
-        agent_configs=agent_configs,
-        checkpointer=checkpointer,
-        supervisor_agent_config=supervisor_config,
-        workspace_root=ws_root,
-        autonomous=body.autonomous,
-    )
-
-
 # Guard against pipeline_loop topologies with large max_loops values
-# hitting LangGraph's default recursion_limit of 25 (ADR-013 §5).
+# hitting LangGraph's default recursion_limit of 25 (ADR-013 S5).
 _GRAPH_RECURSION_LIMIT = 100
 
 
@@ -327,27 +195,24 @@ async def create_thread_endpoint(
     services: tuple[
         AsyncSession,
         EventAggregator,
-        GraphRegistry,
         AsyncSqliteSaver,
-        TaskGroup,
+        httpx.AsyncClient,
     ] = Depends(get_services),
 ) -> CreateThreadResponse:
-    """Create a new orchestration thread and compile its LangGraph graph.
+    """Create a new orchestration thread and dispatch to the worker.
 
-    If ``team_preset`` is set in the request, the matching ``TeamConfig`` is
-    loaded, all worker ``AgentConfig`` objects are resolved, the graph is
-    compiled via ``compile_team_graph()``, and the result is stored in the
-    ``GraphRegistry`` so that subsequent ``send_message`` calls can call
-    ``aggregator.ingest()`` without re-compiling.
+    If ``team_preset`` is set in the request, the work is dispatched to the
+    worker process which handles graph compilation and ``ingest()`` execution
+    (ADR-019).
 
     When ``metadata`` is provided (ADR-014), the endpoint:
     - Validates ``workspace_root`` as an existing directory (422 if not)
     - Auto-discovers ``.vault/`` documents when ``feature_tag`` is set
     - Generates a nickname if not explicitly provided
-    - Injects a context preamble SystemMessage into the graph input
-    - Threads ``workspace_root`` to config loaders and graph compilation
+    - Sends context preamble content to the worker for injection
+    - Threads ``workspace_root`` to the worker for config resolution
     """
-    db, aggregator, registry, checkpointer, tg = services
+    db, aggregator, checkpointer, worker_client = services
     thread_id = uuid4().hex
 
     # --- ADR-014: Metadata processing ---
@@ -362,15 +227,13 @@ async def create_thread_endpoint(
             metadata=metadata_json,
             nickname=nickname,
             thread_id=thread_id,
+            team_preset=body.team_preset,
         )
     except NicknameConflictError as exc:
         raise HTTPException(
             status_code=409,
             detail=f"Thread nickname already exists: {exc.nickname!r}",
         ) from exc
-    # NOTE: db.commit() is intentionally deferred until AFTER graph compilation
-    # (H9 fix): if compile_team_graph() raises, the session is rolled back by
-    # the get_db dependency's exception handling, preventing an orphaned thread.
 
     logger.info(
         "Created thread %s (title=%s, preset=%s, nickname=%s)",
@@ -380,53 +243,58 @@ async def create_thread_endpoint(
         nickname,
     )
 
-    # Compile and register graph if a team preset was requested (ADR-013 §6)
+    # Dispatch to worker if a team preset was requested (ADR-019)
     if body.team_preset:
-        graph = _compile_thread_graph(body, ws_root, checkpointer)
-        registry.register(thread.id, graph)
-        aggregator.register_graph(cast(StreamableGraph, graph))
-        logger.info(
-            "Compiled and registered graph for thread %s (preset=%s)",
-            thread.id,
-            body.team_preset,
-        )
-
-        # Build graph_input with optional context preamble (ADR-014 §2.3)
-        messages: list[SystemMessage | HumanMessage] = []
+        # Build context preamble content if metadata provided (ADR-014 S2.3)
+        context_preamble: str | None = None
         if body.metadata is not None:
-            messages.append(build_context_preamble(body.metadata))
-        messages.append(HumanMessage(content=body.initial_message))
-
-        graph_input = {"messages": messages}
-        config = {
-            "configurable": {"thread_id": thread.id},
-            "recursion_limit": _GRAPH_RECURSION_LIMIT,
-        }
-        # API-C2: check return value — if False, a previous ingest is still active
-        if not await registry.mark_ingest_active(thread.id):
-            raise HTTPException(
-                status_code=409,
-                detail="Thread already has an active ingest",
+            preamble_msg = build_context_preamble(body.metadata)
+            context_preamble = (
+                preamble_msg.content
+                if isinstance(preamble_msg.content, str)
+                else str(preamble_msg.content)
             )
 
-        async def _ingest_and_release_create(
-            _tid: str = thread.id,
-        ) -> None:
+        # Resolve autonomous: explicit request value overrides team default.
+        # None = defer to team preset's auto_approve setting (TOML-04).
+        effective_autonomous: bool = False
+        if body.autonomous is not None:
+            effective_autonomous = body.autonomous
+        else:
             try:
-                await aggregator.ingest(
-                    _tid,
-                    "supervisor",
-                    cast(StreamableGraph, graph),
-                    graph_input,
-                    config,
-                )
-            finally:
-                await registry.mark_ingest_done(_tid)
+                _tc = load_team_config(body.team_preset, workspace_root=ws_root)
+                effective_autonomous = _tc.permissions.auto_approve
+            except (ConfigError, TeamConfigNotFoundError):
+                pass  # fall back to False (supervised)
 
-        tg.start_soon(_ingest_and_release_create)
+        dispatch = DispatchRequest(
+            action="ingest",
+            thread_id=thread.id,
+            team_preset=body.team_preset,
+            workspace_root=str(ws_root) if ws_root else None,
+            autonomous=effective_autonomous,
+            metadata_json=metadata_json,
+            content=body.initial_message,
+            context_preamble=context_preamble,
+            recursion_limit=_GRAPH_RECURSION_LIMIT,
+        )
 
-    # Commit only after all synchronous setup succeeds — prevents orphaned
-    # thread rows when graph compilation or team config loading fails (H9 fix).
+        try:
+            await worker_client.post(
+                "/dispatch",
+                json=dispatch.model_dump(),
+            )
+        except httpx.HTTPError:
+            logger.warning(
+                "Failed to dispatch ingest to worker for thread %s",
+                thread.id,
+                exc_info=True,
+            )
+            # Thread is still created in DB -- the worker can pick it up
+            # when it comes online, or the user can retry via send_message.
+
+    # Commit only after all synchronous setup succeeds -- prevents orphaned
+    # thread rows when metadata processing fails (H9 fix).
     await db.commit()
 
     return CreateThreadResponse(
@@ -437,7 +305,7 @@ async def create_thread_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# GET /threads — List threads (paginated)
+# GET /threads -- List threads (paginated)
 # ---------------------------------------------------------------------------
 
 
@@ -486,7 +354,7 @@ async def list_threads_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# GET /threads/{thread_id}/metadata — Thread metadata (ADR-014)
+# GET /threads/{thread_id}/metadata -- Thread metadata (ADR-014)
 # ---------------------------------------------------------------------------
 
 
@@ -507,7 +375,7 @@ async def get_thread_metadata_endpoint(
 
 
 # ---------------------------------------------------------------------------
-# GET /threads/{thread_id}/state — Thread state snapshot (reconnection)
+# GET /threads/{thread_id}/state -- Thread state snapshot (reconnection)
 # ---------------------------------------------------------------------------
 
 
@@ -588,7 +456,7 @@ async def get_thread_state_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
+    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
 ) -> ThreadStateSnapshot:
     """Return a complete thread state snapshot for client reconnection.
 
@@ -596,9 +464,10 @@ async def get_thread_state_endpoint(
     any subsequent WebSocket events with ``sequence <= last_sequence``
     (ADR-011 section 2.3).
 
-    When a compiled graph is registered for the thread, the snapshot is
-    enriched with messages and checkpoint_id from the LangGraph
-    checkpointer state (ADR-011 §2.3 reconnection protocol).
+    ADR-019: The graph is no longer registered locally.  Snapshot enrichment
+    reads directly from the shared SQLite checkpointer (read-only in the
+    control surface, safe under WAL mode).  If checkpointer data is not
+    available (e.g. worker hasn't written yet), a basic snapshot is returned.
     """
     thread = await get_thread(db, thread_id)
     if thread is None:
@@ -612,34 +481,59 @@ async def get_thread_state_endpoint(
         last_sequence=last_seq,
     )
 
-    # Enrich from checkpointer state if a graph is registered
-    graph = registry.get(thread_id)
-    if graph is not None:
-        try:
-            state = await asyncio.wait_for(
-                graph.aget_state({"configurable": {"thread_id": thread_id}}),
-                timeout=10.0,
-            )
-            if state and state.values:
-                snapshot = _enrich_snapshot_from_state(snapshot, state)
-        except TimeoutError:
-            logger.warning(
-                "Timed out loading graph state for thread %s after 10s; "
-                "returning partial snapshot",
-                thread_id,
-            )
-        except Exception:
-            logger.warning(
-                "Could not load graph state for thread %s; returning partial snapshot",
-                thread_id,
-                exc_info=True,
-            )
+    # ADR-019: Try to enrich from checkpointer directly.
+    # The checkpointer.aget_tuple() returns raw checkpoint data.  We use
+    # checkpointer.aget() which returns a Checkpoint dict with channel_values
+    # containing the messages list.
+    try:
+        checkpoint = await asyncio.wait_for(
+            checkpointer.aget({"configurable": {"thread_id": thread_id}}),
+            timeout=10.0,
+        )
+        if checkpoint is not None:
+            # Extract messages from checkpoint channel_values
+            channel_values = checkpoint.get("channel_values", {})
+            messages_raw = channel_values.get("messages", [])
+            if messages_raw:
+                # Build a minimal StateSnapshot-like object for reuse of
+                # _enrich_snapshot_from_state
+                class _MinimalState:
+                    """Minimal adapter for _enrich_snapshot_from_state."""
+                    def __init__(self, values: dict, config: dict | None = None) -> None:
+                        self.values = values
+                        self.config = config
+
+                config_dict = {"configurable": {"thread_id": thread_id}}
+                # checkpoint_id may be in the checkpoint metadata
+                if "id" in checkpoint:
+                    config_dict["configurable"]["checkpoint_id"] = checkpoint["id"]
+
+                minimal_state = _MinimalState(
+                    values=channel_values,
+                    config=config_dict,
+                )
+                snapshot = _enrich_snapshot_from_state(
+                    snapshot,
+                    minimal_state,  # type: ignore[arg-type]
+                )
+    except TimeoutError:
+        logger.warning(
+            "Timed out loading checkpoint for thread %s after 10s; "
+            "returning partial snapshot",
+            thread_id,
+        )
+    except Exception:
+        logger.warning(
+            "Could not load checkpoint for thread %s; returning partial snapshot",
+            thread_id,
+            exc_info=True,
+        )
 
     return snapshot
 
 
 # ---------------------------------------------------------------------------
-# POST /threads/{thread_id}/messages — Send message into thread
+# POST /threads/{thread_id}/messages -- Send message into thread
 # ---------------------------------------------------------------------------
 
 
@@ -651,18 +545,15 @@ async def get_thread_state_endpoint(
 async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
-    services: tuple[AsyncSession, EventAggregator, GraphRegistry, TaskGroup] = Depends(
-        get_message_services
-    ),
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
 ) -> SendMessageResponse:
     """Send a user message into an existing thread.
 
-    Returns 202 Accepted immediately; graph processing runs asynchronously
-    via ``aggregator.ingest()`` if a compiled graph is registered for this
-    thread.  If no graph is registered the submitted status is still broadcast
-    so the frontend receives feedback.
+    Returns 202 Accepted immediately; the message is dispatched to the
+    worker process for graph execution (ADR-019).
     """
-    db, aggregator, registry, tg = services
     thread = await get_thread(db, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -673,54 +564,61 @@ async def send_message_endpoint(
         len(body.content),
     )
 
-    # Update thread status — DB-C1: use ThreadStatus enum (DB-HIGH-02)
+    # Update thread status -- DB-C1: use ThreadStatus enum (DB-HIGH-02)
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await db.commit()
 
-    graph = registry.get(thread_id)
     agent_id = body.agent_id or "supervisor"
 
-    if graph is not None:
-        if not await registry.mark_ingest_active(thread_id):
-            logger.warning(
-                "Ingest already active for thread %s; dropping concurrent message",
-                thread_id,
-            )
-            return SendMessageResponse(status="accepted", thread_id=thread_id)
-        graph_input = {"messages": [HumanMessage(content=body.content)]}
-        config = {
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": _GRAPH_RECURSION_LIMIT,
-        }
+    # Look up team_preset and workspace_root from DB for lazy recompile
+    # (same pattern as respond_to_permission_endpoint, T22).
+    team_preset: str | None = None
+    workspace_root: str | None = None
+    if thread.team_preset:
+        team_preset = thread.team_preset
+    if thread.thread_metadata:
+        try:
+            meta = json.loads(thread.thread_metadata)
+            workspace_root = meta.get("workspace_root")
+        except (json.JSONDecodeError, AttributeError):
+            pass
 
-        async def _ingest_and_release_send(
-            _tid: str = thread_id,
-            _aid: str = agent_id,
-        ) -> None:
-            try:
-                await aggregator.ingest(
-                    _tid, _aid, cast(StreamableGraph, graph), graph_input, config
-                )
-            finally:
-                await registry.mark_ingest_done(_tid)
+    # Dispatch to worker (ADR-019)
+    dispatch = DispatchRequest(
+        action="ingest",
+        thread_id=thread_id,
+        agent_id=agent_id,
+        content=body.content,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+    )
 
-        tg.start_soon(_ingest_and_release_send)
-    else:
-        # No graph registered: emit submitted status so the frontend knows
-        # the message was received (graph may be wired via WebSocket later).
+    try:
+        await worker_client.post(
+            "/dispatch",
+            json=dispatch.model_dump(),
+        )
+    except httpx.HTTPError:
+        logger.warning(
+            "Failed to dispatch message to worker for thread %s",
+            thread_id,
+            exc_info=True,
+        )
+        # Still return accepted -- the worker may pick it up when available,
+        # or the message handler can retry.
         await aggregator.emit_agent_status(
             thread_id=thread_id,
             agent_id=agent_id,
             node_name="supervisor",
             state=AgentLifecycleState.SUBMITTED,
-            detail="Processing user message",
+            detail="Message received, awaiting worker",
         )
 
     return SendMessageResponse(status="accepted", thread_id=thread_id)
 
 
 # ---------------------------------------------------------------------------
-# GET /team/status — Team status snapshot
+# GET /team/status -- Team status snapshot
 # ---------------------------------------------------------------------------
 
 
@@ -730,8 +628,10 @@ async def get_team_status_endpoint(
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions.
 
-    Agent summaries are sourced from node metadata cached by
-    ``aggregator.register_graph()`` at graph compilation time (ADR-012 §6).
+    ADR-019 NOTE: The control surface aggregator is lightweight and does not
+    have graphs registered.  Agent summaries and active thread lists will be
+    empty until the worker relay populates them.  A future enhancement will
+    proxy this data from the worker.
     """
     active_threads = aggregator.get_active_thread_ids()
     node_summaries = aggregator.get_node_summaries()
@@ -751,25 +651,24 @@ async def get_team_status_endpoint(
     return TeamStatusResponse(
         agents=agents,
         active_threads=active_threads,
-        # TODO(vaultspec): wire pending_permissions from the aggregator when it
+        # TODO(vaultspec): wire pending_permissions from the worker when it
         # https://github.com/vaultspec/vaultspec-a2a/issues/2
-        # tracks outstanding permission requests. The aggregator currently does
-        # not maintain a queryable set of pending PermissionRequestEvents, so
-        # this is always empty. Requires aggregator.get_pending_permissions().
+        # tracks outstanding permission requests.  The local aggregator does
+        # not have graphs registered (ADR-019), so this is always empty.
         pending_permissions=[],
     )
 
 
 # ---------------------------------------------------------------------------
-# GET /teams — List available team presets (ADR-013 §6)
+# GET /teams -- List available team presets (ADR-013 S6)
 # ---------------------------------------------------------------------------
 
-# Built-in preset IDs shipped with the package (ADR-013 §2.9).
+# Built-in preset IDs shipped with the package (ADR-013 S2.9).
 _BUNDLED_TEAM_PRESETS = (
-    "coding-star",
-    "coding-pipeline",
-    "coding-loop",
-    "solo-coder",
+    "vaultspec-adaptive-coder",
+    "vaultspec-structured-coder",
+    "vaultspec-iterative-coder",
+    "vaultspec-solo-coder",
 )
 
 
@@ -803,7 +702,7 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
 
 
 # ---------------------------------------------------------------------------
-# POST /permissions/{request_id}/respond — Permission response (REST)
+# POST /permissions/{request_id}/respond -- Permission response (REST)
 # ---------------------------------------------------------------------------
 
 
@@ -814,18 +713,20 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
 async def respond_to_permission_endpoint(
     request_id: str,
     body: PermissionResponseRequest,
-    aggregator: EventAggregator = Depends(get_aggregator),
-    registry: GraphRegistry = Depends(get_graph_registry),
-    tg: TaskGroup = Depends(get_task_group),
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
 
     Permission responses are handled via REST rather than WebSocket
-    to ensure guaranteed delivery (ADR-011 §3.1).
+    to ensure guaranteed delivery (ADR-011 S3.1).
 
-    Resumes the LangGraph graph interrupt via ``Command(resume=option_id)``.
-    The graph is re-invoked with ``Command(resume=option_id)`` as input, which
-    causes the ``interrupt()`` call in the worker node to return ``option_id``.
+    ADR-019: The resume is dispatched to the worker which owns the graph
+    and calls ``Command(resume=option_id)`` on the interrupted graph.
+
+    The DB is queried for ``team_preset`` and ``workspace_root`` so the
+    worker can lazily recompile the graph if it was evicted or the worker
+    restarted since the thread was created (ADR-019 lazy recompile path).
     """
     logger.info(
         "Permission response: request_id=%s, option_id=%s",
@@ -839,60 +740,49 @@ async def respond_to_permission_endpoint(
     if ":" in request_id:
         thread_id, _ = request_id.split(":", 1)
 
-    graph = registry.get(thread_id) if thread_id else None
+    dispatched = False
+    if thread_id:
+        # Look up team_preset and workspace_root from DB for lazy recompile.
+        team_preset: str | None = None
+        workspace_root: str | None = None
+        thread_record = await get_thread(db, thread_id)
+        if thread_record is not None:
+            team_preset = thread_record.team_preset
+            if thread_record.thread_metadata:
+                try:
+                    meta = json.loads(thread_record.thread_metadata)
+                    workspace_root = meta.get("workspace_root")
+                except (json.JSONDecodeError, AttributeError):
+                    pass
 
-    if graph is not None:
-        # H8: guard against double-resume or stale requests.
-        # mark_ingest_active returns False if an ingest is already running for
-        # this thread, which means either the graph was never interrupted or
-        # another resume is already in flight.
-        if not await registry.mark_ingest_active(thread_id):
-            logger.warning(
-                "Ingest already active for thread %s — ignoring duplicate "
-                "permission response for request_id=%s",
-                thread_id,
-                request_id,
-            )
-            raise HTTPException(
-                status_code=409,
-                detail=(
-                    f"A graph ingest is already running for thread {thread_id!r}. "
-                    "The permission request may have already been handled."
-                ),
-            )
-
-        config = {"configurable": {"thread_id": thread_id}}
-
-        async def _resume_and_release(
-            _tid: str = thread_id,
-            _opt: str = body.option_id,
-        ) -> None:
-            try:
-                await aggregator.ingest(
-                    _tid,
-                    "supervisor",
-                    cast(StreamableGraph, graph),
-                    Command(resume=_opt),
-                    config,
-                )
-            finally:
-                await registry.mark_ingest_done(_tid)
-
-        tg.start_soon(_resume_and_release)
-        logger.info(
-            "Resuming graph for thread %s with option_id=%s",
-            thread_id,
-            body.option_id,
+        dispatch = DispatchRequest(
+            action="resume",
+            thread_id=thread_id,
+            option_id=body.option_id,
+            team_preset=team_preset,
+            workspace_root=workspace_root,
         )
+
+        try:
+            resp = await worker_client.post(
+                "/dispatch",
+                json=dispatch.model_dump(),
+            )
+            dispatched = resp.is_success
+        except httpx.HTTPError:
+            logger.warning(
+                "Failed to dispatch resume to worker for thread %s",
+                thread_id,
+                exc_info=True,
+            )
     else:
         logger.warning(
-            "No graph found for request_id=%s (thread_id=%r) — cannot resume",
+            "No thread_id found in request_id=%s -- cannot dispatch resume",
             request_id,
-            thread_id,
         )
 
     return PermissionResponseResult(
         request_id=request_id,
-        accepted=graph is not None,
+        accepted=dispatched,
         thread_id=thread_id,
     )

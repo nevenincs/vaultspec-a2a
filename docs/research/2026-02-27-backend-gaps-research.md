@@ -27,7 +27,7 @@ LangGraph exposes four first-class streaming primitives via its compiled graph.
 All are async and are the canonical source of data for the Event Aggregator:
 
 | Method | `stream_mode` | Granularity | Best use |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `astream(input, config, stream_mode="values")` | `"values"` | Full state snapshot per step | Snapshot replay |
 | `astream(input, config, stream_mode="updates")` | `"updates"` | Per-node delta dict | Live agent status panels |
 | `astream(input, config, stream_mode="messages")` | `"messages"` | Token-by-token from any LLM invocation | Streaming chat bubbles |
@@ -44,9 +44,9 @@ StreamMode = Literal[
 
 The `"messages"` mode emits LLM token chunks together with metadata for any
 LLM invocations inside nodes — this is the **primary source** for
-`message_chunk` and `thought_chunk` server events.
+`message_chunk`and`thought_chunk`server events.
 
-The `"updates"` mode emits per-node deltas after each step — this drives
+The`"updates"` mode emits per-node deltas after each step — this drives
 `agent_status` events.
 
 ### 1.2 astream_events Schema (v2)
@@ -66,26 +66,28 @@ stream that fires for every operation in the graph. Each event has this shape:
 }
 ```
 
-**High-value events for our wire protocol:**
+### High-value events for our wire protocol
 
 | LangChain event | Maps to server event | Notes |
-|---|---|---|
-| `on_chat_model_stream` | `message_chunk` | `data["chunk"].content` = token text |
+| --- | --- | --- |
+| `on_chat_model_stream` | `message_chunk` | `data["chunk"].content`= token text |
 | `on_chat_model_end` | (no event needed) | Marks completion of a turn |
-| `on_tool_start` | `tool_call_start` | `data["input"]` = tool args |
-| `on_tool_end` | `tool_call_update` | `data["output"]` = tool result |
-| `on_chain_start` (node entry) | `agent_status` → `working` | `name` = node name |
-| `on_chain_end` (node exit) | `agent_status` → `idle` | After final node |
-| `on_custom_event` | `thought_chunk` | Via `StreamWriter` in nodes |
+| `on_tool_start` | `tool_call_start` | `data["input"]`= tool args |
+| `on_tool_end` | `tool_call_update` | `data["output"]`= tool result |
+| `on_chain_start`(node entry) | `agent_status`→`working` | `name`= node name |
+| `on_chain_end`(node exit) | `agent_status`→`idle` | After final node |
+| `on_custom_event` | `thought_chunk` | Via`StreamWriter`in nodes |
 
-**Noise to filter:**
+### Noise to filter
 
-- Internal LangGraph pregel events tagged with `TAG_HIDDEN`
-- Duplicate `on_chain_start`/`on_chain_end` from sub-runnables (check `metadata["langgraph_node"]` to scope to the graph's own nodes)
-- `on_retriever_*` events (not relevant unless we add RAG)
-- `on_prompt_*` events (template expansion, low value)
+- Internal LangGraph pregel events tagged with`TAG_HIDDEN`
+- Duplicate `on_chain_start`/`on_chain_end`from sub-runnables
+  (check`metadata["langgraph_node"]`to scope to the graph's own nodes)
+-`on_retriever_*`events (not relevant unless we add RAG)
+-`on_prompt_*` events (template expansion, low value)
 
 Filter pattern:
+
 ```python
 PASSTHROUGH_EVENTS = frozenset({
     "on_chat_model_stream",
@@ -99,33 +101,34 @@ NODE_BOUNDARY_EVENTS = frozenset({
 })
 ```
 
-Only emit `agent_status` for `on_chain_start`/`on_chain_end` when
-`event["metadata"].get("langgraph_node")` is set and not in an internal pregel
-namespace (i.e., `event["name"]` matches a known graph node name like
+Only emit `agent_status`for`on_chain_start`/`on_chain_end` when
+`event["metadata"].get("langgraph_node")`is set and not in an internal pregel
+namespace (i.e.,`event["name"]` matches a known graph node name like
 `"supervisor"`, `"coder"`, etc.).
 
 ### 1.3 Recommended Aggregator Architecture
 
-The central `EventAggregator` in `lib/core/aggregator.py` should:
+The central `EventAggregator`in`lib/core/aggregator.py`should:
 
-1. **Own one `asyncio.Queue` per `thread_id`**: Incoming LangGraph events are
+1. **Own one`asyncio.Queue`per`thread_id`**: Incoming LangGraph events are
    enqueued by a task running `astream_events`. The queue is the backpressure
    boundary — bounded at ~512 events.
 
-2. **Run a single fan-out coroutine**: A background task drains each queue and
+1. **Run a single fan-out coroutine**: A background task drains each queue and
    broadcasts to all active WebSocket connections subscribed to that
    `thread_id`.
 
-3. **Debounce high-frequency events**: Token streaming events (`on_chat_model_stream`)
+1. **Debounce high-frequency events**: Token streaming events
+   (`on_chat_model_stream`)
    must be batched before WebSocket send:
    - Collect chunks into a buffer
    - Flush every **50ms** or when buffer reaches **4KB** (whichever first)
-   - Use `asyncio.create_task` + `asyncio.sleep(0.05)` timer pattern
+   - Use `asyncio.create_task`+`asyncio.sleep(0.05)`timer pattern
 
-4. **Thread-ID envelope**: Every outbound WebSocket frame MUST carry
-   `thread_id` as the top-level discriminator (per ADR-011 `EventEnvelope`).
+1. **Thread-ID envelope**: Every outbound WebSocket frame MUST carry
+  `thread_id`as the top-level discriminator (per ADR-011`EventEnvelope`).
 
-**Skeleton pattern:**
+### Skeleton pattern
 
 ```python
 import asyncio
@@ -260,31 +263,31 @@ class EventAggregator:
 
 ### 1.4 WebSocket Multiplexing Pattern
 
-The `lib/api/websocket.py` handler should:
+The `lib/api/websocket.py`handler should:
 
 1. Accept one WebSocket per browser tab.
-2. Parse `ClientCommand` frames (discriminated on `type`).
+2. Parse`ClientCommand`frames (discriminated on`type`).
 3. On `subscribe`: call `aggregator.subscribe(thread_id, ws.send_json)`.
 4. On `unsubscribe`: call `aggregator.unsubscribe(thread_id, ws.send_json)`.
 5. On disconnect: unsubscribe from all `thread_id`s this socket subscribed to.
 6. On `send_message`: enqueue a new graph invocation via `aggregator.ingest()`.
-7. On `permission_response`: update the LangGraph `Command(resume=...)` via
+7. On `permission_response`: update the LangGraph `Command(resume=...)`via
    the core graph layer. **Never** route permission responses back through the
    WebSocket aggregator — they MUST go through REST per ADR-011.
 
-**Lifespan binding** (per ADR-007): The `EventAggregator` instance is a
-singleton started in FastAPI's `@asynccontextmanager` lifespan. It is injected
+**Lifespan binding** (per ADR-007): The`EventAggregator`instance is a
+singleton started in FastAPI's`@asynccontextmanager`lifespan. It is injected
 into WebSocket handlers via FastAPI Dependency Injection.
 
 ### 1.5 Backpressure Strategy
 
 | Source | Bounded by | Drop policy |
-|---|---|---|
-| LangGraph `astream_events` → Queue | `maxsize=512` | `await q.put()` blocks generator coroutine (natural backpressure) |
+| --- | --- | --- |
+| LangGraph`astream_events`→ Queue | `maxsize=512` | `await q.put()`blocks generator coroutine (natural backpressure) |
 | Queue → WebSocket broadcast | WebSocket send timeout | Remove dead sockets from subscriber set |
 | Token chunk debounce buffer | 4KB max or 50ms flush | Always flush before sending non-chunk events |
 
-**Critical**: Never use `q.put_nowait()`. Always `await q.put()` to propagate
+**Critical**: Never use`q.put_nowait()`. Always `await q.put()`to propagate
 backpressure to the LangGraph generator, preventing memory blowup if a browser
 client is slow.
 
@@ -294,7 +297,7 @@ client is slow.
 
 ### 2.1 What langgraph-checkpoint-sqlite Owns
 
-Reading `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`,
+Reading`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`,
 the `AsyncSqliteSaver.setup()` method creates exactly two tables:
 
 ```sql
@@ -419,11 +422,11 @@ CREATE INDEX IF NOT EXISTS idx_token_usage_thread_id ON token_usage (thread_id);
 
 ### 2.3 Sharing the Database File: Safety Considerations
 
-`AsyncSqliteSaver` uses a single `aiosqlite.Connection` protected by an
+`AsyncSqliteSaver`uses a single`aiosqlite.Connection` protected by an
 `asyncio.Lock`. Our custom CRUD operations must use a **separate connection**
 to avoid deadlocking LangGraph's internal lock.
 
-**Recommended pattern:**
+### Recommended pattern
 
 ```python
 # lib/database/session.py
@@ -461,7 +464,7 @@ async def setup_app_tables(conn: aiosqlite.Connection) -> None:
 **SQLite WAL mode is set by LangGraph's `AsyncSqliteSaver.setup()`** on first
 connection. Our second connection on the same file inherits WAL mode
 automatically (it is a file-level pragma). However, to be safe, our
-`setup_app_tables` function should also issue `PRAGMA journal_mode=WAL;`.
+`setup_app_tables`function should also issue`PRAGMA journal_mode=WAL;`.
 
 ### 2.4 Connection Pool Constraint
 
@@ -469,8 +472,9 @@ Per ADR-007: "Writes must be batched or funneled through a single async
 worker."
 
 For our CRUD layer:
-- Use one dedicated `aiosqlite.Connection` per FastAPI lifespan (singleton)
-- Protect it with an `asyncio.Lock()` (same pattern as `AsyncSqliteSaver`)
+
+- Use one dedicated `aiosqlite.Connection`per FastAPI lifespan (singleton)
+- Protect it with an`asyncio.Lock()`(same pattern as`AsyncSqliteSaver`)
 - For read-heavy endpoints (snapshots, artifact listing), open short-lived
   read connections — SQLite WAL allows concurrent readers
 
@@ -499,21 +503,21 @@ without the overhead of Alembic.
 - Dual-mode support: flat hierarchy (dev) + worktree mode (agents)
 - Manual cleanup only (no automatic teardown)
 - Global Git Mutex (`asyncio.Lock`) for destructive repo-wide operations
-- All operations must be `async def` (no blocking calls in Uvicorn event loop)
+- All operations must be `async def`(no blocking calls in Uvicorn event loop)
 
 ### 3.2 Async Git Operation Pattern
 
 Python has no official async git library. Options:
 
 | Approach | Pros | Cons |
-|---|---|---|
+| --- | --- | --- |
 | `asyncio.create_subprocess_exec(["git", ...])` | Zero dependencies, native async | Must parse stdout, no object model |
-| `gitpython` via `asyncio.to_thread` | Rich object model | gitpython is sync-only; blocks thread pool |
-| `pygit2` via `asyncio.to_thread` | Fast C bindings, libgit2 | Same blocking issue; libgit2 not great on Windows |
+| `gitpython`via`asyncio.to_thread` | Rich object model | gitpython is sync-only; blocks thread pool |
+| `pygit2`via`asyncio.to_thread` | Fast C bindings, libgit2 | Same blocking issue; libgit2 not great on Windows |
 
-**Recommendation**: Use `asyncio.create_subprocess_exec` for all git
+**Recommendation**: Use`asyncio.create_subprocess_exec`for all git
 operations. This is the safest approach on Windows, avoids blocking the
-event loop, and matches how the existing `AcpChatModel` handles subprocesses.
+event loop, and matches how the existing`AcpChatModel` handles subprocesses.
 
 ```python
 import asyncio
@@ -577,14 +581,14 @@ async def create_worktree(
 
 #### Branch Naming Convention (ADR-001)
 
-```
+```markdown
 agent/{role}/{thread_id_short}
 # Examples:
 agent/coder/a1b2c3d4
 agent/reviewer/a1b2c3d4
 ```
 
-`thread_id_short` = first 8 characters of the `thread_id` UUID.
+`thread_id_short`= first 8 characters of the`thread_id` UUID.
 
 #### Merge Strategy
 
@@ -668,7 +672,7 @@ async def check_merge_conflicts(
 
 ### 3.4 Worktree Path Resolution (Dual-Mode)
 
-Per ADR-001, the `WorkspaceManager` must resolve `.venv` and utility paths
+Per ADR-001, the `WorkspaceManager`must resolve`.venv` and utility paths
 differently depending on mode:
 
 ```python
@@ -774,8 +778,8 @@ async with _git_mutex:
         raise  # let caller handle; mutex releases via context manager exit
 ```
 
-Since `asyncio.Lock()` is used as an async context manager, Python guarantees
-release on `__aexit__` regardless of exception. The risk is a coroutine being
+Since `asyncio.Lock()`is used as an async context manager, Python guarantees
+release on`__aexit__` regardless of exception. The risk is a coroutine being
 cancelled while holding the lock. To mitigate:
 
 ```python
@@ -784,8 +788,8 @@ async def safe_git_op(coro):
     return await asyncio.shield(coro)
 ```
 
-Use `asyncio.shield()` only for the critical section inside the mutex (e.g.,
-the `git merge` call) — not for the entire `_run_git` wrapper.
+Use `asyncio.shield()`only for the critical section inside the mutex (e.g.,
+the`git merge`call) — not for the entire`_run_git` wrapper.
 
 ---
 
@@ -793,51 +797,56 @@ the `git merge` call) — not for the entire `_run_git` wrapper.
 
 ### 4.1 For Task #4: Event Aggregator (`lib/core/aggregator.py`)
 
-- Implement the `EventAggregator` class per section 1.3
-- Use `stream_mode=["updates", "messages"]` via `astream` for structured
-  status/message events; use `astream_events(version="v2")` for granular
+- Implement the `EventAggregator`class per section 1.3
+- Use`stream_mode=["updates", "messages"]`via`astream`for structured
+  status/message events; use`astream_events(version="v2")`for granular
   tool call events
-- Prefer `astream` with `stream_mode="messages"` for token streaming —
-  it avoids the overhead of full `astream_events` callback processing
-- Singleton lifecycle bound to FastAPI lifespan via `anyio.create_task_group`
-- Expose `subscribe(thread_id, send_fn)` / `unsubscribe` / `ingest` public API
+- Prefer`astream`with`stream_mode="messages"`for token streaming —
+  it avoids the overhead of full`astream_events`callback processing
+- Singleton lifecycle bound to FastAPI lifespan via`anyio.create_task_group`
+- Expose `subscribe(thread_id, send_fn)`/`unsubscribe`/`ingest` public API
 
 ### 4.2 For Task #3: Database Layer (`lib/database/`)
 
-- Module structure: `session.py` (connection + setup), `models.py` (dataclasses
-  for our tables), `crud.py` (async CRUD functions)
-- Use `aiosqlite.Row` row factory for named column access
+- Module structure: `session.py`(connection + setup),`models.py`(dataclasses
+  for our tables),`crud.py`(async CRUD functions)
+- Use`aiosqlite.Row`row factory for named column access
 - Do NOT use SQLAlchemy — it adds complexity without benefit for a simple CRUD
   layer over a local SQLite file
-- The `threads` table `id` column MUST match LangGraph's `thread_id` exactly
-  (both are `TEXT`, both are UUIDs)
+- The`threads`table`id`column MUST match LangGraph's`thread_id`exactly
+  (both are`TEXT`, both are UUIDs)
 - Expose `get_db()` as an async context manager FastAPI dependency
 
 ### 4.3 For Task #7: Workspace Manager (`lib/workspace/git_manager.py`)
 
-- Implement `_run_git`, `_git_mutex`, `WorkspaceConfig` per section 3
-- Expose `WorkspaceManager` class with methods: `create_worktree`,
+- Implement `_run_git`, `_git_mutex`, `WorkspaceConfig`per section 3
+- Expose`WorkspaceManager`class with methods:`create_worktree`,
   `remove_worktree`, `list_worktrees`, `check_merge_conflicts`,
   `merge_worktree_branch`
 - All public methods are `async def`
-- Singleton `_git_mutex` lives at module level (not class level) to be
+- Singleton `_git_mutex`lives at module level (not class level) to be
   truly global across instances
-- On Windows 11: `git` must be on `PATH`. Use `shutil.which("git")` to
+- On Windows 11:`git`must be on`PATH`. Use `shutil.which("git")`to
   verify at startup and raise a clear error if not found
 
 ---
 
 ## 5. References
 
-- `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`
-  — Source of `AsyncSqliteSaver.setup()` schema
-- `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/store/sqlite/base.py`
-  — Source of `store` table MIGRATIONS list
-- `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py`
-  — `StreamMode` literal definition
-- `knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/debug.py`
+-`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`
+  — Source of `AsyncSqliteSaver.setup()`schema
+-`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/store/sqlite/base.py`
+  — Source of `store`table MIGRATIONS list
+-`knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py`
+  — `StreamMode`literal definition
+-`knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/debug.py`
   — `TaskPayload`, `CheckpointPayload`, `map_debug_checkpoint`
-- `docs/adrs/001-process-and-workspace-management.md` — Global Git Mutex, dual-mode workspaces
-- `docs/adrs/004-event-aggregation-server-side-replay.md` — Aggregator requirements
-- `docs/adrs/007-tech-stack-deployment.md` — SQLite WAL, aiosqlite, lifespan management
-- `docs/adrs/009-approved-module-hierarchy.md` — `lib/database/`, `lib/workspace/`, `lib/core/aggregator.py`
+
+- `docs/adrs/001-process-and-workspace-management.md`— Global Git Mutex,
+  dual-mode workspaces
+-`docs/adrs/004-event-aggregation-server-side-replay.md`— Aggregator
+requirements
+-`docs/adrs/007-tech-stack-deployment.md`— SQLite WAL, aiosqlite, lifespan
+management
+-`docs/adrs/009-approved-module-hierarchy.md`—`lib/database/`, `lib/workspace/`,
+`lib/core/aggregator.py`

@@ -1,7 +1,11 @@
 ---
-title: ACP Protocol Feature Parity Audit
-source: Toad, claude-agent-sdk, acp-python-sdk
-relevance: 10
+date: 2026-02-26
+type: audit
+feature: acp-protocol-parity
+description: "Comparative audit of ACP protocol feature parity between our acp_chat_model.py implementation and the Toad, claude-agent-sdk, and acp-python-sdk reference sources."
+related:
+  - docs/adrs/2026-02-26-003-protocol-bridging-translation-adr.md
+  - docs/adrs/2026-02-25-002-llm-context-provider-abstraction-adr.md
 ---
 
 # ACP Protocol Feature Parity Audit
@@ -9,7 +13,7 @@ relevance: 10
 **Our implementation:** `lib/providers/acp_chat_model.py`
 **Date:** 2026-02-26
 
-**Sources audited:**
+## Sources audited
 
 1. **Toad** — `toad/acp/agent.py`
 2. **Anthropic claude-agent-sdk** — `claude_agent_sdk`
@@ -59,18 +63,18 @@ Not useful as a direct reference for raw ACP.
 
 | Agent method | Gated? | Toad | Ours |
 | ------------ | ------ | ---- | ---- |
-| `session/update` (notification) | No | ✅ | ✅ |
+| `session/update`(notification) | No | ✅ | ✅ |
 | `session/request_permission` | **No** | ✅ | ✅ |
 | `fs/*` | Yes | ✅ | ❌ |
 | `terminal/*` | Yes | ✅ | ❌ |
 
-### `session/update` Subtypes
+### `session/update`Subtypes
 
 | Type | Ours | Action |
 | ---- | ---- | ------ |
-| `agent_message_chunk` | ✅ | → `AIMessageChunk` |
-| `agent_thought_chunk` | ✅ | → `AIMessageChunk` |
-| `tool_call` | ✅ | → `ToolCallChunk` |
+| `agent_message_chunk` | ✅ | →`AIMessageChunk` |
+| `agent_thought_chunk` | ✅ | →`AIMessageChunk` |
+| `tool_call` | ✅ | →`ToolCallChunk` |
 | `tool_call_update` | ✅ | Status tracking |
 | `plan` | ✅ | Logged |
 | `available_commands_update` | ✅ | Logged |
@@ -85,34 +89,34 @@ Not useful as a direct reference for raw ACP.
 | Feature | Status |
 | ------- | ------ |
 | `session/request_permission` | ✅ Auto-grant + callback |
-| `tool_call` → `ToolCallChunk` | ✅ LangGraph visibility |
+| `tool_call`→`ToolCallChunk` | ✅ LangGraph visibility |
 | `session/cancel` | ✅ Notification in cleanup |
-| `session/load` | ✅ Via `session_id` field |
-| MCP server injection | ✅ Via `mcp_servers` field |
+| `session/load` | ✅ Via`session_id`field |
+| MCP server injection | ✅ Via`mcp_servers`field |
 | All session/update subtypes | ✅ Handled or logged |
 | Outbound session methods | ✅ Session-gated live calls |
 | `permission_callback` | ✅ Optional async callback |
-| `fs/*` / `terminal/*` | ❌ Deferred (caps disabled) |
+| `fs/*`/`terminal/*` | ❌ Deferred (caps disabled) |
 
 ## Toad Reference Alignment (2026-02-26)
 
 | Fix | Detail |
 | --- | ------ |
-| `agentCapabilities` storage | From initialize response |
-| `loadSession` gating | `session/load` only if capable |
-| Modes extraction | From `session/new` response |
-| `session/cancel` as RPC | Not notification, 3s timeout |
+| `agentCapabilities`storage | From initialize response |
+| `loadSession`gating | `session/load`only if capable |
+| Modes extraction | From`session/new`response |
+| `session/cancel`as RPC | Not notification, 3s timeout |
 | Tool call tracking | Merge dict + orphan handling |
 | Field name corrections | `entries`, `availableCommands`, `currentModeId` |
 
 ## Key Learnings
 
-1. `PermissionOption` uses `optionId` (camelCase), not `id`
-2. `terminal: false` is correct — agents fallback internally
-3. `claude-agent-sdk` uses a different wire format
+1.`PermissionOption`uses`optionId`(camelCase), not`id`
+2. `terminal: false`is correct — agents fallback internally
+3.`claude-agent-sdk` uses a different wire format
 4. Gemini probe passed: initialize → session/new → prompt → end_turn
 5. Toad uses identical code for Claude & Gemini (`gemini --experimental-acp`)
-6. `loadSession` capability must be checked before `session/load`
+6. `loadSession`capability must be checked before`session/load`
 
 ## References
 

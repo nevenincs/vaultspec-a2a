@@ -27,6 +27,7 @@ dependencies = [
 
 [project.scripts]
 vaultspec = "lib.api.app:main"
+vaultspec-worker = "lib.worker.app:main"
 
 [project.optional-dependencies]
 dev = [
@@ -83,6 +84,9 @@ markers = [
 line-length = 88
 indent-width = 4
 target-version = "py313"
+# Exclude throwaway utility scripts at repo root (not part of the package).
+# lib/worker/ is untracked WIP — exclude until it is committed and cleaned up.
+exclude = ["fix_*.py", "fix_tables.py", "lib/worker/"]
 
 
 [tool.ruff.lint]
@@ -133,6 +137,10 @@ unfixable = ["B"]
 # FastAPI endpoints use Depends() in function defaults — this IS the correct
 # FastAPI pattern, not a mutable default argument bug.
 "lib/api/endpoints.py" = ["B008"]
+# Internal router uses FastAPI Depends() in function defaults
+"lib/api/internal.py" = ["B008"]
+# Worker app uses FastAPI Depends() in function defaults (same as endpoints.py)
+"lib/worker/app.py" = ["B008"]
 # Telemetry: conditional SDK imports are inside functions because the SDK
 # may not be loaded yet at import time; logging uses lazy imports.
 "lib/telemetry/instrumentation.py" = ["PLC0415"]
@@ -208,3 +216,4 @@ DEP002 = [
 [tool.ty.environment]
 python-version = "3.13"
 root = [".", "lib"]
+

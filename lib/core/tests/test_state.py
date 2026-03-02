@@ -97,10 +97,16 @@ class TestReplacePlan:
         result = _replace_plan(old, new)
         assert result == new
 
-    def test_keeps_existing_when_new_is_empty(self) -> None:
-        """An empty new list leaves the existing plan in place."""
+    def test_empty_new_clears_plan(self) -> None:
+        """An empty list explicitly clears the plan (T12 fix — was silently discarded)."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
         result = _replace_plan(old, [])
+        assert result == []
+
+    def test_none_new_keeps_existing(self) -> None:
+        """None leaves the existing plan in place (reducer called with no update)."""
+        old = [{"step": "research", "status": "done", "agent": "planner"}]
+        result = _replace_plan(old, None)  # type: ignore[arg-type]
         assert result == old
 
 
@@ -177,7 +183,7 @@ class TestTeamStateStructure:
     """Verify TeamState has all expected keys."""
 
     def test_has_required_keys(self) -> None:
-        """TeamState annotations include exactly the eight expected field names."""
+        """TeamState annotations include exactly the expected field names."""
         expected = {
             "messages",
             "next",
@@ -187,6 +193,7 @@ class TestTeamStateStructure:
             "thread_id",
             "token_usage",
             "loop_count",
+            "routing_error",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

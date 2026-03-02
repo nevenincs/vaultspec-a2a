@@ -153,8 +153,8 @@ class TestCompactContext:
         # First message should still be the original system message
         assert isinstance(result["messages"][0], SystemMessage)
         assert result["messages"][0].content == sys_msg.content
-        # Second should be the compaction summary
-        assert isinstance(result["messages"][1], SystemMessage)
+        # Second should be the compaction summary (HumanMessage per T14 fix)
+        assert isinstance(result["messages"][1], HumanMessage)
         summary_content = result["messages"][1].content
         assert isinstance(summary_content, str)
         assert "compacted" in summary_content.lower()

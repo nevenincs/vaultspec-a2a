@@ -23,7 +23,7 @@ Every `POST /threads` compiles a new graph instance from a team preset
 concrete gaps:
 
 | Gap | Current State | Impact |
-|---|---|---|
+| --- | --- | --- |
 | **No human-readable identity** | Thread IDs are UUIDs (`a3f2...`). | Unusable in the UI sidebar — users cannot distinguish threads at a glance. |
 | **No source repository** | Not tracked. | When the orchestrator serves multiple repos, there is no way to attribute a thread to a project. |
 | **No source branch** | Not tracked. | No way to correlate a thread with a feature branch. CI traceability is broken. |
@@ -39,7 +39,7 @@ idea *which* workspace, *which* feature, or *which* documents are relevant.
 
 The target workflow is:
 
-```
+```text
 Feature Request
     │
     ├─ Research   → .vault/research/yyyy-mm-dd-<feature>-<phase>-research.md
@@ -190,7 +190,7 @@ preamble lives in the message stream, not the system prompt, which:
 
 **Message ordering inside a node's `ainvoke()` call:**
 
-```
+```text
 [1] SystemMessage(content=system_prompt)     ← from TOML, prepended by worker_node/supervisor_node
 [2] SystemMessage(content=context_preamble)  ← from graph_input, first in state["messages"]
 [3] HumanMessage(content=initial_message)    ← from graph_input, second in state["messages"]
@@ -306,7 +306,7 @@ for worker_ref in team_config.workers:
 This activates the workspace-local override paths that were already
 implemented but never invoked (ADR-012 §2.8, ADR-013 §2.8):
 
-```
+```text
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (now reachable)
 2. lib/core/presets/agents/{agent_id}.toml               (bundled fallback)
 ```
@@ -326,7 +326,7 @@ process = await asyncio.create_subprocess_shell(
 ```
 
 `_sandbox_path()` validation uses this same `cwd` root. `AcpChatModel`
-gains a `workspace_root: Path | None = None` Pydantic field, set by
+| gains a `workspace_root: Path | None = None` Pydantic field, set by |
 `ProviderFactory.create()` when `metadata.workspace_root` is available.
 
 ### 2.8 Wire Contract Amendments
@@ -352,7 +352,7 @@ UUID, show the feature tag as a badge, show the branch, show a callee icon.
 
 #### New REST Endpoint: Thread Metadata
 
-```
+```text
 GET /threads/{thread_id}/metadata  →  ThreadMetadata | 404
 ```
 

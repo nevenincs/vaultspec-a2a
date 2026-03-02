@@ -17,7 +17,10 @@
       "Bash(powershell.exe -Command \"& { . .\\\\.venv\\\\Scripts\\\\Activate.ps1; python -m pytest lib/core/tests/test_graph.py::test_graph_execution_routing -v -s 2>&1 }\")",
       "Bash(powershell.exe -Command \"gemini --version 2>&1\")",
       "Bash(git checkout:*)",
-      "Bash(pytest:*)"
+      "Bash(pytest:*)",
+      "Bash(npx markdownlint-cli2:*)",
+      "Bash(python:*)",
+      "Bash(lychee:*)"
     ]
   },
   "enableAllProjectMcpServers": true,

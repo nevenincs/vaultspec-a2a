@@ -71,4 +71,4 @@ the v1 architecture.
 
 ## 6. References
 
-- [Process Domain - Distilled](../distilled/2026-25-02-process-distilled.md)
+- [Process Domain - Distilled](../research/2026-02-25-process-distilled-research.md)

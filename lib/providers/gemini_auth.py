@@ -66,6 +66,10 @@ _CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
 # HTTP status code for success.
 _HTTP_OK = 200
 
+# Serialises concurrent refresh attempts so two graph executions that both
+# detect expired credentials do not race on the credentials file (PROV-M8).
+_refresh_lock = asyncio.Lock()
+
 
 def _is_expired(creds: dict) -> bool:
     """Return True if the access token is missing or about to expire."""
@@ -76,8 +80,13 @@ def _is_expired(creds: dict) -> bool:
 
 
 def _fsync_file(path: Path) -> None:
-    """Open a file read-only and fsync it to flush OS write-back cache."""
-    fd = os.open(str(path), os.O_RDONLY)
+    """Open a file and fsync it to flush OS write-back cache.
+
+    On Windows ``os.fsync()`` requires a writable file descriptor —
+    ``O_RDONLY`` raises ``OSError: [Errno 9] Bad file descriptor``.
+    We use ``O_RDWR`` which works on both POSIX and Windows.
+    """
+    fd = os.open(str(path), os.O_RDWR)
     try:
         os.fsync(fd)
     finally:
@@ -113,59 +122,67 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
             "Run `gemini` interactively at least once to authenticate."
         )
 
-    creds: dict = json.loads(creds_path.read_text(encoding="utf-8"))
+    async with _refresh_lock:
+        # PROV-H1: offload blocking read_text via to_thread
+        raw = await asyncio.to_thread(creds_path.read_text, encoding="utf-8")
+        creds: dict = json.loads(raw)
 
-    if not _is_expired(creds):
-        logger.debug("Gemini OAuth token is valid; skipping refresh.")
-        return
+        # Double-check after lock acquisition (another coroutine may have
+        # refreshed while we were waiting for the lock).
+        if not _is_expired(creds):
+            logger.debug("Gemini OAuth token is valid; skipping refresh.")
+            return
 
-    refresh_token = creds.get("refresh_token")
-    if not refresh_token:
-        raise RuntimeError(
-            "No refresh_token in oauth_creds.json — cannot refresh headlessly. "
-            "Run `gemini` interactively to re-authenticate."
+        refresh_token = creds.get("refresh_token")
+        if not refresh_token:
+            raise RuntimeError(
+                "No refresh_token in oauth_creds.json — cannot refresh headlessly. "
+                "Run `gemini` interactively to re-authenticate."
+            )
+
+        logger.info("Gemini OAuth token expired; refreshing via token endpoint.")
+
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                _TOKEN_URI,
+                data={
+                    "grant_type": "refresh_token",
+                    "refresh_token": refresh_token,
+                    "client_id": _CLIENT_ID,
+                    "client_secret": _CLIENT_SECRET,
+                },
+                headers={"Content-Type": "application/x-www-form-urlencoded"},
+                timeout=15.0,
+            )
+
+        if response.status_code != _HTTP_OK:
+            raise RuntimeError(
+                f"Gemini token refresh failed (HTTP {response.status_code}). "
+                "Check ~/.gemini/oauth_creds.json or re-authenticate interactively."
+            ) from None
+
+        token_data = response.json()
+
+        creds["access_token"] = token_data["access_token"]
+        creds["expiry_date"] = int((time.time() + token_data["expires_in"]) * 1000)
+        if "token_type" in token_data:
+            creds["token_type"] = token_data["token_type"]
+        # Google may rotate the refresh token — preserve the new one if provided.
+        if "refresh_token" in token_data:
+            creds["refresh_token"] = token_data["refresh_token"]
+
+        # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
+        tmp = creds_path.with_suffix(".json.tmp")
+        # PROV-H2: offload blocking write_text via to_thread
+        await asyncio.to_thread(
+            tmp.write_text, json.dumps(creds, indent=2), encoding="utf-8"
         )
+        # PROV-L4: fsync via to_thread so blocking syscall doesn't stall event loop.
+        # M16: fsync before rename so data is durable even on power failure.
+        await asyncio.to_thread(_fsync_file, tmp)
+        await asyncio.to_thread(tmp.replace, creds_path)
 
-    logger.info("Gemini OAuth token expired; refreshing via token endpoint.")
-
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            _TOKEN_URI,
-            data={
-                "grant_type": "refresh_token",
-                "refresh_token": refresh_token,
-                "client_id": _CLIENT_ID,
-                "client_secret": _CLIENT_SECRET,
-            },
-            headers={"Content-Type": "application/x-www-form-urlencoded"},
-            timeout=15.0,
+        logger.info(
+            "Gemini OAuth token refreshed; new expiry in %ds.",
+            token_data["expires_in"],
         )
-
-    if response.status_code != _HTTP_OK:
-        raise RuntimeError(
-            f"Gemini token refresh failed (HTTP {response.status_code}). "
-            "Check ~/.gemini/oauth_creds.json or re-authenticate interactively."
-        ) from None
-
-    token_data = response.json()
-
-    creds["access_token"] = token_data["access_token"]
-    creds["expiry_date"] = int((time.time() + token_data["expires_in"]) * 1000)
-    if "token_type" in token_data:
-        creds["token_type"] = token_data["token_type"]
-    # Google may rotate the refresh token — preserve the new one if provided.
-    if "refresh_token" in token_data:
-        creds["refresh_token"] = token_data["refresh_token"]
-
-    # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
-    tmp = creds_path.with_suffix(".json.tmp")
-    tmp.write_text(json.dumps(creds, indent=2), encoding="utf-8")
-    # PROV-L4: fsync via to_thread so blocking syscall doesn't stall event loop.
-    # M16: fsync before rename so data is durable even on power failure.
-    await asyncio.to_thread(_fsync_file, tmp)
-    tmp.replace(creds_path)
-
-    logger.info(
-        "Gemini OAuth token refreshed; new expiry in %ds.",
-        token_data["expires_in"],
-    )

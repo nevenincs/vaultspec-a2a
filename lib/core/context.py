@@ -5,17 +5,23 @@ preparation as mandated by ADR-002 (context management) and ADR-008
 (state serialization).
 """
 
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from .state import TeamState
 
 
 __all__ = [
+    "CONTEXT_LIMIT",
     "compact_context",
     "estimate_tokens",
     "prepare_handoff",
     "should_compact",
 ]
+
+# Conservative context limit that fits all supported models
+# (Claude 200k, GPT-4 Turbo 128k, Gemini 1M). Compaction triggers at 80%
+# (100k tokens) to leave headroom for the generation cycle.
+CONTEXT_LIMIT = 120_000
 
 # Rough approximation: ~4 characters per token (GPT / Claude ballpark).
 _CHARS_PER_TOKEN = 4
@@ -105,7 +111,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
         kept_tokens += msg_tokens
 
     # Build the compacted message list
-    summary = SystemMessage(
+    summary = HumanMessage(
         content=(
             "[Context compacted: earlier conversation history was summarized "
             "to stay within the token budget. The core objective and recent "

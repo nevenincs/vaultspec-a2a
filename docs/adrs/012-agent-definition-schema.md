@@ -36,7 +36,7 @@ canonical definition. There is no way to compose a team without writing Python.
 
 Each logical agent role is defined by a TOML file located at:
 
-```
+```text
 {workspace_root}/.vaultspec/agents/{agent_id}.toml
 ```
 
@@ -89,7 +89,7 @@ require_approval_for = ["fs.writeTextFile"]
 ### 2.2 Full Field Reference
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `agent.id` | `str` | Yes | Unique identifier. Must match filename stem. Used as LangGraph node name. |
 | `agent.display_name` | `str` | Yes | Human-readable name. Stored in `add_node(metadata={"display_name": ...})`. |
 | `agent.role` | `str` | Yes | Semantic role enum: `planner`, `coder`, `reviewer`, `analyst`, `supervisor`, `custom`. |
@@ -97,6 +97,7 @@ require_approval_for = ["fs.writeTextFile"]
 | `agent.persona.system_prompt` | `str` | Yes | Full system prompt. Passed to `create_worker_node(model, system_prompt, name)` (worker.py:64). |
 | `agent.model.provider` | `str` | No | Override team default provider. Values: `claude`, `gemini`, `openai`, `zhipu`. |
 | `agent.model.capability` | `str` | No | Override team default capability level. Values: `low`, `mid`, `high`, `max`. |
+| `agent.model.provider_fallback` | `list[str]` | No | Ordered fallback provider list. If the primary provider fails or is unavailable, providers are tried in order. Same three-level override precedence as `provider`/`capability` (§2.3 in ADR-013). |
 | `agent.capabilities.filesystem_read` | `bool` | No | ACP `fs.readTextFile` flag (default `false`). |
 | `agent.capabilities.filesystem_write` | `bool` | No | ACP `fs.writeTextFile` flag (default `false`). |
 | `agent.capabilities.terminal` | `bool` | No | ACP `terminal` flag (default `false`). |
@@ -124,6 +125,7 @@ class AgentPermissionsConfig(BaseModel):
 class AgentModelConfig(BaseModel):
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
 
 
 class AgentPersonaConfig(BaseModel):
@@ -150,7 +152,7 @@ class AgentConfig(BaseModel):
 ### 2.4 SDK Mapping — How Each Field Becomes LangGraph Code
 
 | TOML Field | SDK API | File:Line |
-|---|---|---|
+| --- | --- | --- |
 | `agent.id` | `builder.add_node(name, ...)` — node name | `state.py:575` |
 | `agent.display_name`, `agent.role` | `builder.add_node(name, action, metadata={"display_name": ..., "role": ...})` | `state.py:575` |
 | `agent.description` | Injected into supervisor system prompt roster | `graph.py` (future) |
@@ -207,7 +209,7 @@ map 1:1:
 }
 ```
 
-`AcpChatModel` gains an `agent_config: AgentConfig | None = None` field.
+| `AcpChatModel` gains an `agent_config: AgentConfig | None = None` field. |
 `compile_team_graph()` injects the config when constructing each model
 via `ProviderFactory`.
 
@@ -217,7 +219,7 @@ The following agent definitions ship as package defaults in
 `lib/core/presets/agents/`:
 
 | File | Role | Capabilities |
-|---|---|---|
+| --- | --- | --- |
 | `planner.toml` | `planner` | `filesystem_read=true`, `terminal=false`, `filesystem_write=false` |
 | `coder.toml` | `coder` | `filesystem_read=true`, `filesystem_write=true`, `terminal=false` |
 | `reviewer.toml` | `reviewer` | `filesystem_read=true`, `filesystem_write=false`, `terminal=false` |
@@ -227,7 +229,7 @@ Workspace-local files at `.vaultspec/agents/{id}.toml` shadow preset defaults.
 
 ### 2.8 Config Discovery Order
 
-```
+```text
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (workspace override)
 2. lib/core/presets/agents/{agent_id}.toml               (bundled default)
 3. Raise AgentConfigNotFoundError                         (fail fast)
@@ -308,6 +310,7 @@ conflates immutable configuration with mutable execution state.
 The following fields are added to ADR-011 schemas:
 
 **`AgentSummary`** (used in `TeamStatusEvent` and `TeamStatusResponse`):
+
 ```python
 class AgentSummary(BaseModel):
     agent_id: str

@@ -9,6 +9,7 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ..core.config import settings
+from ..core.exceptions import ConfigError
 from ..core.team_config import AgentConfig
 from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
@@ -17,6 +18,21 @@ from .acp_chat_model import AcpChatModel
 __all__ = ["ProviderFactory"]
 
 logger = logging.getLogger(__name__)
+
+# PROV-01: cache created model clients to avoid repeated instantiation.
+_client_cache: dict[tuple, "BaseChatModel"] = {}
+
+# Resolve the claude-agent-acp entry point from the project-level node_modules.
+# lib/providers/factory.py -> lib/providers -> lib -> project root
+_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent
+_CLAUDE_ACP_JS = (
+    _PROJECT_ROOT
+    / "node_modules"
+    / "@zed-industries"
+    / "claude-agent-acp"
+    / "dist"
+    / "index.js"
+)
 
 
 class ProviderFactory:
@@ -94,9 +110,17 @@ class ProviderFactory:
                 bool(oauth_token),
             )
 
+            if not _CLAUDE_ACP_JS.exists():
+                raise ConfigError(
+                    f"Claude ACP entry point not found: {_CLAUDE_ACP_JS}. "
+                    f"Run 'npm install' to install @zed-industries/claude-agent-acp."
+                )
+
             return AcpChatModel(
-                command=["claude-agent-acp"],
-                # L10: guard against empty string — only set env var if truly present
+                command=["node", str(_CLAUDE_ACP_JS)],
+                # ADR-002 §2: Only inject CLAUDE_CODE_OAUTH_TOKEN. ANTHROPIC_API_KEY
+                # is explicitly stripped in _astream() to prevent pay-as-you-go billing
+                # from overriding the OAuth subscription.
                 env_vars={"CLAUDE_CODE_OAUTH_TOKEN": oauth_token}
                 if oauth_token and oauth_token.strip()
                 else {},
@@ -144,7 +168,12 @@ class ProviderFactory:
             kwargs["timeout"] = timeout
             kwargs["max_retries"] = 2
 
-            return ChatOpenAI(**kwargs)
+            cache_key = (provider, model_name)
+            if cache_key in _client_cache:
+                return _client_cache[cache_key]
+            client = ChatOpenAI(**kwargs)
+            _client_cache[cache_key] = client
+            return client
 
         if provider == Provider.OPENAI:
             auth_resolved = (
@@ -170,7 +199,12 @@ class ProviderFactory:
             kwargs["timeout"] = timeout
             kwargs["max_retries"] = 2
 
-            return ChatOpenAI(**kwargs)
+            cache_key = (provider, model_name)
+            if cache_key in _client_cache:
+                return _client_cache[cache_key]
+            client = ChatOpenAI(**kwargs)
+            _client_cache[cache_key] = client
+            return client
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")

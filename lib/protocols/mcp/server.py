@@ -40,6 +40,10 @@ _MCP_CREATE_TIMEOUT = 30.0  # POST /api/threads (synchronous setup overhead)
 _MCP_QUERY_TIMEOUT = 15.0  # GET /api/threads/{id}/state and POST /api/messages
 _HTTP_NOT_FOUND = 404
 
+# MCP-01: cap initial_message to prevent unbounded payloads from filling the
+# LLM context window or triggering HTTP 413 errors from the control surface.
+_MAX_INITIAL_MESSAGE_CHARS = 32_000  # ~8k tokens at 4 chars/token
+
 # MCP-M1: _PRESET_TEAMS_DIR uses Path(__file__)-relative navigation to locate
 # preset TOML files in the sibling core/presets/teams/ directory.  This works
 # correctly in development (editable installs) but may require adjustment when
@@ -48,7 +52,7 @@ _HTTP_NOT_FOUND = 404
 # settings-based override to locate the preset directory.
 _PRESET_TEAMS_DIR = Path(__file__).parent.parent.parent / "core" / "presets" / "teams"
 _HARDCODED_PRESETS: frozenset[str] = frozenset(
-    {"coding-star", "coding-pipeline", "coding-loop", "solo-coder"}
+    {"vaultspec-adaptive-coder", "vaultspec-structured-coder", "vaultspec-iterative-coder", "vaultspec-solo-coder"}
 )
 _discovered: frozenset[str] = frozenset(
     p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml")
@@ -59,11 +63,12 @@ _discovered: frozenset[str] = frozenset(
 if _discovered:
     _KNOWN_PRESETS: frozenset[str] = _discovered
 else:
-    logger.warning(
+    logger.error(
         "Using hardcoded preset fallback — TOML files not found at %s",
         _PRESET_TEAMS_DIR,
     )
     _KNOWN_PRESETS = _HARDCODED_PRESETS
+
 
 mcp = FastMCP(
     name="vaultspec-orchestrator",
@@ -76,12 +81,14 @@ mcp = FastMCP(
 )
 
 
+
 def _ws_url_from_api_base(api_base_url: str) -> str:
     """Derive a WebSocket URL from the REST API base URL.
 
-    MCP-M2: Parse the URL once and reuse the parsed components.  Strip any
-    userinfo (credentials) from the netloc before exposing in tool output to
-    prevent credential leakage.
+    Converts ``http://host:port`` → ``ws://host:port/ws`` and
+    ``https://host:port`` → ``wss://host:port/ws``.  Strips any
+    userinfo (credentials) from the netloc to prevent credential leakage
+    in tool output.
     """
     parsed = urlparse(api_base_url)
     ws_scheme = "wss" if parsed.scheme == "https" else "ws"
@@ -108,22 +115,29 @@ async def start_thread(
     Args:
         initial_message: The high-level task description for the agent team.
         team_preset:     Team configuration preset to use. Available presets:
-                         ``coding-star``, ``coding-pipeline``, ``coding-loop``,
-                         ``solo-coder``.  Defaults to ``coding-star``.
+                         see ``_KNOWN_PRESETS`` (auto-discovered from TOML files).
+                         Defaults to ``vaultspec-adaptive-coder``.
 
     Returns:
         A confirmation message with the thread ID and monitoring URLs.
     """
-    preset = team_preset or "coding-star"
+    # MCP-01: reject oversized payloads before making any HTTP call.
+    if len(initial_message) > _MAX_INITIAL_MESSAGE_CHARS:
+        return (
+            f"Error: initial_message too long ({len(initial_message)} chars). "
+            f"Maximum allowed: {_MAX_INITIAL_MESSAGE_CHARS} chars."
+        )
+    preset = team_preset or "vaultspec-adaptive-coder"
     if preset not in _KNOWN_PRESETS:
         return (
             f"Error: Unknown preset {preset!r}. "
             f"Valid: {', '.join(sorted(_KNOWN_PRESETS))}"
         )
     try:
-        async with httpx.AsyncClient(timeout=_MCP_CREATE_TIMEOUT) as client:
+        async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{settings.api_base_url}/api/threads",
+                timeout=_MCP_CREATE_TIMEOUT,
                 json={
                     "title": initial_message[:80],
                     "initial_message": initial_message,
@@ -154,7 +168,7 @@ async def start_thread(
         )
     except httpx.HTTPStatusError as exc:
         # MCP-H1: server responded with an HTTP error status
-        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
+        return f"Server error: HTTP {exc.response.status_code}"
     except httpx.RequestError as exc:
         # MCP-H1: other transport-level errors (SSL, proxy, etc.)
         return (
@@ -177,23 +191,22 @@ async def get_thread_status(thread_id: str) -> str:
     Returns:
         A plain-text status summary suitable for display in an IDE.
     """
-    # MCP-M2: parse URL once and reuse; strip credentials from output.
     ws_live_url = _ws_url_from_api_base(settings.api_base_url)
     try:
-        async with httpx.AsyncClient(timeout=_MCP_QUERY_TIMEOUT) as client:
+        async with httpx.AsyncClient() as client:
             resp = await client.get(
-                f"{settings.api_base_url}/api/threads/{thread_id}/state"
+                f"{settings.api_base_url}/api/threads/{thread_id}/state",
+                timeout=_MCP_QUERY_TIMEOUT,
             )
             resp.raise_for_status()
             data = resp.json()
         status = data.get("status", "unknown")
         msg_count = len(data.get("messages", []))
-        checkpoint = data.get("checkpoint_id") or "none"
+        # MCP-04: omit checkpoint_id — it is a LangGraph internal not useful to callers.
         return (
             f"Thread: {thread_id}\n"
             f"Status: {status}\n"
             f"Messages: {msg_count}\n"
-            f"Checkpoint: {checkpoint}\n"
             f"Live: {ws_live_url}"
         )
     except httpx.ConnectError as exc:
@@ -212,7 +225,7 @@ async def get_thread_status(thread_id: str) -> str:
         # MCP-H1: application-level HTTP error
         if exc.response.status_code == _HTTP_NOT_FOUND:
             return f"Thread {thread_id!r} not found."
-        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
+        return f"Server error: HTTP {exc.response.status_code}"
     except httpx.RequestError as exc:
         # MCP-H1: other transport errors
         return f"Connection error: {exc}"
@@ -234,10 +247,11 @@ async def send_message(thread_id: str, message: str) -> str:
         A confirmation that the message was accepted.
     """
     try:
-        async with httpx.AsyncClient(timeout=_MCP_QUERY_TIMEOUT) as client:
+        async with httpx.AsyncClient() as client:
             resp = await client.post(
                 f"{settings.api_base_url}/api/threads/{thread_id}/messages",
                 json={"content": message},
+                timeout=_MCP_QUERY_TIMEOUT,
             )
             resp.raise_for_status()
         return f"Message delivered to thread {thread_id}."
@@ -257,7 +271,7 @@ async def send_message(thread_id: str, message: str) -> str:
         # MCP-H1: application-level HTTP error
         if exc.response.status_code == _HTTP_NOT_FOUND:
             return f"Thread {thread_id!r} not found."
-        return f"Server error {exc.response.status_code}: {exc.response.text[:200]}"
+        return f"Server error: HTTP {exc.response.status_code}"
     except httpx.RequestError as exc:
         # MCP-H1: other transport errors (SSL, proxy, etc.)
         return f"Connection error: {exc}"

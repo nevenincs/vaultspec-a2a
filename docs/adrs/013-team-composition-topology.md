@@ -28,7 +28,7 @@ The research synthesis identified three concrete topology patterns that are
 directly expressible with the LangGraph APIs already present in the codebase:
 
 | Topology | LangGraph API | When to Use |
-|---|---|---|
+| --- | --- | --- |
 | `star` | `add_conditional_edges(supervisor, ...)` | Open-ended tasks needing dynamic routing |
 | `pipeline` | `add_sequence(order)` | Fixed-order workflows (plan → code → review) |
 | `pipeline_loop` | `add_sequence()` + `add_conditional_edges(loop_node)` | Iterative refinement (code → review → revise) |
@@ -40,7 +40,7 @@ in `graph.py`. This ADR formalizes all three as config-driven options.
 
 Each team preset is defined by a TOML file at:
 
-```
+```text
 {workspace_root}/.vaultspec/teams/{team_id}.toml
 ```
 
@@ -148,7 +148,7 @@ agent_id = "reviewer"
 **`[team]` block:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `team.id` | `str` | Yes | Unique identifier. Must match filename stem. |
 | `team.display_name` | `str` | Yes | Human-readable name surfaced on the frontend. |
 | `team.description` | `str` | No | Purpose description, shown in team picker UI. |
@@ -156,21 +156,22 @@ agent_id = "reviewer"
 **`[team.defaults]` block:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `team.defaults.provider` | `str` | No | Default provider for all workers (overridden per-agent). |
 | `team.defaults.capability` | `str` | No | Default capability level (overridden per-agent). |
+| `team.defaults.provider_fallback` | `list[str]` | No | Ordered fallback provider list (lowest priority in three-level chain). |
 
 **`[team.supervisor]` block** (required only for `star` and `pipeline_loop`):
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `team.supervisor.provider` | `str` | No | Supervisor provider (defaults to `team.defaults.provider`). |
 | `team.supervisor.capability` | `str` | No | Supervisor capability (defaults to `max` if omitted). |
 
 **`[team.topology]` block:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `team.topology.type` | `str` | Yes | `star`, `pipeline`, or `pipeline_loop`. |
 | `team.topology.order` | `list[str]` | `pipeline`/`pipeline_loop` only | Ordered list of `agent_id` values. |
 | `team.topology.loop_node` | `str` | `pipeline_loop` only | Agent whose output triggers the conditional edge back into the loop. |
@@ -179,16 +180,37 @@ agent_id = "reviewer"
 **`[[team.workers]]` array:**
 
 | Field | Type | Required | Description |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `agent_id` | `str` | Yes | References `agents/{agent_id}.toml`. |
 | `model.provider` | `str` | No | Per-worker provider override. Wins over `team.defaults` and agent TOML. |
 | `model.capability` | `str` | No | Per-worker capability override. |
+| `model.provider_fallback` | `list[str]` | No | Per-worker fallback provider list (highest priority in three-level chain). |
+
+**`[team.permissions]` block:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `team.permissions.auto_approve` | `bool` | No | When `true`, all ACP permission requests are auto-approved (autonomous mode). Default: `false`. |
+
+**`[team.persona]` block:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `team.persona.directive` | `str` | No | Additional directive text appended to the supervisor system prompt. |
+| `team.persona.supervisor_display_name` | `str` | No | Override the supervisor's display name in UI and events. |
+
+**`[team.graph]` block:**
+
+| Field | Type | Required | Description |
+| --- | --- | --- | --- |
+| `team.graph.step_timeout_seconds` | `int` | No | Per-node execution timeout in seconds. `null` means no timeout. |
+| `team.graph.recursion_limit` | `int` | No | LangGraph recursion limit passed to `compile()`. Default: `25`. Range: `1`–`500`. |
 
 ### 2.3 Model Resolution Precedence
 
 Model binding follows a strict three-level override chain:
 
-```
+```text
 [[team.workers]] model.* (highest priority)
     ↓
 agent TOML [agent.model].*
@@ -197,7 +219,10 @@ agent TOML [agent.model].*
 ```
 
 `ProviderFactory.create(provider, capability)` is called once per worker
-with the resolved values.
+with the resolved values. The `provider_fallback` list follows the same
+three-level chain: worker override wins over agent TOML, which wins over
+team defaults. Lists are not merged — the highest-priority non-empty list
+is used verbatim.
 
 ### 2.4 Pydantic Models (`lib/core/team_config.py`)
 
@@ -211,6 +236,7 @@ from ..utils.enums import Provider, Model
 class WorkerOverrideConfig(BaseModel):
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
 
 
 class WorkerRef(BaseModel):
@@ -241,6 +267,21 @@ class SupervisorConfig(BaseModel):
 class TeamDefaultsConfig(BaseModel):
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
+
+
+class TeamPermissionsConfig(BaseModel):
+    auto_approve: bool = False
+
+
+class TeamPersonaConfig(BaseModel):
+    directive: str | None = None
+    supervisor_display_name: str | None = None
+
+
+class TeamGraphConfig(BaseModel):
+    step_timeout_seconds: int | None = None
+    recursion_limit: int = Field(default=25, ge=1, le=500)
 
 
 class TeamConfig(BaseModel):
@@ -251,6 +292,9 @@ class TeamConfig(BaseModel):
     supervisor: SupervisorConfig = Field(default_factory=SupervisorConfig)
     topology: TopologyConfig
     workers: list[WorkerRef]
+    permissions: TeamPermissionsConfig = Field(default_factory=TeamPermissionsConfig)
+    persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
+    graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
 
     @classmethod
     def from_toml(cls, path: Path) -> "TeamConfig":
@@ -346,32 +390,25 @@ f"Your team members and their specializations:\n{roster}"
 This is the mechanism by which TOML `description` fields influence routing —
 the supervisor LLM reads them and selects agents accordingly.
 
-### 2.7 interrupt_before Assembly
+### 2.7 Permission Gating (Superseded)
 
-`agent.permissions.require_approval_for` (ADR-012) lists ACP capability
-names per agent. These are translated to LangGraph node names at compile time:
+> **Note:** The original `interrupt_before` assembly described here has been
+> superseded. The graph now **always** compiles with `interrupt_before=[]`.
 
-```python
-interrupt_nodes: list[str] = []
-for agent_config in resolved_agents:
-    if agent_config.permissions.require_approval_for:
-        interrupt_nodes.append(agent_config.id)
+Permission gating is handled entirely by the `permission_callback` closure
+wired into each worker node at compile time (see `lib/core/graph.py`). When
+`autonomous=False`, the callback calls `interrupt()` to suspend the graph
+and emit a `PermissionRequestEvent`; when `autonomous=True`, the callback
+auto-approves.
 
-graph = builder.compile(
-    checkpointer=checkpointer,
-    interrupt_before=interrupt_nodes,   # state.py:1035
-)
-```
-
-For v1, any agent with a non-empty `require_approval_for` list causes the
-entire node to be interrupted before execution (coarse-grained). Fine-grained
-per-tool interrupt (using LangGraph's `interrupt()` inside the node) is the
-existing mechanism in `worker.py` and remains unchanged for ACP-level
-permission callbacks.
+`agent.permissions.require_approval_for` in `AgentPermissionsConfig`
+(ADR-012) is retained in the schema for forward-compatibility but is
+**not currently consumed** by the graph compilation pipeline. The field
+may be used in a future fine-grained per-tool approval implementation.
 
 ### 2.8 Config Discovery Order
 
-```
+```text
 1. {workspace_root}/.vaultspec/teams/{team_id}.toml   (workspace override)
 2. lib/core/presets/teams/{team_id}.toml               (bundled default)
 3. Raise TeamConfigNotFoundError                        (fail fast)
@@ -380,7 +417,7 @@ permission callbacks.
 ### 2.9 Built-in Preset Teams
 
 | File | Topology | Workers | Use Case |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `coding-star.toml` | `star` | planner, coder, reviewer | Open-ended coding tasks |
 | `coding-pipeline.toml` | `pipeline` | planner, coder, reviewer | Structured delivery tasks |
 | `coding-loop.toml` | `pipeline_loop` | planner, coder, reviewer | Iterative quality refinement |
@@ -500,7 +537,7 @@ create a custom team preset in the workspace or modify bundled presets.
 
 ### New REST Endpoint: Team Presets
 
-```
+```text
 GET /teams  →  TeamPresetsResponse
 ```
 

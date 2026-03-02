@@ -19,6 +19,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 
@@ -38,6 +39,7 @@ from langchain_core.language_models.chat_models import (
     generate_from_stream,
 )
 from langchain_core.messages import (
+    AIMessage,
     AIMessageChunk,
     BaseMessage,
     ChatMessage,
@@ -50,7 +52,9 @@ from pydantic import Field, PrivateAttr
 
 from ..core.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
+from ..workspace.environment import resolve_env_vars
 from .acp_exceptions import (
+    AcpAuthError,
     AcpError,
     AcpErrorCode,
     AcpPromptError,
@@ -81,7 +85,7 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
 
 # M18: ACP subprocess startup timeout in seconds.
 # Named constant so it can be adjusted without hunting for magic numbers.
-_ACP_STARTUP_TIMEOUT = 60.0
+_ACP_STARTUP_TIMEOUT = 120.0
 
 # Allowlist of permitted executable names for terminal/create.
 # Only the base name (no path component) is checked so that full paths like
@@ -118,6 +122,11 @@ _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 
 # Valid POSIX environment variable name pattern (PROV-M3).
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# ACP-03: hard cap on fs/read_text_file response size (10 MiB).
+# Prevents agents from loading binary blobs or huge log files into the
+# LLM context window, which would exhaust token budgets silently.
+_FS_READ_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
 def _log_task_exception(task: asyncio.Task) -> None:
@@ -309,12 +318,27 @@ class AcpChatModel(BaseChatModel):
         prompt_blocks: list[dict[str, str]] = []
         for msg in messages:
             if isinstance(
-                msg, (HumanMessage, SystemMessage, ChatMessage, AIMessageChunk)
+                msg, (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk)
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
-        env = os.environ.copy()
+        # ACP-02: use resolve_env_vars() as base so API credentials are scrubbed
+        # from the subprocess environment.  Provider-specific keys (e.g.
+        # CLAUDE_CODE_OAUTH_TOKEN) are re-injected explicitly via self.env_vars,
+        # which is set by ProviderFactory with only the required token.
+        _ws_path = Path(self.workspace_root or self.cwd or str(Path.cwd()))
+        env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
+        # ADR-002 §2: When using CLAUDE_CODE_OAUTH_TOKEN (flat-rate subscription),
+        # ANTHROPIC_API_KEY must be explicitly removed. If both are present,
+        # claude-agent-acp will use pay-as-you-go billing instead of the OAuth
+        # subscription, causing auth/billing failures.
+        if "CLAUDE_CODE_OAUTH_TOKEN" in env:
+            env.pop("ANTHROPIC_API_KEY", None)
+        # ADR-002 §5.1: bypass bundled cli.js — use system claude binary (native PE32+ Bun exe)
+        _system_claude = shutil.which("claude")
+        if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
+            env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
@@ -744,11 +768,17 @@ class AcpChatModel(BaseChatModel):
                 int(params["limit"]) if params.get("limit") is not None else None
             )
 
+            # ACP-03: cap reads at _FS_READ_MAX_BYTES.  When the caller also
+            # supplies a limit, honour whichever is smaller.
+            effective_limit = _FS_READ_MAX_BYTES
+            if limit is not None:
+                effective_limit = min(limit, _FS_READ_MAX_BYTES)
+
             def _read() -> str:
                 with file_path.open(encoding="utf-8", errors="ignore") as fh:
                     if offset:
                         fh.seek(offset)
-                    return fh.read(limit) if limit is not None else fh.read()
+                    return fh.read(effective_limit)
 
             text = await asyncio.to_thread(_read)
             return {"jsonrpc": "2.0", "id": rpc_id, "result": {"content": text}}
@@ -841,8 +871,9 @@ class AcpChatModel(BaseChatModel):
                 resolved_cwd,
             )
 
-            # Build env: start from current environment, apply any overrides
-            terminal_env = os.environ.copy()
+            # Build env: use resolve_env_vars() to scrub API credentials (ACP-02),
+            # then apply any agent-supplied overrides from the RPC params.
+            terminal_env = resolve_env_vars(resolved_cwd)
             if extra_env := params.get("env"):
                 if isinstance(extra_env, list):
                     # ACP protocol: env is list[EnvVariable] with name/value keys
@@ -1319,7 +1350,11 @@ class AcpChatModel(BaseChatModel):
         return resp.get("result", {})
 
     async def authenticate(self, token: str) -> dict[str, object]:
-        """Authenticate session."""
+        """Authenticate session.
+
+        PROV-H6: the token is sent to the subprocess but never logged.
+        Debug logging emits only the token length for diagnostics.
+        """
         self._require_session()
         rpc_id = AcpRequestId.AUTHENTICATE
         futures = self._require_response_futures()
@@ -1330,9 +1365,21 @@ class AcpChatModel(BaseChatModel):
             "method": "authenticate",
             "params": {"token": token},
         }
+        logger.debug(
+            "Sending authenticate RPC (token redacted, length=%d)", len(token)
+        )
         stdin = self._require_stdin()
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
         resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
+        if "error" in resp:
+            err = resp["error"]
+            err_msg = str(err.get("message", "")) if isinstance(err, dict) else str(err)
+            raise AcpAuthError(
+                f"Authentication failed: {err_msg}",
+                code=err.get("code", AcpErrorCode.INTERNAL_ERROR)
+                if isinstance(err, dict)
+                else AcpErrorCode.INTERNAL_ERROR,
+            )
         return resp.get("result", {})

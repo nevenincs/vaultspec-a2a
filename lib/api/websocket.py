@@ -500,6 +500,43 @@ class ConnectionManager:
             pass
 
     # ------------------------------------------------------------------
+    # Direct broadcast (internal relay path — ADR-019)
+    # ------------------------------------------------------------------
+
+    async def broadcast_to_thread(
+        self, thread_id: str, payload: dict[str, Any]
+    ) -> None:
+        """Send a pre-serialised event dict to all clients subscribed to *thread_id*.
+
+        Used by the internal WebSocket relay (``lib.api.internal``) to forward
+        worker events to browser clients without round-tripping through the
+        ``EventAggregator`` queue machinery.  The payload is a plain ``dict``
+        (already JSON-serialisable) produced by the worker's event pipeline.
+
+        Clients whose WebSocket is no longer connected are silently skipped.
+        """
+        for client_id, websocket in list(self._connections.items()):
+            client_subs = self._aggregator.get_subscriptions(client_id)
+            if thread_id not in client_subs:
+                continue
+            if websocket.client_state != WebSocketState.CONNECTED:
+                continue
+            try:
+                await websocket.send_json(payload)
+                _ws_events_sent_counter.add(
+                    1, {"client_id": client_id, "relay": "internal"}
+                )
+            except Exception:
+                _ws_send_failures_counter.add(
+                    1, {"client_id": client_id, "relay": "internal"}
+                )
+                logger.warning(
+                    "Failed to relay event to client %s for thread %s",
+                    client_id,
+                    thread_id,
+                )
+
+    # ------------------------------------------------------------------
     # Cleanup
     # ------------------------------------------------------------------
 

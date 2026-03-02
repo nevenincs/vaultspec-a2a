@@ -1,18 +1,22 @@
 # Figma Design API & REST API Research
 
 **Date:** 2026-03-01
-**Scope:** Comprehensive research into the Figma REST API, Plugin API, Variables API,
+**Scope:** Comprehensive research into the Figma REST API, Plugin API, Variables
+API,
 webhooks, authentication, and design-to-code pipeline capabilities.
 
 ---
 
 ## Table of Contents
 
-1. [What is the Figma REST API / Design API?](#1-what-is-the-figma-rest-api--design-api)
+1. [What is the Figma REST API / Design
+   API?](#1-what-is-the-figma-rest-api--design-api)
 2. [Available Endpoints](#2-available-endpoints)
-3. [Extracting Design Tokens Programmatically](#3-extracting-design-tokens-programmatically)
+3. [Extracting Design Tokens
+   Programmatically](#3-extracting-design-tokens-programmatically)
 4. [Variables and Styles in the API](#4-variables-and-styles-in-the-api)
-5. [Write / Update Access (Bidirectional)](#5-write--update-access-bidirectional)
+5. [Write / Update Access
+   (Bidirectional)](#5-write--update-access-bidirectional)
 6. [Plugin API vs REST API](#6-plugin-api-vs-rest-api)
 7. [Variables API Deep Dive](#7-variables-api-deep-dive)
 8. [REST API and Dev Mode](#8-rest-api-and-dev-mode)
@@ -33,7 +37,7 @@ requiring the Figma application to be open.
 
 ### Core characteristics
 
-- **Base URL:** `https://api.figma.com` (Government: `https://api.figma-gov.com`)
+- **Base URL:** `https://api.figma.com`(Government:`https://api.figma-gov.com`)
 - **Architecture:** RESTful with JSON responses and standard HTTP status codes
 - **Authentication:** Personal Access Tokens (PATs) and OAuth 2.0
 - **OpenAPI Spec:** Fully described in the open-source
@@ -62,7 +66,7 @@ requiring the Figma application to be open.
 ### 2.1 File Endpoints
 
 | Endpoint | Method | Tier | Scope | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `/v1/files/:key` | GET | 1 | `file_content:read` | Full file document as JSON tree |
 | `/v1/files/:key/nodes` | GET | 1 | `file_content:read` | Specific nodes and subtrees by ID |
 | `/v1/images/:key` | GET | 1 | `file_content:read` | Render nodes as PNG/JPG/SVG/PDF images |
@@ -72,11 +76,11 @@ requiring the Figma application to be open.
 #### GET File Parameters
 
 | Parameter | Description |
-|---|---|
+| --- | --- |
 | `version` | Specific version ID to retrieve |
 | `ids` | Comma-separated node IDs for partial tree retrieval |
 | `depth` | Maximum tree traversal depth |
-| `geometry` | Set to `paths` to include vector path data |
+| `geometry` | Set to`paths`to include vector path data |
 | `branch_data` | Include branch metadata |
 | `plugin_data` | Include plugin-stored data |
 
@@ -112,7 +116,7 @@ requiring the Figma application to be open.
 #### GET Image Parameters
 
 | Parameter | Description |
-|---|---|
+| --- | --- |
 | `ids` | Required. Node IDs to render |
 | `scale` | 0.01 to 4. Scaling factor |
 | `format` | `jpg`, `png`, `svg`, or `pdf` |
@@ -129,7 +133,7 @@ rendering failures.
 ### 2.2 Component & Style Endpoints
 
 | Endpoint | Method | Tier | Scope | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `/v1/teams/:team_id/components` | GET | 3 | `team_library_content:read` | Paginated published components in team |
 | `/v1/files/:file_key/components` | GET | 3 | `library_content:read` | Published components in file |
 | `/v1/components/:key` | GET | 3 | `library_assets:read` | Single component by key |
@@ -140,14 +144,14 @@ rendering failures.
 | `/v1/files/:file_key/styles` | GET | 3 | `library_content:read` | Published styles in file |
 | `/v1/styles/:key` | GET | 3 | `library_assets:read` | Single style by key |
 
-Component metadata includes: `key`, `file_key`, `node_id`, `thumbnail_url`,
+Component metadata includes:`key`, `file_key`, `node_id`, `thumbnail_url`,
 `name`, `description`, `updated_at`, `created_at`, `user`, and
-`containing_frame`. Pagination is cursor-based with `before`/`after` cursors.
+`containing_frame`. Pagination is cursor-based with `before`/`after`cursors.
 
 ### 2.3 Variables Endpoints (Enterprise Only)
 
 | Endpoint | Method | Tier | Scope | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `/v1/files/:file_key/variables/local` | GET | 2 | `file_variables:read` | Local and referenced remote variables |
 | `/v1/files/:file_key/variables/published` | GET | 2 | `file_variables:read` | Published variables from file |
 | `/v1/files/:file_key/variables` | POST | 3 | `file_variables:write` | Bulk create/update/delete variables |
@@ -155,7 +159,7 @@ Component metadata includes: `key`, `file_key`, `node_id`, `thumbnail_url`,
 ### 2.4 Comment Endpoints
 
 | Endpoint | Method | Scope | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `/v1/files/:file_key/comments` | GET | `file_comments:read` | List comments on a file |
 | `/v1/files/:file_key/comments` | POST | `file_comments:write` | Post a comment |
 | `/v1/files/:file_key/comments/:comment_id` | DELETE | `file_comments:write` | Delete a comment |
@@ -165,20 +169,20 @@ Component metadata includes: `key`, `file_key`, `node_id`, `thumbnail_url`,
 ### 2.5 Version Endpoints
 
 | Endpoint | Method | Scope | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `/v1/files/:file_key/versions` | GET | `file_versions:read` | List version history |
 
 ### 2.6 Project Endpoints
 
 | Endpoint | Method | Scope | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `/v1/teams/:team_id/projects` | GET | `projects:read` | List projects in a team |
 | `/v1/projects/:project_id/files` | GET | `projects:read` | List files in a project |
 
 ### 2.7 Dev Resources Endpoints
 
 | Endpoint | Method | Tier | Scope | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `/v1/files/:file_key/dev_resources` | GET | 2 | `file_dev_resources:read` | Get dev resources in a file |
 | `/v1/dev_resources` | POST | - | `file_dev_resources:write` | Bulk create dev resources across files |
 | `/v1/dev_resources` | PUT | - | `file_dev_resources:write` | Bulk update dev resources |
@@ -187,7 +191,7 @@ Component metadata includes: `key`, `file_key`, `node_id`, `thumbnail_url`,
 ### 2.8 Webhook Endpoints
 
 | Endpoint | Method | Tier | Scope | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `/v2/webhooks` | POST | 2 | `webhooks:write` | Create a webhook |
 | `/v2/webhooks/:webhook_id` | GET | 2 | `webhooks:read` | Get webhook details |
 | `/v2/webhooks/:webhook_id` | PUT | 2 | `webhooks:write` | Update a webhook |
@@ -198,21 +202,21 @@ Component metadata includes: `key`, `file_key`, `node_id`, `thumbnail_url`,
 ### 2.9 Library Analytics Endpoints (Enterprise Only)
 
 | Endpoint | Method | Scope | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `/v1/analytics/libraries/actions` | GET | `library_analytics:read` | Action time series data |
 | `/v1/analytics/libraries/usages` | GET | `library_analytics:read` | Library usage grouped by dimensions |
 
 ### 2.10 User and Activity Endpoints
 
 | Endpoint | Method | Scope | Purpose |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `/v1/me` | GET | `current_user:read` | Current user profile |
 | `/v1/activity_logs` | GET | `org:activity_log_read` | Organization activity logs (Enterprise) |
 
 ### 2.11 Payments Endpoint
 
 | Endpoint | Method | Purpose |
-|---|---|---|
+| --- | --- | --- |
 | `/v1/payments` | GET | Payment information for plugins/widgets |
 
 ---
@@ -231,14 +235,15 @@ The most robust approach. The Variables REST API exposes all variables
 - **Scoping** (which property types a variable can bind to)
 
 Workflow:
-1. `GET /v1/files/:file_key/variables/local` to enumerate all variables
+
+1.`GET /v1/files/:file_key/variables/local`to enumerate all variables
 2. Parse the response to extract collections, modes, and values
 3. Map to your token format (CSS custom properties, SCSS variables, Tailwind
    config, W3C Design Token Format, Style Dictionary JSON, etc.)
 
 ### 3.2 Via the GET File Endpoint (Any Plan)
 
-The `GET /v1/files/:key` response includes `styles` metadata and node properties
+The`GET /v1/files/:key`response includes`styles` metadata and node properties
 with applied colors, typography, spacing, etc. You can:
 
 1. Fetch the full file or specific nodes
@@ -299,7 +304,7 @@ values that can be applied to design properties and prototyping actions.
 #### Supported Variable Types (`resolvedType`)
 
 | Type | Description | Example Use |
-|---|---|---|
+| --- | --- | --- |
 | `BOOLEAN` | True/false values | Visibility toggles, feature flags |
 | `FLOAT` | Numeric values | Spacing, sizing, border-radius, opacity |
 | `STRING` | Text values | Font family names, content strings |
@@ -313,14 +318,14 @@ variable in the collection can have different values per mode.
 
 - Maximum: 40 modes per collection, 5000 variables per collection
 - Mode names: maximum 40 characters
-- Extended collections are supported via `parentVariableCollectionId`
+- Extended collections are supported via`parentVariableCollectionId`
 
 #### Variable Aliases
 
 A variable alias is a reference from one variable to another, enabling
 hierarchical token systems:
 
-```
+```text
 color/primary  -->  resolved: #0066FF
 button/bg      -->  alias to: color/primary  -->  resolved: #0066FF
 ```
@@ -342,7 +347,7 @@ Styles in the Figma REST API represent published, reusable design decisions.
 They are distinct from variables:
 
 | Aspect | Styles | Variables |
-|---|---|---|
+| --- | --- | --- |
 | **API Access** | Any plan via component/style endpoints | Enterprise only via Variables API |
 | **Types** | FILL, TEXT, EFFECT, GRID | BOOLEAN, FLOAT, STRING, COLOR |
 | **Modes** | No multi-mode support | Multi-mode (Light/Dark, etc.) |
@@ -359,7 +364,7 @@ property in the GET File response.
 ### 5.1 What CAN Be Written via REST API
 
 | Resource | Write Access | Endpoint |
-|---|---|---|
+| --- | --- | --- |
 | Variables | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
 | Variable Collections | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
 | Variable Modes | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
@@ -394,7 +399,7 @@ property in the GET File response.
 
 The canonical bidirectional design system sync pattern:
 
-```
+```text
 Code Repository                         Figma File
      |                                      |
      |  1. LIBRARY_PUBLISH webhook fires    |
@@ -435,7 +440,7 @@ supports:
 ### Comprehensive Comparison
 
 | Capability | Plugin API | REST API |
-|---|---|---|
+| --- | --- | --- |
 | **Read file content** | Full (current file) | Full (any accessible file) |
 | **Write file content** | Full (create/edit/delete nodes) | NOT SUPPORTED |
 | **Write variables** | Full | Full (Enterprise only) |
@@ -475,7 +480,7 @@ interactive UI elements within the canvas.
 
 ### 7.1 GET Local Variables
 
-```
+```text
 GET /v1/files/:file_key/variables/local
 ```
 
@@ -486,7 +491,7 @@ GET /v1/files/:file_key/variables/local
 Returns all local variables and remote variables referenced in the file.
 Remote variables are identified by their `subscribed_id`.
 
-**Response structure:**
+### Response structure
 
 ```json
 {
@@ -529,15 +534,17 @@ Remote variables are identified by their `subscribed_id`.
 }
 ```
 
-**Key details:**
+### Key details
+
 - Includes variables deleted in the editor that may still be referenced
-- Variable aliases appear as `{ "type": "VARIABLE_ALIAS", "id": "VariableID:..." }`
+- Variable aliases appear as `{ "type": "VARIABLE_ALIAS", "id": "VariableID:..."
+  }`
   in `valuesByMode`
 - `codeSyntax` can contain platform-specific token names (web, iOS, Android)
 
 ### 7.2 GET Published Variables
 
-```
+```text
 GET /v1/files/:file_key/variables/published
 ```
 
@@ -546,15 +553,16 @@ GET /v1/files/:file_key/variables/published
 **Plan:** Enterprise
 
 Differences from local endpoint:
+
 - Each variable/collection includes a `subscribed_id`
 - Modes are omitted from published variable collections
-- `id` and `key` are stable; `subscribed_id` changes on each publish
-- `updatedAt` fields indicate last publish timestamp
+- `id`and`key`are stable;`subscribed_id`changes on each publish
+-`updatedAt` fields indicate last publish timestamp
 - Must use main file key (not branch key)
 
 ### 7.3 POST Variables (Bulk Create/Update/Delete)
 
-```
+```text
 POST /v1/files/:file_key/variables
 ```
 
@@ -607,20 +615,23 @@ Request body contains four arrays:
 }
 ```
 
-**Key behaviors:**
-- Each object requires an `action` field: `CREATE`, `UPDATE`, or `DELETE`
+### Key behaviors
+
+- Each object requires an `action`field:`CREATE`, `UPDATE`, or `DELETE`
 - Temporary IDs can be used for cross-referencing within a single request
-- `tempIdToRealId` mapping is returned in the response
+- `tempIdToRealId`mapping is returned in the response
 - New collections always include one default mode; reference it via
-  `initialModeId`
+ `initialModeId`
 - Extended collections supported via `parentVariableCollectionId`
 - Constraints: max 40 modes per collection, max 5000 variables per collection,
   40-char mode name limit
 
 ### 7.4 Variable Scoping (2025 additions)
 
-New `VariableScope` options for typography:
-- `FONT_FAMILY`
+New `VariableScope`options for typography:
+
+-`FONT_FAMILY`
+
 - `FONT_STYLE`
 - `FONT_WEIGHT`
 - `FONT_SIZE`
@@ -630,6 +641,7 @@ New `VariableScope` options for typography:
 - `PARAGRAPH_INDENT`
 
 Plus existing scopes:
+
 - `ALL_FILLS`, `FRAME_FILL`, `SHAPE_FILL`, `TEXT_FILL`, `STROKE_COLOR`
 - `EFFECT_COLOR`
 - `CORNER_RADIUS`
@@ -648,7 +660,8 @@ Dev resources are developer-contributed URLs attached to design nodes that
 appear in Figma's Dev Mode. They enable bidirectional linking between Figma
 and external tools.
 
-**Key characteristics:**
+### Key characteristics
+
 - Can be attached to any node in a file
 - Do NOT require publishing -- immediately available when created/updated
 - When attached to published components, available instantly in all files
@@ -665,12 +678,14 @@ Code Connect bridges your codebase and Figma's Dev Mode, connecting source
 code components to Figma design components. Two approaches:
 
 #### Code Connect UI (newer, runs inside Figma)
+
 - Connects to GitHub for repository context
 - Provides component paths and names
 - AI-generated code examples based on connected source files
 - No GitHub connection required -- manual mapping is supported
 
 #### Code Connect CLI (developer-focused)
+
 - Runs from terminal within local codebase
 - Publishes connections to Figma
 - Property mappings and dynamic code examples
@@ -685,6 +700,7 @@ Mode seat
 ### 8.3 DEV_MODE_STATUS_UPDATE Webhook
 
 Tracks when layers change Dev Mode status:
+
 - Marked "Ready for Dev"
 - Marked "Completed"
 - Status cleared
@@ -699,7 +715,7 @@ Includes change messages if provided. Useful for automated handoff tracking.
 
 #### Pattern A: Direct API Extraction
 
-```
+```text
 Figma File
     |
     v
@@ -717,7 +733,7 @@ Codebase
 
 #### Pattern B: Token-Centric Pipeline
 
-```
+```text
 Figma Variables
     |
     v
@@ -735,7 +751,7 @@ CSS / SCSS / Tailwind / iOS / Android
 
 #### Pattern C: Webhook-Driven Continuous Sync
 
-```
+```text
 Figma publishes library
     |
     v
@@ -756,7 +772,7 @@ CI/CD deploys updated design system
 
 #### Pattern D: MCP-Augmented AI Pipeline (Most Relevant to VaultSpec)
 
-```
+```text
 Figma MCP Server
     |
     v
@@ -775,7 +791,7 @@ Browser verification via Playwright/DevTools
 ### 9.2 Key Tools in the Ecosystem
 
 | Tool | Type | Capabilities |
-|---|---|---|
+| --- | --- | --- |
 | **Figma MCP Server** | AI bridge | Read design data for LLM-powered code generation |
 | **Anima** | Plugin + API | Figma-to-React/HTML code generation with Tailwind/ShadCN |
 | **Code Connect** | CLI + UI | Map Figma components to codebase components |
@@ -803,7 +819,7 @@ Browser verification via Playwright/DevTools
 **Contexts:** Webhooks attach to a specific context:
 
 | Context | Max Webhooks | Required Permission |
-|---|---|---|
+| --- | --- | --- |
 | Team | 20 | Team admin |
 | Project | 5 | Can edit |
 | File | 3 | Can edit |
@@ -817,7 +833,7 @@ CRUD operations must go through the API.
 ### 10.2 Event Types
 
 | Event | Description | Payload Includes |
-|---|---|---|
+| --- | --- | --- |
 | `PING` | Confirmation on webhook creation | Webhook ID |
 | `FILE_UPDATE` | File content changes | File name, file key |
 | `FILE_VERSION_UPDATE` | New version saved | File name, file key, version info |
@@ -829,19 +845,21 @@ CRUD operations must go through the API.
 ### 10.3 Payload Structure
 
 Every payload (except PING) contains:
-- `file_name` -- human-readable file name
-- `file_key` -- unique file identifier for API calls
+
+-`file_name`-- human-readable file name
+-`file_key`-- unique file identifier for API calls
+
 - Event-specific data
 
 ### 10.4 Retry Logic
 
 | Attempt | Delay After Failure |
-|---|---|
+| --- | --- |
 | 1st retry | 5 minutes |
 | 2nd retry | 30 minutes |
 | 3rd retry (final) | 3 hours |
 
-Server must return `200 OK`. Any other status or timeout is treated as failure.
+Server must return`200 OK`. Any other status or timeout is treated as failure.
 
 ### 10.5 Webhook Setup Example
 
@@ -862,10 +880,11 @@ curl -X POST 'https://api.figma.com/v2/webhooks' \
 ### 10.6 Design System Automation with Webhooks
 
 Practical workflow:
+
 1. Designer updates variables in Figma library file
 2. Designer publishes the library
-3. `LIBRARY_PUBLISH` webhook fires to your server
-4. Server calls `GET /v1/files/:key/variables/published` to get updated tokens
+3. `LIBRARY_PUBLISH`webhook fires to your server
+4. Server calls`GET /v1/files/:key/variables/published` to get updated tokens
 5. Server transforms tokens to code format
 6. Server creates a PR in the design system repository
 7. CI runs, PR is reviewed and merged
@@ -877,19 +896,22 @@ Practical workflow:
 
 ### 11.1 Personal Access Tokens (PATs)
 
-**Generation:**
+### Generation
+
 1. Log into Figma
 2. Settings > Security tab
 3. "Generate new token"
 4. Set expiration and scopes
 5. Copy immediately (shown only once)
 
-**Usage in requests:**
-```
+### Usage in requests
+
+```text
 X-Figma-Token: <YOUR_TOKEN>
 ```
 
-**Constraints (as of 2025):**
+### Constraints (as of 2025)
+
 - Maximum 90-day expiration enforced
 - Non-expiring tokens no longer supported
 - Scopes must be specified at generation time
@@ -897,13 +919,15 @@ X-Figma-Token: <YOUR_TOKEN>
 
 ### 11.2 OAuth 2.0
 
-**Setup flow:**
+### Setup flow
+
 1. Create OAuth app at `figma.com/developers/apps`
 2. Configure redirect URLs, scopes, visibility (draft/private/public)
 3. Obtain Client ID and Client Secret
 
-**Authorization URL:**
-```
+### Authorization URL
+
+```text
 GET https://www.figma.com/oauth?
   client_id=:client_id&
   redirect_uri=:callback&
@@ -912,8 +936,9 @@ GET https://www.figma.com/oauth?
   response_type=code
 ```
 
-**Token exchange:**
-```
+### Token exchange
+
+```text
 POST https://api.figma.com/v1/oauth/token
 ```
 
@@ -921,7 +946,8 @@ Using HTTP Basic Auth with Base64-encoded `client_id:client_secret`.
 
 **Critical:** Authentication codes expire after **30 seconds**.
 
-**Token response:**
+### Token response
+
 ```json
 {
   "user_id_string": "<USER_ID>",
@@ -932,25 +958,28 @@ Using HTTP Basic Auth with Base64-encoded `client_id:client_secret`.
 }
 ```
 
-**Token refresh:**
-```
+### Token refresh
+
+```text
 POST https://api.figma.com/v1/oauth/token
 ```
+
 (Previously `/v1/oauth/refresh`, legacy endpoint still works)
 
 **Access token lifetime:** 90 days, refreshable via refresh token.
 
 **PKCE support:** Available for enhanced security.
 
-**Usage in requests:**
-```
+### Usage in requests: (2)
+
+```text
 Authorization: Bearer <ACCESS_TOKEN>
 ```
 
 ### 11.3 Complete Scope Reference
 
 | Scope | Description | PAT | OAuth |
-|---|---|---|---|
+| --- | --- | --- | --- |
 | `current_user:read` | User profile data | Yes | Yes |
 | `file_content:read` | File contents and nodes | Yes | Yes |
 | `file_comments:read` | View file comments | Yes | Yes |
@@ -974,14 +1003,15 @@ Authorization: Bearer <ACCESS_TOKEN>
 | `webhooks:write` | Create/manage webhooks | Yes | Yes |
 
 **Important:** Scopes do NOT supersede file/project/team permissions. A token
-with `file_content:read` can only access files the user has been granted
+with`file_content:read`can only access files the user has been granted
 access to.
 
 ### 11.4 Deprecations and Migration
 
-- `files:read` scope is deprecated; use specific scopes
+-`files:read` scope is deprecated; use specific scopes
   (`file_content:read`, `file_comments:read`, etc.)
-- Numeric `user_id` in OAuth responses is deprecated; use `user_id_string`
+
+- Numeric `user_id`in OAuth responses is deprecated; use`user_id_string`
 - All public OAuth apps required re-publishing by November 17, 2025
 - HTTPS enforced; HTTP requests return 403
 
@@ -994,7 +1024,7 @@ access to.
 Each endpoint is assigned a tier reflecting infrastructure cost:
 
 | Tier | Example Endpoints |
-|---|---|
+| --- | --- |
 | **Tier 1** | GET files, GET file nodes, GET images |
 | **Tier 2** | GET image fills, GET local variables, GET dev resources, webhooks |
 | **Tier 3** | POST variables, GET components/styles, GET file metadata |
@@ -1002,7 +1032,7 @@ Each endpoint is assigned a tier reflecting infrastructure cost:
 ### 12.2 Limits by Plan and Seat Type
 
 | Tier | View/Collab Seats | Dev/Full on Starter | Dev/Full on Pro | Dev/Full on Org | Dev/Full on Enterprise |
-|---|---|---|---|---|---|
+| --- | --- | --- | --- | --- | --- |
 | Tier 1 | Up to 6/month | 10/min | 15/min | 20/min | 20/min |
 | Tier 2 | Up to 5/min | 25/min | 50/min | 100/min | 100/min |
 | Tier 3 | Up to 10/min | 50/min | 100/min | 150/min | 150/min |
@@ -1013,13 +1043,13 @@ This is extremely restrictive.
 ### 12.3 Algorithm
 
 Figma uses a **leaky bucket algorithm**. When the bucket overflows, the API
-returns `429 Too Many Requests` with headers:
+returns `429 Too Many Requests`with headers:
 
 | Header | Description |
-|---|---|
+| --- | --- |
 | `Retry-After` | Seconds to wait before retrying |
 | `X-Figma-Plan-Tier` | Plan level of the resource (enterprise, org, pro, starter) |
-| `X-Figma-Rate-Limit-Type` | Seat classification (`low` for Collab/Viewer, `high` for Full/Dev) |
+| `X-Figma-Rate-Limit-Type` | Seat classification (`low`for Collab/Viewer,`high`for Full/Dev) |
 | `X-Figma-Upgrade-Link` | URL to pricing or account settings |
 
 ### 12.4 Rate Limit Tracking
@@ -1030,11 +1060,11 @@ returns `429 Too Many Requests` with headers:
 
 ### 12.5 Best Practices
 
-1. **Batch requests** whenever possible (use `ids` parameter for multiple nodes)
+1. **Batch requests** whenever possible (use`ids`parameter for multiple nodes)
 2. **Cache results** aggressively (especially images, which have 30-day URLs)
 3. **Implement exponential backoff** when receiving 429 errors
-4. **Use the `Retry-After` header** value, not arbitrary sleep durations
-5. **Prefer `GET /v1/files/:key/nodes`** over `GET /v1/files/:key`** for
+4. **Use the`Retry-After`header** value, not arbitrary sleep durations
+5. **Prefer`GET /v1/files/:key/nodes`** over `GET /v1/files/:key`** for
    targeted node access (same tier, less data)
 6. **Use webhooks** instead of polling for change detection
 
@@ -1048,10 +1078,10 @@ The CLAUDE.md mandates a Figma-first workflow: **Figma > shadcn-ui > Svelte
 MCP > implement > browser verification**. Based on this research:
 
 1. **Figma MCP Server** provides `get_design_context`, `get_screenshot`,
-   `get_variable_defs`, and `get_code_connect_map` -- these internally call
+   `get_variable_defs`, and `get_code_connect_map`-- these internally call
    the REST API endpoints documented above
 2. **Design token extraction** from the MCP server maps to
-   `GET /v1/files/:key/variables/local` under the hood
+  `GET /v1/files/:key/variables/local`under the hood
 3. **Code Connect integration** means Figma components can be mapped to the
    project's shadcn-svelte components, providing the AI agent with exact
    component usage patterns
@@ -1060,7 +1090,7 @@ MCP > implement > browser verification**. Based on this research:
 
 If VaultSpec needs to keep design tokens synchronized:
 
-1. Set up `LIBRARY_PUBLISH` webhooks on the design system file
+1. Set up`LIBRARY_PUBLISH`webhooks on the design system file
 2. On webhook fire, extract variables and transform to Tailwind token format
 3. Auto-generate/update Tailwind config and CSS custom properties
 4. Create PR for review
@@ -1082,7 +1112,7 @@ If VaultSpec needs to keep design tokens synchronized:
 ### 13.4 Key Endpoints for VaultSpec's Figma Integration
 
 | Use Case | Endpoint | Plan Required |
-|---|---|---|
+| --- | --- | --- |
 | Read design structure | `GET /v1/files/:key` | Any |
 | Read specific components | `GET /v1/files/:key/nodes?ids=...` | Any |
 | Export component images | `GET /v1/images/:key?ids=...` | Any |
@@ -1097,33 +1127,57 @@ If VaultSpec needs to keep design tokens synchronized:
 ## Sources
 
 - [Figma REST API Introduction](https://developers.figma.com/docs/rest-api/)
-- [Figma REST API File Endpoints](https://developers.figma.com/docs/rest-api/file-endpoints/)
-- [Figma REST API Variables](https://developers.figma.com/docs/rest-api/variables/)
-- [Figma REST API Variables Endpoints](https://developers.figma.com/docs/rest-api/variables-endpoints/)
-- [Figma REST API Component Endpoints](https://developers.figma.com/docs/rest-api/component-endpoints/)
-- [Figma REST API Authentication](https://developers.figma.com/docs/rest-api/authentication/)
+- [Figma REST API File
+  Endpoints](https://developers.figma.com/docs/rest-api/file-endpoints/)
+- [Figma REST API
+  Variables](https://developers.figma.com/docs/rest-api/variables/)
+- [Figma REST API Variables
+  Endpoints](https://developers.figma.com/docs/rest-api/variables-endpoints/)
+- [Figma REST API Component
+  Endpoints](https://developers.figma.com/docs/rest-api/component-endpoints/)
+- [Figma REST API
+  Authentication](https://developers.figma.com/docs/rest-api/authentication/)
 - [Figma REST API Scopes](https://developers.figma.com/docs/rest-api/scopes/)
-- [Figma REST API Rate Limits](https://developers.figma.com/docs/rest-api/rate-limits/)
-- [Figma REST API Webhooks V2](https://developers.figma.com/docs/rest-api/webhooks/)
-- [Figma REST API Webhook Types](https://developers.figma.com/docs/rest-api/webhooks-types/)
-- [Figma REST API Changelog](https://developers.figma.com/docs/rest-api/changelog/)
+- [Figma REST API Rate
+  Limits](https://developers.figma.com/docs/rest-api/rate-limits/)
+- [Figma REST API Webhooks
+  V2](https://developers.figma.com/docs/rest-api/webhooks/)
+- [Figma REST API Webhook
+  Types](https://developers.figma.com/docs/rest-api/webhooks-types/)
+- [Figma REST API
+  Changelog](https://developers.figma.com/docs/rest-api/changelog/)
 - [Compare the Figma APIs](https://developers.figma.com/compare-apis/)
-- [Figma REST API Dev Resources](https://developers.figma.com/docs/rest-api/dev-resources/)
-- [Figma Dev Resources Endpoints](https://developers.figma.com/docs/rest-api/dev-resources-endpoints/)
-- [Figma Code Connect Introduction](https://developers.figma.com/docs/code-connect/)
-- [Figma Code Connect CLI](https://developers.figma.com/docs/code-connect/quickstart-guide/)
-- [Figma Code Connect UI](https://developers.figma.com/docs/code-connect/code-connect-ui-setup/)
-- [Figma Code Connect MCP Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
+- [Figma REST API Dev
+  Resources](https://developers.figma.com/docs/rest-api/dev-resources/)
+- [Figma Dev Resources
+Endpoints](https://developers.figma.com/docs/rest-api/dev-resources-endpoints/)
+- [Figma Code Connect
+  Introduction](https://developers.figma.com/docs/code-connect/)
+- [Figma Code Connect
+  CLI](https://developers.figma.com/docs/code-connect/quickstart-guide/)
+- [Figma Code Connect
+  UI](https://developers.figma.com/docs/code-connect/code-connect-ui-setup/)
+- [Figma Code Connect MCP
+Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
 - [Figma OpenAPI Spec (GitHub)](https://github.com/figma/rest-api-spec)
 - [Code Connect GitHub Repository](https://github.com/figma/code-connect)
-- [Figma Plugin API Reference](https://developers.figma.com/docs/plugins/api/api-reference/)
+- [Figma Plugin API
+  Reference](https://developers.figma.com/docs/plugins/api/api-reference/)
 - [Figma Token Exporter](https://figma-tokens.com/)
-- [Design Tokens Plugin (lukasoppermann)](https://github.com/lukasoppermann/design-tokens)
+- [Design Tokens Plugin
+  (lukasoppermann)](https://github.com/lukasoppermann/design-tokens)
 - [figma-extractor](https://github.com/kataras/figma-extractor)
-- [Manage Personal Access Tokens](https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens)
-- [Guide to Variables in Figma](https://help.figma.com/hc/en-us/articles/15339657135383-Guide-to-variables-in-Figma)
-- [Synchronizing Figma Variables with Design Tokens (Nate Baldwin)](https://medium.com/@NateBaldwin/synchronizing-figma-variables-with-design-tokens-3a6c6adbf7da)
-- [Automating Design System Sync via Variables REST API (Agshin Rajabov)](https://medium.com/@agshinrajabov/automating-the-synchronization-of-design-systems-using-the-figma-variables-rest-api-6c54deffbb75)
-- [Getting Started with Figma Webhooks](https://souporserious.com/getting-started-with-figma-webhooks/)
-- [Advanced Figma Webhook Integration](https://blog.poespas.me/posts/2025/02/13/advanced-figma-webhook-integration/)
-- [Component Generation with Figma API (DEV Community)](https://dev.to/krjakbrjak/component-generation-with-figma-api-bridging-the-gap-between-development-and-design-1nho)
+- [Manage Personal Access
+Tokens](https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens)
+- [Guide to Variables in
+Figma](https://help.figma.com/hc/en-us/articles/15339657135383-Guide-to-variables-in-Figma)
+- [Synchronizing Figma Variables with Design Tokens (Nate
+Baldwin)](https://medium.com/@NateBaldwin/synchronizing-figma-variables-with-design-tokens-3a6c6adbf7da)
+- [Automating Design System Sync via Variables REST API (Agshin
+Rajabov)](https://medium.com/@agshinrajabov/automating-the-synchronization-of-design-systems-using-the-figma-variables-rest-api-6c54deffbb75)
+- [Getting Started with Figma
+  Webhooks](https://souporserious.com/getting-started-with-figma-webhooks/)
+- [Advanced Figma Webhook
+Integration](https://blog.poespas.me/posts/2025/02/13/advanced-figma-webhook-integration/)
+- [Component Generation with Figma API (DEV
+Community)](https://dev.to/krjakbrjak/component-generation-with-figma-api-bridging-the-gap-between-development-and-design-1nho)

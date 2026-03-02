@@ -52,7 +52,7 @@ implementation reaches feature parity.
 ### 2.2 New Frontend Stack
 
 | Layer | Technology | Version | Purpose |
-|-------|-----------|---------|---------|
+| ------- | ----------- | --------- | --------- |
 | Framework | React | 18.3.x | UI rendering |
 | Build | Vite | 6.x | Dev server + bundling |
 | Styling | Tailwind CSS | 4.x (Oxide) | Utility-first CSS with OKLCH palette |
@@ -105,6 +105,7 @@ index, then fetches individual files via `ReadMcpResourceTool` using
 **File key:** `EAs7Eh1lxKVzBqzke5HASU`
 
 This provides live access to:
+
 - All React component source files (layout, stream, inspector, permission,
   ui primitives)
 - CSS theme and style files
@@ -115,7 +116,7 @@ This provides live access to:
 ### 3.2 MCP Tools
 
 | Tool | Works with Make | Purpose |
-|------|----------------|---------|
+| ------ | ---------------- | --------- |
 | `get_design_context` | Yes | Returns structured React + Tailwind code for a node/selection |
 | `get_screenshot` | Yes | Visual reference capture |
 | `get_metadata` | Design only | Sparse XML node map for large frame decomposition |
@@ -152,6 +153,7 @@ npx figma connect unpublish --node=NODE_URL --label=React
 ```
 
 **Configuration:** `figma.config.json` at project root defines:
+
 - Component directory paths
 - Figma Design library URL
 - Import path mappings
@@ -182,6 +184,7 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
 ```
 
 **Prop mapping functions:**
+
 - `figma.string(prop)` — text → string
 - `figma.boolean(prop)` — boolean toggle
 - `figma.enum(prop, valueMap)` — variant → code values
@@ -190,6 +193,7 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
 - `figma.className(parts[])` — Tailwind class concatenation
 
 **Requirements:**
+
 - Node.js 18+
 - Personal access token with Code Connect: Write and File content: Read
 - `FIGMA_ACCESS_TOKEN` environment variable (already in `.env`)
@@ -203,7 +207,7 @@ create a Design file from the Make project.
 
 The canonical workflow for implementing or modifying any component:
 
-```
+```text
 1. Figma Make (design source)
    │
    ├─► get_design_context → structured React + Tailwind reference code
@@ -229,7 +233,7 @@ The canonical workflow for implementing or modifying any component:
 Three skills are installed via the `figma@claude-plugins-official` plugin:
 
 | Skill | Trigger | Purpose |
-|-------|---------|---------|
+| ------- | --------- | --------- |
 | `figma:implement-design` | Figma URLs, "implement design" | 7-step workflow: parse URL → get context → screenshot → assets → translate → validate |
 | `figma:code-connect-components` | "code connect", "map component" | Scan codebase → match to Figma nodes → create mappings |
 | `figma:create-design-system-rules` | "create design system rules" | Analyze codebase → generate CLAUDE.md rules |
@@ -310,7 +314,7 @@ The following rules must be added to CLAUDE.md for all Figma-driven work:
 The monolithic `use-app-state.ts` hook decomposes into two categories:
 
 | Category | Owner | Examples |
-|----------|-------|---------|
+| ---------- | ------- | --------- |
 | **Server state** (REST) | TanStack Query | Thread list, team presets, team status, thread snapshots |
 | **Client + real-time state** (WS) | Zustand | Stream events (chunk accumulation), tab system, theme, sidebar, inspector, permission queue, WS connection state |
 
@@ -431,7 +435,7 @@ code that uses them.
 Figma MCP server tool calls are rate-limited:
 
 | Plan | Seat | Daily Limit | Per-Minute |
-|------|------|-------------|------------|
+| ------ | ------ | ------------- | ------------ |
 | Enterprise | Full/Dev | 600/day | 20/min |
 | Organization/Pro | Full/Dev | 200/day | 15/min |
 | Starter | Any | 6/month | — |
@@ -442,7 +446,7 @@ Exempt tools (no rate limit): `add_code_connect_map`,
 ## 9. Environment Variables
 
 | Variable | Purpose |
-|----------|---------|
+| ---------- | --------- |
 | `FIGMA_ACCESS_TOKEN` | Authenticates Code Connect CLI and MCP tools. Stored in `.env`. Requires Code Connect: Write + File content: Read scopes. |
 
 ## 10. References

@@ -1,14 +1,21 @@
-"""FastAPI application factory — the system entry point.
+"""FastAPI application factory -- the control surface entry point (ADR-019).
 
 Creates the ASGI application with:
 - Lifespan management (init/close DB, EventAggregator, telemetry)
 - CORS middleware (permissive in dev)
 - REST router from ``endpoints.py``
-- WebSocket route via ``ConnectionManager`` from Task 4
-- StaticFiles mount for SvelteKit build at ``src/ui/build/`` (ADR-007)
+- Internal router from ``internal.py`` (worker relay)
+- WebSocket route via ``ConnectionManager``
+- StaticFiles mount for React SPA build at ``src/ui/build/`` (ADR-007/018)
+- Worker supervisor for auto-spawn mode
+
+The control surface NO LONGER runs agent execution locally.  All graph
+compilation and ``aggregator.ingest()`` calls are dispatched to the
+worker process via HTTP POST to ``/dispatch`` (ADR-019 service separation).
 
 See: ADR-007 (FastAPI serving, SPA)
      ADR-011 (Frontend-Backend Wire Contract)
+     ADR-019 (Service Separation)
 """
 
 import logging
@@ -20,26 +27,28 @@ from pathlib import Path
 from typing import Any, cast
 
 import anyio
+import httpx
 import uvicorn
 
-from anyio.abc import TaskGroup
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
-from ..core.aggregator import EventAggregator, StreamableGraph
+from ..core.aggregator import EventAggregator
 from ..core.config import settings
-from ..database.session import close_db, init_db
+from ..database.crud import get_thread
+from ..database.session import close_db, get_session_factory, init_db
 from ..protocols import mcp as mcp_server
 from ..telemetry import TelemetryMiddleware, configure_telemetry
-from .endpoints import GraphRegistry, router
-from .schemas.enums import AgentControlAction, AgentLifecycleState
+from .endpoints import router
+from .internal import internal_router
+from .schemas.enums import AgentControlAction
+from .supervisor import WorkerSupervisor
 from .websocket import ConnectionManager
 
 
@@ -47,19 +56,19 @@ __all__ = ["create_app", "main"]
 
 logger = logging.getLogger(__name__)
 
-# Path to the SvelteKit build output (ADR-007)
+# Path to the React SPA build output (ADR-007 / ADR-018)
 _UI_BUILD_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "ui" / "build"
 
-# SvelteKit hashed immutable assets: /_app/immutable/**
-_IMMUTABLE_PATTERN = re.compile(r"^/_app/immutable/")
+# SvelteKit/Vite hashed immutable assets: /_app/immutable/** or /assets/**
+_IMMUTABLE_PATTERN = re.compile(r"^/(_app/immutable|assets)/")
 _CACHE_IMMUTABLE = "public, max-age=31536000, immutable"
 _CACHE_HTML = "no-cache"
 
 
 class _CacheControlMiddleware(BaseHTTPMiddleware):
-    """Set Cache-Control headers for static SvelteKit assets (ADR-007 §5).
+    """Set Cache-Control headers for static SPA assets (ADR-007 S5).
 
-    - ``/_app/immutable/**`` (content-hashed JS/CSS): cache forever
+    - ``/_app/immutable/**`` or ``/assets/**`` (content-hashed JS/CSS): cache forever
     - HTML responses (``index.html``, SPA fallback): ``no-cache``
     """
 
@@ -77,119 +86,148 @@ class _CacheControlMiddleware(BaseHTTPMiddleware):
         return response
 
 
-def _create_message_handler(
-    graph_registry: GraphRegistry,
-    aggregator: EventAggregator,
-    tg: TaskGroup,
-) -> Callable:
-    """Create message handler closure for graph_registry/aggregator."""
+# ---------------------------------------------------------------------------
+# Dispatch handlers -- forward work to the worker process (ADR-019)
+# ---------------------------------------------------------------------------
 
-    async def _message_handler(
+
+def _create_dispatch_message_handler(
+    worker_client: httpx.AsyncClient,
+    session_factory: Any,
+) -> Callable:
+    """Create message handler that dispatches to the worker process.
+
+    Replaces the old ``_create_message_handler`` which ran
+    ``aggregator.ingest()`` locally.  Now sends an HTTP POST to the
+    worker's ``/dispatch`` endpoint (ADR-019).
+
+    Looks up the thread to forward ``team_preset`` and ``workspace_root``
+    so the worker can recompile the correct graph (T26b).
+    """
+
+    async def _dispatch_message(
         thread_id: str,
         content: str,
         agent_id: str | None,
     ) -> None:
-        graph = graph_registry.get(thread_id)
-        if graph is None:
+        # Resolve thread-level fields required by the worker.
+        team_preset: str | None = None
+        workspace_root: str | None = None
+        try:
+            async with session_factory() as db:
+                thread = await get_thread(db, thread_id)
+                if thread is not None:
+                    team_preset = thread.team_preset
+                    if thread.thread_metadata:
+                        import json as _json  # noqa: PLC0415
+
+                        try:
+                            meta = _json.loads(thread.thread_metadata)
+                            workspace_root = meta.get("workspace_root")
+                        except (ValueError, AttributeError):
+                            pass
+        except Exception:  # noqa: BLE001
             logger.warning(
-                "No graph registered for thread %s — ignoring message",
+                "Could not look up thread %s for WS dispatch — "
+                "team_preset/workspace_root will be None",
                 thread_id,
+                exc_info=True,
             )
-            return
-        if not await graph_registry.mark_ingest_active(thread_id):
+
+        try:
+            await worker_client.post(
+                "/dispatch",
+                json={
+                    "action": "ingest",
+                    "thread_id": thread_id,
+                    "agent_id": agent_id or "supervisor",
+                    "content": content,
+                    "team_preset": team_preset,
+                    "workspace_root": workspace_root,
+                },
+            )
+        except httpx.HTTPError:
             logger.warning(
-                "Ingest already active for thread %s — dropping WS message",
+                "Failed to dispatch message to worker for thread %s",
                 thread_id,
+                exc_info=True,
             )
-            return
-        config = {
-            "configurable": {"thread_id": thread_id},
-            "recursion_limit": 100,
-        }
-        graph_input = {"messages": [HumanMessage(content=content)]}
-        _aid = agent_id or "supervisor"
 
-        async def _ingest_and_release(_tid: str = thread_id) -> None:
-            try:
-                await aggregator.ingest(
-                    _tid, _aid, cast(StreamableGraph, graph), graph_input, config
-                )
-            finally:
-                await graph_registry.mark_ingest_done(_tid)
-
-        tg.start_soon(_ingest_and_release)
-
-    return _message_handler
+    return _dispatch_message
 
 
-def _create_agent_control_handler(
-    graph_registry: GraphRegistry,
-    aggregator: EventAggregator,
-    tg: TaskGroup,
+def _create_dispatch_control_handler(
+    worker_client: httpx.AsyncClient,
 ) -> Callable:
-    """Create agent control handler closure."""
+    """Create agent control handler that dispatches to the worker.
 
-    async def _agent_control_handler(
+    Replaces the old ``_create_agent_control_handler`` which ran
+    graph operations locally.  Now sends an HTTP POST to the worker's
+    ``/dispatch`` endpoint.
+    """
+
+    async def _dispatch_control(
         thread_id: str,
         agent_id: str,
         action: AgentControlAction,
     ) -> None:
         match action:
             case AgentControlAction.TERMINATE:
-                aggregator.cancel_thread(thread_id)
+                dispatch_action = "cancel"
             case AgentControlAction.RESUME:
-                graph = graph_registry.get(thread_id)
-                if graph is None:
-                    logger.warning(
-                        "No graph registered for thread %s — cannot resume",
-                        thread_id,
-                    )
-                    return
-                if not await graph_registry.mark_ingest_active(thread_id):
-                    logger.warning(
-                        "Ingest already active for thread %s — cannot resume",
-                        thread_id,
-                    )
-                    return
-                config = {
-                    "configurable": {"thread_id": thread_id},
-                    "recursion_limit": 100,
-                }
-
-                async def _resume_and_release(_tid: str = thread_id) -> None:
-                    try:
-                        await aggregator.ingest(
-                            _tid,
-                            agent_id,
-                            cast(StreamableGraph, graph),
-                            None,
-                            config,
-                        )
-                    finally:
-                        await graph_registry.mark_ingest_done(_tid)
-
-                tg.start_soon(_resume_and_release)
-            case AgentControlAction.PAUSE:
-                logger.info(
-                    "Pause not supported by LangGraph — ignoring for thread %s",
+                logger.warning(
+                    "WS RESUME without option_id is a no-op; use POST /permissions/{id}/respond -- thread %s",
                     thread_id,
                 )
-                await aggregator.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=agent_id,
-                    node_name="supervisor",
-                    state=AgentLifecycleState.WORKING,
-                    detail="Pause not supported; agent continues working",
+                return
+            case AgentControlAction.PAUSE:
+                logger.info(
+                    "Pause not supported -- ignoring for thread %s", thread_id
                 )
+                return
 
-    return _agent_control_handler
+        try:
+            await worker_client.post(
+                "/dispatch",
+                json={
+                    "action": dispatch_action,
+                    "thread_id": thread_id,
+                    "agent_id": agent_id,
+                },
+            )
+        except httpx.HTTPError:
+            logger.warning(
+                "Failed to dispatch control to worker for thread %s",
+                thread_id,
+                exc_info=True,
+            )
+
+    return _dispatch_control
+
+
+# ---------------------------------------------------------------------------
+# Application lifespan
+# ---------------------------------------------------------------------------
 
 
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
-    """Application lifespan: startup and shutdown hooks."""
+    """Application lifespan: startup and shutdown hooks.
+
+    ADR-019: The control surface no longer runs agent execution.  All
+    graph compilation and ingest calls are dispatched to the worker
+    process.  The lifespan sets up:
+    1. Database (SQLAlchemy)
+    2. Read-only checkpointer (for snapshot queries -- safe under WAL mode)
+    3. EventAggregator (lightweight -- for local event relay only)
+    4. ConnectionManager
+    5. Telemetry
+    6. httpx.AsyncClient for worker dispatch
+    7. WorkerSupervisor (optional, auto_spawn_worker mode)
+    8. Task group for supervisor monitoring only
+    """
     # --- Startup ---
-    logger.info("Starting application lifespan")
+    logger.info("Starting control surface lifespan (ADR-019)")
 
     # Single source of truth for the database file path (Fix 4 / H7).
     db_path = settings.database_path
@@ -199,19 +237,21 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     engine = await init_db(db_path)
     logger.info("Database initialised (WAL mode) at %s", db_path)
 
-    # LangGraph checkpointer — uses the same path as the application DB.
+    # LangGraph checkpointer -- READ-ONLY in the control surface (ADR-019).
+    # The worker owns the write path.  This connection is safe for concurrent
+    # reads under SQLite WAL mode.  Used by GET /threads/{id}/state to read
+    # checkpoint data for snapshot enrichment.
     async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
         await checkpointer.setup()
         app.state.checkpointer = checkpointer
-        logger.info("LangGraph checkpointer initialised at %s", db_path)
+        logger.info(
+            "LangGraph checkpointer initialised (read-only) at %s", db_path
+        )
 
-        # Event aggregator
+        # Event aggregator -- lightweight in the control surface.
+        # No graphs are registered here; the worker runs ingest.
         aggregator = EventAggregator()
         app.state.aggregator = aggregator
-
-        # Graph registry: thread_id -> compiled LangGraph runnable
-        graph_registry = GraphRegistry()
-        app.state.graph_registry = graph_registry
 
         # Connection manager (depends on aggregator)
         connection_manager = ConnectionManager(aggregator)
@@ -220,35 +260,61 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Store engine ref for shutdown
         app.state.db_engine = engine
 
-        # Telemetry (ADR-010 — mandatory)
+        # Telemetry (ADR-010 -- mandatory)
         configure_telemetry()
         logger.info("Telemetry configured")
 
-        # Task group for background work (ADR-007 §5).
+        # httpx client for dispatching work to the worker process
+        worker_client = httpx.AsyncClient(
+            base_url=settings.worker_url,
+            timeout=httpx.Timeout(30.0, connect=5.0),
+        )
+        app.state.worker_client = worker_client
+        logger.info("Worker client configured: %s", settings.worker_url)
+
+        # Optional: auto-spawn the worker as a child process
+        supervisor: WorkerSupervisor | None = None
+        if settings.auto_spawn_worker:
+            supervisor = WorkerSupervisor(worker_port=settings.worker_port)
+            supervisor.start()
+            app.state.worker_supervisor = supervisor
+            logger.info("Worker supervisor started (auto_spawn_worker=True)")
+
+        # Wire dispatch handlers for WebSocket commands
+        msg_handler = _create_dispatch_message_handler(worker_client, get_session_factory())
+        connection_manager.set_message_handler(msg_handler)
+
+        ctrl_handler = _create_dispatch_control_handler(worker_client)
+        connection_manager.set_agent_control_handler(ctrl_handler)
+
+        # Task group for supervisor monitoring only (NOT for agent execution)
         async with anyio.create_task_group() as tg:
-            app.state.task_group = tg
+            if supervisor is not None:
+                tg.start_soon(supervisor.monitor)
 
-            # Wire handlers
-            msg_handler = _create_message_handler(graph_registry, aggregator, tg)
-            connection_manager.set_message_handler(msg_handler)
-
-            ctrl_handler = _create_agent_control_handler(graph_registry, aggregator, tg)
-            connection_manager.set_agent_control_handler(ctrl_handler)
-
-            logger.info("Application startup complete")
+            logger.info("Control surface startup complete")
 
             yield
 
             # --- Shutdown ---
-            logger.info("Shutting down application")
+            logger.info("Shutting down control surface")
+
+            # Cancel monitor task FIRST to prevent restart race: if the worker
+            # dies between stop() and cancel, monitor would immediately respawn it.
+            tg.cancel_scope.cancel()
+
+            # Close worker HTTP client
+            await worker_client.aclose()
+
+            # Stop worker supervisor (async since T29)
+            if supervisor is not None:
+                await supervisor.stop()
 
             await connection_manager.shutdown()
             await aggregator.shutdown()
             await close_db()
 
-            logger.info("Application shutdown complete")
-            # Task group __aexit__ awaits remaining background tasks
-            tg.cancel_scope.cancel()
+            logger.info("Control surface shutdown complete")
 
 
 def main() -> None:
@@ -279,7 +345,7 @@ def create_app() -> FastAPI:
     )
 
     # --- CORS Middleware ---
-    # Always add CORS so the SvelteKit SPA can make cross-origin requests in
+    # Always add CORS so the React SPA can make cross-origin requests in
     # both dev and production (C1 fix).  CORS spec forbids allow_origins=["*"]
     # combined with allow_credentials=True (browsers reject such responses), so
     # we never use wildcard origins.  In dev the extra Vite origins are included;
@@ -296,14 +362,17 @@ def create_app() -> FastAPI:
     # --- Telemetry Middleware (ADR-010) ---
     app.add_middleware(cast(Any, TelemetryMiddleware))
 
-    # --- Cache-Control Middleware (ADR-007 §5) ---
+    # --- Cache-Control Middleware (ADR-007 S5) ---
     app.add_middleware(cast(Any, _CacheControlMiddleware))
 
     # --- REST Router ---
     app.include_router(router, prefix="/api")
 
+    # --- Internal Router (worker relay -- ADR-019) ---
+    app.include_router(internal_router)
+
     # --- MCP Server (SSE transport for IDE clients: Cursor, Windsurf) ---
-    # Mounted at /mcp; exposes team_create and team_status tools (ADR-006 §5)
+    # Mounted at /mcp; exposes team_create and team_status tools (ADR-006 S5)
     app.mount("/mcp", mcp_server.sse_app())
 
     # --- WebSocket Route ---
@@ -314,17 +383,17 @@ def create_app() -> FastAPI:
         client_id = await cm.connect(websocket)
         await cm.listen(client_id)
 
-    # --- Static Files (SvelteKit SPA) ---
+    # --- Static Files (React SPA) ---
     if _UI_BUILD_DIR.is_dir():
         app.mount(
             "/",
             StaticFiles(directory=str(_UI_BUILD_DIR), html=True),
             name="ui",
         )
-        logger.info("Mounted SvelteKit SPA from %s", _UI_BUILD_DIR)
+        logger.info("Mounted React SPA from %s", _UI_BUILD_DIR)
     else:
         logger.warning(
-            "SvelteKit build not found at %s — UI will not be served",
+            "SPA build not found at %s -- UI will not be served",
             _UI_BUILD_DIR,
         )
 

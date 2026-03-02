@@ -1,25 +1,22 @@
-"""Tests for the REST endpoints.
+"""Tests for the REST endpoints (ADR-019 refactored).
 
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
-EventAggregator + GraphRegistry (no mocks).  Permission tests use a real
-compiled graph pre-registered in the GraphRegistry.
+EventAggregator (no mocks).  Dispatch requests to the worker are captured
+by a test httpx transport and asserted on.
 
-API-C1: all dependency overrides (including get_checkpointer and
-get_task_group) are applied via the shared make_app() helper in conftest.py
-so tests never touch the production vaultspec.db.
+ADR-019: Graph compilation and ingest no longer run in the control surface.
+All work is dispatched to the worker via HTTP POST to /dispatch.  Tests
+verify that the correct dispatch requests are sent.
+
+API-C1: all dependency overrides are applied via the shared make_app()
+helper in conftest.py so tests never touch the production vaultspec.db.
 """
-
-from typing import cast
 
 import pytest
 
 from fastapi.testclient import TestClient
-from langgraph.graph.state import CompiledStateGraph
 
 from ...core.aggregator import EventAggregator
-from ...core.graph import compile_team_graph
-from ...core.team_config import load_agent_config, load_team_config
-from ..endpoints import GraphRegistry
 from .conftest import make_app
 
 
@@ -33,7 +30,7 @@ class TestCreateThread:
 
     def test_creates_thread_without_preset(self, session_factory) -> None:
         """Creating a thread without team_preset returns 201 with thread_id."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -45,43 +42,39 @@ class TestCreateThread:
         assert "thread_id" in data
         assert data["status"] == "submitted"
 
-    def test_creates_thread_with_unknown_preset_raises_422(
+    def test_creates_thread_with_preset_dispatches_to_worker(
         self, session_factory
     ) -> None:
-        """An unknown team_preset returns 422."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        """Creating a thread with a valid preset dispatches ingest to worker."""
+        from .conftest import _CapturedDispatch
+
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
                 "/api/threads",
                 json={
                     "initial_message": "Hello",
-                    "team_preset": "nonexistent-preset",
-                },
-            )
-        assert resp.status_code == 422
-
-    def test_creates_thread_with_valid_preset_registers_graph(
-        self, session_factory
-    ) -> None:
-        """Creating a thread with a valid preset compiles and registers a graph."""
-        app, _agg, registry, _cp = make_app(session_factory)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            resp = client.post(
-                "/api/threads",
-                json={
-                    "initial_message": "Hello",
-                    "team_preset": "coding-pipeline",
+                    "team_preset": "vaultspec-structured-coder",
                 },
             )
         assert resp.status_code == 201
         thread_id = resp.json()["thread_id"]
-        assert registry.get(thread_id) is not None
+
+        # Verify dispatch was sent to worker
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "ingest"
+        assert dispatch["thread_id"] == thread_id
+        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["content"] == "Hello"
 
     def test_initial_message_length_limit(self, session_factory) -> None:
         """initial_message exceeding 64KB is rejected with validation error."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
         oversized = "x" * (65536 + 1)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -102,7 +95,7 @@ class TestListThreads:
 
     def test_empty_list(self, session_factory) -> None:
         """Returns an empty list when no threads exist."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads")
@@ -113,7 +106,7 @@ class TestListThreads:
 
     def test_lists_created_threads(self, session_factory) -> None:
         """Returns threads that were created."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             client.post(
@@ -142,7 +135,7 @@ class TestThreadState:
 
     def test_404_for_unknown_thread(self, session_factory) -> None:
         """Returns 404 for a thread that does not exist."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads/nonexistent/state")
@@ -150,7 +143,7 @@ class TestThreadState:
 
     def test_returns_snapshot_for_existing_thread(self, session_factory) -> None:
         """Returns a ThreadStateSnapshot for a known thread."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -166,44 +159,6 @@ class TestThreadState:
         assert "last_sequence" in data
         assert data["last_sequence"] == 0
 
-    def test_enriched_snapshot_when_graph_registered(self, session_factory) -> None:
-        """GET /threads/{id}/state enriches snapshot when a graph is registered.
-
-        API-M6: tests the _enrich_snapshot_from_state code path.
-        """
-        team = load_team_config("coding-pipeline")
-        agent_configs = {
-            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
-        }
-        graph = compile_team_graph(
-            team_config=team,
-            agent_configs=agent_configs,
-            checkpointer=None,
-        )
-
-        registry = GraphRegistry()
-        registry.register("thread-snap", graph)
-        app, _agg, _reg, _cp = make_app(session_factory, registry=registry)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            # Create the thread first so it exists in DB
-            create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
-            )
-            thread_id = create_resp.json()["thread_id"]
-            # Register graph for this thread
-            registry.register(thread_id, graph)
-
-            resp = client.get(f"/api/threads/{thread_id}/state")
-
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["thread_id"] == thread_id
-        # messages list present (may be empty since no graph execution happened)
-        assert "messages" in data
-        assert isinstance(data["messages"], list)
-
 
 # ---------------------------------------------------------------------------
 # POST /threads/{id}/messages
@@ -215,7 +170,7 @@ class TestSendMessage:
 
     def test_404_for_unknown_thread(self, session_factory) -> None:
         """Returns 404 when the thread does not exist."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -224,14 +179,14 @@ class TestSendMessage:
             )
         assert resp.status_code == 404
 
-    def test_202_accepted_without_graph(self, session_factory) -> None:
-        """Returns 202 and emits submitted status when no graph is registered."""
-        aggregator = EventAggregator()
-        app, _agg, _reg, _cp = make_app(session_factory, aggregator=aggregator)
+    def test_202_accepted_dispatches_to_worker(self, session_factory) -> None:
+        """Returns 202 and dispatches ingest to worker."""
+        from .conftest import _CapturedDispatch
 
-        # Register a subscriber so the aggregator accepts subscriptions
-        aggregator.add_subscriber("test-client")
-        aggregator.subscribe("test-client", ["__all__"])
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -239,22 +194,60 @@ class TestSendMessage:
                 json={"initial_message": "Hello"},
             )
             thread_id = create_resp.json()["thread_id"]
-
-            # Subscribe to this specific thread
-            aggregator.subscribe("test-client", [thread_id])
+            captured.clear()  # Clear the create dispatch if any
 
             resp = client.post(
                 f"/api/threads/{thread_id}/messages",
-                json={"content": "Run it"},
+                json={"content": "Follow-up message"},
             )
         assert resp.status_code == 202
         data = resp.json()
         assert data["status"] == "accepted"
         assert data["thread_id"] == thread_id
 
+        # Verify dispatch was sent to worker
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "ingest"
+        assert dispatch["thread_id"] == thread_id
+        assert dispatch["content"] == "Follow-up message"
+        assert dispatch["agent_id"] == "supervisor"
+
+    def test_dispatch_includes_team_preset(self, session_factory) -> None:
+        """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
+        from .conftest import _CapturedDispatch
+
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={
+                    "initial_message": "Hello",
+                    "team_preset": "vaultspec-structured-coder",
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            captured.requests.clear()
+
+            resp = client.post(
+                f"/api/threads/{thread_id}/messages",
+                json={"content": "Follow-up"},
+            )
+
+        assert resp.status_code == 202
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "ingest"
+        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+
     def test_content_length_limit(self, session_factory) -> None:
         """content exceeding 64KB is rejected with 422."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
         oversized = "x" * (65536 + 1)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -269,39 +262,6 @@ class TestSendMessage:
             )
         assert resp.status_code == 422
 
-    def test_202_accepted_with_graph_triggers_ingest(self, session_factory) -> None:
-        """POST /threads/{id}/messages with a registered graph triggers ingest.
-
-        API-M3: verifies the graph execution path is invoked.
-        """
-        team = load_team_config("coding-pipeline")
-        agent_configs = {
-            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
-        }
-        graph = compile_team_graph(team_config=team, agent_configs=agent_configs)
-
-        registry = GraphRegistry()
-        app, _aggregator, _reg, _cp = make_app(session_factory, registry=registry)
-
-        with TestClient(app, raise_server_exceptions=True) as client:
-            create_resp = client.post(
-                "/api/threads",
-                json={"initial_message": "Hello"},
-            )
-            thread_id = create_resp.json()["thread_id"]
-            # Register graph for this thread
-            registry.register(thread_id, graph)
-
-            resp = client.post(
-                f"/api/threads/{thread_id}/messages",
-                json={"content": "Follow-up message"},
-            )
-
-        assert resp.status_code == 202
-        data = resp.json()
-        assert data["status"] == "accepted"
-        assert data["thread_id"] == thread_id
-
 
 # ---------------------------------------------------------------------------
 # GET /api/teams
@@ -313,7 +273,7 @@ class TestListTeamPresets:
 
     def test_returns_bundled_presets(self, session_factory) -> None:
         """Returns all bundled team presets."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -323,11 +283,11 @@ class TestListTeamPresets:
         assert "presets" in data
         preset_ids = [p["id"] for p in data["presets"]]
         # At minimum the bundled pipeline preset should be present
-        assert "coding-pipeline" in preset_ids
+        assert "vaultspec-structured-coder" in preset_ids
 
     def test_preset_has_required_fields(self, session_factory) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -350,7 +310,7 @@ class TestTeamStatus:
 
     def test_returns_team_status(self, session_factory) -> None:
         """Returns a TeamStatusResponse with agents and active_threads."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -372,9 +332,14 @@ class TestTeamStatus:
 class TestPermissionRespond:
     """Tests for POST /api/permissions/{request_id}/respond."""
 
-    def test_responds_without_graph(self, session_factory) -> None:
-        """Returns accepted=False when no graph is registered for the thread."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+    def test_responds_dispatches_resume_to_worker(self, session_factory) -> None:
+        """Dispatches a resume to the worker and returns accepted=True."""
+        from .conftest import _CapturedDispatch
+
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -385,35 +350,72 @@ class TestPermissionRespond:
         assert resp.status_code == 200
         data = resp.json()
         assert data["request_id"] == "thread-123:req-456"
-        assert data["accepted"] is False
+        assert data["accepted"] is True
         assert data["thread_id"] == "thread-123"
 
-    def test_responds_with_graph(self, session_factory) -> None:
-        """Returns accepted=True when a graph is registered for the thread."""
-        team = load_team_config("coding-pipeline")
-        agent_configs = {
-            w.agent_id: load_agent_config(w.agent_id) for w in team.workers
-        }
-        graph = compile_team_graph(team_config=team, agent_configs=agent_configs)
+        # Verify resume dispatch was sent to worker
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "resume"
+        assert dispatch["thread_id"] == "thread-123"
+        assert dispatch["option_id"] == "allow_once"
 
-        registry = GraphRegistry()
-        registry.register("thread-abc", graph)
-        app, _agg, _reg, _cp = make_app(session_factory, registry=registry)
+    def test_resume_dispatch_includes_team_preset(self, session_factory) -> None:
+        """Resume DispatchRequest includes team_preset from DB for lazy recompile."""
+        from .conftest import _CapturedDispatch
+
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            # First create a thread with a team_preset so it's stored in DB.
+            create_resp = client.post(
+                "/api/threads",
+                json={
+                    "initial_message": "Hello",
+                    "team_preset": "vaultspec-structured-coder",
+                },
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+
+            # Now respond to a permission for that thread.
+            captured.requests.clear()
+            resp = client.post(
+                f"/api/permissions/{thread_id}:req-001/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["accepted"] is True
+
+        # The resume dispatch must carry team_preset for lazy recompile.
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "resume"
+        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+
+    def test_responds_without_thread_id_returns_not_accepted(
+        self, session_factory
+    ) -> None:
+        """Returns accepted=False when request_id has no thread_id component."""
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
-                "/api/permissions/thread-abc:req-xyz/respond",
+                "/api/permissions/no-colon-here/respond",
                 json={"option_id": "allow_once"},
             )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["accepted"] is True
-        assert data["thread_id"] == "thread-abc"
+        assert data["accepted"] is False
 
 
 # ---------------------------------------------------------------------------
-# GraphRegistry unit tests
+# POST /threads -- autonomous mode
 # ---------------------------------------------------------------------------
 
 
@@ -422,7 +424,7 @@ class TestCreateThreadAutonomous:
 
     def test_create_thread_autonomous_defaults_false(self, session_factory) -> None:
         """Creating a thread without autonomous field defaults to False (supervised)."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -436,7 +438,7 @@ class TestCreateThreadAutonomous:
 
     def test_create_thread_autonomous_true_accepted(self, session_factory) -> None:
         """Creating a thread with autonomous=True returns 201 successfully."""
-        app, _agg, _reg, _cp = make_app(session_factory)
+        app, _agg, _captured, _cp = make_app(session_factory)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -451,67 +453,57 @@ class TestCreateThreadAutonomous:
         assert "thread_id" in data
         assert data["status"] == "submitted"
 
-    def test_create_thread_with_preset_autonomous_true(self, session_factory) -> None:
-        """Creating a thread with a valid preset and autonomous=True compiles
-        the graph with the correct structure."""
-        app, _agg, registry, _cp = make_app(session_factory)
+    def test_create_thread_with_preset_autonomous_dispatches(
+        self, session_factory
+    ) -> None:
+        """Creating a thread with a preset and autonomous=True dispatches to worker."""
+        from .conftest import _CapturedDispatch
+
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
                 "/api/threads",
                 json={
                     "initial_message": "Run autonomously",
-                    "team_preset": "coding-pipeline",
+                    "team_preset": "vaultspec-structured-coder",
                     "autonomous": True,
                 },
             )
         assert resp.status_code == 201
-        thread_id = resp.json()["thread_id"]
-        # Graph should be compiled and registered
-        graph = registry.get(thread_id)
-        assert graph is not None
-        # Autonomous graph has the expected pipeline nodes
-        node_keys = {k for k in graph.nodes if not k.startswith("__")}
-        assert {"planner", "coder", "reviewer"} == node_keys
-        # interrupt_before empty in autonomous mode (ADR-013)
-        assert list(graph.interrupt_before_nodes) == []
 
+        # Verify dispatch was sent with autonomous flag
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["action"] == "ingest"
+        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["autonomous"] is True
 
-class TestGraphRegistry:
-    """Unit tests for the GraphRegistry helper class."""
+    def test_create_thread_autonomous_inherits_team_auto_approve(
+        self, session_factory
+    ) -> None:
+        """When autonomous is not set, team auto_approve=True makes dispatch autonomous."""
+        from .conftest import _CapturedDispatch
 
-    def test_register_and_get(self) -> None:
-        """register() stores a graph; get() returns it."""
-        registry = GraphRegistry()
-        graph = cast(CompiledStateGraph, object())
-        registry.register("t1", graph)
-        assert registry.get("t1") is graph
+        captured = _CapturedDispatch()
+        app, _agg, captured, _cp = make_app(
+            session_factory, captured_dispatch=captured
+        )
 
-    def test_get_unknown_returns_none(self) -> None:
-        """get() returns None for an unknown thread_id."""
-        registry = GraphRegistry()
-        assert registry.get("nonexistent") is None
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads",
+                json={
+                    "initial_message": "Run with team default",
+                    "team_preset": "vaultspec-solo-coder",
+                    # autonomous not set — should inherit auto_approve=True from preset
+                },
+            )
+        assert resp.status_code == 201
 
-    def test_pending_resume_roundtrip(self) -> None:
-        """register_pending_resume then pop_pending_resume round-trips correctly."""
-        registry = GraphRegistry()
-        registry.register_pending_resume("req-1", "thread-1", "allow_once")
-        result = registry.pop_pending_resume("req-1")
-        assert result == ("thread-1", "allow_once")
-        # Second pop returns None
-        assert registry.pop_pending_resume("req-1") is None
-
-    @pytest.mark.asyncio
-    async def test_mark_ingest_active_prevents_duplicate(self) -> None:
-        """mark_ingest_active returns False for a thread already active."""
-        registry = GraphRegistry()
-        assert await registry.mark_ingest_active("t1") is True
-        assert await registry.mark_ingest_active("t1") is False
-
-    @pytest.mark.asyncio
-    async def test_mark_ingest_done_releases_thread(self) -> None:
-        """mark_ingest_done releases the thread so it can be re-activated."""
-        registry = GraphRegistry()
-        await registry.mark_ingest_active("t1")
-        await registry.mark_ingest_done("t1")
-        assert await registry.mark_ingest_active("t1") is True
+        assert len(captured.requests) == 1
+        dispatch = captured.requests[0]
+        assert dispatch["autonomous"] is True

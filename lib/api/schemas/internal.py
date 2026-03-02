@@ -1,0 +1,55 @@
+"""Internal IPC message types between control surface and worker (ADR-019)."""
+
+from __future__ import annotations
+
+from pydantic import BaseModel, Field
+
+__all__ = [
+    "DispatchRequest",
+    "DispatchResponse",
+    "HeartbeatMessage",
+    "WorkerEventEnvelope",
+]
+
+
+class DispatchRequest(BaseModel):
+    """Work dispatch command from control surface to worker."""
+
+    action: str = Field(description="'ingest' | 'resume' | 'cancel'")
+    thread_id: str
+    agent_id: str = "supervisor"
+    # For ingest: user message content
+    content: str | None = None
+    # For resume: permission response option
+    option_id: str | None = None
+    # For initial thread creation
+    team_preset: str | None = None
+    workspace_root: str | None = None
+    autonomous: bool = False
+    metadata_json: str | None = None
+    context_preamble: str | None = None
+    recursion_limit: int = 100
+
+
+class DispatchResponse(BaseModel):
+    """Acknowledgement from worker to control surface."""
+
+    status: str = "dispatched"
+    thread_id: str
+
+
+class HeartbeatMessage(BaseModel):
+    """Worker heartbeat sent via internal WebSocket."""
+
+    type: str = "heartbeat"
+    worker_id: str
+    active_threads: list[str] = Field(default_factory=list)
+    timestamp: str
+
+
+class WorkerEventEnvelope(BaseModel):
+    """Wrapper for events sent from worker to control surface via internal WS."""
+
+    type: str = "event"
+    thread_id: str
+    payload: dict

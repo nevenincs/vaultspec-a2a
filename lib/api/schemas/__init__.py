@@ -46,6 +46,10 @@ from .events import ToolCallContentText as ToolCallContentText
 from .events import ToolCallLocation as ToolCallLocation
 from .events import ToolCallStartEvent as ToolCallStartEvent
 from .events import ToolCallUpdateEvent as ToolCallUpdateEvent
+from .internal import DispatchRequest as DispatchRequest
+from .internal import DispatchResponse as DispatchResponse
+from .internal import HeartbeatMessage as HeartbeatMessage
+from .internal import WorkerEventEnvelope as WorkerEventEnvelope
 from .rest import AgentStatusEntry as AgentStatusEntry
 from .rest import CreateThreadRequest as CreateThreadRequest
 from .rest import CreateThreadResponse as CreateThreadResponse
@@ -80,9 +84,12 @@ __all__ = [
     "ConnectedEvent",
     "CreateThreadRequest",
     "CreateThreadResponse",
+    "DispatchRequest",
+    "DispatchResponse",
     "ErrorEvent",
     "EventEnvelope",
     "HeartbeatEvent",
+    "HeartbeatMessage",
     "MessageChunkEvent",
     "MessageSnapshot",
     "PendingPermission",
@@ -122,4 +129,5 @@ __all__ = [
     "ToolCallUpdateEvent",
     "ToolKind",
     "UnsubscribeCommand",
+    "WorkerEventEnvelope",
 ]

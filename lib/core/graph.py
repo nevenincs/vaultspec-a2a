@@ -18,12 +18,15 @@ from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
+from langgraph.pregel._retry import RetryPolicy
 
+from ..providers.acp_exceptions import AcpSessionError
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
-from .exceptions import ConfigError
+from .exceptions import ConfigError, WorkerExecutionError
 from .nodes.supervisor import create_supervisor_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .state import TeamState
@@ -34,6 +37,51 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = ["compile_team_graph"]
+
+# Transient exceptions that warrant a retry at the LangGraph node level.
+_TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    TimeoutError,
+    ConnectionError,
+    ConnectionResetError,
+    ConnectionAbortedError,
+    ConnectionRefusedError,
+)
+
+# Exceptions that must never trigger a retry.
+_NO_RETRY_EXCEPTIONS: tuple[type[BaseException], ...] = (
+    GraphRecursionError,
+    AcpSessionError,
+)
+
+
+def _worker_retry_on(exc: Exception) -> bool:
+    """Predicate passed to ``RetryPolicy`` for every worker node.
+
+    Inspects the direct exception and, for ``WorkerExecutionError`` wrappers,
+    the ``__cause__`` to determine whether a retry is appropriate.
+
+    Returns:
+        ``True``  — transient failure, retry is safe.
+        ``False`` — permanent or indeterminate failure, do not retry.
+    """
+    # Never retry deterministic or quota errors.
+    if isinstance(exc, _NO_RETRY_EXCEPTIONS):
+        return False
+
+    # WorkerExecutionError wraps the original cause — inspect it.
+    if isinstance(exc, WorkerExecutionError):
+        cause = exc.__cause__
+        if cause is None:
+            return False
+        if isinstance(cause, _NO_RETRY_EXCEPTIONS):
+            return False
+        return isinstance(cause, _TRANSIENT_EXCEPTIONS)
+
+    return isinstance(exc, _TRANSIENT_EXCEPTIONS)
+
+
+#: RetryPolicy applied to every worker and supervisor node (T05).
+_NODE_RETRY_POLICY = RetryPolicy(retry_on=_worker_retry_on)
 
 
 def _resolve_model_for_worker(
@@ -48,8 +96,12 @@ def _resolve_model_for_worker(
     1. [[team.workers]] model.* override
     2. agent TOML [agent.model].*
     3. [team.defaults].*
+
+    If the primary provider fails, the provider_fallback chain is tried in
+    order (TOML-05 Scope 2).  provider_fallback is resolved with the same
+    priority as the primary provider.
     """
-    provider: Provider = (
+    primary_provider: Provider = (
         worker_ref.model.provider
         or agent_config.model.provider
         or team_config.defaults.provider
@@ -60,12 +112,42 @@ def _resolve_model_for_worker(
         or agent_config.model.capability
         or team_config.defaults.capability
     )
-    return ProviderFactory.create(
-        provider,
-        model=capability,
-        agent_config=agent_config,
-        workspace_root=workspace_root,
+    fallback_chain: list[Provider] = (
+        worker_ref.model.provider_fallback
+        or agent_config.model.provider_fallback
+        or team_config.defaults.provider_fallback
+        or []
     )
+    providers_to_try = [primary_provider, *fallback_chain]
+    last_exc: Exception | None = None
+    for p in providers_to_try:
+        try:
+            model = ProviderFactory.create(
+                p,
+                model=capability,
+                agent_config=agent_config,
+                workspace_root=workspace_root,
+            )
+            logger.info(
+                "worker=%r resolved model_type=%s provider=%s capability=%s",
+                agent_config.id,
+                type(model).__name__,
+                p.value,
+                capability.value if capability else "default",
+            )
+            return model
+        except ValueError as exc:
+            logger.warning(
+                "Provider %s unavailable for worker %s: %s",
+                p.value,
+                agent_config.id,
+                exc,
+            )
+            last_exc = exc
+    raise ValueError(
+        f"All providers exhausted for worker {agent_config.id!r}: "
+        f"tried {[p.value for p in providers_to_try]}"
+    ) from last_exc
 
 
 def _resolve_supervisor_model(
@@ -87,19 +169,26 @@ def _resolve_supervisor_model(
 def _build_supervisor_prompt(
     resolved_agents: list[AgentConfig],
     base_prompt: str,
+    directive: str | None = None,
 ) -> str:
-    """Inject the agent roster into the supervisor system prompt.
+    """Inject the agent roster (and optional team directive) into the supervisor prompt.
 
     Replaces ``{{AGENT_ROSTER}}`` placeholder if present, otherwise appends
-    the roster to the base prompt (ADR-013 §2.6).
+    the roster to the base prompt (ADR-013 §2.6).  If a team-level directive
+    is supplied (from ``[team.persona] directive`` in the preset TOML), it is
+    appended after the roster section (TOML-05).
     """
     roster = "\n".join(
         f"- {cfg.display_name} ({cfg.id}): {cfg.description.strip()}"
         for cfg in resolved_agents
     )
     if "{{AGENT_ROSTER}}" in base_prompt:
-        return base_prompt.replace("{{AGENT_ROSTER}}", roster)
-    return base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
+        result = base_prompt.replace("{{AGENT_ROSTER}}", roster)
+    else:
+        result = base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
+    if directive:
+        result = result + f"\n\n## Team Directive\n\n{directive.strip()}"
+    return result
 
 
 def compile_team_graph(
@@ -109,6 +198,7 @@ def compile_team_graph(
     supervisor_agent_config: AgentConfig | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
+    step_timeout: float | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -131,6 +221,9 @@ def compile_team_graph(
         autonomous:              When True, skip permission_callback wiring so
                                  ACP models auto-approve tool calls (headless
                                  MCP-launched runs).
+        step_timeout:            Per-step timeout in seconds.  When None the
+                                 team TOML ``step_timeout_seconds`` value is
+                                 used as fallback (TOML-05).
 
     Returns:
         The compiled StateGraph runnable.
@@ -182,10 +275,25 @@ def compile_team_graph(
             "Expected 'star', 'pipeline', or 'pipeline_loop'."
         )
 
-    return builder.compile(
+    graph = builder.compile(
         checkpointer=checkpointer,
         interrupt_before=interrupt_nodes,
     )
+
+    # TOML-05: apply per-preset graph settings.
+    # step_timeout: explicit caller param wins; fall back to team TOML value.
+    effective_timeout = step_timeout if step_timeout is not None else (
+        float(team_config.graph.step_timeout_seconds)
+        if team_config.graph.step_timeout_seconds is not None
+        else None
+    )
+    if effective_timeout is not None:
+        graph.step_timeout = effective_timeout
+
+    # recursion_limit: sourced from team TOML (default 25).
+    graph.recursion_limit = team_config.graph.recursion_limit
+
+    return graph
 
 
 def _compile_star(
@@ -213,24 +321,32 @@ def _compile_star(
 
     if supervisor_agent_config is not None:
         supervisor_prompt = _build_supervisor_prompt(
-            resolved_agents, supervisor_agent_config.persona.system_prompt
+            resolved_agents,
+            supervisor_agent_config.persona.system_prompt,
+            directive=team_config.persona.directive,
+        )
+        # TOML-05: prefer team-level supervisor_display_name when set
+        sv_display_name = (
+            team_config.persona.supervisor_display_name
+            or supervisor_agent_config.display_name
         )
         sv_meta: dict[str, str] = {
-            "display_name": supervisor_agent_config.display_name,
+            "display_name": sv_display_name,
             "role": "supervisor",
             "description": supervisor_agent_config.description.strip(),
         }
     else:
-        roster = "\n".join(
-            f"- {cfg.display_name} ({cfg.id}): {cfg.description.strip()}"
-            for cfg in resolved_agents
-        )
-        supervisor_prompt = (
+        _fallback_base = (
             "You are a supervisor managing a team of expert assistants.\n"
-            f"Your team members and their specializations:\n{roster}\n\n"
+            "{{AGENT_ROSTER}}\n\n"
             "Review the recent messages, identify what needs to be done, "
             "and decide who should act next to progress the goal. "
             "When the goal is fully achieved, respond with FINISH."
+        )
+        supervisor_prompt = _build_supervisor_prompt(
+            resolved_agents,
+            _fallback_base,
+            directive=team_config.persona.directive,
         )
         sv_meta = {
             "display_name": "Supervisor",
@@ -243,20 +359,19 @@ def _compile_star(
         system_prompt=supervisor_prompt,
         workers=worker_ids,
     )
-    builder.add_node("supervisor", supervisor_node, metadata=sv_meta)
+    builder.add_node(
+        "supervisor", supervisor_node, metadata=sv_meta, retry_policy=_NODE_RETRY_POLICY
+    )
     builder.add_edge(START, "supervisor")
 
     compiled_worker_ids: list[str] = []
     for worker_ref in team_config.workers:
         if worker_ref.agent_id not in agent_configs:
-            # H6: log a warning instead of raising so partial teams can still run.
-            logger.warning(
-                "Worker %r is listed in team %r but has no resolved AgentConfig "
-                "— skipping this worker node.",
-                worker_ref.agent_id,
-                team_config.id,
+            raise ConfigError(
+                f"Worker {worker_ref.agent_id!r} is listed in team "
+                f"{team_config.id!r} but has no resolved AgentConfig. "
+                f"Ensure the agent TOML exists and is loaded."
             )
-            continue
         agent_cfg = agent_configs[worker_ref.agent_id]
         model = _resolve_model_for_worker(
             worker_ref,
@@ -278,6 +393,7 @@ def _compile_star(
                 "role": agent_cfg.role,
                 "description": agent_cfg.description.strip(),
             },
+            retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
         compiled_worker_ids.append(agent_cfg.id)
@@ -374,6 +490,7 @@ def _compile_pipeline(
                 "role": agent_cfg.role,
                 "description": agent_cfg.description.strip(),
             },
+            retry_policy=_NODE_RETRY_POLICY,
         )
         node_names.append(agent_cfg.id)
 
@@ -474,6 +591,9 @@ def _compile_pipeline_loop(
     loop_node_id, pre_loop = _validate_pipeline_loop_config(team_config, agent_configs)
     order = team_config.topology.order
 
+    # Map external agent_id (lookup key) → internal node name (agent_cfg.id)
+    node_name_map: dict[str, str] = {}
+
     for agent_id in order:
         if agent_id not in agent_configs:
             raise ConfigError(
@@ -482,6 +602,7 @@ def _compile_pipeline_loop(
                 "loaded before compiling the graph."
             )
         agent_cfg = agent_configs[agent_id]
+        node_name_map[agent_id] = agent_cfg.id
         worker_ref = next(
             (w for w in team_config.workers if w.agent_id == agent_id), None
         )
@@ -513,14 +634,19 @@ def _compile_pipeline_loop(
                 "role": agent_cfg.role,
                 "description": agent_cfg.description.strip(),
             },
+            retry_policy=_NODE_RETRY_POLICY,
         )
 
-    all_sequential: list[str] = [*pre_loop, loop_node_id]
+    # Translate external IDs to node names for edge wiring
+    pre_loop_nodes = [node_name_map[aid] for aid in pre_loop]
+    loop_node_name = node_name_map[loop_node_id]
+
+    all_sequential: list[str] = [*pre_loop_nodes, loop_node_name]
     builder.add_edge(START, all_sequential[0])
     for i in range(len(all_sequential) - 1):
         builder.add_edge(all_sequential[i], all_sequential[i + 1])
 
-    loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
+    loop_target: str = pre_loop_nodes[-1] if pre_loop_nodes else all_sequential[0]
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
@@ -531,7 +657,7 @@ def _compile_pipeline_loop(
         return state.get("next", "revise")
 
     builder.add_conditional_edges(
-        loop_node_id,
+        loop_node_name,
         _loop_router,
         {"revise": loop_target, "FINISH": END},
     )

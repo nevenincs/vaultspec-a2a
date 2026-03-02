@@ -15,7 +15,7 @@ import logging
 import time
 
 from collections import defaultdict
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -39,6 +39,8 @@ from ..api.schemas.events import (
     ToolCallStartEvent,
     ToolCallUpdateEvent,
 )
+from langgraph.types import Command
+
 from ..telemetry.instrumentation import get_meter, get_tracer
 from .exceptions import EventAggregatorError
 
@@ -48,6 +50,11 @@ try:
     from langgraph.errors import GraphInterrupt as _GraphInterrupt
 except ImportError:
     _GraphInterrupt = None  # type: ignore[assignment,misc]
+
+try:
+    from langgraph.errors import GraphRecursionError as _GraphRecursionError
+except ImportError:
+    _GraphRecursionError = None  # type: ignore[assignment,misc]
 
 
 logger = logging.getLogger(__name__)
@@ -90,6 +97,19 @@ _PLAN_UPDATE_DEBOUNCE = 0.250  # max 1 per 250ms per thread
 # Token chunk batching — research §1.3
 # ---------------------------------------------------------------------------
 _CHUNK_FLUSH_INTERVAL = 0.050  # 50ms flush window
+
+# AGG-03: safety cap for debounce timestamp maps to prevent unbounded growth.
+_DEBOUNCE_MAP_MAX_ENTRIES = 1000
+
+
+def _evict_oldest(d: dict, max_entries: int) -> None:
+    """Remove oldest entries (by value = timestamp) until at max_entries."""
+    to_remove = len(d) - max_entries
+    if to_remove <= 0:
+        return
+    # Sort by timestamp (value), evict the oldest.
+    for key in sorted(d, key=d.__getitem__)[:to_remove]:
+        del d[key]
 _CHUNK_BUFFER_MAX_BYTES = 4096  # 4KB buffer threshold
 
 # ---------------------------------------------------------------------------
@@ -129,7 +149,7 @@ class StreamableGraph(Protocol):
 
     def astream_events(
         self,
-        graph_input: dict[str, Any] | None,
+        graph_input: dict[str, Any] | Command | None,
         config: dict[str, Any],
         *,
         version: str,
@@ -187,6 +207,9 @@ class EventAggregator:
         self._subscribers: dict[str, asyncio.Queue[ServerEvent]] = {}
         # Which threads each client is subscribed to: client_id -> set of thread_ids
         self._subscriptions: dict[str, set[str]] = defaultdict(set)
+
+        # Broadcast hooks: called on every event (used by worker bridge relay).
+        self._broadcast_hooks: list[Callable[[ServerEvent], Awaitable[None]]] = []
 
         # Per-thread ingest queues for backpressure (research §1.3)
         self._ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
@@ -353,6 +376,10 @@ class EventAggregator:
         if client_id in self._subscriptions:
             self._subscriptions[client_id].difference_update(thread_ids)
 
+    def add_broadcast_hook(self, hook: Callable[[ServerEvent], Awaitable[None]]) -> None:
+        """Register a hook called on every broadcast (worker bridge relay)."""
+        self._broadcast_hooks.append(hook)
+
     def get_active_thread_ids(self) -> list[str]:
         """Return all thread IDs that have at least one subscriber.
 
@@ -443,6 +470,11 @@ class EventAggregator:
                         continue
                     delivered += 1
             _events_emitted_counter.add(1, {"event.type": str(event_type)})
+            for hook in self._broadcast_hooks:
+                try:
+                    await hook(event)
+                except Exception:
+                    logger.warning("Broadcast hook failed", exc_info=True)
 
     # ------------------------------------------------------------------
     # Debounced broadcasting
@@ -707,6 +739,9 @@ class EventAggregator:
         if now - last_emit >= _TOOL_CALL_UPDATE_DEBOUNCE:
             # Enough time has passed, emit immediately
             self._tool_update_last_emit[key] = now
+            # AGG-03: cap map size to prevent unbounded growth across threads.
+            if len(self._tool_update_last_emit) > _DEBOUNCE_MAP_MAX_ENTRIES:
+                _evict_oldest(self._tool_update_last_emit, _DEBOUNCE_MAP_MAX_ENTRIES)
             await self._broadcast(event)
         else:
             # Debounce: store pending and schedule flush
@@ -996,7 +1031,7 @@ class EventAggregator:
             return
 
         tasks = getattr(state, "tasks", None)
-        if not state or not tasks:
+        if not state or not tasks or not any(t.interrupts for t in tasks):
             return  # Normal completion — no pending interrupts
 
         for task in tasks:
@@ -1067,7 +1102,7 @@ class EventAggregator:
         thread_id: str,
         agent_id: str,
         graph: StreamableGraph,
-        graph_input: dict[str, Any] | None,
+        graph_input: dict[str, Any] | Command | None,
         config: dict[str, Any],
     ) -> None:
         """Start consuming ``astream_events`` from a compiled graph.
@@ -1124,12 +1159,47 @@ class EventAggregator:
                 _is_interrupt = (
                     _GraphInterrupt is not None and isinstance(exc, _GraphInterrupt)
                 ) or exc.__class__.__name__ == "GraphInterrupt"
+                _is_recursion_limit = (
+                    _GraphRecursionError is not None
+                    and isinstance(exc, _GraphRecursionError)
+                ) or exc.__class__.__name__ == "GraphRecursionError"
+                _is_step_timeout = isinstance(exc, TimeoutError)
                 if _is_interrupt:
                     logger.info(
                         "Graph interrupted for thread %s (awaiting approval)",
                         thread_id,
                     )
                     span.set_attribute("interrupted", True)
+                elif _is_recursion_limit:
+                    logger.warning(
+                        "Graph recursion limit reached for thread %s", thread_id
+                    )
+                    span.set_attribute("error.type", "recursion_limit")
+                    await self.emit_error(
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        code="RECURSION_LIMIT_EXCEEDED",
+                        message=(
+                            "Graph recursion limit reached — check recursion_limit"
+                            " configuration"
+                        ),
+                        recoverable=False,
+                    )
+                elif _is_step_timeout:
+                    logger.warning(
+                        "Graph step_timeout fired for thread %s", thread_id
+                    )
+                    span.set_attribute("error.type", "step_timeout")
+                    await self.emit_error(
+                        thread_id=thread_id,
+                        agent_id=agent_id,
+                        code="STEP_TIMEOUT",
+                        message=(
+                            "A graph node exceeded the step timeout — "
+                            "the operation may be retried"
+                        ),
+                        recoverable=True,
+                    )
                 else:
                     logger.exception(
                         "Error during graph ingest for thread %s", thread_id
@@ -1146,6 +1216,12 @@ class EventAggregator:
                 # Clean up cancel event and flush remaining chunks
                 self._clear_cancel_event(thread_id)
                 await self._flush_chunk_buffer(thread_id)
+                # AGG-03: prune per-thread debounce timestamp maps so they
+                # don't grow unbounded across many completed ingests.
+                stale_tool_keys = [k for k in self._tool_update_last_emit if k[0] == thread_id]
+                for k in stale_tool_keys:
+                    del self._tool_update_last_emit[k]
+                self._plan_update_last_emit.pop(thread_id, None)
                 # H4: only call _emit_interrupt_events when an actual interrupt
                 # occurred — skips the aget_state I/O on normal completion.
                 if _is_interrupt:
@@ -1190,3 +1266,5 @@ class EventAggregator:
         self._chunk_buffers.clear()
         self._chunk_buffer_meta.clear()
         self._cancel_events.clear()
+        self._tool_update_last_emit.clear()
+        self._plan_update_last_emit.clear()

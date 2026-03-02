@@ -3,6 +3,9 @@
   "name": "vaultspec-a2a",
   "description": "Dev health tooling for vaultspec A2A orchestration frontend",
   "type": "module",
+  "dependencies": {
+    "@zed-industries/claude-agent-acp": "latest"
+  },
   "devDependencies": {
     "eslint": "latest",
     "eslint-plugin-svelte": "latest",

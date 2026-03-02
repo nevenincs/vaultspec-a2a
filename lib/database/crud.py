@@ -106,6 +106,7 @@ async def create_thread(
     metadata: str | None = None,
     nickname: str | None = None,
     thread_id: str | None = None,
+    team_preset: str | None = None,
 ) -> ThreadModel:
     """Create a new orchestration thread.
 
@@ -143,6 +144,7 @@ async def create_thread(
         status=coerced_status,
         thread_metadata=metadata,
         nickname=nickname,
+        team_preset=team_preset,
     )
     try:
         return await save_model(session, thread)

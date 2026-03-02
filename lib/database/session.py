@@ -15,6 +15,7 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from sqlalchemy import event, text
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -182,6 +183,16 @@ async def init_db(
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        # Idempotent migration: add team_preset column to existing DBs that
+        # pre-date this schema change.  create_all is a no-op on existing tables,
+        # so we must ALTER TABLE explicitly.  The OperationalError guard makes
+        # this safe to run on fresh databases where create_all already added it.
+        try:
+            await conn.execute(
+                text("ALTER TABLE threads ADD COLUMN team_preset TEXT")
+            )
+        except OperationalError:
+            pass  # Column already exists — nothing to do
 
     return engine
 

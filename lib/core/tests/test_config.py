@@ -45,13 +45,13 @@ def test_config_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     assert settings.ci is True
     assert settings.no_color is True
 
-    # Verify VAULTSPEC_ prefix takes precedence over standard ecosystem names
-    # (guaranteed by AliasChoices order in lib/core/config.py).
-    monkeypatch.setenv("VAULTSPEC_ANTHROPIC_API_KEY", "sk-vaultspec-priority")
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-standard-ignored")
+    # Verify bare ecosystem name takes precedence over VAULTSPEC_ prefix
+    # (guaranteed by AliasChoices order in lib/core/config.py — bare key first).
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-standard-priority")
+    monkeypatch.setenv("VAULTSPEC_ANTHROPIC_API_KEY", "sk-vaultspec-ignored")
     monkeypatch.setenv("VAULTSPEC_CI", "false")
     monkeypatch.setenv("CI", "true")
 
     settings = Settings()
-    assert settings.anthropic_api_key == "sk-vaultspec-priority"
+    assert settings.anthropic_api_key == "sk-standard-priority"
     assert settings.ci is False

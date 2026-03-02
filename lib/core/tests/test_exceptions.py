@@ -315,6 +315,7 @@ class TestAllExports:
             "TeamConfigNotFoundError",
             "TokenBudgetExceededError",
             "VaultspecError",
+            "WorkerExecutionError",
             "WorkspaceError",
         }
         assert set(_exceptions_module.__all__) == expected

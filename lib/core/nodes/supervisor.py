@@ -1,11 +1,16 @@
 """Supervisor node for LangGraph agent routing."""
 
+import logging
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import SystemMessage
+from langgraph.constants import TAG_NOSTREAM
 
+from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..state import TeamState
+
+_logger = logging.getLogger(__name__)
 
 
 __all__ = ["create_supervisor_node"]
@@ -48,8 +53,28 @@ def create_supervisor_node(
 
     async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
-        messages = [SystemMessage(content=full_prompt), *state["messages"]]
-        response = await model.ainvoke(messages)
+        working_state = (
+            compact_context(state, CONTEXT_LIMIT)
+            if should_compact(state, CONTEXT_LIMIT)
+            else state
+        )
+        messages = [SystemMessage(content=full_prompt), *working_state.get("messages", [])]
+        model_type = type(model).__name__
+        _logger.debug(
+            "supervisor invoking model=%s messages=%d options=%s",
+            model_type,
+            len(messages),
+            options,
+        )
+        routing_model = model.with_config({"tags": [TAG_NOSTREAM]})
+        try:
+            response = await routing_model.ainvoke(messages)
+        except Exception:
+            _logger.exception(
+                "supervisor model=%s raised during ainvoke — propagating to LangGraph",
+                model_type,
+            )
+            raise
 
         # Parse text safely to derive next route
         text = str(response.content).strip()
@@ -59,11 +84,25 @@ def create_supervisor_node(
         if text in options:
             next_route = text
         else:
-            for option in options:
+            for option in sorted(options, key=len, reverse=True):
                 if option.lower() in text.lower():
                     next_route = option
                     break
 
+        unparseable = next_route == "FINISH" and text not in options and not any(
+            opt.lower() in text.lower() for opt in options
+        )
+        if unparseable:
+            _logger.warning(
+                "supervisor could not parse route from response %r — defaulting to FINISH",
+                text[:120],
+            )
+            return {
+                "next": "FINISH",
+                "routing_error": f"supervisor could not parse route from: {text!r}",
+            }
+
+        _logger.debug("supervisor routed to %r (raw=%r)", next_route, text[:80])
         return {"next": next_route}
 
     # Ensure __name__ is available for type checkers

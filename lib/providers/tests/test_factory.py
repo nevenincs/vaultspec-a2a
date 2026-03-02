@@ -22,7 +22,8 @@ def test_provider_factory_claude_creates_acp() -> None:
     """Verify Claude provider creates AcpChatModel with the correct ACP command."""
     model = ProviderFactory.create(Provider.CLAUDE)
     assert isinstance(model, AcpChatModel)
-    assert model.command == ["claude-agent-acp"]
+    assert model.command[0] == "node"
+    assert model.command[1].endswith("index.js")
 
 
 def test_provider_factory_gemini_creates_acp() -> None:
@@ -82,6 +83,37 @@ def test_provider_factory_workspace_root_none_default() -> None:
     model = ProviderFactory.create(Provider.CLAUDE)
     assert isinstance(model, AcpChatModel)
     assert model.workspace_root is None
+
+
+def test_provider_factory_claude_never_injects_anthropic_api_key() -> None:
+    """ADR-002 §2: Factory must NOT inject ANTHROPIC_API_KEY for Claude.
+
+    When both OAuth and API key are available, only OAuth goes into env_vars.
+    ANTHROPIC_API_KEY is stripped at subprocess spawn time in _astream().
+    """
+    from .. import factory as factory_mod
+
+    original_oauth = factory_mod.settings.claude_code_oauth_token
+    original_key = factory_mod.settings.anthropic_api_key
+    try:
+        factory_mod.settings.claude_code_oauth_token = "test-oauth-token"
+        factory_mod.settings.anthropic_api_key = "sk-test-key"
+        model = ProviderFactory.create(Provider.CLAUDE)
+        assert isinstance(model, AcpChatModel)
+        assert model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN") == "test-oauth-token"
+        assert "ANTHROPIC_API_KEY" not in model.env_vars
+    finally:
+        factory_mod.settings.claude_code_oauth_token = original_oauth
+        factory_mod.settings.anthropic_api_key = original_key
+
+
+def test_provider_factory_claude_oauth_only() -> None:
+    """When OAuth token is set, only CLAUDE_CODE_OAUTH_TOKEN is in env_vars."""
+    model = ProviderFactory.create(Provider.CLAUDE)
+    assert isinstance(model, AcpChatModel)
+    if model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        assert model.env_vars["CLAUDE_CODE_OAUTH_TOKEN"].strip()
+    assert "ANTHROPIC_API_KEY" not in model.env_vars
 
 
 def test_provider_factory_unsupported_provider() -> None:

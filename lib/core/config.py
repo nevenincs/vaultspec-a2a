@@ -27,33 +27,37 @@ class Settings(BaseSettings):
     provider_timeout_seconds: int = Field(
         default=120, description="Global timeout for LLM provider API calls."
     )
-    # API Keys & Auth (with aliases for standard ecosystem names)
+    graph_node_timeout_seconds: int = Field(
+        default=300,
+        description="Per-node step timeout for LangGraph Pregel execution (seconds).",
+    )
+    # API Keys & Auth (bare ecosystem names take precedence over VAULTSPEC_ prefix)
     anthropic_api_key: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "VAULTSPEC_ANTHROPIC_API_KEY", "ANTHROPIC_API_KEY"
+            "ANTHROPIC_API_KEY", "VAULTSPEC_ANTHROPIC_API_KEY"
         ),
     )
     gemini_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VAULTSPEC_GEMINI_API_KEY", "GEMINI_API_KEY"),
+        validation_alias=AliasChoices("GEMINI_API_KEY", "VAULTSPEC_GEMINI_API_KEY"),
     )
     google_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VAULTSPEC_GOOGLE_API_KEY", "GOOGLE_API_KEY"),
+        validation_alias=AliasChoices("GOOGLE_API_KEY", "VAULTSPEC_GOOGLE_API_KEY"),
     )
     openai_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VAULTSPEC_OPENAI_API_KEY", "OPENAI_API_KEY"),
+        validation_alias=AliasChoices("OPENAI_API_KEY", "VAULTSPEC_OPENAI_API_KEY"),
     )
     zhipu_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VAULTSPEC_ZHIPU_API_KEY", "ZHIPU_API_KEY"),
+        validation_alias=AliasChoices("ZHIPU_API_KEY", "VAULTSPEC_ZHIPU_API_KEY"),
     )
     claude_code_oauth_token: str | None = Field(
         default=None,
         validation_alias=AliasChoices(
-            "VAULTSPEC_CLAUDE_CODE_OAUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"
+            "CLAUDE_CODE_OAUTH_TOKEN", "VAULTSPEC_CLAUDE_CODE_OAUTH_TOKEN"
         ),
     )
 
@@ -81,6 +85,26 @@ class Settings(BaseSettings):
             "http://127.0.0.1:8000",
         ],
         description="Allowed CORS origins for production deployments.",
+    )
+
+    # Worker process settings (ADR-019)
+    worker_port: int = Field(
+        default=8001,
+        description="Internal worker HTTP port",
+        alias="VAULTSPEC_WORKER_PORT",
+    )
+    worker_url: str = Field(
+        default="http://127.0.0.1:8001",
+        description="Worker base URL for dispatch calls",
+        alias="VAULTSPEC_WORKER_URL",
+    )
+    auto_spawn_worker: bool = Field(
+        default=True,
+        description=(
+            "Auto-spawn worker as child process (pip install mode). "
+            "Set False for Docker/systemd where worker runs independently."
+        ),
+        alias="VAULTSPEC_AUTO_SPAWN_WORKER",
     )
 
     # Environment Flags

@@ -12,6 +12,7 @@ import asyncio
 import json
 import logging
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -139,12 +140,16 @@ class _ProbeSession:
         self.stdin: asyncio.StreamWriter | None = None
         self.stdout: asyncio.StreamReader | None = None
         self.stderr: asyncio.StreamReader | None = None
+        # PROV-H4: serialise stdin writes so concurrent handle_server_rpc()
+        # and run_loop() calls cannot interleave JSON-RPC frames.
+        self.stdin_lock = asyncio.Lock()
 
     async def send(self, method: str, params: dict) -> int:
         """Send a JSON-RPC request and drain the write buffer.
 
         H8: combined write+drain to prevent interleaved frames and ensure
         the data is flushed to the subprocess.
+        PROV-H4: stdin_lock serialises concurrent writes.
         """
         self.request_id += 1
         req = {
@@ -155,8 +160,9 @@ class _ProbeSession:
         }
         if self.stdin is None:
             raise RuntimeError("send() called before process stdin was initialised")
-        self.stdin.write(f"{json.dumps(req)}\n".encode())
-        await self.stdin.drain()
+        async with self.stdin_lock:
+            self.stdin.write(f"{json.dumps(req)}\n".encode())
+            await self.stdin.drain()
         logger.debug("ACP TX [%d] -> %s", self.request_id, method)
         return self.request_id
 
@@ -207,15 +213,17 @@ class _ProbeSession:
     async def send_response(self, response: dict) -> None:
         """Send a JSON-RPC response (reply to a server-initiated RPC).
 
-        Routes all stdin writes through a single path so that future locking
-        can be added here without touching every call site (PROV-M5).
+        Routes all stdin writes through a single path with stdin_lock so
+        concurrent handle_server_rpc() calls cannot interleave frames
+        (PROV-H4, PROV-M5).
         """
         if self.stdin is None:
             raise RuntimeError(
                 "send_response() called before process stdin was initialised"
             )
-        self.stdin.write(f"{json.dumps(response)}\n".encode())
-        await self.stdin.drain()
+        async with self.stdin_lock:
+            self.stdin.write(f"{json.dumps(response)}\n".encode())
+            await self.stdin.drain()
 
     async def handle_server_rpc(self, rid: int, method: str) -> None:
         resp = {
@@ -277,12 +285,20 @@ async def run_probe(
     command: list[str],
     env_overrides: dict[str, str] | None = None,
     prompt: str = "Reply with only the single word 'Hello'.",
-    timeout: float = 60.0,
+    timeout: float = 120.0,
 ) -> ProbeResult:
     """Run a full ACP protocol probe against the given subprocess command."""
     env = os.environ.copy()
     if env_overrides:
         env.update(env_overrides)
+    # ADR-002 §2: strip ANTHROPIC_API_KEY when OAuth is active to prevent
+    # claude-agent-acp from using pay-as-you-go billing.
+    if "CLAUDE_CODE_OAUTH_TOKEN" in env:
+        env.pop("ANTHROPIC_API_KEY", None)
+    # ADR-002 §5.1: bypass bundled cli.js — use system claude binary (native PE32+ Bun exe)
+    _system_claude = shutil.which("claude")
+    if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
+        env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
     env.pop("CLAUDECODE", None)
 
     session = _ProbeSession(command, env, timeout, prompt)

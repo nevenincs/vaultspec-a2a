@@ -48,6 +48,7 @@ class ThreadModel(Base):
     status: Mapped[str] = mapped_column(default="submitted")
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
     nickname: Mapped[str | None] = mapped_column(default=None)
+    team_preset: Mapped[str | None] = mapped_column(default=None)
 
     artifacts: Mapped[list["ArtifactModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan"

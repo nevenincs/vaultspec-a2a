@@ -43,6 +43,8 @@ class RecoveryAction(StrEnum):
 class GitWorkspaceError(Exception):
     """Base exception for all Git Workspace operations."""
 
+    __slots__ = ()
+
 
 class VaultspecError(Exception):
     """Base exception for all Vaultspec operations.
@@ -77,12 +79,16 @@ class VaultspecError(Exception):
 class ConfigError(VaultspecError):
     """Raised when configuration is invalid or missing."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ABORT
 
 
 class WorkspaceError(VaultspecError):
     """Raised when workspace operations fail."""
+
+    __slots__ = ()
 
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
@@ -96,8 +102,27 @@ class WorkspaceError(VaultspecError):
 class AgentProcessError(VaultspecError):
     """Raised when an agent process fails to start or crashes."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.TRANSIENT
     recovery_action = RecoveryAction.RETRY_WITH_BACKOFF
+
+
+class WorkerExecutionError(VaultspecError):
+    """Raised when a worker node's model invocation fails after all retries."""
+
+    __slots__ = ("worker", "model", "message_count")
+
+    severity = ErrorSeverity.TRANSIENT
+    recovery_action = RecoveryAction.ESCALATE_TO_USER
+
+    def __init__(self, worker: str, model: str, message_count: int) -> None:
+        super().__init__(
+            f"worker={worker!r} model={model} messages={message_count}"
+        )
+        self.worker = worker
+        self.model = model
+        self.message_count = message_count
 
 
 # ---------------------------------------------------------------------------
@@ -107,6 +132,8 @@ class AgentProcessError(VaultspecError):
 
 class ProtocolError(VaultspecError):
     """Raised when encountering invalid states or messages bridging A2A/MCP."""
+
+    __slots__ = ()
 
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ABORT
@@ -120,6 +147,8 @@ class ProtocolError(VaultspecError):
 class EventAggregatorError(VaultspecError):
     """Raised when the central event bus or multiplexer encounters errors."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.TRANSIENT
     recovery_action = RecoveryAction.RETRY
 
@@ -131,6 +160,8 @@ class EventAggregatorError(VaultspecError):
 
 class DatabaseError(VaultspecError):
     """Raised when database operations (connect, query, migrate) fail."""
+
+    __slots__ = ()
 
     severity = ErrorSeverity.TRANSIENT
     recovery_action = RecoveryAction.RETRY_WITH_BACKOFF
@@ -144,6 +175,8 @@ class DatabaseError(VaultspecError):
 class PermissionDeniedError(VaultspecError):
     """Raised when a requested action is denied by the permission engine."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
@@ -156,12 +189,16 @@ class PermissionDeniedError(VaultspecError):
 class TokenBudgetExceededError(VaultspecError):
     """Raised when the token budget for a request or session is exhausted."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.REASSIGN
 
 
 class ContextOverflowError(VaultspecError):
     """Raised when the LLM context window cannot fit the required payload."""
+
+    __slots__ = ()
 
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.REASSIGN
@@ -175,6 +212,8 @@ class ContextOverflowError(VaultspecError):
 class MergeConflictError(WorkspaceError):
     """Raised when a git merge produces conflicts that need resolution."""
 
+    __slots__ = ()
+
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
@@ -186,6 +225,8 @@ class MergeConflictError(WorkspaceError):
 
 class NicknameConflictError(VaultspecError):
     """Raised when a thread nickname already exists in the database."""
+
+    __slots__ = ("nickname",)
 
     severity = ErrorSeverity.PERMANENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
@@ -203,6 +244,8 @@ class AgentConfigNotFoundError(ConfigError):
     1. {workspace_root}/.vaultspec/agents/{agent_id}.toml
     2. lib/core/presets/agents/{agent_id}.toml
     """
+
+    __slots__ = ("agent_id",)
 
     def __init__(self, agent_id: str) -> None:
         """Raise with a descriptive message for the missing agent_id."""
@@ -222,6 +265,8 @@ class TeamConfigNotFoundError(ConfigError):
     2. lib/core/presets/teams/{team_id}.toml
     """
 
+    __slots__ = ("team_id",)
+
     def __init__(self, team_id: str) -> None:
         """Raise with a descriptive message for the missing team_id."""
         super().__init__(
@@ -236,6 +281,7 @@ __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
     "ConfigError",
+    "WorkerExecutionError",
     "ContextOverflowError",
     "DatabaseError",
     "ErrorSeverity",

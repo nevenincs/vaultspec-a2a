@@ -61,7 +61,7 @@ def _replace_plan(
 
     The supervisor overwrites the entire plan on each planning cycle.
     """
-    return new if new else existing
+    return new if new is not None else existing
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +99,10 @@ class TeamState(TypedDict):
 
     # --- existing fields ---
     messages: Annotated[list[BaseMessage], add_messages]
-    next: str
+    next: NotRequired[str]
+
+    # --- routing error: set by supervisor on parse failure ---
+    routing_error: NotRequired[str]
 
     # --- routing / identification ---
     thread_id: str

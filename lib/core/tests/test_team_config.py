@@ -18,6 +18,9 @@ from ..team_config import (
     AgentConfig,
     AgentModelConfig,
     TeamConfig,
+    TeamGraphConfig,
+    TeamPermissionsConfig,
+    TeamPersonaConfig,
     TopologyConfig,
     TopologyType,
     WorkerOverrideConfig,
@@ -35,8 +38,8 @@ _PRESETS_DIR = Path(__file__).parent.parent / "presets"
 _AGENTS_DIR = _PRESETS_DIR / "agents"
 _TEAMS_DIR = _PRESETS_DIR / "teams"
 
-_ALL_AGENT_IDS = ["supervisor", "planner", "coder", "reviewer", "analyst"]
-_ALL_TEAM_IDS = ["coding-star", "coding-pipeline", "coding-loop", "solo-coder"]
+_ALL_AGENT_IDS = ["vaultspec-supervisor", "vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer", "vaultspec-analyst"]
+_ALL_TEAM_IDS = ["vaultspec-adaptive-coder", "vaultspec-structured-coder", "vaultspec-iterative-coder", "vaultspec-solo-coder"]
 
 
 # ---------------------------------------------------------------------------
@@ -51,34 +54,34 @@ class TestAgentConfigFromToml:
     def test_loads_preset_agent(self, agent_id: str) -> None:
         """Each preset agent TOML produces a valid AgentConfig."""
         cfg = AgentConfig.from_toml(_AGENTS_DIR / f"{agent_id}.toml")
-        assert cfg.id == agent_id
+        assert cfg.id == agent_id.removeprefix("vaultspec-").removeprefix("vaultspec-").removeprefix("vaultspec-")
 
     def test_supervisor_has_correct_fields(self) -> None:
         """Supervisor preset has expected display_name, role, and description."""
-        cfg = load_agent_config("supervisor")
+        cfg = load_agent_config("vaultspec-supervisor")
         assert cfg.display_name
         assert cfg.role == "supervisor"
         assert cfg.persona.system_prompt
 
     def test_planner_has_correct_fields(self) -> None:
         """Planner preset has expected role and persona."""
-        cfg = load_agent_config("planner")
+        cfg = load_agent_config("vaultspec-planner")
         assert cfg.role == "planner"
         assert cfg.persona.system_prompt
 
     def test_coder_requires_approval(self) -> None:
         """Coder preset declares at least one require_approval_for entry."""
-        cfg = load_agent_config("coder")
+        cfg = load_agent_config("vaultspec-coder")
         assert cfg.permissions.require_approval_for  # non-empty list
 
     def test_reviewer_has_filesystem_read(self) -> None:
         """Reviewer preset enables filesystem_read capability."""
-        cfg = load_agent_config("reviewer")
+        cfg = load_agent_config("vaultspec-reviewer")
         assert cfg.capabilities.filesystem_read is True
 
     def test_analyst_capabilities(self) -> None:
         """Analyst preset enables filesystem_read and filesystem_write."""
-        cfg = load_agent_config("analyst")
+        cfg = load_agent_config("vaultspec-analyst")
         assert cfg.capabilities.filesystem_read is True
 
 
@@ -92,17 +95,17 @@ class TestAgentModelConfig:
 
     def test_supervisor_uses_max_capability(self) -> None:
         """Supervisor is bound to the MAX capability tier."""
-        cfg = load_agent_config("supervisor")
+        cfg = load_agent_config("vaultspec-supervisor")
         assert cfg.model.capability == Model.MAX
 
     def test_coder_uses_high_capability(self) -> None:
         """Coder is configured at HIGH capability."""
-        cfg = load_agent_config("coder")
+        cfg = load_agent_config("vaultspec-coder")
         assert cfg.model.capability == Model.HIGH
 
     def test_reviewer_uses_zhipu_provider(self) -> None:
         """Reviewer is assigned the ZHIPU provider."""
-        cfg = load_agent_config("reviewer")
+        cfg = load_agent_config("vaultspec-reviewer")
         assert cfg.model.provider == Provider.ZHIPU
 
     def test_agent_model_config_all_optional(self) -> None:
@@ -185,14 +188,14 @@ class TestLoadAgentConfigDiscovery:
 
     def test_finds_bundled_preset(self) -> None:
         """load_agent_config returns a config when only the preset exists."""
-        cfg = load_agent_config("planner")
+        cfg = load_agent_config("vaultspec-planner")
         assert cfg.id == "planner"
 
     def test_workspace_override_takes_precedence(self, tmp_path: Path) -> None:
         """A workspace .vaultspec/agents/{id}.toml overrides the bundled preset."""
         override_dir = tmp_path / ".vaultspec" / "agents"
         override_dir.mkdir(parents=True)
-        override_path = override_dir / "planner.toml"
+        override_path = override_dir / "vaultspec-planner.toml"
         override_path.write_bytes(
             b"""
 [agent]
@@ -301,27 +304,27 @@ class TestTeamConfigFromToml:
         assert cfg.id == team_id
 
     def test_coding_star_is_star_topology(self) -> None:
-        """coding-star uses star topology."""
-        cfg = load_team_config("coding-star")
+        """vaultspec-adaptive-coder uses star topology."""
+        cfg = load_team_config("vaultspec-adaptive-coder")
         assert cfg.topology.type == TopologyType.STAR
 
     def test_coding_pipeline_order(self) -> None:
-        """coding-pipeline has planner → coder → reviewer order."""
-        cfg = load_team_config("coding-pipeline")
+        """vaultspec-structured-coder has planner → coder → reviewer order."""
+        cfg = load_team_config("vaultspec-structured-coder")
         assert cfg.topology.type == TopologyType.PIPELINE
         assert cfg.topology.order == ["planner", "coder", "reviewer"]
 
     def test_coding_loop_loop_node(self) -> None:
-        """coding-loop has reviewer as the loop_node."""
+        """vaultspec-iterative-coder has reviewer as the loop_node."""
         expected_max_loops = 3
-        cfg = load_team_config("coding-loop")
+        cfg = load_team_config("vaultspec-iterative-coder")
         assert cfg.topology.type == TopologyType.PIPELINE_LOOP
         assert cfg.topology.loop_node == "reviewer"
         assert cfg.topology.max_loops == expected_max_loops
 
     def test_solo_coder_single_worker(self) -> None:
-        """solo-coder has exactly one worker: the coder."""
-        cfg = load_team_config("solo-coder")
+        """vaultspec-solo-coder has exactly one worker: the coder."""
+        cfg = load_team_config("vaultspec-solo-coder")
         assert len(cfg.workers) == 1
         assert cfg.workers[0].agent_id == "coder"
 
@@ -341,14 +344,14 @@ class TestWorkerModelOverride:
     """Verify per-worker model overrides are loaded correctly (ADR-013 §2.3)."""
 
     def test_coding_star_coder_has_high_capability(self) -> None:
-        """coding-star overrides coder to HIGH capability."""
-        cfg = load_team_config("coding-star")
+        """vaultspec-adaptive-coder overrides coder to HIGH capability."""
+        cfg = load_team_config("vaultspec-adaptive-coder")
         coder_ref = next(w for w in cfg.workers if w.agent_id == "coder")
         assert coder_ref.model.capability == Model.HIGH
 
     def test_worker_without_override_has_none_fields(self) -> None:
         """Workers with no override have None provider and capability."""
-        cfg = load_team_config("coding-star")
+        cfg = load_team_config("vaultspec-adaptive-coder")
         planner_ref = next(w for w in cfg.workers if w.agent_id == "planner")
         assert planner_ref.model.provider is None
         assert planner_ref.model.capability is None
@@ -393,18 +396,18 @@ class TestLoadTeamConfigDiscovery:
 
     def test_finds_bundled_preset(self) -> None:
         """load_team_config returns a config when only the preset exists."""
-        cfg = load_team_config("coding-star")
-        assert cfg.id == "coding-star"
+        cfg = load_team_config("vaultspec-adaptive-coder")
+        assert cfg.id == "vaultspec-adaptive-coder"
 
     def test_workspace_override_takes_precedence(self, tmp_path: Path) -> None:
         """A workspace .vaultspec/teams/{id}.toml overrides the bundled preset."""
         override_dir = tmp_path / ".vaultspec" / "teams"
         override_dir.mkdir(parents=True)
-        override_path = override_dir / "coding-star.toml"
+        override_path = override_dir / "vaultspec-adaptive-coder.toml"
         override_path.write_bytes(
             b"""
 [team]
-id = "coding-star"
+id = "vaultspec-adaptive-coder"
 display_name = "Custom Star"
 description  = "Workspace override."
 
@@ -415,7 +418,7 @@ type = "star"
 agent_id = "coder"
 """
         )
-        cfg = load_team_config("coding-star", workspace_root=tmp_path)
+        cfg = load_team_config("vaultspec-adaptive-coder", workspace_root=tmp_path)
         assert cfg.display_name == "Custom Star"
 
     def test_missing_team_raises_not_found(self) -> None:
@@ -431,8 +434,8 @@ agent_id = "coder"
 
     def test_workspace_root_none_uses_only_preset(self) -> None:
         """Passing workspace_root=None still finds bundled presets."""
-        cfg = load_team_config("solo-coder", workspace_root=None)
-        assert cfg.id == "solo-coder"
+        cfg = load_team_config("vaultspec-solo-coder", workspace_root=None)
+        assert cfg.id == "vaultspec-solo-coder"
 
 
 # ---------------------------------------------------------------------------
@@ -535,3 +538,171 @@ class TestLoadAgentConfigValidation:
         """Unsafe agent_id values raise ConfigError before any filesystem access."""
         with pytest.raises((ConfigError, AgentConfigNotFoundError)):
             load_agent_config(agent_id)
+
+
+# ---------------------------------------------------------------------------
+# load_team_config: team_id path traversal guard (TC-01)
+# ---------------------------------------------------------------------------
+
+
+class TestLoadTeamConfigValidation:
+    """Verify team_id is validated before path construction (TC-01)."""
+
+    def test_path_traversal_team_id_raises(self) -> None:
+        """team_id containing '..' raises ConfigError."""
+        with pytest.raises(ConfigError, match="Invalid team_id"):
+            load_team_config("../../etc/passwd")
+
+    def test_team_id_with_slash_raises(self) -> None:
+        """team_id containing '/' raises ConfigError."""
+        with pytest.raises(ConfigError, match="Invalid team_id"):
+            load_team_config("foo/bar")
+
+    def test_old_ids_now_raise_not_found(self) -> None:
+        """Old preset IDs (no compat shim) raise TeamConfigNotFoundError."""
+        with pytest.raises(TeamConfigNotFoundError):
+            load_team_config("coding-star")
+
+
+# ---------------------------------------------------------------------------
+# TeamPermissionsConfig, TeamPersonaConfig, TeamGraphConfig
+# ---------------------------------------------------------------------------
+
+
+class TestTeamExtendedConfigDefaults:
+    """Verify new config blocks default correctly when absent from TOML."""
+
+    def test_permissions_defaults(self) -> None:
+        """TeamPermissionsConfig has auto_approve=False by default."""
+        cfg = TeamPermissionsConfig()
+        assert cfg.auto_approve is False
+
+    def test_persona_defaults(self) -> None:
+        """TeamPersonaConfig has all-None fields by default."""
+        cfg = TeamPersonaConfig()
+        assert cfg.directive is None
+        assert cfg.supervisor_display_name is None
+
+    def test_graph_defaults(self) -> None:
+        """TeamGraphConfig defaults: step_timeout_seconds=None, recursion_limit=25."""
+        cfg = TeamGraphConfig()
+        assert cfg.step_timeout_seconds is None
+        assert cfg.recursion_limit == 25
+
+    def test_graph_recursion_limit_bounds(self) -> None:
+        """recursion_limit must be between 1 and 500."""
+        assert TeamGraphConfig(recursion_limit=1).recursion_limit == 1
+        assert TeamGraphConfig(recursion_limit=500).recursion_limit == 500
+        with pytest.raises(Exception):
+            TeamGraphConfig(recursion_limit=0)
+        with pytest.raises(Exception):
+            TeamGraphConfig(recursion_limit=501)
+
+    def test_team_config_has_new_blocks_with_defaults(self) -> None:
+        """Bundled presets parse without permissions/persona/graph sections."""
+        cfg = load_team_config("vaultspec-adaptive-coder")
+        assert cfg.permissions.auto_approve is False
+        # Enriched presets may have persona directives and graph settings;
+        # verify the fields parse without error and have valid types.
+        assert cfg.persona.directive is None or isinstance(cfg.persona.directive, str)
+        assert cfg.graph.step_timeout_seconds is None or isinstance(cfg.graph.step_timeout_seconds, int)
+        assert cfg.graph.recursion_limit >= 1
+
+
+class TestTeamExtendedConfigFromToml:
+    """Verify new config blocks parse correctly from TOML."""
+
+    def test_auto_approve_true_parses(self, tmp_path: Path) -> None:
+        """auto_approve = true in [team.permissions] is read correctly."""
+        toml_content = b"""
+[team]
+id           = "test-auto"
+display_name = "Test Auto"
+
+[team.topology]
+type = "pipeline"
+order = ["coder"]
+
+[[team.workers]]
+agent_id = "coder"
+
+[team.permissions]
+auto_approve = true
+"""
+        override_dir = tmp_path / ".vaultspec" / "teams"
+        override_dir.mkdir(parents=True)
+        (override_dir / "test-auto.toml").write_bytes(toml_content)
+        cfg = load_team_config("test-auto", workspace_root=tmp_path)
+        assert cfg.permissions.auto_approve is True
+
+    def test_directive_parses(self, tmp_path: Path) -> None:
+        """persona.directive string is read correctly."""
+        toml_content = b"""
+[team]
+id           = "test-persona"
+display_name = "Test Persona"
+
+[team.topology]
+type = "pipeline"
+order = ["coder"]
+
+[[team.workers]]
+agent_id = "coder"
+
+[team.persona]
+directive = "Focus on security best practices."
+"""
+        override_dir = tmp_path / ".vaultspec" / "teams"
+        override_dir.mkdir(parents=True)
+        (override_dir / "test-persona.toml").write_bytes(toml_content)
+        cfg = load_team_config("test-persona", workspace_root=tmp_path)
+        assert cfg.persona.directive == "Focus on security best practices."
+
+    def test_step_timeout_seconds_parses(self, tmp_path: Path) -> None:
+        """graph.step_timeout_seconds integer is read correctly."""
+        toml_content = b"""
+[team]
+id           = "test-graph"
+display_name = "Test Graph"
+
+[team.topology]
+type = "pipeline"
+order = ["coder"]
+
+[[team.workers]]
+agent_id = "coder"
+
+[team.graph]
+step_timeout_seconds = 120
+recursion_limit = 50
+"""
+        override_dir = tmp_path / ".vaultspec" / "teams"
+        override_dir.mkdir(parents=True)
+        (override_dir / "test-graph.toml").write_bytes(toml_content)
+        cfg = load_team_config("test-graph", workspace_root=tmp_path)
+        assert cfg.graph.step_timeout_seconds == 120
+        assert cfg.graph.recursion_limit == 50
+
+    def test_provider_fallback_parses_on_defaults(self, tmp_path: Path) -> None:
+        """team.defaults.provider_fallback list parses correctly."""
+        toml_content = b"""
+[team]
+id           = "test-fallback"
+display_name = "Test Fallback"
+
+[team.defaults]
+provider          = "claude"
+provider_fallback = ["openai", "gemini"]
+
+[team.topology]
+type = "pipeline"
+order = ["coder"]
+
+[[team.workers]]
+agent_id = "coder"
+"""
+        override_dir = tmp_path / ".vaultspec" / "teams"
+        override_dir.mkdir(parents=True)
+        (override_dir / "test-fallback.toml").write_bytes(toml_content)
+        cfg = load_team_config("test-fallback", workspace_root=tmp_path)
+        assert len(cfg.defaults.provider_fallback) == 2

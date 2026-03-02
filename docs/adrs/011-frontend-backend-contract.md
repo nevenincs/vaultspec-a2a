@@ -48,10 +48,10 @@ Every server-to-client WebSocket message is a JSON object with a top-level
 **Thread-scoped events** (extend `EventEnvelope`):
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `type` | `ServerEventType` | Discriminator |
 | `thread_id` | `str` | Target thread |
-| `agent_id` | `str \| null` | Originating agent |
+| `agent_id` | `str \ | null` |
 | `timestamp` | `datetime` | Server timestamp |
 | `sequence` | `int` | Monotonic per-thread counter |
 
@@ -73,9 +73,9 @@ All 12 event types form the `ServerEvent` discriminated union.
 Every client-to-server WebSocket message extends `ClientCommand`:
 
 | Field | Type | Description |
-|---|---|---|
+| --- | --- | --- |
 | `type` | `ClientCommandType` | Discriminator |
-| `request_id` | `str \| null` | Correlation ID |
+| `request_id` | `str \ | null` |
 
 Concrete types: `SubscribeCommand`, `UnsubscribeCommand`,
 `SendMessageCommand`, `AgentControlCommand`, `PermissionResponseCommand`,
@@ -89,7 +89,7 @@ REST endpoints complement WebSocket for operations requiring guaranteed
 delivery and idempotent semantics.
 
 | Method | Path | Request | Response | Purpose |
-|---|---|---|---|---|
+| --- | --- | --- | --- | --- |
 | `POST` | `/threads` | `CreateThreadRequest` | `CreateThreadResponse` | Create thread |
 | `GET` | `/threads` | query params | `ThreadListResponse` | List threads |
 | `GET` | `/threads/{id}/state` | --- | `ThreadStateSnapshot` | State replay |

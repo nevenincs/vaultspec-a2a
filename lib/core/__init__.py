@@ -32,6 +32,7 @@ from .exceptions import (
     TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
+    WorkerExecutionError,
     WorkspaceError,
 )
 from .metadata import (
@@ -160,6 +161,7 @@ __all__ = [
     "TopologyConfig",
     "TopologyType",
     "VaultspecError",
+    "WorkerExecutionError",
     "WorkerOverrideConfig",
     "WorkerRef",
     "WorkspaceError",

@@ -1,25 +1,56 @@
-# Production override: single backend serves embedded SPA.
+# Production: API (control surface) + Worker (agent executor) + Jaeger.
 # Usage: docker compose -f docker-compose.prod.yml up --build
-# App: http://localhost:8000 (FastAPI serves frontend via StaticFiles)
+# App: http://localhost:8000 (FastAPI serves React SPA)
 # Jaeger UI: http://localhost:16686
 
 services:
-  backend:
+  api:
     build:
       context: .
       dockerfile: Dockerfile
-      target: runtime
+      target: api
     ports:
       - "8000:8000"
     volumes:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: "sqlite+aiosqlite:////app/data/vaultspec.db"
+      VAULTSPEC_AUTO_SPAWN_WORKER: "false"
+      VAULTSPEC_WORKER_URL: "http://worker:8001"
       OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
       OTEL_EXPORTER_OTLP_INSECURE: "true"
     env_file: .env
     depends_on:
       - jaeger
+      - worker
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: worker
+    volumes:
+      - db-data:/app/data
+    environment:
+      VAULTSPEC_DATABASE_URL: "sqlite+aiosqlite:////app/data/vaultspec.db"
+      VAULTSPEC_API_BASE_URL: "http://api:8000"
+      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
+      OTEL_EXPORTER_OTLP_INSECURE: "true"
+    env_file: .env
+    depends_on:
+      - jaeger
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   jaeger:
     image: jaegertracing/jaeger:latest

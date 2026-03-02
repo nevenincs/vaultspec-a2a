@@ -61,6 +61,7 @@ class AgentControlCommand(ClientCommand):
     thread_id: str
     agent_id: str
     action: AgentControlAction
+    option_id: str | None = None
 
 
 class PermissionResponseCommand(ClientCommand):

@@ -47,6 +47,9 @@ __all__ = [
     "TeamConfig",
     "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
+    "TeamGraphConfig",
+    "TeamPermissionsConfig",
+    "TeamPersonaConfig",
     "TopologyConfig",
     "TopologyType",
     "WorkerOverrideConfig",
@@ -110,6 +113,7 @@ class AgentModelConfig(BaseModel):
 
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
 
 
 class AgentPersonaConfig(BaseModel):
@@ -139,10 +143,11 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
-        """Ensure agent.id is a valid Python identifier (LangGraph node name)."""
-        if not self.id.isidentifier():
+        """Ensure agent.id is a valid identifier (allows hyphens for vaultspec- prefix)."""
+        import re
+        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', self.id):
             raise ValueError(
-                f"agent.id must be a valid Python identifier, got: {self.id!r}"
+                f"agent.id must match ^[a-zA-Z][a-zA-Z0-9_-]*$, got: {self.id!r}"
             )
         return self
 
@@ -165,7 +170,11 @@ class AgentConfig(BaseModel):
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f"Invalid TOML in agent config {path}: {exc}") from exc
-        return cls.model_validate(data["agent"])
+        try:
+            agent_data = data["agent"]
+        except KeyError as exc:
+            raise ConfigError(f"Missing [agent] section in {path}") from exc
+        return cls.model_validate(agent_data)
 
 
 # ---------------------------------------------------------------------------
@@ -178,6 +187,7 @@ class WorkerOverrideConfig(BaseModel):
 
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
 
 
 class WorkerRef(BaseModel):
@@ -238,6 +248,27 @@ class TeamDefaultsConfig(BaseModel):
 
     provider: Provider | None = None
     capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
+
+
+class TeamPermissionsConfig(BaseModel):
+    """Team-level permission defaults."""
+
+    auto_approve: bool = False
+
+
+class TeamPersonaConfig(BaseModel):
+    """Team-level supervisor persona overrides."""
+
+    directive: str | None = None
+    supervisor_display_name: str | None = None
+
+
+class TeamGraphConfig(BaseModel):
+    """Team-level graph execution settings."""
+
+    step_timeout_seconds: int | None = None
+    recursion_limit: int = Field(default=25, ge=1, le=500)
 
 
 class TeamConfig(BaseModel):
@@ -254,6 +285,9 @@ class TeamConfig(BaseModel):
     supervisor: SupervisorConfig = Field(default_factory=SupervisorConfig)
     topology: TopologyConfig
     workers: list[WorkerRef]
+    permissions: TeamPermissionsConfig = Field(default_factory=TeamPermissionsConfig)
+    persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
+    graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
 
     @model_validator(mode="after")
     def validate_topology_order_subset(self) -> "TeamConfig":
@@ -286,7 +320,11 @@ class TeamConfig(BaseModel):
                 data = tomllib.load(f)
         except tomllib.TOMLDecodeError as exc:
             raise ConfigError(f"Invalid TOML in team config {path}: {exc}") from exc
-        return cls.model_validate(data["team"])
+        try:
+            team_data = data["team"]
+        except KeyError as exc:
+            raise ConfigError(f"Missing [team] section in {path}") from exc
+        return cls.model_validate(team_data)
 
 
 # ---------------------------------------------------------------------------
@@ -354,6 +392,12 @@ def load_team_config(
                                   bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
+    if not _SAFE_AGENT_ID_RE.match(team_id):
+        raise ConfigError(
+            f"Invalid team_id {team_id!r}: must match pattern "
+            r"[a-zA-Z_][a-zA-Z0-9_\-]{{0,62}}."
+        )
+
     candidates: list[Path] = []
     if workspace_root is not None:
         candidates.append(workspace_root / ".vaultspec" / "teams" / f"{team_id}.toml")

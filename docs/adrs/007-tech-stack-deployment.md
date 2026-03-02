@@ -102,8 +102,8 @@ We formalize the following technology stack and deployment architecture:
 
 ## 7. References
 
-* [LangGraph Gap Audit Research](../research/2026-26-02-langgraph-gap-audit-research.md)
-* [Architecture Domain - Distilled](../distilled/2026-25-02-architecture-distilled.md)
+* [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
+* [Architecture Domain - Distilled](../research/2026-02-25-architecture-distilled-research.md)
 
 ### 7.2 Codebase Modules & Patterns
 

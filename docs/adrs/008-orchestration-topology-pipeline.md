@@ -101,5 +101,5 @@ orchestrating independent processes too brittle for v1.
 
 ## 7. References
 
-* [LangGraph Gap Audit Research](../research/2026-26-02-langgraph-gap-audit-research.md)
+* [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
 * **LangGraph:** `knowledge/repositories/langgraph/`

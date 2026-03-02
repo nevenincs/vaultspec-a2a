@@ -1,7 +1,11 @@
-# Development environment: fixture server + vite dev + Jaeger tracing.
+# Development environment: fixture server + vite dev + Jaeger tracing (ADR-019).
 # Usage: docker compose up --build
 # Frontend: http://localhost:5173 (HMR, proxied to fixture server)
 # Jaeger UI: http://localhost:16686
+#
+# NOTE: In dev mode the fixture server provides mock data — no real worker
+# is needed.  For real-backend dev, use `just dev-real` which starts the
+# API control surface + worker locally with hot-reload.
 
 services:
   fixture-server:

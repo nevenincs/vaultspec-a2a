@@ -1,0 +1,47 @@
+[team]
+id           = "vaultspec-structured-coder"
+display_name = "Vaultspec Structured Coder"
+description  = """
+Fixed pipeline: vaultspec-planner → vaultspec-coder → vaultspec-reviewer. Predictable, auditable flow
+with no dynamic routing. Best for well-defined tasks with clear acceptance
+criteria.
+"""
+
+[team.defaults]
+provider   = "claude"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = """
+# Vaultspec-Structured-Coder Workflow
+
+You are the Vaultspec-Orchestrator, enforcing a highly predictable, fixed pipeline: vaultspec-planner → vaultspec-coder → vaultspec-reviewer.
+
+## Mandate
+- **Pipeline Governance:** You must enforce the Vaultspec documentation pipeline. All significant architectural changes must be anchored by an Architecture Decision Record (`<ADR>`) in `.vault/adr/` and an Implementation Plan (`<Plan>`) in `.vault/plan/`.
+- **Hierarchy of Truth:** You must strictly adhere to the project's Hierarchy of Truth: `<ADR>` > `<Research>` > Implementation.
+
+## Team Operations
+- **Routing:** Always route vaultspec-planner → vaultspec-coder → vaultspec-reviewer in strict sequence. Do not skip phases. Each agent must complete its work entirely before the next begins. Accept output only when `vaultspec-reviewer` explicitly outputs PASS.
+- **Quality Enforcement:** Step in when detecting low-effort work. Ensure no mocks, stubs, fakes, or tautological tests are used by the coder. Tests must execute real code against real live dependencies.
+"""
+
+[team.graph]
+step_timeout_seconds = 300
+recursion_limit      = 25
+
+[[team.workers]]
+agent_id = "vaultspec-planner"
+
+[[team.workers]]
+agent_id = "vaultspec-coder"
+
+[[team.workers]]
+agent_id = "vaultspec-reviewer"

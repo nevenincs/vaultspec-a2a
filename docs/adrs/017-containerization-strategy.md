@@ -34,7 +34,7 @@ The project has no Docker infrastructure. This blocks:
 ### 1.1 Architecture Constraints
 
 | Constraint | Implication |
-|-----------|-------------|
+| ----------- | ------------- |
 | SQLite with WAL mode | Single-container only — WAL breaks across container boundaries |
 | SvelteKit `adapter-static` | Frontend builds to pure HTML/JS/CSS — no Node runtime needed |
 | OTel mandatory (ADR-015) | Collector sidecar needed for trace consumption |
@@ -44,7 +44,7 @@ The project has no Docker infrastructure. This blocks:
 ### 1.2 Reference Patterns
 
 | Project | Architecture | Containers |
-|---------|-------------|-----------|
+| --------- | ------------- | ----------- |
 | Open WebUI | Single container (Python + built Svelte) | 1 |
 | Dify | Multi-container (11 services) | 11 |
 | LangGraph CLI | Programmatic compose (3-4 services) | 3-4 |
@@ -63,6 +63,7 @@ SvelteKit static assets in a single container. FastAPI serves the API at
 needed.
 
 **Rationale:**
+
 - SQLite WAL mode requires single-process database access
 - `adapter-static` output is pure HTML/JS/CSS — no Node server needed
 - Simplest deployment model for personal/team use
@@ -77,6 +78,7 @@ Two build stages:
    built frontend, serves everything
 
 **Base image: `python:3.13-slim-bookworm`** (not Alpine):
+
 - Alpine uses musl libc — breaks compiled packages (grpcio for OTel,
   SQLAlchemy C extensions)
 - `slim-bookworm` ≈ 130MB, avoids Alpine pitfalls
@@ -149,6 +151,7 @@ CMD ["uv", "run", "vaultspec"]
 ```
 
 **Key patterns:**
+
 - **Two-phase uv sync**: deps cached separately from app code — code
   changes don't invalidate the dep layer
 - **`UV_COMPILE_BYTECODE=1`**: faster startup in production
@@ -196,6 +199,7 @@ volumes:
 ```
 
 **Usage:**
+
 - `docker compose up` — starts all three services
 - `http://localhost:8000` — backend API
 - `http://localhost:5173` — frontend dev server (HMR)
@@ -229,7 +233,7 @@ volumes:
 
 ### 3.4 .dockerignore
 
-```
+```text
 # VCS
 .git/
 .gitignore
@@ -302,7 +306,7 @@ PostgreSQL (or Turso/libSQL for distributed SQLite).
 ## 5. Compliance Matrix
 
 | ADR | Relationship | Status |
-|-----|-------------|--------|
+| ----- | ------------- | -------- |
 | ADR-007 (Tech Stack) | Implements — FastAPI serves SPA + API in single container | Compliant |
 | ADR-010 (Observability) | Enforces — Jaeger sidecar consumes mandatory OTel traces | Compliant |
 | ADR-015 (Dep Hygiene) | Depends — clean dep surface enables cross-platform Docker builds | Compliant |

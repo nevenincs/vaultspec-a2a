@@ -105,5 +105,5 @@ high-volume event bursts. The core framework is SvelteKit (Svelte 5).
 
 ## 7. References
 
-* [LangGraph Gap Audit Research](../research/2026-26-02-langgraph-gap-audit-research.md)
-* [Control Surface Domain - Distilled](../distilled/2026-25-02-control-surface-distilled.md)
+* [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
+* [Control Surface Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)

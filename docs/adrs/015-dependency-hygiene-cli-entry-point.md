@@ -24,7 +24,7 @@ packaged, containerized, or distributed. A systematic audit of
 of issues:
 
 | Category | Finding | Impact |
-|----------|---------|--------|
+| ---------- | --------- | -------- |
 | **Dead dependencies** | `pywin32>=311` and `winfcntl>=1.1.9` are listed as unconditional runtime deps but are **imported nowhere** in the codebase (0 matches across all of `lib/`). | `uv sync` / `pip install` **fails on Linux and macOS** because pywin32 has no non-Windows wheels. Cross-platform install, Docker builds, and CI on Ubuntu are all broken. |
 | **Phantom dependency** | `claude-agent-sdk` is pinned to a git URL (`git+https://github.com/anthropics/claude-agent-sdk-python.git@main`) but is **imported nowhere** in the codebase. | Blocks PyPI distribution entirely (PyPI rejects packages with git-based deps). Adds ~3,100 lines of unused transitive code to the venv. Couples the lockfile to GitHub availability. |
 | **Speculative deps** | 8 additional runtime deps (`PyYAML`, `a2a-sdk`, `agent-client-protocol`, `fastmcp`, `langchain-anthropic`, `langchain-google-genai`, `langchain-mcp-adapters`, `sse-starlette`) are **imported nowhere** — added speculatively as the architecture evolved to use ACP subprocess wrappers instead of direct SDK calls. | Bloated dependency surface (25 → 17 runtime deps). Slower installs, larger venv, false sense of coupling. |
@@ -68,7 +68,7 @@ Remove the following 11 packages from `pyproject.toml`
 `[project.dependencies]` — all confirmed zero imports in `lib/`:
 
 | Package | Why it was there | Why it's dead |
-|---------|-----------------|---------------|
+| --------- | ----------------- | --------------- |
 | `pywin32` | Precautionary for Windows subprocess | Code uses only stdlib `subprocess.CREATE_NEW_PROCESS_GROUP`. Remains available transitively via `mcp>=1.26.0` (correctly guarded). |
 | `winfcntl` | Precautionary fcntl compat | Zero consumers anywhere. |
 | `claude-agent-sdk` | Design research reference | AcpChatModel uses raw ACP JSON-RPC, not the SDK's stream-json. Eliminates only git-based dep (PyPI blocker). |
@@ -129,7 +129,8 @@ and conditional checks in `lib/api/app.py`.
 
 - `try: from ..telemetry import ...` → direct import (no guard)
 - `if _configure_telemetry is not None:` → unconditional `configure_telemetry()`
-- `if _TelemetryMiddleware is not None:` → unconditional `app.add_middleware(..., TelemetryMiddleware)`
+- `if _TelemetryMiddleware is not None:` → unconditional
+  `app.add_middleware(..., TelemetryMiddleware)`
 
 ### 2.4 Promote anyio to Direct Dependency
 
@@ -321,7 +322,7 @@ DEP002 = ["ruff", "ty", "prek", "identify", "nodeenv",
 
 ### 3.4 Lockfile Regeneration
 
-```
+```bash
 uv lock    # Resolved 100 packages (down from 144)
 uv sync
 ```
@@ -378,7 +379,7 @@ uv sync
 ## 5. Compliance Matrix
 
 | ADR | Relationship | Status |
-|-----|-------------|--------|
+| ----- | ------------- | -------- |
 | ADR-007 (Tech Stack) | Aligns — removes undeclared platform coupling | Compliant |
 | ADR-009 (Module Hierarchy) | Aligns — `lib/api/app.py` gains `main()` in its public surface | Compliant |
 | ADR-010 (Observability) | **Enforces** — OTel promoted from optional to mandatory runtime dep | Compliant |

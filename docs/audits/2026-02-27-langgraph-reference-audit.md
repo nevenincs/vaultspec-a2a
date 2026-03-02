@@ -1,3 +1,14 @@
+---
+date: 2026-02-27
+type: audit
+feature: langgraph-reference
+description: "Reference audit of 7 key LangGraph areas against our lib/ implementation identifying 5 critical correctness issues including loop router always-FINISH default and conditional edge routing bugs."
+related:
+  - docs/adrs/2026-02-27-013-team-composition-topology-adr.md
+  - docs/adrs/2026-02-26-008-orchestration-topology-pipeline-adr.md
+  - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
+---
+
 # LangGraph Reference Audit — A2A Implementation
 
 **Date:** 2026-02-27
@@ -8,7 +19,11 @@
 
 ## Executive Summary
 
-Analysis of 7 key areas reveals **5 critical correctness issues** and **2 high-priority pattern violations**. The implementation correctly uses LangGraph's interrupt mechanism but has subtle routing logic and state management issues that could cause silent failures in conditional edge scenarios.
+Analysis of 7 key areas reveals **5 critical correctness issues** and **2
+high-priority pattern violations**. The implementation correctly uses
+LangGraph's interrupt mechanism but has subtle routing logic and state
+management issues that could cause silent failures in conditional edge
+scenarios.
 
 ---
 
@@ -28,7 +43,8 @@ def _loop_router(state: TeamState) -> str:
 ```
 
 **Problem:**
-The conditional edge callback `_loop_router` reads `state["next"]`, but the worker node **never sets this key**:
+The conditional edge callback `_loop_router`reads`state["next"]`, but the worker
+node **never sets this key**:
 
 ```python
 # From worker.py:102
@@ -38,20 +54,25 @@ return {"messages": [response]}  # ← Only returns "messages", never "next"
 ```
 
 **Consequence:**
-After 1 iteration, `state.get("next", "FINISH")` returns `"FINISH"` (the sentinel), terminating the loop regardless of `max_loops`. The loop will NEVER iterate more than once.
+After 1 iteration, `state.get("next", "FINISH")`returns`"FINISH"`(the sentinel),
+terminating the loop regardless of`max_loops`. The loop will NEVER iterate more
+than once.
 
 **Evidence from LangGraph Reference:**
-In the fanout_to_subgraph.py example (knowledge/repositories/langgraph/bench/fanout_to_subgraph.py:37-38):
+In the fanout_to_subgraph.py example
+(knowledge/repositories/langgraph/bench/fanout_to_subgraph.py:37-38):
 
 ```python
 async def bump_loop(state: JokeOutput):
     return END if state["jokes"][0].endswith(" a" * 10) else "bump"
 ```
 
-The router **explicitly returns the target node name** ("bump") when NOT finishing. Our code defaults to "FINISH" instead.
+The router **explicitly returns the target node name** ("bump") when NOT
+finishing. Our code defaults to "FINISH" instead.
 
 **Recommendation:**
-The worker node MUST set `state["next"]` to indicate the desired route, or the router must have a different default:
+The worker node MUST set `state["next"]` to indicate the desired route, or the
+router must have a different default:
 
 ```python
 # Option 1: Worker node sets next
@@ -82,17 +103,21 @@ async def _loop_node_with_counter(
 ```
 
 **Problem:**
-When the loop node has `interrupt_before=["loop_node_id"]`, the interrupt fires BEFORE the node runs. On resume via `Command(resume=...)`:
+When the loop node has `interrupt_before=["loop_node_id"]`, the interrupt fires
+BEFORE the node runs. On resume via `Command(resume=...)`:
 
-1. LangGraph re-executes the **entire wrapped function** `_loop_node_with_counter`
-2. This calls `_inner(state)` again (re-running the AI agent)
-3. Then increments `loop_count` a second time
+1. LangGraph re-executes the **entire wrapped function**
+   `_loop_node_with_counter`
+2. This calls `_inner(state)`again (re-running the AI agent)
+3. Then increments`loop_count`a second time
 
 **Expected LangGraph Behavior:**
-Per test_interruption.py, `interrupt_before` pauses BEFORE node execution. The wrapper is transparent to LangGraph's interrupt mechanism.
+Per test_interruption.py,`interrupt_before`pauses BEFORE node execution. The
+wrapper is transparent to LangGraph's interrupt mechanism.
 
 **Consequence:**
-If a single node is interrupted, `loop_count` increments twice instead of once, artificially raising the iteration counter and causing premature termination.
+If a single node is interrupted,`loop_count` increments twice instead of once,
+artificially raising the iteration counter and causing premature termination.
 
 **Recommendation:**
 Move counter increment OUTSIDE the interrupt boundary:
@@ -122,25 +147,30 @@ def increment_counter(state: TeamState):
 
 ### Finding: Only 5 Event Types Handled; v2 Emits ~15
 
-**Location:** `lib/core/aggregator.py:696-769` (process_langgraph_event)
+**Location:** `lib/core/aggregator.py:696-769`(process_langgraph_event)
 
-**Handled Events:**
-- `on_chat_model_stream` → MessageChunkEvent
-- `on_tool_start` → ToolCallStartEvent
-- `on_tool_end` → ToolCallUpdateEvent
-- `on_chain_start` / `on_chain_end` → AgentStatusEvent
-- `on_custom_event` → ThoughtChunkEvent
+### Handled Events
+
+-`on_chat_model_stream`→ MessageChunkEvent
+-`on_tool_start`→ ToolCallStartEvent
+-`on_tool_end`→ ToolCallUpdateEvent
+-`on_chain_start`/`on_chain_end`→ AgentStatusEvent
+-`on_custom_event`→ ThoughtChunkEvent
 
 **Evidence from LangGraph Tests:**
-test_pregel_async.py uses `version="v2"` with events like:
-- `on_chain_stream` (chunk data during chain execution)
-- `on_chat_model_start` / `on_chat_model_end` (boundary events)
-- `on_tool_error` (tool failure — NOT handled)
-- `on_retriever_start`, `on_retriever_end`, `on_retriever_stream`
+test_pregel_async.py uses`version="v2"`with events like:
+
+-`on_chain_stream`(chunk data during chain execution)
+-`on_chat_model_start`/`on_chat_model_end`(boundary events)
+-`on_tool_error`(tool failure — NOT handled)
+-`on_retriever_start`, `on_retriever_end`, `on_retriever_stream`
+
 - `on_parser_start`, `on_parser_end`, `on_parser_stream`
 
 **Consequence:**
-Tool errors, retriever calls, and custom parser invocations are silently filtered (lines 763-764). If an agent uses a retriever or multi-step tool pipeline, those intermediate steps are invisible to the frontend.
+Tool errors, retriever calls, and custom parser invocations are silently
+filtered (lines 763-764). If an agent uses a retriever or multi-step tool
+pipeline, those intermediate steps are invisible to the frontend.
 
 **Recommendation:**
 Expand event filtering to capture:
@@ -182,15 +212,19 @@ config = {"configurable": {"thread_id": "1"}, "recursion_limit": 20000000000}
 
 knowledge/repositories/langgraph/langgraph/errors.py documents the error:
 
-```
+```text
 "run your graph with a config specifying a higher `recursion_limit`."
 ```
 
 **Default Value:**
-LangGraph's default `recursion_limit` is **25** (from pregel/main.py logic). For pipeline_loop teams that may iterate 10-100 times, this is **too low**. Each loop iteration counts as 1 recursion step.
+LangGraph's default `recursion_limit`is **25** (from pregel/main.py logic). For
+pipeline_loop teams that may iterate 10-100 times, this is **too low**. Each
+loop iteration counts as 1 recursion step.
 
 **Consequence:**
-If `max_loops=30` and default recursion_limit=25, the graph will hit `GraphRecursionError` after 25 steps, failing before hitting the `max_loops` guard.
+If`max_loops=30`and default recursion_limit=25, the graph will
+hit`GraphRecursionError`after 25 steps, failing before hitting the`max_loops`
+guard.
 
 **Recommendation:**
 Set recursion_limit in compile or require it in invoke config:
@@ -207,7 +241,8 @@ return builder.compile(
 # config = {"recursion_limit": max_loops + 10, "configurable": {"thread_id": "..."}}
 ```
 
-**Severity:** MEDIUM — Manifests only under high-iteration pipeline_loop scenarios.
+**Severity:** MEDIUM — Manifests only under high-iteration pipeline_loop
+scenarios.
 
 ---
 
@@ -224,17 +259,21 @@ class TeamState(TypedDict):
 ```
 
 **Pattern in LangGraph Reference:**
-test_managed_values.py and test_deprecation.py use NotRequired for optional fields:
+test_managed_values.py and test_deprecation.py use NotRequired for optional
+fields:
 
 ```python
 class StateNotRequired(TypedDict):
     remaining_steps: NotRequired[RemainingSteps]
 ```
 
-These are tested with checkpointers (test_deprecation.py:test_checkpoint_during_deprecation_state_graph) and work correctly.
+These are tested with checkpointers
+(test_deprecation.py:test_checkpoint_during_deprecation_state_graph) and work
+correctly.
 
 **Finding:**
-No known issues with NotRequired + SQLite checkpointer. The Pydantic adapter correctly handles missing keys on deserialization.
+No known issues with NotRequired + SQLite checkpointer. The Pydantic adapter
+correctly handles missing keys on deserialization.
 
 **Recommendation:**
 No action needed. This pattern is canonical in LangGraph.
@@ -273,10 +312,11 @@ await graph.ainvoke(None, thread, durability=durability)
 assert (await graph.aget_state(thread)).next == ("step_2",)  # Pauses after step_1
 ```
 
-On `Command(resume=value)`, the graph re-executes the same node, and each `interrupt()` in order returns its stored resume value.
+On `Command(resume=value)`, the graph re-executes the same node, and each
+`interrupt()`in order returns its stored resume value.
 
 **Pattern:**
-If a node calls `interrupt()` twice:
+If a node calls`interrupt()` twice:
 
 ```python
 result1 = interrupt({"type": "perm_req_1", ...})  # Raises, stores resume_value[0]
@@ -284,10 +324,14 @@ result2 = interrupt({"type": "perm_req_2", ...})  # On replay, returns resume_va
 ```
 
 **Finding:**
-Our implementation calls `interrupt()` exactly once per permission request. **This is correct.** Multiple permission requests within a single worker node would require multiple `interrupt()` calls, each returning its corresponding resume value in order.
+Our implementation calls `interrupt()`exactly once per permission request.
+**This is correct.** Multiple permission requests within a single worker node
+would require multiple`interrupt()`calls, each returning its corresponding
+resume value in order.
 
 **Recommendation:**
-Current pattern is correct. Document that multiple permissions in one node execution must use separate `interrupt()` calls.
+Current pattern is correct. Document that multiple permissions in one node
+execution must use separate`interrupt()`calls.
 
 **Severity:** LOW — No issue identified.
 
@@ -297,7 +341,7 @@ Current pattern is correct. Document that multiple permissions in one node execu
 
 ### Finding: Single Agent ID Assigned to Multi-Node Events
 
-**Location:** `lib/core/aggregator.py:775-809` (ingest method)
+**Location:**`lib/core/aggregator.py:775-809` (ingest method)
 
 ```python
 async def ingest(
@@ -324,16 +368,24 @@ async def ingest(
 ```
 
 **Problem:**
-In a multi-node graph (star, pipeline, pipeline_loop), different nodes run with different agent IDs. A supervisor might emit events with a different agent_id than the workers.
+In a multi-node graph (star, pipeline, pipeline_loop), different nodes run with
+different agent IDs. A supervisor might emit events with a different agent_id
+than the workers.
 
-The raw_event metadata contains `langgraph_node` (e.g., "worker_a", "supervisor"), but we attribute ALL events to the single `agent_id` passed to `ingest()`.
+The raw_event metadata contains `langgraph_node`(e.g., "worker_a",
+"supervisor"), but we attribute ALL events to the single`agent_id`passed
+to`ingest()`.
 
 **Consequence:**
-Events from supervisor and worker nodes are all attributed to, say, "worker_a", even though the supervisor generated them. The frontend cannot distinguish which agent was responsible for each event.
+Events from supervisor and worker nodes are all attributed to, say, "worker_a",
+even though the supervisor generated them. The frontend cannot distinguish which
+agent was responsible for each event.
 
-**Evidence:**
-- `process_langgraph_event()` receives only `agent_id`, not node_name
-- Line 750 extracts `node = metadata.get("langgraph_node")` but only uses it for filtering, not attribution
+### Evidence
+
+- `process_langgraph_event()`receives only`agent_id`, not node_name
+- Line 750 extracts `node = metadata.get("langgraph_node")` but only uses it for
+  filtering, not attribution
 - supervisor_node in nodes/supervisor.py doesn't set a name on its return
 
 **Recommendation:**
@@ -371,7 +423,7 @@ async def process_langgraph_event(
 ## Summary Table
 
 | Issue | Severity | Component | Impact |
-|-------|----------|-----------|--------|
+| ------- | ---------- | ----------- | -------- |
 | 1. Loop router defaults to FINISH | CRITICAL | graph.py:_loop_router | Loops never iterate >1x |
 | 2. Counter wrapper runs after interrupt | HIGH | graph.py:_loop_node_with_counter | Incorrect iteration counts |
 | 3. Incomplete v2 event handling | MEDIUM | aggregator.py:process_langgraph_event | Missing tool/retriever observability |
@@ -385,25 +437,34 @@ async def process_langgraph_event(
 ## Recommendations by Priority
 
 ### CRITICAL (Fix Immediately)
-1. **Fix _loop_router** to check if worker node sets "next" or require explicit routing field from worker
+
+1. **Fix _loop_router** to check if worker node sets "next" or require explicit
+   routing field from worker
 
 ### HIGH (Fix Before Release)
-2. **Fix loop counter timing** relative to interrupt boundary
-3. **Fix agent_id attribution** in event stream processing
+
+1. **Fix loop counter timing** relative to interrupt boundary
+2. **Fix agent_id attribution** in event stream processing
 
 ### MEDIUM (Fix Soon)
-4. **Add recursion_limit** to graph compilation config
-5. **Expand astream_events handling** for tool errors, retriever calls
+
+1. **Add recursion_limit** to graph compilation config
+2. **Expand astream_events handling** for tool errors, retriever calls
 
 ### LOW (Document)
-6. **State pattern** (NotRequired) is correct, no changes needed
-7. **Interrupt resume pattern** is correct, document usage
+
+1. **State pattern** (NotRequired) is correct, no changes needed
+2. **Interrupt resume pattern** is correct, document usage
 
 ---
 
 ## References
 
-- **LangGraph Interrupt Tests:** knowledge/repositories/langgraph/libs/langgraph/tests/test_interruption.py
-- **Conditional Edges:** knowledge/repositories/langgraph/libs/langgraph/bench/fanout_to_subgraph.py
-- **Recursion Limit:** knowledge/repositories/langgraph/libs/langgraph/langgraph/errors.py
-- **State Management:** knowledge/repositories/langgraph/libs/langgraph/tests/test_managed_values.py
+- **LangGraph Interrupt Tests:**
+  knowledge/repositories/langgraph/libs/langgraph/tests/test_interruption.py
+- **Conditional Edges:**
+  knowledge/repositories/langgraph/libs/langgraph/bench/fanout_to_subgraph.py
+- **Recursion Limit:**
+  knowledge/repositories/langgraph/libs/langgraph/langgraph/errors.py
+- **State Management:**
+  knowledge/repositories/langgraph/libs/langgraph/tests/test_managed_values.py

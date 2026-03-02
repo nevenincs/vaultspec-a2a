@@ -1,21 +1,20 @@
 """Shared fixtures for lib/api/tests/.
 
-Centralises engine, session_factory, session, and _make_app so that all test
+Centralises engine, session_factory, session, and make_app so that all test
 modules use the same in-memory SQLite setup and dependency overrides.
 
-API-C1 fix: _make_app now overrides get_checkpointer (using MemorySaver) and
-get_task_group (using a test-scoped anyio task group) in addition to get_db,
-get_aggregator, and get_graph_registry.  This prevents the real _lifespan from
-touching the production vaultspec.db.
+ADR-019: The control surface no longer runs agent execution locally.
+Tests override get_worker_client with a test httpx.AsyncClient that
+posts to a local test handler (or simply captures requests).  The
+GraphRegistry has moved to the worker process.
 
 API-M7 fix: shared fixtures eliminate duplicate engine/session_factory
 definitions across test files.
 """
 
-import asyncio
-
 from collections.abc import AsyncGenerator
 
+import httpx
 import pytest_asyncio
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -30,11 +29,9 @@ from ...database.models import Base
 from ...database.session import get_db
 from ..app import create_app
 from ..endpoints import (
-    GraphRegistry,
     get_aggregator,
     get_checkpointer,
-    get_graph_registry,
-    get_task_group,
+    get_worker_client,
 )
 
 
@@ -71,76 +68,86 @@ async def session(engine):
 
 
 # ---------------------------------------------------------------------------
+# Test worker transport -- captures dispatch requests
+# ---------------------------------------------------------------------------
+
+
+class _CapturedDispatch:
+    """Records dispatch requests sent by the control surface to the worker."""
+
+    def __init__(self) -> None:
+        self.requests: list[dict] = []
+
+    def clear(self) -> None:
+        self.requests.clear()
+
+
+def _make_test_worker_transport(
+    captured: _CapturedDispatch,
+) -> httpx.MockTransport:
+    """Create an httpx transport that captures /dispatch POSTs.
+
+    Returns 200 with ``{"status": "dispatched", "thread_id": "..."}`` for
+    all POST /dispatch requests, recording the request body in *captured*.
+    """
+    import json as _json
+
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/dispatch" and request.method == "POST":
+            body = _json.loads(request.content)
+            captured.requests.append(body)
+            return httpx.Response(
+                200,
+                json={"status": "dispatched", "thread_id": body.get("thread_id", "")},
+            )
+        return httpx.Response(404, json={"detail": "Not found"})
+
+    return httpx.MockTransport(_handler)
+
+
+# ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
 
 
-def make_app(session_factory, aggregator=None, registry=None):
+def make_app(session_factory, aggregator=None, captured_dispatch=None):
     """Create a test FastAPI app with all dependency overrides applied.
 
-    API-C1: overrides get_checkpointer (MemorySaver) and get_task_group
-    (test anyio task group) so the real _lifespan never opens production DB.
+    ADR-019: overrides get_worker_client with a test httpx client that
+    captures dispatch requests.  GraphRegistry and TaskGroup are no longer
+    needed -- the worker owns graph lifecycle.
+
+    Returns:
+        Tuple of (app, aggregator, captured_dispatch, checkpointer).
     """
     app = create_app()
 
     if aggregator is None:
         aggregator = EventAggregator()
-    if registry is None:
-        registry = GraphRegistry()
+    if captured_dispatch is None:
+        captured_dispatch = _CapturedDispatch()
 
     # Store singletons in app.state so WebSocket handlers can read them
     app.state.aggregator = aggregator
-    app.state.graph_registry = registry
 
-    # In-memory checkpointer — never touches vaultspec.db
+    # In-memory checkpointer -- never touches vaultspec.db
     checkpointer = MemorySaver()
     app.state.checkpointer = checkpointer
+
+    # Test worker client -- captures dispatch POST requests
+    transport = _make_test_worker_transport(captured_dispatch)
+    worker_client = httpx.AsyncClient(
+        transport=transport, base_url="http://test-worker:8001"
+    )
+    app.state.worker_client = worker_client
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
         async with session_factory() as session:
             yield session
 
-    async def _override_get_checkpointer():
-        return checkpointer
-
-    # Provide a lightweight task group for test endpoints.
-    class _TestTaskGroup:
-        """Lightweight task group for API tests.
-
-        Policy exception: replaces a real anyio.abc.TaskGroup because test
-        endpoints need a task-group dependency for fire-and-forget background
-        work (e.g. graph ingestion) but don't require structured concurrency
-        semantics within the test scope.  Exceptions from background tasks
-        are logged rather than silently discarded.
-
-        Stores task references in ``_background_tasks`` to prevent premature
-        garbage collection (RUF006).
-        """
-
-        def __init__(self):
-            self._background_tasks: set[asyncio.Task] = set()
-
-        def start_soon(self, coro_fn, *args, **kwargs):
-            import logging as _logging
-
-            async def _wrapper():
-                try:
-                    await coro_fn(*args, **kwargs)
-                except Exception:
-                    _logging.getLogger(__name__).exception(
-                        "_TestTaskGroup background task failed"
-                    )
-
-            task = asyncio.get_event_loop().create_task(_wrapper())
-            self._background_tasks.add(task)
-            task.add_done_callback(self._background_tasks.discard)
-
-    _test_tg = _TestTaskGroup()
-
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_graph_registry] = lambda: registry
     app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_task_group] = lambda: _test_tg
+    app.dependency_overrides[get_worker_client] = lambda: worker_client
 
-    return app, aggregator, registry, checkpointer
+    return app, aggregator, captured_dispatch, checkpointer

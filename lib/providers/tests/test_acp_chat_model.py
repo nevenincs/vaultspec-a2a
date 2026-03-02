@@ -8,6 +8,8 @@ Requirements:
   - Gemini: `gemini --experimental-acp` on PATH + ~/.gemini/oauth_creds.json
 """
 
+from pathlib import Path
+
 import pytest
 
 from langchain_core.messages import HumanMessage
@@ -15,6 +17,7 @@ from langchain_core.messages import HumanMessage
 from ...core.config import settings
 from ...utils.enums import MODEL_MAP, Model, Provider
 from ..acp_chat_model import AcpChatModel
+from ..factory import _CLAUDE_ACP_JS
 
 
 _GEMINI_COMMAND = [
@@ -41,7 +44,7 @@ async def test_acp_claude_streaming() -> None:
         pytest.skip("CLAUDE_CODE_OAUTH_TOKEN not set — Claude ACP unavailable.")
 
     model = AcpChatModel(
-        command=["claude-agent-acp"],
+        command=["node", str(_CLAUDE_ACP_JS)],
         env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
     )
 
@@ -104,7 +107,7 @@ async def test_acp_claude_ainvoke() -> None:
         pytest.skip("CLAUDE_CODE_OAUTH_TOKEN not set — Claude ACP unavailable.")
 
     model = AcpChatModel(
-        command=["claude-agent-acp"],
+        command=["node", str(_CLAUDE_ACP_JS)],
         env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
     )
 

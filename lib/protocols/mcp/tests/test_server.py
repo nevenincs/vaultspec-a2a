@@ -5,9 +5,11 @@ triggers the app lifespan) to verify MCP tool error paths and the API
 contract expected by the MCP tools.
 
 Per CLAUDE.md: no mocks, no monkeypatching.  The TestClient path runs
-the full lifespan (checkpointer, task group) using real in-memory SQLite
-and a MemorySaver checkpointer so the production vaultspec.db is never
-created.
+the full lifespan using real in-memory SQLite and a MemorySaver
+checkpointer so the production vaultspec.db is never created.
+
+ADR-019: GraphRegistry has moved to the worker process.  The control
+surface test app uses a test httpx client for worker dispatch.
 
 Error-path tests (unknown preset, connection error) call MCP tool
 functions directly and rely on the known unreachable ``localhost:8000``
@@ -16,6 +18,7 @@ default to exercise the ``httpx.RequestError`` branch.
 
 from collections.abc import AsyncGenerator
 
+import httpx
 import pytest
 import pytest_asyncio
 
@@ -29,10 +32,9 @@ from sqlalchemy.ext.asyncio import (
 
 from ....api.app import create_app
 from ....api.endpoints import (
-    GraphRegistry,
     get_aggregator,
     get_checkpointer,
-    get_graph_registry,
+    get_worker_client,
 )
 from ....core.aggregator import EventAggregator
 from ....database.models import Base
@@ -66,35 +68,47 @@ async def session_factory(engine):
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-def _make_test_client(session_factory, aggregator=None, registry=None) -> TestClient:
+def _make_test_client(session_factory, aggregator=None) -> TestClient:
     """Create a TestClient backed by a real app lifespan.
 
-    MCP-HIGH-02 fix: override ``get_checkpointer`` with a ``MemorySaver`` so
-    the real ``_lifespan`` never opens the production ``vaultspec.db``.  This
-    mirrors the pattern used in ``lib/api/tests/conftest.py``.
+    ADR-019: overrides get_worker_client with a test httpx client.
+    GraphRegistry and TaskGroup are no longer needed.
     """
+    import json as _json
+
     app = create_app()
     if aggregator is None:
         aggregator = EventAggregator()
-    if registry is None:
-        registry = GraphRegistry()
 
-    # In-memory checkpointer — never touches vaultspec.db
+    # In-memory checkpointer -- never touches vaultspec.db
     checkpointer = MemorySaver()
     app.state.checkpointer = checkpointer
+
+    # Test worker client that accepts all dispatch requests
+    def _handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/dispatch" and request.method == "POST":
+            body = _json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={"status": "dispatched", "thread_id": body.get("thread_id", "")},
+            )
+        return httpx.Response(404, json={"detail": "Not found"})
+
+    transport = httpx.MockTransport(_handler)
+    worker_client = httpx.AsyncClient(
+        transport=transport, base_url="http://test-worker:8001"
+    )
+    app.state.worker_client = worker_client
 
     # Override the DB session so tests use in-memory SQLite
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
         async with session_factory() as session:
             yield session
 
-    async def _override_get_checkpointer():
-        return checkpointer
-
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_graph_registry] = lambda: registry
-    app.dependency_overrides[get_checkpointer] = _override_get_checkpointer
+    app.dependency_overrides[get_checkpointer] = lambda: checkpointer
+    app.dependency_overrides[get_worker_client] = lambda: worker_client
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -112,13 +126,13 @@ async def test_start_thread_unknown_preset_returns_error() -> None:
     assert "Error" in result
     assert "nonexistent-preset" in result
     # Should list valid presets in the error message
-    assert "coding-star" in result
+    assert "vaultspec-adaptive-coder" in result
 
 
 @pytest.mark.asyncio
 async def test_start_thread_default_preset_not_unknown() -> None:
-    """start_thread with team_preset=None uses 'coding-star' — not unknown."""
-    # With no server running this hits a connection error — but must NOT hit
+    """start_thread with team_preset=None uses 'vaultspec-adaptive-coder' -- not unknown."""
+    # With no server running this hits a connection error -- but must NOT hit
     # the unknown-preset early-return.
     result = await start_thread(initial_message="test", team_preset=None)
     # Must not mention the unknown preset error
@@ -228,13 +242,13 @@ async def test_start_thread_returns_meaningful_result_for_valid_preset() -> None
     """
     result = await start_thread(
         initial_message="do something",
-        team_preset="coding-star",
+        team_preset="vaultspec-adaptive-coder",
     )
     assert isinstance(result, str)
     assert len(result) > 0
     lower = result.lower()
-    # Server unavailable → error/connection/network/timeout
-    # Server running → thread/started/preset
+    # Server unavailable -> error/connection/network/timeout
+    # Server running -> thread/started/preset
     _expected_keywords = ("error", "connection", "network", "timeout", "thread")
     assert any(kw in lower for kw in _expected_keywords)
 
@@ -251,8 +265,8 @@ async def test_get_thread_status_returns_error_when_server_unavailable() -> None
     assert isinstance(result, str)
     assert len(result) > 0
     lower = result.lower()
-    # Server unavailable → connection/network/timeout error
-    # Server running, thread absent → "not found"
+    # Server unavailable -> connection/network/timeout error
+    # Server running, thread absent -> "not found"
     _expected_keywords = ("error", "connection", "network", "timeout", "not found")
     assert any(kw in lower for kw in _expected_keywords)
 
@@ -269,8 +283,8 @@ async def test_send_message_returns_error_when_server_unavailable() -> None:
     assert isinstance(result, str)
     assert len(result) > 0
     lower = result.lower()
-    # Server unavailable → connection/network/timeout error
-    # Server running, thread absent → "not found"
+    # Server unavailable -> connection/network/timeout error
+    # Server running, thread absent -> "not found"
     _expected_keywords = ("error", "connection", "network", "timeout", "not found")
     assert any(kw in lower for kw in _expected_keywords)
 

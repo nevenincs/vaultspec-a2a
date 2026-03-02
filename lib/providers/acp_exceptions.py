@@ -33,6 +33,8 @@ class AcpErrorCode(IntEnum):
 class AcpError(Exception):
     """Base exception for all ACP-related errors."""
 
+    __slots__ = ("message", "code", "data", "request_id")
+
     def __init__(
         self,
         message: str,
@@ -66,14 +68,22 @@ class AcpError(Exception):
 class AcpProtocolError(AcpError):
     """Raised when the agent sends malformed protocol data."""
 
+    __slots__ = ()
+
 
 class AcpSessionError(AcpError):
     """Raised when session operations (new/load/fork) fail."""
+
+    __slots__ = ()
 
 
 class AcpPromptError(AcpError):
     """Raised when session/prompt fails (e.g. quota, refusal)."""
 
+    __slots__ = ()
+
 
 class AcpAuthError(AcpError):
     """Raised when authentication challenges fail."""
+
+    __slots__ = ()

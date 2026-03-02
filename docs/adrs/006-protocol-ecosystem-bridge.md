@@ -186,8 +186,8 @@ implementors **must** follow them exactly:
 
 ## 7. References
 
-* [LangGraph Gap Audit Research](../research/2026-26-02-langgraph-gap-audit-research.md)
-* [Protocols Domain - Distilled](../distilled/2026-25-02-protocols-distilled.md)
+* [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
+* [Protocols Domain - Distilled](../research/2026-02-25-protocols-distilled-research.md)
 * **Reference Implementation:**
   `knowledge/repositories/toad/src/toad/acp/agent.py` — Toad's
   `_run_agent()` method is the primary reference for all ACP subprocess

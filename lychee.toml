@@ -10,4 +10,8 @@ timeout = 30
 # Exclude URLs that are known to be valid but flaky under automated checking
 exclude = [
   "https://github.com/figma/mcp-server-guide",
+  # Root docs redirect returns 404; sub-paths are valid
+  "https://developers.figma.com/docs/$",
+  # Blog has intermittent connectivity issues under automated checks
+  "https://tkdodo.eu/",
 ]

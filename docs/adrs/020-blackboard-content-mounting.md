@@ -247,7 +247,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
         else state
     )
 
-    anchoring = _build_anchoring_context(state)   # ADR-022
+    anchoring = build_anchoring_context(state)   # ADR-022
 
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     if anchoring:

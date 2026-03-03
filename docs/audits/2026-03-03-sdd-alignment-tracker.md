@@ -98,14 +98,14 @@ Track divergence between `.vaultspec` rules in `Y:/code/vaultspec-worktrees/main
 | -------- | ---------- | ------------------------------------------------------------------------------------------------------ | -------- | ---------------------------------- |
 | DRIFT-01 | .vaultspec | `discover_context_refs` missing `reference` + `audit` stages                                           | HIGH     | ✅ Fixed                           |
 | DRIFT-02 | .vaultspec | Anchoring instruction passive, not imperative                                                          | MEDIUM   | ✅ Fixed                           |
-| DRIFT-03 | .vaultspec | No mount step — agents see paths, not content                                                          | HIGH     | Pending ADR-020                    |
-| DRIFT-04 | .vaultspec | No persistent task queue — agents track state implicitly                                               | HIGH     | Pending ADR-021                    |
-| DRIFT-05 | ADR-022    | `pipeline_phase` never set at runtime                                                                  | MEDIUM   | By design (supervisor to populate) |
+| DRIFT-03 | .vaultspec | No mount step — agents see paths, not content                                                          | HIGH     | ✅ Fixed (ADR-020 implemented)     |
+| DRIFT-04 | .vaultspec | No persistent task queue — agents track state implicitly                                               | HIGH     | ✅ Fixed (ADR-021 implemented)     |
+| DRIFT-05 | ADR-022    | `pipeline_phase` never set at runtime                                                                  | MEDIUM   | ✅ Fixed (ADR-026 implemented)     |
 | DRIFT-06 | ADR-019    | `vault_index` not updated after artifact writes                                                        | MEDIUM   | By design (node responsibility)    |
 | DRIFT-07 | ADR-022    | No `{{FEATURE_CONTEXT}}` placeholder in any supervisor TOML directive (3 presets affected)             | HIGH     | ✅ Fixed                           |
 | DRIFT-08 | ADR-019    | `compile_team_graph()` missing `feature_tag` param — fields threaded via DispatchRequest instead       | MEDIUM   | ✅ Fixed                           |
-| DRIFT-09 | ADR-019    | `anchoring.py` + `supervisor.py` use `.get()` for SDD fields instead of direct `state["field"]` access | LOW      | Open                               |
-| DRIFT-10 | ADR-019    | `TeamState` SDD fields declared `NotRequired` — ADR says required                                      | LOW      | Open                               |
+| DRIFT-09 | ADR-019    | `anchoring.py` + `supervisor.py` use `.get()` for SDD fields instead of direct `state["field"]` access | LOW      | ✅ Resolved (ADR-019 §5 clarified: `.get()` is acceptable for legacy checkpoint tolerance) |
+| DRIFT-10 | ADR-019    | `TeamState` SDD fields declared `NotRequired` — ADR says required                                      | LOW      | ✅ Resolved (ADR-019 §5 clarified: `NotRequired` for TypedDict compat, semantically required via graph_input) |
 
 ---
 

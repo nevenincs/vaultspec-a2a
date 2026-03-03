@@ -7,6 +7,8 @@ related:
   - docs/adrs/008-orchestration-topology-pipeline.md
   - docs/adrs/013-team-composition-topology.md
   - docs/adrs/014-thread-metadata-context-injection.md
+  - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
+  - docs/adrs/026-pipeline-phase-population.md
 ---
 
 # ADR-019: TeamState Enrichment for SDD Blackboard Awareness
@@ -234,8 +236,10 @@ keys are filled with their zero values.
 
 ### Positive
 
-- Supervisor and worker nodes read `state["active_feature"]`, `state["pipeline_phase"]`,
-  and `state["vault_index"]` directly --- no defensive `.get()` patterns needed.
+- Supervisor and worker nodes can read `state["active_feature"]`,
+  `state["pipeline_phase"]`, and `state["vault_index"]` directly after graph
+  compilation (fields are always present). Gate code that may encounter legacy
+  checkpoints uses `.get()` defensively (see §5).
 - `vault_index` provides O(1) lookup of which doc-types exist for the feature,
   enabling phase-gate logic in the supervisor (ADR-022).
 - `validation_errors` enables a quality gate: supervisor refuses to route to
@@ -294,9 +298,14 @@ Deferred, not rejected.
 
 ## 5. Implementation Constraints
 
-- All four new fields are required. Node code reads them with `state["active_feature"]`,
-  `state["pipeline_phase"]`, `state["vault_index"]`, `state["validation_errors"]`.
-  No `.get()` defensive patterns.
+- All four new fields are **semantically required**: `create_thread_endpoint()`
+  always sets them in `graph_input`, and the startup migration backfills them in
+  existing checkpoints. "Required" here means "always present after graph
+  compilation," not a TypedDict `Required[]` annotation — the TypedDict uses
+  `NotRequired` to ensure backward-compatible type checking with legacy state.
+  Node code should prefer direct `state["field"]` access. However, supervisor
+  gate code that may encounter legacy checkpoints where the migration has not yet
+  run may use `.get()` defensively (see ADR-025 §5 for the carve-out).
 - Every graph input must include all four fields. `create_thread_endpoint()` always
   sets them before invoking the graph.
 - `_build_initial_vault_index` applies the 50-document-per-stage cap (`_VAULT_INDEX_CAP`)

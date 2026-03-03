@@ -441,3 +441,68 @@ When the UI sends `AgentControlCommand(action="terminate", agent_id="coder")`, i
 ### C. Required Next Steps for the Backend Edge (Cycle 16)
 1. **Decision Required:** Remove `PAUSE` and `RESUME` from the `AgentControlCommand` schema entirely to prevent the frontend from building dead UI buttons, or implement true dynamic graph interruption inside `lib/worker/executor.py`'s `astream_events` loop.
 2. Consider implementing a true "Agent Termination" signal that injects a `routing_error` and forces the active worker node to crash gracefully back to the supervisor, rather than nuking the entire orchestrator thread.
+
+---
+
+## 19. Gaps & Missing Information (Cycle 17 Audit)
+
+Cycle 17 audited the mapping of LangGraph tool invocation metadata into the `ToolCallStartEvent` and `ToolCallUpdateEvent` models, specifically checking how the backend handles `ToolCallLocation` and the `ToolCallContent` structures (text/diff/terminal).
+
+### A. Dead Code Path: Tool Locations are Never Sent [HIGH]
+The `ToolCallLocation` schema (`path`, `line`) is intended to allow the UI to show exactly *where* in the codebase a tool is operating (e.g. `src/main.ts:42`).
+**The Bug:** In `lib/core/aggregator.py`, the `emit_tool_call_start` function initializes `locations=[]` (via the default factory) and the `emit_tool_call_update` function never sets `locations`. The backend entirely fails to parse the tool arguments (e.g., extracting the `file_path` arg from a file-edit tool) to construct a `ToolCallLocation`. The UI will never receive file location hints for tool calls.
+
+### B. Dead Code Path: Rich Tool Content is Never Sent [CRITICAL]
+The `ToolCallContent` union (`ToolCallContentText`, `ToolCallContentDiff`, `ToolCallContentTerminal`) allows the UI to render tool arguments and outputs using rich components (like syntax highlighters or diff viewers).
+**The Bug:** In `lib/core/aggregator.py`, `emit_tool_call_start` and `emit_tool_call_update` **never** populate the `content` list.
+- During `on_tool_start`, the `event_data["data"].get("input")` containing the tool's arguments (what the LLM generated) is completely ignored.
+- During `on_tool_end`, the `event_data["data"].get("output")` containing the result (what the tool returned) is completely ignored.
+The UI receives a `ToolCallUpdateEvent` that only says `status="completed"`. It never receives the arguments passed to the tool, nor the result returned by the tool.
+
+### C. Required Next Steps for the Backend Edge (Cycle 17)
+1. Update `EventAggregator.process_langgraph_event` to parse `event_data["data"].get("input")` on `on_tool_start`. Map arguments like `file_path` to `ToolCallLocation` and format the arguments into a `ToolCallContent` block.
+2. Update `EventAggregator.process_langgraph_event` to parse `event_data["data"].get("output")` on `on_tool_end`. Wrap the output string in a `ToolCallContentText` block and append it to the `content` list in the `ToolCallUpdateEvent`.
+
+---
+
+## 20. Gaps & Missing Information (Cycle 18 Audit)
+
+Cycle 18 audited the concurrency control mechanisms between the control surface and the worker process, specifically focusing on how the system handles simultaneous `ingest` (new message) and `resume` (permission response) requests.
+
+### A. Concurrent Dispatch Collision [HIGH]
+The worker's `Executor` uses `_mark_ingest_active(thread_id)` to ensure only one LangGraph execution runs per thread.
+**The Bug:** When a thread is suspended at a LangGraph `interrupt` (awaiting user permission), it is considered "not ingesting". If a user types a new message into the UI *while* a permission request is pending, the control surface will dispatch an `ingest` action. The worker will accept this, effectively "forking" the thread's future or overwriting the current suspended state in the checkpointer.
+**The UI Impact:** The user might respond to a permission request *after* they've already sent a new message, causing the graph to resume in a corrupted or stale state. The backend does not lock the thread for `resume` while an `ingest` is pending, or vice versa.
+
+### B. Opaque State Versioning / Checkpoint Pins [MEDIUM]
+LangGraph supports explicit state versioning via `checkpoint_id`.
+**The Gap:** The `DispatchRequest` and `ServerEvent` schemas do not support pinning a command to a specific checkpoint ID. If the UI sends a `RESUME` command, it is applied to the *latest* checkpoint. In a fast-moving multi-agent thread, the "latest" checkpoint might have moved beyond the one the user was looking at when they hit "Approve".
+**The Risk:** Race conditions where user actions are applied to the wrong version of the graph state.
+
+### C. Required Next Steps for the Backend Edge (Cycle 18)
+1. Implement a "Thread Lock" state in the database or aggregator. While a thread has `pending_permissions`, the REST API should reject `POST /messages` with a `409 Conflict` (or the UI should disable the input).
+2. Add `checkpoint_id: str | None` to the `AgentControlCommand` and `PermissionResponseRequest` to ensure human interventions are only applied to the exact state version they were generated for.
+3. Export the `checkpoint_id` in every `ServerEvent` so the frontend can track the exact version history of the session.
+
+---
+
+## 21. Gaps & Missing Information (Cycle 19 Audit)
+
+Cycle 19 audited the persistence and provenance of message history within `lib/database/models.py`, `lib/database/crud.py`, and the snapshot enrichment logic in `lib/api/endpoints.py`.
+
+### A. Message History is Not Persisted in SQL [HIGH]
+The backend's SQL schema (`ThreadModel`, `ArtifactModel`, etc.) contains no table for messages.
+**The Gap:** All conversation history is stored exclusively inside the LangGraph SQLite checkpointer. This is a "single source of truth" for the graph state, but it makes historical auditing, global message search, and cross-thread analytics impossible without loading every single thread's graph state into memory. The backend is effectively treating messages as transient "state" rather than durable "records".
+
+### B. Mismatch Between Streaming `message_id` and Snapshot `message_id` [CRITICAL]
+The system uses different identification strategies for the same messages depending on whether they are streamed or fetched as a snapshot.
+- **Streaming:** In `lib/core/aggregator.py`, `MessageChunkEvent` uses the LangGraph `run_id` (the ID of the model invocation) as the `message_id`.
+- **Snapshot:** In `lib/api/endpoints.py`, `_enrich_snapshot_from_state` attempts to read `m.id` from the persisted message. If `m.id` is missing (common for checkpointer messages), it falls back to a **deterministic hash of role + content**.
+**The Bug:** The deterministic hash will **never** match the `run_id` used during the stream.
+**The UI Impact:** When a user refreshes the page, the message IDs will change. The frontend's deduplication logic will fail, leading to duplicate messages in the UI or loss of UI state linked to the original streaming message (e.g., collapsed states, local annotations).
+
+### C. Required Next Steps for the Backend Edge (Cycle 19)
+1. Ensure that the `EventAggregator` and `endpoints.py` use a unified strategy for message identification. The `run_id` from the model invocation should be persisted as the message ID in the LangGraph state so it can be reliably recovered.
+2. Consider implementing a `MessageModel` in the main SQL database to provide a high-performance, queryable record of the conversation that is independent of the LangGraph checkpointer internals.
+3. Update `MessageSnapshot` to include the `run_id` or `invocation_id` to maintain provenance.
+

@@ -2,7 +2,7 @@
 adr_id: 021
 title: Persistent Task Queue Schema
 date: 2026-03-03
-status: Implemented
+status: Revised
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/020-blackboard-content-mounting.md
@@ -12,7 +12,7 @@ related:
 # ADR-021: Persistent Task Queue Schema
 
 **Date:** 2026-03-03
-**Status:** Proposed
+**Status:** Revised (supersedes side-channel drain pattern — see §2.4 and §5)
 
 ## 1. Context & Problem Statement
 
@@ -74,8 +74,8 @@ never modifies the queue file directly. Its only queue interaction is:
 
 1. Reading the current queue content (injected as a `SystemMessage` by the mount step).
 2. Calling the `mark_task_complete` tool with a task ID when it finishes work.
-3. Python code validates the ID, updates the file, and advances `current_task_id` in
-   state via the side-channel drain pattern (§2.3).
+3. Python code validates the ID, updates the file, and returns a `Command(update={...})`
+   that LangGraph propagates through the reducer pipeline automatically (§2.4).
 
 ### 2.2 Sequential Task IDs
 
@@ -100,7 +100,7 @@ class TeamState(TypedDict):
 
     # Pointer to the task the current worker is executing.
     # None when no feature is active or no task has been assigned.
-    # Updated by the side-channel drain after mark_task_complete tool call.
+    # Updated via Command.update from mark_task_complete tool.
     # Never stores queue content — content lives in the queue file on disk.
     current_task_id: NotRequired[str | None]
 ```
@@ -109,14 +109,25 @@ class TeamState(TypedDict):
 Only the ID pointer lives in state; queue content lives on disk and is injected via
 the mount step (ADR-020).
 
-### 2.4 `mark_task_complete` Tool — Side-Channel Drain Pattern
+### 2.4 `mark_task_complete` Tool — `Command(update={...})` Pattern
 
-ACP tools return strings to the LLM — they cannot return `TeamState` patch dicts.
-To propagate state updates (advancing `current_task_id`) from tool execution back to
-`worker_node`, a **side-channel drain pattern** is used.
+The `mark_task_complete` tool returns a `Command(update={...})` object that LangGraph
+propagates directly through the state reducer pipeline. This is the documented pattern
+for tools that need to update graph state (LangGraph docs:
+https://docs.langchain.com/oss/python/langgraph/use-graph-api).
+
+**Key constraints from official docs:**
+- The tool must be decorated with `@tool` (or equivalent) so `ToolNode` can handle it.
+- `Command.update` **must** include a `messages` key containing a `ToolMessage` with
+  the correct `tool_call_id`. This is required because LLM providers enforce that every
+  AI tool-call message is followed by a corresponding tool result message.
+- `InjectedToolCallId` (from `langchain_core.tools`) injects the `tool_call_id`
+  automatically at call time — it is not visible to the LLM as a parameter.
+- `ToolNode` automatically propagates `Command` objects returned by tools. No drain
+  step or wrapper node is needed.
 
 `create_mark_task_complete_tool` (in `lib/core/task_queue.py`) is a factory that
-returns a `(tool_fn, drain_fn)` tuple:
+returns a single `@tool`-decorated async function:
 
 ```python
 # lib/core/task_queue.py
@@ -124,7 +135,11 @@ from __future__ import annotations
 
 import asyncio
 from pathlib import Path
-from typing import Any, Callable
+from typing import Annotated
+
+from langchain_core.messages import ToolMessage
+from langchain_core.tools import InjectedToolCallId, tool
+from langgraph.types import Command
 
 __all__ = ["create_mark_task_complete_tool"]
 
@@ -132,31 +147,36 @@ __all__ = ["create_mark_task_complete_tool"]
 def create_mark_task_complete_tool(
     workspace_root: Path,
     feature_tag: str,
-) -> tuple[Callable, Callable]:
-    """Factory returning (tool_fn, drain_fn).
+):
+    """Factory returning a single @tool-decorated async function.
 
-    tool_fn: async tool passed to the LLM — returns a string acknowledgement.
-    drain_fn: called by worker_node after model.ainvoke() — returns accumulated
-              TeamState patch dict and clears the pending list.
-
-    The side-channel pattern is required because ACP tools return strings
-    to the LLM, not TeamState dicts.
+    The returned tool updates TeamState via Command(update={...}), which
+    ToolNode propagates through the reducer pipeline automatically.
+    No drain step or side-channel is required.
     """
     queue_path = workspace_root / ".vault" / "plan" / f"{feature_tag}-queue.md"
-    pending_state_updates: list[dict[str, Any]] = []
 
-    async def mark_task_complete(task_id: str) -> str:
+    @tool
+    async def mark_task_complete(
+        task_id: str,
+        tool_call_id: Annotated[str, InjectedToolCallId],
+    ) -> Command:
         """Mark a task as completed in the queue file.
 
         Args:
             task_id: The task ID to mark complete (e.g. 'SBI-003').
 
         Returns:
-            A string acknowledgement for the LLM confirming completion
-            and stating the next pending task ID (or "no further tasks").
+            A Command updating current_task_id in TeamState and adding a
+            ToolMessage to the message history.
         """
         if not queue_path.exists():
-            return f"Queue file not found at {queue_path}. Cannot mark {task_id} complete."
+            msg = f"Queue file not found at {queue_path}. Cannot mark {task_id} complete."
+            return Command(
+                update={
+                    "messages": [ToolMessage(content=msg, tool_call_id=tool_call_id)],
+                }
+            )
 
         def _update_queue() -> tuple[str, str | None]:
             """Read, update, and write queue file. Returns (message, next_task_id)."""
@@ -188,41 +208,33 @@ def create_mark_task_complete_tool(
         message, next_task_id = await asyncio.to_thread(_update_queue)
 
         if next_task_id:
-            pending_state_updates.append({"current_task_id": next_task_id})
-            return f"{message} Next task: {next_task_id}."
+            ack = f"{message} Next task: {next_task_id}."
         else:
-            pending_state_updates.append({"current_task_id": None})
-            return f"{message} No further pending tasks."
+            ack = f"{message} No further pending tasks."
 
-    def drain_state_updates() -> dict[str, Any]:
-        """Return accumulated state updates and clear the pending list.
+        return Command(
+            update={
+                "current_task_id": next_task_id,
+                "messages": [ToolMessage(content=ack, tool_call_id=tool_call_id)],
+            }
+        )
 
-        Called by worker_node after model.ainvoke() completes.
-        """
-        merged: dict[str, Any] = {}
-        for update in pending_state_updates:
-            merged.update(update)
-        pending_state_updates.clear()
-        return merged
-
-    return mark_task_complete, drain_state_updates
+    return mark_task_complete
 ```
 
 **Worker integration** in `create_worker_node()` (`lib/core/nodes/worker.py`):
 
 ```python
-tool_fn, drain_fn = create_mark_task_complete_tool(workspace_root, feature_tag)
-# ... wire tool_fn into model tool binding ...
+# worker_node no longer needs a drain step — ToolNode propagates Command automatically.
+tool_fn = create_mark_task_complete_tool(workspace_root, feature_tag)
+# Bind tool_fn to the model and add a ToolNode to the graph for tool dispatch.
 
 async def worker_node(state: TeamState) -> dict[str, Any]:
     # ... message construction (ADR-022, ADR-020) ...
-    response = await model.ainvoke(messages, config)
-    state_updates = drain_fn()
-    return {
-        "messages": [response],
-        "mounted_context": None,
-        **state_updates,
-    }
+    response = await effective_model.ainvoke(messages)
+    response.name = name
+    return {"messages": [response], "mounted_context": None}
+    # State updates (current_task_id) flow via Command.update in ToolNode — no drain.
 ```
 
 ### 2.5 Filtered Queue Injection
@@ -266,18 +278,24 @@ for the orchestration engine and requires no new tool implementation.
   are next, surviving thread restarts and context compaction.
 - Sequential task IDs provide a stable cross-session reference that neither conversation
   history nor `TeamState` alone can offer.
-- The side-channel drain pattern cleanly separates tool string output (for the LLM) from
-  state updates (for LangGraph), without requiring any changes to the ACP tool protocol.
+- `Command(update={...})` is the documented LangGraph pattern for tools updating state.
+  State updates flow through the reducer pipeline automatically — no side-channel, no
+  drain step, no risk of silent update loss on interrupt.
+- `ToolNode` propagates `Command` automatically: the worker node needs no awareness of
+  whether a tool updated state. The graph topology handles it.
+- The `ToolMessage` requirement (enforced by `InjectedToolCallId`) ensures message
+  history validity — LLM providers require tool-call messages to be followed by tool
+  results.
 - Filtered queue injection (current + next 2) limits token overhead while giving workers
   enough horizon to plan their next step.
 - Queue file is ground truth — `TeamState` carries only a lightweight pointer.
 
 ### Negative / Trade-offs
 
-- The `pending_state_updates` side channel is implicit coupling between `mark_task_complete`
-  and `worker_node`. The factory must be called once per graph compilation and the returned
-  `drain_fn` must be called after every `model.ainvoke()`. If a caller forgets `drain_fn()`,
-  state updates are silently dropped.
+- Tools returning `Command` require `ToolNode` in the graph. The current ACP-backed
+  worker pattern (direct `model.ainvoke`) does not use `ToolNode`; integrating
+  `Command`-returning tools requires adding a `ToolNode` branch or a custom tool
+  dispatch layer that manually propagates `Command` objects.
 - Queue file format changes require a migration — existing queue files using a different
   column layout will fail `_filter_queue_content` parsing.
 - `mark_task_complete` validates by substring match (`f"| {task_id} |"`). Task IDs
@@ -298,11 +316,27 @@ LLMs reliably corrupt structured formats when asked to edit them in-place (trail
 in JSON, hallucinated YAML indentation, duplicate keys). Machine-writes, LLM-reads is the
 MetaGPT-validated pattern. Rejected.
 
-### Return TeamState dict from tool function
+### Side-channel drain pattern (original §2.4)
 
-ACP tool functions return strings to the LLM. Returning a dict would violate the ACP
-tool protocol and cause a runtime error. The side-channel drain pattern is required.
-Rejected.
+The original implementation used a `(tool_fn, drain_fn)` tuple factory where the tool
+accumulated state updates in a closure-scoped `pending_state_updates` list and `drain_fn`
+was called by `worker_node` after `model.ainvoke()`. This pattern was rejected for the
+revised design because:
+
+1. **Incompatible with LangGraph's state model.** `drain_fn()` returns a plain dict that
+   `worker_node` merges into its own return value. This bypasses the reducer pipeline —
+   updates are applied as a last-write-wins flat merge, ignoring `_merge_vault_index`
+   and other annotated reducers.
+2. **Silent loss on interrupt.** When `GraphBubbleUp` is raised (ACP interrupt path),
+   `worker_node` calls `drain_fn()` and discards the result (the `except GraphBubbleUp`
+   block re-raises immediately). Any `current_task_id` advance accumulated during that
+   invocation is silently dropped.
+3. **Implicit coupling.** The factory must be called once per graph compilation and the
+   `drain_fn` must be called after every `model.ainvoke()`, including in every exception
+   handler. A missed call leaks accumulated state across invocations.
+4. **Documented alternative exists.** `Command(update={...})` from a `@tool`-decorated
+   function is the officially documented LangGraph pattern for tools that update state.
+   `ToolNode` propagates it automatically. No drain step is required.
 
 ### Inject full queue on every invocation
 
@@ -313,12 +347,19 @@ The SWE-agent pattern (filtered view) is more efficient. Rejected.
 ## 5. Implementation Constraints
 
 - `lib/core/task_queue.py` must declare `__all__ = ["create_mark_task_complete_tool"]`.
-  `_filter_queue_content` is private (not exported).
+  `_filter_queue_content` is private (not exported), but may be imported by `mount.py`
+  as an internal sibling import pending a refactor to a shared utility (tracked as M-2
+  in the LangGraph drift audit).
 - `mark_task_complete` must be `async def`. File reads and writes use `asyncio.to_thread`.
-- `drain_fn()` must be called by `worker_node` after every `model.ainvoke()`, including
-  in exception handlers, to avoid state update leaks between invocations.
-- Queue file writes are append-safe: `_update_queue` reads the full file, patches the
-  relevant row, and writes the complete updated content atomically (no partial writes).
+- `mark_task_complete` must accept `tool_call_id: Annotated[str, InjectedToolCallId]`
+  as a parameter. This is injected automatically by LangGraph at call time and is not
+  exposed to the LLM in the tool schema.
+- `Command.update` **must** include a `messages` key containing a `ToolMessage` with
+  the injected `tool_call_id`. This ensures message history validity.
+- The factory returns a single callable (no tuple). The `drain_fn` pattern is
+  eliminated — callers receive only `mark_task_complete`.
+- `worker_node` no longer calls a drain function. State updates from
+  `mark_task_complete` flow via `Command.update` through `ToolNode` automatically.
 - `current_task_id` uses last-write-wins. It is `NotRequired` in `TeamState` — direct
   access via `state.get("current_task_id")` is correct (field may be absent in legacy state).
 - Queue injection (§2.5) applies only for `pipeline_phase in {"plan", "exec"}`. `mount_node`
@@ -331,16 +372,17 @@ The SWE-agent pattern (filtered view) is more efficient. Rejected.
 ```text
 lib/core/
 ├── state.py            AMENDED: current_task_id: NotRequired[str | None] added
-├── task_queue.py       NEW: create_mark_task_complete_tool() factory, drain_fn,
-│                       _filter_queue_content; __all__ = ["create_mark_task_complete_tool"]
+├── task_queue.py       NEW: create_mark_task_complete_tool() factory (single callable,
+│                       no drain_fn); _filter_queue_content (private);
+│                       __all__ = ["create_mark_task_complete_tool"]
 ├── nodes/
 │   ├── mount.py        AMENDED: calls _filter_queue_content for queue files
 │   │                   when pipeline_phase in {"plan", "exec"}
-│   └── worker.py       AMENDED: calls create_mark_task_complete_tool(),
-│                       calls drain_fn() after model.ainvoke()
+│   └── worker.py       AMENDED: calls create_mark_task_complete_tool() (single
+│                       callable); no drain_fn; ToolNode propagates Command.update
 ├── tests/
-│   ├── test_task_queue.py  NEW: tool factory, drain pattern, filtered injection,
-│   │                       phase gate, async file I/O
+│   ├── test_task_queue.py  NEW: tool factory, Command.update pattern, ToolMessage
+│   │                       validity, filtered injection, phase gate, async file I/O
 │   └── test_mount.py       AMENDED: queue filtering integration
 ```
 
@@ -349,7 +391,11 @@ lib/core/
 - `lib/core/task_queue.py` — NEW (create_mark_task_complete_tool factory)
 - `lib/core/state.py` — TeamState (current_task_id field added)
 - `lib/core/nodes/mount.py` — queue content filtering integration
-- `lib/core/nodes/worker.py` — drain_fn integration, mark_task_complete tool binding
+- `lib/core/nodes/worker.py` — mark_task_complete tool binding; no drain_fn
+- [LangGraph docs — Update state from tools](https://docs.langchain.com/oss/python/langgraph/use-graph-api)
+  — `Command(update={...})` pattern, `InjectedToolCallId`, `ToolNode` propagation
+- [LangGraph docs — Command reference](https://docs.langchain.com/oss/python/langgraph/graph-api)
+  — `Command.update`, `Command.goto`, tool return semantics
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — vault_index, TeamState fields
 - [ADR-020](020-blackboard-content-mounting.md) — mount_node, content injection pattern
 - [docs/research/2026-03-03-task-queue-schema-derisking.md](../research/2026-03-03-task-queue-schema-derisking.md) — MetaGPT pattern, markdown table format, session persistence

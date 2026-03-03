@@ -2,7 +2,7 @@
 adr_id: 024
 title: Plan Approval Interrupt
 date: 2026-03-03
-status: Implemented
+status: Revised
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
@@ -13,7 +13,7 @@ related:
 # ADR-024: Plan Approval Interrupt
 
 **Date:** 2026-03-03
-**Status:** Proposed
+**Status:** Revised (supersedes supervisor-inline interrupt — see §2.2, §4)
 
 ## 1. Context & Problem Statement
 
@@ -33,8 +33,17 @@ proceeds. The two gates are sequential at the exec boundary:
 
 The existing `interrupt()` mechanism handles ACP tool call permissions inside
 worker nodes. This ADR extends the interrupt pattern to handle plan approval —
-a supervisor-level interrupt triggered by graph state (exec routing detected),
-not by ACP tool output.
+a dedicated graph node triggered by the supervisor's conditional edge when exec
+routing with an unapproved plan is detected.
+
+**Revision note:** The original design placed the `interrupt()` call inside
+`supervisor_node` conditionally. This violates LangGraph's index-based resume
+contract: on replay, the supervisor LLM is re-invoked and may produce a
+different `next_route`, causing the conditional guard to evaluate differently
+and the `interrupt()` call to be skipped entirely. The corrected design places
+the interrupt in a dedicated `plan_approval_node` that calls `interrupt()`
+unconditionally when entered — matching the documented LangGraph approval node
+pattern (https://docs.langchain.com/oss/python/langgraph/interrupts).
 
 ## 2. Decision
 
@@ -59,34 +68,104 @@ where the plan has not yet been approved.
 Once set to `True`, `plan_approved` persists for the thread's lifetime in the
 checkpointer. This is a per-session, one-time gate.
 
-### 2.2 Trigger Location
+### 2.2 Trigger Location — Dedicated `plan_approval_node`
 
-The plan approval interrupt fires inside `supervisor_node`
-(`lib/core/nodes/supervisor.py`). When the supervisor routes to an exec
-worker, a plan artifact exists, and `plan_approved` is not yet `True`, the
-supervisor calls `interrupt()` before returning the routing decision:
+The plan approval interrupt fires inside a **dedicated `plan_approval_node`**,
+not inside `supervisor_node`. The supervisor's conditional edge routes to this
+node when the approval gate conditions are met. Once entered, the node calls
+`interrupt()` unconditionally.
+
+This matches the documented LangGraph pattern for human-in-the-loop approval:
 
 ```python
-if (next_route in exec_workers
-        and vault_index.get("plan")
-        and not state.get("plan_approved")):
-    resume_value = interrupt({
-        "type": "plan_approval_request",
-        "feature": state.get("active_feature"),
-        "plan_paths": vault_index.get("plan", []),
-        "exec_worker": next_route,
-    })
-    if resume_value.get("approved"):
-        return {"next": next_route, "plan_approved": True,
-                "pipeline_phase": inferred_phase}
-    else:
-        return {"next": workers[0], "pipeline_phase": inferred_phase,
-                "routing_error": "Plan rejected by user — revise before proceeding to execution."}
+# lib/core/nodes/supervisor.py (or a new lib/core/nodes/plan_approval.py)
+from langgraph.types import interrupt, Command
+from typing import Literal
+
+def create_plan_approval_node(workers: list[str], autonomous: bool = False):
+    """Factory: returns a plan_approval_node that unconditionally interrupts.
+
+    Called only when the supervisor routes to an exec worker with an unapproved
+    plan. Once entered, always calls interrupt() — no conditional guard inside
+    the node.
+
+    In autonomous mode returns a passthrough Command routing directly to the
+    exec worker without interrupting.
+    """
+    async def plan_approval_node(
+        state: TeamState,
+    ) -> Command[Literal[*workers, "supervisor"]]:  # type: ignore[valid-type]
+        if autonomous:
+            # No human present — proceed without approval prompt.
+            return Command(
+                update={"plan_approved": True},
+                goto=state["next"],
+            )
+
+        vault_index: dict[str, list[str]] = state.get("vault_index") or {}
+        decision = interrupt({
+            "type": "plan_approval_request",
+            "feature": state.get("active_feature"),
+            "plan_paths": vault_index.get("plan", []),
+            "exec_worker": state["next"],
+        })
+
+        if decision.get("approved"):
+            _logger.info(
+                "plan approved by user — routing to exec_worker=%r",
+                state["next"],
+            )
+            return Command(
+                update={"plan_approved": True},
+                goto=state["next"],
+            )
+
+        _logger.info("plan rejected by user — rerouting to supervisor for revision")
+        return Command(
+            update={
+                "routing_error": (
+                    "Plan rejected by user — revise before proceeding to execution."
+                ),
+            },
+            goto="supervisor",
+        )
+
+    plan_approval_node.__name__ = "plan_approval_node"
+    return plan_approval_node
 ```
 
-This is consistent with the `interrupt_before=[]` architectural constraint
-(CLAUDE.md): all interrupts must be triggered from inside nodes, not as
-graph-level pre-node pauses.
+The supervisor node itself **never calls `interrupt()`**. It sets `state["next"]`
+to the intended exec worker and returns. The conditional edge in `graph.py`
+intercepts the route and redirects to `plan_approval_node` when the gate
+conditions are met:
+
+```python
+# lib/core/graph.py — supervisor conditional edge router
+
+def _make_supervisor_router(
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+    autonomous: bool,
+) -> Callable[[TeamState], str]:
+    def _router(state: TeamState) -> str:
+        next_node = state["next"]
+        vault_index = state.get("vault_index") or {}
+        if (
+            not autonomous
+            and worker_phase_map
+            and worker_phase_map.get(next_node) == "exec"
+            and state.get("active_feature")
+            and vault_index.get("plan")
+            and not state.get("plan_approved")
+        ):
+            return "plan_approval"
+        return next_node
+    return _router
+
+builder.add_node("plan_approval", create_plan_approval_node(workers, autonomous))
+builder.add_conditional_edges("supervisor", _make_supervisor_router(...))
+# plan_approval_node uses Command(goto=...) — no static edges needed from it
+```
 
 ### 2.3 Interrupt Payload
 
@@ -95,7 +174,7 @@ interrupt({
     "type": "plan_approval_request",
     "feature": state.get("active_feature"),
     "plan_paths": vault_index.get("plan", []),
-    "exec_worker": next_route,
+    "exec_worker": state["next"],
 })
 ```
 
@@ -117,24 +196,24 @@ The `PermissionRequestEvent` schema already supports arbitrary `options` with
    with `option_id: "approve"`.
 2. Endpoint dispatches `Command(resume={"approved": True})` to the interrupted
    graph.
-3. Supervisor node replays; `interrupt()` returns `{"approved": True}`.
-4. Supervisor sets `plan_approved: True` in state and routes to the exec
-   worker.
-5. `plan_approved: True` persists in the checkpointer — subsequent exec
-   routing decisions in this thread proceed without re-triggering the
-   interrupt.
+3. `plan_approval_node` replays; `interrupt()` returns `{"approved": True}`.
+4. Node returns `Command(update={"plan_approved": True}, goto=exec_worker)`.
+5. LangGraph applies `plan_approved: True` to state and routes to the exec
+   worker. `plan_approved: True` persists in the checkpointer — subsequent
+   exec routing decisions in this thread do not enter `plan_approval_node`
+   again (the supervisor router condition is false).
 
 **Rejection path:**
 
 1. User clicks "Reject — Revise Plan" → `POST /api/permissions/{request_id}/respond`
    with `option_id: "reject"`.
 2. Endpoint dispatches `Command(resume={"approved": False})`.
-3. Supervisor node replays; `interrupt()` returns `{"approved": False}`.
-4. Supervisor reroutes to `workers[0]` with a `routing_error` stating the plan
-   was rejected and requires revision. The supervisor LLM determines which plan
-   worker to invoke on the next pass.
-5. `plan_approved` remains absent or `False` — the next exec routing attempt
-   will re-trigger the interrupt.
+3. `plan_approval_node` replays; `interrupt()` returns `{"approved": False}`.
+4. Node returns `Command(update={"routing_error": "..."}, goto="supervisor")`.
+5. Supervisor receives control with `routing_error` set. On its next pass it
+   routes to a planning worker for revision.
+6. `plan_approved` remains absent or `False` — the next exec routing attempt
+   will re-enter `plan_approval_node`.
 
 ### 2.5 `autonomous=True` Behaviour
 
@@ -142,38 +221,49 @@ The plan approval interrupt is **skipped** when `autonomous=True`. No human is
 present in autonomous mode (headless MCP-launched execution); the interrupt
 would block indefinitely with no user to respond.
 
-The supervisor checks `autonomous` (captured in the node closure at
-compilation time) before calling `interrupt()`. When `autonomous=True`,
-`plan_approved` is implicitly treated as `True` and routing proceeds to the
-exec worker without interruption.
+`create_plan_approval_node` captures `autonomous` at factory call time. When
+`autonomous=True`, the node returns a passthrough `Command(update={"plan_approved":
+True}, goto=state["next"])` without calling `interrupt()`. The gate conditions
+in the supervisor router (`not autonomous and ...`) additionally prevent the
+router from ever directing to `plan_approval_node` in autonomous mode — the
+node is unreachable in that configuration.
 
 This follows the same pattern as ACP permission approvals: `autonomous=True`
-leaves `permission_callback` unwired, causing ACP tool calls to auto-approve.
-Plan approval follows the same design — autonomous bypasses human-in-the-loop
-gates, not quality artifact gates.
+bypasses human-in-the-loop gates, not quality artifact gates.
 
 ### 2.6 No `active_feature` Behaviour
 
-The gate is skipped when `active_feature` is `None`. The thread is not
-SDD-bound; the plan approval mandate does not apply. This is consistent with
-ADR-023 and ADR-025.
+The supervisor router gate condition includes `state.get("active_feature")`.
+When `active_feature` is `None`, the router never routes to `plan_approval_node`.
+The thread is not SDD-bound; the plan approval mandate does not apply. This is
+consistent with ADR-023 and ADR-025.
 
-### 2.7 Execution Order in `supervisor_node`
+### 2.7 Execution Order at the Exec Boundary
 
-The full gate chain in `supervisor_node`, in order of execution:
+The full gate chain, in order of evaluation:
 
-1. **ADR-022:** `validation_errors` → block FINISH if validation errors are present.
-2. **ADR-025:** `vault_index["audit"]` → block FINISH if no review artifact exists.
-3. **ADR-023:** Phase prerequisites → block out-of-order routing (e.g., exec without plan).
-4. **ADR-024:** Plan approval → interrupt before exec routing when plan exists but is unapproved.
+1. **ADR-022** (in `supervisor_node`): `validation_errors` → block FINISH if
+   validation errors are present. Supervisor returns `next=workers[0]`.
+2. **ADR-025** (in `supervisor_node`): `vault_index["audit"]` → block FINISH
+   if no review artifact exists. Supervisor returns `next=workers[0]`.
+3. **ADR-023** (in `supervisor_node`): Phase prerequisites → if hard gate
+   fires, supervisor returns `next=workers[0]` (safe fallback, not the blocked
+   destination). Soft gate sets `routing_warning`, proceeds.
+4. **Supervisor conditional edge router**: checks plan approval conditions. If
+   all hold, routes to `plan_approval_node`. Otherwise routes to `state["next"]`
+   directly.
+5. **ADR-024** (in `plan_approval_node`): interrupts for human approval. On
+   resume, routes to exec worker (approved) or `supervisor` (rejected).
 
 ADR-023 and ADR-024 are complementary at the exec boundary: if ADR-023 fires
-(no plan artifact), ADR-024 is irrelevant. If ADR-023 passes (plan exists),
-ADR-024 checks for approval.
+(no plan artifact), the supervisor routes to a safe fallback and the router
+condition `vault_index.get("plan")` is false — `plan_approval_node` is never
+entered. If ADR-023 passes (plan exists), the router condition may route to
+`plan_approval_node` for approval.
 
 ### 2.8 `_emit_interrupt_events` Extension
 
-`aggregator.py`'s `_emit_interrupt_events()` currently detects payloads with
+`aggregator.py`'s `_emit_interrupt_events()` detects payloads with
 `type == "permission_request"` to emit `PermissionRequestEvent` to WebSocket
 clients. It must be extended to handle `type == "plan_approval_request"`:
 
@@ -186,6 +276,13 @@ For `plan_approval_request` payloads, the emitted `PermissionRequestEvent`
 carries approve and reject options. The UI permission modal is extended to
 render plan context (feature name, plan document paths) when the interrupt type
 is `plan_approval_request`.
+
+**Note:** Once the `aggregator.py` interrupt detection is refactored to use
+stream-based `"__interrupt__"` key detection (per audit finding A-1) rather
+than `BaseException` catching, `_emit_interrupt_events` will receive the
+interrupt payload directly from the stream event — the `aget_state` call is
+eliminated. This ADR is compatible with both the current and future
+implementations.
 
 ### 2.9 Per-Session One-Time Semantics
 
@@ -205,8 +302,14 @@ on the next exec routing attempt.
 
 - Human-in-the-loop approval at the plan→exec boundary, fulfilling the
   `framework.md` mandate.
+- `plan_approval_node` calls `interrupt()` unconditionally — no conditional
+  guard inside the node. This is the documented LangGraph approval pattern and
+  is safe for replay: the node is only entered when approval is needed, but
+  once entered, the `interrupt()` call always executes. No index mismatch risk.
 - Reuses the existing `interrupt()` / resume machinery and `PermissionRequestEvent`
   schema — no new IPC mechanisms required.
+- Supervisor node is freed from interrupt responsibility — it only sets routing
+  state. All interrupt logic is concentrated in `plan_approval_node`.
 - Autonomous mode correctly bypasses the interrupt (no human present to approve)
   while non-autonomous threads are always gated.
 - One-time per-session semantics prevent repeated approval prompts for the same
@@ -214,9 +317,14 @@ on the next exec routing attempt.
 
 ### Negative / Trade-offs
 
-- Supervisor node replay on resume means the LLM is re-invoked. The routing
-  decision must be re-parsed on every resume. The `plan_approved` flag in state
-  prevents re-triggering the interrupt, but the LLM call cost is paid on replay.
+- Adds a new `plan_approval` graph node to every compiled team graph that has
+  exec-phase workers and a `worker_phase_map`. Graph topology is slightly more
+  complex. The node is unreachable in autonomous mode.
+- `plan_approval_node` uses `Command(goto=...)` for its return value. Unlike
+  `worker_node` and `supervisor_node` which return plain dicts, this node
+  participates in LangGraph's `Command`-based routing. The graph compiler must
+  not add static edges out of `plan_approval_node` — routing is entirely via
+  `Command.goto`.
 - `_emit_interrupt_events` must be extended to handle the new
   `"plan_approval_request"` interrupt type — a second detection branch alongside
   the existing `"permission_request"` branch.
@@ -229,15 +337,24 @@ on the next exec routing attempt.
 
 ## 4. Rejected Alternatives
 
-### Dedicated `plan_approval_node` Between Supervisor and Exec Workers
+### Supervisor-inline `interrupt()` (original §2.2)
 
-A new `plan_approval_node` sits between the supervisor's conditional edge and
-each exec worker, triggering the interrupt unconditionally on first invocation.
-Rejected: adds another node per exec worker on top of ADR-020 mount nodes,
-increasing graph compilation complexity. Rejection routing requires the Command
-API (`Command(goto="supervisor")`), changing the node's return type and
-introducing a non-standard pattern. The supervisor-inline approach keeps all
-routing logic in one location.
+The original design placed the `interrupt()` call inside `supervisor_node`
+behind a five-condition guard. Rejected because:
+
+1. **Index mismatch on replay.** On resume, LangGraph replays `supervisor_node`
+   from scratch. The LLM is re-invoked and may produce a different `next_route`.
+   If any of the five conditions is then false, `interrupt()` is skipped. LangGraph
+   finds a stored resume value with no matching `interrupt()` call — undefined
+   behaviour.
+2. **Violates documented pattern.** Official LangGraph docs show `interrupt()`
+   in dedicated nodes that call it unconditionally
+   (https://docs.langchain.com/oss/python/langgraph/interrupts — "Approval Node
+   with Interrupt"). Placing it conditionally inside a routing node is not a
+   documented pattern.
+3. **Mixed responsibilities.** `supervisor_node` is a routing node (LLM call →
+   `state["next"]`). Adding interrupt logic couples routing and HIL gating in
+   one function, making both harder to test.
 
 ### Pre-Node `interrupt_before` Pause
 
@@ -260,16 +377,21 @@ structurally enforced. Per-session once-only semantics are sufficient for v1.
 - `plan_approved: NotRequired[bool]` added to `TeamState` (`lib/core/state.py`).
   Last-write-wins, no reducer. Consuming code uses `.get("plan_approved")` to
   handle absent field on legacy threads.
-- Interrupt triggers inside `supervisor_node`, not in a separate node.
-- `autonomous=True` → skip interrupt, proceed as if `plan_approved: True`. The
-  `autonomous` flag is captured in the supervisor node closure at compilation.
+- `interrupt()` fires inside `plan_approval_node`, never inside
+  `supervisor_node`. The supervisor only sets `state["next"]` and returns.
+- `plan_approval_node` must **not** have static outgoing edges added in
+  `graph.py`. All routing from this node is via `Command(goto=...)`.
+- The supervisor conditional edge router checks plan approval conditions and
+  redirects to `"plan_approval"` when all hold; otherwise passes through to
+  `state["next"]`.
+- `autonomous=True` → `plan_approval_node` returns passthrough `Command`
+  without calling `interrupt()`. Additionally, the router condition includes
+  `not autonomous` preventing the node from being entered at all.
 - `_emit_interrupt_events` (`lib/core/aggregator.py`) extended to handle
   `type == "plan_approval_request"` payloads, emitting `PermissionRequestEvent`
   with approve (`ALLOW_ONCE`) and reject (`DENY_ONCE`) options.
 - Resume payload is `{"approved": True}` or `{"approved": False}` — the
-  interrupt consumer checks `resume_value.get("approved")`.
-- The interrupt fires only when all three conditions hold: routing to exec
-  worker, `vault_index["plan"]` non-empty, `not state.get("plan_approved")`.
+  interrupt consumer checks `decision.get("approved")`.
 
 ## 6. Module Hierarchy Impact
 
@@ -277,10 +399,19 @@ structurally enforced. Per-session once-only semantics are sufficient for v1.
 lib/core/
   state.py              AMENDED: plan_approved: NotRequired[bool] added to TeamState
 
-  nodes/supervisor.py   AMENDED: plan approval interrupt in supervisor_node,
-                        after ADR-023 phase prerequisite checks, before
-                        returning exec routing decision; autonomous closure
-                        captured at create_supervisor_node() compilation
+  nodes/supervisor.py   AMENDED: plan approval interrupt REMOVED from supervisor_node;
+                        supervisor_node only sets state["next"] and returns;
+                        no interrupt() call in supervisor
+
+  nodes/plan_approval.py  NEW (or added to supervisor.py):
+                          create_plan_approval_node(workers, autonomous) factory;
+                          unconditional interrupt() + Command(goto=...) routing;
+                          __all__ = ["create_plan_approval_node"]
+
+  graph.py              AMENDED: add "plan_approval" node to graph;
+                        supervisor conditional edge uses _make_supervisor_router()
+                        which redirects to "plan_approval" when gate conditions hold;
+                        no static edges from plan_approval_node
 
   aggregator.py         AMENDED: _emit_interrupt_events() handles
                         type == "plan_approval_request" payloads;
@@ -289,7 +420,7 @@ lib/core/
   tests/test_graph.py   AMENDED: test cases for plan approval gate —
                         interrupt fires on first exec routing with plan present,
                         approve path sets plan_approved and routes to exec,
-                        reject path reroutes with routing_error,
+                        reject path reroutes to supervisor with routing_error,
                         gate skipped in autonomous mode,
                         gate skipped when active_feature is None,
                         gate not re-triggered when plan_approved is True
@@ -301,6 +432,8 @@ lib/api/
 
 ## 7. References
 
+- [LangGraph docs — Approval Node with Interrupt](https://docs.langchain.com/oss/python/langgraph/interrupts)
+  — dedicated node calling `interrupt()` unconditionally; `Command(goto=...)` routing
 - [docs/audits/2026-03-03-vaultspec-rule-drift.md](../audits/2026-03-03-vaultspec-rule-drift.md) — D-02
 - `Y:/code/vaultspec-worktrees/main/.vaultspec/rules/system/framework.md` — "The user must approve plans before execution proceeds"
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — TeamState field patterns; `NotRequired` precedent
@@ -309,5 +442,5 @@ lib/api/
 - [ADR-025](025-mandatory-review-gate.md) — review artifact FINISH gate; gate ordering reference
 - [docs/research/2026-03-03-plan-approval-interrupt-research.md](../research/2026-03-03-plan-approval-interrupt-research.md) — interrupt mechanism analysis, option comparison, resume flow, autonomous interaction
 - `lib/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
-- `lib/core/aggregator.py:1023` — `_emit_interrupt_events`, interrupt payload detection
-- `lib/api/endpoints.py:722` — `respond_to_permission_endpoint`, resume via REST
+- `lib/core/aggregator.py` — `_emit_interrupt_events`, interrupt payload detection
+- `lib/api/endpoints.py` — `respond_to_permission_endpoint`, resume via REST

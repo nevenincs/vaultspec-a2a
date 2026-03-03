@@ -67,7 +67,7 @@ if next_route == "FINISH":
     # Existing gate: validation errors (ADR-022)
     errors: list[str] = state.get("validation_errors") or []
     if errors:
-        next_route = workers[0]
+        next_route = workers[0] if workers else "FINISH"
         return {"next": next_route, "pipeline_phase": inferred_phase,
                 "routing_error": f"FINISH blocked: {len(errors)} validation error(s)"}
 
@@ -75,7 +75,7 @@ if next_route == "FINISH":
     active_feature = state.get("active_feature")
     vault_index = state.get("vault_index") or {}
     if active_feature and vault_index.get("exec") and not vault_index.get("audit"):
-        next_route = workers[0]
+        next_route = workers[0] if workers else "FINISH"
         return {"next": next_route, "pipeline_phase": inferred_phase,
                 "routing_error": "FINISH blocked: no review artifact in vault_index[\"audit\"]. "
                                  "A reviewer agent must produce an audit artifact before completion."}
@@ -187,9 +187,10 @@ condition. Any audit artifact is sufficient evidence of review in v1.
 - `vault_index` and `active_feature` are read with `.get()` inside the gate
   because `supervisor_node` may be invoked on legacy state that pre-dates
   ADR-019 (defensive reads only at this call site; required fields elsewhere).
-  This is a deliberate exception to ADR-019 §5's "no `.get()`" mandate —
-  supervisor gate code must tolerate legacy checkpoints where the migration
-  backfill has not yet run.
+  This is consistent with ADR-019 §5, which mandates direct `state["field"]`
+  access but carves out `.get()` for call sites that may encounter legacy state
+  pre-dating ADR-019 field additions — specifically, supervisor gate code that
+  must tolerate checkpoints where the migration backfill has not yet run.
 
 ## 6. Module Hierarchy Impact
 

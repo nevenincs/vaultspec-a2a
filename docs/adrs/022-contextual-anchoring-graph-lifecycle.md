@@ -7,6 +7,8 @@ related:
   - docs/adrs/013-team-composition-topology.md
   - docs/adrs/014-thread-metadata-context-injection.md
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
+  - docs/adrs/020-blackboard-content-mounting.md
+  - docs/adrs/026-pipeline-phase-population.md
 ---
 
 # ADR-022: Contextual Anchoring in Graph Lifecycle
@@ -69,7 +71,7 @@ to training data even when relevant documents are provided.
 
 **Google ADK --- context as compiled view**: "Context is a compiled view over a
 richer stateful system, rebuilt fresh each invocation." The anchoring summary
-produced by `_build_anchoring_context()` below is exactly this --- a fresh
+produced by `build_anchoring_context()` below is exactly this --- a fresh
 compilation of the state's feature fields into a structured SystemMessage,
 rebuilt on every node call.
 
@@ -100,9 +102,9 @@ def _build_supervisor_prompt(
 
 The compile-time `feature_context` block is a static string describing the
 feature tag at graph compilation time. Dynamic, per-invocation context (phase,
-vault paths, validation errors) is handled by `_build_anchoring_context()` (S2.2).
+vault paths, validation errors) is handled by `build_anchoring_context()` (S2.2).
 
-### 2.2 `_build_anchoring_context()` --- Per-Invocation Anchoring Summary
+### 2.2 `build_anchoring_context()` --- Per-Invocation Anchoring Summary
 
 A new function in `lib/core/nodes/supervisor.py` and `lib/core/nodes/worker.py`
 (or a shared utility in `lib/core/anchoring.py`):
@@ -110,7 +112,7 @@ A new function in `lib/core/nodes/supervisor.py` and `lib/core/nodes/worker.py`
 ```python
 _ANCHOR_PATH_CAP = 10  # max vault paths per doc-type in the summary
 
-def _build_anchoring_context(state: TeamState) -> str | None:
+def build_anchoring_context(state: TeamState) -> str | None:
     """Produce a per-invocation anchoring summary from TeamState.
 
     Returns None when active_feature is None (no feature bound to this thread),
@@ -124,7 +126,7 @@ def _build_anchoring_context(state: TeamState) -> str | None:
 
     Does NOT read file content. Paths only.
     """
-    feature = state["active_feature"]
+    feature = state.get("active_feature")
     if not feature:
         return None
 
@@ -133,16 +135,16 @@ def _build_anchoring_context(state: TeamState) -> str | None:
         f"- **Feature:** {feature}",
     ]
 
-    phase = state["pipeline_phase"]
+    phase = state.get("pipeline_phase")
     if phase:
         lines.append(f"- **Phase:** {phase}")
 
-    vault_index: dict[str, list[str]] = state["vault_index"]
+    vault_index: dict[str, list[str]] = state.get("vault_index") or {}
     if vault_index:
         lines.append("\n### Available Vault Documents")
         lines.append(
-            "The following documents exist for this feature. "
-            "Read them as needed using your filesystem capabilities."
+            "CONSULT these documents as PRIMARY references before acting. "
+            "Read their content using your filesystem capabilities."
         )
         for doc_type, paths in vault_index.items():
             lines.append(f"\n**{doc_type.upper()}**")
@@ -153,7 +155,7 @@ def _build_anchoring_context(state: TeamState) -> str | None:
             if remainder > 0:
                 lines.append(f"  - (+ {remainder} more)")
 
-    errors: list[str] = state["validation_errors"]
+    errors: list[str] = state.get("validation_errors") or []
     if errors:
         lines.append(f"\n### Validation Errors ({len(errors)} active)")
         for err in errors:
@@ -183,7 +185,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
 
     # Build per-invocation anchoring summary (ADR-022).
     # Returns None when active_feature is None; skipped in that case.
-    anchoring = _build_anchoring_context(state)
+    anchoring = build_anchoring_context(state)
 
     messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
     if anchoring:
@@ -213,7 +215,7 @@ This is implemented as a guard in `supervisor_node()` after parsing the route:
 ```python
 # After deriving next_route from model response:
 if next_route == "FINISH":
-    errors = state["validation_errors"]
+    errors = state.get("validation_errors") or []
     if errors:
         _logger.warning(
             "supervisor blocked FINISH: %d validation error(s) active --- "
@@ -249,7 +251,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
     )
 
     # Build per-invocation anchoring summary (ADR-022).
-    anchoring = _build_anchoring_context(state)
+    anchoring = build_anchoring_context(state)
 
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     if anchoring:
@@ -298,7 +300,7 @@ for the static preamble that may have been compressed away by `compact_context`.
   increases the message list length by one for every invocation. This is
   cosmetically visible in debug logs and token counts but has no functional
   impact.
-- `_build_anchoring_context()` reads `vault_index` from state on every
+- `build_anchoring_context()` reads `vault_index` from state on every
   invocation. The `_ANCHOR_PATH_CAP = 10` depth cap per doc-type prevents token
   overflow for large indexes.
 
@@ -329,7 +331,7 @@ additional TOML schema; (b) the anchoring summary already communicates the phase
 to the supervisor's LLM, which can self-enforce the constraint; (c) hard
 filtering reduces flexibility for teams with workers that span phases.
 
-### Implement `_build_anchoring_context` as a LangGraph Node
+### Implement `build_anchoring_context` as a LangGraph Node
 
 A dedicated "anchoring node" could update `TeamState` with a pre-compiled
 anchoring string on each cycle. Rejected because: (a) it adds a node to the
@@ -340,16 +342,17 @@ implemented.
 
 ## 5. Implementation Constraints
 
-- `_build_anchoring_context()` returns `None` only when `state["active_feature"]`
-  is `None` (no feature bound). It never returns `None` due to a missing key.
+- `build_anchoring_context()` (in `lib/core/anchoring.py`) returns `None` when
+  `state.get("active_feature")` is falsy (no feature bound). Uses `.get()` for
+  all SDD fields to tolerate legacy checkpoints (ADR-019 §5 carve-out).
   Calling nodes check `if anchoring:` to skip injection when no feature is set.
 - The validation error gate must be tested with a state that has
   `validation_errors` non-empty and `next_route == "FINISH"` --- verify that the
   gate redirects to `workers[0]` and sets `routing_error`.
-- `_build_anchoring_context()` applies `_ANCHOR_PATH_CAP = 10` per doc-type.
+- `build_anchoring_context()` applies `_ANCHOR_PATH_CAP = 10` per doc-type.
   When more paths are present, include a `(+ N more)` note.
-- `_build_anchoring_context()` must not read any files from disk. It operates
-  on `state["vault_index"]` (paths only). File content injection is strictly
+- `build_anchoring_context()` must not read any files from disk. It operates
+  on `state.get("vault_index")` (paths only). File content injection is strictly
   scoped to ADR-020.
 - Both `supervisor_node` and `worker_node` insert the anchoring `SystemMessage`
   at position `[1]` (after persona, before history).
@@ -362,8 +365,9 @@ implemented.
 ```text
 lib/core/
   state.py            UNCHANGED (fields added by ADR-019)
-  anchoring.py        NEW: build_anchoring_context() shared utility;
-                      __all__ = ["build_anchoring_context"]
+  anchoring.py        NEW: build_anchoring_context() — the core function
+                      introduced by this ADR; per-invocation anchoring summary
+                      compiled from TeamState; __all__ = ["build_anchoring_context"]
   graph.py            AMENDED: _build_supervisor_prompt() gains
                       feature_context param and {{FEATURE_CONTEXT}} support
   nodes/
@@ -380,12 +384,10 @@ lib/core/
 
 ## 7. References
 
-- `lib/core/nodes/supervisor.py:29` --- `create_supervisor_node()` (to be amended)
-- `lib/core/nodes/supervisor.py:54` --- `supervisor_node()` closure (routing logic)
-- `lib/core/nodes/worker.py:92` --- `create_worker_node()` (to be amended)
-- `lib/core/nodes/worker.py:126` --- `worker_node()` closure (message construction)
-- `lib/core/graph.py:169` --- `_build_supervisor_prompt()` (gains feature_context param)
-- `lib/core/graph.py:409` --- `add_conditional_edges` for supervisor routing
+- `lib/core/anchoring.py` --- `build_anchoring_context()` shared utility (NEW)
+- `lib/core/nodes/supervisor.py` --- `create_supervisor_node()` (amended: anchoring + gates)
+- `lib/core/nodes/worker.py` --- `create_worker_node()` (amended: anchoring injection)
+- `lib/core/graph.py` --- `_build_supervisor_prompt()` (amended: feature_context param)
 - [ADR-013](013-team-composition-topology.md) --- Team Composition (supervisor routing, `state["next"]`)
 - [ADR-014](014-thread-metadata-context-injection.md) --- Thread Metadata (context preamble, message ordering)
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) --- TeamState enrichment (active_feature, vault_index, validation_errors)

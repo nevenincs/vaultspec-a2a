@@ -199,6 +199,75 @@ Each finding is tagged with:
 
 ---
 
+### LG-018 — CRITICAL — Interrupt Detection via `BaseException` + Classname String Matching
+- **Module:** `lib/core/aggregator.py`
+- **ADR:** N/A
+- **Status:** Fix Required
+- **Description:** `ingest()` catches `BaseException` and detects interrupts via `isinstance(exc, _GraphInterrupt) or type(exc).__name__ in ("GraphInterrupt", "NodeInterrupt")`. Documented pattern is checking `"__interrupt__"` key in stream update chunks. String-based classname fallback fires on any exception named `GraphInterrupt` regardless of module.
+- **LangGraph position:** Interrupts are detected from stream data (`"__interrupt__"` in chunk), not by catching exceptions.
+- **LG-Doc source:** https://docs.langchain.com/oss/python/langgraph/interrupts
+- **Required fix:** Switch to stream-based interrupt detection via `"__interrupt__"` in the event payload.
+
+---
+
+### LG-019 — HIGH — `aget_state` + `asyncio.wait_for` Post-Interrupt — Undocumented, Race-Prone
+- **Module:** `lib/core/aggregator.py`
+- **ADR:** N/A
+- **Status:** Fix Required
+- **Description:** `_emit_interrupt_events()` calls `await asyncio.wait_for(graph.aget_state(config), timeout=5.0)` after a `GraphInterrupt` to read interrupt payload. Official pattern reads interrupt values directly from the stream event at interrupt detection time — no separate `aget_state` needed. Post-interrupt `aget_state` introduces a race condition if another invocation advances state between the interrupt and the read.
+- **LangGraph position:** Interrupt payload is available in the same stream event chunk (`chunk["__interrupt__"][0].value`).
+- **LG-Doc source:** https://docs.langchain.com/oss/python/langgraph/interrupts
+- **Required fix:** Read interrupt values directly from the stream event. Remove `aget_state` call from interrupt path.
+
+---
+
+### LG-020 — MEDIUM — `ImportError` Guards on `GraphInterrupt`/`GraphRecursionError`
+- **Module:** `lib/core/aggregator.py`
+- **ADR:** N/A
+- **Status:** Fix Required
+- **Description:** `GraphInterrupt` and `GraphRecursionError` wrapped in `ImportError` try/except. If absent, falls back to string classname matching — fragile silent degradation. These are hard dependency imports; `ImportError` path should never be reached. Fix for LG-018 renders these imports unnecessary.
+- **Required fix:** Resolved by LG-018 fix (stream-based interrupt detection removes need for these imports).
+
+---
+
+### LG-021 — HIGH — `_tool_fn` Discarded in `worker.py` — `mark_task_complete` Never Wired to LLM + ToolNode Missing
+- **Module:** `lib/core/nodes/worker.py`, `lib/core/task_queue.py`
+- **ADR:** ADR-021
+- **Status:** Fix Required — **Functional regression. Task queue completion silently non-functional.**
+- **Description:** `_tool_fn, drain_fn = create_mark_task_complete_tool(...)` — `_tool_fn` assigned to throwaway `_` prefix variable and never passed to `effective_model.bind_tools()`. The LLM has no knowledge of the `mark_task_complete` tool and cannot call it. Drain side-channel works correctly but is never triggered because the LLM never invokes the tool.
+- **LangGraph position:** Tools must be bound via `model.bind_tools([tool_fn])` before `ainvoke` to be accessible to the LLM.
+- **Required fix (post ADR-021 redesign):** Add `ToolNode([mark_task_complete_tool])` as a per-worker tool node in graph.py. Add conditional edge from worker node: if `state["messages"][-1].tool_calls` → tool node, else → supervisor. Add edge from tool node back to worker. Worker node drops all drain logic. `except GraphBubbleUp` block (LG-008) becomes dead code and is deleted with the drain removal.
+
+---
+
+### LG-022 — MEDIUM — `count_tokens_approximately` from Undocumented Internal Path
+- **Module:** `lib/core/nodes/mount.py`
+- **ADR:** ADR-020
+- **Status:** Fix Required
+- **Description:** `from langchain_core.messages.utils import count_tokens_approximately` — not in any official LangChain public API docs. Internal utility, liable to move or be removed without deprecation.
+- **Required fix:** Replace with documented approach (e.g., `len(text) // 4` heuristic or tiktoken directly).
+
+---
+
+### LG-023 — LOW — `_filter_queue_content` Private Import Across Modules
+- **Module:** `lib/core/nodes/mount.py`
+- **ADR:** ADR-021
+- **Status:** Fix Required (resolve with LG-021 redesign)
+- **Description:** `from ..task_queue import _filter_queue_content` imports a private function across module boundaries. Either make it public in `task_queue.__all__` or move to a shared utility.
+- **Required fix:** Resolved naturally when ADR-021 is redesigned — revisit at that point.
+
+---
+
+### LG-024 — CRITICAL — Hard Phase Gate Returns Blocked Destination — Gate Is Bypassed
+- **Module:** `lib/core/nodes/supervisor.py`, `lib/core/graph.py`
+- **ADR:** ADR-023
+- **Status:** Fix Required — **Phase gates are currently non-functional.**
+- **Description:** When a hard phase gate fires in `supervisor_node`, it returns `{"next": next_route, "routing_error": "..."}` — `next_route` is the blocked destination. The conditional edge in `graph.py` is `lambda state: state["next"]`, which reads `next` directly without inspecting `routing_error`. The graph routes to the blocked worker regardless. `routing_error` is informational only — it does not prevent routing.
+- **LangGraph position:** Conditional edge routing is determined entirely by the return value of the router function. A `routing_error` field has no effect on routing unless the router function explicitly checks it.
+- **Required fix:** Hard gate must return `{"next": workers[0]}` or `{"next": "supervisor"}` — a safe fallback destination, not the blocked destination. Soft gate should use a separate `routing_warning` field, not `routing_error`.
+
+---
+
 ## Resolved Findings
 
 *(none yet)*
@@ -212,13 +281,14 @@ Each finding is tagged with:
 | `lib/core/task_queue.py` | ✅ 2026-03-03 | LG-001, LG-002 | Redesign required |
 | `lib/core/nodes/supervisor.py` | ✅ 2026-03-03 | LG-003, LG-004, LG-005, LG-006 | Redesign + fixes required |
 | `lib/core/nodes/worker.py` | ✅ 2026-03-03 | LG-007, LG-008, LG-009, LG-010, LG-011 | Redesign + fixes required |
-| `lib/core/phase.py` | ❌ Pending | — | — |
-| `lib/core/nodes/mount.py` | ❌ Pending | — | — |
+| `lib/core/phase.py` | ✅ 2026-03-03 | None | Clean |
+| `lib/core/nodes/mount.py` | ✅ 2026-03-03 | LG-022, LG-023 | Fixes required |
 | `lib/core/graph.py` | ✅ 2026-03-03 | LG-012, LG-013, LG-014, LG-015 | Fixes required |
-| `lib/core/aggregator.py` | 🔄 In progress | — | — |
+| `lib/core/aggregator.py` | ✅ 2026-03-03 | LG-018, LG-019, LG-020 | Critical fixes required |
 | `lib/core/state.py` | ✅ 2026-03-03 | LG-016, LG-017 | Fixes required |
-| `lib/core/anchoring.py` | ❌ Pending | — | — |
-| `lib/core/metadata.py` | ❌ Pending | — | — |
+| `lib/core/anchoring.py` | ✅ 2026-03-03 | None | Clean |
+| `lib/core/metadata.py` | ✅ 2026-03-03 | None | Clean |
+| `lib/core/context.py` | ✅ 2026-03-03 | None | Clean |
 
 ---
 

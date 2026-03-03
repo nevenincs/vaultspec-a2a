@@ -140,7 +140,7 @@ class TeamState(TypedDict):
 
     # --- task queue pointer (ADR-021) ---
     # ID of the task currently assigned to the worker. None when no feature is active
-    # or no task has been assigned. Updated via side-channel drain after mark_task_complete.
+    # or no task has been assigned. Updated via Command(update={...}) from mark_task_complete.
     current_task_id: NotRequired[str | None]
 
     # --- plan approval gate (ADR-024) ---

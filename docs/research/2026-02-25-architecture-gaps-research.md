@@ -1,8 +1,8 @@
 ---
-name: "Architecture Gaps Research"
+name: 'Architecture Gaps Research'
 date: 2026-25-02
 type: research
-summary: "Rigorous technical specifications for Git worktree-based agent isolation and LangGraph state checkpointer patterns for LLM context management."
+summary: 'Rigorous technical specifications for Git worktree-based agent isolation and LangGraph state checkpointer patterns for LLM context management.'
 maturity: 70
 feature: architecture-gaps
 ---
@@ -27,13 +27,13 @@ If an agent attempts to pass its entire thought history to the next agent
 - **Included**: **State Checkpointing (LangGraph Pattern)**.
 
 **Rationale**:
-The orchestrator must decouple the *Conversation History* from the
-*Architectural State*. We adopt the state-graph pattern. The Orchestrator
+The orchestrator must decouple the _Conversation History_ from the
+_Architectural State_. We adopt the state-graph pattern. The Orchestrator
 maintains a `TypedDict`representing the compiled state (e.g.,`current_plan`,
 `files_to_edit`, `approved_code`).
 
 When transferring control from the Planner to the Coder, the Orchestrator does
-*not* send the Planner's 50-turn internal deliberation. It only sends the
+_not_ send the Planner's 50-turn internal deliberation. It only sends the
 finalized `State`object via the A2A`ContextId`.
 
 **Implementation Reference (Concept)**:
@@ -85,8 +85,8 @@ git worktree add ../.worktrees/agent-coder-123 -b agent/coder/123
 ```
 
 1. **Merge Strategy (Sequential Fast-Forward/Rebase)**:
-Once the Reviewer Agent signs off, the Orchestrator executes a rebase to keep
-history linear, rather than generating messy merge commits.
+   Once the Reviewer Agent signs off, the Orchestrator executes a rebase to keep
+   history linear, rather than generating messy merge commits.
 
 ```powershell
 cd /main/repo
@@ -96,8 +96,8 @@ git merge --ff-only agent/coder/123
 ```
 
 1. **Cleanup Policy (Mandatory)**:
-To prevent disk exhaustion on agent failure, the `ProcessManager`must
-trap`finally` blocks and execute:
+   To prevent disk exhaustion on agent failure, the `ProcessManager`must
+   trap`finally` blocks and execute:
 
 ```powershell
 git worktree remove --force ../.worktrees/agent-coder-123

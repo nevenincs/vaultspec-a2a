@@ -1,8 +1,8 @@
 ---
-name: "Agent Process Lifecycle"
+name: 'Agent Process Lifecycle'
 date: 2026-25-02
 type: research
-summary: "Windows-specific process management research covering asyncio subprocess patterns, graceful shutdown, health checks, state machines, and zombie prevention."
+summary: 'Windows-specific process management research covering asyncio subprocess patterns, graceful shutdown, health checks, state machines, and zombie prevention.'
 maturity: 30
 feature: agent-process-lifecycle
 ---
@@ -45,11 +45,11 @@ is needed with Python 3.13.
 
 -`asyncio.create_subprocess_exec`historically only works from the **main
 thread** on
-  Windows (see [cpython#79816](https://github.com/python/cpython/issues/79816)).
-  This
-  is a long-standing limitation. If you need to spawn subprocesses from worker
-  threads,
-  you must delegate back to the main thread's event loop.
+Windows (see [cpython#79816](https://github.com/python/cpython/issues/79816)).
+This
+is a long-standing limitation. If you need to spawn subprocesses from worker
+threads,
+you must delegate back to the main thread's event loop.
 
 - 2025 benchmarks show ProactorEventLoop achieves 1.2M msgs/sec throughput and
   18ms p99
@@ -81,7 +81,7 @@ The `SubprocessCLITransport` in
 uses `anyio`(which wraps asyncio) to manage subprocess I/O:
 
 - Opens process with`anyio.open_process(cmd, stdin=PIPE, stdout=PIPE,
-  stderr=PIPE)`
+stderr=PIPE)`
 - Wraps stdout/stderr in `TextReceiveStream` for async iteration
 - Spawns a dedicated task (`_handle_stderr`) in a `TaskGroup`to read stderr
   concurrently
@@ -108,20 +108,20 @@ uses `anyio`(which wraps asyncio) to manage subprocess I/O:
 
 1. **Concurrent reading pattern:**
 
-  ```python
-   # Pseudocode — do NOT implement yet
-   async def stream_output(process, websocket_broadcast):
-       async def read_stream(stream, stream_name):
-           while True:
-               line = await stream.readline()
-               if not line:
-                   break
-               await websocket_broadcast(stream_name, line.decode())
+```python
+ # Pseudocode — do NOT implement yet
+ async def stream_output(process, websocket_broadcast):
+     async def read_stream(stream, stream_name):
+         while True:
+             line = await stream.readline()
+             if not line:
+                 break
+             await websocket_broadcast(stream_name, line.decode())
 
-       async with asyncio.TaskGroup() as tg:
-           tg.create_task(read_stream(process.stdout, "stdout"))
-           tg.create_task(read_stream(process.stderr, "stderr"))
-   ```
+     async with asyncio.TaskGroup() as tg:
+         tg.create_task(read_stream(process.stdout, "stdout"))
+         tg.create_task(read_stream(process.stderr, "stderr"))
+```
 
 1. **Backpressure:** If WebSocket clients are slow, the relay buffer can grow
    unbounded.
@@ -181,17 +181,17 @@ equivalent of SIGKILL — there is no graceful shutdown opportunity.
 
 ### 1.4 Windows Process Termination: What Actually Works
 
-| Method | What it does | Graceful? | Kills children? |
-| -------- | ------------- | ----------- | ----------------- |
-| `process.terminate()` | Calls`TerminateProcess()` | No | No |
-| `process.kill()` | Same as`terminate()`on Windows | No | No |
-| `os.kill(pid, signal.CTRL_BREAK_EVENT)` | Sends console control event | Yes | No |
-| `os.kill(pid, signal.CTRL_C_EVENT)` | Sends Ctrl+C to process group | Yes | Yes (group) |
-| `taskkill /PID {pid}` | Sends WM_CLOSE message | Sometimes | No |
-| `taskkill /F /PID {pid}` | Force terminates | No | No |
-| `taskkill /T /PID {pid}` | Terminates process tree | Sometimes | Yes |
-| `taskkill /T /F /PID {pid}` | Force terminates process tree | No | Yes |
-| `psutil.Process(pid).children()`+`kill()` | Programmatic tree kill | No | Yes (manual) |
+| Method                                    | What it does                   | Graceful? | Kills children? |
+| ----------------------------------------- | ------------------------------ | --------- | --------------- |
+| `process.terminate()`                     | Calls`TerminateProcess()`      | No        | No              |
+| `process.kill()`                          | Same as`terminate()`on Windows | No        | No              |
+| `os.kill(pid, signal.CTRL_BREAK_EVENT)`   | Sends console control event    | Yes       | No              |
+| `os.kill(pid, signal.CTRL_C_EVENT)`       | Sends Ctrl+C to process group  | Yes       | Yes (group)     |
+| `taskkill /PID {pid}`                     | Sends WM_CLOSE message         | Sometimes | No              |
+| `taskkill /F /PID {pid}`                  | Force terminates               | No        | No              |
+| `taskkill /T /PID {pid}`                  | Terminates process tree        | Sometimes | Yes             |
+| `taskkill /T /F /PID {pid}`               | Force terminates process tree  | No        | Yes             |
+| `psutil.Process(pid).children()`+`kill()` | Programmatic tree kill         | No        | Yes (manual)    |
 
 **Recommendation:** Use`psutil` for reliable process tree management. It
 provides
@@ -224,15 +224,15 @@ parent hasn't called`wait()`). However, Windows has analogous problems:
    terminated.
    This is the most robust approach.
 
-  ```python
-   # Available via pywin32 or ctypes
-   import win32job
-   job = win32job.CreateJobObject(None, "")
-   info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
-   info['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-   win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
-   # Assign child processes to this job
-   ```
+```python
+ # Available via pywin32 or ctypes
+ import win32job
+ job = win32job.CreateJobObject(None, "")
+ info = win32job.QueryInformationJobObject(job, win32job.JobObjectExtendedLimitInformation)
+ info['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+ win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
+ # Assign child processes to this job
+```
 
 1. **atexit handler:** Register cleanup that iterates all managed processes and
    terminates
@@ -260,20 +260,20 @@ listening and ready to accept HTTP requests?
 
 1. **TCP connect probe:** Repeatedly attempt to connect to the target port.
 
-  ```python
-   # Pseudocode
-   async def wait_for_port(host, port, timeout=10.0):
-       deadline = time.monotonic() + timeout
-       while time.monotonic() < deadline:
-           try:
-               reader, writer = await asyncio.open_connection(host, port)
-               writer.close()
-               await writer.wait_closed()
-               return True
-           except (ConnectionRefusedError, OSError):
-               await asyncio.sleep(0.1)
-       return False
-   ```
+```python
+ # Pseudocode
+ async def wait_for_port(host, port, timeout=10.0):
+     deadline = time.monotonic() + timeout
+     while time.monotonic() < deadline:
+         try:
+             reader, writer = await asyncio.open_connection(host, port)
+             writer.close()
+             await writer.wait_closed()
+             return True
+         except (ConnectionRefusedError, OSError):
+             await asyncio.sleep(0.1)
+     return False
+```
 
 1. **HTTP health endpoint probe:** Better than TCP because it confirms the ASGI
    app is
@@ -422,7 +422,7 @@ Old "coder" at port 8001 (DRAINING → STOPPING → STOPPED)
 single-developer
 use but becomes valuable when agents are long-running or have expensive startup
 (e.g.,
-loading LLM context). The pattern should be *available* but not *required* — a
+loading LLM context). The pattern should be _available_ but not _required_ — a
 simple
 stop-then-start is fine for most cases.
 
@@ -430,17 +430,17 @@ stop-then-start is fine for most cases.
 
 Kubernetes rolling updates provide useful conceptual patterns:
 
-| K8s Concept | Agent Manager Analog |
-| ------------- | --------------------- |
-| Pod | Agent subprocess |
-| Deployment | Agent definition (name, config, model) |
-| ReplicaSet | Active instances of an agent definition |
-| readinessProbe | Health check (HTTP to agent card endpoint) |
-| livenessProbe | Process alive check + periodic health HTTP check |
-| terminationGracePeriodSeconds | Drain timeout |
-| maxUnavailable | Minimum agents that must be running during update |
-| maxSurge | Maximum extra agents allowed during update |
-| preStop hook | Drain initiation signal |
+| K8s Concept                   | Agent Manager Analog                              |
+| ----------------------------- | ------------------------------------------------- |
+| Pod                           | Agent subprocess                                  |
+| Deployment                    | Agent definition (name, config, model)            |
+| ReplicaSet                    | Active instances of an agent definition           |
+| readinessProbe                | Health check (HTTP to agent card endpoint)        |
+| livenessProbe                 | Process alive check + periodic health HTTP check  |
+| terminationGracePeriodSeconds | Drain timeout                                     |
+| maxUnavailable                | Minimum agents that must be running during update |
+| maxSurge                      | Maximum extra agents allowed during update        |
+| preStop hook                  | Drain initiation signal                           |
 
 ### Relevant patterns to adopt
 
@@ -519,12 +519,12 @@ From `knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/types.py`:
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
 ```
 
-| Mode | Behavior |
-| ------ | ---------- |
-| `"default"` | Ask for permission on dangerous operations |
-| `"acceptEdits"` | Auto-allow file edits, ask for other dangerous ops |
-| `"plan"` | Agent plans but does not execute (read-only) |
-| `"bypassPermissions"` | Allow everything without asking |
+| Mode                  | Behavior                                           |
+| --------------------- | -------------------------------------------------- |
+| `"default"`           | Ask for permission on dangerous operations         |
+| `"acceptEdits"`       | Auto-allow file edits, ask for other dangerous ops |
+| `"plan"`              | Agent plans but does not execute (read-only)       |
+| `"bypassPermissions"` | Allow everything without asking                    |
 
 **CanUseTool callback** (invoked at runtime per tool call):
 
@@ -543,8 +543,7 @@ This callback receives:
 
 And returns either:
 
--`PermissionResultAllow(updated_input=...)`— allow, optionally modify input
--`PermissionResultDeny(message=...)` — deny with reason
+-`PermissionResultAllow(updated_input=...)`— allow, optionally modify input -`PermissionResultDeny(message=...)` — deny with reason
 
 **PermissionUpdate** (runtime permission changes):
 
@@ -654,13 +653,13 @@ Agent: "coder"
 
 ### Recommended granularity for our use case
 
-| Level | Description | Complexity | Recommendation |
-| ------- | ------------- | ------------ | ---------------- |
-| Per-agent permission mode | 4 modes | Low | Must have |
-| Per-tool allow/deny | Toggle per tool name | Medium | Must have |
-| Per-tool with content rules | Regex/glob on tool input | High | Nice to have |
-| Per-directory scope | Allowed working dirs | Medium | Must have |
-| Per-file-operation | Read vs write vs delete | High | Defer |
+| Level                       | Description              | Complexity | Recommendation |
+| --------------------------- | ------------------------ | ---------- | -------------- |
+| Per-agent permission mode   | 4 modes                  | Low        | Must have      |
+| Per-tool allow/deny         | Toggle per tool name     | Medium     | Must have      |
+| Per-tool with content rules | Regex/glob on tool input | High       | Nice to have   |
+| Per-directory scope         | Allowed working dirs     | Medium     | Must have      |
+| Per-file-operation          | Read vs write vs delete  | High       | Defer          |
 
 **Implementation approach:** The `CanUseTool` callback in the Claude Agent SDK
 is the
@@ -697,16 +696,16 @@ Supervisord defines the most well-established process lifecycle model:
 
 ### States
 
-| State | Code | Description |
-| ------- | ------ | ------------- |
-| STOPPED | 0 | Never started, or stopped by admin |
-| STARTING | 10 | Start requested, process launched but not yet confirmed running |
-| RUNNING | 20 | Process confirmed running (survived `startsecs`threshold) |
-| BACKOFF | 30 | Start attempt failed, waiting to retry |
-| STOPPING | 40 | Stop requested, waiting for process to exit |
-| EXITED | 100 | Exited from RUNNING state (expected or unexpected) |
-| FATAL | 200 | Could not start after all retries exhausted |
-| UNKNOWN | 1000 | Supervisor lost track of process |
+| State    | Code | Description                                                     |
+| -------- | ---- | --------------------------------------------------------------- |
+| STOPPED  | 0    | Never started, or stopped by admin                              |
+| STARTING | 10   | Start requested, process launched but not yet confirmed running |
+| RUNNING  | 20   | Process confirmed running (survived `startsecs`threshold)       |
+| BACKOFF  | 30   | Start attempt failed, waiting to retry                          |
+| STOPPING | 40   | Stop requested, waiting for process to exit                     |
+| EXITED   | 100  | Exited from RUNNING state (expected or unexpected)              |
+| FATAL    | 200  | Could not start after all retries exhausted                     |
+| UNKNOWN  | 1000 | Supervisor lost track of process                                |
 
 ### Key configuration parameters
 
@@ -715,9 +714,8 @@ Supervisord defines the most well-established process lifecycle model:
 
 - `startretries`: Max retries before FATAL (default: 3)
 - `stopwaitsecs`: Timeout for graceful stop before SIGKILL (default: 10)
-| - `autorestart`: `true` | `false` | `"unexpected"`(restart on unexpected exit
-codes) |
--`exitcodes`: List of "expected" exit codes (default: [0])
+  | - `autorestart`: `true` | `false` | `"unexpected"`(restart on unexpected exit
+  codes) | -`exitcodes`: List of "expected" exit codes (default: [0])
 
 **Retry backoff:** Linear: 1s, 2s, 3s, ... up to `startretries`.
 
@@ -725,25 +723,25 @@ codes) |
 
 PM2 process states (simplified from its internal model):
 
-| State | Description |
-| ------- | ------------- |
-| online | Process is running normally |
-| stopping | Graceful stop in progress |
-| stopped | Process stopped (manual or exit 0) |
-| launching | Process starting up |
-| errored | Process exited with error |
-| one-launch-status | One-shot process (no restart) |
+| State             | Description                        |
+| ----------------- | ---------------------------------- |
+| online            | Process is running normally        |
+| stopping          | Graceful stop in progress          |
+| stopped           | Process stopped (manual or exit 0) |
+| launching         | Process starting up                |
+| errored           | Process exited with error          |
+| one-launch-status | One-shot process (no restart)      |
 
 ### PM2 restart strategies
 
-| Strategy | Trigger | Configuration |
-| ---------- | --------- | --------------- |
-| Auto-restart | On crash/exit | Default behavior |
-| Cron restart | Time-based | `cron_restart: "0 0 * * *"` |
-| Memory limit | Memory threshold | `max_memory_restart: "200M"` |
-| File watch | File changes | `watch: true` |
+| Strategy            | Trigger          | Configuration                    |
+| ------------------- | ---------------- | -------------------------------- |
+| Auto-restart        | On crash/exit    | Default behavior                 |
+| Cron restart        | Time-based       | `cron_restart: "0 0 * * *"`      |
+| Memory limit        | Memory threshold | `max_memory_restart: "200M"`     |
+| File watch          | File changes     | `watch: true`                    |
 | Exponential backoff | Repeated crashes | `exp_backoff_restart_delay: 100` |
-| No restart | One-shot script | `autorestart: false` |
+| No restart          | One-shot script  | `autorestart: false`             |
 
 ### PM2 Exponential backoff details
 
@@ -781,18 +779,18 @@ Windows:
 
 ### States for our agent process manager
 
-| State | Description | Exit conditions |
-| ------- | ------------- | ----------------- |
-| CREATED | Agent definition loaded, not yet started | → STARTING (on start command) |
-| STARTING | Process launched, waiting for port ready | → READY (health check passes), → BACKOFF (process exits or health check timeout) |
-| READY | Port is listening, agent card accessible | → RUNNING (first successful A2A interaction or after readiness delay) |
-| RUNNING | Fully operational, accepting tasks | → DRAINING (on replace/update), → STOPPING (on stop), → EXITED (unexpected exit) |
-| DRAINING | Finishing in-flight tasks, not accepting new | → STOPPING (drain complete or timeout) |
-| STOPPING | Shutdown signal sent, waiting for exit | → STOPPED (process exited), → STOPPED (force kill after timeout) |
-| STOPPED | Process not running, clean exit | → STARTING (on restart) |
-| EXITED | Unexpected process exit | → BACKOFF (if autorestart), → STOPPED (if no autorestart) |
-| BACKOFF | Waiting before retry | → STARTING (after delay), → FATAL (retries exhausted) |
-| FATAL | Cannot start, manual intervention required | → STARTING (manual restart only) |
+| State    | Description                                  | Exit conditions                                                                  |
+| -------- | -------------------------------------------- | -------------------------------------------------------------------------------- |
+| CREATED  | Agent definition loaded, not yet started     | → STARTING (on start command)                                                    |
+| STARTING | Process launched, waiting for port ready     | → READY (health check passes), → BACKOFF (process exits or health check timeout) |
+| READY    | Port is listening, agent card accessible     | → RUNNING (first successful A2A interaction or after readiness delay)            |
+| RUNNING  | Fully operational, accepting tasks           | → DRAINING (on replace/update), → STOPPING (on stop), → EXITED (unexpected exit) |
+| DRAINING | Finishing in-flight tasks, not accepting new | → STOPPING (drain complete or timeout)                                           |
+| STOPPING | Shutdown signal sent, waiting for exit       | → STOPPED (process exited), → STOPPED (force kill after timeout)                 |
+| STOPPED  | Process not running, clean exit              | → STARTING (on restart)                                                          |
+| EXITED   | Unexpected process exit                      | → BACKOFF (if autorestart), → STOPPED (if no autorestart)                        |
+| BACKOFF  | Waiting before retry                         | → STARTING (after delay), → FATAL (retries exhausted)                            |
+| FATAL    | Cannot start, manual intervention required   | → STARTING (manual restart only)                                                 |
 
 ### 4.4 Restart Policies
 
@@ -905,13 +903,13 @@ retries.
 - [BaseSubprocessTransport.**del** orphan leak —
   cpython#114177](https://github.com/python/cpython/issues/114177)
 - [Python Subprocess Termination
-Strategies](https://sqlpey.com/python/python-subprocess-termination-strategies/)
+  Strategies](https://sqlpey.com/python/python-subprocess-termination-strategies/)
 - [How to kill child processes on
   Windows](https://gist.github.com/jizhilong/6687481)
 - [Subprocess management — Python 3.14
   docs](https://docs.python.org/3/library/subprocess.html)
 - [TerminateProcess via os.kill on Windows —
-discuss.python.org](https://discuss.python.org/t/terminateprocess-via-os-kill-on-windows/30882)
+  discuss.python.org](https://discuss.python.org/t/terminateprocess-via-os-kill-on-windows/30882)
 
 ### Part 1: Uvicorn Shutdown and Port Allocation
 
@@ -920,31 +918,31 @@ discuss.python.org](https://discuss.python.org/t/terminateprocess-via-os-kill-on
   DeepWiki](https://deepwiki.com/encode/uvicorn/4.2-process-management)
 - [Uvicorn Settings](https://www.uvicorn.org/settings/)
 - [Starting and Stopping uvicorn in the
-Background](https://bugfactory.io/articles/starting-and-stopping-uvicorn-in-the-background/)
+  Background](https://bugfactory.io/articles/starting-and-stopping-uvicorn-in-the-background/)
 - [How to Avoid Port Conflicts —
-BugFactory](https://bugfactory.io/articles/how-to-avoid-conflicts-and-let-your-os-select-a-random-port/)
+  BugFactory](https://bugfactory.io/articles/how-to-avoid-conflicts-and-let-your-os-select-a-random-port/)
 - [Stream subprocess output with
   asyncio](https://gist.github.com/gh640/50953484edfa846fda9a95374df57900)
 
 ### Part 2: Deployment Patterns
 
 - [Rolling vs Blue-Green Deployments —
-Harness](https://www.harness.io/blog/difference-between-rolling-and-blue-green-deployments)
+  Harness](https://www.harness.io/blog/difference-between-rolling-and-blue-green-deployments)
 - [What is Blue-Green Deployment — Red
   Hat](https://www.redhat.com/en/topics/devops/what-is-blue-green-deployment)
 - [Circuit Breaker Pattern in Microservices —
-GeeksforGeeks](https://www.geeksforgeeks.org/system-design/what-is-circuit-breaker-pattern-in-microservices/)
+  GeeksforGeeks](https://www.geeksforgeeks.org/system-design/what-is-circuit-breaker-pattern-in-microservices/)
 - [Implementing Circuit Breaker in
-FastAPI](https://blog.stackademic.com/system-design-1-implementing-the-circuit-breaker-pattern-in-fastapi-e96e8864f342)
+  FastAPI](https://blog.stackademic.com/system-design-1-implementing-the-circuit-breaker-pattern-in-fastapi-e96e8864f342)
 - [pybreaker — GitHub](https://github.com/danielfm/pybreaker)
 - [circuitbreaker — PyPI](https://pypi.org/project/circuitbreaker/)
 
 ### Part 3: MCP Permissions
 
 - [Dynamic Tool Updates in Spring AI
-MCP](https://spring.io/blog/2025/05/04/spring-ai-dynamic-tool-updates-with-mcp/)
+  MCP](https://spring.io/blog/2025/05/04/spring-ai-dynamic-tool-updates-with-mcp/)
 - [MCP Permissions —
-Cerbos](https://www.cerbos.dev/blog/mcp-permissions-securing-ai-agent-access-to-tools)
+  Cerbos](https://www.cerbos.dev/blog/mcp-permissions-securing-ai-agent-access-to-tools)
 - [MCP Authorization — Cerbos](https://www.cerbos.dev/blog/mcp-authorization)
 - [Dynamic MCP Server —
   GitHub](https://github.com/scitara-cto/dynamic-mcp-server)
@@ -963,19 +961,14 @@ Cerbos](https://www.cerbos.dev/blog/mcp-permissions-securing-ai-agent-access-to-
 - [PM2 Graceful
   Shutdown](https://pm2.keymetrics.io/docs/usage/signals-clean-restart/)
 - [Complete Guide to PM2 —
-AppSignal](https://blog.appsignal.com/2022/03/09/a-complete-guide-to-nodejs-process-management-with-pm2.html)
+  AppSignal](https://blog.appsignal.com/2022/03/09/a-complete-guide-to-nodejs-process-management-with-pm2.html)
 
 ### Repository References (Local Knowledge)
 
 -`knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/types.py`—
-PermissionMode, CanUseTool, PermissionUpdate
--`knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/_internal/transport/subprocess_cli.py`—
-Subprocess management reference
--`knowledge/repositories/claude-agent-sdk/examples/tool_permission_callback.py`—
-Permission callback example
--`knowledge/repositories/acp-python-sdk/src/acp/contrib/permissions.py`—
-PermissionBroker, PermissionOption
--`knowledge/repositories/acp-python-sdk/src/acp/schema.py`—
-PermissionOptionKind, RequestPermissionRequest/Response
--`knowledge/repositories/acp-python-sdk/src/acp/task/state.py` —
+PermissionMode, CanUseTool, PermissionUpdate -`knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/_internal/transport/subprocess_cli.py`—
+Subprocess management reference -`knowledge/repositories/claude-agent-sdk/examples/tool_permission_callback.py`—
+Permission callback example -`knowledge/repositories/acp-python-sdk/src/acp/contrib/permissions.py`—
+PermissionBroker, PermissionOption -`knowledge/repositories/acp-python-sdk/src/acp/schema.py`—
+PermissionOptionKind, RequestPermissionRequest/Response -`knowledge/repositories/acp-python-sdk/src/acp/task/state.py` —
 MessageStateStore pattern

@@ -26,7 +26,6 @@
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [
     "playwright",
-    "svelte",
     "shadcn-ui",
     "chrome-devtools",
     "docs-langchain",

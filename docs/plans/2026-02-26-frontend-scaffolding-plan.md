@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: plan
 feature: frontend-scaffolding
-description: "Technical scaffolding steps for the SvelteKit frontend at src/ui/, establishing the typed API layer, state stores, and component stubs per ADR-005, ADR-007, ADR-009, and ADR-011."
+description: 'Technical scaffolding steps for the React frontend at src/ui/, establishing the typed API layer, state stores, and component stubs per ADR-005, ADR-007, ADR-009, and ADR-011.'
 related_adrs:
   - docs/adrs/2026-02-26-005-frontend-rendering-stack-adr.md
   - docs/adrs/2026-02-26-007-tech-stack-deployment-adr.md
@@ -19,50 +19,49 @@ related_research:
 
 The backend wire contract (`lib/api/schemas/`) is complete with 51 Pydantic v2
 types defining the full WebSocket + REST protocol. No frontend code exists yet.
-This plan scaffolds the SvelteKit application at `src/ui/`per ADR-005, ADR-007,
+This plan scaffolds the React application at `src/ui/`per ADR-005, ADR-007,
 ADR-009, and ADR-011, producing a buildable project with typed API layer, state
 stores, and component stubs ready for UI development.
 
-## Step 1 — Scaffold SvelteKit project
+## Step 1 — Scaffold React project
 
-Create`src/ui/` as a standalone SvelteKit project with adapter-static (SPA mode
+Create`src/ui/` as a standalone React project with adapter-static (SPA mode
 per ADR-007: FastAPI serves compiled static assets).
 
 ```bash
 npx sv create src/ui
 ```
 
-Options: Svelte 5, TypeScript, adapter-static, no demo app.
+Options: React 5, TypeScript, adapter-static, no demo app.
 
-Then configure `svelte.config.js`:
+Then configure `React.config.js`:
 
-- `adapter-static`with`fallback: 'index.html'`(SPA client-side routing)
--`paths.base`empty (served at root by FastAPI)
+- `adapter-static`with`fallback: 'index.html'`(SPA client-side routing) -`paths.base`empty (served at root by FastAPI)
 
 Configure`vite.config.ts`:
 
 - `build.outDir`→`build/`(default, FastAPI serves from`src/ui/build/`)
 
-**Files created:** `src/ui/package.json`, `src/ui/svelte.config.js`,
+**Files created:** `src/ui/package.json`, `src/ui/React.config.js`,
 `src/ui/vite.config.ts`, `src/ui/tsconfig.json`, `src/ui/src/app.html`,
 `src/ui/src/app.d.ts`
 
-## Step 2 — Install shadcn-svelte + Tailwind CSS v4
+## Step 2 — Install shadcn-React + Tailwind CSS v4
 
 ```bash
-cd src/ui && npx shadcn-svelte@latest init
+cd src/ui && npx shadcn-React@latest init
 ```
 
 This sets up:
 
 - Tailwind CSS v4 (Oxide engine) via `@tailwindcss/vite`
-- Bits UI (headless primitives underneath shadcn-svelte)
+- Bits UI (headless primitives underneath shadcn-React)
 - `src/ui/src/lib/components/ui/` directory for shadcn components
 
 Add initial shadcn components needed for the control surface:
 
 ```bash
-npx shadcn-svelte@latest add button card badge separator scroll-area dialog alert
+npx shadcn-React@latest add button card badge separator scroll-area dialog alert
 ```
 
 **Files created/modified:** `src/ui/src/app.css` (Tailwind directives + theme),
@@ -84,13 +83,11 @@ Contents (mirrors `lib/api/schemas/` 1:1):
   `AgentLifecycleState`, `ToolKind`, `ToolCallStatus`, `PermissionOptionKind`,
   `AgentControlAction`, `PlanEntryStatus`, `PlanEntryPriority`, `Provider`,
   `Model`)
-- `EventEnvelope`interface (thread-scoped base)
--`ClientCommand`interface (client base)
+- `EventEnvelope`interface (thread-scoped base) -`ClientCommand`interface (client base)
 - 12 server event interfaces
-- 6 client command interfaces
--`ServerEvent`/`ClientMessage`discriminated unions
+- 6 client command interfaces -`ServerEvent`/`ClientMessage`discriminated unions
 - Component types:`ToolCallLocation`, `ToolCallContent`(union),
- `PlanEntry`, `PermissionOption`, `AgentSummary`
+  `PlanEntry`, `PermissionOption`, `AgentSummary`
 - REST models: `CreateThreadRequest/Response`, `SendMessageRequest`,
   `ThreadSummary`, `ThreadListResponse`, `TeamStatusResponse`,
   `PermissionResponseRequest/Result`
@@ -131,15 +128,15 @@ Typed fetch wrappers for all 6 REST endpoints:
 - `sendMessage(threadId: string, req: SendMessageRequest): Promise<void>`
 - `getTeamStatus(): Promise<TeamStatusResponse>`
 - `respondToPermission(requestId: string, req: PermissionResponseRequest):
-  Promise<PermissionResponseResult>`
+Promise<PermissionResponseResult>`
 
 Base URL configurable. All functions throw typed errors.
 
-## Step 6 — Svelte 5 Runes stores
+## Step 6 — React 5 Runes stores
 
 Three stores using `$state`and`$derived`runes:
 
-### `src/ui/src/lib/stores/agent-state.svelte.ts`
+### `src/ui/src/lib/stores/agent-state.React.ts`
 
 - Per-thread state map: `Map<threadId, ThreadState>`
 - `ThreadState`tracks: lifecycle state, messages (append-only),
@@ -150,34 +147,32 @@ Three stores using `$state`and`$derived`runes:
 - `restoreFromSnapshot(snapshot: ThreadStateSnapshot)`— bulk state
   restoration on reconnect
 
-### `src/ui/src/lib/stores/team-state.svelte.ts`
+### `src/ui/src/lib/stores/team-state.React.ts`
 
 - `agents: AgentSummary[]`— updated from`TeamStatusEvent`
 - `activeThreadIds: string[]`
 - Method: `applyTeamStatus(event: TeamStatusEvent)`
 
-### `src/ui/src/lib/stores/permission-queue.svelte.ts`
+### `src/ui/src/lib/stores/permission-queue.React.ts`
 
 - FIFO queue of `PermissionRequestEvent`
-- `current`— the head of the queue (active permission request)
--`enqueue(event: PermissionRequestEvent)`
-- `dequeue()`— removes head after user responds
--`respond(requestId, optionId)`— calls REST endpoint + dequeues
+- `current`— the head of the queue (active permission request) -`enqueue(event: PermissionRequestEvent)`
+- `dequeue()`— removes head after user responds -`respond(requestId, optionId)`— calls REST endpoint + dequeues
 
 ## Step 7 — Application layout + routes
 
-### `src/ui/src/routes/+layout.svelte`
+### `src/ui/src/routes/+layout.React`
 
 - App shell: sidebar (thread list) + main content area
 - Initialize WebSocket connection on mount
 - Wire WebSocket events → stores
 
-### `src/ui/src/routes/+page.svelte`
+### `src/ui/src/routes/+page.React`
 
 - Landing/thread list view
 - "New Thread" button → `POST /threads`
 
-### `src/ui/src/routes/thread/[id]/+page.svelte`
+### `src/ui/src/routes/thread/[id]/+page.React`
 
 - Thread detail view: message stream, tool calls, artifacts, plan
 - Subscribe to thread on mount, unsubscribe on destroy
@@ -185,30 +180,30 @@ Three stores using `$state`and`$derived`runes:
 
 ## Step 8 — Component directory stubs
 
-Create component directories with minimal skeleton`.svelte` files that
+Create component directories with minimal skeleton`.React` files that
 accept the correct typed props. Each renders a basic placeholder using
 shadcn primitives so the app is visually functional from first build.
 
 ```text
 src/ui/src/lib/components/
 ├── message/
-│   └── MessageBubble.svelte        # props: MessageChunkEvent | ThoughtChunkEvent
+│   └── MessageBubble.React        # props: MessageChunkEvent | ThoughtChunkEvent
 ├── tool-call/
-│   └── ToolCallCard.svelte         # props: ToolCallStartEvent (merged with updates)
+│   └── ToolCallCard.React         # props: ToolCallStartEvent (merged with updates)
 ├── permission/
-│   └── PermissionModal.svelte      # props: PermissionRequestEvent
+│   └── PermissionModal.React      # props: PermissionRequestEvent
 ├── plan/
-│   └── PlanView.svelte             # props: PlanEntry[]
+│   └── PlanView.React             # props: PlanEntry[]
 ├── artifact/
-│   └── ArtifactViewer.svelte       # props: {filename, content, complete}
+│   └── ArtifactViewer.React       # props: {filename, content, complete}
 ├── team-status/
-│   └── TeamStatusPanel.svelte      # props: AgentSummary[]
+│   └── TeamStatusPanel.React      # props: AgentSummary[]
 ├── markdown/
-│   └── MarkdownRenderer.svelte     # props: {content: string, streaming: boolean}
+│   └── MarkdownRenderer.React     # props: {content: string, streaming: boolean}
 ├── diff/
-│   └── DiffViewer.svelte           # props: ToolCallContentDiff
+│   └── DiffViewer.React           # props: ToolCallContentDiff
 └── terminal/
-    └── TerminalOutput.svelte       # props: {terminalId: string, content: string}
+    └── TerminalOutput.React       # props: {terminalId: string, content: string}
 ```
 
 Each component will:
@@ -220,15 +215,14 @@ Each component will:
 
 ## Step 9 — Build verification
 
-- `cd src/ui && npm install && npm run build`— verify clean SPA build
--`npm run check`— verify TypeScript types pass svelte-check
+- `cd src/ui && npm install && npm run build`— verify clean SPA build -`npm run check`— verify TypeScript types pass React-check
 - Verify`src/ui/build/`contains`index.html`+ assets
 
 ## Files modified outside src/ui/
 
 - **Root`package.json`**: No changes needed (existing eslint/prettier configs
   will lint src/ui/ files via the plugins already installed)
-- **Root `.gitignore`**: Add `src/ui/node_modules/`, `src/ui/.svelte-kit/`,
+- **Root `.gitignore`**: Add `src/ui/node_modules/`, `src/ui/.React-kit/`,
   `src/ui/build/`if not already covered
 
 ## Critical constraints observed

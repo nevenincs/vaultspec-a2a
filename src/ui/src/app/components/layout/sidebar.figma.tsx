@@ -1,6 +1,6 @@
-import figma from '@figma/code-connect'
-import { Sidebar } from './sidebar'
-import type { ThreadSummary } from '../../data/types'
+import figma from '@figma/code-connect';
+import { Sidebar } from './sidebar';
+import type { ThreadSummary } from '../../data/types';
 
 /**
  * Code Connect mapping for Sidebar.
@@ -15,14 +15,18 @@ import type { ThreadSummary } from '../../data/types'
  * - clearActiveTab: () => void — deselect active tab
  * - onFocusSearchRef: MutableRefObject — exposes Ctrl+K focus trigger to AppShell
  */
-figma.connect(Sidebar, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <Sidebar
-      threads={[]}
-      activeTabId={null}
-      openTransient={() => {}}
-      openPinned={() => {}}
-      clearActiveTab={() => {}}
-    />
-  ),
-})
+figma.connect(
+  Sidebar,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <Sidebar
+        threads={[]}
+        activeTabId={null}
+        openTransient={() => {}}
+        openPinned={() => {}}
+        clearActiveTab={() => {}}
+      />
+    ),
+  },
+);

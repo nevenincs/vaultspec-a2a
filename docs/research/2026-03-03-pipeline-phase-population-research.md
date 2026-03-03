@@ -1,9 +1,9 @@
 ---
-title: "Research: pipeline_phase Population"
+title: 'Research: pipeline_phase Population'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "How should a multi-stage agent pipeline track which phase it is in? Analysis of deterministic inference, LLM-driven, and hybrid approaches for setting pipeline_phase in TeamState."
+description: 'How should a multi-stage agent pipeline track which phase it is in? Analysis of deterministic inference, LLM-driven, and hybrid approaches for setting pipeline_phase in TeamState.'
 ---
 
 # Research: pipeline_phase Population
@@ -33,7 +33,7 @@ CrewAI offers two process modes:
 
 **Sequential process:** Tasks execute in a fixed order. Phase is implicit in the task index — there is no explicit phase field. When task N completes, phase N+1 begins. No LLM involvement in phase transitions.
 
-**Hierarchical process:** A manager LLM delegates tasks to worker agents. The manager determines *which worker to call* but not an explicit phase label. CrewAI has no concept of a `pipeline_phase` field in its shared context.
+**Hierarchical process:** A manager LLM delegates tasks to worker agents. The manager determines _which worker to call_ but not an explicit phase label. CrewAI has no concept of a `pipeline_phase` field in its shared context.
 
 **Key lesson:** CrewAI sidesteps phase tracking entirely by structuring it as task sequencing (sequential) or delegation (hierarchical). Neither approach exposes a named phase to agents. For vaultspec's use case — where agents need to know "I am in the exec phase; read `.vault/exec/` documents" — CrewAI's implicit approach is insufficient. A named, queryable phase field is necessary.
 
@@ -74,7 +74,7 @@ The paper explicitly distinguishes the control unit from the agents themselves:
 
 > "The control unit is not itself a knowledge source. It does not produce blackboard content. Its role is to observe the blackboard and determine activation order."
 
-For phase tracking, this maps directly to: the supervisor (acting as control unit) should *observe* the vault_index and *infer* phase — it should not *produce* a phase as part of its LLM output.
+For phase tracking, this maps directly to: the supervisor (acting as control unit) should _observe_ the vault_index and _infer_ phase — it should not _produce_ a phase as part of its LLM output.
 
 **Key lesson:** Phase determination is a control-unit responsibility, not a knowledge-source responsibility. It should be computed deterministically from observed blackboard state, then injected into the context for agents to read.
 
@@ -107,6 +107,7 @@ def _infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
 ```
 
 **Pros:**
+
 - Deterministic — no LLM hallucination risk on a structurally binding field
 - Zero additional tokens — no extra LLM call
 - Self-correcting — if an agent writes a new artifact and updates `vault_index`, the phase automatically advances on the next supervisor call
@@ -115,6 +116,7 @@ def _infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
 - Works correctly on session restart (artifacts persist on disk, `vault_index` rebuilt at graph compilation)
 
 **Cons:**
+
 - Cannot distinguish between "in progress at this phase" and "starting this phase" — phase is always the highest phase with any artifacts
 - Cannot handle non-linear phase orders (e.g., jumping from `plan` back to `adr` after a major revision) without artifact deletion
 - `vault_index` is populated at graph compilation from disk scan — if an artifact is written mid-session but `vault_index` is not updated, the inferred phase may lag
@@ -130,10 +132,12 @@ class RoutingDecision(BaseModel):
 ```
 
 **Pros:**
+
 - Flexible — the LLM can read context and declare a phase that does not follow strict artifact presence rules
 - Can handle edge cases (e.g., "we have ADR artifacts but user wants to go back to research")
 
 **Cons:**
+
 - Fragile — the LLM may hallucinate a phase value (e.g., `"implementation"` instead of `"exec"`) despite the Literal constraint; structured output reduces but does not eliminate this risk
 - `pipeline_phase` is consumed by anchoring (ADR-022), mounting (ADR-020), and queue injection (ADR-021) — a wrong value has cascading effects
 - Adds a Pydantic-constrained structured output requirement to the supervisor, increasing model invocation cost and constraining which models can serve as supervisor
@@ -156,11 +160,13 @@ else:
 ```
 
 **Pros:**
+
 - Combines determinism with flexibility
 - LLM can signal "we're done with plan, starting exec" even before the first exec artifact appears
 - Phase cannot regress below the artifact-inferred baseline
 
 **Cons:**
+
 - Requires structured output from the supervisor — adds model constraint and token overhead
 - The "LLM can advance phase" path still has hallucination risk (LLM declares `exec` when no exec work has been done)
 - Adds implementation complexity: two phase computation paths, tiebreaker logic, structured output schema
@@ -185,6 +191,7 @@ Both options correctly handle first session. Option A is sufficient.
 ## 4. Ambiguity Analysis — Can Phase Be Inferred from vault_index Alone?
 
 **Unambiguous cases (majority):**
+
 - `vault_index = {}` → `research`
 - Only research entries → `research`
 - research + adr entries, no plan → `adr`
@@ -193,6 +200,7 @@ Both options correctly handle first session. Option A is sufficient.
 - Any audit entries → `audit`
 
 **Potentially ambiguous cases:**
+
 - A feature that has ADRs but was deliberately re-opened at research phase — the human has asked the agent to do more research before revising an ADR. The vault_index-inferred phase would be `adr`, but the correct phase is `research`.
 - A feature transitioning from `plan` to `exec` — the first exec invocation happens with no exec artifacts yet; `vault_index["exec"]` is empty, so inferred phase is `plan`.
 
@@ -220,6 +228,7 @@ The supervisor node returns `{"next": route, "pipeline_phase": inferred_phase}` 
 **Implement Option A (deterministic inference) as the primary mechanism.**
 
 Rationale:
+
 1. Phase determination is a control-unit responsibility (2507.01701) — it observes blackboard state, it does not produce it
 2. MetaGPT and all surveyed frameworks use deterministic phase management, not LLM-driven phase output
 3. `pipeline_phase` has cascading downstream effects (anchoring, mounting, queue injection) — hallucination risk is unacceptable
@@ -228,12 +237,14 @@ Rationale:
 6. Option C adds implementation complexity and a structured output constraint for marginal benefit
 
 **If Option C (hybrid) is chosen** (team lead recommendation), the implementation should:
+
 - Keep the deterministic inference as the default and the floor
 - Use a `phase_hint` field (optional) in structured output, not a required `phase` field
 - Only accept LLM phase advances in the forward direction
 - Ensure supervisor models that do not support structured output gracefully fall back to Option A
 
 **For the ADR-026 scope**, the minimum binding decision is:
+
 1. `_infer_phase_from_vault_index(vault_index)` is a private function in `lib/core/graph.py` (or `lib/core/phase.py`)
 2. Called by `create_supervisor_node()` on every invocation
 3. Result written as `pipeline_phase` in the supervisor return dict

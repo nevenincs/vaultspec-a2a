@@ -1,8 +1,8 @@
 ---
-name: "Protocols Gaps Research"
+name: 'Protocols Gaps Research'
 date: 2026-25-02
 type: research
-summary: "Rigorous analysis of protocol bridging, focusing on state translation logic, queueing mechanics for elicitations, and MCP compliance."
+summary: 'Rigorous analysis of protocol bridging, focusing on state translation logic, queueing mechanics for elicitations, and MCP compliance.'
 maturity: 70
 feature: protocol-gaps
 ---
@@ -47,15 +47,15 @@ def aggregate_team_status(agent_states: List[A2AState]) -> MCPState:
     # 1. Terminal Failures take absolute precedence (fail fast)
     if any(s in (A2AState.FAILED, A2AState.REJECTED) for s in agent_states):
         return MCPState.FAILED
-        
+
     # 2. Blockers halt the entire team from the CLI's perspective
     if any(s in (A2AState.INPUT_REQUIRED, A2AState.AUTH_REQUIRED) for s in agent_states):
         return MCPState.INPUT_REQUIRED
-        
+
     # 3. Success is only achieved when ALL agents are done
     if all(s == A2AState.COMPLETED for s in agent_states):
         return MCPState.COMPLETED
-        
+
     # 4. If anyone is cancelled, the session is cancelled
     if any(s == A2AState.CANCELED for s in agent_states):
         return MCPState.CANCELLED

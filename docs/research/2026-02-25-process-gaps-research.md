@@ -1,8 +1,8 @@
 ---
-name: "Process Gaps Research"
+name: 'Process Gaps Research'
 date: 2026-25-02
 type: research
-summary: "Rigorous analysis of Windows 11 subprocess management for A2A agents, detailing pywin32 Job Object implementation and state machine thresholds."
+summary: 'Rigorous analysis of Windows 11 subprocess management for A2A agents, detailing pywin32 Job Object implementation and state machine thresholds.'
 maturity: 75
 feature: process-gaps
 ---
@@ -45,7 +45,7 @@ import subprocess
 def spawn_agent_in_job(cmd: list[str]):
     # 1. Create a headless job object
     hJob = win32job.CreateJobObject(None, "")
-    
+
     # 2. Configure the OS to kill all children when the parent handle closes
     info = win32job.QueryInformationJobObject(hJob, win32job.JobObjectExtendedLimitInformation)
     info['BasicLimitInformation']['LimitFlags'] = win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
@@ -53,12 +53,12 @@ def spawn_agent_in_job(cmd: list[str]):
 
     # 3. Spawn the subprocess (suspended)
     proc = subprocess.Popen(cmd, creationflags=win32con.CREATE_SUSPENDED | win32con.CREATE_NEW_PROCESS_GROUP)
-    
+
     # 4. Assign the process to the Job, then resume
     handle = win32api.OpenProcess(win32con.PROCESS_SET_QUOTA | win32con.PROCESS_TERMINATE, False, proc.pid)
     win32job.AssignProcessToJobObject(hJob, handle)
     # Windows API requires resuming the main thread (implementation details via pywin32...)
-    
+
     # Crucial: The orchestrator MUST keep `hJob` in memory. If hJob is garbage collected, the child dies.
     return proc, hJob
 ```
@@ -81,9 +81,9 @@ exists`check results in false positives ("Running but not ready").
 **Rationale**:
 
 1. **`STARTING`->`READY`**: Transition occurs when an HTTP `GET
-   /.well-known/agent.json` returns HTTP 200. This confirms the ASGI server
+/.well-known/agent.json` returns HTTP 200. This confirms the ASGI server
    (Uvicorn) is bound and the A2A routing layer is responsive.
-2. **`READY`->`RUNNING`**: Transition occurs *only* if the process survives for
+2. **`READY`->`RUNNING`**: Transition occurs _only_ if the process survives for
    **30 seconds** without exiting.
    - If it crashes `< 30s`: It is classified as a `STARTUP_FAILURE`. The process
      manager triggers aggressive exponential backoff (e.g., 2s -> 4s -> 8s) to

@@ -1,8 +1,8 @@
 ---
-name: "LangChain Reference"
+name: 'LangChain Reference'
 date: 2026-25-02
 type: reference
-summary: "Core LangChain library reference covering model abstraction, prompts, tools, agents, and memory for provider-agnostic integration."
+summary: 'Core LangChain library reference covering model abstraction, prompts, tools, agents, and memory for provider-agnostic integration.'
 maturity: 50
 ---
 

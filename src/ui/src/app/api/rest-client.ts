@@ -5,19 +5,19 @@
  * Permission responses MUST go via REST (WS rejects them).
  */
 
-import type {
-  CreateThreadRequest,
-  CreateThreadResponse,
-  ThreadListResponse,
-  ThreadStateSnapshot,
-  ThreadMetadata,
-  SendMessageRequest,
-  SendMessageResponse,
-  TeamStatusResponse,
-  TeamPresetsResponse,
-  PermissionResponseRequest,
-  PermissionResponseResult,
-} from '../data/wire-types';
+import type { components } from '../data/wire-types';
+
+type CreateThreadRequest = components['schemas']['CreateThreadRequest'];
+type CreateThreadResponse = components['schemas']['CreateThreadResponse'];
+type ThreadListResponse = components['schemas']['ThreadListResponse'];
+type ThreadStateSnapshot = components['schemas']['ThreadStateSnapshot'];
+type ThreadMetadata = components['schemas']['ThreadMetadata'];
+type SendMessageRequest = components['schemas']['SendMessageRequest'];
+type SendMessageResponse = components['schemas']['SendMessageResponse'];
+type TeamStatusResponse = components['schemas']['TeamStatusResponse'];
+type TeamPresetsResponse = components['schemas']['TeamPresetsResponse'];
+type PermissionResponseRequest = components['schemas']['PermissionResponseRequest'];
+type PermissionResponseResult = components['schemas']['PermissionResponseResult'];
 
 class RestClientError extends Error {
   constructor(

@@ -1,8 +1,8 @@
 ---
-name: "MCP Tool Description Best Practices"
+name: 'MCP Tool Description Best Practices'
 date: 2026-03-02
 type: research
-summary: "Best practices for writing MCP tool names, descriptions, and parameter annotations to maximize LLM discoverability and correct invocation."
+summary: 'Best practices for writing MCP tool names, descriptions, and parameter annotations to maximize LLM discoverability and correct invocation.'
 maturity: 80
 feature: mcp-tool-descriptions
 ---
@@ -50,12 +50,12 @@ def sum(a: int, b: int) -> int: ...
 
 ### 2.2 Cross-Platform Patterns
 
-| Source | Convention | Examples |
-|--------|-----------|----------|
-| MCP SDK | `snake_case` | `get_weather`, `long_running_task` |
-| OpenAI | `snake_case` | `get_weather`, `get_location` |
-| Anthropic | `snake_case` | `get_weather`, `get_time` |
-| GitHub MCP servers | `slash_namespace` | `github_create_issue` |
+| Source             | Convention        | Examples                           |
+| ------------------ | ----------------- | ---------------------------------- |
+| MCP SDK            | `snake_case`      | `get_weather`, `long_running_task` |
+| OpenAI             | `snake_case`      | `get_weather`, `get_location`      |
+| Anthropic          | `snake_case`      | `get_weather`, `get_time`          |
+| GitHub MCP servers | `slash_namespace` | `github_create_issue`              |
 
 ### 2.3 Best Practices for Names
 
@@ -81,6 +81,7 @@ Anthropic's official documentation states:
 > factor in tool performance."**
 
 Specific guidance:
+
 - **Aim for at least 3-4 sentences per tool description**, more for complex tools.
 - Explain every detail about the tool including **important caveats or limitations**.
 - State **what information the tool does NOT return** if the tool name is unclear.
@@ -92,6 +93,7 @@ Specific guidance:
 ### 3.2 OpenAI's Guidance
 
 OpenAI recommends:
+
 - Be **concise but descriptive** — tool definitions become part of context on
   every call, affecting cost and latency.
 - Use **strict mode** (`strict: true`) to ensure function calls reliably
@@ -101,6 +103,7 @@ OpenAI recommends:
 ### 3.3 MCP Spec Guidance
 
 The MCP specification and documentation recommend:
+
 - Provide **clear, descriptive names and descriptions**.
 - Use **detailed JSON Schema definitions** for parameters.
 - Include **examples in tool descriptions** to demonstrate usage.
@@ -151,11 +154,11 @@ async def start_thread(initial_message: str) -> str:
 
 ### 3.5 Description Length Guidance
 
-| Provider | Minimum | Recommended | Maximum |
-|----------|---------|-------------|---------|
-| Anthropic | 3-4 sentences | 4-6 sentences | No hard limit, but token cost increases |
-| OpenAI | 1 sentence | 2-3 sentences | "Concise but descriptive" |
-| MCP Spec | Not specified | "Clear, descriptive" | Not specified |
+| Provider  | Minimum       | Recommended          | Maximum                                 |
+| --------- | ------------- | -------------------- | --------------------------------------- |
+| Anthropic | 3-4 sentences | 4-6 sentences        | No hard limit, but token cost increases |
+| OpenAI    | 1 sentence    | 2-3 sentences        | "Concise but descriptive"               |
+| MCP Spec  | Not specified | "Clear, descriptive" | Not specified                           |
 
 **Recommendation for vaultspec**: Aim for **4-6 sentences** per tool. Our MCP
 server has fewer than 10 tools, so the token overhead is minimal. Thorough
@@ -191,33 +194,37 @@ class WeatherData(BaseModel):
 
 ### 4.2 Cross-Provider Parameter Patterns
 
-| Practice | Anthropic | OpenAI | MCP |
-|----------|-----------|--------|-----|
-| Include format examples | Yes: `"e.g. San Francisco, CA"` | Yes: same pattern | Yes |
-| Document enum values | Yes: in description | Yes: `"enum"` field | Yes: JSON Schema |
-| State constraints | Yes: in description | Yes: schema constraints | Yes: JSON Schema |
-| Document defaults | Yes: in description | Yes: schema `default` | Yes: Python default |
+| Practice                | Anthropic                       | OpenAI                  | MCP                 |
+| ----------------------- | ------------------------------- | ----------------------- | ------------------- |
+| Include format examples | Yes: `"e.g. San Francisco, CA"` | Yes: same pattern       | Yes                 |
+| Document enum values    | Yes: in description             | Yes: `"enum"` field     | Yes: JSON Schema    |
+| State constraints       | Yes: in description             | Yes: schema constraints | Yes: JSON Schema    |
+| Document defaults       | Yes: in description             | Yes: schema `default`   | Yes: Python default |
 
 ### 4.3 Synthesized Parameter Description Rules
 
 1. **Always include a format example** for string parameters:
+
    ```
    "The thread ID returned by start_thread, e.g. '550e8400-e29b-41d4-a716-446655440000'"
    ```
 
 2. **State valid values explicitly** for constrained parameters:
+
    ```
    "Team preset ID. Valid values: 'vaultspec-adaptive-coder', 'vaultspec-solo-coder', etc.
     Use list_team_presets to discover available presets."
    ```
 
 3. **Document what happens with None/default** for optional parameters:
+
    ```
    "Workspace root path. If omitted, context injection is disabled and the
     thread runs without project-specific files."
    ```
 
 4. **Cross-reference related tools** in parameter descriptions:
+
    ```
    "The thread_id returned by start_thread. Use list_threads to find
     existing thread IDs."
@@ -268,22 +275,22 @@ pass to cancel), structured returns would improve reliability.
 
 ### 6.1 Descriptions That Cause Misselection
 
-| Anti-Pattern | Problem | Fix |
-|-------------|---------|-----|
-| Identical first sentences | LLM can't distinguish tools | Differentiate in first 10 words |
-| Jargon-only descriptions | LLM may not know domain terms | Use plain language first, jargon second |
-| Missing negative guidance | LLM uses tool when it shouldn't | Add "Do NOT use this tool for..." |
-| No return format | LLM guesses output shape | Document return structure |
-| Overly long descriptions | Token waste, attention dilution | Front-load key info, trim filler |
+| Anti-Pattern              | Problem                         | Fix                                     |
+| ------------------------- | ------------------------------- | --------------------------------------- |
+| Identical first sentences | LLM can't distinguish tools     | Differentiate in first 10 words         |
+| Jargon-only descriptions  | LLM may not know domain terms   | Use plain language first, jargon second |
+| Missing negative guidance | LLM uses tool when it shouldn't | Add "Do NOT use this tool for..."       |
+| No return format          | LLM guesses output shape        | Document return structure               |
+| Overly long descriptions  | Token waste, attention dilution | Front-load key info, trim filler        |
 
 ### 6.2 Parameter Descriptions That Cause Hallucination
 
-| Anti-Pattern | Problem | Fix |
-|-------------|---------|-----|
-| No format example | LLM invents format | Add `"e.g. ..."` |
-| Ambiguous type | LLM sends wrong type | Use strict JSON Schema types |
-| Missing constraints | LLM sends out-of-range values | State limits in description |
-| No cross-reference | LLM guesses parameter values | Reference tool that provides valid values |
+| Anti-Pattern        | Problem                       | Fix                                       |
+| ------------------- | ----------------------------- | ----------------------------------------- |
+| No format example   | LLM invents format            | Add `"e.g. ..."`                          |
+| Ambiguous type      | LLM sends wrong type          | Use strict JSON Schema types              |
+| Missing constraints | LLM sends out-of-range values | State limits in description               |
+| No cross-reference  | LLM guesses parameter values  | Reference tool that provides valid values |
 
 ---
 
@@ -313,6 +320,7 @@ Apply this checklist when reviewing each tool in `lib/protocols/mcp/server.py`:
 ```
 
 **Issues**:
+
 - Only 1 sentence (should be 4-6)
 - No guidance on when to use vs. send_message
 - No return format documentation
@@ -325,6 +333,7 @@ Apply this checklist when reviewing each tool in `lib/protocols/mcp/server.py`:
 ```
 
 **Issues**:
+
 - Only 1 sentence
 - No return format documentation
 - No guidance on polling frequency
@@ -337,6 +346,7 @@ Apply this checklist when reviewing each tool in `lib/protocols/mcp/server.py`:
 ```
 
 **Issues**:
+
 - Only 1 sentence
 - Leaks HTTP detail ("202") irrelevant to MCP consumer
 - No guidance on when to use vs. start_thread

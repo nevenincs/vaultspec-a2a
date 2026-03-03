@@ -2,7 +2,7 @@
 adr_id: 026
 title: pipeline_phase Population
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/020-blackboard-content-mounting.md
@@ -24,15 +24,15 @@ audit (`docs/audits/2026-03-03-vaultspec-rule-drift.md`):
 
 > **DRIFT-11 (MEDIUM):** `pipeline_phase` never set at runtime. Supervisor returns
 > `{"next": route}` only. Three downstream consumers operate with `pipeline_phase =
-> None` on every invocation.
+None` on every invocation.
 
 The three downstream consumers blocked by this gap are:
 
-| Consumer | Dependency on pipeline_phase |
-|----------|------------------------------|
-| ADR-022 anchoring (`build_anchoring_context`) | Includes phase in the anchoring summary injected at position [2]. With `None`, the phase line is omitted — supervisor and workers have no phase signal. |
-| ADR-020 mounting (`_select_paths`) | Selects phase-scoped documents for injection at position [3]. With `None`, `vault_index.get(None)` returns nothing — only ADR documents are ever mounted, regardless of session stage. |
-| ADR-021 queue injection (`_filter_queue_content`) | Activated only when `pipeline_phase in {"plan", "exec"}`. With `None`, queue content is never injected — workers cannot see their task queue. |
+| Consumer                                          | Dependency on pipeline_phase                                                                                                                                                           |
+| ------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ADR-022 anchoring (`build_anchoring_context`)     | Includes phase in the anchoring summary injected at position [2]. With `None`, the phase line is omitted — supervisor and workers have no phase signal.                                |
+| ADR-020 mounting (`_select_paths`)                | Selects phase-scoped documents for injection at position [3]. With `None`, `vault_index.get(None)` returns nothing — only ADR documents are ever mounted, regardless of session stage. |
+| ADR-021 queue injection (`_filter_queue_content`) | Activated only when `pipeline_phase in {"plan", "exec"}`. With `None`, queue content is never injected — workers cannot see their task queue.                                          |
 
 Without `pipeline_phase` being set, the entire SDD pipeline awareness stack
 (ADR-019 through ADR-022) operates at reduced fidelity on every invocation.
@@ -95,6 +95,7 @@ def infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
 ```
 
 **Module contract:**
+
 - `PHASE_ORDER` is the authoritative ordered list of the six pipeline phases. It
   is exported for use by any consumer that needs to compare or index phases
   (e.g., Option C tiebreaker logic, if added in a future ADR).
@@ -135,6 +136,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
 ```
 
 Key integration constraints:
+
 - `infer_phase_from_vault_index` is called **before** `build_anchoring_context` so
   the anchoring summary injected at position [2] already reflects the current phase.
 - `pipeline_phase` is included in every supervisor return dict, including the early-
@@ -354,8 +356,8 @@ lib/core/
 - `lib/core/nodes/supervisor.py` — AMENDED (phase inference on every invocation)
 - `lib/core/__init__.py` — AMENDED (facade export)
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — pipeline_phase field definition,
-  vault_index reducer, _build_initial_vault_index
-- [ADR-020](020-blackboard-content-mounting.md) — _select_paths uses pipeline_phase
+  vault_index reducer, \_build_initial_vault_index
+- [ADR-020](020-blackboard-content-mounting.md) — \_select_paths uses pipeline_phase
   for phase-scoped document selection
 - [ADR-021](021-persistent-task-queue-schema.md) — queue injection gated on
   pipeline_phase in {"plan", "exec"}

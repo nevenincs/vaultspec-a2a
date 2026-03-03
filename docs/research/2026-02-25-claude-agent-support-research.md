@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: claude-agent
-description: "Provider analysis for Anthropic Claude covering authentication, ACP/A2A support, permission model, and subscription-based billing bypass."
-name: "Claude Agent Support"
+description: 'Provider analysis for Anthropic Claude covering authentication, ACP/A2A support, permission model, and subscription-based billing bypass.'
+name: 'Claude Agent Support'
 maturity: 25
-summary: "Provider analysis for Anthropic Claude covering authentication, ACP/A2A support, permission model, and subscription-based billing bypass."
+summary: 'Provider analysis for Anthropic Claude covering authentication, ACP/A2A support, permission model, and subscription-based billing bypass.'
 ---
 
 # Phase 2 Research: Claude Agent Support and Specificities
@@ -84,7 +84,7 @@ To successfully integrate Claude into the proposed coding-teams framework:
 The **Claude Pro** consumer subscription and the **Anthropic API** are entirely
 separate platforms.
 
-- **The OAuth Bypass (Using Subscriptions for CLI)**: You *can* bypass API
+- **The OAuth Bypass (Using Subscriptions for CLI)**: You _can_ bypass API
   billing and use a **Claude Pro** ($20/mo) or Max/Enterprise subscription to
   power the Claude Code CLI. By running`claude setup-token`, you generate a
   long-lived OAuth token.
@@ -98,7 +98,7 @@ separate platforms.
   ($150/user/month) which provide massive, dedicated usage limits specifically
   for the Claude Code CLI.
 - **Developer API (Pay-as-you-go)**: If you bypass the official Claude Code CLI
-  and write your own custom agent scripts, you *must* use an Anthropic API key,
+  and write your own custom agent scripts, you _must_ use an Anthropic API key,
   which is billed separately per-token and does not benefit from Pro
   subscriptions.
 - **Summary**: For the A2A orchestrator, if you wrap the official `claude`binary

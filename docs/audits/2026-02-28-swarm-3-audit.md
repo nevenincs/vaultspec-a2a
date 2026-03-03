@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: audit
 feature: full-backend-swarm-3
-description: "Third-pass 6-agent deep audit producing ~124 findings (14 CRITICAL, 35 HIGH, 45 MEDIUM, 28 LOW) covering background task cancellation, chunk_queue deadlock, DB test isolation, and glob injection."
+description: 'Third-pass 6-agent deep audit producing ~124 findings (14 CRITICAL, 35 HIGH, 45 MEDIUM, 28 LOW) covering background task cancellation, chunk_queue deadlock, DB test isolation, and glob injection.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -25,24 +25,24 @@ resolved),`2026-28-02-swarm-audit-2.md`
 
 ## Executive Summary
 
-| Severity | Count |
-| ---------- | ------- |
-| CRITICAL | 14 |
-| HIGH | 35 |
-| MEDIUM | 45 |
-| LOW | 28 |
+| Severity  | Count    |
+| --------- | -------- |
+| CRITICAL  | 14       |
+| HIGH      | 35       |
+| MEDIUM    | 45       |
+| LOW       | 28       |
 | **Total** | **~124** |
 
 ### By Module
 
-| Agent | Module(s) | C | H | M | L | Total |
-| ------- | ----------- | --- | --- | --- | --- | ------- |
-| core-auditor | `lib/core/` | 3 | 6 | 9 | 6 | 24 |
-| api-auditor | `lib/api/` | 2 | 5 | 8 | 4 | 19 |
-| providers-auditor | `lib/providers/` | 2 | 5 | 6 | 4 | 17 |
-| db-protocol-auditor | `lib/database/`, `lib/protocols/` | 2 | 5 | 5 | 4 | 18 |
-| utils-auditor | `lib/utils/`, `lib/telemetry/`, `lib/workspace/` | 3 | 7 | 6 | 4 | 20 |
-| test-quality-auditor | Cross-cutting test quality | 2 | 7 | 11 | 6 | 26 |
+| Agent                | Module(s)                                        | C   | H   | M   | L   | Total |
+| -------------------- | ------------------------------------------------ | --- | --- | --- | --- | ----- |
+| core-auditor         | `lib/core/`                                      | 3   | 6   | 9   | 6   | 24    |
+| api-auditor          | `lib/api/`                                       | 2   | 5   | 8   | 4   | 19    |
+| providers-auditor    | `lib/providers/`                                 | 2   | 5   | 6   | 4   | 17    |
+| db-protocol-auditor  | `lib/database/`, `lib/protocols/`                | 2   | 5   | 5   | 4   | 18    |
+| utils-auditor        | `lib/utils/`, `lib/telemetry/`, `lib/workspace/` | 3   | 7   | 6   | 4   | 20    |
+| test-quality-auditor | Cross-cutting test quality                       | 2   | 7   | 11  | 6   | 26    |
 
 ---
 
@@ -187,9 +187,9 @@ could be reduced.
 no default
 
 - File:`lib/api/schemas/snapshots.py`, lines 77–84
-| - Unlike `AgentStatusEntry`and`AgentSummary`which correctly use`Provider |
+  | - Unlike `AgentStatusEntry`and`AgentSummary`which correctly use`Provider |
 None = None`, `_AgentSnapshot`requires these fields — making the`agents`list in
-reconnection snapshots unusable when provider/model are unknown. |
+  reconnection snapshots unusable when provider/model are unknown. |
 
 ### API-H4:`auth.py`module mandated by ADR-009 is missing
 
@@ -253,7 +253,7 @@ local network.
 
 - File:`lib/providers/acp_chat_model.py`, lines 960–965
 - `_handle_session_update()`is awaited directly in the stdout loop with`await
-  ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
+ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
   (`_yield_chunks`) is slow, the queue fills, blocking the stdout loop. If the
   ACP subprocess waits for an RPC response before sending more data, the entire
   pipeline deadlocks with no timeout and no error.
@@ -533,7 +533,7 @@ architectural violations that undermine system correctness:
    configs
 9. **CORE-C3** — Sanitize`feature_tag`before glob pattern injection
 10. **WS-C3** —
-Validate`target_branch`against`_BRANCH_NAME_RE`in`merge_worktree`/`has_conflicts`
+    Validate`target_branch`against`_BRANCH_NAME_RE`in`merge_worktree`/`has_conflicts`
 11. **UTIL-C1** — Add `__all__`to`enums.py`
 12. **TEL-C2** — Remove OTel SDK `try/except ImportError`guards (ADR-015 makes
     it mandatory)

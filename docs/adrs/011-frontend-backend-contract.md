@@ -47,13 +47,13 @@ Every server-to-client WebSocket message is a JSON object with a top-level
 
 **Thread-scoped events** (extend `EventEnvelope`):
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `type` | `ServerEventType` | Discriminator |
-| `thread_id` | `str` | Target thread |
-| `agent_id` | `str \ | null` |
-| `timestamp` | `datetime` | Server timestamp |
-| `sequence` | `int` | Monotonic per-thread counter |
+| Field       | Type              | Description                  |
+| ----------- | ----------------- | ---------------------------- |
+| `type`      | `ServerEventType` | Discriminator                |
+| `thread_id` | `str`             | Target thread                |
+| `agent_id`  | `str \            | null`                        |
+| `timestamp` | `datetime`        | Server timestamp             |
+| `sequence`  | `int`             | Monotonic per-thread counter |
 
 Concrete types: `AgentStatusEvent`, `MessageChunkEvent`, `ThoughtChunkEvent`,
 `ToolCallStartEvent`, `ToolCallUpdateEvent`, `PermissionRequestEvent`,
@@ -72,10 +72,10 @@ All 12 event types form the `ServerEvent` discriminated union.
 
 Every client-to-server WebSocket message extends `ClientCommand`:
 
-| Field | Type | Description |
-| --- | --- | --- |
-| `type` | `ClientCommandType` | Discriminator |
-| `request_id` | `str \ | null` |
+| Field        | Type                | Description   |
+| ------------ | ------------------- | ------------- |
+| `type`       | `ClientCommandType` | Discriminator |
+| `request_id` | `str \              | null`         |
 
 Concrete types: `SubscribeCommand`, `UnsubscribeCommand`,
 `SendMessageCommand`, `AgentControlCommand`, `PermissionResponseCommand`,
@@ -88,13 +88,13 @@ All 6 command types form the `ClientMessage` discriminated union.
 REST endpoints complement WebSocket for operations requiring guaranteed
 delivery and idempotent semantics.
 
-| Method | Path | Request | Response | Purpose |
-| --- | --- | --- | --- | --- |
-| `POST` | `/threads` | `CreateThreadRequest` | `CreateThreadResponse` | Create thread |
-| `GET` | `/threads` | query params | `ThreadListResponse` | List threads |
-| `GET` | `/threads/{id}/state` | --- | `ThreadStateSnapshot` | State replay |
-| `POST` | `/threads/{id}/messages` | `SendMessageRequest` | `202 Accepted` | Send message |
-| `GET` | `/team/status` | --- | `TeamStatusResponse` | Team overview |
+| Method | Path                        | Request                     | Response                   | Purpose             |
+| ------ | --------------------------- | --------------------------- | -------------------------- | ------------------- |
+| `POST` | `/threads`                  | `CreateThreadRequest`       | `CreateThreadResponse`     | Create thread       |
+| `GET`  | `/threads`                  | query params                | `ThreadListResponse`       | List threads        |
+| `GET`  | `/threads/{id}/state`       | ---                         | `ThreadStateSnapshot`      | State replay        |
+| `POST` | `/threads/{id}/messages`    | `SendMessageRequest`        | `202 Accepted`             | Send message        |
+| `GET`  | `/team/status`              | ---                         | `TeamStatusResponse`       | Team overview       |
 | `POST` | `/permissions/{id}/respond` | `PermissionResponseRequest` | `PermissionResponseResult` | Permission response |
 
 ### 2.3 Reconnection Protocol
@@ -113,12 +113,12 @@ delivery and idempotent semantics.
 2. FastAPI exports `/openapi.json` with discriminated unions rendered as
    `oneOf` with `propertyName` discriminators.
 3. `openapi-typescript` consumes the OpenAPI spec and generates
-   `src/ui/src/app/data/wire-types.ts`. *(Amended by ADR-018: path
-   changed from `src/lib/api/` to `src/app/data/`.)*
+   `src/ui/src/app/data/wire-types.ts`. _(Amended by ADR-018: path
+   changed from `src/lib/api/` to `src/app/data/`.)_
 4. The generated types are committed to the repository (not generated at
    build time) to enable frontend work without a running backend.
 5. CI validates that generated types match the current OpenAPI spec.
-6. *(ADR-018 addition)* Frontend-only presentation types live in
+6. _(ADR-018 addition)_ Frontend-only presentation types live in
    `src/ui/src/app/data/types.ts`. Mapper functions in
    `src/ui/src/app/api/mappers.ts` translate wire types to frontend
    types (e.g., `WireThreadSummary` → `ThreadSummary`, `in_progress` →
@@ -135,7 +135,7 @@ Frontend development proceeds before the backend is fully wired:
    builder functions that produce valid model instances for each event type.
 3. **Recorded sessions**: Integration tests record real WebSocket sessions
    to JSON files in `src/ui/tests/fixtures/` for Playwright replay.
-4. *(Superseded by ADR-018)* The React frontend uses a live backend
+4. _(Superseded by ADR-018)_ The React frontend uses a live backend
    integration layer (`websocket-client.ts`, `rest-client.ts`) with
    TanStack Query for REST caching and Zustand stores for real-time
    state. Mock data stubs exist in `mock-data.ts` for offline
@@ -272,7 +272,7 @@ lib/api/schemas/
 - [ADR-004](004-event-aggregation-server-side-replay.md): Event Aggregation
   and State Replay (WebSocket + checkpoint sourcing)
 - [ADR-005](005-frontend-rendering-stack.md): Frontend Rendering Stack
-  *(Superseded by ADR-018: React + shadcn/ui)*
+  _(Superseded by ADR-018: React + shadcn/ui)_
 - [ADR-006](006-protocol-ecosystem-bridge.md): Protocol Ecosystem Bridge
   (ACP, A2A)
 - [ADR-009](009-approved-module-hierarchy.md): Approved Module Hierarchy

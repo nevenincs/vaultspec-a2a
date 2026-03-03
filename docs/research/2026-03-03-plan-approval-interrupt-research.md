@@ -1,9 +1,9 @@
 ---
-title: "Research: Plan Approval Interrupt"
+title: 'Research: Plan Approval Interrupt'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "How to implement a human-in-the-loop plan approval gate at the plan→exec boundary. Integration with existing interrupt mechanism. Research for ADR-024."
+description: 'How to implement a human-in-the-loop plan approval gate at the plan→exec boundary. Integration with existing interrupt mechanism. Research for ADR-024.'
 ---
 
 # Research: Plan Approval Interrupt
@@ -39,6 +39,7 @@ async def _interrupt_permission_callback(tool_name, tool_input, options) -> str:
 ```
 
 When `interrupt()` is called inside a LangGraph node:
+
 1. LangGraph raises `GraphInterrupt` (a `GraphBubbleUp` subclass) — the node re-raises it
 2. The graph suspends to the checkpointer
 3. The `finally` block in `aggregator.ingest()` calls `_emit_interrupt_events()`
@@ -47,6 +48,7 @@ When `interrupt()` is called inside a LangGraph node:
 6. The UI shows the permission modal
 
 **Resume path:**
+
 1. User responds via `POST /api/permissions/{request_id}/respond` with `option_id`
 2. Endpoint dispatches a `DispatchRequest(action="resume", option_id=...)` to the worker
 3. Worker calls `Command(resume=option_id)` on the interrupted graph
@@ -61,6 +63,7 @@ payload type is `"permission_request"` and the options are ACP-provided (allow_o
 deny_once, allow_always, etc.).
 
 **The plan approval interrupt is different in nature:**
+
 - It fires at the **supervisor level**, not the worker level
 - It fires based on **graph state** (exec routing detected), not ACP tool output
 - The options are binary: **approve** (proceed to exec) or **reject** (reroute to plan)
@@ -100,11 +103,13 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
 ```
 
 **Pros:**
+
 - Single location for approval logic
 - Supervisor has all needed context (vault_index, next_route)
 - Consistent with `interrupt_before=[]` constraint
 
 **Cons:**
+
 - Supervisor node currently uses `TAG_NOSTREAM` (responses not streamed) — the interrupt payload needs to reach the aggregator's `_emit_interrupt_events` machinery, which looks for `type == "permission_request"` specifically. A new `type == "plan_approval_request"` requires extending `_emit_interrupt_events` to handle it.
 - Replaying the supervisor node on resume means the LLM is re-invoked — the routing decision must be re-parsed. The `plan_approved` flag in state prevents re-triggering the interrupt.
 
@@ -130,10 +135,12 @@ async def plan_approval_node(state: TeamState) -> dict[str, Any]:
 ```
 
 **Pros:**
+
 - Clean separation — plan approval is its own node, not mixed into supervisor logic
 - Supervisor replay is avoided — `plan_approval_node` replays on resume, not the supervisor
 
 **Cons:**
+
 - Adds another node per exec worker (on top of ADR-020 mount nodes)
 - Rejection requires `Command(goto="supervisor")` — uses the Command API, changing the return type of the node
 - Must be wired into graph compilation (ADR-020 style: `supervisor → plan_approval_{worker} → exec_worker`)
@@ -166,12 +173,14 @@ interrupt({
 
 The UI permission modal (already implemented for ACP tool approvals) can be extended
 to render:
+
 - Feature name and plan document paths as links
 - Task queue summary (if available)
 - Two options: "Approve — proceed to execution" and "Reject — revise the plan"
 
 The `PermissionRequestEvent` schema already supports arbitrary `options` with
 `option_id`, `name`, and `kind` fields. The plan approval can use:
+
 - `option_id: "approve"`, `name: "Approve Plan"`, `kind: ALLOW_ONCE`
 - `option_id: "reject"`, `name: "Reject — Revise Plan"`, `kind: DENY_ONCE`
 
@@ -180,12 +189,14 @@ The `PermissionRequestEvent` schema already supports arbitrary `options` with
 ## 4. User Approval/Rejection Flow
 
 **Approval:**
+
 1. User clicks "Approve Plan" → `POST /api/permissions/{request_id}/respond` with `option_id: "approve"`
 2. Worker dispatches `Command(resume={"approved": True})` to interrupted graph
 3. Supervisor receives resume, sets `plan_approved: True`, routes to exec worker
 4. `plan_approved: True` in state prevents re-triggering on subsequent exec routing
 
 **Rejection:**
+
 1. User clicks "Reject — Revise Plan" → `POST /api/permissions/{request_id}/respond` with `option_id: "reject"`
 2. Worker dispatches `Command(resume={"approved": False})`
 3. Supervisor routes back to the plan worker (or to the worker the LLM selects given the rejection context)
@@ -245,6 +256,7 @@ Execution order in `supervisor_node`:
 5. ADR-024: check plan approval → interrupt if routing to exec without approval
 
 ADR-023 and ADR-024 are complementary at the exec boundary:
+
 - ADR-023 blocks exec routing when there is NO plan (hard gate — can't execute without a plan)
 - ADR-024 pauses exec routing when there IS a plan but it hasn't been approved yet
 

@@ -1,8 +1,8 @@
 ---
-name: "A2A Python SDK Reference"
+name: 'A2A Python SDK Reference'
 date: 2026-25-02
 type: reference
-summary: "Overview of the a2a-sdk package modules including server, client, models, executor, and updater components."
+summary: 'Overview of the a2a-sdk package modules including server, client, models, executor, and updater components.'
 maturity: 55
 ---
 

@@ -2,7 +2,7 @@
 date: 2026-03-01
 type: audit
 feature: code-connect
-description: "Final re-verification of all 27 .figma.tsx Code Connect mapping files after coder fixes, confirming 0 TypeScript errors and 28 valid Figma mappings."
+description: 'Final re-verification of all 27 .figma.tsx Code Connect mapping files after coder fixes, confirming 0 TypeScript errors and 28 valid Figma mappings.'
 related:
   - docs/adrs/2026-02-28-018-react-tailwind-figma-migration-adr.md
   - docs/adrs/2026-03-01-019-figma-developer-workflow-adr.md
@@ -34,17 +34,17 @@ coder fixes (task #10), plus full deep audit per task #9.
 
 ## Fix Verification (9 required fixes from initial audit)
 
-| # | Finding | Status | Verification |
-| --- | --------- | -------- | ------------- |
-| C1 | Remove`sequence`from all event mocks | FIXED | Removed from all 7 files. No`sequence`property in any .figma.tsx |
-| C2 | Change`'shell'`to`'execute'`in permission-modal | FIXED | `tool_kind: 'execute'`at permission-modal.figma.tsx:30 |
-| C3 | Add`id`and`thread_id`to all event mocks | FIXED | All mocks have`id: 'evt-N'`and`thread_id: 'thread-1'` |
-| H1 | Remove`description`, add `priority`to PlanEntry mocks | FIXED | `description`removed,`priority: 'high'\ |
-| H2 | Add `onKeyDown`to MarkdownEditor example | FIXED | `onKeyDown={() => {}}`at markdown-editor.figma.tsx:26 |
-| H3 | Fix PermissionRequest mock (remove`thread_id`, add `agent_id`) | FIXED | `agent_id: 'agent-1'`added,`thread_id`removed |
-| H4 | Add`artifact_id`and`complete`to ArtifactEvent mock | FIXED | `artifact_id: 'art-1'`, `complete: true`at artifact-card.figma.tsx:21,24 |
-| H5 | Add`tool_call_id`to ToolCallEvent mocks | FIXED | `tool_call_id: 'tc-1'`in tool-call-card.figma.tsx:27 and inspector-panel.figma.tsx:32 |
-| M1 | Fix`importPaths`in figma.config.json | FIXED | Changed to`"src/app/components/*": "@/app/components"` |
+| #   | Finding                                                        | Status | Verification                                                                          |
+| --- | -------------------------------------------------------------- | ------ | ------------------------------------------------------------------------------------- |
+| C1  | Remove`sequence`from all event mocks                           | FIXED  | Removed from all 7 files. No`sequence`property in any .figma.tsx                      |
+| C2  | Change`'shell'`to`'execute'`in permission-modal                | FIXED  | `tool_kind: 'execute'`at permission-modal.figma.tsx:30                                |
+| C3  | Add`id`and`thread_id`to all event mocks                        | FIXED  | All mocks have`id: 'evt-N'`and`thread_id: 'thread-1'`                                 |
+| H1  | Remove`description`, add `priority`to PlanEntry mocks          | FIXED  | `description`removed,`priority: 'high'\                                               |
+| H2  | Add `onKeyDown`to MarkdownEditor example                       | FIXED  | `onKeyDown={() => {}}`at markdown-editor.figma.tsx:26                                 |
+| H3  | Fix PermissionRequest mock (remove`thread_id`, add `agent_id`) | FIXED  | `agent_id: 'agent-1'`added,`thread_id`removed                                         |
+| H4  | Add`artifact_id`and`complete`to ArtifactEvent mock             | FIXED  | `artifact_id: 'art-1'`, `complete: true`at artifact-card.figma.tsx:21,24              |
+| H5  | Add`tool_call_id`to ToolCallEvent mocks                        | FIXED  | `tool_call_id: 'tc-1'`in tool-call-card.figma.tsx:27 and inspector-panel.figma.tsx:32 |
+| M1  | Fix`importPaths`in figma.config.json                           | FIXED  | Changed to`"src/app/components/*": "@/app/components"`                                |
 
 **8 of 9 fixes applied.** M2 (trim`include`to only`*.figma.tsx`) was NOT applied
 -- the include array still contains `"src/**/*.tsx"`and`"src/**/*.ts"`. This is
@@ -135,26 +135,21 @@ npx figma connect publish --dry-run: PASS
 
 - `status-bar.figma.tsx`: No props (correct -- StatusBar takes none)
 - `sidebar.figma.tsx`: All 5 required props provided, optional
-  `onFocusSearchRef`correctly omitted
--`tab-bar.figma.tsx`: All 6 required props provided
+  `onFocusSearchRef`correctly omitted -`tab-bar.figma.tsx`: All 6 required props provided
 - `message-stream.figma.tsx`: 4 required props provided, 8 optional props
   correctly omitted
 - `input-bar.figma.tsx`: 2 required props provided, optional props selectively
   included
 - `input.figma.tsx`:
-  `figma.string('Placeholder')`and`figma.boolean('Disabled')`appropriate
--`tooltip.figma.tsx`: Correct compound component composition (TooltipProvider
-wrapping omitted, acceptable)
+  `figma.string('Placeholder')`and`figma.boolean('Disabled')`appropriate -`tooltip.figma.tsx`: Correct compound component composition (TooltipProvider
+  wrapping omitted, acceptable)
 - `dialog.figma.tsx`: Correct compound component composition with trigger
 - `alert-dialog.figma.tsx`: Correct usage with `open={true}`(matches
-  PermissionModal pattern)
--`card.figma.tsx`: Correct compound component with `figma.string()`for
-title/description
--`popover.figma.tsx`: Correct compound component composition
+  PermissionModal pattern) -`card.figma.tsx`: Correct compound component with `figma.string()`for
+  title/description -`popover.figma.tsx`: Correct compound component composition
 - `scroll-area.figma.tsx`: Minimal correct example
 - `separator.figma.tsx`: `figma.enum('Orientation')`correctly maps
-  horizontal/vertical
--`skeleton.figma.tsx`: Minimal correct example with className
+  horizontal/vertical -`skeleton.figma.tsx`: Minimal correct example with className
 - `tabs.figma.tsx`: Correct compound component with
   TabsList/TabsTrigger/TabsContent
 
@@ -162,10 +157,7 @@ title/description
 
 All event mocks now include:
 
-- `id: string`(BaseStreamEvent) -- present in all mocks
--`thread_id: string`(BaseStreamEvent) -- present in all mocks
--`type: string`(correct discriminant value) -- present in all mocks
--`timestamp: string`(via`new Date().toISOString()`) -- present in all mocks
+- `id: string`(BaseStreamEvent) -- present in all mocks -`thread_id: string`(BaseStreamEvent) -- present in all mocks -`type: string`(correct discriminant value) -- present in all mocks -`timestamp: string`(via`new Date().toISOString()`) -- present in all mocks
 - All type-specific required fields (agent_id, agent_name, tool_call_id,
   artifact_id, complete, etc.) -- verified
 

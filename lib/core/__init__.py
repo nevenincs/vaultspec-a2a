@@ -58,12 +58,13 @@ from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
 from .nodes.supervisor import create_supervisor_node as create_supervisor_node
-from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
 from .nodes.worker import create_worker_node as create_worker_node
+from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
 from .preamble import (
     build_context_preamble as build_context_preamble,
 )
 from .state import TeamState
+from .task_queue import create_mark_task_complete_tool as create_mark_task_complete_tool
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
 )
@@ -89,15 +90,6 @@ from .team_config import (
     TeamDefaultsConfig as TeamDefaultsConfig,
 )
 from .team_config import (
-    TopologyConfig as TopologyConfig,
-)
-from .team_config import (
-    TopologyType as TopologyType,
-)
-from .team_config import (
-    WorkerOverrideConfig as WorkerOverrideConfig,
-)
-from .team_config import (
     TeamGraphConfig as TeamGraphConfig,
 )
 from .team_config import (
@@ -105,6 +97,15 @@ from .team_config import (
 )
 from .team_config import (
     TeamPersonaConfig as TeamPersonaConfig,
+)
+from .team_config import (
+    TopologyConfig as TopologyConfig,
+)
+from .team_config import (
+    TopologyType as TopologyType,
+)
+from .team_config import (
+    WorkerOverrideConfig as WorkerOverrideConfig,
 )
 from .team_config import (
     WorkerRef as WorkerRef,
@@ -140,7 +141,6 @@ def __getattr__(name: str) -> object:
 __all__ = [
     "AgentCapabilitiesConfig",
     "AgentConfig",
-    "build_anchoring_context",
     "AgentConfigNotFoundError",
     "AgentModelConfig",
     "AgentPermissionsConfig",
@@ -180,9 +180,11 @@ __all__ = [
     "WorkerOverrideConfig",
     "WorkerRef",
     "WorkspaceError",
+    "build_anchoring_context",
     "build_context_preamble",
     "compact_context",
     "compile_team_graph",
+    "create_mark_task_complete_tool",
     "create_supervisor_node",
     "create_worker_node",
     "discover_context_refs",

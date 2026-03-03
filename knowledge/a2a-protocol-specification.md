@@ -1,8 +1,8 @@
 ---
-name: "A2A Protocol Specification"
+name: 'A2A Protocol Specification'
 date: 2026-25-02
 type: reference
-summary: "Technical specification reference for A2A RC v1.0 covering the three-layer architecture, protocol bindings, error handling, and service parameters."
+summary: 'Technical specification reference for A2A RC v1.0 covering the three-layer architecture, protocol bindings, error handling, and service parameters.'
 maturity: 85
 ---
 
@@ -35,21 +35,21 @@ Concrete mappings to JSON-RPC, gRPC, and HTTP/REST.
   [List Tasks] -> [Cancel Task] -> [Get Agent Card]
 - **L3 (Bindings):** [JSON-RPC Methods] | [gRPC RPCs] | [HTTP/REST Endpoints] |
   [Custom Bindings]
-*Dependencies flow from L1 -> L2 -> L3.*
+  _Dependencies flow from L1 -> L2 -> L3._
 
 ---
 
 ## 2. CORE OPERATIONS (L2)
 
-| Operation | Input | Output | Description |
-| :--- | :--- | :--- | :--- |
-| **Send Message** | `SendMessageRequest` | `Task` OR `Message` | Initiates interaction. |
-| **Send Streaming Message** | `SendMessageRequest` | `StreamResponse` | Real-time updates. |
-| **Get Task** | `id`, `historyLength` | `Task` | Retrieves current state. |
-| **List Tasks** | `contextId`, `status` | `ListTasksResponse` | Paginated list of tasks. |
-| **Cancel Task** | `id` | `Task` | Cancels an active task. |
-| **Subscribe to Task** | `id` | `StreamResponse` | Establishes update stream. |
-| **Get Extended Agent Card** | `tenant` | `AgentCard` | Fetches detailed metadata. |
+| Operation                   | Input                 | Output              | Description                |
+| :-------------------------- | :-------------------- | :------------------ | :------------------------- |
+| **Send Message**            | `SendMessageRequest`  | `Task` OR `Message` | Initiates interaction.     |
+| **Send Streaming Message**  | `SendMessageRequest`  | `StreamResponse`    | Real-time updates.         |
+| **Get Task**                | `id`, `historyLength` | `Task`              | Retrieves current state.   |
+| **List Tasks**              | `contextId`, `status` | `ListTasksResponse` | Paginated list of tasks.   |
+| **Cancel Task**             | `id`                  | `Task`              | Cancels an active task.    |
+| **Subscribe to Task**       | `id`                  | `StreamResponse`    | Establishes update stream. |
+| **Get Extended Agent Card** | `tenant`              | `AgentCard`         | Fetches detailed metadata. |
 
 ---
 

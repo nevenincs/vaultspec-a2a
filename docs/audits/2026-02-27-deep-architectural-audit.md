@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: deep-architectural
-description: "Deep architectural audit of lib/core/, lib/providers/, and lib/api/ against A2A SDK and LangGraph references, fixing 5 confirmed bugs including pipeline_loop routing, CORS, log dedup, and sandbox path collision."
+description: 'Deep architectural audit of lib/core/, lib/providers/, and lib/api/ against A2A SDK and LangGraph references, fixing 5 confirmed bugs including pipeline_loop routing, CORS, log dedup, and sandbox path collision.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -35,8 +35,8 @@ regardless of `max_loops`. The loop count guard at lines 327-329 was correct but
 the
 continuation path was unreachable.
 
-The docstring in `state.py`also incorrectly stated: *"the loop_node sets
-next='FINISH'"* —
+The docstring in `state.py`also incorrectly stated: _"the loop_node sets
+next='FINISH'"_ —
 no code did this; the`_loop_router`conditional edge is the enforcement point.
 
 **Fix:** Changed default from`"FINISH"`to`"revise"`:
@@ -301,9 +301,8 @@ was emitted).
   `ToolCallUpdate(status=FAILED)`
   and logs the error message at WARNING.
 - Added `"on_chain_error"`to`_NODE_BOUNDARY_EVENTS`; handler emits
-  `AgentStatus(state=FAILED, detail=<error[:200]>)`and logs at WARNING.
--`data["error"]`in both events is the raw exception object; converted
-with`str()`.
+  `AgentStatus(state=FAILED, detail=<error[:200]>)`and logs at WARNING. -`data["error"]`in both events is the raw exception object; converted
+  with`str()`.
 
 ---
 
@@ -332,10 +331,10 @@ by LangGraph; emits a`WORKING`status to keep frontend state consistent).
 ### `endpoints.py`—`AgentConfigNotFoundError`+ timestamp extraction
 
 - Replaced broad`except Exception`on`load_agent_config()`with`except
-  AgentConfigNotFoundError`.
+AgentConfigNotFoundError`.
 - `_enrich_snapshot_from_state`now extracts actual message timestamps from
- `response_metadata`/`additional_kwargs` (`created_at`or`timestamp`), falling
- back to
+  `response_metadata`/`additional_kwargs` (`created_at`or`timestamp`), falling
+  back to
   `datetime.now(UTC)` only when the provider did not populate a timestamp.
 
 ---

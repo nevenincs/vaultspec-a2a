@@ -11,14 +11,17 @@ export function ErrorAlert({ event }: { event: ErrorStreamEvent }) {
 
   return (
     <div className="px-4 py-1.5">
-      <div className="relative w-full rounded-ui border border-status-error/30 bg-status-error/5 px-4 py-3 text-[0.8125rem]" role="alert">
+      <div
+        className="rounded-ui border-status-error/30 bg-status-error/5 relative w-full border px-4 py-3 text-[0.8125rem]"
+        role="alert"
+      >
         <div className="flex items-start gap-3">
-          <AlertTriangle className="h-4 w-4 text-status-error shrink-0 mt-0.5" />
-          <div className="flex-1 min-w-0">
-            <p className="font-medium text-status-error">Error</p>
+          <AlertTriangle className="text-status-error mt-0.5 h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-status-error font-medium">Error</p>
             <p className="text-foreground/80 mt-0.5">{event.message}</p>
             {event.code && (
-              <span className="text-[0.6875rem] block mt-1 text-muted-foreground/70 font-mono">
+              <span className="text-muted-foreground/70 mt-1 block font-mono text-[0.6875rem]">
                 Code: {event.code}
               </span>
             )}

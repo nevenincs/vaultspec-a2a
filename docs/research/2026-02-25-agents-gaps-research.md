@@ -1,8 +1,8 @@
 ---
-name: "Agents Gaps Research"
+name: 'Agents Gaps Research'
 date: 2026-25-02
 type: research
-summary: "Rigorous evaluation of LLM CLI limitations on Windows, highlighting sandboxing incompatibilities and mandating specific token lifecycles."
+summary: 'Rigorous evaluation of LLM CLI limitations on Windows, highlighting sandboxing incompatibilities and mandating specific token lifecycles.'
 maturity: 65
 feature: agent-gaps
 ---
@@ -30,10 +30,10 @@ sandboxing.
 - **Included with Strict Constraints**: Anthropic Claude Code CLI.
 - **Rationale**: Claude Code uses standard Node.js (via Bun) cross-platform file
   execution. However, community bug reports confirm that executing it via`Git
-  Bash`or`mintty`on Windows results in a fatal`Error: Raw mode is not supported
-  on the current process.stdin`.
+Bash`or`mintty`on Windows results in a fatal`Error: Raw mode is not supported
+on the current process.stdin`.
 
-**Architectural Mandate**: The Orchestrator's Process Manager *must* explicitly
+**Architectural Mandate**: The Orchestrator's Process Manager _must_ explicitly
 invoke Claude Code using `powershell.exe -NoProfile -Command "claude"`to
 guarantee proper Windows Console API allocation for the TTY bridge.
 
@@ -76,7 +76,7 @@ Zhipu's "Coding Plan" API (`https://open.bigmodel.cn/api/paas/v4/`) is strictly
 **OpenAI SDK compatible**.
 
 - It accepts the standard `[{"type": "function", "function": {"name": "...",
-  "parameters": <JSON_SCHEMA>}}]`array payload.
+"parameters": <JSON_SCHEMA>}}]`array payload.
 - It supports parallel function calling natively.
 
 **Decision**: No custom tool-schema translation layer is required. The

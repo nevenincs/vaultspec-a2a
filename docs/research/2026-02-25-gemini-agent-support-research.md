@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: gemini-agent
-description: "Provider analysis for Google Gemini CLI covering OAuth authentication, native ACP support, experimental A2A configuration, and subscription billing."
-name: "Gemini Agent Support"
+description: 'Provider analysis for Google Gemini CLI covering OAuth authentication, native ACP support, experimental A2A configuration, and subscription billing.'
+name: 'Gemini Agent Support'
 maturity: 25
-summary: "Provider analysis for Google Gemini CLI covering OAuth authentication, native ACP support, experimental A2A configuration, and subscription billing."
+summary: 'Provider analysis for Google Gemini CLI covering OAuth authentication, native ACP support, experimental A2A configuration, and subscription billing.'
 ---
 
 # Phase 1 Research: Gemini Agent Support and Specificities
@@ -62,7 +62,7 @@ the standard.
   subagents."
 - **Configuration & Discovery**: A2A support is currently an experimental
   feature (enabled via`settings.json`: `"experimental": { "enableAgents": true
-  }`). Remote agents are discovered and defined using Markdown files containing
+}`). Remote agents are discovered and defined using Markdown files containing
   YAML frontmatter that specifies the `agent_card_url`.
 - **Framework Integration**: Gemini orchestrates its team by exposing both local
   and remote sub-agents as tools to the main agent. It delegates tasks based on
@@ -92,7 +92,7 @@ The **Gemini Advanced** consumer subscription (part of Google One AI Premium)
 and the **Gemini API** are completely separate billing systems, though the
 highest tiers now offer a bridge.
 
-- **Interactive/Subscription Model (OAuth Bypass)**: You *can* power the Gemini
+- **Interactive/Subscription Model (OAuth Bypass)**: You _can_ power the Gemini
   CLI using a consumer subscription. When you authenticate via "Login with
   Google" (OAuth), the CLI caches a refresh token. The backend automatically
   applies your account's subscription tier. If you have **Google AI Pro**

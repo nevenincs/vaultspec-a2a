@@ -84,11 +84,11 @@ backoff_factor=2.0, max_interval=30.0, max_attempts=3, jitter=True)` and pass
 `retry_policy=_WORKER_RETRY` to all `add_node()` calls for workers and supervisor.
 Import `RetryPolicy` from `langgraph.types`.
 **Task:** T05
-**Status:** resolved (all 4 add_node calls carry retry_policy=_WORKER_RETRY — see Cycle 5 docs-researcher entry)
+**Status:** resolved (all 4 add_node calls carry retry_policy=\_WORKER_RETRY — see Cycle 5 docs-researcher entry)
 
 ---
 
-## [MEDIUM] [Cycle 3] — T05 imports default_retry_on from private _internal module
+## [MEDIUM] [Cycle 3] — T05 imports default_retry_on from private \_internal module
 
 **Reported:** Cycle 3 (T05 working tree review)
 **File:** `lib/core/graph.py:20`
@@ -100,7 +100,7 @@ on any minor LangGraph version bump without deprecation warning.
 private import, or (b) wrap with try/except ImportError that degrades to a
 simpler predicate. Option (a) is more robust.
 **Task:** T05 (pre-commit review finding)
-**Status:** open — follow-up captured in more detail by docs-researcher Cycle 5 entry (requests dependency + _internal import risk)
+**Status:** open — follow-up captured in more detail by docs-researcher Cycle 5 entry (requests dependency + \_internal import risk)
 
 ---
 
@@ -180,7 +180,7 @@ worker.py pattern. Bundled into T03 per orchestrator instruction.
 
 ---
 
-## [LOW] [Cycle 1] — _MinimalState recreated inline on every request in endpoints.py
+## [LOW] [Cycle 1] — \_MinimalState recreated inline on every request in endpoints.py
 
 **Reported:** Cycle 1
 **File:** `lib/api/endpoints.py:487-502`
@@ -295,7 +295,7 @@ to `astream_events`. At minimum: `thread_id`, `active_agent`, `artifacts`,
 
 ---
 
-## [MEDIUM] [Cycle 2] — _replace_plan reducer silently discards intentional empty plan
+## [MEDIUM] [Cycle 2] — \_replace_plan reducer silently discards intentional empty plan
 
 **Reported:** Cycle 2
 **File:** `lib/core/state.py:64`
@@ -309,7 +309,7 @@ way to explicitly reset the plan to empty.
 
 ---
 
-## [LOW] [Cycle 2] — test_state.py:100 validates broken _replace_plan behavior
+## [LOW] [Cycle 2] — test_state.py:100 validates broken \_replace_plan behavior
 
 **Reported:** Cycle 2
 **File:** `lib/core/tests/test_state.py:100`
@@ -324,7 +324,7 @@ T12 is fixed, this test must be updated: the correct assertion becomes
 
 ---
 
-## [LOW] [Cycle 2] — test_exceptions.py hardcodes __all__ without WorkerExecutionError
+## [LOW] [Cycle 2] — test_exceptions.py hardcodes **all** without WorkerExecutionError
 
 **Reported:** Cycle 2
 **File:** `lib/core/tests/test_exceptions.py:299-320`
@@ -407,7 +407,7 @@ using `agent_id=name, model_type=model_type` kwargs.
 
 ---
 
-## [HIGH] [Cycle 3] — test_exceptions.py __all__ set missing WorkerExecutionError (pre-commit)
+## [HIGH] [Cycle 3] — test_exceptions.py **all** set missing WorkerExecutionError (pre-commit)
 
 **Reported:** Cycle 3 (working tree check mid-T04)
 **File:** `lib/core/tests/test_exceptions.py:301-320`
@@ -575,6 +575,7 @@ Note: `httpx` IS a project dependency so the httpx branch is safe. The
 **Fix direction:** Replace the `default_retry_on(exc)` fallback in
 `_worker_retry_on` with an inlined safe equivalent that does not require
 `requests`:
+
 ```python
 # Instead of: return default_retry_on(exc)
 try:
@@ -586,6 +587,7 @@ except ImportError:
 # ConnectionError covered above; all other unrecognised exceptions: retry
 return isinstance(exc, ConnectionError)
 ```
+
 This also removes the `_internal` private import entirely.
 **Task:** T05 (follow-up — should be addressed before shipping)
 **Status:** open
@@ -617,6 +619,7 @@ with `asyncio.get_running_loop()` in `supervisor.py`.
 **Issue:** The `/internal/events` and `/internal/heartbeat` HTTP POST endpoints
 accept any unauthenticated request. Any process with network access to the
 control surface can:
+
 1. POST arbitrary payloads to `/internal/events`, which are broadcast directly
    to browser clients via `cm.broadcast_to_thread()` — enabling spoofed agent
    output injection.
@@ -627,6 +630,7 @@ In the current architecture these endpoints are intended only for the worker
 child process. There is no shared secret, token, or bind-address restriction.
 
 **Fix direction:** Options in ascending complexity:
+
 1. **Bind to loopback only** — add a separate uvicorn bind for internal
    endpoints on `127.0.0.1` only (simplest, process-level isolation).
 2. **Shared secret header** — generate a random `VAULTSPEC_INTERNAL_TOKEN`
@@ -720,7 +724,7 @@ then await executor and bridge cleanup. Or add a `_closed` flag to
 **Task:** INFO — no task (low impact, clean shutdown noise only)
 **Status:** open
 
-## [MEDIUM] [Cycle 7 / docs-researcher] — AcpSessionError not excluded from _worker_retry_on
+## [MEDIUM] [Cycle 7 / docs-researcher] — AcpSessionError not excluded from \_worker_retry_on
 
 **Reported:** Cycle 7
 **File:** `lib/core/graph.py:47-64` (exclusion list) + `lib/providers/acp_chat_model.py:1161,1191`
@@ -745,18 +749,19 @@ raises).
 **File:** `lib/database/models.py` + `lib/database/crud.py:101`
 **Issue:** T17 was originally scoped to `endpoints.py` resume path and `executor.py` lazy
 recompile. Full DB layer investigation reveals the scope is larger:
+
 1. `ThreadModel` has NO `team_preset` column — threads are created without any stored preset.
 2. `create_thread()` in `crud.py` has no `team_preset` parameter.
 3. Resume dispatch at `endpoints.py:712-716` cannot forward `team_preset` since it is never
    persisted at creation time.
-The full T17 chain: ThreadModel column → create_thread param → creation endpoint stores it
-→ resume endpoint reads and forwards → executor lazy recompile on miss.
-**Fix direction:** (1) Add `team_preset: str | None` column to `ThreadModel` with Alembic
-migration; (2) add `team_preset: str | None = None` param to `create_thread()`; (3) update
-create-thread endpoint to pass through; (4) update resume endpoint to look up from DB before
-forwarding DispatchRequest; (5) implement lazy recompile in `_handle_resume`.
-**Task:** T17
-**Status:** open
+   The full T17 chain: ThreadModel column → create_thread param → creation endpoint stores it
+   → resume endpoint reads and forwards → executor lazy recompile on miss.
+   **Fix direction:** (1) Add `team_preset: str | None` column to `ThreadModel` with Alembic
+   migration; (2) add `team_preset: str | None = None` param to `create_thread()`; (3) update
+   create-thread endpoint to pass through; (4) update resume endpoint to look up from DB before
+   forwarding DispatchRequest; (5) implement lazy recompile in `_handle_resume`.
+   **Task:** T17
+   **Status:** open
 
 ---
 
@@ -768,12 +773,14 @@ forwarding DispatchRequest; (5) implement lazy recompile in `_handle_resume`.
 ### T08 — Loop iteration logging: RESOLVED (confirmed)
 
 Call site at `lib/core/graph.py:615-618` correctly reads:
+
 ```python
 if agent_id == loop_node_id:
     worker_node = _wrap_loop_node(
         worker_node, loop_node_id=loop_node_id, max_loops=max_loops
     )
 ```
+
 Both keyword args are passed. Pre-summary analysis of a stale snapshot was incorrect.
 `_wrap_loop_node` signature and implementation at lines 521-559 confirmed correct.
 **Status update: T08 is fully resolved.** TaskList confirms completed.
@@ -789,7 +796,7 @@ TaskList shows T05 still `in_progress` with coder assigned.
 
 `lib/core/graph.py:253`: `builder.compile(checkpointer=checkpointer, interrupt_before=interrupt_nodes)` — no `step_timeout` post-compile assignment. TaskList: pending.
 
-### T12 — _replace_plan empty discard: confirmed open
+### T12 — \_replace_plan empty discard: confirmed open
 
 `lib/core/state.py:64`: `return new if new else existing` — broken behavior still present. TaskList: pending.
 
@@ -817,7 +824,7 @@ Executor passes `Command(resume=req.option_id)` at line 232 — type mismatch su
 
 ---
 
-## [HIGH] [Cycle 8 / docs-researcher] — T05 partial fix: `import requests` retained in inlined _worker_retry_on
+## [HIGH] [Cycle 8 / docs-researcher] — T05 partial fix: `import requests` retained in inlined \_worker_retry_on
 
 **Reported:** Cycle 8
 **File:** `lib/core/graph.py:68-76`
@@ -832,9 +839,11 @@ The T05 task is now marked completed but this residual issue remains.
 **Fix direction:** Replace the `requests.HTTPError` branch (lines 75-76) with a no-op or
 simply remove it entirely. The project uses `httpx` for all HTTP calls; `requests` objects
 will never reach `_worker_retry_on`. The safe replacement:
+
 ```python
 # requests.HTTPError branch removed — project uses httpx exclusively
 ```
+
 Also remove `import requests` at line 69.
 **Task:** T05 residual (new follow-up needed)
 **Status:** open
@@ -851,11 +860,13 @@ Also remove `import requests` at line 69.
 at line 62 correctly reveals the cause, but `AcpSessionError` at `acp_chat_model.py:1161,1191`
 would fall through to `return True` (retry), consuming 3 attempts unnecessarily.
 **Fix direction:** Add a local import and isinstance guard:
+
 ```python
 from ..providers.acp_exceptions import AcpAuthError, AcpSessionError  # noqa: PLC0415
 if isinstance(cause, (AcpAuthError, AcpSessionError)):
     return False
 ```
+
 **Task:** T05 residual
 **Status:** open
 
@@ -866,12 +877,12 @@ if isinstance(cause, (AcpAuthError, AcpSessionError)):
 **Reported:** Cycle 3 (post-commit verification, codebase-researcher)
 **Summary:** All four Batch 1 tasks verified in working tree via direct file reads.
 
-| Task | Verification | Result |
-|------|-------------|--------|
-| T01 | `state.py:102` NotRequired, `graph.py:371` state.get, `test_graph.py:316` test | resolved |
-| T02 | `supervisor.py:87` sorted(options, key=len, reverse=True), `test_supervisor.py:67` collision test | resolved |
-| T03 | `state.py:105` routing_error NotRequired, `supervisor.py:100-103` returns routing_error, tests present | resolved |
-| T04 | `worker.py:8` GraphBubbleUp import, `worker.py:166` guard before except Exception, `worker.py:174-178` WorkerExecutionError wrapping with from exc | resolved |
+| Task | Verification                                                                                                                                       | Result   |
+| ---- | -------------------------------------------------------------------------------------------------------------------------------------------------- | -------- |
+| T01  | `state.py:102` NotRequired, `graph.py:371` state.get, `test_graph.py:316` test                                                                     | resolved |
+| T02  | `supervisor.py:87` sorted(options, key=len, reverse=True), `test_supervisor.py:67` collision test                                                  | resolved |
+| T03  | `state.py:105` routing_error NotRequired, `supervisor.py:100-103` returns routing_error, tests present                                             | resolved |
+| T04  | `worker.py:8` GraphBubbleUp import, `worker.py:166` guard before except Exception, `worker.py:174-178` WorkerExecutionError wrapping with from exc | resolved |
 
 **Note on T18:** RETRACTED (Cycle 10). Pregel intercepts `GraphBubbleUp` at the task runner
 level before any node-local `except Exception` block. The guard added as T18 is superfluous
@@ -912,6 +923,7 @@ before committing.
 ### T13 — graph_input missing required fields: RESOLVED
 
 `lib/worker/executor.py:176-183` now initialises all required `TeamState` fields:
+
 ```python
 graph_input: dict[str, Any] = {
     "messages": messages,
@@ -922,10 +934,11 @@ graph_input: dict[str, Any] = {
     "token_usage": {},
 }
 ```
+
 Task list confirms completed. Fix is clean — empty `messages: []` is safe with the
 `add_messages` reducer (appends nothing on merge).
 
-### T12 — _replace_plan empty discard: still open
+### T12 — \_replace_plan empty discard: still open
 
 `lib/core/state.py:64`: `return new if new else existing` — unchanged. Coder has task
 in_progress. See Cycle 9 design clarification note: the existing test
@@ -955,10 +968,12 @@ No lazy recompile logic present. T17 DB scope (missing `team_preset` column in
 ### T15 — GraphRecursionError fix direction (precise)
 
 From `knowledge/repositories/langgraph/libs/langgraph/langgraph/errors.py:45`:
+
 ```python
 class GraphRecursionError(RecursionError):
     pass
 ```
+
 `GraphRecursionError` inherits `RecursionError → Exception → BaseException`. It IS caught
 by the `except BaseException` block in `aggregator.ingest()` (line 1117), falls into the
 `else` branch (not `_is_interrupt`), and emits `INGEST_ERROR` with `recoverable=False`.
@@ -1012,6 +1027,7 @@ and propagates input to the same underlying `astream` — so `Command` is valid 
 The Protocol and `ingest()` type annotations are simply too narrow. Two-line fix:
 
 In `aggregator.py`:
+
 1. Add `from langgraph.types import Command` to imports.
 2. Change `StreamableGraph.astream_events` signature:
    ```python
@@ -1027,8 +1043,8 @@ In `aggregator.py`:
    # After:
    graph_input: dict[str, Any] | Command | None,
    ```
-This removes the `cast(StreamableGraph, graph)` workaround in `executor.py` and makes the
-type system accurate. No runtime behaviour changes.
+   This removes the `cast(StreamableGraph, graph)` workaround in `executor.py` and makes the
+   type system accurate. No runtime behaviour changes.
 
 ---
 
@@ -1040,6 +1056,7 @@ type system accurate. No runtime behaviour changes.
 ### How step_timeout works in Pregel (authoritative)
 
 From `pregel/main.py:601-602` and `640-688`:
+
 - `step_timeout: float | None = None` is a **constructor parameter** of the compiled
   `Pregel` object, stored as `self.step_timeout`.
 - It is passed directly to `runner.tick()` / `runner.atick()` as `timeout=self.step_timeout`
@@ -1056,6 +1073,7 @@ There is no `step_timeout` parameter on `compile()`.
 ### Correct T11 implementation path
 
 The only correct approach is **post-compile attribute assignment**:
+
 ```python
 compiled = builder.compile(checkpointer=checkpointer, interrupt_before=interrupt_nodes)
 if step_timeout is not None:
@@ -1072,6 +1090,7 @@ anything.
 Three changes needed:
 
 1. **`lib/core/config.py`** — add field:
+
    ```python
    graph_node_timeout_seconds: int = Field(
        default=300,
@@ -1081,6 +1100,7 @@ Three changes needed:
 
 2. **`lib/core/graph.py`** — add `step_timeout` param to `compile_team_graph()` and set
    post-compile:
+
    ```python
    def compile_team_graph(
        ...,
@@ -1111,9 +1131,11 @@ When `step_timeout` fires, `asyncio.TimeoutError` propagates out of `astream_eve
 The `except BaseException` in `aggregator.ingest()` catches it. Currently falls to the
 generic `INGEST_ERROR` branch. Consider adding a third branch alongside the T15
 `_is_recursion_limit` check:
+
 ```python
 _is_step_timeout = isinstance(exc, asyncio.TimeoutError)
 ```
+
 If matched: emit `code="STEP_TIMEOUT"` with `recoverable=True` (user can retry with a
 larger timeout or a simpler task). This is a separate finding but naturally companion to T15.
 
@@ -1143,6 +1165,7 @@ Existing `vaultspec.db` files on disk will silently lack the column, causing
 
 **Migration strategy for T17:** Use a lightweight `ALTER TABLE` guard in `init_db()` or
 a separate `migrate_db()` helper, run at startup before `create_all`:
+
 ```python
 async with engine.begin() as conn:
     # Add team_preset column if it doesn't exist (idempotent)
@@ -1150,24 +1173,29 @@ async with engine.begin() as conn:
         "ALTER TABLE threads ADD COLUMN team_preset TEXT"
     ))
 ```
+
 SQLite's `ALTER TABLE … ADD COLUMN` is safe to run even when the column already exists
 — it raises `OperationalError: duplicate column name` which should be caught and ignored:
+
 ```python
 try:
     await conn.execute(text("ALTER TABLE threads ADD COLUMN team_preset TEXT"))
 except Exception:
     pass  # Column already exists
 ```
+
 Run this BEFORE `create_all` so fresh and existing DBs both end up with the column.
 
 ### Full T17 wiring — four files
 
 **1. `lib/database/models.py`** — add column:
+
 ```python
 team_preset: Mapped[str | None] = mapped_column(default=None)
 ```
 
 **2. `lib/database/session.py`** — add migration guard in `init_db()` before `create_all`:
+
 ```python
 async with engine.begin() as conn:
     try:
@@ -1178,6 +1206,7 @@ async with engine.begin() as conn:
 ```
 
 **3. `lib/database/crud.py`** — add `team_preset` param to `create_thread()`:
+
 ```python
 async def create_thread(
     session: AsyncSession,
@@ -1203,6 +1232,7 @@ async def create_thread(
 **4. `lib/api/endpoints.py`** — two changes:
 
 a) Pass `team_preset` to `create_thread()` at the create-thread endpoint (`~line 223`):
+
 ```python
 thread = await create_thread(
     db,
@@ -1213,6 +1243,7 @@ thread = await create_thread(
 ```
 
 b) At the resume endpoint (`~line 711`), look up `team_preset` from DB before dispatching:
+
 ```python
 thread = await get_thread(db, thread_id)
 team_preset = thread.team_preset if thread else None
@@ -1226,6 +1257,7 @@ dispatch = DispatchRequest(
 ```
 
 **5. `lib/worker/executor.py`** — implement lazy recompile in `_handle_resume()`:
+
 ```python
 async def _handle_resume(self, req: DispatchRequest) -> None:
     graph = self._graphs.get(req.thread_id)
@@ -1265,6 +1297,7 @@ to extract it, OR a dedicated `workspace_root` column could be added alongside
 
 Recommend extracting from `thread_metadata` JSON at the resume endpoint — avoids a
 second schema migration:
+
 ```python
 import json
 meta = json.loads(thread.thread_metadata) if thread.thread_metadata else {}
@@ -1338,7 +1371,7 @@ These are new code paths exercised only at runtime.
 **Reported:** Cycle 15
 **Scope:** Full confirmation sweep of all in-progress tasks + T05 residual + new findings
 
-### T12 — _replace_plan None sentinel: CONFIRMED RESOLVED
+### T12 — \_replace_plan None sentinel: CONFIRMED RESOLVED
 
 `lib/core/state.py:64`: `return new if new is not None else existing` — correct. Uses `None`
 sentinel per orchestrator decision, not falsiness. Allows `[]` to overwrite as a valid plan.
@@ -1424,7 +1457,7 @@ the lambda when the supervisor node routes, and `START → supervisor` is a dire
 that always runs first. Supervisor always sets `next` before the conditional fires.
 No runtime risk — confirmed safe.
 
-### lib/providers/probes/_protocol.py: clean
+### lib/providers/probes/\_protocol.py: clean
 
 Standalone probe module, no LangGraph interactions. Not a retry/graph concern.
 
@@ -1432,7 +1465,7 @@ Standalone probe module, no LangGraph interactions. Not a retry/graph concern.
 
 ## [CYCLE 17 FINDINGS] — docs-researcher: AcpSessionError + asyncio deprecation
 
-### [MEDIUM] AcpSessionError not excluded from _worker_retry_on — session failures incorrectly retried
+### [MEDIUM] AcpSessionError not excluded from \_worker_retry_on — session failures incorrectly retried
 
 **Reported:** Cycle 17
 **File:** `lib/core/graph.py:46-98`
@@ -1451,6 +1484,7 @@ represent non-transient subprocess lifecycle failures; retrying them delays
 surfacing the real error and wastes 3× the latency budget (3 attempts × backoff).
 
 **Fix direction:**
+
 ```python
 # Near top of _worker_retry_on, after the GraphRecursionError guard:
 try:
@@ -1520,6 +1554,7 @@ Covered. T15 test verifies retry predicate returns `False` for `GraphRecursionEr
 added as part of T15 in the aggregator's `ingest()` `except BaseException` handler has
 zero test coverage. `lib/core/tests/test_aggregator.py` has no test that injects a
 `GraphRecursionError` into a mock graph's `astream_events` and verifies:
+
 - `ErrorEvent(code="RECURSION_LIMIT_EXCEEDED")` is emitted
 - `recoverable=False` is set
 
@@ -1527,6 +1562,7 @@ The T15 test at `test_graph.py:465` only covers the retry predicate, not the agg
 event emission. These are separate code paths.
 
 **Fix direction:** Add a test in `test_aggregator.py`:
+
 ```python
 async def test_ingest_recursion_limit_emits_correct_event(fake_graph, ...):
     # fake_graph raises GraphRecursionError on astream_events
@@ -1539,7 +1575,7 @@ async def test_ingest_recursion_limit_emits_correct_event(fake_graph, ...):
 
 ---
 
-## [CYCLE 19 FINDINGS] — docs-researcher: _is_step_timeout dead variable + wrong recoverable flag
+## [CYCLE 19 FINDINGS] — docs-researcher: \_is_step_timeout dead variable + wrong recoverable flag
 
 ### [HIGH] `_is_step_timeout` computed but never used — step timeouts mislabelled as INGEST_ERROR
 
@@ -1549,10 +1585,13 @@ async def test_ingest_recursion_limit_emits_correct_event(fake_graph, ...):
 variable is NEVER referenced in the subsequent `if / elif / else` chain. Step timeout
 exceptions (raised by Pregel's `_runner.py:530` as `asyncio.TimeoutError("Timed out")`)
 fall through to the `else` branch and are emitted as:
+
 ```python
 ErrorEvent(code="INGEST_ERROR", recoverable=False)
 ```
+
 This is wrong on two counts:
+
 1. **Wrong code**: `INGEST_ERROR` suggests an event stream failure, not a timeout. The
    frontend has no way to distinguish a timeout from a genuine crash.
 2. **Wrong recoverable flag**: Step timeouts are transient — a single slow node hit the
@@ -1562,6 +1601,7 @@ This is wrong on two counts:
 The variable name `_is_step_timeout` indicates this branch was planned but not connected.
 
 **Fix direction:** Add `elif _is_step_timeout:` before the `else` block:
+
 ```python
 elif _is_step_timeout:
     logger.warning("Step timeout for thread %s", thread_id)
@@ -1611,6 +1651,7 @@ are lost with no retry or alerting at the worker side.
 **Fix direction:** Return HTTP 503 (or a non-200 body field) when `connection_manager`
 is None so the worker bridge can log a proper warning (currently already logged at
 WARNING level on the control surface side — the gap is the worker side has no signal):
+
 ```python
 if cm is None:
     return JSONResponse({"status": "dropped", "reason": "no_connection_manager"}, status_code=503)
@@ -1660,6 +1701,7 @@ exception handling and `_aggregator.register_graph()` wiring. Clean.
 **File:** `lib/api/endpoints.py:712-717`
 **Issue:** `respond_to_permission_endpoint` builds a `DispatchRequest(action="resume", ...)`
 without `team_preset` or `workspace_root`. On a cold-restart scenario:
+
 - Worker `_graph_presets` dict is empty (in-memory, lost on restart)
 - `req.team_preset` is `None` (not supplied by endpoint)
 - `_handle_resume` hits `logger.warning("No graph for thread %s -- cannot resume")` and returns
@@ -1673,6 +1715,7 @@ both fields.
 has a `workspace_root` field stored as JSON in the `thread_metadata` column).
 
 **Fix direction:**
+
 ```python
 # In respond_to_permission_endpoint, after extracting thread_id:
 async with get_db() as db:
@@ -1701,6 +1744,7 @@ dispatch = DispatchRequest(
 ### websocket.py: largely clean
 
 `ConnectionManager` implementation is well-structured. Key positive observations:
+
 - H10: Cross-cancel pattern on heartbeat/writer tasks correctly implemented.
 - M14: 1 MiB incoming message size limit enforced before JSON parse.
 - Dead client timeout via `asyncio.wait_for(_DEAD_CLIENT_TIMEOUT=90s)`.
@@ -1724,11 +1768,14 @@ public methods; a matching `is_subscribed(client_id, thread_id) -> bool` accesso
 close this gap.
 
 **Fix direction:** Add a method to `EventAggregator`:
+
 ```python
 def is_subscribed(self, client_id: str, thread_id: str) -> bool:
     return thread_id in self._subscriptions.get(client_id, set())
 ```
+
 Then replace the private access in `broadcast_to_thread`:
+
 ```python
 if not self._aggregator.is_subscribed(client_id, thread_id):
     continue
@@ -1795,9 +1842,11 @@ immediately re-raises without calling `_should_retry_on` at all.
 The `except Exception as exc` clause at line 64 (async: 160) receives the OUTERMOST
 exception. If `WorkerExecutionError` wraps the original cause, `retry_on` receives
 `WorkerExecutionError` as `exc`. Our `_worker_retry_on` correctly handles this:
+
 ```python
 cause = exc.__cause__ if isinstance(exc, WorkerExecutionError) and exc.__cause__ is not None else exc
 ```
+
 This is the right pattern since `_should_retry_on` passes the raw outermost exc to the callable.
 
 **T05 verdict:** Correct. `GraphBubbleUp` never reaches `retry_on`. No action needed.
@@ -1818,6 +1867,7 @@ excluded from `_worker_retry_on`.**
 
 **With `include_raw=True`:**
 Chain becomes `RunnableMap(raw=llm) | parser_with_fallback`:
+
 ```python
 parser_assign = RunnablePassthrough.assign(
     parsed=itemgetter("raw") | output_parser,
@@ -1826,8 +1876,10 @@ parser_assign = RunnablePassthrough.assign(
 parser_none = RunnablePassthrough.assign(parsed=lambda _: None)
 parser_with_fallback = parser_assign.with_fallbacks([parser_none], exception_key="parsing_error")
 ```
+
 Parsing failures are CAUGHT by `with_fallbacks` — stored in `result["parsing_error"]`
 while `result["parsed"]` is `None`. The chain DOES NOT RAISE on parse failure. You get:
+
 - `result["raw"]`: the original `AIMessage` (raw LLM output)
 - `result["parsed"]`: the Pydantic instance, or `None` on failure
 - `result["parsing_error"]`: the exception, or `None` on success
@@ -1869,6 +1921,7 @@ reducer. No reducer bypass. Update writes are attributed to `NULL_TASK_ID` (same
 
 **Finding:** Node metadata is stored in `PregelNode._metadata` at compile time and baked
 into `PregelExecutableTask` at `prepare_next_tasks` time. The retry loop only mutates:
+
 - `task.writes` — cleared at line 130/40 before each attempt
 - `config` — patched with `CONFIG_KEY_RESUMING=True` at line 201/105
 
@@ -1890,11 +1943,13 @@ run inside `arun_with_retry` which is called within a single superstep's task ex
 phase — the loop's `step` counter does not advance during retries.
 
 Out-of-steps check:
+
 ```python
 if self.step > self.stop:   # _loop.py:467
     self.status = "out_of_steps"
 ```
-`self.stop = self.step + self.config["recursion_limit"] + 1`  — set once at init.
+
+`self.stop = self.step + self.config["recursion_limit"] + 1` — set once at init.
 
 **Verdict:** 3 retry attempts on a node = **1 recursion step consumed**, not 3.
 `_GRAPH_RECURSION_LIMIT = 100` is safe regardless of retry count per node.
@@ -1958,9 +2013,9 @@ fall back to `result["raw"].content` for text-based routing on failure.
 
 ---
 
-## [CYCLE 25 FINDINGS] — docs-researcher: _is_step_timeout resolved + full status sweep
+## [CYCLE 25 FINDINGS] — docs-researcher: \_is_step_timeout resolved + full status sweep
 
-### _is_step_timeout HIGH finding: RESOLVED
+### \_is_step_timeout HIGH finding: RESOLVED
 
 `lib/core/aggregator.py:1160-1174`: `elif _is_step_timeout:` branch fully wired.
 `code="STEP_TIMEOUT"`, `recoverable=True`, `span.set_attribute("error.type", "step_timeout")`.
@@ -1976,14 +2031,14 @@ The Cycle 19 HIGH finding is resolved.
 
 All HIGH findings resolved. Remaining open items:
 
-| Severity | Finding | Task | Status |
-|----------|---------|------|--------|
-| MEDIUM | T21: /internal/events returns 200 on event drop | #34 | **completed** |
-| LOW | T20: Aggregator RECURSION_LIMIT_EXCEEDED branch untested | #36 | **completed** |
-| LOW | T23: OutputParserException exclusion (T09 companion) | pending | blocked on T09 |
-| INFO | broadcast_to_thread accesses _subscriptions private attr | none | open |
-| INFO | /internal/* endpoints have no auth | none | open |
-| INFO | _loop_router "FINISH" path is dead code | none | open |
+| Severity | Finding                                                   | Task    | Status         |
+| -------- | --------------------------------------------------------- | ------- | -------------- |
+| MEDIUM   | T21: /internal/events returns 200 on event drop           | #34     | **completed**  |
+| LOW      | T20: Aggregator RECURSION_LIMIT_EXCEEDED branch untested  | #36     | **completed**  |
+| LOW      | T23: OutputParserException exclusion (T09 companion)      | pending | blocked on T09 |
+| INFO     | broadcast_to_thread accesses \_subscriptions private attr | none    | open           |
+| INFO     | /internal/\* endpoints have no auth                       | none    | open           |
+| INFO     | \_loop_router "FINISH" path is dead code                  | none    | open           |
 
 ---
 
@@ -1991,7 +2046,7 @@ All HIGH findings resolved. Remaining open items:
 
 ### T20 (RECURSION_LIMIT_EXCEEDED test): confirmed landed
 
-\: 
+\:
 present, asserts \ and \. Complete.
 
 ### T21 (503 on dropped event): confirmed landed
@@ -2025,6 +2080,7 @@ No `GraphBubbleUp` risk — supervisor never calls `interrupt()`.
 ### websocket.py — confirmed clean; broadcast_to_thread private attr still INFO
 
 Full re-read (548 lines). Confirms all previous findings resolved:
+
 - H10 cross-cancel: hb_task + wr_task callbacks at lines 173-174. Correct.
 - Dead-client timeout: `asyncio.wait_for(..., timeout=_DEAD_CLIENT_TIMEOUT)` at line 227. Correct.
 - 1 MiB message size cap at line 240. Correct.
@@ -2033,11 +2089,12 @@ Full re-read (548 lines). Confirms all previous findings resolved:
   This remains open as INFO — the aggregator would need a public `get_subscriptions(client_id)` method
   to eliminate the coupling, but no current correctness risk.
 
-### graph.py — confirmed clean + _loop_router note
+### graph.py — confirmed clean + \_loop_router note
 
 Full re-read (690 lines). All hardening landed:
+
 - `_worker_retry_on` at line 46 — GraphRecursionError excluded, AcpSessionError excluded,
-  TimeoutError whitelisted, WorkerExecutionError.__cause__ unwrapping correct.
+  TimeoutError whitelisted, WorkerExecutionError.**cause** unwrapping correct.
 - `_WORKER_RETRY = RetryPolicy(max_attempts=3, ...)` at line 105. Correct params.
 - `interrupt_before=[]` always (line 292). Correct.
 - `step_timeout` post-compile at lines 294-295. Correct.
@@ -2050,6 +2107,7 @@ Full re-read (690 lines). All hardening landed:
 ### state.py — confirmed clean
 
 Full re-read (112 lines). All state fields validated:
+
 - `messages: Annotated[list[BaseMessage], add_messages]` — correct reducer.
 - `artifacts: Annotated[..., _append_artifacts]` — custom dedup reducer.
 - `current_plan: Annotated[..., _replace_plan]` — replacement reducer (T12 fix).
@@ -2082,6 +2140,7 @@ carries no information — it's a dead field. If the intent was to track which a
 is currently active (useful for aggregator/frontend routing), the supervisor or workers
 need to include `"active_agent": name` in their return dict. As-is the field is always
 `""` in production and should be either removed or populated.
+
 - Severity: LOW
 - File: lib/core/state.py:81, lib/core/nodes/worker.py:185 (return dict omits active_agent),
   lib/core/nodes/supervisor.py:106 (return dict omits active_agent)
@@ -2103,6 +2162,7 @@ Source: `knowledge/repositories/langgraph/libs/checkpoint/langgraph/checkpoint/m
 and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`.
 
 **InMemorySaver threading model:**
+
 - Stores state in a plain `defaultdict` — no locking of any kind.
 - `aget_tuple`, `alist`, `aput`, `aput_writes` are all thin `async def` wrappers that call
   the synchronous methods directly (no `await` inside, just `return self.method(...)`).
@@ -2117,6 +2177,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
   Tests that were previously using `InMemorySaver` were correct for the test context.
 
 **AsyncSqliteSaver threading model:**
+
 - `self.lock = asyncio.Lock()` at init (line 120) — a single asyncio lock guards all DB operations.
 - Every async operation (`aget_tuple`, `alist`, `aput`, `aput_writes`, `adelete_thread`) acquires
   `async with self.lock` before touching the database.
@@ -2131,6 +2192,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
   with an explicit "only allowed from a different thread" guard — not relevant to our async-only paths.
 
 **Codebase assessment:**
+
 - Our `executor.py` uses a single shared `AsyncSqliteSaver` instance across all concurrent graph
   runs on the worker. This is safe (lock ensures consistency) but creates a serialization bottleneck
   when many threads are active simultaneously.
@@ -2143,6 +2205,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
 Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/graph/state.py` (already read in earlier cycles).
 
 **LangGraph channel initialization:**
+
 - LangGraph uses `TypedDict` annotations to discover channels. For each key in the TypedDict:
   - `Annotated[T, reducer]` → creates a `BinaryOperatorAggregate` channel with that reducer.
   - Plain `T` → creates a `LastValue` channel.
@@ -2155,6 +2218,7 @@ Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/graph/state.p
   via `graph_input` at invocation time.
 
 **Codebase assessment:**
+
 - `executor.py:180-195` builds graph_input with: `messages`, `active_agent`, `artifacts`,
   `token_usage`, `thread_id`, `current_plan` — all six required fields.
 - `loop_count`, `next`, `routing_error` are `NotRequired` — correctly absent from graph_input.
@@ -2162,10 +2226,10 @@ Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/graph/state.p
 
 ### Summary for Cycle 28
 
-| Severity | Finding | Status |
-|----------|---------|--------|
-| INFO | AsyncSqliteSaver single-lock serializes all concurrent checkpoint ops | open (known limitation) |
-| CLEAN | Channel initialization — no defaults needed, graph_input supplies all required fields | resolved |
+| Severity | Finding                                                                               | Status                  |
+| -------- | ------------------------------------------------------------------------------------- | ----------------------- |
+| INFO     | AsyncSqliteSaver single-lock serializes all concurrent checkpoint ops                 | open (known limitation) |
+| CLEAN    | Channel initialization — no defaults needed, graph_input supplies all required fields | resolved                |
 
 ---
 
@@ -2180,6 +2244,7 @@ Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/main.p
 and `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py:62`.
 
 **How Durability works:**
+
 - Default is `"async"` (from `CONFIG_KEY_DURABILITY` config or hardcoded fallback at line 2394-2395).
   Checkpoint writes are fired asynchronously in the background while the NEXT superstep is already
   executing. This maximises throughput but creates a window where a crash between supersteps
@@ -2194,6 +2259,7 @@ Our `aggregator.ingest()` calls `graph.astream_events(graph_input, config, versi
 line 1103 — no `durability` keyword passed. This means the default `"async"` mode is used.
 
 For the interrupt / permission flow specifically:
+
 - When a node calls `interrupt()`, a `GraphInterrupt` is raised and propagates out of
   `astream_events`. The checkpoint write for the superstep that raised the interrupt is
   initiated (in the background under `"async"` mode) but may not have completed by the time
@@ -2212,6 +2278,7 @@ Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py:144-
 and `_internal/_cache.py` (not read, but API understood from types.py).
 
 **CachePolicy definition:**
+
 ```python
 @dataclass(kw_only=True, slots=True, frozen=True)
 class CachePolicy(Generic[KeyFuncT]):
@@ -2220,6 +2287,7 @@ class CachePolicy(Generic[KeyFuncT]):
 ```
 
 **Codebase assessment — none of our nodes are cache-eligible:**
+
 - `worker_node` calls an LLM with the full message history. Output is non-deterministic.
   Caching by input state would produce stale LLM responses. Not suitable.
 - `supervisor_node` routes based on conversation history. Non-deterministic by intent.
@@ -2242,6 +2310,7 @@ Source: channel source files read this cycle.
 | `BinaryOperatorAggregate` | Applies `Annotated[T, reducer]` | `messages`, `artifacts`, `current_plan`, `token_usage` |
 
 **NEW FINDING — LastValue collision risk on parallel star topology:**
+
 - `active_agent: str`, `thread_id: str`, `next: NotRequired[str]`, `routing_error: NotRequired[str]`,
   `loop_count: NotRequired[int]` — all use plain `LastValue` channels (no `Annotated`).
 - `LastValue.update()` raises `InvalidUpdateError` ("Can receive only one value per step.
@@ -2262,11 +2331,11 @@ Source: channel source files read this cycle.
 
 ### Summary for Cycle 29
 
-| Severity | Finding | Status |
-|----------|---------|--------|
-| LOW (already acked) | `durability="async"` race window on interrupt aget_state | open — orchestrator: no action |
-| CLEAN | CachePolicy — no deterministic nodes in codebase | n/a |
-| LOW | LastValue collision if parallel Send dispatch ever added (active_agent, next, routing_error) | open |
+| Severity            | Finding                                                                                      | Status                         |
+| ------------------- | -------------------------------------------------------------------------------------------- | ------------------------------ |
+| LOW (already acked) | `durability="async"` race window on interrupt aget_state                                     | open — orchestrator: no action |
+| CLEAN               | CachePolicy — no deterministic nodes in codebase                                             | n/a                            |
+| LOW                 | LastValue collision if parallel Send dispatch ever added (active_agent, next, routing_error) | open                           |
 
 ---
 
@@ -2281,6 +2350,7 @@ one important nuance.
 Source: `pregel/main.py:996-1113` (`_prepare_state_snapshot`) and `pregel/debug.py:215-284` (`tasks_w_writes`).
 
 Full trace:
+
 1. `aget_state(config)` → `checkpointer.aget_tuple(config)` → `CheckpointTuple` with `pending_writes`.
 2. `_aprepare_state_snapshot` calls `prepare_next_tasks(saved.checkpoint, saved.pending_writes, ...)`
    to reconstruct which tasks are pending next execution.
@@ -2314,6 +2384,7 @@ tasks: `tuple([i for task in tasks_with_writes for i in task.interrupts])`. Our 
 `state.tasks` and then `task.interrupts` per task — this is equivalent but requires two loops.
 
 Using `state.interrupts` directly would be simpler:
+
 ```python
 # Current (correct but verbose):
 for task in tasks:
@@ -2325,6 +2396,7 @@ for interrupt_obj in state.interrupts:
     # But we lose task.name for agent_id attribution
     ...
 ```
+
 The current per-task loop is actually BETTER than using `state.interrupts` flat because it
 preserves `task.name` for the `agent_id` attribution in the emitted `PermissionRequestEvent`.
 Using `state.interrupts` would lose the per-task agent attribution. Finding: our approach
@@ -2334,12 +2406,14 @@ is the correct and more informative choice. CLEAN.
 
 At `_prepare_state_snapshot:1086-1092`, when `apply_pending_writes=True` (which is the case
 when no `checkpoint_id` is in config — i.e., normal `aget_state()` without pinning):
+
 ```python
 for tid, k, v in saved.pending_writes:
     if k in (ERROR, INTERRUPT):
         continue   # ← INTERRUPT writes are EXCLUDED from state application
     ...
 ```
+
 `INTERRUPT` pending writes are deliberately NOT applied to channel state — they are kept as
 pending writes and surface only through `task.interrupts`. This is the correct design:
 interrupt values are metadata, not channel state. Our reading of `task.interrupts` is correct.
@@ -2367,11 +2441,11 @@ since `tasks` is NOT empty on normal completion.
 
 ### Summary for Cycle 30
 
-| Severity | Finding | Status |
-|----------|---------|--------|
-| CLEAN | `_emit_interrupt_events` reads correct field (`task.interrupts` from `pending_writes[INTERRUPT]`) | verified |
-| CLEAN | Per-task loop preserves `task.name` for agent_id attribution — better than `state.interrupts` flat | verified |
-| LOW | `aggregator.py:1006` guard `if not tasks` never short-circuits on normal completion — misleading | open |
+| Severity | Finding                                                                                            | Status   |
+| -------- | -------------------------------------------------------------------------------------------------- | -------- |
+| CLEAN    | `_emit_interrupt_events` reads correct field (`task.interrupts` from `pending_writes[INTERRUPT]`)  | verified |
+| CLEAN    | Per-task loop preserves `task.name` for agent_id attribution — better than `state.interrupts` flat | verified |
+| LOW      | `aggregator.py:1006` guard `if not tasks` never short-circuits on normal completion — misleading   | open     |
 
 ---
 
@@ -2380,6 +2454,7 @@ since `tasks` is NOT empty on normal completion.
 ### Topic A: astream_events v2 event coverage
 
 `_PASSTHROUGH_EVENTS` and `_NODE_BOUNDARY_EVENTS` cover all actionable v2 events:
+
 - `on_chat_model_stream` → MessageChunkEvent. Correct.
 - `on_tool_start/end/error` → ToolCall events. Correct.
 - `on_custom_event` → ThoughtChunkEvent. Correct.
@@ -2393,6 +2468,7 @@ since `tasks` is NOT empty on normal completion.
 ### Topic B: context.py — full audit
 
 All compaction properties verified clean:
+
 - `estimate_tokens` multi-part content handling correct (vision messages).
 - `should_compact` 80% threshold correct.
 - H5 fix (`max(0, budget)`) prevents negative budget. Correct.
@@ -2402,6 +2478,7 @@ All compaction properties verified clean:
 NEW LOW: The "summary" inserted at line 114-120 is a static boilerplate placeholder — it
 contains no content from the dropped messages. The docstring overstates it as a summary.
 By ADR-002 design (structural state over history), this is architecturally intentional.
+
 - Severity: LOW / by-design
 - File: `lib/core/context.py:114-121`
 - Note: Not actionable without ADR update. If richer handoff context is needed, an
@@ -2409,11 +2486,11 @@ By ADR-002 design (structural state over history), this is architecturally inten
 
 ### Summary for Cycle 31
 
-| Severity | Finding | Status |
-|----------|---------|--------|
-| CLEAN | astream_events v2 coverage complete and correct | verified |
-| INFO | on_chat_model_start/end add noise to events_filtered OTel counter | open |
-| LOW (by design) | compact_context summary is static boilerplate, not actual summarisation | open |
+| Severity        | Finding                                                                 | Status   |
+| --------------- | ----------------------------------------------------------------------- | -------- |
+| CLEAN           | astream_events v2 coverage complete and correct                         | verified |
+| INFO            | on_chat_model_start/end add noise to events_filtered OTel counter       | open     |
+| LOW (by design) | compact_context summary is static boilerplate, not actual summarisation | open     |
 
 ---
 
@@ -2429,6 +2506,7 @@ By ADR-002 design (structural state over history), this is architecturally inten
 Compare: `respond_to_permission_endpoint` was already fixed (T22) to look up `team_preset` and `workspace_root` from the DB and pass them in the resume `DispatchRequest`. The same fix is needed for `send_message_endpoint`.
 
 **Fix direction:**
+
 ```python
 # In send_message_endpoint, before dispatching:
 team_preset: str | None = None
@@ -2451,10 +2529,11 @@ dispatch = DispatchRequest(
     workspace_root=workspace_root,
 )
 ```
+
 - Severity: MEDIUM
 - Impact: Silent message loss after worker restart during active threads
 
-### Finding 2: [HIGH] send_message ingest wipes current_plan via _replace_plan reducer
+### Finding 2: [HIGH] send_message ingest wipes current_plan via \_replace_plan reducer
 
 **File:** `lib/worker/executor.py:185-192`, `lib/core/state.py:56-64`
 **Issue:** `_handle_ingest` always supplies `"current_plan": []` in `graph_input`. The `_replace_plan` reducer is: `return new if new is not None else existing`. Since `[]` is not `None`, it always returns `[]`. **Every user follow-up message (send_message) unconditionally wipes the current plan from the checkpoint**.
@@ -2462,6 +2541,7 @@ dispatch = DispatchRequest(
 This is a correctness bug: the supervisor's plan built during the first turn is erased when the user sends any subsequent message. On the next graph run, the supervisor starts from an empty plan with no context of what was already decided.
 
 **Fix direction:** Two options:
+
 1. Change `graph_input` to omit `current_plan` key entirely when it's a follow-up (not initial creation) — LangGraph only calls the reducer if the key is present in the update dict.
 2. Change `_replace_plan` to treat empty list as "no-op": `return new if new else existing` — but this prevents intentional plan clearing.
 
@@ -2473,22 +2553,25 @@ Option 1 is cleaner: only set `current_plan: []` when building the very first gr
 ### Finding 3: [CLEAN] respond_to_permission_endpoint — T22 fix correctly implemented
 
 The T22 fix at lines 718-729 correctly:
+
 - Looks up `thread_record.team_preset` from DB
 - Parses `workspace_root` from `thread_record.thread_metadata` JSON
 - Passes both into `DispatchRequest(action="resume", ...)`
-The lazy recompile path in `_handle_resume` (executor.py:228-257) correctly uses `req.team_preset` as fallback when `preset_info` is absent from cache.
-CLEAN — T22 fully functional.
+  The lazy recompile path in `_handle_resume` (executor.py:228-257) correctly uses `req.team_preset` as fallback when `preset_info` is absent from cache.
+  CLEAN — T22 fully functional.
 
-### Finding 4: [INFO] _enrich_snapshot_from_state: _MinimalState inner class defined per request
+### Finding 4: [INFO] \_enrich_snapshot_from_state: \_MinimalState inner class defined per request
 
 **File:** `lib/api/endpoints.py:488-492`
 **Issue:** A `_MinimalState` class is defined inside `get_thread_state_endpoint` on every HTTP request that has checkpoint data. In CPython, `class` bodies are executed at call time, so this creates a fresh class object per request. Harmless for correctness, minor allocation overhead. Could be lifted to module level.
+
 - Severity: INFO — cosmetic/micro-perf only.
 
 ### Finding 5: [INFO] aget() used instead of aget_tuple() in snapshot endpoint
 
 **File:** `lib/api/endpoints.py:477-478`
 **Issue:** `checkpointer.aget(config)` returns raw checkpoint dict, while `aget_tuple(config)` returns `CheckpointTuple` (which includes the metadata and pending writes). The snapshot endpoint only needs messages, so `aget()` is appropriate. However, `checkpoint["id"]` at line 496 is the checkpoint's UUID — this is populated by the LangGraph internal checkpoint structure and should be present. CLEAN by inspection.
+
 - Severity: INFO — confirmed correct.
 
 ### Finding 6: [CLEAN] PermissionResponseResult.accepted=False when thread_id not parseable
@@ -2503,19 +2586,20 @@ CLEAN.
 **Issue:** `"active_agent": ""` in graph_input is passed to `add_messages`-style... no, `active_agent` is a plain `LastValue` channel (no reducer annotation). So every ingest (including follow-up messages) writes `active_agent=""` to the checkpoint, overwriting whatever the last worker set. When the supervisor reads state on a follow-up run, `state["active_agent"]` will always be `""` rather than the last active agent.
 
 Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only set on initial creation. The supervisor doesn't use `active_agent` for routing (it uses `next`), but it's confusing dead state.
+
 - Severity: MEDIUM (contributes to the dead `active_agent` field finding from Cycle 27)
 
 ### Summary for Cycle 32
 
-| Severity | Finding | File | Status |
-|----------|---------|------|--------|
-| HIGH | send_message wipes current_plan via _replace_plan on every follow-up | `executor.py:186`, `state.py:63` | open — needs task |
-| MEDIUM | send_message omits team_preset/workspace_root → silent message drop after worker restart | `endpoints.py:562-566` | open — needs task |
-| MEDIUM | send_message sets active_agent="" on every follow-up (LastValue overwrite) | `executor.py:187` | open (related to Cycle 27 LOW) |
-| CLEAN | T22 resume path correctly wires team_preset + workspace_root | `endpoints.py:731-737` | verified |
-| INFO | _MinimalState inner class allocated per request | `endpoints.py:488` | cosmetic |
-| INFO | aget() vs aget_tuple() correct for snapshot use | `endpoints.py:477` | verified |
-| CLEAN | PermissionResponseResult fail-safe when request_id malformed | `endpoints.py:751` | verified |
+| Severity | Finding                                                                                  | File                             | Status                         |
+| -------- | ---------------------------------------------------------------------------------------- | -------------------------------- | ------------------------------ |
+| HIGH     | send_message wipes current_plan via \_replace_plan on every follow-up                    | `executor.py:186`, `state.py:63` | open — needs task              |
+| MEDIUM   | send_message omits team_preset/workspace_root → silent message drop after worker restart | `endpoints.py:562-566`           | open — needs task              |
+| MEDIUM   | send_message sets active_agent="" on every follow-up (LastValue overwrite)               | `executor.py:187`                | open (related to Cycle 27 LOW) |
+| CLEAN    | T22 resume path correctly wires team_preset + workspace_root                             | `endpoints.py:731-737`           | verified                       |
+| INFO     | \_MinimalState inner class allocated per request                                         | `endpoints.py:488`               | cosmetic                       |
+| INFO     | aget() vs aget_tuple() correct for snapshot use                                          | `endpoints.py:477`               | verified                       |
+| CLEAN    | PermissionResponseResult fail-safe when request_id malformed                             | `endpoints.py:751`               | verified                       |
 
 ---
 
@@ -2554,6 +2638,7 @@ The relay task must drain the queue and forward each event's JSON to `bridge.sen
 **File:** `lib/worker/ipc.py:132`
 
 `heartbeat_loop` calls `await asyncio.sleep(interval)` inside an `anyio.create_task_group()` started task. Under the asyncio backend (current default), this works. Under trio (if ever switched), `asyncio.sleep` would not integrate with trio's event loop. Should be `await anyio.sleep(interval)` for backend-agnostic correctness.
+
 - Severity: MEDIUM (latent portability bug)
 
 ### Finding 3: [INFO] Shutdown order: bridge.close() before tg.cancel_scope.cancel()
@@ -2561,16 +2646,17 @@ The relay task must drain the queue and forward each event's JSON to `bridge.sen
 **File:** `lib/worker/app.py:87-91`
 
 Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_scope.cancel()`. The heartbeat loop runs in `tg` and calls `bridge.send_heartbeat()` which uses `bridge._client`. If the heartbeat fires between `bridge.close()` and `tg.cancel_scope.cancel()`, it hits a closed httpx client. `send_heartbeat` catches `httpx.HTTPError` at DEBUG level — so it's benign but noisy.
+
 - Fix: call `tg.cancel_scope.cancel()` before `bridge.close()`, or reverse the order.
 - Severity: INFO (benign, covered by exception handler)
 
 ### Summary for Cycle 33
 
-| Severity | Finding | File | Status |
-|----------|---------|------|--------|
+| Severity | Finding                                                                                        | File                                  | Status            |
+| -------- | ---------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------- |
 | CRITICAL | Worker EventAggregator never relays events to control surface — bridge.send_event never called | `executor.py:77`, `aggregator.py:408` | open — needs task |
-| MEDIUM | heartbeat_loop uses asyncio.sleep inside anyio TaskGroup (portability) | `ipc.py:132` | open |
-| INFO | Shutdown ordering: bridge.close before tg.cancel_scope.cancel | `app.py:87-91` | benign |
+| MEDIUM   | heartbeat_loop uses asyncio.sleep inside anyio TaskGroup (portability)                         | `ipc.py:132`                          | open              |
+| INFO     | Shutdown ordering: bridge.close before tg.cancel_scope.cancel                                  | `app.py:87-91`                        | benign            |
 
 ---
 
@@ -2585,6 +2671,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 `subprocess.Popen.wait(timeout=30)` is a **synchronous** blocking call. It is called from `stop()` which is called from the control surface's async lifespan shutdown handler. If the worker is slow to exit, this blocks the entire asyncio event loop for up to 30 seconds during API shutdown, preventing any other coroutines (including Starlette's WebSocket close handshakes) from running.
 
 **Fix direction:** Either:
+
 1. Run `process.wait()` in a thread pool: `await asyncio.get_event_loop().run_in_executor(None, self._process.wait, 30)`
 2. Switch to `asyncio.create_subprocess_exec` (non-blocking) and `await proc.wait()`
 
@@ -2595,6 +2682,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 **File:** `lib/api/supervisor.py:94,106`
 
 Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `anyio.create_task_group()` task (from `app.py` lifespan). Should be `anyio.sleep` for backend portability.
+
 - Severity: MEDIUM (same as ipc.py finding)
 
 ### Finding 3: [MEDIUM] supervisor.start() uses subprocess.Popen (synchronous)
@@ -2602,6 +2690,7 @@ Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `
 **File:** `lib/api/supervisor.py:44`
 
 `subprocess.Popen(cmd, ...)` is synchronous. On Linux it's fast (fork+exec), but on Windows it can block for tens of milliseconds while the OS creates the process. During the monitor loop this runs in the async event loop. Should use `asyncio.create_subprocess_exec` and store an `asyncio.subprocess.Process`.
+
 - Severity: MEDIUM (latent, Windows-specific perf concern)
 
 ### Finding 4: [CLEAN] broadcast_to_thread event relay chain verified
@@ -2611,6 +2700,7 @@ Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `
 The chain: worker → `bridge.send_event` → `POST /internal/events` → `receive_worker_event` → `cm.broadcast_to_thread` → subscribed WebSocket clients.
 
 `broadcast_to_thread` correctly:
+
 - Iterates `self._connections` (with list() snapshot for concurrent safety)
 - Checks `self._aggregator._subscriptions` for thread subscription (note: accesses private attribute — INFO finding from Cycle 26 confirmed)
 - Skips disconnected WebSocket states
@@ -2618,16 +2708,17 @@ The chain: worker → `bridge.send_event` → `POST /internal/events` → `recei
 
 CLEAN — delivery chain from control surface to browser is correct. The only gap is the upstream worker not calling `bridge.send_event` (T27).
 
-### Finding 5: [INFO] broadcast_to_thread accesses aggregator._subscriptions private attribute
+### Finding 5: [INFO] broadcast_to_thread accesses aggregator.\_subscriptions private attribute
 
 **File:** `lib/api/websocket.py:519`
 
 `self._aggregator._subscriptions.get(client_id, set())` — accesses private attribute. This is the previously-noted INFO finding. Could be exposed via a public method `aggregator.get_subscriptions(client_id)` (which already exists at `aggregator.py:329`!).
 
 **Fix:** Replace `self._aggregator._subscriptions.get(client_id, set())` with `self._aggregator.get_subscriptions(client_id)`.
+
 - Severity: LOW (correctness unaffected, but cleaner API usage — existing public method available)
 
-### Finding 6: [CLEAN] WebSocket _writer_loop and _heartbeat_loop: cross-cancel via done_callback
+### Finding 6: [CLEAN] WebSocket \_writer_loop and \_heartbeat_loop: cross-cancel via done_callback
 
 **File:** `lib/api/websocket.py:163-174`
 
@@ -2641,14 +2732,14 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 
 ### Summary for Cycle 34
 
-| Severity | Finding | File | Status |
-|----------|---------|------|--------|
-| HIGH | supervisor.stop() blocks event loop up to 30s via sync process.wait() | `supervisor.py:70` | open — needs task |
-| MEDIUM | supervisor.monitor() uses asyncio.sleep in anyio task group | `supervisor.py:94,106` | open |
-| MEDIUM | supervisor.start() uses sync subprocess.Popen | `supervisor.py:44` | open |
-| CLEAN | broadcast_to_thread relay chain verified correct | `websocket.py:506-527` | verified |
-| LOW | broadcast_to_thread uses aggregator._subscriptions private attr (public method exists) | `websocket.py:519` | minor fix available |
-| CLEAN | WS cross-cancel (H10), PERMISSION_RESPONSE WS rejection | `websocket.py:163,335` | verified |
+| Severity | Finding                                                                                 | File                   | Status              |
+| -------- | --------------------------------------------------------------------------------------- | ---------------------- | ------------------- |
+| HIGH     | supervisor.stop() blocks event loop up to 30s via sync process.wait()                   | `supervisor.py:70`     | open — needs task   |
+| MEDIUM   | supervisor.monitor() uses asyncio.sleep in anyio task group                             | `supervisor.py:94,106` | open                |
+| MEDIUM   | supervisor.start() uses sync subprocess.Popen                                           | `supervisor.py:44`     | open                |
+| CLEAN    | broadcast_to_thread relay chain verified correct                                        | `websocket.py:506-527` | verified            |
+| LOW      | broadcast_to_thread uses aggregator.\_subscriptions private attr (public method exists) | `websocket.py:519`     | minor fix available |
+| CLEAN    | WS cross-cancel (H10), PERMISSION_RESPONSE WS rejection                                 | `websocket.py:163,335` | verified            |
 
 ---
 
@@ -2656,7 +2747,7 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 
 **Files read:** `lib/api/app.py` (full), `lib/worker/executor.py:260-289`
 
-### Finding 1: [MEDIUM] _dispatch_message (WS SEND_MESSAGE path) also missing team_preset/workspace_root
+### Finding 1: [MEDIUM] \_dispatch_message (WS SEND_MESSAGE path) also missing team_preset/workspace_root
 
 **File:** `lib/api/app.py:103-125`
 
@@ -2671,6 +2762,7 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 The correct permission response flow is `POST /permissions/{id}/respond` (REST) per ADR-011 §3.1. The `AGENT_CONTROL.RESUME` WS path appears to be a general-purpose graph resume (non-permission) — but since `interrupt()` in our worker node is always a permission request, `resume=None` is semantically wrong.
 
 **Fix direction:** Either:
+
 1. Remove/document `AGENT_CONTROL.RESUME` as not for permission responses (permissions are REST-only — already enforced via `PERMISSION_RESPONSE` WS rejection).
 2. Add `option_id` to `AgentControlCommand` schema and thread it through `_dispatch_control`.
 
@@ -2683,10 +2775,12 @@ The correct permission response flow is `POST /permissions/{id}/respond` (REST) 
 Shutdown sequence calls `supervisor.stop()` (line 272) before `tg.cancel_scope.cancel()` (line 280). Between these calls, `supervisor.monitor()` in the task group sees `not self.is_alive()` and calls `self.start()` — spawning a new worker. When `tg.cancel_scope.cancel()` fires, the monitor task is killed but the freshly spawned OS process becomes an orphan.
 
 **Fix direction:** Cancel the task group first, then stop the supervisor:
+
 ```python
 tg.cancel_scope.cancel()  # kill monitor task first
 supervisor.stop()         # then terminate worker cleanly
 ```
+
 - Severity: HIGH — orphan worker process spawned during graceful shutdown
 
 ### Finding 4: [CLEAN] CORS, telemetry, SPA mounting, lifespan checkpointer scoping — all correct
@@ -2695,12 +2789,12 @@ CORS always-on (C1 fix), `settings.cors_allowed_origins` used, checkpointer open
 
 ### Summary for Cycle 35
 
-| Severity | Finding | File | Status |
-|----------|---------|------|--------|
-| HIGH | AGENT_CONTROL.RESUME dispatches Command(resume=None) — always wrong option_id | `app.py:147-162` | open — needs task or doc |
-| HIGH | Shutdown race: monitor restarts killed worker before tg.cancel_scope.cancel() → orphan process | `app.py:264-280` | open — needs task |
-| MEDIUM | _dispatch_message WS path missing team_preset/workspace_root — T26 scope gap | `app.py:103-125` | open — widen T26 scope |
-| CLEAN | CORS, telemetry, SPA, checkpointer lifecycle, WS wiring | `app.py:304-363` | verified |
+| Severity | Finding                                                                                        | File             | Status                   |
+| -------- | ---------------------------------------------------------------------------------------------- | ---------------- | ------------------------ |
+| HIGH     | AGENT_CONTROL.RESUME dispatches Command(resume=None) — always wrong option_id                  | `app.py:147-162` | open — needs task or doc |
+| HIGH     | Shutdown race: monitor restarts killed worker before tg.cancel_scope.cancel() → orphan process | `app.py:264-280` | open — needs task        |
+| MEDIUM   | \_dispatch_message WS path missing team_preset/workspace_root — T26 scope gap                  | `app.py:103-125` | open — widen T26 scope   |
+| CLEAN    | CORS, telemetry, SPA, checkpointer lifecycle, WS wiring                                        | `app.py:304-363` | verified                 |
 
 ---
 
@@ -2711,6 +2805,7 @@ CORS always-on (C1 fix), `settings.cors_allowed_origins` used, checkpointer open
 ### Overall: CLEAN — well-implemented layer with prior fixes all confirmed
 
 All prior audit fixes verified present:
+
 - TOCTOU race on nickname: SELECT pre-check + `IntegrityError` catch on UNIQUE index collision (H12/H17) ✓
 - `_coerce_status` validates status strings before insert (DB-HIGH-02) ✓
 - `updated_at` set explicitly in `update_thread_status` + `update_thread_metadata` (DB-H2) ✓
@@ -2724,6 +2819,7 @@ All prior audit fixes verified present:
 **File:** `lib/database/crud.py:194-204`
 
 Two queries in same session: `SELECT COUNT(*) FROM threads` then `SELECT ... LIMIT/OFFSET`. Under WAL, concurrent inserts between the two could produce a `total` that doesn't match the returned list length. This is a normal pagination consistency tradeoff (acceptable) — just worth documenting.
+
 - Severity: INFO — by-design; consistent with standard pagination patterns
 
 ### Finding 2: [INFO] get_engine singleton path comparison against DEFAULT_DB_PATH (not existing engine URL)
@@ -2737,16 +2833,17 @@ H19 warning: the path mismatch check compares `resolved_requested != resolved_de
 **File:** `lib/database/crud.py:226-236`, `lib/api/endpoints.py:556`
 
 `update_thread_status` returns `None` if `thread_id` not found. `send_message_endpoint` calls `update_thread_status` and ignores the return value (line 556). Since `get_thread` is called earlier on line 545 and raises 404 if missing, the thread is guaranteed to exist at this point. CLEAN by ordering — but the return value silently discarded is a minor readability concern.
+
 - Severity: LOW — no actual bug
 
 ### Summary for Cycle 36
 
-| Severity | Finding | File | Status |
-|----------|---------|------|--------|
-| CLEAN | Full CRUD layer — all prior fixes confirmed, WAL setup correct | `crud.py`, `session.py` | verified |
-| INFO | list_threads two-query COUNT/SELECT — normal pagination consistency tradeoff | `crud.py:194` | by-design |
-| INFO | get_engine singleton path comparison logic correct on close reading | `session.py:97` | verified |
-| LOW | update_thread_status return value silently discarded in send_message_endpoint | `endpoints.py:556` | cosmetic |
+| Severity | Finding                                                                       | File                    | Status    |
+| -------- | ----------------------------------------------------------------------------- | ----------------------- | --------- |
+| CLEAN    | Full CRUD layer — all prior fixes confirmed, WAL setup correct                | `crud.py`, `session.py` | verified  |
+| INFO     | list_threads two-query COUNT/SELECT — normal pagination consistency tradeoff  | `crud.py:194`           | by-design |
+| INFO     | get_engine singleton path comparison logic correct on close reading           | `session.py:97`         | verified  |
+| LOW      | update_thread_status return value silently discarded in send_message_endpoint | `endpoints.py:556`      | cosmetic  |
 
 ---
 
@@ -2757,6 +2854,7 @@ H19 warning: the path mismatch check compares `resolved_requested != resolved_de
 ### models.py: CLEAN
 
 All four models correct:
+
 - `ThreadModel`: unique index on `nickname`, `team_preset` column present, `cascade="all, delete-orphan"` on all relationships, `_utcnow` default and `onupdate` ✓
 - `ArtifactModel`, `PermissionLogModel`, `CostTrackingModel`: foreign keys to `threads.id`, appropriate indexes ✓
 - `thread_metadata` uses column attr name (SQLAlchemy reserves `metadata` — fix from ADR-014 sprint) ✓
@@ -2764,6 +2862,7 @@ All four models correct:
 ### provider layer quick-scan: CLEAN (no new issues)
 
 Targeted scan for known problem patterns across `lib/providers/`:
+
 - No `asyncio.sleep` calls (anyio portability non-issue here — provider is asyncio-native)
 - No `subprocess.Popen` (uses `asyncio.create_subprocess_exec` / `create_subprocess_shell`) ✓
 - No `get_event_loop()` usage ✓
@@ -2779,10 +2878,10 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### Summary for Cycle 37
 
-| Severity | Finding | Status |
-|----------|---------|--------|
-| CLEAN | models.py — all prior fixes confirmed, schema correct | verified |
-| CLEAN | providers/ — no new asyncio/blocking/injection issues | verified |
+| Severity | Finding                                               | Status   |
+| -------- | ----------------------------------------------------- | -------- |
+| CLEAN    | models.py — all prior fixes confirmed, schema correct | verified |
+| CLEAN    | providers/ — no new asyncio/blocking/injection issues | verified |
 
 ---
 
@@ -2887,24 +2986,25 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### Summary for Cycle 38
 
-| ID | Severity | File | Issue | Status |
-|----|----------|------|-------|--------|
-| API-01 | MEDIUM | app.py:103-125 | `_dispatch_message` missing team_preset/workspace_root (T26b) | open |
-| API-02 | MEDIUM | internal.py:44 | No size limit on internal WS frames | open |
-| API-03 | MEDIUM | internal.py:94-118 | No body size limit or auth on /internal/events | open |
-| API-04 | LOW | supervisor.py:94,106 | asyncio.sleep in monitor (anyio inconsistency) | open |
-| API-05 | LOW | supervisor.py:64-75 | supervisor.stop() blocks event loop (T29) | open |
-| API-06 | MEDIUM | app.py:264-280 | Shutdown cancel after cleanup (T30) | open |
-| API-07 | INFO | crud.py:132-159 | TOCTOU IntegrityError catch — correct | clean |
-| API-08 | INFO | crud.py:194-204 | Pagination count TOCTOU — known limitation | clean |
-| API-09 | LOW | endpoints.py:655-660 | _BUNDLED_TEAM_PRESETS duplicates MCP _KNOWN_PRESETS | open |
-| API-10 | MEDIUM | app.py:145-147 | AGENT_CONTROL.RESUME dispatches without option_id (T31) | open |
+| ID     | Severity | File                 | Issue                                                         | Status |
+| ------ | -------- | -------------------- | ------------------------------------------------------------- | ------ |
+| API-01 | MEDIUM   | app.py:103-125       | `_dispatch_message` missing team_preset/workspace_root (T26b) | open   |
+| API-02 | MEDIUM   | internal.py:44       | No size limit on internal WS frames                           | open   |
+| API-03 | MEDIUM   | internal.py:94-118   | No body size limit or auth on /internal/events                | open   |
+| API-04 | LOW      | supervisor.py:94,106 | asyncio.sleep in monitor (anyio inconsistency)                | open   |
+| API-05 | LOW      | supervisor.py:64-75  | supervisor.stop() blocks event loop (T29)                     | open   |
+| API-06 | MEDIUM   | app.py:264-280       | Shutdown cancel after cleanup (T30)                           | open   |
+| API-07 | INFO     | crud.py:132-159      | TOCTOU IntegrityError catch — correct                         | clean  |
+| API-08 | INFO     | crud.py:194-204      | Pagination count TOCTOU — known limitation                    | clean  |
+| API-09 | LOW      | endpoints.py:655-660 | \_BUNDLED_TEAM_PRESETS duplicates MCP \_KNOWN_PRESETS         | open   |
+| API-10 | MEDIUM   | app.py:145-147       | AGENT_CONTROL.RESUME dispatches without option_id (T31)       | open   |
 
 ---
 
 ## Cycle 38 — preamble.py, metadata.py, environment.py, telemetry/instrumentation.py
 
 **Files read:**
+
 - `lib/core/preamble.py`
 - `lib/core/metadata.py`
 - `lib/workspace/environment.py`
@@ -2951,18 +3051,19 @@ The `VAULTSPEC_*` prefix scrub provides a generic escape hatch, but Figma and pr
 
 ### Summary for Cycle 38
 
-| Severity | Finding | Location | Status |
-|----------|---------|----------|--------|
-| LOW | WS-L2: FIGMA_ACCESS_TOKEN not in scrub_keys — leaks to agent subprocess env | `environment.py:72-86` | new |
-| CLEAN | preamble.py — no injection surface | — | verified |
-| CLEAN | metadata.py — all validators confirmed | — | verified |
-| CLEAN | telemetry/instrumentation.py — no secrets read/logged, idempotent | — | verified |
+| Severity | Finding                                                                     | Location               | Status   |
+| -------- | --------------------------------------------------------------------------- | ---------------------- | -------- |
+| LOW      | WS-L2: FIGMA_ACCESS_TOKEN not in scrub_keys — leaks to agent subprocess env | `environment.py:72-86` | new      |
+| CLEAN    | preamble.py — no injection surface                                          | —                      | verified |
+| CLEAN    | metadata.py — all validators confirmed                                      | —                      | verified |
+| CLEAN    | telemetry/instrumentation.py — no secrets read/logged, idempotent           | —                      | verified |
 
 ---
 
-## Cycle 39 — health.py, __main__.py, auth.py, mcp/server.py
+## Cycle 39 — health.py, **main**.py, auth.py, mcp/server.py
 
 **Files read:**
+
 - `lib/worker/health.py`
 - `lib/worker/__main__.py`
 - `lib/api/auth.py`
@@ -2972,7 +3073,7 @@ The `VAULTSPEC_*` prefix scrub provides a generic escape hatch, but Figma and pr
 
 Empty class body — placeholder only. No logic to audit.
 
-### __main__.py — CLEAN
+### **main**.py — CLEAN
 
 Trivial entry point: `from .app import main; main()` under `__name__ == "__main__"` guard.
 
@@ -2985,6 +3086,7 @@ No-op stub with correct docstring documenting intent. Not wired into any endpoin
 **MCP-M3 [MEDIUM]: Hardcoded preset fallback + docstring becomes stale after TOML-01 rename**
 
 `_HARDCODED_PRESETS` (line 51) hardcodes the old preset IDs:
+
 ```python
 _HARDCODED_PRESETS: frozenset[str] = frozenset(
     {"coding-star", "coding-pipeline", "coding-loop", "solo-coder"}
@@ -2992,6 +3094,7 @@ _HARDCODED_PRESETS: frozenset[str] = frozenset(
 ```
 
 The `_discovered` path (dynamic glob of TOML files) will self-correct after TOML-01 renames the files. However:
+
 1. The fallback frozenset will serve stale IDs if TOML discovery fails in a packaged deployment
 2. The `start_thread` docstring (lines 113-114) hardcodes old preset names as examples: `"coding-star", "coding-pipeline", "coding-loop", "solo-coder"`
 
@@ -3006,6 +3109,7 @@ After TOML-01 completes, both the fallback set and the docstring must be updated
 **MCP-L1 [LOW]: thread_id interpolated directly into URL path without encoding**
 
 In `get_thread_status` (line 185) and `send_message` (line 239):
+
 ```python
 f"{settings.api_base_url}/api/threads/{thread_id}/state"
 f"{settings.api_base_url}/api/threads/{thread_id}/messages"
@@ -3021,19 +3125,20 @@ Impact is LOW — the server-side endpoint validates against the DB (thread won'
 
 ### Summary for Cycle 39
 
-| Severity | Finding | Location | Status |
-|----------|---------|----------|--------|
-| MEDIUM | MCP-M3: Hardcoded preset fallback + docstring become stale after TOML-01 | `server.py:50-52,113` | new |
-| LOW | MCP-L1: thread_id interpolated directly into URL path without encoding | `server.py:185,239` | new |
-| CLEAN | health.py — stub only | — | verified |
-| CLEAN | __main__.py — trivial entry point | — | verified |
-| CLEAN | auth.py — acknowledged no-op stub | — | verified |
+| Severity | Finding                                                                  | Location              | Status   |
+| -------- | ------------------------------------------------------------------------ | --------------------- | -------- |
+| MEDIUM   | MCP-M3: Hardcoded preset fallback + docstring become stale after TOML-01 | `server.py:50-52,113` | new      |
+| LOW      | MCP-L1: thread_id interpolated directly into URL path without encoding   | `server.py:185,239`   | new      |
+| CLEAN    | health.py — stub only                                                    | —                     | verified |
+| CLEAN    | **main**.py — trivial entry point                                        | —                     | verified |
+| CLEAN    | auth.py — acknowledged no-op stub                                        | —                     | verified |
 
 ---
 
 ## Cycle 40 — nodes/supervisor.py, context.py
 
 **Files read:**
+
 - `lib/core/nodes/supervisor.py`
 - `lib/core/context.py`
 
@@ -3058,11 +3163,11 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### Summary for Cycle 40
 
-| Severity | Finding | Location | Status |
-|----------|---------|----------|--------|
-| CLEAN | supervisor.py — all prior fixes confirmed | — | verified |
-| CLEAN | context.py — all prior fixes confirmed | — | verified |
-| INFO | prepare_handoff() is dead production code (tests only) | `context.py:128` | no action |
+| Severity | Finding                                                | Location         | Status    |
+| -------- | ------------------------------------------------------ | ---------------- | --------- |
+| CLEAN    | supervisor.py — all prior fixes confirmed              | —                | verified  |
+| CLEAN    | context.py — all prior fixes confirmed                 | —                | verified  |
+| INFO     | prepare_handoff() is dead production code (tests only) | `context.py:128` | no action |
 
 ---
 
@@ -3133,33 +3238,35 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **File:** `lib/workspace/git_manager.py`
 **Verified:**
+
 - `_AGENT_ID_RE` enforced on `create_worktree` ✓
 - `_BRANCH_NAME_RE` enforced on `create_worktree`, `has_conflicts`, `merge_worktree` ✓
 - `_validate_worktree_path` called before all path operations in remove/conflicts/merge ✓
 - `asyncio.shield()` on all destructive git commands ✓
 - `_git_mutex` held for all worktree/merge mutations ✓
 - Module-level `asyncio.Lock()` — commented as safe for Python 3.13, single-process uvicorn ✓
-**Status:** CLEAN
+  **Status:** CLEAN
 
 ---
 
 ### Summary for Cycle 40
 
-| ID | Severity | File | Issue | Status |
-|----|----------|------|-------|--------|
-| AGG-01 | INFO | aggregator.py:497,572 | asyncio.create_task in debounce — asyncio-native, correct | clean |
-| AGG-02 | LOW | aggregator.py:314-330 | prune_sequences never called — _sequences unbounded | open |
-| AGG-03 | MEDIUM | aggregator.py:217-219 | _tool_update/_plan_update last_emit dicts never pruned | open |
-| AGG-04 | INFO | aggregator.py:1192 | emit_error fallback uses ingest-level agent_id | info |
-| DB-01 | LOW | session.py:190-195 | Inline ALTER TABLE unversioned migration | info |
-| WS-01 | LOW | environment.py:72-86 | FIGMA_ACCESS_TOKEN not in scrub list (dup WS-L2) | open |
-| WS-02/03 | CLEAN | git_manager.py | All injection guards, mutex, shield confirmed correct | clean |
+| ID       | Severity | File                  | Issue                                                     | Status |
+| -------- | -------- | --------------------- | --------------------------------------------------------- | ------ |
+| AGG-01   | INFO     | aggregator.py:497,572 | asyncio.create_task in debounce — asyncio-native, correct | clean  |
+| AGG-02   | LOW      | aggregator.py:314-330 | prune_sequences never called — \_sequences unbounded      | open   |
+| AGG-03   | MEDIUM   | aggregator.py:217-219 | \_tool_update/\_plan_update last_emit dicts never pruned  | open   |
+| AGG-04   | INFO     | aggregator.py:1192    | emit_error fallback uses ingest-level agent_id            | info   |
+| DB-01    | LOW      | session.py:190-195    | Inline ALTER TABLE unversioned migration                  | info   |
+| WS-01    | LOW      | environment.py:72-86  | FIGMA_ACCESS_TOKEN not in scrub list (dup WS-L2)          | open   |
+| WS-02/03 | CLEAN    | git_manager.py        | All injection guards, mutex, shield confirmed correct     | clean  |
 
 ---
 
 ## Cycle 41 — state.py, exceptions.py (final production module sweep)
 
 **Files read:**
+
 - `lib/core/state.py`
 - `lib/core/exceptions.py`
 
@@ -3182,10 +3289,10 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### Summary for Cycle 41
 
-| Severity | Finding | Location | Status |
-|----------|---------|----------|--------|
-| CLEAN | state.py — all reducers correct, JSON-serializable | — | verified |
-| CLEAN | exceptions.py — taxonomy complete, error messages correct post-TOML-01 | — | verified |
+| Severity | Finding                                                                | Location | Status   |
+| -------- | ---------------------------------------------------------------------- | -------- | -------- |
+| CLEAN    | state.py — all reducers correct, JSON-serializable                     | —        | verified |
+| CLEAN    | exceptions.py — taxonomy complete, error messages correct post-TOML-01 | —        | verified |
 
 ---
 
@@ -3193,42 +3300,42 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 All production modules in `lib/` have been audited across Cycles 1-41:
 
-| Module | Status | Key Findings |
-|--------|--------|-------------|
-| `lib/core/graph.py` | ✓ AUDITED | T11-T17, T24-T26 fixes verified |
-| `lib/core/state.py` | ✓ CLEAN | All reducers correct |
-| `lib/core/context.py` | ✓ CLEAN | T06, T14 fixes verified |
-| `lib/core/exceptions.py` | ✓ CLEAN | Full taxonomy |
-| `lib/core/metadata.py` | ✓ CLEAN | C3, M1 fixes verified |
-| `lib/core/preamble.py` | ✓ CLEAN | No injection surface |
-| `lib/core/team_config.py` | ✓ CLEAN | Schema correct |
-| `lib/core/models.py` | ✓ CLEAN | Prior fixes confirmed |
-| `lib/core/nodes/worker.py` | ✓ CLEAN | H4, GraphBubbleUp guard ✓ |
-| `lib/core/nodes/supervisor.py` | ✓ CLEAN | T02, T03, T06, T07 ✓ |
-| `lib/api/app.py` | T30, T31 | Shutdown race, RESUME None |
-| `lib/api/endpoints.py` | T26 fixed | send_message gap |
-| `lib/api/websocket.py` | T26b pending | WS dispatch gap |
-| `lib/api/internal.py` | ✓ CLEAN | T21 fix verified |
-| `lib/api/auth.py` | ✓ CLEAN | Acknowledged stub |
-| `lib/api/supervisor.py` | T29 | Blocking stop(), asyncio.sleep |
-| `lib/api/schemas/` | ✓ CLEAN | All schema types correct |
-| `lib/worker/app.py` | ✓ AUDITED | T25-T27 scope |
-| `lib/worker/executor.py` | ✓ AUDITED | T25 fixed |
-| `lib/worker/ipc.py` | T27 fixed | Bridge relay |
-| `lib/worker/health.py` | ✓ CLEAN | Stub |
-| `lib/worker/__main__.py` | ✓ CLEAN | Trivial |
-| `lib/providers/acp_chat_model.py` | ✓ CLEAN | H4 model_copy ✓ |
-| `lib/providers/factory.py` | ✓ CLEAN | Single-pass (TOML-02 scope) |
-| `lib/providers/gemini_auth.py` | ✓ CLEAN | Async httpx ✓ |
-| `lib/providers/probes/` | ✓ CLEAN | All probes correct |
-| `lib/protocols/mcp/server.py` | MCP-M3, MCP-L1 | Stale presets, URL encoding |
-| `lib/database/crud.py` | ✓ CLEAN | All DB fixes confirmed |
-| `lib/database/session.py` | ✓ CLEAN | WAL, cleanup correct |
-| `lib/database/models.py` | ✓ CLEAN | Schema correct |
-| `lib/workspace/environment.py` | WS-L2 | FIGMA_ACCESS_TOKEN not scrubbed |
-| `lib/workspace/git_manager.py` | ✓ AUDITED | Prior cycles |
-| `lib/telemetry/instrumentation.py` | ✓ CLEAN | No secrets, idempotent |
-| `lib/utils/` | ✓ CLEAN | All utils correct |
+| Module                             | Status         | Key Findings                    |
+| ---------------------------------- | -------------- | ------------------------------- |
+| `lib/core/graph.py`                | ✓ AUDITED      | T11-T17, T24-T26 fixes verified |
+| `lib/core/state.py`                | ✓ CLEAN        | All reducers correct            |
+| `lib/core/context.py`              | ✓ CLEAN        | T06, T14 fixes verified         |
+| `lib/core/exceptions.py`           | ✓ CLEAN        | Full taxonomy                   |
+| `lib/core/metadata.py`             | ✓ CLEAN        | C3, M1 fixes verified           |
+| `lib/core/preamble.py`             | ✓ CLEAN        | No injection surface            |
+| `lib/core/team_config.py`          | ✓ CLEAN        | Schema correct                  |
+| `lib/core/models.py`               | ✓ CLEAN        | Prior fixes confirmed           |
+| `lib/core/nodes/worker.py`         | ✓ CLEAN        | H4, GraphBubbleUp guard ✓       |
+| `lib/core/nodes/supervisor.py`     | ✓ CLEAN        | T02, T03, T06, T07 ✓            |
+| `lib/api/app.py`                   | T30, T31       | Shutdown race, RESUME None      |
+| `lib/api/endpoints.py`             | T26 fixed      | send_message gap                |
+| `lib/api/websocket.py`             | T26b pending   | WS dispatch gap                 |
+| `lib/api/internal.py`              | ✓ CLEAN        | T21 fix verified                |
+| `lib/api/auth.py`                  | ✓ CLEAN        | Acknowledged stub               |
+| `lib/api/supervisor.py`            | T29            | Blocking stop(), asyncio.sleep  |
+| `lib/api/schemas/`                 | ✓ CLEAN        | All schema types correct        |
+| `lib/worker/app.py`                | ✓ AUDITED      | T25-T27 scope                   |
+| `lib/worker/executor.py`           | ✓ AUDITED      | T25 fixed                       |
+| `lib/worker/ipc.py`                | T27 fixed      | Bridge relay                    |
+| `lib/worker/health.py`             | ✓ CLEAN        | Stub                            |
+| `lib/worker/__main__.py`           | ✓ CLEAN        | Trivial                         |
+| `lib/providers/acp_chat_model.py`  | ✓ CLEAN        | H4 model_copy ✓                 |
+| `lib/providers/factory.py`         | ✓ CLEAN        | Single-pass (TOML-02 scope)     |
+| `lib/providers/gemini_auth.py`     | ✓ CLEAN        | Async httpx ✓                   |
+| `lib/providers/probes/`            | ✓ CLEAN        | All probes correct              |
+| `lib/protocols/mcp/server.py`      | MCP-M3, MCP-L1 | Stale presets, URL encoding     |
+| `lib/database/crud.py`             | ✓ CLEAN        | All DB fixes confirmed          |
+| `lib/database/session.py`          | ✓ CLEAN        | WAL, cleanup correct            |
+| `lib/database/models.py`           | ✓ CLEAN        | Schema correct                  |
+| `lib/workspace/environment.py`     | WS-L2          | FIGMA_ACCESS_TOKEN not scrubbed |
+| `lib/workspace/git_manager.py`     | ✓ AUDITED      | Prior cycles                    |
+| `lib/telemetry/instrumentation.py` | ✓ CLEAN        | No secrets, idempotent          |
+| `lib/utils/`                       | ✓ CLEAN        | All utils correct               |
 
 ---
 
@@ -3249,24 +3356,24 @@ All `lib/` modules audited across Cycles 1-41. No remaining unexamined source fi
 
 ### Open findings requiring future tasking (post-TOML sprint)
 
-| ID | Severity | Module | Issue |
-|----|----------|--------|-------|
-| TC-01 | HIGH | team_config.py | load_team_config missing path-traversal guard on team_id |
-| TC-02 | HIGH | team_config.py | AgentConfig.from_toml bare KeyError on missing [agent] section |
-| PROV-02 | HIGH | providers/factory.py | _CLAUDE_ACP_JS path duplicated + no exists() guard |
-| W-02 | HIGH | worker/executor.py | Silent continue on AgentConfigNotFoundError → broken graph stored |
-| API-01 | MEDIUM | api/app.py | _dispatch_message missing team_preset/workspace_root (T26b) |
-| API-02 | MEDIUM | api/internal.py | No size limit on internal WS frames |
-| API-06 | MEDIUM | api/app.py | Shutdown cancel after cleanup (T30) |
-| API-10 | MEDIUM | api/app.py | AGENT_CONTROL.RESUME missing option_id (T31) |
-| AGG-03 | MEDIUM | core/aggregator.py | _tool_update/_plan_update last_emit dicts never pruned |
-| CTX-01 | MEDIUM | core/context.py | Infinite compaction loop when system msgs exceed max_tokens |
-| CTX-02 | MEDIUM | core/context.py | estimate_tokens ignores tool_calls content |
-| LOG-01 | MEDIUM | utils/logging.py | JSONFormatter crashes on non-serializable extras |
-| PROV-04 | MEDIUM | providers/gemini_auth.py | token_data keys not validated before subscript |
-| PROV-06 | MEDIUM | providers/probes/_protocol.py | Subprocess leaked if stream guard fires |
-| W-03 | MEDIUM | worker/executor.py | Silent drop on first ingest with no team_preset |
-| W-04 | MEDIUM | worker/ipc.py | send_event catch misses RuntimeError from closed client |
+| ID      | Severity | Module                         | Issue                                                             |
+| ------- | -------- | ------------------------------ | ----------------------------------------------------------------- |
+| TC-01   | HIGH     | team_config.py                 | load_team_config missing path-traversal guard on team_id          |
+| TC-02   | HIGH     | team_config.py                 | AgentConfig.from_toml bare KeyError on missing [agent] section    |
+| PROV-02 | HIGH     | providers/factory.py           | \_CLAUDE_ACP_JS path duplicated + no exists() guard               |
+| W-02    | HIGH     | worker/executor.py             | Silent continue on AgentConfigNotFoundError → broken graph stored |
+| API-01  | MEDIUM   | api/app.py                     | \_dispatch_message missing team_preset/workspace_root (T26b)      |
+| API-02  | MEDIUM   | api/internal.py                | No size limit on internal WS frames                               |
+| API-06  | MEDIUM   | api/app.py                     | Shutdown cancel after cleanup (T30)                               |
+| API-10  | MEDIUM   | api/app.py                     | AGENT_CONTROL.RESUME missing option_id (T31)                      |
+| AGG-03  | MEDIUM   | core/aggregator.py             | \_tool_update/\_plan_update last_emit dicts never pruned          |
+| CTX-01  | MEDIUM   | core/context.py                | Infinite compaction loop when system msgs exceed max_tokens       |
+| CTX-02  | MEDIUM   | core/context.py                | estimate_tokens ignores tool_calls content                        |
+| LOG-01  | MEDIUM   | utils/logging.py               | JSONFormatter crashes on non-serializable extras                  |
+| PROV-04 | MEDIUM   | providers/gemini_auth.py       | token_data keys not validated before subscript                    |
+| PROV-06 | MEDIUM   | providers/probes/\_protocol.py | Subprocess leaked if stream guard fires                           |
+| W-03    | MEDIUM   | worker/executor.py             | Silent drop on first ingest with no team_preset                   |
+| W-04    | MEDIUM   | worker/ipc.py                  | send_event catch misses RuntimeError from closed client           |
 
 ---
 
@@ -3365,17 +3472,17 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### Summary for Cycle 42
 
-| ID | Severity | File | Issue | Status |
-|----|----------|------|-------|--------|
-| ACP-01 | LOW | acp_chat_model.py:976 | terminal/wait_for_exit timeout uncapped | open |
-| ACP-02 | MEDIUM | acp_chat_model.py:319 | os.environ.copy() bypasses resolve_env_vars scrub | open |
-| ACP-03 | MEDIUM | acp_chat_model.py:764 | fs/read_text_file no size cap — OOM on large files | open |
-| ACP-04 | LOW | acp_chat_model.py:682-704 | deny fallback options[-1]["optionId"] may raise KeyError | open |
-| ACP-05 | INFO | acp_chat_model.py:279-298 | model_copy() + PrivateAttr reset — correct | clean |
-| ACP-06 | INFO | acp_chat_model.py:736-742 | _sandbox_path path traversal guard — correct | clean |
-| ACP-07 | INFO | acp_chat_model.py:818-833 | terminal allowlist + metachar guard — correct | clean |
-| ACP-08 | INFO | acp_chat_model.py:168-216 | _kill_process_tree — correct | clean |
-| ACP-09 | INFO | acp_chat_model.py | stdin_lock coverage — all write paths covered | clean |
+| ID     | Severity | File                      | Issue                                                    | Status |
+| ------ | -------- | ------------------------- | -------------------------------------------------------- | ------ |
+| ACP-01 | LOW      | acp_chat_model.py:976     | terminal/wait_for_exit timeout uncapped                  | open   |
+| ACP-02 | MEDIUM   | acp_chat_model.py:319     | os.environ.copy() bypasses resolve_env_vars scrub        | open   |
+| ACP-03 | MEDIUM   | acp_chat_model.py:764     | fs/read_text_file no size cap — OOM on large files       | open   |
+| ACP-04 | LOW      | acp_chat_model.py:682-704 | deny fallback options[-1]["optionId"] may raise KeyError | open   |
+| ACP-05 | INFO     | acp_chat_model.py:279-298 | model_copy() + PrivateAttr reset — correct               | clean  |
+| ACP-06 | INFO     | acp_chat_model.py:736-742 | \_sandbox_path path traversal guard — correct            | clean  |
+| ACP-07 | INFO     | acp_chat_model.py:818-833 | terminal allowlist + metachar guard — correct            | clean  |
+| ACP-08 | INFO     | acp_chat_model.py:168-216 | \_kill_process_tree — correct                            | clean  |
+| ACP-09 | INFO     | acp_chat_model.py         | stdin_lock coverage — all write paths covered            | clean  |
 
 ---
 
@@ -3384,6 +3491,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 **Scope:** Verify current state of TOML-01 through TOML-05 after session compaction.
 
 **Files read:**
+
 - `lib/core/team_config.py` — full
 - `lib/core/presets/teams/vaultspec-adaptive-coder.toml` — representative sample
 - `lib/api/endpoints.py` — grep for auto_approve/autonomous
@@ -3392,29 +3500,34 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 ### Findings
 
 #### TOML-01 — DONE (merged to main)
+
 Aliases dict at `team_config.py:78-83` confirmed: old IDs → new IDs. New preset files (`vaultspec-*.toml`) present in presets/teams/. Old short-name files also present (kept for external references). **Status: complete.**
 
 #### TOML-02 — DONE (merged to main)
+
 `TeamPermissionsConfig` (line 257), `TeamPersonaConfig` (line 264), `TeamGraphConfig` (line 271) all present in `team_config.py`. All three wired into `TeamConfig` (lines 292-294). `__all__` includes all three (lines 50-52). **Status: complete.**
 
 #### TOML-03 — NOT DONE
+
 None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec-structured-coder.toml`, `vaultspec-iterative-coder.toml`, `vaultspec-solo-coder.toml`) contain `[team.permissions]`, `[team.persona]`, or `[team.graph]` sections. These sections are valid per the schema (TOML-02) but absent from all presets. **Status: pending.**
 
 #### TOML-04 — NOT DONE
+
 `endpoints.py:263` — `autonomous=body.autonomous` only. `team_config.permissions.auto_approve` is never read. The schema field exists but the wiring from TOML → runtime flag is missing. **Status: pending.**
 
 #### TOML-05 — NOT DONE
+
 `graph.py` has no references to `persona.directive`, `persona.supervisor_display_name`, `graph.step_timeout_seconds` (note: separate from existing `step_timeout` parameter), or `graph.recursion_limit`. The `TeamPersonaConfig` and `TeamGraphConfig` fields are loaded but silently discarded. **Status: pending.**
 
 ### Summary
 
-| Task | Status | Gap |
-|------|--------|-----|
-| TOML-01 | Done | — |
-| TOML-02 | Done | — |
+| Task    | Status  | Gap                                                           |
+| ------- | ------- | ------------------------------------------------------------- |
+| TOML-01 | Done    | —                                                             |
+| TOML-02 | Done    | —                                                             |
 | TOML-03 | Pending | Preset TOMLs missing [permissions]/[persona]/[graph] sections |
-| TOML-04 | Pending | auto_approve not wired into autonomous flag in endpoint |
-| TOML-05 | Pending | persona.directive + graph config not consumed in graph.py |
+| TOML-04 | Pending | auto_approve not wired into autonomous flag in endpoint       |
+| TOML-05 | Pending | persona.directive + graph config not consumed in graph.py     |
 
 ---
 
@@ -3426,7 +3539,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ---
 
-### SCH-01 — INFO: Facade __init__.py correctly re-exports all public types
+### SCH-01 — INFO: Facade **init**.py correctly re-exports all public types
 
 **File:** `lib/api/schemas/__init__.py`
 **Issue:** None. All 65 public symbols from the 6 sub-modules are explicitly re-exported via `X as X` pattern (triggers `py.typed` re-export semantics) and listed in `__all__`. No deep-import leakage required from consumers.
@@ -3523,19 +3636,19 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### Summary for Cycle 44 — lib/api/schemas/
 
-| ID | Severity | File | Issue | Status |
-|----|----------|------|-------|--------|
-| SCH-01 | INFO | schemas/__init__.py | Facade re-exports correct | clean |
-| SCH-02 | INFO | events.py, commands.py | Discriminated union pattern correct | clean |
-| SCH-03 | LOW | commands.py:57-63 | AgentControlCommand missing option_id (schema-level T31 gap) | open |
-| SCH-04 | INFO | commands.py:53, rest.py:46,70 | 64 KiB cap consistent | clean |
-| SCH-05 | LOW | internal.py:18 | DispatchRequest.action unconstrained str | open |
-| SCH-06 | INFO | internal.py:54 | WorkerEventEnvelope.payload bare dict — acceptable | clean |
-| SCH-07 | INFO | snapshots.py:60-74 | Private snapshot models correctly unexported | clean |
-| SCH-08 | LOW | rest.py:141 | PermissionResponseRequest.kind inert — silent no-op | open |
-| SCH-09 | INFO | events.py:241,250 | ConnectedEvent/HeartbeatEvent.metadata correct | clean |
-| SCH-10 | INFO | base.py:30 | EventEnvelope.agent_id optional — correct | clean |
-| SCH-11 | LOW | schemas/tests/test_schemas.py | Internal IPC models untested | open |
+| ID     | Severity | File                          | Issue                                                        | Status |
+| ------ | -------- | ----------------------------- | ------------------------------------------------------------ | ------ |
+| SCH-01 | INFO     | schemas/**init**.py           | Facade re-exports correct                                    | clean  |
+| SCH-02 | INFO     | events.py, commands.py        | Discriminated union pattern correct                          | clean  |
+| SCH-03 | LOW      | commands.py:57-63             | AgentControlCommand missing option_id (schema-level T31 gap) | open   |
+| SCH-04 | INFO     | commands.py:53, rest.py:46,70 | 64 KiB cap consistent                                        | clean  |
+| SCH-05 | LOW      | internal.py:18                | DispatchRequest.action unconstrained str                     | open   |
+| SCH-06 | INFO     | internal.py:54                | WorkerEventEnvelope.payload bare dict — acceptable           | clean  |
+| SCH-07 | INFO     | snapshots.py:60-74            | Private snapshot models correctly unexported                 | clean  |
+| SCH-08 | LOW      | rest.py:141                   | PermissionResponseRequest.kind inert — silent no-op          | open   |
+| SCH-09 | INFO     | events.py:241,250             | ConnectedEvent/HeartbeatEvent.metadata correct               | clean  |
+| SCH-10 | INFO     | base.py:30                    | EventEnvelope.agent_id optional — correct                    | clean  |
+| SCH-11 | LOW      | schemas/tests/test_schemas.py | Internal IPC models untested                                 | open   |
 
 **New actionable findings this cycle:** SCH-03 (confirms T31 schema gap), SCH-05 (unconstrained action), SCH-08 (inert kind field), SCH-11 (test gap).
 
@@ -3626,11 +3739,13 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 **File:** `lib/worker/executor.py:333-334`
 **Issue:** (Confirms prior W-02 finding.)
+
 ```python
 except AgentConfigNotFoundError:
     logger.warning("Agent config not found for %s", worker_ref.agent_id)
     # continues — agent_configs left missing this entry
 ```
+
 `compile_team_graph` receives an incomplete `agent_configs` dict. The error surfaces only at graph traversal time as a confusing `KeyError` or node-not-found exception.
 **Severity:** MEDIUM — already tracked as W-02.
 **Status:** OPEN (W-02)
@@ -3664,20 +3779,20 @@ except AgentConfigNotFoundError:
 
 ### Summary for Cycle 45 — lib/worker/
 
-| ID | Severity | File | Issue | Status |
-|----|----------|------|-------|--------|
-| WRK-01 | INFO | health.py | HealthCheck stub — empty, unused | clean |
-| WRK-02 | MEDIUM | executor.py:352 | step_timeout uses global setting, ignores team_config.graph | open |
-| WRK-03 | LOW | executor.py:289 | _handle_resume hardcodes recursion_limit, ignores req field | open |
-| WRK-04 | LOW | executor.py:73 | _graphs dict grows unbounded — no eviction | open |
-| WRK-05 | LOW | executor.py:91 | asyncio.Lock inconsistent with anyio project convention | open |
-| WRK-06 | INFO | app.py:138 | 127.0.0.1 loopback bind — correct | clean |
-| WRK-07 | INFO | app.py:87-91 | Lifespan shutdown order correct | clean |
-| WRK-08 | INFO | executor.py:111-127 | _mark_ingest_active/done lock pattern correct | clean |
-| WRK-09 | MEDIUM | executor.py:333-334 | W-02 confirmed: silent AgentConfigNotFoundError continue | open (W-02) |
-| WRK-10 | INFO | ipc.py:81-101 | send_event failure handling correct | clean |
-| WRK-11 | LOW | ipc.py:90-95 | Non-200 relay responses silently dropped, no retry | open |
-| WRK-12 | INFO | executor.py:318 | workspace_root Path.resolve() — TC-01 covers validation | clean |
+| ID     | Severity | File                | Issue                                                        | Status      |
+| ------ | -------- | ------------------- | ------------------------------------------------------------ | ----------- |
+| WRK-01 | INFO     | health.py           | HealthCheck stub — empty, unused                             | clean       |
+| WRK-02 | MEDIUM   | executor.py:352     | step_timeout uses global setting, ignores team_config.graph  | open        |
+| WRK-03 | LOW      | executor.py:289     | \_handle_resume hardcodes recursion_limit, ignores req field | open        |
+| WRK-04 | LOW      | executor.py:73      | \_graphs dict grows unbounded — no eviction                  | open        |
+| WRK-05 | LOW      | executor.py:91      | asyncio.Lock inconsistent with anyio project convention      | open        |
+| WRK-06 | INFO     | app.py:138          | 127.0.0.1 loopback bind — correct                            | clean       |
+| WRK-07 | INFO     | app.py:87-91        | Lifespan shutdown order correct                              | clean       |
+| WRK-08 | INFO     | executor.py:111-127 | \_mark_ingest_active/done lock pattern correct               | clean       |
+| WRK-09 | MEDIUM   | executor.py:333-334 | W-02 confirmed: silent AgentConfigNotFoundError continue     | open (W-02) |
+| WRK-10 | INFO     | ipc.py:81-101       | send_event failure handling correct                          | clean       |
+| WRK-11 | LOW      | ipc.py:90-95        | Non-200 relay responses silently dropped, no retry           | open        |
+| WRK-12 | INFO     | executor.py:318     | workspace_root Path.resolve() — TC-01 covers validation      | clean       |
 
 **New actionable findings:** WRK-02 (MEDIUM: team step_timeout ignored), WRK-03 (LOW: resume hardcodes recursion_limit), WRK-04 (LOW: unbounded graph dict), WRK-05 (LOW: asyncio vs anyio), WRK-11 (LOW: silent event drop).
 
@@ -3707,7 +3822,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ---
 
-### PROV-02 — HIGH: _CLAUDE_ACP_JS path duplicated + no exists() guard
+### PROV-02 — HIGH: \_CLAUDE_ACP_JS path duplicated + no exists() guard
 
 **File:** `lib/providers/acp_chat_model.py`
 **Issue:** The path to the Claude ACP JavaScript entrypoint is hardcoded in two places (the constant and a fallback). Neither location calls `Path.exists()` before attempting to spawn the subprocess. If the JS file is missing, the error surfaces as a cryptic subprocess failure rather than a clear config error.
@@ -3716,7 +3831,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ---
 
-### G-01 — MEDIUM: _compile_star supervisor prompt fallback duplicates roster logic
+### G-01 — MEDIUM: \_compile_star supervisor prompt fallback duplicates roster logic
 
 **File:** `lib/core/graph.py:224-234`
 **Issue:** When `supervisor_agent_config is None`, the fallback supervisor prompt construction duplicates the roster-building logic that already exists in `_build_supervisor_prompt()`. Should call `_build_supervisor_prompt()` with a default base prompt instead.
@@ -3752,7 +3867,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ---
 
-### EXC-01 — MEDIUM: ConfigError and domain exceptions missing __slots__
+### EXC-01 — MEDIUM: ConfigError and domain exceptions missing **slots**
 
 **File:** `lib/core/exceptions.py`
 **Issue:** Custom exception classes don't define `__slots__`, which means each instance carries a `__dict__`. For exceptions that may be created frequently (e.g., in retry loops), this adds unnecessary memory overhead.
@@ -3799,20 +3914,20 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### Summary of persisted verbal findings
 
-| ID | Severity | Status | Notes |
-|----|----------|--------|-------|
-| TC-02 | HIGH | OPEN | KeyError on missing [agent]/[team] section |
-| W-02 | HIGH | OPEN | Silent agent config skip → broken graph |
-| PROV-02 | HIGH | OPEN | ACP JS path duplication + no exists() guard |
-| G-01 | MEDIUM | OPEN | Duplicated roster logic in fallback prompt |
-| G-02 | MEDIUM | OPEN | permission_callback closure captures mutable state |
-| CTX-01 | MEDIUM | OPEN | Unsanitized glob patterns |
-| CTX-02 | MEDIUM | OPEN | 50-doc cap after full expansion |
-| EXC-01 | MEDIUM | OPEN | Missing __slots__ on exceptions |
-| LOG-01 | MEDIUM | OPEN | JSON formatter not on all handlers |
-| PROV-01 | MEDIUM | OPEN | No model client caching |
-| PROV-03 | MEDIUM | OPEN | Gemini probe false positive |
-| PROV-04 | MEDIUM | OPEN | OpenAI no request_timeout |
+| ID      | Severity | Status | Notes                                              |
+| ------- | -------- | ------ | -------------------------------------------------- |
+| TC-02   | HIGH     | OPEN   | KeyError on missing [agent]/[team] section         |
+| W-02    | HIGH     | OPEN   | Silent agent config skip → broken graph            |
+| PROV-02 | HIGH     | OPEN   | ACP JS path duplication + no exists() guard        |
+| G-01    | MEDIUM   | OPEN   | Duplicated roster logic in fallback prompt         |
+| G-02    | MEDIUM   | OPEN   | permission_callback closure captures mutable state |
+| CTX-01  | MEDIUM   | OPEN   | Unsanitized glob patterns                          |
+| CTX-02  | MEDIUM   | OPEN   | 50-doc cap after full expansion                    |
+| EXC-01  | MEDIUM   | OPEN   | Missing **slots** on exceptions                    |
+| LOG-01  | MEDIUM   | OPEN   | JSON formatter not on all handlers                 |
+| PROV-01 | MEDIUM   | OPEN   | No model client caching                            |
+| PROV-03 | MEDIUM   | OPEN   | Gemini probe false positive                        |
+| PROV-04 | MEDIUM   | OPEN   | OpenAI no request_timeout                          |
 
 ---
 
@@ -3829,23 +3944,24 @@ get_pending_permissions since that read. Full audit doc:
 
 ### Findings
 
-| ID | Severity | Location | Finding |
-|----|----------|----------|---------|
-| MCD-01 | HIGH | FastMCP instructions:79-85 | `respond_to_permission` and `get_team_status` omitted from server instructions string |
-| MCD-02 | HIGH | FastMCP instructions:79-85 | No workflow sequence guidance — LLM cannot infer autonomous vs supervised call order |
-| MCD-03 | MEDIUM | start_thread → team_preset:123 | `_KNOWN_PRESETS` reference is internal Python symbol; valid preset names should be listed verbatim |
-| MCD-04 | MEDIUM | start_thread → workspace_root:128 | "ADR-014" and "ACP agent CWD" are internal jargon; replace with plain behavioural description |
-| MCD-05 | MEDIUM | get_thread_status:321 | Docstring claims "checkpoint ID" in return; MCP-04 removed it — description is stale |
-| MCD-06 | MEDIUM | respond_to_permission → option_id:274 | No guidance on how to discover valid option IDs (must call get_pending_permissions first) |
-| MCD-07 | MEDIUM | respond_to_permission:272 | "ADR-011 §2.2" reference in description body — internal jargon |
-| MCD-08 | LOW | send_message:372 | "(async, returns 202)" parenthetical exposes HTTP implementation detail |
-| MCD-09 | LOW | send_message → message:380 | No documented size constraint; start_thread cap is documented (32k) but send_message has none |
-| MCD-10 | LOW | get_thread_status:317 | Possible status values not enumerated (submitted/running/input_required/completed/failed/cancelled) |
-| MCD-11 | LOW | get_team_status:423 | "ADR-011 §2.2" internal reference in description body |
-| MCD-12 | LOW | list_threads:199 | Thread status values not enumerated in description |
-| MCD-13 | INFO | get_pending_permissions:476 | Calls /api/team/status — subset of get_team_status; overlap not documented |
+| ID     | Severity | Location                              | Finding                                                                                             |
+| ------ | -------- | ------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| MCD-01 | HIGH     | FastMCP instructions:79-85            | `respond_to_permission` and `get_team_status` omitted from server instructions string               |
+| MCD-02 | HIGH     | FastMCP instructions:79-85            | No workflow sequence guidance — LLM cannot infer autonomous vs supervised call order                |
+| MCD-03 | MEDIUM   | start_thread → team_preset:123        | `_KNOWN_PRESETS` reference is internal Python symbol; valid preset names should be listed verbatim  |
+| MCD-04 | MEDIUM   | start_thread → workspace_root:128     | "ADR-014" and "ACP agent CWD" are internal jargon; replace with plain behavioural description       |
+| MCD-05 | MEDIUM   | get_thread_status:321                 | Docstring claims "checkpoint ID" in return; MCP-04 removed it — description is stale                |
+| MCD-06 | MEDIUM   | respond_to_permission → option_id:274 | No guidance on how to discover valid option IDs (must call get_pending_permissions first)           |
+| MCD-07 | MEDIUM   | respond_to_permission:272             | "ADR-011 §2.2" reference in description body — internal jargon                                      |
+| MCD-08 | LOW      | send_message:372                      | "(async, returns 202)" parenthetical exposes HTTP implementation detail                             |
+| MCD-09 | LOW      | send_message → message:380            | No documented size constraint; start_thread cap is documented (32k) but send_message has none       |
+| MCD-10 | LOW      | get_thread_status:317                 | Possible status values not enumerated (submitted/running/input_required/completed/failed/cancelled) |
+| MCD-11 | LOW      | get_team_status:423                   | "ADR-011 §2.2" internal reference in description body                                               |
+| MCD-12 | LOW      | list_threads:199                      | Thread status values not enumerated in description                                                  |
+| MCD-13 | INFO     | get_pending_permissions:476           | Calls /api/team/status — subset of get_team_status; overlap not documented                          |
 
 ### Clean paths (no issues)
+
 - Error handling in all 7 tools: consistent httpx exception hierarchy, correct 404 branching
 - `_ws_url_from_api_base` credential stripping: correct (strips userinfo before returning ws URL)
 - `_MAX_INITIAL_MESSAGE_CHARS` guard in `start_thread`: present and documented
@@ -3853,6 +3969,7 @@ get_pending_permissions since that read. Full audit doc:
 - `_KNOWN_PRESETS` preset validation in `start_thread`: correct runtime guard, good error message
 
 ### Proposed fix (P0 — instructions rewrite)
+
 See `docs/audits/2026-03-02-mcp-tool-description-audit.md` §"Proposed instructions Rewrite"
 for the exact replacement string (covers both autonomous and supervised workflows, names all 7
 tools with their roles).
@@ -3862,6 +3979,7 @@ tools with their roles).
 ## Cycle 47 — MCP Deep Correctness Audit (2026-03-02)
 
 **Files audited**:
+
 - `lib/protocols/mcp/server.py` (783 lines, 9 tools — fresh read)
 - `lib/protocols/mcp/tests/test_server.py` (633 lines — fresh read)
 - `lib/api/endpoints.py` cancel + permission endpoints
@@ -3869,10 +3987,10 @@ tools with their roles).
 
 ### CRITICAL: IndentationError in two new tools — module will not import
 
-| ID | Severity | Location | Finding |
-|----|----------|----------|---------|
+| ID         | Severity | Location            | Finding                                                                                                                                                                       |
+| ---------- | -------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | MCP-SYN-01 | CRITICAL | `server.py:692-697` | `list_team_presets`: `resp = await client.get(...)` is over-indented relative to `client = _get_client()` — orphaned indent with no enclosing block. Python IndentationError. |
-| MCP-SYN-02 | CRITICAL | `server.py:756-761` | `cancel_thread`: same pattern — `resp = await client.post(...)` is over-indented. IndentationError. |
+| MCP-SYN-02 | CRITICAL | `server.py:756-761` | `cancel_thread`: same pattern — `resp = await client.post(...)` is over-indented. IndentationError.                                                                           |
 
 **Root cause**: Both tools were added after the `async with httpx.AsyncClient()` →
 `_get_client()` refactor. The inner block indentation from the old `async with`
@@ -3883,6 +4001,7 @@ was preserved but the enclosing `async with` context manager was removed, leavin
 time. ALL 9 MCP tools are completely unavailable until fixed.
 
 **Fix required** (server.py:692-697):
+
 ```python
     try:
         client = _get_client()
@@ -3896,6 +4015,7 @@ time. ALL 9 MCP tools are completely unavailable until fixed.
 ```
 
 **Fix required** (server.py:756-761):
+
 ```python
     try:
         client = _get_client()
@@ -3909,17 +4029,18 @@ time. ALL 9 MCP tools are completely unavailable until fixed.
 
 ### Other Findings
 
-| ID | Severity | Location | Finding |
-|----|----------|----------|---------|
-| MCP-CLI-01 | MEDIUM | `server.py:46-54` | `_get_client()` global client has no teardown — connection pool never closed on process exit |
-| MCP-TST-03 | LOW | `test_server.py` | No `get_thread_status` happy-path test verifying enriched response (agents + plan fields returned by MCP-R7) |
-| MCP-URL-01 | INFO | `server.py:347` | `respond_to_permission` → `/api/permissions/{id}/respond` matches `endpoints.py:718`. Correct. |
-| MCP-URL-02 | INFO | `server.py:757` | `cancel_thread` → `POST /api/threads/{id}/cancel` matches `endpoints.py:811`. Correct. |
-| MCP-URL-03 | INFO | `server.py:692` | `list_team_presets` → `GET /api/teams` matches `endpoints.py:682`. Correct. |
-| MCP-SCH-01 | INFO | `server.py:762-763` | `cancel_thread` reads `cancelled` + `status` matching `CancelThreadResponse` schema. Correct. |
-| MCP-ERR-01 | INFO | All 9 tools | Error-handling hierarchy (ConnectError→TimeoutException→HTTPStatusError→RequestError) is consistent across all tools. 404 branching correct on per-thread tools. |
+| ID         | Severity | Location            | Finding                                                                                                                                                          |
+| ---------- | -------- | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| MCP-CLI-01 | MEDIUM   | `server.py:46-54`   | `_get_client()` global client has no teardown — connection pool never closed on process exit                                                                     |
+| MCP-TST-03 | LOW      | `test_server.py`    | No `get_thread_status` happy-path test verifying enriched response (agents + plan fields returned by MCP-R7)                                                     |
+| MCP-URL-01 | INFO     | `server.py:347`     | `respond_to_permission` → `/api/permissions/{id}/respond` matches `endpoints.py:718`. Correct.                                                                   |
+| MCP-URL-02 | INFO     | `server.py:757`     | `cancel_thread` → `POST /api/threads/{id}/cancel` matches `endpoints.py:811`. Correct.                                                                           |
+| MCP-URL-03 | INFO     | `server.py:692`     | `list_team_presets` → `GET /api/teams` matches `endpoints.py:682`. Correct.                                                                                      |
+| MCP-SCH-01 | INFO     | `server.py:762-763` | `cancel_thread` reads `cancelled` + `status` matching `CancelThreadResponse` schema. Correct.                                                                    |
+| MCP-ERR-01 | INFO     | All 9 tools         | Error-handling hierarchy (ConnectError→TimeoutException→HTTPStatusError→RequestError) is consistent across all tools. 404 branching correct on per-thread tools. |
 
 ### Clean paths
+
 - MCP-05 shared client applied correctly to tools 1-7 (start_thread through get_pending_permissions)
 - `_HARDCODED_PRESETS` now includes `vaultspec-continuous-audit` (REG-02 resolved)
 - FastMCP `instructions` string updated (MCD-01/02 resolved)
@@ -3930,6 +4051,6 @@ time. ALL 9 MCP tools are completely unavailable until fixed.
 - `_ws_url_from_api_base` unit tests: 5 tests, comprehensive
 
 ### Action required
+
 **P0**: Fix MCP-SYN-01 and MCP-SYN-02 (indentation) — coder must de-dent `resp = ...`
 lines in both `list_team_presets` and `cancel_thread` to align with `client = _get_client()`.
-

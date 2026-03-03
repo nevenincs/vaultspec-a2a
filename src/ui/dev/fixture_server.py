@@ -1,4 +1,4 @@
-"""Fixture server for visual testing of the SvelteKit 5 frontend.
+"""Fixture server for visual testing of the React 5 frontend.
 
 Speaks the exact wire protocol expected by src/ui/src/lib/api/ — REST endpoints
 at root paths and WebSocket at /ws with EventEnvelope-shaped events.

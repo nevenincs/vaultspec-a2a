@@ -3,18 +3,23 @@
 from __future__ import annotations
 
 import asyncio
+
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
 from ..state import TeamState
+from ..task_queue import _filter_queue_content
+
 
 __all__ = ["create_mount_node"]
 
 _MOUNT_TOKEN_CEILING = 20_000
 _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
+_QUEUE_PHASES = frozenset({"plan", "exec"})
 
 
 def _select_paths(state: TeamState, workspace_root: Path) -> list[Path]:
@@ -87,8 +92,13 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
                 continue
 
             content = await _read_vault_doc(path)
-            rel_path = str(path.relative_to(workspace_root))
 
+            # ADR-021: filter queue files to current task + next 2 pending rows
+            phase: str | None = state.get("pipeline_phase")
+            if path.name.endswith("-queue.md") and phase in _QUEUE_PHASES:
+                content = _filter_queue_content(content, state.get("current_task_id"))
+
+            rel_path = str(path.relative_to(workspace_root))
             header = _DOC_SEPARATOR.format(path=rel_path)
             block = f"{header}\n{content}\n{_DOC_FOOTER}"
             block_tokens = count_tokens_approximately(block)

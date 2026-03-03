@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: plan
 feature: autonomous-mode-mcp
-description: "Implementation plan for autonomous mode flag and MCP server tool stubs, fixing the broken permission interrupt chain and enabling headless agent orchestration."
+description: 'Implementation plan for autonomous mode flag and MCP server tool stubs, fixing the broken permission interrupt chain and enabling headless agent orchestration.'
 related_adrs:
   - docs/adrs/2026-02-26-003-protocol-bridging-translation-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -38,30 +38,29 @@ Three compounding problems identified through audit:
 - FastMCP `>=3.0.2`supports`async def @mcp.tool()` — use it.
 - Standard A2A autonomous patterns: Pattern A (`--yolo`auto-approve) is
   acceptable when the user explicitly opts in by launching headlessly. Our
-  architecture gates this with the`autonomous`flag.
--`interrupt_before`(pre-node graph pause) universally auto-proceeds in all modes
-in this architecture — it only pauses before a node but the actual approval is
-tool-level. Decision: **remove`interrupt_before`entirely; make`interrupt_nodes =
+  architecture gates this with the`autonomous`flag. -`interrupt_before`(pre-node graph pause) universally auto-proceeds in all modes
+  in this architecture — it only pauses before a node but the actual approval is
+  tool-level. Decision: **remove`interrupt_before`entirely; make`interrupt_nodes =
 []`always.** All human approval flows through`interrupt()`inside the node only.
-This eliminates the auto-resume loop complexity.
+  This eliminates the auto-resume loop complexity.
 
 ---
 
 ## Files Modified
 
-| File | Change |
-| --- | --- |
-| `lib/core/config.py` | Add`api_base_url: str`setting |
-| `lib/core/graph.py` | `interrupt_nodes = []`always; add`autonomous: bool = False`; thread to `_compile_*`helpers |
-| `lib/core/nodes/worker.py` | Add`autonomous: bool = False`; skip `permission_callback`wiring when True |
-| `lib/core/aggregator.py` | Extend`_StreamableGraph`protocol with`aget_state`; add interrupt detection in `ingest()` |
-| `lib/api/schemas/rest.py` | Add`autonomous: bool = False`to`CreateThreadRequest` |
-| `lib/api/endpoints.py` | Thread`body.autonomous`through`compile_team_graph` |
-| `lib/protocols/mcp/server.py` | Implement all three tools with real`async def`+`httpx.AsyncClient` |
-| `lib/core/tests/test_graph.py` | Tests for autonomous/supervised compile paths |
-| `lib/core/tests/test_aggregator.py` | Tests for interrupt detection in`ingest()` |
-| `lib/api/tests/test_endpoints.py` | Tests for`autonomous`field |
-| `lib/protocols/mcp/tests/test_server.py` | New file — MCP tool tests with httpx mock |
+| File                                     | Change                                                                                     |
+| ---------------------------------------- | ------------------------------------------------------------------------------------------ |
+| `lib/core/config.py`                     | Add`api_base_url: str`setting                                                              |
+| `lib/core/graph.py`                      | `interrupt_nodes = []`always; add`autonomous: bool = False`; thread to `_compile_*`helpers |
+| `lib/core/nodes/worker.py`               | Add`autonomous: bool = False`; skip `permission_callback`wiring when True                  |
+| `lib/core/aggregator.py`                 | Extend`_StreamableGraph`protocol with`aget_state`; add interrupt detection in `ingest()`   |
+| `lib/api/schemas/rest.py`                | Add`autonomous: bool = False`to`CreateThreadRequest`                                       |
+| `lib/api/endpoints.py`                   | Thread`body.autonomous`through`compile_team_graph`                                         |
+| `lib/protocols/mcp/server.py`            | Implement all three tools with real`async def`+`httpx.AsyncClient`                         |
+| `lib/core/tests/test_graph.py`           | Tests for autonomous/supervised compile paths                                              |
+| `lib/core/tests/test_aggregator.py`      | Tests for interrupt detection in`ingest()`                                                 |
+| `lib/api/tests/test_endpoints.py`        | Tests for`autonomous`field                                                                 |
+| `lib/protocols/mcp/tests/test_server.py` | New file — MCP tool tests with httpx mock                                                  |
 
 ---
 
@@ -386,10 +385,9 @@ async def send_message(thread_id: str, message: str) -> str:
 
 - `test_compile_supervised_no_interrupt_before`: verify
   `interrupt_before=[]`even with coder in supervised mode (nodes run, permission
-  via callback only)
--`test_compile_autonomous_no_permission_callback`: compile with
-`autonomous=True`, confirm worker model has no `permission_callback`wired
-after`worker_node(...)` is invoked once
+  via callback only) -`test_compile_autonomous_no_permission_callback`: compile with
+  `autonomous=True`, confirm worker model has no `permission_callback`wired
+  after`worker_node(...)` is invoked once
 
 **`lib/core/tests/test_aggregator.py`**:
 
@@ -397,18 +395,16 @@ after`worker_node(...)` is invoked once
   `astream_events`yields nothing,`aget_state`returns a task with
   one`Interrupt(value={type: "permission_request", tool_name:
   "fs/write_text_file", options: [{optionId: "allow_once", label: "Allow"}]})`.
-  Assert `PermissionRequestEvent`emitted +`INPUT_REQUIRED`status.
--`test_ingest_no_permission_on_normal_completion`: `aget_state`returns empty
-tasks. Assert no`PermissionRequestEvent`.
+  Assert `PermissionRequestEvent`emitted +`INPUT_REQUIRED`status. -`test_ingest_no_permission_on_normal_completion`: `aget_state`returns empty
+  tasks. Assert no`PermissionRequestEvent`.
 - `test_ingest_no_permission_on_empty_interrupt_tasks`: `aget_state`returns task
   with`interrupts=()`. Assert no event (guard case).
 
 **`lib/api/tests/test_endpoints.py`**:
 
 - `test_create_thread_autonomous_defaults_to_false`: no `autonomous`field →
-  behaves as supervised
--`test_create_thread_autonomous_true_accepted`: `autonomous=True` → 201
-response, graph compiled
+  behaves as supervised -`test_create_thread_autonomous_true_accepted`: `autonomous=True` → 201
+  response, graph compiled
 
 **`lib/protocols/mcp/tests/test_server.py`** (new):
 
@@ -429,22 +425,16 @@ response, graph compiled
 ## Key Invariants
 
 - `interrupt_before=[]`always — approval is exclusively via`interrupt()`inside
-  nodes
--`autonomous=True`→`permission_callback`not wired → AcpChatModel auto-approves
-(first option)
--`autonomous=False`→`permission_callback = _interrupt_permission_callback`→
-interrupt fires → PermissionRequestEvent emitted to WebSocket
+  nodes -`autonomous=True`→`permission_callback`not wired → AcpChatModel auto-approves
+  (first option) -`autonomous=False`→`permission_callback = _interrupt_permission_callback`→
+  interrupt fires → PermissionRequestEvent emitted to WebSocket
 - MCP-launched threads are always`autonomous=True`
 - `_emit_interrupt_events`is always in`finally`and is a no-op on normal
-  completion
--`respond_to_permission_endpoint`requires no changes
-—`Command(resume=option_id)`already handles both cases
+  completion -`respond_to_permission_endpoint`requires no changes
+  —`Command(resume=option_id)`already handles both cases
 
 ## Verification
 
-1.`.venv/Scripts/python -m pytest lib/ -x`— full suite must pass
-2. Start server → use MCP Inspector to call`start_thread`→ confirm real
-   thread_id returned, graph runs
-3. Interactive UI: create thread with`autonomous=False`, confirm permission
-   popup appears in control surface when coder writes a file
-4. Autonomous thread: no popup, completes without interruption
+1.`.venv/Scripts/python -m pytest lib/ -x`— full suite must pass 2. Start server → use MCP Inspector to call`start_thread`→ confirm real
+thread_id returned, graph runs 3. Interactive UI: create thread with`autonomous=False`, confirm permission
+popup appears in control surface when coder writes a file 4. Autonomous thread: no popup, completes without interruption

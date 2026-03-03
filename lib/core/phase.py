@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 __all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]
 
 PHASE_ORDER: list[str] = ["research", "reference", "adr", "plan", "exec", "audit"]

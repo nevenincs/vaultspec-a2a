@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { ToolCallCard } from './tool-call-card'
+import figma from '@figma/code-connect';
+import { ToolCallCard } from './tool-call-card';
 
 /**
  * Code Connect mapping for ToolCallCard.
@@ -17,23 +17,27 @@ import { ToolCallCard } from './tool-call-card'
  * - event: ToolCallEvent — { type: 'tool_call', tool_name, status, input?, location?, ... }
  * - onInspect: (target: InspectorTarget) => void
  */
-figma.connect(ToolCallCard, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <ToolCallCard
-      event={{
-        id: 'evt-4',
-        type: 'tool_call',
-        thread_id: 'thread-1',
-        tool_call_id: 'tc-1',
-        tool_name: 'read_file',
-        status: 'completed',
-        tool_kind: 'read',
-        input: 'src/lib/api.py',
-        agent_id: 'agent-1',
-        agent_name: 'Coder',
-        timestamp: new Date().toISOString(),
-      }}
-      onInspect={() => {}}
-    />
-  ),
-})
+figma.connect(
+  ToolCallCard,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <ToolCallCard
+        event={{
+          id: 'evt-4',
+          type: 'tool_call',
+          thread_id: 'thread-1',
+          tool_call_id: 'tc-1',
+          tool_name: 'read_file',
+          status: 'completed',
+          tool_kind: 'read',
+          input: 'src/lib/api.py',
+          agent_id: 'agent-1',
+          agent_name: 'Coder',
+          timestamp: new Date().toISOString(),
+        }}
+        onInspect={() => {}}
+      />
+    ),
+  },
+);

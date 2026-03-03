@@ -40,10 +40,12 @@ from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
+
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+from ...utils.enums import Model, Provider
 from ..graph import compile_team_graph
 from ..team_config import (
     AgentModelConfig,
@@ -51,7 +53,6 @@ from ..team_config import (
     load_agent_config,
     load_team_config,
 )
-from ...utils.enums import Model, Provider
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,9 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
     - Checkpoint is written after execution
     - At least one AI message is produced
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-solo-coder", Provider.OPENAI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-solo-coder", Provider.OPENAI
+    )
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,
@@ -138,7 +141,9 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
     }
     state = {
         "messages": [
-            HumanMessage(content="Write a Python function that checks if a number is prime. Keep it short.")
+            HumanMessage(
+                content="Write a Python function that checks if a number is prime. Keep it short."
+            )
         ]
     }
 
@@ -159,7 +164,9 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_pipeline_team_openai_collaboration(checkpointer: AsyncSqliteSaver) -> None:
+async def test_pipeline_team_openai_collaboration(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Three-agent pipeline (planner -> coder -> reviewer) with OpenAI.
 
     This is the primary end-to-end test of the core value proposition:
@@ -172,7 +179,9 @@ async def test_pipeline_team_openai_collaboration(checkpointer: AsyncSqliteSaver
     - Checkpoint persists the full conversation after all agents complete
     - Each agent contributes at least one AI message
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-structured-coder", Provider.OPENAI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-structured-coder", Provider.OPENAI
+    )
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,
@@ -227,7 +236,9 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
     - A second human message in the same thread_id resumes from the checkpoint
     - The second turn accumulates messages on top of turn 1 (history preserved)
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-solo-coder", Provider.OPENAI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-solo-coder", Provider.OPENAI
+    )
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,
@@ -243,7 +254,11 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
 
     # Turn 1
     state1 = {
-        "messages": [HumanMessage(content="Write a Python function called `add(a, b)` that returns a + b.")]
+        "messages": [
+            HumanMessage(
+                content="Write a Python function called `add(a, b)` that returns a + b."
+            )
+        ]
     }
     await _run_and_collect_nodes(graph, state1, config, {"vaultspec-coder"})
     snap1 = await checkpointer.aget(config)
@@ -252,7 +267,9 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
 
     # Turn 2: follow-up in the same thread (resumes from checkpoint)
     state2 = {
-        "messages": [HumanMessage(content="Now add type hints and a docstring to that function.")]
+        "messages": [
+            HumanMessage(content="Now add type hints and a docstring to that function.")
+        ]
     }
     await _run_and_collect_nodes(graph, state2, config, {"vaultspec-coder"})
     snap2 = await checkpointer.aget(config)
@@ -263,9 +280,9 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
         f"Expected messages to grow after resume: "
         f"turn1={count_after_t1}, turn2={len(messages_t2)}"
     )
-    assert any(
-        m.content == state1["messages"][0].content for m in messages_t2
-    ), "Turn-1 human message must be preserved in the resumed checkpoint"
+    assert any(m.content == state1["messages"][0].content for m in messages_t2), (
+        "Turn-1 human message must be preserved in the resumed checkpoint"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -275,7 +292,9 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_star_topology_supervisor_routing_openai(checkpointer: AsyncSqliteSaver) -> None:
+async def test_star_topology_supervisor_routing_openai(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Star topology: supervisor dynamically routes to at least one worker via OpenAI.
 
     Proves:
@@ -283,9 +302,13 @@ async def test_star_topology_supervisor_routing_openai(checkpointer: AsyncSqlite
     - At least one worker node is dispatched
     - Checkpoint captures the full routed conversation
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-adaptive-coder", Provider.OPENAI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-adaptive-coder", Provider.OPENAI
+    )
     supervisor_cfg = load_agent_config("vaultspec-supervisor").model_copy(
-        update={"model": AgentModelConfig(provider=Provider.OPENAI, capability=Model.LOW)}
+        update={
+            "model": AgentModelConfig(provider=Provider.OPENAI, capability=Model.LOW)
+        }
     )
 
     graph = compile_team_graph(
@@ -341,7 +364,9 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
     Proves the ACP JSON-RPC stdio protocol works end-to-end:
     spawn -> initialize -> session/new -> session/prompt -> stream chunks -> checkpoint.
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-solo-coder", Provider.GEMINI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-solo-coder", Provider.GEMINI
+    )
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,
@@ -356,7 +381,9 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
     }
     state = {
         "messages": [
-            HumanMessage(content="Write a Python function that checks if a string is a palindrome. Keep it short.")
+            HumanMessage(
+                content="Write a Python function that checks if a string is a palindrome. Keep it short."
+            )
         ]
     }
 
@@ -377,7 +404,9 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_pipeline_team_gemini_collaboration(checkpointer: AsyncSqliteSaver) -> None:
+async def test_pipeline_team_gemini_collaboration(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Three-agent pipeline (planner -> coder -> reviewer) with Gemini ACP.
 
     Proves the ACP subprocess protocol works for multi-agent orchestration:
@@ -385,7 +414,9 @@ async def test_pipeline_team_gemini_collaboration(checkpointer: AsyncSqliteSaver
     messages from prior agents, and contributes its own AI output to the
     shared state before passing to the next agent.
     """
-    team, agent_configs = _team_and_agents_with_provider("vaultspec-structured-coder", Provider.GEMINI)
+    team, agent_configs = _team_and_agents_with_provider(
+        "vaultspec-structured-coder", Provider.GEMINI
+    )
     graph = compile_team_graph(
         team_config=team,
         agent_configs=agent_configs,

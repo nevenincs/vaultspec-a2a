@@ -18,7 +18,7 @@ related:
 
 ## 1. Context and Problem Statement
 
-The VaultSpec Control Surface frontend (SvelteKit / Svelte 5 / shadcn-svelte /
+The VaultSpec Control Surface frontend (React / React 5 / shadcn-React /
 Tailwind
 CSS v4) is authored against a Figma design file. The CLAUDE.md workflow mandate
 already
@@ -28,14 +28,14 @@ However, without Code Connect and a design token pipeline in place:
 
 - The MCP server returns raw node layout data and invented component code rather
   than
-  production-ready Svelte snippets referencing real shadcn-svelte components.
+  production-ready React snippets referencing real shadcn-React components.
 - AI agents hard-code pixel values instead of Tailwind token classes because
   `get_variable_defs` cannot resolve token names from unbound variables.
-- Dev Mode shows auto-generated CSS approximations instead of real Svelte
+- Dev Mode shows auto-generated CSS approximations instead of real React
   component
   usage, slowing designer–developer handoff.
 - There is no machine-readable link between Figma component nodes and their
-  `.svelte`
+  `.React`
   source files.
 
 This ADR decides how the Figma developer ecosystem surfaces (Code Connect CLI,
@@ -74,7 +74,7 @@ session.
 
 Code Connect will be adopted via the **CLI approach** using **template
 (no-parser)
-files** (`.figma.js`), because Svelte has no native Code Connect parser.
+files** (`.figma.js`), because React has no native Code Connect parser.
 
 The CLI approach is chosen over the Code Connect UI because:
 
@@ -83,7 +83,7 @@ The CLI approach is chosen over the Code Connect UI because:
 - CLI produces true-to-production snippets; UI auto-generation is approximate.
 - CLI supports the full `figma.selectedInstance.*` property mapping API.
 
-Each shadcn-svelte component used in `src/ui/` that has a corresponding Figma
+Each shadcn-React component used in `src/ui/` that has a corresponding Figma
 component
 node **must have** a sibling `.figma.js` Code Connect file. Publishing is done
 via:
@@ -98,7 +98,7 @@ The `figma.config.json` at project root governs inclusion, label, and language:
 {
   "codeConnect": {
     "include": ["src/ui/**/*.figma.js"],
-    "label": "Svelte",
+    "label": "React",
     "language": "html"
   }
 }
@@ -149,7 +149,7 @@ confirmed.
 
 Figma Make is **not adopted** for this project. It is React-only and produces
 React +
-CSS prototypes. The VaultSpec frontend is SvelteKit. Make kits (the design
+CSS prototypes. The VaultSpec frontend is React. Make kits (the design
 system
 integration mechanism) only support React npm packages.
 
@@ -170,7 +170,7 @@ touching `src/ui/`:
    tight)
 3. **`get_variable_defs`** — resolve design values to token names
 4. **`get_code_connect_map`** — discover real component paths for all node IDs
-5. Implement using shadcn-svelte primitives with Tailwind token classes
+5. Implement using shadcn-React primitives with Tailwind token classes
 6. Verify with Playwright or Chrome DevTools before committing
 
 Steps 3 and 4 are only meaningful after Code Connect mappings have been
@@ -187,7 +187,7 @@ must flag missing token/component data rather than inventing values.
 
 Without Code Connect, the MCP server has no knowledge of the mapping between a
 Figma
-node and the corresponding `.svelte` file. The agent must infer from component
+node and the corresponding `.React` file. The agent must infer from component
 names
 alone, which produces incorrect imports, wrong prop names, and invented
 components that
@@ -202,15 +202,15 @@ of
 `color: #0066CC`. Without it, the agent cannot reliably respect the token
 system.
 
-### Why template/no-parser over Code Connect UI for Svelte
+### Why template/no-parser over Code Connect UI for React
 
 The Code Connect UI (GitHub repo auto-mapping) generates approximated snippets
 from
-component names and AI inference. It does not support Svelte-specific prop
+component names and AI inference. It does not support React-specific prop
 conventions
 (`bind:`, `$props()`, slot-based composition). The CLI template approach allows
 explicit,
-hand-authored prop mappings that precisely encode the Svelte component's API.
+hand-authored prop mappings that precisely encode the React component's API.
 
 ### Why token code syntax is a blocker
 
@@ -231,14 +231,14 @@ The full implementation plan lives at:
 
 High-level phases:
 
-| Phase | Description | Blocker |
-| --- | --- | --- |
-| 0 | Confirm Figma plan tier (Org/Enterprise) | External |
-| 1 | Set code syntax on all Figma Variables | Design team |
-| 2 | Publish `figma.config.json` and initial `.figma.js` mappings for top-level shadcn-svelte components | Dev team |
-| 3 | Validate MCP `get_code_connect_map` returns populated data | Requires phase 2 |
-| 4 | Validate AI-generated Svelte code uses real components + token classes | Requires phases 1-3 |
-| 5 | Add `LIBRARY_PUBLISH` webhook for automated token sync | Requires Enterprise plan |
+| Phase | Description                                                                                        | Blocker                  |
+| ----- | -------------------------------------------------------------------------------------------------- | ------------------------ |
+| 0     | Confirm Figma plan tier (Org/Enterprise)                                                           | External                 |
+| 1     | Set code syntax on all Figma Variables                                                             | Design team              |
+| 2     | Publish `figma.config.json` and initial `.figma.js` mappings for top-level shadcn-React components | Dev team                 |
+| 3     | Validate MCP `get_code_connect_map` returns populated data                                         | Requires phase 2         |
+| 4     | Validate AI-generated React code uses real components + token classes                              | Requires phases 1-3      |
+| 5     | Add `LIBRARY_PUBLISH` webhook for automated token sync                                             | Requires Enterprise plan |
 
 ---
 
@@ -251,7 +251,7 @@ Rejected. `get_variable_defs` unavailable; OAuth-only authentication;
 
 ### Code Connect UI (auto-mapping)
 
-Rejected for Svelte. AI-generated snippets do not accurately represent Svelte
+Rejected for React. AI-generated snippets do not accurately represent React
 component
 APIs (props, slots, Runes). The CLI template approach is more work but produces
 correct,
@@ -259,7 +259,7 @@ maintainable mappings.
 
 ### Figma Make for prototyping integration
 
-Rejected. React-only. No Svelte output path.
+Rejected. React-only. No React output path.
 
 ### Manual design-to-code (no MCP, no Code Connect)
 
@@ -280,10 +280,10 @@ surface we need. A custom wrapper adds complexity without benefit at this stage.
 
 ### Positive
 
-- AI agents receive real shadcn-svelte component references with correct imports
+- AI agents receive real shadcn-React component references with correct imports
   and
   Tailwind token classes — dramatically reducing hallucinated component code.
-- Dev Mode shows real Svelte snippets during designer–developer handoff.
+- Dev Mode shows real React snippets during designer–developer handoff.
 - Design system tokens are machine-readable end-to-end (Figma → CI → Tailwind
   config).
 - The implementation loop (Figma → Code → Browser) is fully instrumented.
@@ -301,7 +301,7 @@ surface we need. A custom wrapper adds complexity without benefit at this stage.
 - **Desktop dependency:** Every developer working on UI must have the Figma
   desktop app
   installed and a file open in Dev Mode. Browser-only access is insufficient.
-- **No Svelte language syntax highlight:** Code Connect's `"language": "html"`
+- **No React language syntax highlight:** Code Connect's `"language": "html"`
   is the
   closest supported option. Snippets are highlighted as HTML in Dev Mode.
 

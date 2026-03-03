@@ -65,24 +65,24 @@ requiring the Figma application to be open.
 
 ### 2.1 File Endpoints
 
-| Endpoint | Method | Tier | Scope | Purpose |
-| --- | --- | --- | --- | --- |
-| `/v1/files/:key` | GET | 1 | `file_content:read` | Full file document as JSON tree |
-| `/v1/files/:key/nodes` | GET | 1 | `file_content:read` | Specific nodes and subtrees by ID |
-| `/v1/images/:key` | GET | 1 | `file_content:read` | Render nodes as PNG/JPG/SVG/PDF images |
-| `/v1/files/:key/images` | GET | 2 | `file_content:read` | Download URLs for user-uploaded image fills |
-| `/v1/files/:key/meta` | GET | 3 | `file_metadata:read` | File metadata without document content |
+| Endpoint                | Method | Tier | Scope                | Purpose                                     |
+| ----------------------- | ------ | ---- | -------------------- | ------------------------------------------- |
+| `/v1/files/:key`        | GET    | 1    | `file_content:read`  | Full file document as JSON tree             |
+| `/v1/files/:key/nodes`  | GET    | 1    | `file_content:read`  | Specific nodes and subtrees by ID           |
+| `/v1/images/:key`       | GET    | 1    | `file_content:read`  | Render nodes as PNG/JPG/SVG/PDF images      |
+| `/v1/files/:key/images` | GET    | 2    | `file_content:read`  | Download URLs for user-uploaded image fills |
+| `/v1/files/:key/meta`   | GET    | 3    | `file_metadata:read` | File metadata without document content      |
 
 #### GET File Parameters
 
-| Parameter | Description |
-| --- | --- |
-| `version` | Specific version ID to retrieve |
-| `ids` | Comma-separated node IDs for partial tree retrieval |
-| `depth` | Maximum tree traversal depth |
-| `geometry` | Set to`paths`to include vector path data |
-| `branch_data` | Include branch metadata |
-| `plugin_data` | Include plugin-stored data |
+| Parameter     | Description                                         |
+| ------------- | --------------------------------------------------- |
+| `version`     | Specific version ID to retrieve                     |
+| `ids`         | Comma-separated node IDs for partial tree retrieval |
+| `depth`       | Maximum tree traversal depth                        |
+| `geometry`    | Set to`paths`to include vector path data            |
+| `branch_data` | Include branch metadata                             |
+| `plugin_data` | Include plugin-stored data                          |
 
 #### GET File Response Structure
 
@@ -115,16 +115,16 @@ requiring the Figma application to be open.
 
 #### GET Image Parameters
 
-| Parameter | Description |
-| --- | --- |
-| `ids` | Required. Node IDs to render |
-| `scale` | 0.01 to 4. Scaling factor |
-| `format` | `jpg`, `png`, `svg`, or `pdf` |
-| `svg_outline_text` | Render text as vector paths in SVG |
-| `svg_include_id` | Include layer names as SVG element IDs |
-| `svg_include_node_id` | Add Figma node IDs to SVG elements |
-| `contents_only` | Exclude overlapping content from other layers |
-| `use_absolute_bounds` | Full dimensions regardless of cropping |
+| Parameter             | Description                                   |
+| --------------------- | --------------------------------------------- |
+| `ids`                 | Required. Node IDs to render                  |
+| `scale`               | 0.01 to 4. Scaling factor                     |
+| `format`              | `jpg`, `png`, `svg`, or `pdf`                 |
+| `svg_outline_text`    | Render text as vector paths in SVG            |
+| `svg_include_id`      | Include layer names as SVG element IDs        |
+| `svg_include_node_id` | Add Figma node IDs to SVG elements            |
+| `contents_only`       | Exclude overlapping content from other layers |
+| `use_absolute_bounds` | Full dimensions regardless of cropping        |
 
 **Important:** Rendered image URLs expire after 30 days. Images exceeding 32
 megapixels are automatically scaled down. Null values in the response indicate
@@ -132,17 +132,17 @@ rendering failures.
 
 ### 2.2 Component & Style Endpoints
 
-| Endpoint | Method | Tier | Scope | Purpose |
-| --- | --- | --- | --- | --- |
-| `/v1/teams/:team_id/components` | GET | 3 | `team_library_content:read` | Paginated published components in team |
-| `/v1/files/:file_key/components` | GET | 3 | `library_content:read` | Published components in file |
-| `/v1/components/:key` | GET | 3 | `library_assets:read` | Single component by key |
-| `/v1/teams/:team_id/component_sets` | GET | 3 | `team_library_content:read` | Component sets (variant groups) in team |
-| `/v1/files/:file_key/component_sets` | GET | 3 | `library_content:read` | Component sets in file |
-| `/v1/component_sets/:key` | GET | 3 | `library_assets:read` | Single component set by key |
-| `/v1/teams/:team_id/styles` | GET | 3 | `team_library_content:read` | Paginated published styles in team |
-| `/v1/files/:file_key/styles` | GET | 3 | `library_content:read` | Published styles in file |
-| `/v1/styles/:key` | GET | 3 | `library_assets:read` | Single style by key |
+| Endpoint                             | Method | Tier | Scope                       | Purpose                                 |
+| ------------------------------------ | ------ | ---- | --------------------------- | --------------------------------------- |
+| `/v1/teams/:team_id/components`      | GET    | 3    | `team_library_content:read` | Paginated published components in team  |
+| `/v1/files/:file_key/components`     | GET    | 3    | `library_content:read`      | Published components in file            |
+| `/v1/components/:key`                | GET    | 3    | `library_assets:read`       | Single component by key                 |
+| `/v1/teams/:team_id/component_sets`  | GET    | 3    | `team_library_content:read` | Component sets (variant groups) in team |
+| `/v1/files/:file_key/component_sets` | GET    | 3    | `library_content:read`      | Component sets in file                  |
+| `/v1/component_sets/:key`            | GET    | 3    | `library_assets:read`       | Single component set by key             |
+| `/v1/teams/:team_id/styles`          | GET    | 3    | `team_library_content:read` | Paginated published styles in team      |
+| `/v1/files/:file_key/styles`         | GET    | 3    | `library_content:read`      | Published styles in file                |
+| `/v1/styles/:key`                    | GET    | 3    | `library_assets:read`       | Single style by key                     |
 
 Component metadata includes:`key`, `file_key`, `node_id`, `thumbnail_url`,
 `name`, `description`, `updated_at`, `created_at`, `user`, and
@@ -150,74 +150,74 @@ Component metadata includes:`key`, `file_key`, `node_id`, `thumbnail_url`,
 
 ### 2.3 Variables Endpoints (Enterprise Only)
 
-| Endpoint | Method | Tier | Scope | Purpose |
-| --- | --- | --- | --- | --- |
-| `/v1/files/:file_key/variables/local` | GET | 2 | `file_variables:read` | Local and referenced remote variables |
-| `/v1/files/:file_key/variables/published` | GET | 2 | `file_variables:read` | Published variables from file |
-| `/v1/files/:file_key/variables` | POST | 3 | `file_variables:write` | Bulk create/update/delete variables |
+| Endpoint                                  | Method | Tier | Scope                  | Purpose                               |
+| ----------------------------------------- | ------ | ---- | ---------------------- | ------------------------------------- |
+| `/v1/files/:file_key/variables/local`     | GET    | 2    | `file_variables:read`  | Local and referenced remote variables |
+| `/v1/files/:file_key/variables/published` | GET    | 2    | `file_variables:read`  | Published variables from file         |
+| `/v1/files/:file_key/variables`           | POST   | 3    | `file_variables:write` | Bulk create/update/delete variables   |
 
 ### 2.4 Comment Endpoints
 
-| Endpoint | Method | Scope | Purpose |
-| --- | --- | --- | --- |
-| `/v1/files/:file_key/comments` | GET | `file_comments:read` | List comments on a file |
-| `/v1/files/:file_key/comments` | POST | `file_comments:write` | Post a comment |
-| `/v1/files/:file_key/comments/:comment_id` | DELETE | `file_comments:write` | Delete a comment |
-| `/v1/files/:file_key/comments/:comment_id/reactions` | GET | `file_comments:read` | List reactions on a comment |
-| `/v1/files/:file_key/comments/:comment_id/reactions` | POST | `file_comments:write` | Post a reaction |
+| Endpoint                                             | Method | Scope                 | Purpose                     |
+| ---------------------------------------------------- | ------ | --------------------- | --------------------------- |
+| `/v1/files/:file_key/comments`                       | GET    | `file_comments:read`  | List comments on a file     |
+| `/v1/files/:file_key/comments`                       | POST   | `file_comments:write` | Post a comment              |
+| `/v1/files/:file_key/comments/:comment_id`           | DELETE | `file_comments:write` | Delete a comment            |
+| `/v1/files/:file_key/comments/:comment_id/reactions` | GET    | `file_comments:read`  | List reactions on a comment |
+| `/v1/files/:file_key/comments/:comment_id/reactions` | POST   | `file_comments:write` | Post a reaction             |
 
 ### 2.5 Version Endpoints
 
-| Endpoint | Method | Scope | Purpose |
-| --- | --- | --- | --- |
-| `/v1/files/:file_key/versions` | GET | `file_versions:read` | List version history |
+| Endpoint                       | Method | Scope                | Purpose              |
+| ------------------------------ | ------ | -------------------- | -------------------- |
+| `/v1/files/:file_key/versions` | GET    | `file_versions:read` | List version history |
 
 ### 2.6 Project Endpoints
 
-| Endpoint | Method | Scope | Purpose |
-| --- | --- | --- | --- |
-| `/v1/teams/:team_id/projects` | GET | `projects:read` | List projects in a team |
-| `/v1/projects/:project_id/files` | GET | `projects:read` | List files in a project |
+| Endpoint                         | Method | Scope           | Purpose                 |
+| -------------------------------- | ------ | --------------- | ----------------------- |
+| `/v1/teams/:team_id/projects`    | GET    | `projects:read` | List projects in a team |
+| `/v1/projects/:project_id/files` | GET    | `projects:read` | List files in a project |
 
 ### 2.7 Dev Resources Endpoints
 
-| Endpoint | Method | Tier | Scope | Purpose |
-| --- | --- | --- | --- | --- |
-| `/v1/files/:file_key/dev_resources` | GET | 2 | `file_dev_resources:read` | Get dev resources in a file |
-| `/v1/dev_resources` | POST | - | `file_dev_resources:write` | Bulk create dev resources across files |
-| `/v1/dev_resources` | PUT | - | `file_dev_resources:write` | Bulk update dev resources |
-| `/v1/files/:file_key/dev_resources/:id` | DELETE | 2 | `file_dev_resources:write` | Delete a dev resource |
+| Endpoint                                | Method | Tier | Scope                      | Purpose                                |
+| --------------------------------------- | ------ | ---- | -------------------------- | -------------------------------------- |
+| `/v1/files/:file_key/dev_resources`     | GET    | 2    | `file_dev_resources:read`  | Get dev resources in a file            |
+| `/v1/dev_resources`                     | POST   | -    | `file_dev_resources:write` | Bulk create dev resources across files |
+| `/v1/dev_resources`                     | PUT    | -    | `file_dev_resources:write` | Bulk update dev resources              |
+| `/v1/files/:file_key/dev_resources/:id` | DELETE | 2    | `file_dev_resources:write` | Delete a dev resource                  |
 
 ### 2.8 Webhook Endpoints
 
-| Endpoint | Method | Tier | Scope | Purpose |
-| --- | --- | --- | --- | --- |
-| `/v2/webhooks` | POST | 2 | `webhooks:write` | Create a webhook |
-| `/v2/webhooks/:webhook_id` | GET | 2 | `webhooks:read` | Get webhook details |
-| `/v2/webhooks/:webhook_id` | PUT | 2 | `webhooks:write` | Update a webhook |
-| `/v2/webhooks/:webhook_id` | DELETE | 2 | `webhooks:write` | Delete a webhook |
-| `/v2/webhooks` | GET | - | `webhooks:read` | List webhooks by context or plan |
-| `/v2/webhooks/:webhook_id/requests` | GET | - | `webhooks:read` | Past 7 days of webhook requests |
+| Endpoint                            | Method | Tier | Scope            | Purpose                          |
+| ----------------------------------- | ------ | ---- | ---------------- | -------------------------------- |
+| `/v2/webhooks`                      | POST   | 2    | `webhooks:write` | Create a webhook                 |
+| `/v2/webhooks/:webhook_id`          | GET    | 2    | `webhooks:read`  | Get webhook details              |
+| `/v2/webhooks/:webhook_id`          | PUT    | 2    | `webhooks:write` | Update a webhook                 |
+| `/v2/webhooks/:webhook_id`          | DELETE | 2    | `webhooks:write` | Delete a webhook                 |
+| `/v2/webhooks`                      | GET    | -    | `webhooks:read`  | List webhooks by context or plan |
+| `/v2/webhooks/:webhook_id/requests` | GET    | -    | `webhooks:read`  | Past 7 days of webhook requests  |
 
 ### 2.9 Library Analytics Endpoints (Enterprise Only)
 
-| Endpoint | Method | Scope | Purpose |
-| --- | --- | --- | --- |
-| `/v1/analytics/libraries/actions` | GET | `library_analytics:read` | Action time series data |
-| `/v1/analytics/libraries/usages` | GET | `library_analytics:read` | Library usage grouped by dimensions |
+| Endpoint                          | Method | Scope                    | Purpose                             |
+| --------------------------------- | ------ | ------------------------ | ----------------------------------- |
+| `/v1/analytics/libraries/actions` | GET    | `library_analytics:read` | Action time series data             |
+| `/v1/analytics/libraries/usages`  | GET    | `library_analytics:read` | Library usage grouped by dimensions |
 
 ### 2.10 User and Activity Endpoints
 
-| Endpoint | Method | Scope | Purpose |
-| --- | --- | --- | --- |
-| `/v1/me` | GET | `current_user:read` | Current user profile |
-| `/v1/activity_logs` | GET | `org:activity_log_read` | Organization activity logs (Enterprise) |
+| Endpoint            | Method | Scope                   | Purpose                                 |
+| ------------------- | ------ | ----------------------- | --------------------------------------- |
+| `/v1/me`            | GET    | `current_user:read`     | Current user profile                    |
+| `/v1/activity_logs` | GET    | `org:activity_log_read` | Organization activity logs (Enterprise) |
 
 ### 2.11 Payments Endpoint
 
-| Endpoint | Method | Purpose |
-| --- | --- | --- |
-| `/v1/payments` | GET | Payment information for plugins/widgets |
+| Endpoint       | Method | Purpose                                 |
+| -------------- | ------ | --------------------------------------- |
+| `/v1/payments` | GET    | Payment information for plugins/widgets |
 
 ---
 
@@ -236,10 +236,8 @@ The most robust approach. The Variables REST API exposes all variables
 
 Workflow:
 
-1.`GET /v1/files/:file_key/variables/local`to enumerate all variables
-2. Parse the response to extract collections, modes, and values
-3. Map to your token format (CSS custom properties, SCSS variables, Tailwind
-   config, W3C Design Token Format, Style Dictionary JSON, etc.)
+1.`GET /v1/files/:file_key/variables/local`to enumerate all variables 2. Parse the response to extract collections, modes, and values 3. Map to your token format (CSS custom properties, SCSS variables, Tailwind
+config, W3C Design Token Format, Style Dictionary JSON, etc.)
 
 ### 3.2 Via the GET File Endpoint (Any Plan)
 
@@ -303,12 +301,12 @@ values that can be applied to design properties and prototyping actions.
 
 #### Supported Variable Types (`resolvedType`)
 
-| Type | Description | Example Use |
-| --- | --- | --- |
-| `BOOLEAN` | True/false values | Visibility toggles, feature flags |
-| `FLOAT` | Numeric values | Spacing, sizing, border-radius, opacity |
-| `STRING` | Text values | Font family names, content strings |
-| `COLOR` | RGBA color values | Fill colors, stroke colors, text colors |
+| Type      | Description       | Example Use                             |
+| --------- | ----------------- | --------------------------------------- |
+| `BOOLEAN` | True/false values | Visibility toggles, feature flags       |
+| `FLOAT`   | Numeric values    | Spacing, sizing, border-radius, opacity |
+| `STRING`  | Text values       | Font family names, content strings      |
+| `COLOR`   | RGBA color values | Fill colors, stroke colors, text colors |
 
 #### Variable Collections
 
@@ -346,13 +344,13 @@ include typography-specific scopes:
 Styles in the Figma REST API represent published, reusable design decisions.
 They are distinct from variables:
 
-| Aspect | Styles | Variables |
-| --- | --- | --- |
-| **API Access** | Any plan via component/style endpoints | Enterprise only via Variables API |
-| **Types** | FILL, TEXT, EFFECT, GRID | BOOLEAN, FLOAT, STRING, COLOR |
-| **Modes** | No multi-mode support | Multi-mode (Light/Dark, etc.) |
-| **Aliasing** | No native aliasing | Variable aliases supported |
-| **Write Access** | Read-only via REST API | Read/Write via REST API (Enterprise) |
+| Aspect           | Styles                                 | Variables                            |
+| ---------------- | -------------------------------------- | ------------------------------------ |
+| **API Access**   | Any plan via component/style endpoints | Enterprise only via Variables API    |
+| **Types**        | FILL, TEXT, EFFECT, GRID               | BOOLEAN, FLOAT, STRING, COLOR        |
+| **Modes**        | No multi-mode support                  | Multi-mode (Light/Dark, etc.)        |
+| **Aliasing**     | No native aliasing                     | Variable aliases supported           |
+| **Write Access** | Read-only via REST API                 | Read/Write via REST API (Enterprise) |
 
 Styles are accessed through the component/style endpoints or via the `styles`
 property in the GET File response.
@@ -363,15 +361,15 @@ property in the GET File response.
 
 ### 5.1 What CAN Be Written via REST API
 
-| Resource | Write Access | Endpoint |
-| --- | --- | --- |
-| Variables | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
-| Variable Collections | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
-| Variable Modes | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables` |
-| Comments | CREATE, DELETE | `POST/DELETE /v1/files/:file_key/comments/...` |
-| Comment Reactions | CREATE, DELETE | `POST/DELETE .../reactions` |
-| Dev Resources | CREATE, UPDATE, DELETE | `POST/PUT/DELETE /v1/dev_resources/...` |
-| Webhooks | CREATE, UPDATE, DELETE | `POST/PUT/DELETE /v2/webhooks/...` |
+| Resource             | Write Access           | Endpoint                                       |
+| -------------------- | ---------------------- | ---------------------------------------------- |
+| Variables            | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables`           |
+| Variable Collections | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables`           |
+| Variable Modes       | CREATE, UPDATE, DELETE | `POST /v1/files/:file_key/variables`           |
+| Comments             | CREATE, DELETE         | `POST/DELETE /v1/files/:file_key/comments/...` |
+| Comment Reactions    | CREATE, DELETE         | `POST/DELETE .../reactions`                    |
+| Dev Resources        | CREATE, UPDATE, DELETE | `POST/PUT/DELETE /v1/dev_resources/...`        |
+| Webhooks             | CREATE, UPDATE, DELETE | `POST/PUT/DELETE /v2/webhooks/...`             |
 
 ### 5.2 What CANNOT Be Written via REST API
 
@@ -439,24 +437,24 @@ supports:
 
 ### Comprehensive Comparison
 
-| Capability | Plugin API | REST API |
-| --- | --- | --- |
-| **Read file content** | Full (current file) | Full (any accessible file) |
-| **Write file content** | Full (create/edit/delete nodes) | NOT SUPPORTED |
-| **Write variables** | Full | Full (Enterprise only) |
-| **Write styles** | Full | NOT SUPPORTED |
-| **Multi-file access** | Only via calling REST API from plugin | Native |
-| **Background execution** | NOT SUPPORTED (user must be present) | Full |
-| **Comments** | NOT SUPPORTED | Full read/write |
-| **Version history** | NOT SUPPORTED | Read-only |
-| **Webhooks** | NOT SUPPORTED | Full CRUD |
-| **Dev resources** | Read/write | Full CRUD |
-| **Requires Figma open** | YES | NO |
-| **Rate limits** | N/A | Tier-based per plan |
-| **Runtime environment** | Sandboxed JavaScript in Electron/browser | Any HTTP client |
-| **Technology** | JavaScript/HTML | Any language with HTTP support |
-| **Distribution** | Figma plugin store (requires review) | Self-hosted |
-| **Scope** | Single open file | Organization-wide |
+| Capability               | Plugin API                               | REST API                       |
+| ------------------------ | ---------------------------------------- | ------------------------------ |
+| **Read file content**    | Full (current file)                      | Full (any accessible file)     |
+| **Write file content**   | Full (create/edit/delete nodes)          | NOT SUPPORTED                  |
+| **Write variables**      | Full                                     | Full (Enterprise only)         |
+| **Write styles**         | Full                                     | NOT SUPPORTED                  |
+| **Multi-file access**    | Only via calling REST API from plugin    | Native                         |
+| **Background execution** | NOT SUPPORTED (user must be present)     | Full                           |
+| **Comments**             | NOT SUPPORTED                            | Full read/write                |
+| **Version history**      | NOT SUPPORTED                            | Read-only                      |
+| **Webhooks**             | NOT SUPPORTED                            | Full CRUD                      |
+| **Dev resources**        | Read/write                               | Full CRUD                      |
+| **Requires Figma open**  | YES                                      | NO                             |
+| **Rate limits**          | N/A                                      | Tier-based per plan            |
+| **Runtime environment**  | Sandboxed JavaScript in Electron/browser | Any HTTP client                |
+| **Technology**           | JavaScript/HTML                          | Any language with HTTP support |
+| **Distribution**         | Figma plugin store (requires review)     | Self-hosted                    |
+| **Scope**                | Single open file                         | Organization-wide              |
 
 ### Widget API (Third Option)
 
@@ -538,7 +536,7 @@ Remote variables are identified by their `subscribed_id`.
 
 - Includes variables deleted in the editor that may still be referenced
 - Variable aliases appear as `{ "type": "VARIABLE_ALIAS", "id": "VariableID:..."
-  }`
+}`
   in `valuesByMode`
 - `codeSyntax` can contain platform-specific token names (web, iOS, Android)
 
@@ -556,8 +554,7 @@ Differences from local endpoint:
 
 - Each variable/collection includes a `subscribed_id`
 - Modes are omitted from published variable collections
-- `id`and`key`are stable;`subscribed_id`changes on each publish
--`updatedAt` fields indicate last publish timestamp
+- `id`and`key`are stable;`subscribed_id`changes on each publish -`updatedAt` fields indicate last publish timestamp
 - Must use main file key (not branch key)
 
 ### 7.3 POST Variables (Bulk Create/Update/Delete)
@@ -621,7 +618,7 @@ Request body contains four arrays:
 - Temporary IDs can be used for cross-referencing within a single request
 - `tempIdToRealId`mapping is returned in the response
 - New collections always include one default mode; reference it via
- `initialModeId`
+  `initialModeId`
 - Extended collections supported via `parentVariableCollectionId`
 - Constraints: max 40 modes per collection, max 5000 variables per collection,
   40-char mode name limit
@@ -790,14 +787,14 @@ Browser verification via Playwright/DevTools
 
 ### 9.2 Key Tools in the Ecosystem
 
-| Tool | Type | Capabilities |
-| --- | --- | --- |
-| **Figma MCP Server** | AI bridge | Read design data for LLM-powered code generation |
-| **Anima** | Plugin + API | Figma-to-React/HTML code generation with Tailwind/ShadCN |
-| **Code Connect** | CLI + UI | Map Figma components to codebase components |
-| **Style Dictionary** | Transform tool | Convert tokens to multi-platform output |
-| **Tokens Studio** | Plugin | Bidirectional token sync with GitHub |
-| **figma-extractor** | CLI (Go) | Extract design specs as markdown with CSS variables |
+| Tool                 | Type           | Capabilities                                             |
+| -------------------- | -------------- | -------------------------------------------------------- |
+| **Figma MCP Server** | AI bridge      | Read design data for LLM-powered code generation         |
+| **Anima**            | Plugin + API   | Figma-to-React/HTML code generation with Tailwind/ShadCN |
+| **Code Connect**     | CLI + UI       | Map Figma components to codebase components              |
+| **Style Dictionary** | Transform tool | Convert tokens to multi-platform output                  |
+| **Tokens Studio**    | Plugin         | Bidirectional token sync with GitHub                     |
+| **figma-extractor**  | CLI (Go)       | Extract design specs as markdown with CSS variables      |
 
 ### 9.3 Best Practices
 
@@ -819,10 +816,10 @@ Browser verification via Playwright/DevTools
 **Contexts:** Webhooks attach to a specific context:
 
 | Context | Max Webhooks | Required Permission |
-| --- | --- | --- |
-| Team | 20 | Team admin |
-| Project | 5 | Can edit |
-| File | 3 | Can edit |
+| ------- | ------------ | ------------------- |
+| Team    | 20           | Team admin          |
+| Project | 5            | Can edit            |
+| File    | 3            | Can edit            |
 
 File webhook limits scale by plan: Professional (150), Organization (300),
 Enterprise (600).
@@ -832,32 +829,31 @@ CRUD operations must go through the API.
 
 ### 10.2 Event Types
 
-| Event | Description | Payload Includes |
-| --- | --- | --- |
-| `PING` | Confirmation on webhook creation | Webhook ID |
-| `FILE_UPDATE` | File content changes | File name, file key |
-| `FILE_VERSION_UPDATE` | New version saved | File name, file key, version info |
-| `FILE_DELETE` | File deleted | File name, file key |
-| `FILE_COMMENT` | Comment added/modified | File name, file key, comment data |
-| `LIBRARY_PUBLISH` | Library published | File name, file key, variable data |
-| `DEV_MODE_STATUS_UPDATE` | Layer dev status changes | File name, file key, status, message |
+| Event                    | Description                      | Payload Includes                     |
+| ------------------------ | -------------------------------- | ------------------------------------ |
+| `PING`                   | Confirmation on webhook creation | Webhook ID                           |
+| `FILE_UPDATE`            | File content changes             | File name, file key                  |
+| `FILE_VERSION_UPDATE`    | New version saved                | File name, file key, version info    |
+| `FILE_DELETE`            | File deleted                     | File name, file key                  |
+| `FILE_COMMENT`           | Comment added/modified           | File name, file key, comment data    |
+| `LIBRARY_PUBLISH`        | Library published                | File name, file key, variable data   |
+| `DEV_MODE_STATUS_UPDATE` | Layer dev status changes         | File name, file key, status, message |
 
 ### 10.3 Payload Structure
 
 Every payload (except PING) contains:
 
--`file_name`-- human-readable file name
--`file_key`-- unique file identifier for API calls
+-`file_name`-- human-readable file name -`file_key`-- unique file identifier for API calls
 
 - Event-specific data
 
 ### 10.4 Retry Logic
 
-| Attempt | Delay After Failure |
-| --- | --- |
-| 1st retry | 5 minutes |
-| 2nd retry | 30 minutes |
-| 3rd retry (final) | 3 hours |
+| Attempt           | Delay After Failure |
+| ----------------- | ------------------- |
+| 1st retry         | 5 minutes           |
+| 2nd retry         | 30 minutes          |
+| 3rd retry (final) | 3 hours             |
 
 Server must return`200 OK`. Any other status or timeout is treated as failure.
 
@@ -978,29 +974,29 @@ Authorization: Bearer <ACCESS_TOKEN>
 
 ### 11.3 Complete Scope Reference
 
-| Scope | Description | PAT | OAuth |
-| --- | --- | --- | --- |
-| `current_user:read` | User profile data | Yes | Yes |
-| `file_content:read` | File contents and nodes | Yes | Yes |
-| `file_comments:read` | View file comments | Yes | Yes |
-| `file_comments:write` | Create/delete comments and reactions | Yes | Yes |
-| `file_dev_resources:read` | View dev resources | Yes | Yes |
-| `file_dev_resources:write` | Create dev resources | Yes | Yes |
-| `file_metadata:read` | Read file metadata | Yes | Yes |
-| `file_variables:read` | Access variables (Enterprise) | Yes | Yes |
-| `file_variables:write` | Modify variables (Enterprise) | Yes | Yes |
-| `file_versions:read` | View version history | Yes | Yes |
-| `files:read` | **DEPRECATED** -- broad access | Yes | Yes |
-| `library_analytics:read` | Design system analytics (Enterprise) | Yes | Yes |
-| `library_assets:read` | Published component/style data | Yes | Yes |
-| `library_content:read` | Published components and styles | Yes | Yes |
-| `org:activity_log_read` | Org activity logs (Enterprise, admin) | Yes | Yes |
-| `org:discovery_read` | Text events (Enterprise Gov+, admin) | Yes | Yes |
-| `projects:read` | List projects and files | Yes | Private only |
-| `selections:read` | Recent selection data | Yes | Yes |
-| `team_library_content:read` | Team components and styles | Yes | Yes |
-| `webhooks:read` | Webhook metadata | Yes | Yes |
-| `webhooks:write` | Create/manage webhooks | Yes | Yes |
+| Scope                       | Description                           | PAT | OAuth        |
+| --------------------------- | ------------------------------------- | --- | ------------ |
+| `current_user:read`         | User profile data                     | Yes | Yes          |
+| `file_content:read`         | File contents and nodes               | Yes | Yes          |
+| `file_comments:read`        | View file comments                    | Yes | Yes          |
+| `file_comments:write`       | Create/delete comments and reactions  | Yes | Yes          |
+| `file_dev_resources:read`   | View dev resources                    | Yes | Yes          |
+| `file_dev_resources:write`  | Create dev resources                  | Yes | Yes          |
+| `file_metadata:read`        | Read file metadata                    | Yes | Yes          |
+| `file_variables:read`       | Access variables (Enterprise)         | Yes | Yes          |
+| `file_variables:write`      | Modify variables (Enterprise)         | Yes | Yes          |
+| `file_versions:read`        | View version history                  | Yes | Yes          |
+| `files:read`                | **DEPRECATED** -- broad access        | Yes | Yes          |
+| `library_analytics:read`    | Design system analytics (Enterprise)  | Yes | Yes          |
+| `library_assets:read`       | Published component/style data        | Yes | Yes          |
+| `library_content:read`      | Published components and styles       | Yes | Yes          |
+| `org:activity_log_read`     | Org activity logs (Enterprise, admin) | Yes | Yes          |
+| `org:discovery_read`        | Text events (Enterprise Gov+, admin)  | Yes | Yes          |
+| `projects:read`             | List projects and files               | Yes | Private only |
+| `selections:read`           | Recent selection data                 | Yes | Yes          |
+| `team_library_content:read` | Team components and styles            | Yes | Yes          |
+| `webhooks:read`             | Webhook metadata                      | Yes | Yes          |
+| `webhooks:write`            | Create/manage webhooks                | Yes | Yes          |
 
 **Important:** Scopes do NOT supersede file/project/team permissions. A token
 with`file_content:read`can only access files the user has been granted
@@ -1009,7 +1005,7 @@ access to.
 ### 11.4 Deprecations and Migration
 
 -`files:read` scope is deprecated; use specific scopes
-  (`file_content:read`, `file_comments:read`, etc.)
+(`file_content:read`, `file_comments:read`, etc.)
 
 - Numeric `user_id`in OAuth responses is deprecated; use`user_id_string`
 - All public OAuth apps required re-publishing by November 17, 2025
@@ -1023,19 +1019,19 @@ access to.
 
 Each endpoint is assigned a tier reflecting infrastructure cost:
 
-| Tier | Example Endpoints |
-| --- | --- |
-| **Tier 1** | GET files, GET file nodes, GET images |
+| Tier       | Example Endpoints                                                 |
+| ---------- | ----------------------------------------------------------------- |
+| **Tier 1** | GET files, GET file nodes, GET images                             |
 | **Tier 2** | GET image fills, GET local variables, GET dev resources, webhooks |
-| **Tier 3** | POST variables, GET components/styles, GET file metadata |
+| **Tier 3** | POST variables, GET components/styles, GET file metadata          |
 
 ### 12.2 Limits by Plan and Seat Type
 
-| Tier | View/Collab Seats | Dev/Full on Starter | Dev/Full on Pro | Dev/Full on Org | Dev/Full on Enterprise |
-| --- | --- | --- | --- | --- | --- |
-| Tier 1 | Up to 6/month | 10/min | 15/min | 20/min | 20/min |
-| Tier 2 | Up to 5/min | 25/min | 50/min | 100/min | 100/min |
-| Tier 3 | Up to 10/min | 50/min | 100/min | 150/min | 150/min |
+| Tier   | View/Collab Seats | Dev/Full on Starter | Dev/Full on Pro | Dev/Full on Org | Dev/Full on Enterprise |
+| ------ | ----------------- | ------------------- | --------------- | --------------- | ---------------------- |
+| Tier 1 | Up to 6/month     | 10/min              | 15/min          | 20/min          | 20/min                 |
+| Tier 2 | Up to 5/min       | 25/min              | 50/min          | 100/min         | 100/min                |
+| Tier 3 | Up to 10/min      | 50/min              | 100/min         | 150/min         | 150/min                |
 
 **Note:** View/Collab seats have a monthly cap for Tier 1 (6 requests/month).
 This is extremely restrictive.
@@ -1045,12 +1041,12 @@ This is extremely restrictive.
 Figma uses a **leaky bucket algorithm**. When the bucket overflows, the API
 returns `429 Too Many Requests`with headers:
 
-| Header | Description |
-| --- | --- |
-| `Retry-After` | Seconds to wait before retrying |
-| `X-Figma-Plan-Tier` | Plan level of the resource (enterprise, org, pro, starter) |
+| Header                    | Description                                                     |
+| ------------------------- | --------------------------------------------------------------- |
+| `Retry-After`             | Seconds to wait before retrying                                 |
+| `X-Figma-Plan-Tier`       | Plan level of the resource (enterprise, org, pro, starter)      |
 | `X-Figma-Rate-Limit-Type` | Seat classification (`low`for Collab/Viewer,`high`for Full/Dev) |
-| `X-Figma-Upgrade-Link` | URL to pricing or account settings |
+| `X-Figma-Upgrade-Link`    | URL to pricing or account settings                              |
 
 ### 12.4 Rate Limit Tracking
 
@@ -1064,7 +1060,7 @@ returns `429 Too Many Requests`with headers:
 2. **Cache results** aggressively (especially images, which have 30-day URLs)
 3. **Implement exponential backoff** when receiving 429 errors
 4. **Use the`Retry-After`header** value, not arbitrary sleep durations
-5. **Prefer`GET /v1/files/:key/nodes`** over `GET /v1/files/:key`** for
+5. **Prefer`GET /v1/files/:key/nodes`** over `GET /v1/files/:key`\*\* for
    targeted node access (same tier, less data)
 6. **Use webhooks** instead of polling for change detection
 
@@ -1074,16 +1070,16 @@ returns `429 Too Many Requests`with headers:
 
 ### 13.1 For the MCP-Driven Frontend Workflow
 
-The CLAUDE.md mandates a Figma-first workflow: **Figma > shadcn-ui > Svelte
+The CLAUDE.md mandates a Figma-first workflow: **Figma > shadcn-ui > React
 MCP > implement > browser verification**. Based on this research:
 
 1. **Figma MCP Server** provides `get_design_context`, `get_screenshot`,
    `get_variable_defs`, and `get_code_connect_map`-- these internally call
    the REST API endpoints documented above
 2. **Design token extraction** from the MCP server maps to
-  `GET /v1/files/:key/variables/local`under the hood
+   `GET /v1/files/:key/variables/local`under the hood
 3. **Code Connect integration** means Figma components can be mapped to the
-   project's shadcn-svelte components, providing the AI agent with exact
+   project's shadcn-React components, providing the AI agent with exact
    component usage patterns
 
 ### 13.2 For Automated Design System Sync
@@ -1111,16 +1107,16 @@ If VaultSpec needs to keep design tokens synchronized:
 
 ### 13.4 Key Endpoints for VaultSpec's Figma Integration
 
-| Use Case | Endpoint | Plan Required |
-| --- | --- | --- |
-| Read design structure | `GET /v1/files/:key` | Any |
-| Read specific components | `GET /v1/files/:key/nodes?ids=...` | Any |
-| Export component images | `GET /v1/images/:key?ids=...` | Any |
-| Extract design tokens | `GET /v1/files/:key/variables/local` | Enterprise |
-| List published components | `GET /v1/files/:key/components` | Any |
-| Detect design changes | `POST /v2/webhooks` (LIBRARY_PUBLISH) | Any (team admin) |
-| Track dev handoff status | Webhook: DEV_MODE_STATUS_UPDATE | Any (Can edit) |
-| Link code to design | Dev Resources API | Any |
+| Use Case                  | Endpoint                              | Plan Required    |
+| ------------------------- | ------------------------------------- | ---------------- |
+| Read design structure     | `GET /v1/files/:key`                  | Any              |
+| Read specific components  | `GET /v1/files/:key/nodes?ids=...`    | Any              |
+| Export component images   | `GET /v1/images/:key?ids=...`         | Any              |
+| Extract design tokens     | `GET /v1/files/:key/variables/local`  | Enterprise       |
+| List published components | `GET /v1/files/:key/components`       | Any              |
+| Detect design changes     | `POST /v2/webhooks` (LIBRARY_PUBLISH) | Any (team admin) |
+| Track dev handoff status  | Webhook: DEV_MODE_STATUS_UPDATE       | Any (Can edit)   |
+| Link code to design       | Dev Resources API                     | Any              |
 
 ---
 
@@ -1150,7 +1146,7 @@ If VaultSpec needs to keep design tokens synchronized:
 - [Figma REST API Dev
   Resources](https://developers.figma.com/docs/rest-api/dev-resources/)
 - [Figma Dev Resources
-Endpoints](https://developers.figma.com/docs/rest-api/dev-resources-endpoints/)
+  Endpoints](https://developers.figma.com/docs/rest-api/dev-resources-endpoints/)
 - [Figma Code Connect
   Introduction](https://developers.figma.com/docs/code-connect/)
 - [Figma Code Connect
@@ -1158,7 +1154,7 @@ Endpoints](https://developers.figma.com/docs/rest-api/dev-resources-endpoints/)
 - [Figma Code Connect
   UI](https://developers.figma.com/docs/code-connect/code-connect-ui-setup/)
 - [Figma Code Connect MCP
-Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
+  Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
 - [Figma OpenAPI Spec (GitHub)](https://github.com/figma/rest-api-spec)
 - [Code Connect GitHub Repository](https://github.com/figma/code-connect)
 - [Figma Plugin API
@@ -1168,16 +1164,16 @@ Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-int
   (lukasoppermann)](https://github.com/lukasoppermann/design-tokens)
 - [figma-extractor](https://github.com/kataras/figma-extractor)
 - [Manage Personal Access
-Tokens](https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens)
+  Tokens](https://help.figma.com/hc/en-us/articles/8085703771159-Manage-personal-access-tokens)
 - [Guide to Variables in
-Figma](https://help.figma.com/hc/en-us/articles/15339657135383-Guide-to-variables-in-Figma)
+  Figma](https://help.figma.com/hc/en-us/articles/15339657135383-Guide-to-variables-in-Figma)
 - [Synchronizing Figma Variables with Design Tokens (Nate
-Baldwin)](https://medium.com/@NateBaldwin/synchronizing-figma-variables-with-design-tokens-3a6c6adbf7da)
+  Baldwin)](https://medium.com/@NateBaldwin/synchronizing-figma-variables-with-design-tokens-3a6c6adbf7da)
 - [Automating Design System Sync via Variables REST API (Agshin
-Rajabov)](https://medium.com/@agshinrajabov/automating-the-synchronization-of-design-systems-using-the-figma-variables-rest-api-6c54deffbb75)
+  Rajabov)](https://medium.com/@agshinrajabov/automating-the-synchronization-of-design-systems-using-the-figma-variables-rest-api-6c54deffbb75)
 - [Getting Started with Figma
   Webhooks](https://souporserious.com/getting-started-with-figma-webhooks/)
 - [Advanced Figma Webhook
-Integration](https://blog.poespas.me/posts/2025/02/13/advanced-figma-webhook-integration/)
+  Integration](https://blog.poespas.me/posts/2025/02/13/advanced-figma-webhook-integration/)
 - [Component Generation with Figma API (DEV
-Community)](https://dev.to/krjakbrjak/component-generation-with-figma-api-bridging-the-gap-between-development-and-design-1nho)
+  Community)](https://dev.to/krjakbrjak/component-generation-with-figma-api-bridging-the-gap-between-development-and-design-1nho)

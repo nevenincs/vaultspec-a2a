@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: research
 feature: toad-reference-patterns
-description: "Reference patterns extracted from TOAD codebase for ACP compliance."
+description: 'Reference patterns extracted from TOAD codebase for ACP compliance.'
 ---
 
 # TOAD Reference Patterns for ACP Audit Issues
@@ -150,13 +150,13 @@ level.
    matching.
 3. **Consider requiring permission** for DANGEROUS/DESTRUCTIVE commands before
    execution.
-| 4. The `env`parameter merges agent-requested env vars over`os.environ`(TOAD
-line 188:`os.environ | command.env`), so our code should do the same but may
-want to filter sensitive vars. |
+   | 4. The `env`parameter merges agent-requested env vars over`os.environ`(TOAD
+   line 188:`os.environ | command.env`), so our code should do the same but may
+   want to filter sensitive vars. |
 
 ---
 
-## Issue 2: Path sandbox (_sandbox_path) (SEC-001)
+## Issue 2: Path sandbox (\_sandbox_path) (SEC-001)
 
 ### TOAD Implementation (danger.py:265,314,340; agent.py:357-359,377)
 
@@ -214,7 +214,7 @@ if not resource_path.is_relative_to(root):
 ### What Our Code Should Do (2)
 
 1. **Replace
-`str(resolved).startswith(str(cwd.resolve()))`with`resolved.is_relative_to(cwd.resolve())`**.
+   `str(resolved).startswith(str(cwd.resolve()))`with`resolved.is_relative_to(cwd.resolve())`**.
    The `startswith`approach has a prefix collision
    bug:`/home/user/project-secrets`would be accepted as
    within`/home/user/project`.
@@ -363,7 +363,7 @@ storage. |
 2. Extract `entries`from the update payload.
 3. Emit a`plan_update`server event to connected WebSocket clients with the plan
    entries.
-| 4. Use the`PlanEntry`data structure:`{content: str, priority?: "high" |
+   | 4. Use the`PlanEntry`data structure:`{content: str, priority?: "high" |
 "medium" | "low", status?: "pending" | "in_progress" | "completed"}`. |
 
 ---
@@ -459,11 +459,11 @@ def rpc_read_text_file(
 
 1. Read the full file content first (UTF-8 with `errors="ignore"`).
 2. If `line`is provided, convert from 1-based to 0-based:`line = max(0, line -
-   1)`.
+1)`.
 3. If only `line`is given (no`limit`): slice from that line to end:
    `text.splitlines()[line:]`.
 4. If both `line`and`limit`are given: slice a range:`text.splitlines()[line :
-   line + limit]`.
+line + limit]`.
 5. Rejoin with `"\n".join(...)`.
 6. Return `{"content": text}`.
 7. On `IOError`, return empty string (not an error response).
@@ -522,7 +522,7 @@ class TerminalExitStatus(SchemaDict, total=False):
 1. The base response always includes `output`and`truncated`.
 2. `exitStatus`is **conditionally included** -- only when`return_code is not
    None`(process has exited).
-| 3. The`exitStatus`object has the shape`{"exitCode": int | None, "signal": str
+   | 3. The`exitStatus`object has the shape`{"exitCode": int | None, "signal": str
 | None}`. |
 3. If the process is still running, `exitStatus`is omitted entirely (not set
    to`None`).
@@ -542,16 +542,16 @@ class TerminalExitStatus(SchemaDict, total=False):
 
 All 8 session update types handled in TOAD's `rpc_session_update`:
 
-| # | sessionUpdate type | Line range | Handler action |
-| --- | --- | --- | --- |
-| 1 | `user_message_chunk` | 234-239 | Post`UserMessage(type, text)` |
-| 2 | `agent_message_chunk` | 241-245 | Post`Update(type, text)` |
-| 3 | `agent_thought_chunk` | 247-251 | Post`Thinking(type, text)` |
-| 4 | `tool_call` | 253-258 | Store in`tool_calls`dict, post`ToolCall(update)` |
-| 5 | `plan` | 260-261 | Post`Plan(entries)` |
-| 6 | `tool_call_update` | 263-288 | Merge into existing or create synthetic, post update |
-| 7 | `available_commands_update` | 290-294 | Post`AvailableCommandsUpdate(available_commands)` |
-| 8 | `current_mode_update` | 296-297 | Post`ModeUpdate(mode_id)` |
+| #   | sessionUpdate type          | Line range | Handler action                                       |
+| --- | --------------------------- | ---------- | ---------------------------------------------------- |
+| 1   | `user_message_chunk`        | 234-239    | Post`UserMessage(type, text)`                        |
+| 2   | `agent_message_chunk`       | 241-245    | Post`Update(type, text)`                             |
+| 3   | `agent_thought_chunk`       | 247-251    | Post`Thinking(type, text)`                           |
+| 4   | `tool_call`                 | 253-258    | Store in`tool_calls`dict, post`ToolCall(update)`     |
+| 5   | `plan`                      | 260-261    | Post`Plan(entries)`                                  |
+| 6   | `tool_call_update`          | 263-288    | Merge into existing or create synthetic, post update |
+| 7   | `available_commands_update` | 290-294    | Post`AvailableCommandsUpdate(available_commands)`    |
+| 8   | `current_mode_update`       | 296-297    | Post`ModeUpdate(mode_id)`                            |
 
 Additionally, lines 299-300
 handle`_meta.field_meta.openhands.dev/metrics.status_line`as a cross-cutting

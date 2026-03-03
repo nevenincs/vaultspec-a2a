@@ -33,24 +33,24 @@ The project has no Docker infrastructure. This blocks:
 
 ### 1.1 Architecture Constraints
 
-| Constraint | Implication |
-| ----------- | ------------- |
-| SQLite with WAL mode | Single-container only — WAL breaks across container boundaries |
-| SvelteKit `adapter-static` | Frontend builds to pure HTML/JS/CSS — no Node runtime needed |
-| OTel mandatory (ADR-015) | Collector sidecar needed for trace consumption |
-| Windows-primary dev | Docker Desktop required, not native Linux containers |
-| 17 runtime Python deps | All on PyPI, no git deps (ADR-015) |
+| Constraint               | Implication                                                    |
+| ------------------------ | -------------------------------------------------------------- |
+| SQLite with WAL mode     | Single-container only — WAL breaks across container boundaries |
+| React `adapter-static`   | Frontend builds to pure HTML/JS/CSS — no Node runtime needed   |
+| OTel mandatory (ADR-015) | Collector sidecar needed for trace consumption                 |
+| Windows-primary dev      | Docker Desktop required, not native Linux containers           |
+| 17 runtime Python deps   | All on PyPI, no git deps (ADR-015)                             |
 
 ### 1.2 Reference Patterns
 
-| Project | Architecture | Containers |
-| --------- | ------------- | ----------- |
-| Open WebUI | Single container (Python + built Svelte) | 1 |
-| Dify | Multi-container (11 services) | 11 |
-| LangGraph CLI | Programmatic compose (3-4 services) | 3-4 |
-| a2a-samples | Minimal per-agent Dockerfile | 1 |
+| Project       | Architecture                            | Containers |
+| ------------- | --------------------------------------- | ---------- |
+| Open WebUI    | Single container (Python + built React) | 1          |
+| Dify          | Multi-container (11 services)           | 11         |
+| LangGraph CLI | Programmatic compose (3-4 services)     | 3-4        |
+| a2a-samples   | Minimal per-agent Dockerfile            | 1          |
 
-Open WebUI is the closest match to our stack (FastAPI + SvelteKit,
+Open WebUI is the closest match to our stack (FastAPI + React,
 single container).
 
 ## 2. Decision
@@ -58,7 +58,7 @@ single container).
 ### 2.1 Single-Container Production Architecture
 
 The production image bundles both the Python backend and the pre-built
-SvelteKit static assets in a single container. FastAPI serves the API at
+React static assets in a single container. FastAPI serves the API at
 `/api` and the SPA at `/` — no separate Node runtime or reverse proxy
 needed.
 
@@ -73,7 +73,7 @@ needed.
 
 Two build stages:
 
-1. **Node stage**: `node:22-alpine` — builds SvelteKit frontend
+1. **Node stage**: `node:22-alpine` — builds React frontend
 2. **Python stage**: `python:3.13-slim-bookworm` — installs deps, copies
    built frontend, serves everything
 
@@ -106,7 +106,7 @@ Python (uv) and Node, with `postCreateCommand` running `just setup`.
 
 ```dockerfile
 # ============================================================
-# Stage 1: Build SvelteKit frontend
+# Stage 1: Build React frontend
 # ============================================================
 FROM node:22-alpine AS frontend-build
 WORKDIR /app/src/ui
@@ -166,7 +166,7 @@ services:
   backend:
     build: .
     ports:
-      - "8000:8000"
+      - '8000:8000'
     volumes:
       - db-data:/app/data
     environment:
@@ -181,16 +181,16 @@ services:
     working_dir: /app/src/ui
     command: npm run dev -- --host 0.0.0.0
     ports:
-      - "5173:5173"
+      - '5173:5173'
     volumes:
       - ./src/ui:/app/src/ui
 
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "16686:16686" # Jaeger UI — http://localhost:16686
+      - '4317:4317' # OTLP gRPC receiver
+      - '4318:4318' # OTLP HTTP receiver
+      - '16686:16686' # Jaeger UI — http://localhost:16686
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
@@ -223,7 +223,7 @@ volumes:
       "extensions": [
         "ms-python.python",
         "charliermarsh.ruff",
-        "svelte.svelte-vscode",
+        "React.React-vscode",
         "tamasfe.even-better-toml"
       ]
     }
@@ -248,7 +248,7 @@ build/
 
 # Node
 node_modules/
-src/ui/.svelte-kit/
+src/ui/.React-kit/
 
 # Project
 knowledge/
@@ -305,9 +305,9 @@ PostgreSQL (or Turso/libSQL for distributed SQLite).
 
 ## 5. Compliance Matrix
 
-| ADR | Relationship | Status |
-| ----- | ------------- | -------- |
-| ADR-007 (Tech Stack) | Implements — FastAPI serves SPA + API in single container | Compliant |
-| ADR-010 (Observability) | Enforces — Jaeger sidecar consumes mandatory OTel traces | Compliant |
-| ADR-015 (Dep Hygiene) | Depends — clean dep surface enables cross-platform Docker builds | Compliant |
-| ADR-016 (Task Runner) | Integrates — `just docker-build`, `just docker-dev` recipes | Compliant |
+| ADR                     | Relationship                                                     | Status    |
+| ----------------------- | ---------------------------------------------------------------- | --------- |
+| ADR-007 (Tech Stack)    | Implements — FastAPI serves SPA + API in single container        | Compliant |
+| ADR-010 (Observability) | Enforces — Jaeger sidecar consumes mandatory OTel traces         | Compliant |
+| ADR-015 (Dep Hygiene)   | Depends — clean dep surface enables cross-platform Docker builds | Compliant |
+| ADR-016 (Task Runner)   | Integrates — `just docker-build`, `just docker-dev` recipes      | Compliant |

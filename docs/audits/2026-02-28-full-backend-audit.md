@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: audit
 feature: full-backend
-description: "First-pass 6-agent parallel swarm audit of all lib/ modules producing 101 findings (8 CRITICAL, 33 HIGH, 37 MEDIUM, 23 LOW) including CORS production regression and AcpChatModel security issues."
+description: 'First-pass 6-agent parallel swarm audit of all lib/ modules producing 101 findings (8 CRITICAL, 33 HIGH, 37 MEDIUM, 23 LOW) including CORS production regression and AcpChatModel security issues.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -23,14 +23,14 @@ before auditing.
 
 ## Summary by Module
 
-| Module | CRIT | HIGH | MED | LOW | Total |
-| -------- | ------ | ------ | ----- | ----- | ------- |
-| `lib/core/` | 0 | 7 | 9 | 5 | 21 |
-| `lib/api/` | 3 | 5 | 7 | 4 | 19 |
-| `lib/providers/` | 1 | 4 | 7 | 4 | 16 |
-| `lib/database/`+`lib/protocols/` | 0 | 3 | 6 | 4 | 13 |
-| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 1 | 5 | 8 | 6 | 20 |
-| All tests | 3 | 9 | 12 | 0 | 24 |
+| Module                                         | CRIT | HIGH | MED | LOW | Total |
+| ---------------------------------------------- | ---- | ---- | --- | --- | ----- |
+| `lib/core/`                                    | 0    | 7    | 9   | 5   | 21    |
+| `lib/api/`                                     | 3    | 5    | 7   | 4   | 19    |
+| `lib/providers/`                               | 1    | 4    | 7   | 4   | 16    |
+| `lib/database/`+`lib/protocols/`               | 0    | 3    | 6   | 4   | 13    |
+| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 1    | 5    | 8   | 6   | 20    |
+| All tests                                      | 3    | 9    | 12  | 0   | 24    |
 
 ---
 
@@ -40,7 +40,7 @@ before auditing.
 
 The`create_app()`factory adds`CORSMiddleware`only when`debug=True`. In
 production mode, the middleware is absent entirely. Any browser-based UI (the
-SvelteKit SPA) will fail to make cross-origin requests to the API. This is not a
+React SPA) will fail to make cross-origin requests to the API. This is not a
 security hardening — it's a functional regression.
 
 **Fix**: Always add `CORSMiddleware`. In production, restrict `allow_origins`to
@@ -82,7 +82,7 @@ hallucinating LLM agent could execute arbitrary shell commands.
 
 | **Fix**: Implement a command allowlist (e.g.,`["python", "pip", "git", "npm",
 "node"]`) and validate the command prefix before spawning. Reject any command
-containing shell metacharacters (` | `, `&`, `;`, backticks). |
+containing shell metacharacters (`|`, `&`, `;`, backticks). |
 
 ---
 
@@ -280,14 +280,9 @@ Don't verify that`interrupt_before_nodes`differs between modes.
 
 **H33. Coverage gaps — 10 source modules have NO tests**:
 
--`lib/core/models.py`— dataclass round-trip untested
--`lib/core/nodes/supervisor.py`— routing logic untested
--`lib/core/nodes/worker.py`— node execution untested
--`lib/providers/acp_exceptions.py`
+-`lib/core/models.py`— dataclass round-trip untested -`lib/core/nodes/supervisor.py`— routing logic untested -`lib/core/nodes/worker.py`— node execution untested -`lib/providers/acp_exceptions.py`
 
-- `lib/providers/gemini_auth.py`— OAuth token refresh untested
--`lib/providers/probes/_protocol.py`(+ claude, gemini, openai, zhipu)
--`lib/utils/enums.py`
+- `lib/providers/gemini_auth.py`— OAuth token refresh untested -`lib/providers/probes/_protocol.py`(+ claude, gemini, openai, zhipu) -`lib/utils/enums.py`
 - `lib/utils/printer.py`
 
 ---
@@ -343,7 +338,7 @@ Don't verify that`interrupt_before_nodes`differs between modes.
 -
 
 M20.`acp_chat_model.py`—`_handle_session_update`processes`agent_message_chunk`type
-  only; ignores`tool_call_chunk`
+only; ignores`tool_call_chunk`
 
 - M21. `factory.py`— No validation that`model_name`maps to a valid provider
 - M22.`acp_exceptions.py`— Exception hierarchy doesn't
@@ -449,39 +444,39 @@ L7.`schemas/rest.py`—`CreateThreadResponse`includes`thread_id`and`id`(redundan
 
 ## Test Coverage Gap Analysis
 
-| Source Module | Test Coverage |
-| --- | --- |
-| `lib/core/aggregator.py` | Covered (structural fakes, not real LangGraph) |
-| `lib/core/config.py` | Covered |
-| `lib/core/context.py` | Covered |
-| `lib/core/exceptions.py` | Covered (some tautological) |
-| `lib/core/graph.py` | Covered (compile-only, tautological) |
-| `lib/core/metadata.py` | Covered |
-| `lib/core/models.py` | **MISSING** |
-| `lib/core/nodes/supervisor.py` | **MISSING** |
-| `lib/core/nodes/worker.py` | **MISSING** |
-| `lib/core/preamble.py` | Covered |
-| `lib/core/state.py` | Covered |
-| `lib/core/team_config.py` | Covered |
-| `lib/api/endpoints.py` | Covered |
-| `lib/api/websocket.py` | Covered (timing-dependent) |
-| `lib/api/schemas/*` | Covered |
-| `lib/database/crud.py` | Covered |
-| `lib/database/models.py` | Covered |
-| `lib/database/session.py` | Covered (singleton leaks) |
-| `lib/providers/acp_chat_model.py` | Live-only |
-| `lib/providers/acp_exceptions.py` | **MISSING** |
-| `lib/providers/factory.py` | Covered |
-| `lib/providers/gemini_auth.py` | **MISSING** |
-| `lib/providers/probes/*` | **MISSING** (5 files) |
-| `lib/protocols/mcp/server.py` | Partial |
-| `lib/telemetry/instrumentation.py` | Covered (import-time limitation) |
-| `lib/telemetry/middleware.py` | Covered |
-| `lib/utils/enums.py` | **MISSING** |
-| `lib/utils/logging.py` | Covered (state leaks) |
-| `lib/utils/printer.py` | **MISSING** |
-| `lib/workspace/git_manager.py` | Covered |
-| `lib/workspace/environment.py` | Covered |
+| Source Module                      | Test Coverage                                  |
+| ---------------------------------- | ---------------------------------------------- |
+| `lib/core/aggregator.py`           | Covered (structural fakes, not real LangGraph) |
+| `lib/core/config.py`               | Covered                                        |
+| `lib/core/context.py`              | Covered                                        |
+| `lib/core/exceptions.py`           | Covered (some tautological)                    |
+| `lib/core/graph.py`                | Covered (compile-only, tautological)           |
+| `lib/core/metadata.py`             | Covered                                        |
+| `lib/core/models.py`               | **MISSING**                                    |
+| `lib/core/nodes/supervisor.py`     | **MISSING**                                    |
+| `lib/core/nodes/worker.py`         | **MISSING**                                    |
+| `lib/core/preamble.py`             | Covered                                        |
+| `lib/core/state.py`                | Covered                                        |
+| `lib/core/team_config.py`          | Covered                                        |
+| `lib/api/endpoints.py`             | Covered                                        |
+| `lib/api/websocket.py`             | Covered (timing-dependent)                     |
+| `lib/api/schemas/*`                | Covered                                        |
+| `lib/database/crud.py`             | Covered                                        |
+| `lib/database/models.py`           | Covered                                        |
+| `lib/database/session.py`          | Covered (singleton leaks)                      |
+| `lib/providers/acp_chat_model.py`  | Live-only                                      |
+| `lib/providers/acp_exceptions.py`  | **MISSING**                                    |
+| `lib/providers/factory.py`         | Covered                                        |
+| `lib/providers/gemini_auth.py`     | **MISSING**                                    |
+| `lib/providers/probes/*`           | **MISSING** (5 files)                          |
+| `lib/protocols/mcp/server.py`      | Partial                                        |
+| `lib/telemetry/instrumentation.py` | Covered (import-time limitation)               |
+| `lib/telemetry/middleware.py`      | Covered                                        |
+| `lib/utils/enums.py`               | **MISSING**                                    |
+| `lib/utils/logging.py`             | Covered (state leaks)                          |
+| `lib/utils/printer.py`             | **MISSING**                                    |
+| `lib/workspace/git_manager.py`     | Covered                                        |
+| `lib/workspace/environment.py`     | Covered                                        |
 
 ### 10 source modules have zero test coverage
 
@@ -489,16 +484,16 @@ L7.`schemas/rest.py`—`CreateThreadResponse`includes`thread_id`and`id`(redundan
 
 ## Mandate Compliance
 
-| Mandate | Status |
-| --- | --- |
-| `unittest`module imported | PASS — zero occurrences |
-| `Mock`/`MagicMock`/`patch`used | PASS — zero occurrences |
-| `monkeypatch.setattr/delattr` | PASS — only`setenv/delenv`(permitted) |
-| pytest only | PASS |
-| Tests in`tests/`subdirectories | PASS |
-| ADR-009 facade re-exports | PARTIAL —`lib/utils/__init__.py`missing`Model`, `MODEL_MAP`, `AcpRequestId` |
-| ADR-010 OTel compliance | PARTIAL — deprecated semantic convention attributes in middleware |
-| ADR-001 process safety | PASS —`taskkill /T /F`pattern correct |
+| Mandate                        | Status                                                                      |
+| ------------------------------ | --------------------------------------------------------------------------- |
+| `unittest`module imported      | PASS — zero occurrences                                                     |
+| `Mock`/`MagicMock`/`patch`used | PASS — zero occurrences                                                     |
+| `monkeypatch.setattr/delattr`  | PASS — only`setenv/delenv`(permitted)                                       |
+| pytest only                    | PASS                                                                        |
+| Tests in`tests/`subdirectories | PASS                                                                        |
+| ADR-009 facade re-exports      | PARTIAL —`lib/utils/__init__.py`missing`Model`, `MODEL_MAP`, `AcpRequestId` |
+| ADR-010 OTel compliance        | PARTIAL — deprecated semantic convention attributes in middleware           |
+| ADR-001 process safety         | PASS —`taskkill /T /F`pattern correct                                       |
 
 ---
 

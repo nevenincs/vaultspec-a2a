@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: agent-ui-terminal-dashboard
-description: "Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations."
-name: "UI Terminal Dashboard Survey"
+description: 'Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations.'
+name: 'UI Terminal Dashboard Survey'
 maturity: 20
-summary: "Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations."
+summary: 'Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations.'
 ---
 
 # Phase 7: Agent UI, Terminal-in-Browser, and Real-time Dashboard Survey
@@ -24,11 +24,11 @@ summary: "Comparative survey of agent UIs, terminal-in-browser solutions, and re
 
 **Tech Stack**:
 
-- **Frontend**: SvelteKit (migrated from earlier Svelte)
+- **Frontend**: React (migrated from earlier React)
 - **Backend**: Python FastAPI
 - **Database**: SQLAlchemy with SQLite (default, with optional encryption),
   PostgreSQL
-- **State Management**: Svelte stores
+- **State Management**: React stores
 - **Real-time**: Socket.IO + Server-Sent Events (SSE) hybrid
 - **Caching/PubSub**: Redis-backed WebSocket manager for scalability
 - **Observability**: OpenTelemetry integration
@@ -38,9 +38,9 @@ summary: "Comparative survey of agent UIs, terminal-in-browser solutions, and re
 Three-tier architecture with clear frontend/backend separation:
 
 1. **Connection Layer**: Socket.IO client managed in root layout
-2. **Event Processing Layer**: Event handlers in Chat.svelte processing incoming
+2. **Event Processing Layer**: Event handlers in Chat.React processing incoming
    stream chunks
-3. **Display Layer**: ResponseMessage.svelte components rendering streaming
+3. **Display Layer**: ResponseMessage.React components rendering streaming
    content incrementally
 
 **Streaming Implementation**:
@@ -72,7 +72,7 @@ Three-tier architecture with clear frontend/backend separation:
 - The SSE + WebSocket hybrid is powerful: SSE for model streaming, WebSocket for
   chat events and control messages
 - Redis-backed WebSocket manager pattern is essential for horizontal scaling
-- SvelteKit + FastAPI is a proven pairing for AI UIs
+- React + FastAPI is a proven pairing for AI UIs
 - Socket.IO multiplexing keeps connection count manageable
 
 **Limitations**:
@@ -349,13 +349,13 @@ Three distinct visual builders:
 
 **Comparison with Langflow**:
 
-| Aspect | Langflow | Flowise |
-| -------- | ---------- | --------- |
-| Backend | Python (FastAPI) | Node.js (Express) |
-| Customization | Full source access per component | Template-based |
-| Performance | 23% faster on complex RAG workflows | Better at scaling multi-threaded queries |
-| Strength | Quick prototyping, LangChain native | Enterprise features, templates, multi-agent |
-| Skill Level | Assumes AI familiarity | Graduated complexity (Assistant/Chatflow/Agentflow) |
+| Aspect        | Langflow                            | Flowise                                             |
+| ------------- | ----------------------------------- | --------------------------------------------------- |
+| Backend       | Python (FastAPI)                    | Node.js (Express)                                   |
+| Customization | Full source access per component    | Template-based                                      |
+| Performance   | 23% faster on complex RAG workflows | Better at scaling multi-threaded queries            |
+| Strength      | Quick prototyping, LangChain native | Enterprise features, templates, multi-agent         |
+| Skill Level   | Assumes AI familiarity              | Graduated complexity (Assistant/Chatflow/Agentflow) |
 
 **What We Can Learn**:
 
@@ -871,17 +871,17 @@ Three-layer architecture:
 
 ### Dominant Technology Patterns
 
-| Pattern | Projects Using It | Relevance |
-| --------- | ------------------- | ----------- |
-| React Flow for visual editors | Dify, Langflow, Flowise | High -- if we build workflow visualization |
-| xterm.js for terminals | All terminal projects, VS Code, Theia, JupyterLab | Critical -- this is the standard |
-| WebSocket for real-time | All projects | Critical -- universal choice |
-| SSE for LLM streaming | Open WebUI, Dify | High -- standard for LLM token streaming |
-| Zustand for state | LobeChat | Medium -- lightweight alternative to Redux |
-| React Flow + Python backend | Langflow, Dify | High -- common for AI workflow UIs |
-| JSON-RPC over WebSocket | Theia | High -- structured protocol for multi-channel |
-| Pub/Sub multiplexed WebSocket | Grafana | High -- scalable real-time pattern |
-| Process state machine | Supervisor, PM2 | High -- maps to agent lifecycle |
+| Pattern                       | Projects Using It                                 | Relevance                                     |
+| ----------------------------- | ------------------------------------------------- | --------------------------------------------- |
+| React Flow for visual editors | Dify, Langflow, Flowise                           | High -- if we build workflow visualization    |
+| xterm.js for terminals        | All terminal projects, VS Code, Theia, JupyterLab | Critical -- this is the standard              |
+| WebSocket for real-time       | All projects                                      | Critical -- universal choice                  |
+| SSE for LLM streaming         | Open WebUI, Dify                                  | High -- standard for LLM token streaming      |
+| Zustand for state             | LobeChat                                          | Medium -- lightweight alternative to Redux    |
+| React Flow + Python backend   | Langflow, Dify                                    | High -- common for AI workflow UIs            |
+| JSON-RPC over WebSocket       | Theia                                             | High -- structured protocol for multi-channel |
+| Pub/Sub multiplexed WebSocket | Grafana                                           | High -- scalable real-time pattern            |
+| Process state machine         | Supervisor, PM2                                   | High -- maps to agent lifecycle               |
 
 ### Recommended Tech Stack for Our Use Case
 
@@ -890,11 +890,11 @@ would be:
 
 **Frontend**:
 
-- **SvelteKit** or **Next.js** (both proven in agent UIs; SvelteKit is lighter,
+- **React** or **Next.js** (both proven in agent UIs; React is lighter,
   Next.js has larger ecosystem)
 - **xterm.js** for terminal embedding (non-negotiable -- it's the universal
   standard)
-- **Zustand** or Svelte stores for state management
+- **Zustand** or React stores for state management
 - React Flow if visual workflow editing is needed
 
 **Real-Time Communication**:
@@ -933,19 +933,19 @@ would be:
 
 ### GitHub Star Summary
 
-| Project | Stars | Category |
-| --------- | ------- | ---------- |
-| Dify | ~100k | Agent UI |
-| Langflow | ~100k | Agent UI |
-| LobeChat | ~55k | Agent UI |
-| Open WebUI | ~45k+ | Agent UI |
-| AutoGen | ~42k+ | Agent UI |
-| Flowise | ~15k+ | Agent UI |
-| code-server | ~70k | Terminal |
-| Grafana | ~66k | Dashboard |
-| Portainer | ~32k | Dashboard |
-| PM2 | ~42k | Process Mgmt |
-| GoTTY | ~19k | Terminal |
-| Theia | ~20k | Terminal/IDE |
-| xterm.js | ~18k+ | Terminal Lib |
-| ttyd | ~8k+ | Terminal |
+| Project     | Stars | Category     |
+| ----------- | ----- | ------------ |
+| Dify        | ~100k | Agent UI     |
+| Langflow    | ~100k | Agent UI     |
+| LobeChat    | ~55k  | Agent UI     |
+| Open WebUI  | ~45k+ | Agent UI     |
+| AutoGen     | ~42k+ | Agent UI     |
+| Flowise     | ~15k+ | Agent UI     |
+| code-server | ~70k  | Terminal     |
+| Grafana     | ~66k  | Dashboard    |
+| Portainer   | ~32k  | Dashboard    |
+| PM2         | ~42k  | Process Mgmt |
+| GoTTY       | ~19k  | Terminal     |
+| Theia       | ~20k  | Terminal/IDE |
+| xterm.js    | ~18k+ | Terminal Lib |
+| ttyd        | ~8k+  | Terminal     |

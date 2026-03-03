@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: audit
 feature: full-backend-swarm-4
-description: "Fourth-pass 6-agent independent audit producing ~110 unique findings (14 CRITICAL, 37 HIGH, 59 MEDIUM, 38 LOW) against all 17 ADRs, resolving final lint violations and achieving 702 tests passing."
+description: 'Fourth-pass 6-agent independent audit producing ~110 unique findings (14 CRITICAL, 37 HIGH, 59 MEDIUM, 38 LOW) against all 17 ADRs, resolving final lint violations and achieving 702 tests passing.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -25,15 +25,15 @@ audits)
 
 ## Executive Summary
 
-| Agent | Scope | CRIT | HIGH | MED | LOW | Total |
-| ------- | ------- | ------ | ------ | ----- | ----- | ------- |
-| core-auditor | `lib/core/` | 4 | 6 | 8 | 7 | 25 |
-| api-auditor | `lib/api/` | 0 | 6 | 13 | 7 | 26 |
-| providers-auditor | `lib/providers/` | 2 | 6 | 9 | 6 | 23 |
-| db-protocol-auditor | `lib/database/`+`lib/protocols/` | 0 | 5 | 8 | 6 | 19 |
-| utils-auditor | `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 3 | 5 | 6 | 4 | 18 |
-| test-quality-auditor | Cross-cutting test quality | 5 | 9 | 15 | 8 | 37 |
-| **TOTAL (raw)** | | **14** | **37** | **59** | **38** | **148** |
+| Agent                | Scope                                          | CRIT   | HIGH   | MED    | LOW    | Total   |
+| -------------------- | ---------------------------------------------- | ------ | ------ | ------ | ------ | ------- |
+| core-auditor         | `lib/core/`                                    | 4      | 6      | 8      | 7      | 25      |
+| api-auditor          | `lib/api/`                                     | 0      | 6      | 13     | 7      | 26      |
+| providers-auditor    | `lib/providers/`                               | 2      | 6      | 9      | 6      | 23      |
+| db-protocol-auditor  | `lib/database/`+`lib/protocols/`               | 0      | 5      | 8      | 6      | 19      |
+| utils-auditor        | `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 3      | 5      | 6      | 4      | 18      |
+| test-quality-auditor | Cross-cutting test quality                     | 5      | 9      | 15     | 8      | 37      |
+| **TOTAL (raw)**      |                                                | **14** | **37** | **59** | **38** | **148** |
 
 **Note:** The test-quality-auditor findings overlap significantly with other
 agents' test findings. After dedup, unique actionable findings are approximately
@@ -117,61 +117,61 @@ unreachable. Both contradict ADR-015 which mandates SDK as a runtime dependency.
 
 ### Core (6)
 
-| ID | File | Issue |
-| ---- | ------ | ------- |
-| CORE-H1 | `graph.py:513-527` | No test validates exact loop iteration count semantics |
-| CORE-H2 | `nodes/tests/test_worker.py:41-55` | `_AcpLikeModel`stub replaces real AcpChatModel |
-| CORE-H3 | `nodes/tests/test_supervisor.py`, `test_worker.py` | `FakeListChatModel`violates "live real code" mandate |
-| CORE-H4 | `aggregator.py:401-444` | `_broadcast`race on`_subscriptions`dict without lock |
-| CORE-H5 | `aggregator.py:586-601` | `emit()`re-sequences events that already have assigned sequences |
-| CORE-H6 | `tests/test_graph.py:283-308` | `test_loop_router_worker_can_signal_finish`is vacuous — never invokes the router |
+| ID      | File                                               | Issue                                                                            |
+| ------- | -------------------------------------------------- | -------------------------------------------------------------------------------- |
+| CORE-H1 | `graph.py:513-527`                                 | No test validates exact loop iteration count semantics                           |
+| CORE-H2 | `nodes/tests/test_worker.py:41-55`                 | `_AcpLikeModel`stub replaces real AcpChatModel                                   |
+| CORE-H3 | `nodes/tests/test_supervisor.py`, `test_worker.py` | `FakeListChatModel`violates "live real code" mandate                             |
+| CORE-H4 | `aggregator.py:401-444`                            | `_broadcast`race on`_subscriptions`dict without lock                             |
+| CORE-H5 | `aggregator.py:586-601`                            | `emit()`re-sequences events that already have assigned sequences                 |
+| CORE-H6 | `tests/test_graph.py:283-308`                      | `test_loop_router_worker_can_signal_finish`is vacuous — never invokes the router |
 
 ### API (6)
 
-| ID | File | Issue |
-| ---- | ------ | ------- |
-| API-H1 | `auth.py`/ all endpoints | `authenticate_request`declared but never wired — all endpoints unauthenticated |
-| API-H2 | `tests/conftest.py:105-113` | `_NullTaskGroup`silently swallows ingest errors |
-| API-H3 | `websocket.py:156-157` | `asyncio.create_task()`escapes structured concurrency (should use anyio) |
-| API-H4 | `endpoints.py:582` | `asyncio.wait_for()`instead of`anyio.fail_after()` |
-| API-H5 | `schemas/rest.py:136-137` | `PermissionResponseRequest.kind`accepted but silently ignored |
-| API-H6 | `endpoints.py:258` | `workspace_root`not`.resolve()`d — symlink traversal possible |
+| ID     | File                        | Issue                                                                          |
+| ------ | --------------------------- | ------------------------------------------------------------------------------ |
+| API-H1 | `auth.py`/ all endpoints    | `authenticate_request`declared but never wired — all endpoints unauthenticated |
+| API-H2 | `tests/conftest.py:105-113` | `_NullTaskGroup`silently swallows ingest errors                                |
+| API-H3 | `websocket.py:156-157`      | `asyncio.create_task()`escapes structured concurrency (should use anyio)       |
+| API-H4 | `endpoints.py:582`          | `asyncio.wait_for()`instead of`anyio.fail_after()`                             |
+| API-H5 | `schemas/rest.py:136-137`   | `PermissionResponseRequest.kind`accepted but silently ignored                  |
+| API-H6 | `endpoints.py:258`          | `workspace_root`not`.resolve()`d — symlink traversal possible                  |
 
 ### Providers (6)
 
-| ID | File | Issue |
-| ---- | ------ | ------- |
-| PROV-H1 | `gemini_auth.py:162,166` | `write_text()`and`replace()`are blocking I/O in async context |
-| PROV-H2 | `gemini_auth.py:116` | `creds_path.read_text()`is blocking I/O in async context |
-| PROV-H3 | `acp_chat_model.py:310-314` | `AIMessage`type silently dropped — conversation history corrupted |
-| PROV-H4 | `probes/_protocol.py:143-227` | `_ProbeSession`has no`stdin_lock` |
-| PROV-H5 | `gemini_auth.py:78-84` | `os.fsync()`on read-only fd is semantically incorrect |
-| PROV-H6 | `acp_chat_model.py:1319-1336` | `authenticate()`has no credential redaction |
+| ID      | File                          | Issue                                                             |
+| ------- | ----------------------------- | ----------------------------------------------------------------- |
+| PROV-H1 | `gemini_auth.py:162,166`      | `write_text()`and`replace()`are blocking I/O in async context     |
+| PROV-H2 | `gemini_auth.py:116`          | `creds_path.read_text()`is blocking I/O in async context          |
+| PROV-H3 | `acp_chat_model.py:310-314`   | `AIMessage`type silently dropped — conversation history corrupted |
+| PROV-H4 | `probes/_protocol.py:143-227` | `_ProbeSession`has no`stdin_lock`                                 |
+| PROV-H5 | `gemini_auth.py:78-84`        | `os.fsync()`on read-only fd is semantically incorrect             |
+| PROV-H6 | `acp_chat_model.py:1319-1336` | `authenticate()`has no credential redaction                       |
 
 ### Database + MCP (5)
 
-| ID | File | Issue |
-| ---- | ------ | ------- |
-| DB-HIGH-01 | `session.py`, `pyproject.toml` | `aiosqlite`used directly but not declared as direct dependency (ADR-015 DEP003) |
-| DB-HIGH-02 | `crud.py:93,191` | `ThreadStatus`enum never enforced — raw strings bypass enum |
-| DB-HIGH-03 | `models.py:49`, ADR-014 | ADR-014 §2.5 specifies `metadata`but impl uses`thread_metadata`— ADR never updated |
-| MCP-HIGH-01 | `test_server.py:192-229` | "Connectivity" tests always exercise error branch — success path untested |
-| MCP-HIGH-02 | `test_server.py:107-183` | `TestCreateThreadViaApp`creates real`vaultspec.db`on disk |
+| ID          | File                           | Issue                                                                              |
+| ----------- | ------------------------------ | ---------------------------------------------------------------------------------- |
+| DB-HIGH-01  | `session.py`, `pyproject.toml` | `aiosqlite`used directly but not declared as direct dependency (ADR-015 DEP003)    |
+| DB-HIGH-02  | `crud.py:93,191`               | `ThreadStatus`enum never enforced — raw strings bypass enum                        |
+| DB-HIGH-03  | `models.py:49`, ADR-014        | ADR-014 §2.5 specifies `metadata`but impl uses`thread_metadata`— ADR never updated |
+| MCP-HIGH-01 | `test_server.py:192-229`       | "Connectivity" tests always exercise error branch — success path untested          |
+| MCP-HIGH-02 | `test_server.py:107-183`       | `TestCreateThreadViaApp`creates real`vaultspec.db`on disk                          |
 
 ### Utils/Telemetry/Workspace (5)
 
-| ID | File | Issue |
-| ---- | ------ | ------- |
-| WS-HIGH-001 | `git_manager.py:296-435` | `has_conflicts`and`merge_worktree`accept arbitrary`worktree_path`without path validation |
-| WS-HIGH-002 | `tests/test_workspace.py` | No adversarial path-traversal tests for any worktree method |
-| WS-HIGH-003 | `tests/test_workspace.py` | No test asserts`is_main=True`— WS-CRIT-001 survived because of this |
-| TEL-HIGH-001 | `tests/test_telemetry.py` | Middleware tests never verify span attributes |
-| TEL-HIGH-002 | `tests/test_telemetry.py:229-244` | `test_inject_trace_context`tautological: only asserts`isinstance(carrier, dict)` |
+| ID           | File                              | Issue                                                                                    |
+| ------------ | --------------------------------- | ---------------------------------------------------------------------------------------- |
+| WS-HIGH-001  | `git_manager.py:296-435`          | `has_conflicts`and`merge_worktree`accept arbitrary`worktree_path`without path validation |
+| WS-HIGH-002  | `tests/test_workspace.py`         | No adversarial path-traversal tests for any worktree method                              |
+| WS-HIGH-003  | `tests/test_workspace.py`         | No test asserts`is_main=True`— WS-CRIT-001 survived because of this                      |
+| TEL-HIGH-001 | `tests/test_telemetry.py`         | Middleware tests never verify span attributes                                            |
+| TEL-HIGH-002 | `tests/test_telemetry.py:229-244` | `test_inject_trace_context`tautological: only asserts`isinstance(carrier, dict)`         |
 
 ### Test Quality (9)
 
-| ID | Issue |
-| ---- | ------- |
+| ID                | Issue                                                                                         |
+| ----------------- | --------------------------------------------------------------------------------------------- |
 | TEST-HIGH-001–009 | Vacuous isinstance assertions, fuzzy keyword matching, exception swallowing across test suite |
 
 ---
@@ -181,33 +181,20 @@ unreachable. Both contradict ADR-015 which mandates SDK as a runtime dependency.
 ### Core (8): CORE-M1 through CORE-M8
 
 - Silent skip of missing workers in star topology
-- Tool call debounce sequence number inconsistency
--`compact_context`untested edge case (system msgs > max_tokens)
--`generate_nickname`no post-generation validation
-- Test accepts either ConfigError or AgentConfigNotFoundError
--`_append_artifacts`crashes on missing`id`key
+- Tool call debounce sequence number inconsistency -`compact_context`untested edge case (system msgs > max_tokens) -`generate_nickname`no post-generation validation
+- Test accepts either ConfigError or AgentConfigNotFoundError -`_append_artifacts`crashes on missing`id`key
 - Concurrent ingest cancellation race
 - Fallback supervisor prompt incomplete when workers silently skipped
 
 ### API (13): API-M1 through API-M13
 
--`title`, `agent_id`, `team_preset`missing max_length/format validation
--`GET /threads`pagination untested
--`GET /team/status`test only checks key presence
--`_enrich_snapshot_from_state`untested in isolation
--`contextlib.suppress(Exception)`masks TeamConfig errors
--`TERMINATE`→`cancel_thread()`integration untested
--`_NullTaskGroup`doesn't implement full anyio interface
--`pending_permissions`permanently empty (TODO hidden by test)
--`recursion_limit: 100`hardcoded in 3 places
+-`title`, `agent_id`, `team_preset`missing max_length/format validation -`GET /threads`pagination untested -`GET /team/status`test only checks key presence -`_enrich_snapshot_from_state`untested in isolation -`contextlib.suppress(Exception)`masks TeamConfig errors -`TERMINATE`→`cancel_thread()`integration untested -`_NullTaskGroup`doesn't implement full anyio interface -`pending_permissions`permanently empty (TODO hidden by test) -`recursion_limit: 100`hardcoded in 3 places
 
 ### Providers (9): PROV-M1 through PROV-M9
 
 -`pending.pop(rid, "?")`silently absorbs unknown responses
 
-- Zero test coverage for auto-approve path (autonomous mode)
--`_FakeCtx.stdin_lock`is class-level (shared across tests)
--`Path("python3.13").stem`returns`"python3"`(dead allowlist entry)
+- Zero test coverage for auto-approve path (autonomous mode) -`_FakeCtx.stdin_lock`is class-level (shared across tests) -`Path("python3.13").stem`returns`"python3"`(dead allowlist entry)
 - Probe per-line timeout equals total timeout
 - Zero test coverage for capability gate in`_handle_server_rpc`
 - No concurrent refresh lock in `gemini_auth`
@@ -217,17 +204,12 @@ unreachable. Both contradict ADR-015 which mandates SDK as a runtime dependency.
 
 - TOCTOU test bypasses `create_thread()`entirely
 - Module docstring claims WAL coverage that doesn't exist
-- No commit-then-retrieve durability tests
--`close_db()`, `get_session_factory()`, `get_db()`untested
-- Cascade delete behavior untested
--`_ws_url_from_api_base()`credential-stripping untested
--`start_thread`success path untested
--`initial_message[:80]`truncation edge cases untested
+- No commit-then-retrieve durability tests -`close_db()`, `get_session_factory()`, `get_db()`untested
+- Cascade delete behavior untested -`_ws_url_from_api_base()`credential-stripping untested -`start_thread`success path untested -`initial_message[:80]`truncation edge cases untested
 
 ### Utils/Telemetry/Workspace (6): Various
 
--`JSONFormatter`has no functional tests
--`JSONFormatter`not re-exported from facade`__init__.py`
+-`JSONFormatter`has no functional tests -`JSONFormatter`not re-exported from facade`__init__.py`
 
 - SDK-disable tests documented as tautological
 - `test_all_methods_are_static`only checks`callable`, not `staticmethod`
@@ -348,4 +330,4 @@ The following areas were confirmed compliant across all auditors:
 - **Terminal allowlist**:
   `_TERMINAL_COMMAND_ALLOWLIST`+`_SHELL_METACHAR_RE`validation
 - **Agent ID
-validation**:`_AGENT_ID_RE`in`git_manager`and`_SAFE_AGENT_ID_RE`in`team_config`
+  validation**:`_AGENT_ID_RE`in`git_manager`and`_SAFE_AGENT_ID_RE`in`team_config`

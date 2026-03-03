@@ -40,7 +40,6 @@ Get-Content "Y:\code\vaultspec-a2a-worktrees\main\docs\README.md" -Raw
 ```
 
 1. After reading all documents, confirm readiness by summarising:
-
    - The 9 ADR titles and their core decisions
    - The module hierarchy (ADR-009)
    - The tech stack (ADR-007)

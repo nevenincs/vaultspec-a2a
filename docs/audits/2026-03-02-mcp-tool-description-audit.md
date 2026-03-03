@@ -17,14 +17,14 @@ be updated once that document is merged).
 
 The server exposes **7 tools** as of this audit:
 
-| Tool | Status |
-|------|--------|
-| `start_thread` | Present |
-| `list_threads` | Present |
-| `respond_to_permission` | Present |
-| `get_thread_status` | Present |
-| `send_message` | Present |
-| `get_team_status` | Present |
+| Tool                      | Status  |
+| ------------------------- | ------- |
+| `start_thread`            | Present |
+| `list_threads`            | Present |
+| `respond_to_permission`   | Present |
+| `get_thread_status`       | Present |
+| `send_message`            | Present |
+| `get_team_status`         | Present |
 | `get_pending_permissions` | Present |
 
 The surface is now close to full REST parity. The primary category of remaining
@@ -37,21 +37,21 @@ string is the most impactful single defect.
 
 ## Finding Index
 
-| ID | Severity | Tool / Location | Summary |
-|----|----------|-----------------|---------|
-| MCD-01 | HIGH | `FastMCP instructions` | `respond_to_permission` and `get_team_status` omitted from server instructions |
-| MCD-02 | HIGH | `FastMCP instructions` | No workflow sequence guidance; LLM cannot infer tool call order |
-| MCD-03 | MEDIUM | `start_thread` → `team_preset` | Description references `_KNOWN_PRESETS` (internal Python symbol) |
-| MCD-04 | MEDIUM | `start_thread` → `workspace_root` | Description cites "ADR-014" (internal jargon opaque to LLM callers) |
-| MCD-05 | MEDIUM | `get_thread_status` | Docstring claims "checkpoint ID" in return but MCP-04 removed it |
-| MCD-06 | MEDIUM | `respond_to_permission` → `option_id` | No guidance on how to discover valid option IDs |
-| MCD-07 | MEDIUM | `respond_to_permission` | Internal ADR reference in description body ("ADR-011 §2.2") |
-| MCD-08 | LOW | `send_message` | Title parenthetical "(async, returns 202)" exposes HTTP implementation detail |
-| MCD-09 | LOW | `send_message` | No size constraint mentioned; `initial_message` cap (32k) is documented but `message` is not |
-| MCD-10 | LOW | `get_thread_status` | Possible status values not enumerated in description |
-| MCD-11 | LOW | `get_team_status` | Internal ADR reference ("ADR-011 §2.2") in description |
-| MCD-12 | LOW | `list_threads` | No enumeration of what thread status values look like |
-| MCD-13 | INFO | `get_pending_permissions` | Hits `/api/team/status` — subset of `get_team_status`; overlap not documented |
+| ID     | Severity | Tool / Location                       | Summary                                                                                      |
+| ------ | -------- | ------------------------------------- | -------------------------------------------------------------------------------------------- |
+| MCD-01 | HIGH     | `FastMCP instructions`                | `respond_to_permission` and `get_team_status` omitted from server instructions               |
+| MCD-02 | HIGH     | `FastMCP instructions`                | No workflow sequence guidance; LLM cannot infer tool call order                              |
+| MCD-03 | MEDIUM   | `start_thread` → `team_preset`        | Description references `_KNOWN_PRESETS` (internal Python symbol)                             |
+| MCD-04 | MEDIUM   | `start_thread` → `workspace_root`     | Description cites "ADR-014" (internal jargon opaque to LLM callers)                          |
+| MCD-05 | MEDIUM   | `get_thread_status`                   | Docstring claims "checkpoint ID" in return but MCP-04 removed it                             |
+| MCD-06 | MEDIUM   | `respond_to_permission` → `option_id` | No guidance on how to discover valid option IDs                                              |
+| MCD-07 | MEDIUM   | `respond_to_permission`               | Internal ADR reference in description body ("ADR-011 §2.2")                                  |
+| MCD-08 | LOW      | `send_message`                        | Title parenthetical "(async, returns 202)" exposes HTTP implementation detail                |
+| MCD-09 | LOW      | `send_message`                        | No size constraint mentioned; `initial_message` cap (32k) is documented but `message` is not |
+| MCD-10 | LOW      | `get_thread_status`                   | Possible status values not enumerated in description                                         |
+| MCD-11 | LOW      | `get_team_status`                     | Internal ADR reference ("ADR-011 §2.2") in description                                       |
+| MCD-12 | LOW      | `list_threads`                        | No enumeration of what thread status values look like                                        |
+| MCD-13 | INFO     | `get_pending_permissions`             | Hits `/api/team/status` — subset of `get_team_status`; overlap not documented                |
 
 ---
 
@@ -62,6 +62,7 @@ string is the most impactful single defect.
 **Location**: `server.py:79-85`
 
 **Current text**:
+
 ```python
 "Vaultspec A2A Orchestrator MCP tools. "
 "Use 'start_thread' to launch a multi-agent coding workflow, "
@@ -114,6 +115,7 @@ covering both the autonomous path and the supervised path.
 **Location**: `server.py:122-124`
 
 **Current text**:
+
 ```
 team_preset: Team configuration preset to use. Available presets:
              see ``_KNOWN_PRESETS`` (auto-discovered from TOML files).
@@ -139,6 +141,7 @@ may be available via `list_threads` or `get_team_status`.
 **Location**: `server.py:128-130`
 
 **Current text**:
+
 ```
 workspace_root: Optional absolute path to the workspace directory.
                 Enables ADR-014 context injection (.vault/ auto-discovery)
@@ -152,6 +155,7 @@ functional behaviour — scanning `.vault/` for context files and setting the
 agent's working directory — should be described in plain terms.
 
 **Recommendation**:
+
 ```
 workspace_root: Optional absolute path to the project root. When provided,
                 the agent team uses this directory as their working directory
@@ -167,6 +171,7 @@ workspace_root: Optional absolute path to the project root. When provided,
 **Location**: `server.py:321-328`
 
 **Current text**:
+
 ```
 Returns a human-readable summary of the thread's current state including
 message count and checkpoint ID.  For real-time streaming updates, connect
@@ -189,6 +194,7 @@ actual fields returned: thread ID, status, message count, live WebSocket URL.
 **Location**: `server.py:274-277`
 
 **Current text**:
+
 ```
 option_id: The ID of the chosen permission option.
 ```
@@ -199,6 +205,7 @@ correct flow is: receive a `PermissionRequestEvent` over the WebSocket (or via
 Without this guidance, a caller is likely to guess or use the wrong value.
 
 **Recommendation**:
+
 ```
 option_id: The ID of the chosen option from the PermissionRequestEvent.
            Call ``get_pending_permissions`` to list pending requests and their
@@ -213,13 +220,14 @@ option_id: The ID of the chosen option from the PermissionRequestEvent.
 **Location**: `server.py:267-272`
 
 **Current text**:
+
 ```
 ...Use this tool to submit the chosen option and unblock the
 graph (ADR-011 §2.2).
 ```
 
 **Problem**: "ADR-011 §2.2" is an internal architecture document reference
-meaningless to an LLM calling the tool. This appears in the *body* of the
+meaningless to an LLM calling the tool. This appears in the _body_ of the
 description (not just a parameter comment), so it will be included in the LLM's
 context.
 
@@ -234,6 +242,7 @@ thread."
 **Location**: `server.py:372`
 
 **Current text**:
+
 ```
 Send a follow-up message into an existing thread (async, returns 202).
 ```
@@ -283,6 +292,7 @@ it will not know that `input_required` means `respond_to_permission` is needed).
 **Location**: `server.py:423-427`
 
 **Current text**:
+
 ```
 ...and any outstanding permission requests that need responses (ADR-011 §2.2).
 ```
@@ -318,18 +328,18 @@ that is appropriate for the supervised-thread unblocking workflow. The overlap
 is acceptable but should be acknowledged in both descriptions.
 
 **Recommendation**: Add a cross-reference in `get_team_status`: "For a focused
-view of only permission requests, use ``get_pending_permissions``."
+view of only permission requests, use `get_pending_permissions`."
 
 ---
 
 ## Summary Table — Recommended Fixes by Priority
 
-| Priority | Finding(s) | Description |
-|----------|-----------|-------------|
-| P0 (Fix immediately) | MCD-01, MCD-02 | Rewrite `instructions` string to include all tools and both workflow paths |
+| Priority             | Finding(s)                             | Description                                                                             |
+| -------------------- | -------------------------------------- | --------------------------------------------------------------------------------------- |
+| P0 (Fix immediately) | MCD-01, MCD-02                         | Rewrite `instructions` string to include all tools and both workflow paths              |
 | P1 (Fix this sprint) | MCD-03, MCD-04, MCD-05, MCD-06, MCD-07 | Remove internal jargon, fix stale checkpoint_id claim, add option_id discovery guidance |
-| P2 (Fix next sprint) | MCD-08, MCD-09, MCD-10, MCD-11, MCD-12 | Low-friction polish: remove HTTP parenthetical, add size hint, enumerate status values |
-| Informational | MCD-13 | Document tool overlap; no code change required |
+| P2 (Fix next sprint) | MCD-08, MCD-09, MCD-10, MCD-11, MCD-12 | Low-friction polish: remove HTTP parenthetical, add size hint, enumerate status values  |
+| Informational        | MCD-13                                 | Document tool overlap; no code change required                                          |
 
 ---
 
@@ -358,5 +368,5 @@ mcp = FastMCP(
 
 ---
 
-*Audit completed: 2026-03-02. Next review recommended after docs-researcher
-best-practices document lands and after MCD-01/02 P0 fixes are applied.*
+_Audit completed: 2026-03-02. Next review recommended after docs-researcher
+best-practices document lands and after MCD-01/02 P0 fixes are applied._

@@ -1,9 +1,9 @@
 ---
-title: "Derisking: Persistent Task Queue Schema"
+title: 'Derisking: Persistent Task Queue Schema'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "Implementation risk analysis for feature-derived sequential task IDs and a queue persisted to disk."
+description: 'Implementation risk analysis for feature-derived sequential task IDs and a queue persisted to disk.'
 ---
 
 # Derisking: Persistent Task Queue Schema
@@ -65,6 +65,7 @@ unquoted keys, and comment syntax.
 **Recommended mitigation — machine-writes, LLM-reads only:**
 
 The queue file is written exclusively by Python code. The LLM's only interactions are:
+
 1. Reading the current queue (injected as a `SystemMessage` by the mount step).
 2. Emitting a task ID in its response (e.g., `TASK: SBI-003 — complete`).
 3. The orchestrator parses the emitted ID, updates the in-memory queue object, and
@@ -76,23 +77,23 @@ a simple `|`-split, more robust than YAML or JSON under generation pressure:
 ```markdown
 ## Task Queue — sdd-blackboard-integration
 
-| ID      | Status      | Title                                      |
-|---------|-------------|--------------------------------------------|
-| SBI-001 | completed   | Add 4 new fields to TeamState              |
-| SBI-002 | completed   | Implement _build_initial_vault_index       |
-| SBI-003 | in_progress | Implement _build_anchoring_context         |
-| SBI-004 | pending     | Implement mount step node                  |
+| ID      | Status      | Title                                 |
+| ------- | ----------- | ------------------------------------- |
+| SBI-001 | completed   | Add 4 new fields to TeamState         |
+| SBI-002 | completed   | Implement \_build_initial_vault_index |
+| SBI-003 | in_progress | Implement \_build_anchoring_context   |
+| SBI-004 | pending     | Implement mount step node             |
 ```
 
 ## 4. Key Risks Summary
 
-| Risk | Mitigation |
-|------|------------|
-| LLM edits queue file directly and corrupts it | Queue writes are Python-only; LLM emits task ID only |
-| Queue diverges from TeamState across restarts | TeamState carries only `current_task_id`; queue file is ground truth |
-| ID collisions across features | Feature prefix (e.g., `SBI-`) scopes IDs; counter derived from existing file row count at creation |
-| Queue file grows unbounded | Archive completed tasks to `{feature}-queue-archive.md` after each phase |
-| LLM loses track of current task mid-session | Inject only current + next 1–2 pending tasks, not full queue |
+| Risk                                          | Mitigation                                                                                         |
+| --------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| LLM edits queue file directly and corrupts it | Queue writes are Python-only; LLM emits task ID only                                               |
+| Queue diverges from TeamState across restarts | TeamState carries only `current_task_id`; queue file is ground truth                               |
+| ID collisions across features                 | Feature prefix (e.g., `SBI-`) scopes IDs; counter derived from existing file row count at creation |
+| Queue file grows unbounded                    | Archive completed tasks to `{feature}-queue-archive.md` after each phase                           |
+| LLM loses track of current task mid-session   | Inject only current + next 1–2 pending tasks, not full queue                                       |
 
 ## 5. References
 

@@ -2,7 +2,7 @@
 adr_id: 021
 title: Persistent Task Queue Schema
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/020-blackboard-content-mounting.md
@@ -18,7 +18,7 @@ related:
 
 ADR-019 extended `TeamState` to carry an `active_feature` tag and `vault_index`.
 ADR-020 introduced content mounting — workers receive the text of binding `.vault/`
-documents on every invocation. Neither ADR addresses *task sequencing*: there is no
+documents on every invocation. Neither ADR addresses _task sequencing_: there is no
 structured representation of the ordered steps a feature requires, no persistent
 record of what has been completed, and no pointer to the worker's current task.
 
@@ -57,11 +57,11 @@ The task queue is stored at `.vault/plan/{feature_tag}-queue.md` as a markdown t
 ```markdown
 ## Task Queue — {feature_tag}
 
-| ID      | Status      | Title                                      |
-|---------|-------------|--------------------------------------------|
-| SBI-001 | completed   | Add 4 new fields to TeamState              |
-| SBI-002 | in_progress | Implement build_anchoring_context          |
-| SBI-003 | pending     | Implement mount step node                  |
+| ID      | Status      | Title                             |
+| ------- | ----------- | --------------------------------- |
+| SBI-001 | completed   | Add 4 new fields to TeamState     |
+| SBI-002 | in_progress | Implement build_anchoring_context |
+| SBI-003 | pending     | Implement mount step node         |
 ```
 
 **Rationale for markdown table:** LLM-readable without prompting, Python-parseable
@@ -71,6 +71,7 @@ suffers from hallucinated indentation and duplicate keys).
 
 **Python-only writes:** The queue file is written exclusively by Python code. The LLM
 never modifies the queue file directly. Its only queue interaction is:
+
 1. Reading the current queue content (injected as a `SystemMessage` by the mount step).
 2. Calling the `mark_task_complete` tool with a task ID when it finishes work.
 3. Python code validates the ID, updates the file, and advances `current_task_id` in
@@ -245,6 +246,7 @@ def _filter_queue_content(
 
 Queue content is injected only when `pipeline_phase` is `"plan"` or `"exec"`.
 Other phases (research, adr, reference, audit) do not inject queue content:
+
 - Research, adr, reference: task queue does not exist yet at these phases.
 - Audit: audit workers verify artifacts by reading vault documents directly;
   they do not execute or complete tasks from the task queue.

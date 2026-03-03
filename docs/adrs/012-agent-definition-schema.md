@@ -88,20 +88,20 @@ require_approval_for = ["fs.writeTextFile"]
 
 ### 2.2 Full Field Reference
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `agent.id` | `str` | Yes | Unique identifier. Must match filename stem. Used as LangGraph node name. |
-| `agent.display_name` | `str` | Yes | Human-readable name. Stored in `add_node(metadata={"display_name": ...})`. |
-| `agent.role` | `str` | Yes | Semantic role enum: `planner`, `coder`, `reviewer`, `analyst`, `supervisor`, `custom`. |
-| `agent.description` | `str` | Yes | Plain-language description of this agent's responsibilities. Injected into the supervisor's system prompt for LLM-driven routing. |
-| `agent.persona.system_prompt` | `str` | Yes | Full system prompt. Passed to `create_worker_node(model, system_prompt, name)` (worker.py:64). |
-| `agent.model.provider` | `str` | No | Override team default provider. Values: `claude`, `gemini`, `openai`, `zhipu`. |
-| `agent.model.capability` | `str` | No | Override team default capability level. Values: `low`, `mid`, `high`, `max`. |
-| `agent.model.provider_fallback` | `list[str]` | No | Ordered fallback provider list. If the primary provider fails or is unavailable, providers are tried in order. Same three-level override precedence as `provider`/`capability` (§2.3 in ADR-013). |
-| `agent.capabilities.filesystem_read` | `bool` | No | ACP `fs.readTextFile` flag (default `false`). |
-| `agent.capabilities.filesystem_write` | `bool` | No | ACP `fs.writeTextFile` flag (default `false`). |
-| `agent.capabilities.terminal` | `bool` | No | ACP `terminal` flag (default `false`). |
-| `agent.permissions.require_approval_for` | `list[str]` | No | ACP capability names requiring human approval. Contributes to graph `interrupt_before`. |
+| Field                                    | Type        | Required | Description                                                                                                                                                                                       |
+| ---------------------------------------- | ----------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `agent.id`                               | `str`       | Yes      | Unique identifier. Must match filename stem. Used as LangGraph node name.                                                                                                                         |
+| `agent.display_name`                     | `str`       | Yes      | Human-readable name. Stored in `add_node(metadata={"display_name": ...})`.                                                                                                                        |
+| `agent.role`                             | `str`       | Yes      | Semantic role enum: `planner`, `coder`, `reviewer`, `analyst`, `supervisor`, `custom`.                                                                                                            |
+| `agent.description`                      | `str`       | Yes      | Plain-language description of this agent's responsibilities. Injected into the supervisor's system prompt for LLM-driven routing.                                                                 |
+| `agent.persona.system_prompt`            | `str`       | Yes      | Full system prompt. Passed to `create_worker_node(model, system_prompt, name)` (worker.py:64).                                                                                                    |
+| `agent.model.provider`                   | `str`       | No       | Override team default provider. Values: `claude`, `gemini`, `openai`, `zhipu`.                                                                                                                    |
+| `agent.model.capability`                 | `str`       | No       | Override team default capability level. Values: `low`, `mid`, `high`, `max`.                                                                                                                      |
+| `agent.model.provider_fallback`          | `list[str]` | No       | Ordered fallback provider list. If the primary provider fails or is unavailable, providers are tried in order. Same three-level override precedence as `provider`/`capability` (§2.3 in ADR-013). |
+| `agent.capabilities.filesystem_read`     | `bool`      | No       | ACP `fs.readTextFile` flag (default `false`).                                                                                                                                                     |
+| `agent.capabilities.filesystem_write`    | `bool`      | No       | ACP `fs.writeTextFile` flag (default `false`).                                                                                                                                                    |
+| `agent.capabilities.terminal`            | `bool`      | No       | ACP `terminal` flag (default `false`).                                                                                                                                                            |
+| `agent.permissions.require_approval_for` | `list[str]` | No       | ACP capability names requiring human approval. Contributes to graph `interrupt_before`.                                                                                                           |
 
 ### 2.3 Pydantic Model (`lib/core/team_config.py`)
 
@@ -151,17 +151,17 @@ class AgentConfig(BaseModel):
 
 ### 2.4 SDK Mapping — How Each Field Becomes LangGraph Code
 
-| TOML Field | SDK API | File:Line |
-| --- | --- | --- |
-| `agent.id` | `builder.add_node(name, ...)` — node name | `state.py:575` |
-| `agent.display_name`, `agent.role` | `builder.add_node(name, action, metadata={"display_name": ..., "role": ...})` | `state.py:575` |
-| `agent.description` | Injected into supervisor system prompt roster | `graph.py` (future) |
-| `agent.persona.system_prompt` | `create_worker_node(model, system_prompt, name)` | `worker.py:64` |
-| `agent.model.provider` + `agent.model.capability` | `ProviderFactory.create(provider, capability)` | `factory.py` |
-| `agent.capabilities.filesystem_read` | `_initialize_session()` → `fs.readTextFile` flag | `acp_chat_model.py:469` |
-| `agent.capabilities.filesystem_write` | `_initialize_session()` → `fs.writeTextFile` flag | `acp_chat_model.py:469` |
-| `agent.capabilities.terminal` | `_initialize_session()` → `terminal` flag | `acp_chat_model.py:469` |
-| `agent.permissions.require_approval_for` | Aggregated across team → `builder.compile(interrupt_before=[...])` | `state.py:1035` |
+| TOML Field                                        | SDK API                                                                       | File:Line               |
+| ------------------------------------------------- | ----------------------------------------------------------------------------- | ----------------------- |
+| `agent.id`                                        | `builder.add_node(name, ...)` — node name                                     | `state.py:575`          |
+| `agent.display_name`, `agent.role`                | `builder.add_node(name, action, metadata={"display_name": ..., "role": ...})` | `state.py:575`          |
+| `agent.description`                               | Injected into supervisor system prompt roster                                 | `graph.py` (future)     |
+| `agent.persona.system_prompt`                     | `create_worker_node(model, system_prompt, name)`                              | `worker.py:64`          |
+| `agent.model.provider` + `agent.model.capability` | `ProviderFactory.create(provider, capability)`                                | `factory.py`            |
+| `agent.capabilities.filesystem_read`              | `_initialize_session()` → `fs.readTextFile` flag                              | `acp_chat_model.py:469` |
+| `agent.capabilities.filesystem_write`             | `_initialize_session()` → `fs.writeTextFile` flag                             | `acp_chat_model.py:469` |
+| `agent.capabilities.terminal`                     | `_initialize_session()` → `terminal` flag                                     | `acp_chat_model.py:469` |
+| `agent.permissions.require_approval_for`          | Aggregated across team → `builder.compile(interrupt_before=[...])`            | `state.py:1035`         |
 
 ### 2.5 Node Metadata Carrier
 
@@ -218,12 +218,12 @@ via `ProviderFactory`.
 The following agent definitions ship as package defaults in
 `lib/core/presets/agents/`:
 
-| File | Role | Capabilities |
-| --- | --- | --- |
-| `planner.toml` | `planner` | `filesystem_read=true`, `terminal=false`, `filesystem_write=false` |
-| `coder.toml` | `coder` | `filesystem_read=true`, `filesystem_write=true`, `terminal=false` |
+| File            | Role       | Capabilities                                                       |
+| --------------- | ---------- | ------------------------------------------------------------------ |
+| `planner.toml`  | `planner`  | `filesystem_read=true`, `terminal=false`, `filesystem_write=false` |
+| `coder.toml`    | `coder`    | `filesystem_read=true`, `filesystem_write=true`, `terminal=false`  |
 | `reviewer.toml` | `reviewer` | `filesystem_read=true`, `filesystem_write=false`, `terminal=false` |
-| `analyst.toml` | `analyst` | `filesystem_read=true`, `filesystem_write=false`, `terminal=false` |
+| `analyst.toml`  | `analyst`  | `filesystem_read=true`, `filesystem_write=false`, `terminal=false` |
 
 Workspace-local files at `.vaultspec/agents/{id}.toml` shadow preset defaults.
 

@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: architectural-review
-description: "Five-agent architectural review of the full codebase against all 13 ADRs confirming end-to-end orchestration viability with 0 critical violations and 6 identified gaps."
+description: 'Five-agent architectural review of the full codebase against all 13 ADRs confirming end-to-end orchestration viability with 0 critical violations and 6 identified gaps.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -27,38 +27,38 @@ mid-session)
 
 ## Audit Team Composition
 
-| Agent | Model | Domain | Findings |
-| --- | --- | --- | --- |
-| codeview-core | Sonnet | `lib/core/`(graph, state, team_config, nodes, aggregator) | 0 critical, 2 minor |
-| codeview-providers | Sonnet | `lib/providers/`(AcpChatModel, factory, probes, facade) | Report delivered |
-| codeview-serving | Sonnet | `lib/api/`, `lib/database/`, `lib/telemetry/`, `lib/workspace/` | 0 critical, 4 gaps |
-| orchestrator | Opus | Compiled unified report from 3 codeview agents | Unified gap analysis |
-| auditor | Opus | Final architectural authority | Prioritized findings below |
+| Agent              | Model  | Domain                                                          | Findings                   |
+| ------------------ | ------ | --------------------------------------------------------------- | -------------------------- |
+| codeview-core      | Sonnet | `lib/core/`(graph, state, team_config, nodes, aggregator)       | 0 critical, 2 minor        |
+| codeview-providers | Sonnet | `lib/providers/`(AcpChatModel, factory, probes, facade)         | Report delivered           |
+| codeview-serving   | Sonnet | `lib/api/`, `lib/database/`, `lib/telemetry/`, `lib/workspace/` | 0 critical, 4 gaps         |
+| orchestrator       | Opus   | Compiled unified report from 3 codeview agents                  | Unified gap analysis       |
+| auditor            | Opus   | Final architectural authority                                   | Prioritized findings below |
 
 ---
 
 ## Reference Documents
 
-| Document | Path |
-| --- | --- |
-| ADR-001 | `docs/adrs/001-process-and-workspace-management.md` |
-| ADR-002 | `docs/adrs/002-llm-context-provider-abstraction.md` |
-| ADR-003 | `docs/adrs/003-protocol-bridging-translation.md` |
-| ADR-004 | `docs/adrs/004-event-aggregation-server-side-replay.md` |
-| ADR-005 | `docs/adrs/005-frontend-rendering-stack.md` |
-| ADR-006 | `docs/adrs/006-protocol-ecosystem-bridge.md` |
-| ADR-007 | `docs/adrs/007-tech-stack-deployment.md` |
-| ADR-008 | `docs/adrs/008-orchestration-topology-pipeline.md` |
-| ADR-009 | `docs/adrs/009-approved-module-hierarchy.md` |
-| ADR-010 | `docs/adrs/010-observability-telemetry-integration.md` |
-| ADR-011 | `docs/adrs/011-frontend-backend-contract.md` |
-| ADR-012 | `docs/adrs/012-agent-definition-schema.md` |
-| ADR-013 | `docs/adrs/013-team-composition-topology.md` |
-| Prior Audit | `docs/audits/2026-27-02-active-audit.md` |
-| Plan | `docs/plans/2026-02-27-backend-foundational-gaps-plan.md` |
-| Prompt | `docs/prompts/backend-foundational-gaps.md` |
-| Research: Backend Gaps | `docs/research/2026-02-27-backend-gaps-research.md` |
-| Research: Model Matrix | `docs/research/2026-02-27-model-capability-matrix.md` |
+| Document               | Path                                                      |
+| ---------------------- | --------------------------------------------------------- |
+| ADR-001                | `docs/adrs/001-process-and-workspace-management.md`       |
+| ADR-002                | `docs/adrs/002-llm-context-provider-abstraction.md`       |
+| ADR-003                | `docs/adrs/003-protocol-bridging-translation.md`          |
+| ADR-004                | `docs/adrs/004-event-aggregation-server-side-replay.md`   |
+| ADR-005                | `docs/adrs/005-frontend-rendering-stack.md`               |
+| ADR-006                | `docs/adrs/006-protocol-ecosystem-bridge.md`              |
+| ADR-007                | `docs/adrs/007-tech-stack-deployment.md`                  |
+| ADR-008                | `docs/adrs/008-orchestration-topology-pipeline.md`        |
+| ADR-009                | `docs/adrs/009-approved-module-hierarchy.md`              |
+| ADR-010                | `docs/adrs/010-observability-telemetry-integration.md`    |
+| ADR-011                | `docs/adrs/011-frontend-backend-contract.md`              |
+| ADR-012                | `docs/adrs/012-agent-definition-schema.md`                |
+| ADR-013                | `docs/adrs/013-team-composition-topology.md`              |
+| Prior Audit            | `docs/audits/2026-27-02-active-audit.md`                  |
+| Plan                   | `docs/plans/2026-02-27-backend-foundational-gaps-plan.md` |
+| Prompt                 | `docs/prompts/backend-foundational-gaps.md`               |
+| Research: Backend Gaps | `docs/research/2026-02-27-backend-gaps-research.md`       |
+| Research: Model Matrix | `docs/research/2026-02-27-model-capability-matrix.md`     |
 
 ---
 
@@ -73,9 +73,8 @@ reconnection protocol are non-functional.
 
 ### Details
 
-- `lib/api/app.py`lifespan never creates an`AsyncSqliteSaver`instance.
--`lib/api/endpoints.py:194`calls`compile_team_graph()`without passing
-a`checkpointer`argument (defaults to`None`).
+- `lib/api/app.py`lifespan never creates an`AsyncSqliteSaver`instance. -`lib/api/endpoints.py:194`calls`compile_team_graph()`without passing
+  a`checkpointer`argument (defaults to`None`).
 - Without a checkpointer, `graph.aget_state()` returns nothing meaningful
   (`endpoints.py:321`), breaking `GET /threads/{id}/state`.
 - Without a checkpointer, LangGraph's `interrupt()`mechanism
@@ -165,8 +164,7 @@ checkpointer's`__aenter__`/`__aexit__`lifecycle is not managed.
 ### Details: (5)
 
 -`AsyncSqliteSaver`is a context manager. It must be entered (sets up SQLite
-connection) and exited (closes it).
--`test_graph.py:19`correctly uses`async with
+connection) and exited (closes it). -`test_graph.py:19`correctly uses`async with
 AsyncSqliteSaver.from_conn_string(...)`. The lifespan must do the same.
 
 ---
@@ -199,9 +197,8 @@ index.
 ### Details: (7)
 
 - `_on_fs_write_text_file`writes files directly without acquiring the global git
-  mutex.
--`workspace/git_manager.py`has the mutex implementation, but it is not
-integrated into the ACP RPC file write path.
+  mutex. -`workspace/git_manager.py`has the mutex implementation, but it is not
+  integrated into the ACP RPC file write path.
 
 ---
 
@@ -244,10 +241,8 @@ state coherence.
 ### Details: (10)
 
 - `config.py:23`: `database_url = "sqlite+aiosqlite:///vaultspec.db"`(SQLAlchemy
-  URL format)
--`session.py:40`: `DEFAULT_DB_PATH = Path("data/orchestrator.db")`(plain path)
--`app.py:73`: `init_db()`is called without passing`settings.database_url`, so it
-uses `data/orchestrator.db`.
+  URL format) -`session.py:40`: `DEFAULT_DB_PATH = Path("data/orchestrator.db")`(plain path) -`app.py:73`: `init_db()`is called without passing`settings.database_url`, so it
+  uses `data/orchestrator.db`.
 - No coordination between application DB and checkpointer DB.
 
 **Fix Required:** `init_db()`should read from`settings.database_url`.
@@ -373,18 +368,18 @@ interrupt() in worker.py (C1: no checkpointer → cannot persist)
 
 ## Strategic Fix Priority
 
-| Priority | Finding | Impact When Fixed |
-| --- | --- | --- |
-| 1 | C1 (Checkpointer) | Unblocks state persistence, interrupt/resume, reconnection |
-| 2 | C2 (Initial message) | Unblocks thread execution |
-| 3 | C3 (Task retention) | Prevents silent task GC |
-| 4 | H7 (Database path) | Ensures state coherence |
-| 5 | H1 (Path traversal) | Security fix |
-| 6 | H2 (Checkpointer lifecycle) | Prevents connection leaks |
-| 7 | H3 (Team status) | Enables frontend team overview |
-| 8 | H4 (Git mutex) | Safe concurrent writes |
-| 9 | H5 (Async file I/O) | Unblocks event loop |
-| 10 | H6 (Terminal sandbox) | Security fix |
-| 11 | M3 (WS permission rejection) | Protocol compliance |
+| Priority | Finding                      | Impact When Fixed                                          |
+| -------- | ---------------------------- | ---------------------------------------------------------- |
+| 1        | C1 (Checkpointer)            | Unblocks state persistence, interrupt/resume, reconnection |
+| 2        | C2 (Initial message)         | Unblocks thread execution                                  |
+| 3        | C3 (Task retention)          | Prevents silent task GC                                    |
+| 4        | H7 (Database path)           | Ensures state coherence                                    |
+| 5        | H1 (Path traversal)          | Security fix                                               |
+| 6        | H2 (Checkpointer lifecycle)  | Prevents connection leaks                                  |
+| 7        | H3 (Team status)             | Enables frontend team overview                             |
+| 8        | H4 (Git mutex)               | Safe concurrent writes                                     |
+| 9        | H5 (Async file I/O)          | Unblocks event loop                                        |
+| 10       | H6 (Terminal sandbox)        | Security fix                                               |
+| 11       | M3 (WS permission rejection) | Protocol compliance                                        |
 
 After the top 7 fixes, the system can run end-to-end multi-agent sessions.

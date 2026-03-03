@@ -27,10 +27,10 @@ no team identity.
 The research synthesis identified three concrete topology patterns that are
 directly expressible with the LangGraph APIs already present in the codebase:
 
-| Topology | LangGraph API | When to Use |
-| --- | --- | --- |
-| `star` | `add_conditional_edges(supervisor, ...)` | Open-ended tasks needing dynamic routing |
-| `pipeline` | `add_sequence(order)` | Fixed-order workflows (plan → code → review) |
+| Topology        | LangGraph API                                         | When to Use                                   |
+| --------------- | ----------------------------------------------------- | --------------------------------------------- |
+| `star`          | `add_conditional_edges(supervisor, ...)`              | Open-ended tasks needing dynamic routing      |
+| `pipeline`      | `add_sequence(order)`                                 | Fixed-order workflows (plan → code → review)  |
 | `pipeline_loop` | `add_sequence()` + `add_conditional_edges(loop_node)` | Iterative refinement (code → review → revise) |
 
 None of these alternatives are implemented; only `star` exists, hardcoded
@@ -147,64 +147,64 @@ agent_id = "reviewer"
 
 **`[team]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.id` | `str` | Yes | Unique identifier. Must match filename stem. |
-| `team.display_name` | `str` | Yes | Human-readable name surfaced on the frontend. |
-| `team.description` | `str` | No | Purpose description, shown in team picker UI. |
+| Field               | Type  | Required | Description                                   |
+| ------------------- | ----- | -------- | --------------------------------------------- |
+| `team.id`           | `str` | Yes      | Unique identifier. Must match filename stem.  |
+| `team.display_name` | `str` | Yes      | Human-readable name surfaced on the frontend. |
+| `team.description`  | `str` | No       | Purpose description, shown in team picker UI. |
 
 **`[team.defaults]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.defaults.provider` | `str` | No | Default provider for all workers (overridden per-agent). |
-| `team.defaults.capability` | `str` | No | Default capability level (overridden per-agent). |
-| `team.defaults.provider_fallback` | `list[str]` | No | Ordered fallback provider list (lowest priority in three-level chain). |
+| Field                             | Type        | Required | Description                                                            |
+| --------------------------------- | ----------- | -------- | ---------------------------------------------------------------------- |
+| `team.defaults.provider`          | `str`       | No       | Default provider for all workers (overridden per-agent).               |
+| `team.defaults.capability`        | `str`       | No       | Default capability level (overridden per-agent).                       |
+| `team.defaults.provider_fallback` | `list[str]` | No       | Ordered fallback provider list (lowest priority in three-level chain). |
 
 **`[team.supervisor]` block** (required only for `star` and `pipeline_loop`):
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.supervisor.provider` | `str` | No | Supervisor provider (defaults to `team.defaults.provider`). |
-| `team.supervisor.capability` | `str` | No | Supervisor capability (defaults to `max` if omitted). |
+| Field                        | Type  | Required | Description                                                 |
+| ---------------------------- | ----- | -------- | ----------------------------------------------------------- |
+| `team.supervisor.provider`   | `str` | No       | Supervisor provider (defaults to `team.defaults.provider`). |
+| `team.supervisor.capability` | `str` | No       | Supervisor capability (defaults to `max` if omitted).       |
 
 **`[team.topology]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.topology.type` | `str` | Yes | `star`, `pipeline`, or `pipeline_loop`. |
-| `team.topology.order` | `list[str]` | `pipeline`/`pipeline_loop` only | Ordered list of `agent_id` values. |
-| `team.topology.loop_node` | `str` | `pipeline_loop` only | Agent whose output triggers the conditional edge back into the loop. |
-| `team.topology.max_loops` | `int` | No | Maximum iterations before forcing END (default: `3`). |
+| Field                     | Type        | Required                        | Description                                                          |
+| ------------------------- | ----------- | ------------------------------- | -------------------------------------------------------------------- |
+| `team.topology.type`      | `str`       | Yes                             | `star`, `pipeline`, or `pipeline_loop`.                              |
+| `team.topology.order`     | `list[str]` | `pipeline`/`pipeline_loop` only | Ordered list of `agent_id` values.                                   |
+| `team.topology.loop_node` | `str`       | `pipeline_loop` only            | Agent whose output triggers the conditional edge back into the loop. |
+| `team.topology.max_loops` | `int`       | No                              | Maximum iterations before forcing END (default: `3`).                |
 
 **`[[team.workers]]` array:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `agent_id` | `str` | Yes | References `agents/{agent_id}.toml`. |
-| `model.provider` | `str` | No | Per-worker provider override. Wins over `team.defaults` and agent TOML. |
-| `model.capability` | `str` | No | Per-worker capability override. |
-| `model.provider_fallback` | `list[str]` | No | Per-worker fallback provider list (highest priority in three-level chain). |
+| Field                     | Type        | Required | Description                                                                |
+| ------------------------- | ----------- | -------- | -------------------------------------------------------------------------- |
+| `agent_id`                | `str`       | Yes      | References `agents/{agent_id}.toml`.                                       |
+| `model.provider`          | `str`       | No       | Per-worker provider override. Wins over `team.defaults` and agent TOML.    |
+| `model.capability`        | `str`       | No       | Per-worker capability override.                                            |
+| `model.provider_fallback` | `list[str]` | No       | Per-worker fallback provider list (highest priority in three-level chain). |
 
 **`[team.permissions]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.permissions.auto_approve` | `bool` | No | When `true`, all ACP permission requests are auto-approved (autonomous mode). Default: `false`. |
+| Field                           | Type   | Required | Description                                                                                     |
+| ------------------------------- | ------ | -------- | ----------------------------------------------------------------------------------------------- |
+| `team.permissions.auto_approve` | `bool` | No       | When `true`, all ACP permission requests are auto-approved (autonomous mode). Default: `false`. |
 
 **`[team.persona]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.persona.directive` | `str` | No | Additional directive text appended to the supervisor system prompt. |
-| `team.persona.supervisor_display_name` | `str` | No | Override the supervisor's display name in UI and events. |
+| Field                                  | Type  | Required | Description                                                         |
+| -------------------------------------- | ----- | -------- | ------------------------------------------------------------------- |
+| `team.persona.directive`               | `str` | No       | Additional directive text appended to the supervisor system prompt. |
+| `team.persona.supervisor_display_name` | `str` | No       | Override the supervisor's display name in UI and events.            |
 
 **`[team.graph]` block:**
 
-| Field | Type | Required | Description |
-| --- | --- | --- | --- |
-| `team.graph.step_timeout_seconds` | `int` | No | Per-node execution timeout in seconds. `null` means no timeout. |
-| `team.graph.recursion_limit` | `int` | No | LangGraph recursion limit passed to `compile()`. Default: `25`. Range: `1`–`500`. |
+| Field                             | Type  | Required | Description                                                                       |
+| --------------------------------- | ----- | -------- | --------------------------------------------------------------------------------- |
+| `team.graph.step_timeout_seconds` | `int` | No       | Per-node execution timeout in seconds. `null` means no timeout.                   |
+| `team.graph.recursion_limit`      | `int` | No       | LangGraph recursion limit passed to `compile()`. Default: `25`. Range: `1`–`500`. |
 
 ### 2.3 Model Resolution Precedence
 
@@ -416,12 +416,12 @@ may be used in a future fine-grained per-tool approval implementation.
 
 ### 2.9 Built-in Preset Teams
 
-| File | Topology | Workers | Use Case |
-| --- | --- | --- | --- |
-| `coding-star.toml` | `star` | planner, coder, reviewer | Open-ended coding tasks |
-| `coding-pipeline.toml` | `pipeline` | planner, coder, reviewer | Structured delivery tasks |
-| `coding-loop.toml` | `pipeline_loop` | planner, coder, reviewer | Iterative quality refinement |
-| `solo-coder.toml` | `pipeline` | coder only | Single-agent quick fixes |
+| File                   | Topology        | Workers                  | Use Case                     |
+| ---------------------- | --------------- | ------------------------ | ---------------------------- |
+| `coding-star.toml`     | `star`          | planner, coder, reviewer | Open-ended coding tasks      |
+| `coding-pipeline.toml` | `pipeline`      | planner, coder, reviewer | Structured delivery tasks    |
+| `coding-loop.toml`     | `pipeline_loop` | planner, coder, reviewer | Iterative quality refinement |
+| `solo-coder.toml`      | `pipeline`      | coder only               | Single-agent quick fixes     |
 
 ## 3. Rationale
 

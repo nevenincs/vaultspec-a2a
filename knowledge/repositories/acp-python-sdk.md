@@ -1,8 +1,8 @@
 ---
-name: "ACP Python SDK Reference"
+name: 'ACP Python SDK Reference'
 date: 2026-25-02
 type: reference
-summary: "Agent Client Protocol SDK overview covering Pydantic models, stdio/HTTP transports, agent base class, and protocol highlights."
+summary: 'Agent Client Protocol SDK overview covering Pydantic models, stdio/HTTP transports, agent base class, and protocol highlights.'
 maturity: 55
 ---
 

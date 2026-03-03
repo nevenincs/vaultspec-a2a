@@ -30,7 +30,7 @@ export function useThreadStateQuery(threadId: string | null) {
 
       const events: StreamEvent[] = [];
 
-      for (const msg of snapshot.messages) {
+      for (const msg of snapshot.messages ?? []) {
         if (msg.role === 'human') {
           events.push({
             id: msg.message_id,
@@ -53,8 +53,8 @@ export function useThreadStateQuery(threadId: string | null) {
         }
       }
 
-      for (const tc of snapshot.tool_calls) {
-        const loc = tc.locations[0];
+      for (const tc of snapshot.tool_calls ?? []) {
+        const loc = tc.locations?.[0];
         events.push({
           id: tc.tool_call_id,
           type: 'tool_call',
@@ -70,7 +70,7 @@ export function useThreadStateQuery(threadId: string | null) {
         });
       }
 
-      for (const art of snapshot.artifacts) {
+      for (const art of snapshot.artifacts ?? []) {
         events.push({
           id: art.artifact_id,
           type: 'artifact',

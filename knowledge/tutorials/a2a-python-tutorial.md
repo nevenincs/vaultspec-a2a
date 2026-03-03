@@ -9,9 +9,11 @@ relevance: 10
 This tutorial walks through building an A2A-compliant agent using the Python SDK, from setup to advanced streaming and multi-turn interactions.
 
 ## 1. Introduction[1]
+
 This tutorial demonstrates the concepts and components of an A2A server, starting with a simple "echo" example and progressing to an LLM-integrated agent.
 
 ### Key Concepts
+
 - **Agent:** An autonomous system capable of reasoning and using tools.
 - **Protocol:** Defines how agents communicate (A2A).
 - **Skills & Cards:** How agents advertise their capabilities.
@@ -22,37 +24,44 @@ This tutorial demonstrates the concepts and components of an A2A server, startin
 ## 2. Setup[2]
 
 ### Prerequisites
+
 - Python 3.10+
 - Terminal access
 - Git
 
 ### Clone the Repository
+
 ```powershell
 git clone https://github.com/a2aproject/a2a-samples.git -b main --depth 1
 cd a2a-samples
 ```
 
 ### Create Environment
+
 Using `venv` is recommended.
 
 **Windows:**
+
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
 ```
 
 **Mac/Linux:**
+
 ```bash
 python -m venv .venv
 source .venv/bin/activate
 ```
 
 ### Install Dependencies
+
 ```powershell
 pip install -r samples/python/requirements.txt
 ```
 
 ### Verify Installation
+
 ```powershell
 python -c "import a2a; print('A2A SDK imported successfully')"
 ```
@@ -64,6 +73,7 @@ python -c "import a2a; print('A2A SDK imported successfully')"
 Agents must define what they can do (Skills) and how they are discovered (Card).
 
 ### Define a Skill
+
 An `AgentSkill` describes a discrete capability.
 
 ```python
@@ -81,6 +91,7 @@ skill = AgentSkill(
 ```
 
 ### Define the Agent Card
+
 The `AgentCard` acts as the agent's manifest.
 
 ```python
@@ -110,6 +121,7 @@ public_agent_card = AgentCard(
 The `AgentExecutor` implements the agent's logic. You must subclass `a2a.server.agent_execution.AgentExecutor` and implement `execute` and `cancel`.
 
 ### Implementation: Hello World Agent
+
 This executor simply echoes "Hello World".
 
 ```python
@@ -135,10 +147,10 @@ class HelloWorldAgentExecutor(AgentExecutor):
         3. Enqueues the message to be sent to the client.
         """
         result = await self.agent.invoke()
-        
+
         # Create a standard text message response
         message_event = new_agent_text_message(result)
-        
+
         # Enqueue the event for delivery
         await event_queue.enqueue_event(message_event)
 
@@ -184,10 +196,12 @@ if __name__ == '__main__':
 ```
 
 Run the server:
+
 ```powershell
 python samples/python/agents/helloworld/__main__.py
 ```
-*The server will start at `http://0.0.0.0:9999`.*
+
+_The server will start at `http://0.0.0.0:9999`._
 
 ---
 
@@ -196,6 +210,7 @@ python samples/python/agents/helloworld/__main__.py
 The `A2AClient` simplifies communication. It handles card resolution and RPC calls.
 
 ### Client Setup
+
 ```python
 from a2a.client import A2AClient, A2ACardResolver
 import httpx
@@ -207,11 +222,12 @@ async def main():
         # 1. Resolve the Agent Card
         resolver = A2ACardResolver(httpx_client=httpx_client, base_url=base_url)
         client = await resolver.resolve()
-        
+
         print(f"Connected to: {client.agent_card.name}")
 ```
 
 ### Sending a Message (Task)
+
 ```python
 from a2a.types import SendMessageRequest, MessageSendParams
 from uuid import uuid4
@@ -229,7 +245,7 @@ send_message_payload = {
 
 # Wrap in Request object
 request = SendMessageRequest(
-    id=str(uuid4()), 
+    id=str(uuid4()),
     params=MessageSendParams(**send_message_payload)
 )
 
@@ -245,13 +261,14 @@ print("Response:", response.model_dump(mode='json', exclude_none=True))
 Real-world agents often stream partial results and require multiple turns (e.g., clarifying questions).
 
 ### Streaming
+
 Use `SendStreamingMessageRequest` to receive chunks.
 
 ```python
 from a2a.types import SendStreamingMessageRequest
 
 streaming_request = SendStreamingMessageRequest(
-    id=str(uuid4()), 
+    id=str(uuid4()),
     params=MessageSendParams(**send_message_payload)
 )
 
@@ -263,6 +280,7 @@ async for chunk in stream_response:
 ```
 
 ### Multi-Turn Logic (LangGraph Example)
+
 The SDK supports multi-turn workflows where the agent pauses for input (`INPUT_REQUIRED`).
 
 1.  **Agent Pauses:** Returns `TaskState.input_required` when it needs clarification.
@@ -270,6 +288,7 @@ The SDK supports multi-turn workflows where the agent pauses for input (`INPUT_R
 3.  **Agent Resumes:** The `AgentExecutor` retrieves the task history and continues.
 
 **Example Flow:**
+
 1.  User: "Book a flight."
 2.  Agent (Stream): `TaskStatusUpdate(state='working')` -> `TaskStatusUpdate(state='input_required')` -> `Message("Where to?")`.
 3.  User: (Sends message with `taskId` from step 2) "To Paris."

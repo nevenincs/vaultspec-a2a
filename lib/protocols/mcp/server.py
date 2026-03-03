@@ -73,9 +73,10 @@ def _reset_client() -> None:
         # Synchronous close is fine in test teardown; the transport is idle.
         try:
             _shared_client._transport.__del__()  # type: ignore[union-attr]
-        except Exception:  # noqa: BLE001
+        except Exception:
             pass
     _shared_client = None
+
 
 # M29: MCP HTTP request timeouts (seconds) — named constants so they can be
 # located and adjusted without hunting for magic numbers in each tool function.
@@ -113,7 +114,6 @@ mcp = FastMCP(
 )
 
 
-
 def _ws_url_from_api_base(api_base_url: str) -> str:
     """Derive a WebSocket URL from the REST API base URL.
 
@@ -133,10 +133,30 @@ def _ws_url_from_api_base(api_base_url: str) -> str:
 
 @mcp.tool()
 async def start_thread(
-    initial_message: Annotated[str, Field(description="The coding task description for the agent team. Maximum 32,000 characters.")],
-    team_preset: Annotated[str | None, Field(description="Team configuration preset ID. Use list_team_presets to discover all available presets. Defaults to 'vaultspec-adaptive-coder'.")] = None,
-    autonomous: Annotated[bool, Field(description="If True (default), agents auto-approve all tool calls. Set to False to require manual approval via get_pending_permissions and respond_to_permission.")] = True,
-    workspace_root: Annotated[str | None, Field(description="Absolute path to the project directory, e.g. 'C:/projects/myapp'. Enables .vault/ context injection and scopes file operations to this directory.")] = None,
+    initial_message: Annotated[
+        str,
+        Field(
+            description="The coding task description for the agent team. Maximum 32,000 characters."
+        ),
+    ],
+    team_preset: Annotated[
+        str | None,
+        Field(
+            description="Team configuration preset ID. Use list_team_presets to discover all available presets. Defaults to 'vaultspec-adaptive-coder'."
+        ),
+    ] = None,
+    autonomous: Annotated[
+        bool,
+        Field(
+            description="If True (default), agents auto-approve all tool calls. Set to False to require manual approval via get_pending_permissions and respond_to_permission."
+        ),
+    ] = True,
+    workspace_root: Annotated[
+        str | None,
+        Field(
+            description="Absolute path to the project directory, e.g. 'C:/projects/myapp'. Enables .vault/ context injection and scopes file operations to this directory."
+        ),
+    ] = None,
 ) -> str:
     """Start a new multi-agent coding workflow and return a thread ID for tracking.
 
@@ -186,8 +206,7 @@ async def start_thread(
     preset = team_preset or "vaultspec-adaptive-coder"
     if preset not in _KNOWN_PRESETS:
         raise ToolError(
-            f"Unknown preset {preset!r}. "
-            f"Valid: {', '.join(sorted(_KNOWN_PRESETS))}"
+            f"Unknown preset {preset!r}. Valid: {', '.join(sorted(_KNOWN_PRESETS))}"
         )
     try:
         payload: dict[str, object] = {
@@ -238,8 +257,20 @@ async def start_thread(
 
 @mcp.tool()
 async def list_threads(
-    limit: Annotated[int, Field(description="Maximum number of threads to return (1–200). Defaults to 20.", ge=1, le=200)] = 20,
-    offset: Annotated[int, Field(description="Number of threads to skip for pagination. Defaults to 0.", ge=0)] = 0,
+    limit: Annotated[
+        int,
+        Field(
+            description="Maximum number of threads to return (1–200). Defaults to 20.",
+            ge=1,
+            le=200,
+        ),
+    ] = 20,
+    offset: Annotated[
+        int,
+        Field(
+            description="Number of threads to skip for pagination. Defaults to 0.", ge=0
+        ),
+    ] = 0,
 ) -> str:
     """List existing orchestration threads to discover work that can be resumed or monitored.
 
@@ -288,10 +319,7 @@ async def list_threads(
             created = t.get("created_at", "?")
             nickname = t.get("nickname")
             title = t.get("title") or ""
-            entry = (
-                f"  [{status}] {tid}\n"
-                f"    preset: {preset}  created: {created}\n"
-            )
+            entry = f"  [{status}] {tid}\n    preset: {preset}  created: {created}\n"
             if nickname:
                 entry += f"    nickname: {nickname}\n"
             if title:

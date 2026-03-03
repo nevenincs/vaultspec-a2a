@@ -60,7 +60,7 @@ logger = logging.getLogger(__name__)
 # Path to the React SPA build output (ADR-007 / ADR-018)
 _UI_BUILD_DIR = Path(__file__).resolve().parent.parent.parent / "src" / "ui" / "build"
 
-# SvelteKit/Vite hashed immutable assets: /_app/immutable/** or /assets/**
+# React/Vite hashed immutable assets: /_app/immutable/** or /assets/**
 _IMMUTABLE_PATTERN = re.compile(r"^/(_app/immutable|assets)/")
 _CACHE_IMMUTABLE = "public, max-age=31536000, immutable"
 _CACHE_HTML = "no-cache"
@@ -127,7 +127,7 @@ def _create_dispatch_message_handler(
                             workspace_root = meta.get("workspace_root")
                         except (ValueError, AttributeError):
                             pass
-        except Exception:  # noqa: BLE001
+        except Exception:
             logger.warning(
                 "Could not look up thread %s for WS dispatch — "
                 "team_preset/workspace_root will be None",
@@ -182,9 +182,7 @@ def _create_dispatch_control_handler(
                 )
                 return
             case AgentControlAction.PAUSE:
-                logger.info(
-                    "Pause not supported -- ignoring for thread %s", thread_id
-                )
+                logger.info("Pause not supported -- ignoring for thread %s", thread_id)
                 return
 
         try:
@@ -249,9 +247,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
         await checkpointer.setup()
         app.state.checkpointer = checkpointer
-        logger.info(
-            "LangGraph checkpointer initialised (read-only) at %s", db_path
-        )
+        logger.info("LangGraph checkpointer initialised (read-only) at %s", db_path)
 
         # Event aggregator -- lightweight in the control surface.
         # No graphs are registered here; the worker runs ingest.
@@ -286,7 +282,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             logger.info("Worker supervisor started (auto_spawn_worker=True)")
 
         # Wire dispatch handlers for WebSocket commands
-        msg_handler = _create_dispatch_message_handler(worker_client, get_session_factory())
+        msg_handler = _create_dispatch_message_handler(
+            worker_client, get_session_factory()
+        )
         connection_manager.set_message_handler(msg_handler)
 
         ctrl_handler = _create_dispatch_control_handler(worker_client)

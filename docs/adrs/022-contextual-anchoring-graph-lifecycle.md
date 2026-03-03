@@ -2,7 +2,7 @@
 adr_id: 022
 title: Contextual Anchoring in Graph Lifecycle
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/013-team-composition-topology.md
   - docs/adrs/014-thread-metadata-context-injection.md
@@ -26,11 +26,11 @@ every supervisor routing call and every worker invocation, the active feature
 context is surfaced as a structured, high-priority signal rather than buried in
 a growing conversation history. Three concrete problems motivate this ADR:
 
-| Problem | Evidence |
-| --- | --- |
-| **Supervisor routes on conversation text alone** | `supervisor.py:61` builds `messages = [SystemMessage(full_prompt), *history]`. The routing decision is grounded in conversational history with no structured feature/phase signal. Routing is unreliable when history is long or compacted. |
-| **No validation error gate** | The supervisor returns `FINISH` even when `state["validation_errors"]` is non-empty. Malformed artifacts propagate silently. |
-| **Worker context dilution** | Workers receive `[SystemMessage(persona), *history]`. As history grows and compaction replaces mid-history content with summaries, the feature context from the ADR-014 preamble may be compressed or lost. Workers have no per-invocation reminder of which feature they are working on. |
+| Problem                                          | Evidence                                                                                                                                                                                                                                                                                  |
+| ------------------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Supervisor routes on conversation text alone** | `supervisor.py:61` builds `messages = [SystemMessage(full_prompt), *history]`. The routing decision is grounded in conversational history with no structured feature/phase signal. Routing is unreliable when history is long or compacted.                                               |
+| **No validation error gate**                     | The supervisor returns `FINISH` even when `state["validation_errors"]` is non-empty. Malformed artifacts propagate silently.                                                                                                                                                              |
+| **Worker context dilution**                      | Workers receive `[SystemMessage(persona), *history]`. As history grows and compaction replaces mid-history content with summaries, the feature context from the ADR-014 preamble may be compressed or lost. Workers have no per-invocation reminder of which feature they are working on. |
 
 ### 1.1 What This ADR Does Not Do
 
@@ -224,6 +224,7 @@ if next_route == "FINISH":
         next_route = workers[0] if workers else "FINISH"
         return {
             "next": next_route,
+            "pipeline_phase": inferred_phase,
             "routing_error": (
                 f"FINISH blocked: {len(errors)} validation error(s) must be resolved first."
             ),
@@ -361,16 +362,19 @@ implemented.
 ```text
 lib/core/
   state.py            UNCHANGED (fields added by ADR-019)
+  anchoring.py        NEW: build_anchoring_context() shared utility;
+                      __all__ = ["build_anchoring_context"]
   graph.py            AMENDED: _build_supervisor_prompt() gains
                       feature_context param and {{FEATURE_CONTEXT}} support
   nodes/
-    supervisor.py     AMENDED: supervisor_node() injects anchoring summary;
-                      adds validation_errors FINISH gate;
-                      new _build_anchoring_context() (or imported from shared)
+    supervisor.py     AMENDED: supervisor_node() injects anchoring summary
+                      (imported from anchoring.py);
+                      adds validation_errors FINISH gate
     worker.py         AMENDED: worker_node() injects anchoring summary
+                      (imported from anchoring.py)
   tests/
     test_graph.py          AMENDED: _build_supervisor_prompt feature_context tests
-    test_anchoring.py      NEW: _build_anchoring_context unit tests (all branches)
+    test_anchoring.py      NEW: build_anchoring_context unit tests (all branches)
     test_supervisor.py     AMENDED: validation error gate test
 ```
 

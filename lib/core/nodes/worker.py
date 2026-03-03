@@ -1,6 +1,8 @@
 """Worker node for LangGraph agent task execution."""
 
 import logging
+
+from pathlib import Path
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
@@ -12,6 +14,8 @@ from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..exceptions import WorkerExecutionError
 from ..state import TeamState
+from ..task_queue import create_mark_task_complete_tool
+
 
 _logger = logging.getLogger(__name__)
 
@@ -95,6 +99,8 @@ def create_worker_node(
     system_prompt: str,
     name: str,
     autonomous: bool = False,
+    workspace_root: Path | None = None,
+    feature_tag: str | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -115,14 +121,20 @@ def create_worker_node(
     step is skipped and the node behaves as a plain async LLM call.
 
     Args:
-        model:         The LangChain chat model to use for this node.
-        system_prompt: The system prompt defining the worker's behaviour.
-        name:          The name of the worker, added to the generated message.
-        autonomous:    When True, skip permission_callback wiring (headless).
+        model:          The LangChain chat model to use for this node.
+        system_prompt:  The system prompt defining the worker's behaviour.
+        name:           The name of the worker, added to the generated message.
+        autonomous:     When True, skip permission_callback wiring (headless).
+        workspace_root: Optional workspace root for task queue file resolution (ADR-021).
+        feature_tag:    Optional feature tag for task queue file resolution (ADR-021).
 
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
+    # ADR-021: create task queue drain if workspace_root and feature_tag are both set.
+    drain_fn: Any = None
+    if workspace_root is not None and feature_tag is not None:
+        _tool_fn, drain_fn = create_mark_task_complete_tool(workspace_root, feature_tag)
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
@@ -172,8 +184,12 @@ def create_worker_node(
         try:
             response = await effective_model.ainvoke(messages)
         except GraphBubbleUp:
+            if drain_fn is not None:
+                drain_fn()  # Prevent state update leaks (ADR-021 §5)
             raise  # Let GraphInterrupt/Command pass through to LangGraph untouched
         except Exception as exc:
+            if drain_fn is not None:
+                drain_fn()  # Prevent state update leaks (ADR-021 §5)
             _logger.exception(
                 "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
                 name,
@@ -185,11 +201,12 @@ def create_worker_node(
                 message_count=len(messages),
             ) from exc
 
-        _logger.debug(
-            "worker[%s] response len=%d", name, len(str(response.content))
-        )
+        # ADR-021: drain side-channel state updates (current_task_id advance, etc.)
+        state_updates: dict[str, Any] = drain_fn() if drain_fn is not None else {}
+
+        _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))
         # Attribute the message to the worker so the supervisor can route correctly.
         response.name = name
-        return {"messages": [response], "mounted_context": None}
+        return {"messages": [response], "mounted_context": None, **state_updates}
 
     return worker_node

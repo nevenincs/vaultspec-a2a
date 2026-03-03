@@ -1,8 +1,8 @@
 ---
-name: "A2A and MCP Integration"
+name: 'A2A and MCP Integration'
 date: 2026-25-02
 type: reference
-summary: "Comparison of A2A and MCP protocols, their complementary roles, and patterns for representing A2A agents as MCP resources."
+summary: 'Comparison of A2A and MCP protocols, their complementary roles, and patterns for representing A2A agents as MCP resources.'
 maturity: 75
 ---
 
@@ -43,12 +43,12 @@ peers to achieve common goals.
 
 ## Technical Comparison: Tools vs. Agents
 
-| Feature | Tools and Resources (MCP Domain) | Agents (A2A Domain) |
-| :--- | :--- | :--- |
+| Feature             | Tools and Resources (MCP Domain)              | Agents (A2A Domain)                                  |
+| :------------------ | :-------------------------------------------- | :--------------------------------------------------- |
 | **Characteristics** | Primitives with well-defined, structured I/O. | Autonomous systems that reason, plan, and use tools. |
-| **State** | Typically stateless, discrete functions. | Maintain state over long, multi-turn interactions. |
-| **Interaction** | Request-Response for specific data/actions. | Complex, evolving dialogues for novel tasks. |
-| **Examples** | Calculators, DB queries, weather APIs. | Shop managers, diagnostic mechanics, suppliers. |
+| **State**           | Typically stateless, discrete functions.      | Maintain state over long, multi-turn interactions.   |
+| **Interaction**     | Request-Response for specific data/actions.   | Complex, evolving dialogues for novel tasks.         |
+| **Examples**        | Calculators, DB queries, weather APIs.        | Shop managers, diagnostic mechanics, suppliers.      |
 
 ## Protocol Synergy: A2A ❤️ MCP
 
@@ -59,7 +59,7 @@ tools.
 ### Textual Transcription of Architecture Diagram
 
 ```text
-[ User ] 
+[ User ]
     |
     | (A2A Protocol)
     v
@@ -78,9 +78,9 @@ tools.
    with the customer (e.g., requesting video of the noise).
 3. **Agent-to-Tool (MCP):** The "Mechanic" agent (assigned by the Manager) uses
    MCP to call specialized tools:
-    - `scan_vehicle_for_error_codes(vehicle_id='XYZ123')`
-    - `get_repair_procedure(error_code='P0300', ...)`
-    - `raise_platform(height_meters=2)`
+   - `scan_vehicle_for_error_codes(vehicle_id='XYZ123')`
+   - `get_repair_procedure(error_code='P0300', ...)`
+   - `raise_platform(height_meters=2)`
 4. **Agent-to-Agent (A2A):** Mechanic agent uses A2A to ask a "Parts Supplier"
    agent: "Do you have part #12345 in stock?"
 

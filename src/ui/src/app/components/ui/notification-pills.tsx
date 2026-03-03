@@ -21,14 +21,17 @@ import type { LogLevel } from '../../utils/logger';
 
 // ── Status color mapping (oxide token classes) ─────────────────────────────
 
-const LEVEL_CONFIG: Record<LogLevel, {
-  icon: typeof Info;
-  stripe: string;
-  iconColor: string;
-  bg: string;
-  border: string;
-  label: string;
-}> = {
+const LEVEL_CONFIG: Record<
+  LogLevel,
+  {
+    icon: typeof Info;
+    stripe: string;
+    iconColor: string;
+    bg: string;
+    border: string;
+    label: string;
+  }
+> = {
   debug: {
     icon: Info,
     stripe: 'bg-muted-foreground',
@@ -80,44 +83,41 @@ const NotificationPill = forwardRef<
       animate={{ opacity: 1, y: 0, scale: 1 }}
       exit={{ opacity: 0, y: 10, scale: 0.95, transition: { duration: 0.2 } }}
       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-      className={`
-        relative flex items-start gap-2.5 min-w-[18rem] max-w-[26rem]
-        rounded-bubble border ${config.border} ${config.bg}
-        backdrop-blur-xl shadow-lg shadow-black/10
-        dark:shadow-black/30
-        overflow-hidden
-        pointer-events-auto
-      `}
+      className={`rounded-bubble relative flex max-w-[26rem] min-w-[18rem] items-start gap-2.5 border ${config.border} ${config.bg} pointer-events-auto overflow-hidden shadow-lg shadow-black/10 backdrop-blur-xl dark:shadow-black/30`}
       role="alert"
       aria-live={notification.level === 'error' ? 'assertive' : 'polite'}
       aria-label={`${config.label}: ${notification.message}`}
     >
       {/* Left accent stripe */}
-      <div className={`absolute left-0 top-0 bottom-0 w-[3px] ${config.stripe}`} />
+      <div className={`absolute top-0 bottom-0 left-0 w-[3px] ${config.stripe}`} />
 
       {/* Content */}
-      <div className="flex items-start gap-2.5 pl-3.5 pr-2 py-2.5 flex-1 min-w-0">
-        <Icon className={`w-4 h-4 ${config.iconColor} shrink-0 mt-0.5`} />
+      <div className="flex min-w-0 flex-1 items-start gap-2.5 py-2.5 pr-2 pl-3.5">
+        <Icon className={`h-4 w-4 ${config.iconColor} mt-0.5 shrink-0`} />
 
-        <div className="flex-1 min-w-0">
+        <div className="min-w-0 flex-1">
           {/* Source namespace */}
-          <div className="flex items-center gap-2 mb-0.5">
-            <span className="text-[0.5625rem] font-mono uppercase tracking-widest text-oxide-metadata truncate">
+          <div className="mb-0.5 flex items-center gap-2">
+            <span className="text-oxide-metadata truncate font-mono text-[0.5625rem] tracking-widest uppercase">
               {notification.source}
             </span>
-            <span className="text-[0.5rem] text-oxide-metadata tabular-nums shrink-0">
-              {new Date(notification.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            <span className="text-oxide-metadata shrink-0 text-[0.5rem] tabular-nums">
+              {new Date(notification.ts).toLocaleTimeString([], {
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit',
+              })}
             </span>
           </div>
 
           {/* Message */}
-          <p className="text-[0.75rem] text-foreground/90 break-words">
+          <p className="text-foreground/90 text-[0.75rem] break-words">
             {notification.message}
           </p>
 
           {/* Optional data preview */}
           {notification.data != null && (
-            <pre className="text-[0.625rem] text-oxide-metadata font-mono mt-1 truncate max-w-full">
+            <pre className="text-oxide-metadata mt-1 max-w-full truncate font-mono text-[0.625rem]">
               {typeof notification.data === 'string'
                 ? notification.data
                 : JSON.stringify(notification.data)}
@@ -128,10 +128,10 @@ const NotificationPill = forwardRef<
         {/* Dismiss button */}
         <button
           onClick={() => onDismiss(notification.id)}
-          className="shrink-0 p-1 rounded-control text-oxide-metadata hover:text-foreground hover:bg-muted/60 transition-colors"
+          className="rounded-control text-oxide-metadata hover:text-foreground hover:bg-muted/60 shrink-0 p-1 transition-colors"
           aria-label="Dismiss notification"
         >
-          <X className="w-3 h-3" />
+          <X className="h-3 w-3" />
         </button>
       </div>
 
@@ -155,7 +155,7 @@ export function NotificationPills() {
 
   return (
     <div
-      className="fixed bottom-8 right-4 z-50 flex flex-col-reverse gap-2 pointer-events-none"
+      className="pointer-events-none fixed right-4 bottom-8 z-50 flex flex-col-reverse gap-2"
       aria-label="Notifications"
       role="log"
       aria-live="polite"
@@ -178,14 +178,7 @@ export function NotificationPills() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.9 }}
             onClick={clearAll}
-            className="
-              pointer-events-auto self-end
-              text-[0.625rem] font-mono uppercase tracking-widest
-              text-oxide-metadata hover:text-foreground
-              bg-oxide-terminal-bg/60 backdrop-blur-lg
-              border border-border/30 rounded-full
-              px-3 py-1 transition-colors
-            "
+            className="text-oxide-metadata hover:text-foreground bg-oxide-terminal-bg/60 border-border/30 pointer-events-auto self-end rounded-full border px-3 py-1 font-mono text-[0.625rem] tracking-widest uppercase backdrop-blur-lg transition-colors"
             aria-label="Clear all notifications"
           >
             Clear all

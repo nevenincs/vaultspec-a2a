@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { MarkdownEditor } from './markdown-editor'
+import figma from '@figma/code-connect';
+import { MarkdownEditor } from './markdown-editor';
 
 /**
  * Code Connect mapping for MarkdownEditor.
@@ -18,13 +18,17 @@ import { MarkdownEditor } from './markdown-editor'
  * - style?: React.CSSProperties — used for dynamic height resizing
  * - isDark?: boolean — token color palette
  */
-figma.connect(MarkdownEditor, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <MarkdownEditor
-      value=""
-      onChange={() => {}}
-      onKeyDown={() => {}}
-      placeholder="Type a message..."
-    />
-  ),
-})
+figma.connect(
+  MarkdownEditor,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <MarkdownEditor
+        value=""
+        onChange={() => {}}
+        onKeyDown={() => {}}
+        placeholder="Type a message..."
+      />
+    ),
+  },
+);

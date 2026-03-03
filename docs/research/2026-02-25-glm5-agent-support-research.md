@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: glm5-agent
-description: "Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-compatible REST interface, and Coding Plan subscription pricing."
-name: "GLM-5 Agent Support"
+description: 'Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-compatible REST interface, and Coding Plan subscription pricing.'
+name: 'GLM-5 Agent Support'
 maturity: 20
-summary: "Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-compatible REST interface, and Coding Plan subscription pricing."
+summary: 'Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-compatible REST interface, and Coding Plan subscription pricing.'
 ---
 
 # Phase 4 Research: GLM-5 Agent Support and Specificities

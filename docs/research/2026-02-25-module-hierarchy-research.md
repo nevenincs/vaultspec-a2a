@@ -2,7 +2,7 @@
 date: 2026-02-25
 type: research
 feature: module-hierarchy
-description: "Research into approved module hierarchy and package organisation patterns."
+description: 'Research into approved module hierarchy and package organisation patterns.'
 ---
 
 # Module Hierarchy Research
@@ -62,7 +62,7 @@ Based on the ADRs, the project needs:
 3. **Workspace Management**: To handle Worktrees and Git Mutexes.
 4. **Event Aggregation**: To source events to SQLite and manage the ANSI ring
    buffer.
-5. **UI Layer**: A SvelteKit frontend bundled into the package.
+5. **UI Layer**: A React frontend bundled into the package.
 
 ---
 
@@ -70,5 +70,5 @@ Based on the ADRs, the project needs:
 
 - `{{TRANS_LAYER}}`: The logic that maps ACP updates to A2A events.
 - `{{EXEC_CORE}}`: The engine that actually runs the agent reasoned loops.
-- `{{UI_ADAPTER}}`: The bridge between Python events and Svelte components.
+- `{{UI_ADAPTER}}`: The bridge between Python events and React components.
 - `{{PORT_MANAGER}}`: The logic for race-condition-proof port allocation.

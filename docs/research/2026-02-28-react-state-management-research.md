@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: research
 feature: react-state-management
-description: "Research into React state management patterns for the frontend pivot."
+description: 'Research into React state management patterns for the frontend pivot.'
 ---
 
 # React State Management & Data Fetching Library Research
@@ -110,7 +110,7 @@ permission-store).
   store, middleware)
 - Heaviest bundle option by far
 - Its streaming model assumes per-query WebSocket connections via
- `onCacheEntryAdded`, but our architecture uses a single global
+  `onCacheEntryAdded`, but our architecture uses a single global
   WebSocket with per-thread subscriptions — fundamental mismatch
 - Redux is declining in new React projects
 - Boilerplate: `createApi`, `configureStore`, `Provider`, `setupListeners`
@@ -182,15 +182,15 @@ permission-store).
 
 **Total new bundle cost:** ~17.2 KB gzipped
 
-| Concern | Owner | Previous Location |
-| --------- | ------- | ------------------ |
-| REST fetching (threads, team, presets, snapshots) | TanStack Query | `rest-client.ts`+`use-app-state.ts` |
-| REST mutations (create thread, permission response) | TanStack Query | `use-app-state.ts` |
-| WebSocket transport (connect, reconnect, ping, heartbeat) | Existing`WebSocketClient` | `websocket-client.ts` |
-| Real-time stream events (chunk accumulation, tool calls) | Zustand store | `use-app-state.ts` |
-| Tab system (open, close, pin, activate) | Zustand store | `use-app-state.ts` |
-| UI state (theme, sidebar, inspector) | Zustand store (persist) | `use-app-state.ts` |
-| Permission queue | Zustand store | `use-app-state.ts` |
+| Concern                                                   | Owner                     | Previous Location                   |
+| --------------------------------------------------------- | ------------------------- | ----------------------------------- |
+| REST fetching (threads, team, presets, snapshots)         | TanStack Query            | `rest-client.ts`+`use-app-state.ts` |
+| REST mutations (create thread, permission response)       | TanStack Query            | `use-app-state.ts`                  |
+| WebSocket transport (connect, reconnect, ping, heartbeat) | Existing`WebSocketClient` | `websocket-client.ts`               |
+| Real-time stream events (chunk accumulation, tool calls)  | Zustand store             | `use-app-state.ts`                  |
+| Tab system (open, close, pin, activate)                   | Zustand store             | `use-app-state.ts`                  |
+| UI state (theme, sidebar, inspector)                      | Zustand store (persist)   | `use-app-state.ts`                  |
+| Permission queue                                          | Zustand store             | `use-app-state.ts`                  |
 
 **Key integration point:**`WebSocketClient`'s event callback calls
 `zustandStore.getState().handleWireEvent(threadId, event)`— Zustand's
@@ -198,31 +198,27 @@ vanilla API works without React context.
 
 ### Decomposition of use-app-state.ts
 
-| New file | Concern | Library |
-| ---------- | --------- | --------- |
-| `stores/stream-store.ts` | Per-thread stream events + chunk accumulation | Zustand + Immer |
-| `stores/tab-store.ts` | Tab open/close/pin/activate + WS subscribe | Zustand |
-| `stores/ui-store.ts` | Theme, sidebar, inspector | Zustand + persist |
-| `stores/permission-store.ts` | Permission queue (WS pushes, REST removes) | Zustand |
-| `hooks/use-threads.ts` | Thread list, create, snapshot | TanStack Query |
-| `hooks/use-team.ts` | Team status, presets | TanStack Query |
+| New file                     | Concern                                       | Library           |
+| ---------------------------- | --------------------------------------------- | ----------------- |
+| `stores/stream-store.ts`     | Per-thread stream events + chunk accumulation | Zustand + Immer   |
+| `stores/tab-store.ts`        | Tab open/close/pin/activate + WS subscribe    | Zustand           |
+| `stores/ui-store.ts`         | Theme, sidebar, inspector                     | Zustand + persist |
+| `stores/permission-store.ts` | Permission queue (WS pushes, REST removes)    | Zustand           |
+| `hooks/use-threads.ts`       | Thread list, create, snapshot                 | TanStack Query    |
+| `hooks/use-team.ts`          | Team status, presets                          | TanStack Query    |
 
 ### What stays unchanged
 
--`websocket-client.ts`— well-structured, protocol-aware
--`rest-client.ts`— becomes the fetcher passed to TanStack Query
--`wire-types.ts`— backend schema mirrors
--`types.ts`— frontend domain types
--`mappers.ts`— wire-to-frontend translation
+-`websocket-client.ts`— well-structured, protocol-aware -`rest-client.ts`— becomes the fetcher passed to TanStack Query -`wire-types.ts`— backend schema mirrors -`types.ts`— frontend domain types -`mappers.ts`— wire-to-frontend translation
 
 ## 4. Production Precedent
 
-| App Type | Typical Stack |
-| ---------- | -------------- |
-| AI coding assistants (Cursor, Windsurf) | Custom WS + custom state |
-| Chat applications | TanStack Query (REST) + Zustand (messages/WS) |
-| Real-time dashboards | TanStack Query + Zustand + native WebSocket |
-| IDE-like web tools | Zustand for UI state + custom WS client |
+| App Type                                | Typical Stack                                 |
+| --------------------------------------- | --------------------------------------------- |
+| AI coding assistants (Cursor, Windsurf) | Custom WS + custom state                      |
+| Chat applications                       | TanStack Query (REST) + Zustand (messages/WS) |
+| Real-time dashboards                    | TanStack Query + Zustand + native WebSocket   |
+| IDE-like web tools                      | Zustand for UI state + custom WS client       |
 
 The consistent pattern across production real-time React apps in 2025-2026
 is: TanStack Query for REST, Zustand for client + real-time state, custom
@@ -232,16 +228,16 @@ WebSocket client for protocol-specific needs.
 
 Research identified available MCP servers for each frontend library:
 
-| Library | Best MCP Server | Package | Actively Maintained | Recommendation |
-| --------- | ---------------- | --------- | ------- | ---------------- |
-| TanStack Query | TanStack CLI | `@tanstack/cli` | Yes (first-party) | Add to`.mcp.json` |
-| Zustand | context7 / GitMCP | `gitmcp.io/pmndrs/zustand` | N/A | Use existing context7 |
-| React 18 | context7 / GitMCP | `gitmcp.io/facebook/react` | N/A | Use existing context7 |
-| Tailwind CSS v4 | @clarity-contrib server | `@clarity-contrib/tailwindcss-mcp-server` | Yes | Add to`.mcp.json` |
-| Radix UI | @gianpieropuleo server | `@gianpieropuleo/radix-mcp-server` | Moderate | Add to`.mcp.json` |
-| shadcn/ui (React) | Official shadcn CLI | `shadcn@latest mcp` | Yes (first-party) | **Replace current** |
-| Vite | context7 | N/A | N/A | Use existing context7 |
-| Lucide React | lucide-icons-mcp | `lucide-icons-mcp` | Yes | Add to`.mcp.json` |
+| Library           | Best MCP Server         | Package                                   | Actively Maintained | Recommendation        |
+| ----------------- | ----------------------- | ----------------------------------------- | ------------------- | --------------------- |
+| TanStack Query    | TanStack CLI            | `@tanstack/cli`                           | Yes (first-party)   | Add to`.mcp.json`     |
+| Zustand           | context7 / GitMCP       | `gitmcp.io/pmndrs/zustand`                | N/A                 | Use existing context7 |
+| React 18          | context7 / GitMCP       | `gitmcp.io/facebook/react`                | N/A                 | Use existing context7 |
+| Tailwind CSS v4   | @clarity-contrib server | `@clarity-contrib/tailwindcss-mcp-server` | Yes                 | Add to`.mcp.json`     |
+| Radix UI          | @gianpieropuleo server  | `@gianpieropuleo/radix-mcp-server`        | Moderate            | Add to`.mcp.json`     |
+| shadcn/ui (React) | Official shadcn CLI     | `shadcn@latest mcp`                       | Yes (first-party)   | **Replace current**   |
+| Vite              | context7                | N/A                                       | N/A                 | Use existing context7 |
+| Lucide React      | lucide-icons-mcp        | `lucide-icons-mcp`                        | Yes                 | Add to`.mcp.json`     |
 
 ### High-priority actions
 
@@ -258,9 +254,9 @@ Research identified available MCP servers for each frontend library:
 - [TanStack Query + WebSockets
   (tkdodo)](https://tkdodo.eu/blog/using-web-sockets-with-react-query)
 - [Zustand + TanStack Query
-Pattern](https://javascript.plainenglish.io/zustand-and-tanstack-query-the-dynamic-duo-that-simplified-my-react-state-management-e71b924efb90)
+  Pattern](https://javascript.plainenglish.io/zustand-and-tanstack-query-the-dynamic-duo-that-simplified-my-react-state-management-e71b924efb90)
 - [React State Management 2026
-Comparison](https://dev.to/jsgurujobs/state-management-in-2026-zustand-vs-jotai-vs-redux-toolkit-vs-signals-2gge)
+  Comparison](https://dev.to/jsgurujobs/state-management-in-2026-zustand-vs-jotai-vs-redux-toolkit-vs-signals-2gge)
 - [MCP Server Registry](https://registry.modelcontextprotocol.io/)
 - [RTK Query Streaming
   Updates](https://redux-toolkit.js.org/rtk-query/usage/streaming-updates)

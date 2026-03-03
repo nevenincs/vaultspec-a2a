@@ -2,7 +2,7 @@
 adr_id: 025
 title: Mandatory Review Gate
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
@@ -144,14 +144,14 @@ workflow.
 
 ### Edge Cases
 
-| Scenario | Gate behaviour | Acceptable? |
-|----------|----------------|-------------|
-| No `active_feature` | Gate skipped | Yes — non-feature threads are out of SDD scope |
-| `active_feature` set, no exec artifacts yet | Gate skipped (exec non-empty check fails) | Yes — if no execution happened, no review needed |
-| `active_feature` set, exec artifacts exist, audit artifacts exist | FINISH allowed | Yes — review artifact present |
-| `active_feature` set, exec artifacts exist, no audit artifacts | FINISH blocked, reroute | Yes — this is the enforcement case |
-| Multiple exec→review cycles (iterative review) | Each FINISH attempt checks `vault_index["audit"]` | Yes — gate passes once any review artifact exists |
-| Review artifact written but not added to `vault_index` | Gate blocks incorrectly | Risk — workers must return `vault_index` updates |
+| Scenario                                                          | Gate behaviour                                    | Acceptable?                                       |
+| ----------------------------------------------------------------- | ------------------------------------------------- | ------------------------------------------------- |
+| No `active_feature`                                               | Gate skipped                                      | Yes — non-feature threads are out of SDD scope    |
+| `active_feature` set, no exec artifacts yet                       | Gate skipped (exec non-empty check fails)         | Yes — if no execution happened, no review needed  |
+| `active_feature` set, exec artifacts exist, audit artifacts exist | FINISH allowed                                    | Yes — review artifact present                     |
+| `active_feature` set, exec artifacts exist, no audit artifacts    | FINISH blocked, reroute                           | Yes — this is the enforcement case                |
+| Multiple exec→review cycles (iterative review)                    | Each FINISH attempt checks `vault_index["audit"]` | Yes — gate passes once any review artifact exists |
+| Review artifact written but not added to `vault_index`            | Gate blocks incorrectly                           | Risk — workers must return `vault_index` updates  |
 
 ## 4. Rejected Alternatives
 
@@ -187,6 +187,9 @@ condition. Any audit artifact is sufficient evidence of review in v1.
 - `vault_index` and `active_feature` are read with `.get()` inside the gate
   because `supervisor_node` may be invoked on legacy state that pre-dates
   ADR-019 (defensive reads only at this call site; required fields elsewhere).
+  This is a deliberate exception to ADR-019 §5's "no `.get()`" mandate —
+  supervisor gate code must tolerate legacy checkpoints where the migration
+  backfill has not yet run.
 
 ## 6. Module Hierarchy Impact
 

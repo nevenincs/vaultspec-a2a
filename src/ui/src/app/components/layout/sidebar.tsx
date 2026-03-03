@@ -1,6 +1,15 @@
 import {
-  Plus, PanelLeftClose, PanelLeft, Sun, Moon, Monitor,
-  Settings, Search, X, GitBranch, ShieldAlert,
+  Plus,
+  PanelLeftClose,
+  PanelLeft,
+  Sun,
+  Moon,
+  Monitor,
+  Settings,
+  Search,
+  X,
+  GitBranch,
+  ShieldAlert,
 } from 'lucide-react';
 import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
 import type { MutableRefObject } from 'react';
@@ -9,7 +18,12 @@ import { useShallow } from 'zustand/react/shallow';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
 import { ScrollArea } from '../ui/scroll-area';
-import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from '../ui/tooltip';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+  TooltipProvider,
+} from '../ui/tooltip';
 import { agentStateDot } from './state-indicators';
 import { ShaderBackground } from '../ui/shader-background';
 import { appStore } from '../../store/app-store';
@@ -32,10 +46,14 @@ interface SidebarProps {
 /** Human-readable topology label */
 function topologyLabel(topology?: TeamTopology): string {
   switch (topology) {
-    case 'star': return 'Star';
-    case 'pipeline': return 'Pipeline';
-    case 'pipeline_loop': return 'Loop';
-    default: return '';
+    case 'star':
+      return 'Star';
+    case 'pipeline':
+      return 'Pipeline';
+    case 'pipeline_loop':
+      return 'Loop';
+    default:
+      return '';
   }
 }
 
@@ -73,7 +91,7 @@ export function Sidebar({
     setSidebarWidth,
   } = useStore(
     appStore,
-    useShallow(s => ({
+    useShallow((s) => ({
       sidebarCollapsed: s.sidebarCollapsed,
       toggleSidebar: s.toggleSidebar,
       themeMode: s.themeMode,
@@ -108,14 +126,17 @@ export function Sidebar({
   const filteredThreads = useMemo(() => {
     if (!taskFilter) return threads;
     const q = taskFilter.toLowerCase();
-    return threads.filter(t => {
+    return threads.filter((t) => {
       const searchable = [
         t.nickname,
         t.title,
         t.feature_tag,
         t.source_branch,
         t.source_repo,
-      ].filter(Boolean).join(' ').toLowerCase();
+      ]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase();
       return searchable.includes(q);
     });
   }, [threads, taskFilter]);
@@ -130,7 +151,10 @@ export function Sidebar({
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!isResizing.current) return;
-        const newWidth = Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, startWidth + (ev.clientX - startX)));
+        const newWidth = Math.max(
+          MIN_WIDTH,
+          Math.min(MAX_WIDTH, startWidth + (ev.clientX - startX)),
+        );
         setSidebarWidth(newWidth);
       };
 
@@ -152,11 +176,21 @@ export function Sidebar({
 
   if (sidebarCollapsed) {
     return (
-      <nav className="flex flex-col items-center py-2 px-1 border-r border-border bg-oxide-sidebar-bg h-full w-12 shrink-0" aria-label="Sidebar" data-focus-section="sidebar">
+      <nav
+        className="border-border bg-oxide-sidebar-bg flex h-full w-12 shrink-0 flex-col items-center border-r px-1 py-2"
+        aria-label="Sidebar"
+        data-focus-section="sidebar"
+      >
         <TooltipProvider>
           <Tooltip>
             <TooltipTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-8 w-8" onClick={toggleSidebar} aria-label="Expand sidebar">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                onClick={toggleSidebar}
+                aria-label="Expand sidebar"
+              >
                 <PanelLeft className="h-4 w-4" />
               </Button>
             </TooltipTrigger>
@@ -168,15 +202,34 @@ export function Sidebar({
   }
 
   return (
-    <nav className="relative flex flex-col border-r border-border bg-oxide-sidebar-bg h-full shrink-0" style={{ width: `${sidebarWidth / 16}rem` }} aria-label="Sidebar" data-focus-section="sidebar">
+    <nav
+      className="border-border bg-oxide-sidebar-bg relative flex h-full shrink-0 flex-col border-r"
+      style={{ width: `${sidebarWidth / 16}rem` }}
+      aria-label="Sidebar"
+      data-focus-section="sidebar"
+    >
       {/* Header */}
-      <div className="relative flex items-center justify-between px-3 py-2.5 border-b border-border overflow-hidden">
-        <ShaderBackground preset="soft" opacity={0.5} speed={1.0} brightness={3.0} colorSlots={[0, 2, 5, 7]} />
+      <div className="border-border relative flex items-center justify-between overflow-hidden border-b px-3 py-2.5">
+        <ShaderBackground
+          preset="soft"
+          opacity={0.5}
+          speed={1.0}
+          brightness={3.0}
+          colorSlots={[0, 2, 5, 7]}
+        />
         <div className="relative z-10 flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={toggleSidebar} aria-label="Collapse sidebar">
-            <PanelLeftClose className="h-4 w-4 text-oxide-icon" />
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7"
+            onClick={toggleSidebar}
+            aria-label="Collapse sidebar"
+          >
+            <PanelLeftClose className="text-oxide-icon h-4 w-4" />
           </Button>
-          <span className="text-[0.8125rem] font-bold tracking-tight text-foreground uppercase">VaultSpec</span>
+          <span className="text-foreground text-[0.8125rem] font-bold tracking-tight uppercase">
+            VaultSpec
+          </span>
         </div>
         <div className="relative z-10 flex items-center gap-0.5">
           <TooltipProvider>
@@ -185,17 +238,36 @@ export function Sidebar({
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 text-oxide-icon"
-                  onClick={() => setThemeMode(themeMode === 'dark' ? 'light' : themeMode === 'light' ? 'system' : 'dark')}
+                  className="text-oxide-icon h-7 w-7"
+                  onClick={() =>
+                    setThemeMode(
+                      themeMode === 'dark'
+                        ? 'light'
+                        : themeMode === 'light'
+                          ? 'system'
+                          : 'dark',
+                    )
+                  }
                   aria-label={`Switch theme, current: ${themeMode}`}
                 >
-                  {themeMode === 'dark' ? <Moon className="h-3.5 w-3.5" /> : themeMode === 'light' ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}
+                  {themeMode === 'dark' ? (
+                    <Moon className="h-3.5 w-3.5" />
+                  ) : themeMode === 'light' ? (
+                    <Sun className="h-3.5 w-3.5" />
+                  ) : (
+                    <Monitor className="h-3.5 w-3.5" />
+                  )}
                 </Button>
               </TooltipTrigger>
               <TooltipContent side="bottom">Theme: {themeMode}</TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <Button variant="ghost" size="icon" className="h-7 w-7 text-oxide-icon" aria-label="Settings">
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-oxide-icon h-7 w-7"
+            aria-label="Settings"
+          >
             <Settings className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -203,36 +275,36 @@ export function Sidebar({
 
       {/* Section header */}
       <div className="px-3 pt-3 pb-1.5">
-        <div className="flex items-center justify-between h-7">
-          <div className="flex-1 min-w-0 mr-1">
+        <div className="flex h-7 items-center justify-between">
+          <div className="mr-1 min-w-0 flex-1">
             {searchOpen ? (
               <div className="relative flex items-center">
-                <Search className="absolute left-2 h-3 w-3 text-muted-foreground pointer-events-none z-10" />
+                <Search className="text-muted-foreground pointer-events-none absolute left-2 z-10 h-3 w-3" />
                 <Input
                   ref={searchRef}
                   value={taskFilter}
                   onChange={(e) => setTaskFilter(e.target.value)}
                   onKeyDown={(e) => e.key === 'Escape' && setSearchOpen(false)}
                   placeholder="Filter tasks..."
-                  className="h-6 pl-6 pr-2 text-[0.6875rem]"
+                  className="h-6 pr-2 pl-6 text-[0.6875rem]"
                   aria-label="Filter tasks"
                 />
               </div>
             ) : (
-              <span className="text-[0.625rem] font-bold uppercase tracking-widest text-text-dimmed px-1 select-none">
+              <span className="text-text-dimmed px-1 text-[0.625rem] font-bold tracking-widest uppercase select-none">
                 Tasks
               </span>
             )}
           </div>
 
-          <div className="flex items-center gap-0.5 shrink-0">
+          <div className="flex shrink-0 items-center gap-0.5">
             <TooltipProvider>
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-6 w-6 text-text-dimmed hover:text-foreground transition-colors"
+                    className="text-text-dimmed hover:text-foreground h-6 w-6 transition-colors"
                     onClick={() => clearActiveTab()}
                     aria-label="New task"
                   >
@@ -249,29 +321,35 @@ export function Sidebar({
                     variant="ghost"
                     size="icon"
                     className={`h-6 w-6 transition-colors ${searchOpen ? 'text-primary bg-primary/10' : 'text-text-dimmed hover:text-foreground'}`}
-                    onClick={() => setSearchOpen(v => !v)}
+                    onClick={() => setSearchOpen((v) => !v)}
                     aria-label={searchOpen ? 'Close search' : 'Search tasks'}
                     aria-expanded={searchOpen}
                   >
-                    {searchOpen ? <X className="h-3 w-3" /> : <Search className="h-3 w-3" />}
+                    {searchOpen ? (
+                      <X className="h-3 w-3" />
+                    ) : (
+                      <Search className="h-3 w-3" />
+                    )}
                   </Button>
                 </TooltipTrigger>
-                <TooltipContent side="bottom">{searchOpen ? 'Close search' : 'Search tasks'}</TooltipContent>
+                <TooltipContent side="bottom">
+                  {searchOpen ? 'Close search' : 'Search tasks'}
+                </TooltipContent>
               </Tooltip>
             </TooltipProvider>
           </div>
         </div>
       </div>
 
-      <ScrollArea className="flex-1 min-h-0">
-        <div className="px-2 py-1 space-y-0.5" role="listbox" aria-label="Task list">
+      <ScrollArea className="min-h-0 flex-1">
+        <div className="space-y-0.5 px-2 py-1" role="listbox" aria-label="Task list">
           {filteredThreads.length === 0 && taskFilter && (
-            <div className="px-3 py-4 text-center text-[0.6875rem] text-text-subtle italic">
+            <div className="text-text-subtle px-3 py-4 text-center text-[0.6875rem] italic">
               No tasks match &ldquo;{taskFilter}&rdquo;
             </div>
           )}
           {filteredThreads.length === 0 && !taskFilter && (
-            <div className="px-3 py-4 text-center text-[0.6875rem] text-text-subtle italic">
+            <div className="text-text-subtle px-3 py-4 text-center text-[0.6875rem] italic">
               No tasks yet. Click &ldquo;New Task&rdquo; to start.
             </div>
           )}
@@ -293,7 +371,7 @@ export function Sidebar({
       <div
         onMouseDown={handleMouseDown}
         tabIndex={0}
-        className="absolute top-0 right-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-30"
+        className="hover:bg-primary/30 active:bg-primary/50 absolute top-0 right-0 z-30 h-full w-1 cursor-col-resize transition-colors"
         role="separator"
         aria-orientation="vertical"
         aria-label="Resize sidebar"
@@ -339,13 +417,17 @@ function TaskItem({
   };
 
   const dot = agentStateDot(thread.agent_state);
-  const needsAction = thread.agent_state === 'input_required' || thread.agent_state === 'auth_required' || hasPermissionPending;
+  const needsAction =
+    thread.agent_state === 'input_required' ||
+    thread.agent_state === 'auth_required' ||
+    hasPermissionPending;
   const displayName = thread.nickname || thread.title;
   const topoLabel = topologyLabel(thread.topology);
-  const teamComposition = agents.map(a => a.node_name).join(' · ');
-  const diskPath = thread.source_repo && thread.source_branch
-    ? `~/${thread.source_repo}/.git/refs/heads/${thread.source_branch}`
-    : null;
+  const teamComposition = agents.map((a) => a.node_name).join(' · ');
+  const diskPath =
+    thread.source_repo && thread.source_branch
+      ? `~/${thread.source_repo}/.git/refs/heads/${thread.source_branch}`
+      : null;
 
   return (
     <TooltipProvider delayDuration={500}>
@@ -363,7 +445,9 @@ function TaskItem({
               const target = e.currentTarget as HTMLElement;
               const container = target.parentElement;
               if (!container) return;
-              const items = Array.from(container.querySelectorAll<HTMLElement>('button[role="option"]'));
+              const items = Array.from(
+                container.querySelectorAll<HTMLElement>('button[role="option"]'),
+              );
               const idx = items.indexOf(target);
               if (idx === -1) return;
               let nextIdx: number | null = null;
@@ -379,47 +463,51 @@ function TaskItem({
             role="option"
             aria-selected={isActive}
             aria-label={`Task: ${displayName}, ${thread.agent_state}, updated ${timeAgo(thread.updated_at)} ago`}
-            className={`w-full text-left rounded-ui px-2.5 py-2 transition-colors group ${
+            className={`rounded-ui group w-full px-2.5 py-2 text-left transition-colors ${
               isActive
-                ? 'bg-accent text-accent-foreground shadow-sm border border-border/10'
+                ? 'bg-accent text-accent-foreground border-border/10 border shadow-sm'
                 : 'hover:bg-accent/40 text-foreground/70'
             }`}
           >
             {/* Row 1: status dot + nickname + time */}
             <div className="flex items-start gap-2">
               {needsAction ? (
-                <span className="shrink-0 w-4 flex items-center justify-center mt-0.5">
-                  <ShieldAlert className="w-3.5 h-3.5 text-status-warning" />
+                <span className="mt-0.5 flex w-4 shrink-0 items-center justify-center">
+                  <ShieldAlert className="text-status-warning h-3.5 w-3.5" />
                 </span>
               ) : dot ? (
-                <span className="shrink-0 w-4 flex items-center justify-center mt-0.5">{dot}</span>
+                <span className="mt-0.5 flex w-4 shrink-0 items-center justify-center">
+                  {dot}
+                </span>
               ) : (
-                <span className="shrink-0 w-4 mt-0.5" />
+                <span className="mt-0.5 w-4 shrink-0" />
               )}
-              <span className={`flex-1 text-[0.75rem] break-words min-w-0 text-foreground ${isActive ? 'font-bold' : 'font-normal'}`}>
+              <span
+                className={`text-foreground min-w-0 flex-1 text-[0.75rem] break-words ${isActive ? 'font-bold' : 'font-normal'}`}
+              >
                 {displayName}
               </span>
-              <span className="text-[0.625rem] text-oxide-metadata shrink-0 tabular-nums mt-0.5">
+              <span className="text-oxide-metadata mt-0.5 shrink-0 text-[0.625rem] tabular-nums">
                 {timeAgo(thread.updated_at)}
               </span>
             </div>
 
             {/* Row 2: metadata — action needed + feature tag + branch */}
             {(thread.feature_tag || thread.source_branch || needsAction) && (
-              <div className="flex items-center gap-1.5 mt-1 ml-6 flex-wrap">
+              <div className="mt-1 ml-6 flex flex-wrap items-center gap-1.5">
                 {needsAction && (
-                  <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-sans bg-status-warning/15 text-status-warning border border-status-warning/30">
+                  <span className="bg-status-warning/15 text-status-warning border-status-warning/30 inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-sans text-[0.5625rem]">
                     Action needed
                   </span>
                 )}
                 {thread.feature_tag && (
-                  <span className="text-[0.625rem] text-oxide-metadata font-mono">
+                  <span className="text-oxide-metadata font-mono text-[0.625rem]">
                     #{thread.feature_tag}
                   </span>
                 )}
                 {thread.source_branch && (
-                  <span className="flex items-center gap-0.5 text-[0.625rem] text-oxide-metadata font-mono">
-                    <GitBranch className="w-2.5 h-2.5 shrink-0" />
+                  <span className="text-oxide-metadata flex items-center gap-0.5 font-mono text-[0.625rem]">
+                    <GitBranch className="h-2.5 w-2.5 shrink-0" />
                     {thread.source_branch}
                   </span>
                 )}
@@ -431,47 +519,73 @@ function TaskItem({
           side="right"
           align="start"
           sideOffset={8}
-          className="max-w-[280px] p-0 bg-oxide-terminal-bg border-border rounded-ui shadow-lg"
+          className="bg-oxide-terminal-bg border-border rounded-ui max-w-[280px] p-0 shadow-lg"
         >
-          <div className="px-3 py-2.5 space-y-2 font-sans">
+          <div className="space-y-2 px-3 py-2.5 font-sans">
             <div>
-              <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Task</span>
-              <p className="text-[0.75rem] text-foreground font-bold mt-0.5">{thread.title}</p>
+              <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                Task
+              </span>
+              <p className="text-foreground mt-0.5 text-[0.75rem] font-bold">
+                {thread.title}
+              </p>
               {thread.nickname && thread.nickname !== thread.title && (
-                <p className="text-[0.6875rem] text-oxide-metadata font-mono mt-0.5">{thread.nickname}</p>
+                <p className="text-oxide-metadata mt-0.5 font-mono text-[0.6875rem]">
+                  {thread.nickname}
+                </p>
               )}
             </div>
             {(thread.team_preset || topoLabel) && (
               <div>
-                <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Team</span>
-                <p className="text-[0.6875rem] text-foreground mt-0.5">
+                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                  Team
+                </span>
+                <p className="text-foreground mt-0.5 text-[0.6875rem]">
                   {thread.team_preset || '—'}
-                  {topoLabel && <span className="text-oxide-metadata ml-1.5">({topoLabel})</span>}
+                  {topoLabel && (
+                    <span className="text-oxide-metadata ml-1.5">({topoLabel})</span>
+                  )}
                 </p>
               </div>
             )}
             {agents.length > 0 && (
               <div>
-                <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Agents</span>
-                <p className="text-[0.6875rem] text-foreground mt-0.5">{teamComposition}</p>
+                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                  Agents
+                </span>
+                <p className="text-foreground mt-0.5 text-[0.6875rem]">
+                  {teamComposition}
+                </p>
               </div>
             )}
             {thread.feature_tag && (
               <div>
-                <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Feature</span>
-                <p className="text-[0.6875rem] text-foreground font-mono mt-0.5">#{thread.feature_tag}</p>
+                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                  Feature
+                </span>
+                <p className="text-foreground mt-0.5 font-mono text-[0.6875rem]">
+                  #{thread.feature_tag}
+                </p>
               </div>
             )}
             {thread.source_branch && (
               <div>
-                <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Branch</span>
-                <p className="text-[0.6875rem] text-foreground font-mono mt-0.5">{thread.source_branch}</p>
+                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                  Branch
+                </span>
+                <p className="text-foreground mt-0.5 font-mono text-[0.6875rem]">
+                  {thread.source_branch}
+                </p>
               </div>
             )}
             {diskPath && (
               <div>
-                <span className="text-[0.625rem] text-oxide-metadata uppercase tracking-widest">Path</span>
-                <p className="text-[0.625rem] text-foreground font-mono mt-0.5 break-all opacity-80">{diskPath}</p>
+                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
+                  Path
+                </span>
+                <p className="text-foreground mt-0.5 font-mono text-[0.625rem] break-all opacity-80">
+                  {diskPath}
+                </p>
               </div>
             )}
           </div>

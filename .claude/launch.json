@@ -16,7 +16,14 @@
     {
       "name": "backend-real",
       "runtimeExecutable": "uv",
-      "runtimeArgs": ["run", "uvicorn", "lib.api.app:app", "--reload", "--port", "8000"],
+      "runtimeArgs": [
+        "run",
+        "uvicorn",
+        "lib.api.app:app",
+        "--reload",
+        "--port",
+        "8000"
+      ],
       "port": 8000
     }
   ]

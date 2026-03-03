@@ -138,6 +138,16 @@ class TeamState(TypedDict):
     # None when active_feature is unset, vault_index is empty, or workspace_root is None.
     mounted_context: NotRequired[str | None]
 
+    # --- task queue pointer (ADR-021) ---
+    # ID of the task currently assigned to the worker. None when no feature is active
+    # or no task has been assigned. Updated via side-channel drain after mark_task_complete.
+    current_task_id: NotRequired[str | None]
+
+    # --- plan approval gate (ADR-024) ---
+    # Set to True once the user approves the plan for execution.
+    # NotRequired: absent on legacy threads — defaults to False (unapproved) at read time.
+    plan_approved: NotRequired[bool]
+
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str]
 

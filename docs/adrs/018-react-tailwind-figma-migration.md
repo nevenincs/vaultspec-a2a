@@ -1,6 +1,6 @@
 ---
 adr_id: 018
-title: "React + Tailwind + Figma Stack Migration"
+title: 'React + Tailwind + Figma Stack Migration'
 date: 2026-02-28
 status: Proposed
 supersedes:
@@ -19,15 +19,15 @@ related:
 
 ## 1. Context & Problem Statement
 
-The Control Surface frontend was implemented in SvelteKit 5 (Runes) with
-shadcn-svelte, as prescribed by ADR-005. While functional, this stack
+The Control Surface frontend was implemented in React 5 (Runes) with
+shadcn-React, as prescribed by ADR-005. While functional, this stack
 creates a permanent translation layer between the authoritative design
 source (Figma Make, which outputs React + Tailwind) and the codebase.
 
 The Figma Make project (`EAs7Eh1lxKVzBqzke5HASU`) is the single source
 of truth for the Control Surface UI. It outputs React + Tailwind v4 code
 natively. Every design iteration in Figma Make produces React components
-that must then be manually translated into Svelte 5 — a lossy,
+that must then be manually translated into React 5 — a lossy,
 time-consuming process that introduces drift between design and code.
 
 Additionally, the Figma MCP server's `get_design_context` tool returns
@@ -39,36 +39,36 @@ React-first workflows.
 
 ## 2. The Decision
 
-**Deprecate the SvelteKit 5 frontend. Migrate to React + Tailwind v4
+**Deprecate the React 5 frontend. Migrate to React + Tailwind v4
 using the Figma MCP toolchain as the primary design-to-code pipeline.**
 
-### 2.1 SvelteKit Deprecation
+### 2.1 React Deprecation
 
-The existing SvelteKit 5 frontend at `src/ui/` (Runes stores, shadcn-svelte
+The existing React 5 frontend at `src/ui/` (Runes stores, shadcn-React
 components, layout system) is deprecated. No further development will
-occur on the Svelte codebase. It will be removed once the React
+occur on the React codebase. It will be removed once the React
 implementation reaches feature parity.
 
 ### 2.2 New Frontend Stack
 
-| Layer | Technology | Version | Purpose |
-| ------- | ----------- | --------- | --------- |
-| Framework | React | 18.3.x | UI rendering |
-| Build | Vite | 6.x | Dev server + bundling |
-| Styling | Tailwind CSS | 4.x (Oxide) | Utility-first CSS with OKLCH palette |
-| Primitives | Radix UI | latest | Headless accessible components |
-| Component Kit | shadcn/ui (React) | latest | Pre-built Radix + Tailwind components |
-| Icons | Lucide React | 0.487+ | Icon system |
-| Markdown | react-markdown + remark-gfm | 10.x | Streaming markdown rendering |
-| Code Display | react-syntax-highlighter | 16.x | Code block highlighting |
-| Routing | react-router | 7.x | Client-side SPA routing |
-| Motion | motion (Framer) | 12.x | Animations and transitions |
-| Server State | TanStack Query (React Query) | 5.x | REST caching, dedup, background refetch, mutations |
-| Client State | Zustand | 5.x | WS-driven real-time state, UI state, chunk accumulation |
-| Drag & Drop | react-dnd | 16.x | Tab reordering, panel resizing |
-| Panels | react-resizable-panels | 2.x | Split-pane layout |
-| Forms | react-hook-form | 7.x | Form state management |
-| Toasts | sonner | 2.x | Notification system |
+| Layer         | Technology                   | Version     | Purpose                                                 |
+| ------------- | ---------------------------- | ----------- | ------------------------------------------------------- |
+| Framework     | React                        | 18.3.x      | UI rendering                                            |
+| Build         | Vite                         | 6.x         | Dev server + bundling                                   |
+| Styling       | Tailwind CSS                 | 4.x (Oxide) | Utility-first CSS with OKLCH palette                    |
+| Primitives    | Radix UI                     | latest      | Headless accessible components                          |
+| Component Kit | shadcn/ui (React)            | latest      | Pre-built Radix + Tailwind components                   |
+| Icons         | Lucide React                 | 0.487+      | Icon system                                             |
+| Markdown      | react-markdown + remark-gfm  | 10.x        | Streaming markdown rendering                            |
+| Code Display  | react-syntax-highlighter     | 16.x        | Code block highlighting                                 |
+| Routing       | react-router                 | 7.x         | Client-side SPA routing                                 |
+| Motion        | motion (Framer)              | 12.x        | Animations and transitions                              |
+| Server State  | TanStack Query (React Query) | 5.x         | REST caching, dedup, background refetch, mutations      |
+| Client State  | Zustand                      | 5.x         | WS-driven real-time state, UI state, chunk accumulation |
+| Drag & Drop   | react-dnd                    | 16.x        | Tab reordering, panel resizing                          |
+| Panels        | react-resizable-panels       | 2.x         | Split-pane layout                                       |
+| Forms         | react-hook-form              | 7.x         | Form state management                                   |
+| Toasts        | sonner                       | 2.x         | Notification system                                     |
 
 ### 2.3 Design System
 
@@ -115,17 +115,17 @@ This provides live access to:
 
 ### 3.2 MCP Tools
 
-| Tool | Works with Make | Purpose |
-| ------ | ---------------- | --------- |
-| `get_design_context` | Yes | Returns structured React + Tailwind code for a node/selection |
-| `get_screenshot` | Yes | Visual reference capture |
-| `get_metadata` | Design only | Sparse XML node map for large frame decomposition |
-| `get_variable_defs` | Design only | Design token extraction |
-| `get_code_connect_map` | Design only | Retrieves existing Code Connect mappings |
-| `add_code_connect_map` | Design only | Creates node → component mappings |
-| `create_design_system_rules` | N/A | Generates project rules file |
-| `get_code_connect_suggestions` | Design only | Suggests component mappings |
-| `send_code_connect_mappings` | Design only | Confirms suggested mappings |
+| Tool                           | Works with Make | Purpose                                                       |
+| ------------------------------ | --------------- | ------------------------------------------------------------- |
+| `get_design_context`           | Yes             | Returns structured React + Tailwind code for a node/selection |
+| `get_screenshot`               | Yes             | Visual reference capture                                      |
+| `get_metadata`                 | Design only     | Sparse XML node map for large frame decomposition             |
+| `get_variable_defs`            | Design only     | Design token extraction                                       |
+| `get_code_connect_map`         | Design only     | Retrieves existing Code Connect mappings                      |
+| `add_code_connect_map`         | Design only     | Creates node → component mappings                             |
+| `create_design_system_rules`   | N/A             | Generates project rules file                                  |
+| `get_code_connect_suggestions` | Design only     | Suggests component mappings                                   |
+| `send_code_connect_mappings`   | Design only     | Confirms suggested mappings                                   |
 
 ### 3.3 Code Connect CLI
 
@@ -163,8 +163,8 @@ npx figma connect unpublish --node=NODE_URL --label=React
 declare prop mappings between Figma properties and React props:
 
 ```tsx
-import figma from '@figma/code-connect'
-import { Button } from '@/components/ui/button'
+import figma from '@figma/code-connect';
+import { Button } from '@/components/ui/button';
 
 figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
   props: {
@@ -180,7 +180,7 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
       {props.label}
     </Button>
   ),
-})
+});
 ```
 
 **Prop mapping functions:**
@@ -232,11 +232,11 @@ The canonical workflow for implementing or modifying any component:
 
 Three skills are installed via the `figma@claude-plugins-official` plugin:
 
-| Skill | Trigger | Purpose |
-| ------- | --------- | --------- |
-| `figma:implement-design` | Figma URLs, "implement design" | 7-step workflow: parse URL → get context → screenshot → assets → translate → validate |
-| `figma:code-connect-components` | "code connect", "map component" | Scan codebase → match to Figma nodes → create mappings |
-| `figma:create-design-system-rules` | "create design system rules" | Analyze codebase → generate CLAUDE.md rules |
+| Skill                              | Trigger                         | Purpose                                                                               |
+| ---------------------------------- | ------------------------------- | ------------------------------------------------------------------------------------- |
+| `figma:implement-design`           | Figma URLs, "implement design"  | 7-step workflow: parse URL → get context → screenshot → assets → translate → validate |
+| `figma:code-connect-components`    | "code connect", "map component" | Scan codebase → match to Figma nodes → create mappings                                |
+| `figma:create-design-system-rules` | "create design system rules"    | Analyze codebase → generate CLAUDE.md rules                                           |
 
 ### 3.6 CLAUDE.md Integration Rules
 
@@ -266,16 +266,16 @@ The following rules must be added to CLAUDE.md for all Figma-driven work:
 
 ## 4. Rationale
 
-### 4.1 Why Deprecate SvelteKit
+### 4.1 Why Deprecate React
 
 - **Translation overhead**: Every Figma Make iteration produces React code
-  that must be manually translated to Svelte 5 Runes syntax. This is the
+  that must be manually translated to React 5 Runes syntax. This is the
   dominant source of development friction.
 - **Ecosystem alignment**: The Figma MCP toolchain (Code Connect, design
-  system rules, implement-design skill) is React-first. Svelte support
+  system rules, implement-design skill) is React-first. React support
   exists but is secondary.
 - **Code Connect**: The CLI's interactive setup, AI prop mapping, and
-  richest `<CodeConnectSnippet>` output target React. Svelte Code Connect
+  richest `<CodeConnectSnippet>` output target React. React Code Connect
   exists but has fewer features.
 - **Make Resources**: The Make project outputs React components directly.
   Using React eliminates the translation step entirely — components can be
@@ -313,10 +313,10 @@ The following rules must be added to CLAUDE.md for all Figma-driven work:
 
 The monolithic `use-app-state.ts` hook decomposes into two categories:
 
-| Category | Owner | Examples |
-| ---------- | ------- | --------- |
-| **Server state** (REST) | TanStack Query | Thread list, team presets, team status, thread snapshots |
-| **Client + real-time state** (WS) | Zustand | Stream events (chunk accumulation), tab system, theme, sidebar, inspector, permission queue, WS connection state |
+| Category                          | Owner          | Examples                                                                                                         |
+| --------------------------------- | -------------- | ---------------------------------------------------------------------------------------------------------------- |
+| **Server state** (REST)           | TanStack Query | Thread list, team presets, team status, thread snapshots                                                         |
+| **Client + real-time state** (WS) | Zustand        | Stream events (chunk accumulation), tab system, theme, sidebar, inspector, permission queue, WS connection state |
 
 The boundary is clean: TanStack Query caches REST responses and manages
 mutations; Zustand holds the real-time event stream and all UI state.
@@ -389,19 +389,19 @@ code that uses them.
 
 ### Phase 4: Cleanup
 
-- Remove SvelteKit 5 codebase (`src/ui/` Svelte files, stores, routes)
-- Remove Svelte-specific dependencies (shadcn-svelte, bits-ui, melt-ui,
-  @humanspeak/svelte-markdown, etc.)
-- Remove `svelte` MCP server from `.mcp.json`
+- Remove React 5 codebase (`src/ui/` React files, stores, routes)
+- Remove React-specific dependencies (shadcn-React, bits-ui, melt-ui,
+  @humanspeak/React-markdown, etc.)
+- Remove `React` MCP server from `.mcp.json`
 - Update ADR-007 deployment section (static SPA build remains the same
-  pattern, just React instead of SvelteKit)
+  pattern, just React instead of React)
 - Update ADR-011 TypeScript type generation (still via openapi-typescript,
-  consumed by React instead of Svelte stores)
+  consumed by React instead of React stores)
 
 ## 6. Rejected Alternatives
 
-- **Keep SvelteKit + translate from Figma**: Rejected. The translation
-  layer is the core problem. Every Figma iteration requires manual Svelte
+- **Keep React + translate from Figma**: Rejected. The translation
+  layer is the core problem. Every Figma iteration requires manual React
   conversion, creating permanent drift and slowing velocity.
 - **Next.js / Remix**: Rejected. The deployment model (ADR-007) requires
   a static SPA bundled into a Python package. Server-side rendering is
@@ -417,36 +417,36 @@ code that uses them.
 
 ## 7. Negative Consequences
 
-- **Migration effort**: The existing SvelteKit frontend represents
+- **Migration effort**: The existing React frontend represents
   significant work (23 component files, 7 stores, full layout system).
   This work is not wasted — the component architecture and backend
-  integration patterns carry over — but the Svelte-specific code must be
+  integration patterns carry over — but the React-specific code must be
   rewritten.
-- **Svelte expertise**: Any team Svelte expertise becomes less relevant
+- **React expertise**: Any team React expertise becomes less relevant
   for this project.
 - **React bundle size**: React's runtime (~40KB gzipped) is larger than
-  Svelte's compiled output. Acceptable for a developer tool SPA.
-- **Two UI frameworks temporarily**: During migration, both Svelte and
-  React code will coexist. The Svelte code is frozen (no new work) but
+  React's compiled output. Acceptable for a developer tool SPA.
+- **Two UI frameworks temporarily**: During migration, both React and
+  React code will coexist. The React code is frozen (no new work) but
   remains until React reaches parity.
 
 ## 8. Rate Limits
 
 Figma MCP server tool calls are rate-limited:
 
-| Plan | Seat | Daily Limit | Per-Minute |
-| ------ | ------ | ------------- | ------------ |
-| Enterprise | Full/Dev | 600/day | 20/min |
-| Organization/Pro | Full/Dev | 200/day | 15/min |
-| Starter | Any | 6/month | — |
+| Plan             | Seat     | Daily Limit | Per-Minute |
+| ---------------- | -------- | ----------- | ---------- |
+| Enterprise       | Full/Dev | 600/day     | 20/min     |
+| Organization/Pro | Full/Dev | 200/day     | 15/min     |
+| Starter          | Any      | 6/month     | —          |
 
 Exempt tools (no rate limit): `add_code_connect_map`,
 `generate_figma_design`, `whoami`.
 
 ## 9. Environment Variables
 
-| Variable | Purpose |
-| ---------- | --------- |
+| Variable             | Purpose                                                                                                                   |
+| -------------------- | ------------------------------------------------------------------------------------------------------------------------- |
 | `FIGMA_ACCESS_TOKEN` | Authenticates Code Connect CLI and MCP tools. Stored in `.env`. Requires Code Connect: Write + File content: Read scopes. |
 
 ## 10. References

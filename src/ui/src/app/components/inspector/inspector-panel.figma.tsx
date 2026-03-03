@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { InspectorPanel } from './inspector-panel'
+import figma from '@figma/code-connect';
+import { InspectorPanel } from './inspector-panel';
 
 /**
  * Code Connect mapping for InspectorPanel.
@@ -20,27 +20,31 @@ import { InspectorPanel } from './inspector-panel'
  * - isDark?: boolean — for syntax highlighter theme
  * - onOpenDocument?: (doc: ContextDocument) => void
  */
-figma.connect(InspectorPanel, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <InspectorPanel
-      target={{
-        type: 'tool_call',
-        event: {
-          id: 'evt-4',
+figma.connect(
+  InspectorPanel,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <InspectorPanel
+        target={{
           type: 'tool_call',
-          thread_id: 'thread-1',
-          tool_call_id: 'tc-1',
-          tool_name: 'read_file',
-          status: 'completed',
-          tool_kind: 'read',
-          input: 'src/lib/api.py',
-          output: '# content here',
-          agent_id: 'agent-1',
-          agent_name: 'Coder',
-          timestamp: new Date().toISOString(),
-        },
-      }}
-      onClose={() => {}}
-    />
-  ),
-})
+          event: {
+            id: 'evt-4',
+            type: 'tool_call',
+            thread_id: 'thread-1',
+            tool_call_id: 'tc-1',
+            tool_name: 'read_file',
+            status: 'completed',
+            tool_kind: 'read',
+            input: 'src/lib/api.py',
+            output: '# content here',
+            agent_id: 'agent-1',
+            agent_name: 'Coder',
+            timestamp: new Date().toISOString(),
+          },
+        }}
+        onClose={() => {}}
+      />
+    ),
+  },
+);

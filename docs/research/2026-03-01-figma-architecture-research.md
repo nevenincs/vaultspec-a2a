@@ -2,7 +2,7 @@
 date: 2026-03-01
 type: research
 feature: figma-architecture
-description: "Research into Figma design-system architecture and component pipeline."
+description: 'Research into Figma design-system architecture and component pipeline.'
 ---
 
 # Figma Developer Ecosystem: Architecture Research
@@ -25,7 +25,7 @@ codebase bridge), and the **Figma MCP Server** (the AI-agent interface). A
 fifth,
 tangential tool — **Figma Make** — handles AI-driven prototyping but is
 React-only and
-not directly relevant to this SvelteKit project.
+not directly relevant to this React project.
 
 The central insight of the ecosystem: **the design system is the shared source
 of truth**.
@@ -39,15 +39,15 @@ rigour with which tokens and component mappings are maintained upstream.
 
 ### Applicability to VaultSpec
 
-| Surface | Applicability | Key Constraint |
-| --- | --- | --- |
-| Figma Design / Dev Mode | Full | Requires Dev seat on paid plan |
-| Figma REST API | Full (PAT auth) | Variables API requires Enterprise + Full seat |
-| Code Connect CLI | Partial | **Svelte has no native parser** — template/no-parser mode required |
-| Code Connect UI | N/A | GitHub-repo auto-mapping; less precise than CLI for Svelte |
-| Figma MCP Server (desktop) | Full — **already configured** | Requires Figma desktop app running with Dev Mode active |
-| Figma MCP Server (remote) | Partial | OAuth only (no PAT); `get_variable_defs` unavailable |
-| Figma Make | N/A | React-only output |
+| Surface                    | Applicability                 | Key Constraint                                                    |
+| -------------------------- | ----------------------------- | ----------------------------------------------------------------- |
+| Figma Design / Dev Mode    | Full                          | Requires Dev seat on paid plan                                    |
+| Figma REST API             | Full (PAT auth)               | Variables API requires Enterprise + Full seat                     |
+| Code Connect CLI           | Partial                       | **React has no native parser** — template/no-parser mode required |
+| Code Connect UI            | N/A                           | GitHub-repo auto-mapping; less precise than CLI for React         |
+| Figma MCP Server (desktop) | Full — **already configured** | Requires Figma desktop app running with Dev Mode active           |
+| Figma MCP Server (remote)  | Partial                       | OAuth only (no PAT); `get_variable_defs` unavailable              |
+| Figma Make                 | N/A                           | React-only output                                                 |
 
 ---
 
@@ -92,7 +92,7 @@ rigour with which tokens and component mappings are maintained upstream.
          │  AI AGENT (Claude Code / Cursor / etc.)  │
          │  Receives: design context + tokens +     │
          │            Code Connect component refs   │
-         │  Generates: Svelte/SvelteKit components  │
+         │  Generates: React/React components  │
          └──────────────────────────────────────────┘
 ```
 
@@ -131,7 +131,7 @@ provides:
 - Colors and fills resolved to **variable names** when variables are bound — not
   just
   raw hex values. A designer using`#0066CC`gets`color:
-  var(--color-primary-500)`only
+var(--color-primary-500)`only
   if that color references a Figma Variable with code syntax set.
 - Auto-generated code: CSS, SwiftUI, Jetpack Compose
 - **Code Connect snippets** (when published): replaces auto-generated code with
@@ -208,18 +208,18 @@ https://www.figma.com/design/<fileKey>/Name?node-id=<nodeId>
 
 ### Key Endpoints
 
-| Endpoint | Purpose |
-| --- | --- |
-| `GET /v1/files/:key` | Full file JSON (document tree, components, styles) |
-| `GET /v1/files/:key/nodes?ids=:id` | Specific node subtrees |
-| `GET /v1/images/:key?ids=:id&format=png` | Render nodes as images |
-| `GET /v1/files/:key/images` | URLs for embedded raster assets |
-| `GET /v1/files/:key/variables/local` | All local design tokens |
-| `GET /v1/files/:key/variables/published` | Published (library) tokens |
-| `POST /v1/files/:key/variables` | Create/update/delete tokens |
-| `GET /v1/files/:key/components` | Published components in file |
-| `GET /v1/files/:key/styles` | Published styles |
-| `GET /v1/me` | Authenticated user info |
+| Endpoint                                 | Purpose                                            |
+| ---------------------------------------- | -------------------------------------------------- |
+| `GET /v1/files/:key`                     | Full file JSON (document tree, components, styles) |
+| `GET /v1/files/:key/nodes?ids=:id`       | Specific node subtrees                             |
+| `GET /v1/images/:key?ids=:id&format=png` | Render nodes as images                             |
+| `GET /v1/files/:key/images`              | URLs for embedded raster assets                    |
+| `GET /v1/files/:key/variables/local`     | All local design tokens                            |
+| `GET /v1/files/:key/variables/published` | Published (library) tokens                         |
+| `POST /v1/files/:key/variables`          | Create/update/delete tokens                        |
+| `GET /v1/files/:key/components`          | Published components in file                       |
+| `GET /v1/files/:key/styles`              | Published styles                                   |
+| `GET /v1/me`                             | Authenticated user info                            |
 
 ### Variables API (Design Tokens)
 
@@ -229,7 +229,7 @@ The Variables API maps directly onto the design token concept:
 - A **VariableCollection** groups variables with **modes** (e.g., light / dark)
 - Variables can hold: `COLOR`, `FLOAT`(spacing, sizing,
   radius),`STRING`(typography),
- `BOOLEAN`
+  `BOOLEAN`
 
 **Requirements:** Enterprise plan + Full seat + `file_variables:read` scope on
 PAT.
@@ -291,21 +291,20 @@ npx figma connect publish --token $FIGMA_ACCESS_TOKEN
 
 #### Code Connect UI (the auto-mapping path)
 
-Browser-based, GitHub-repo connected, AI-generated suggestions. Introduced in
-2025.
+Browser-based, GitHub-repo connected, AI-generated suggestions. Introduced in 2025.
 Less precise than CLI. Not the recommended path for a design system with
 non-React
 framework.
 
 ### CLI Commands
 
-| Command | Description |
-| --- | --- |
-| `figma connect` | Interactive wizard — detects components, suggests mappings |
-| `figma connect publish` | Uploads all mapping files to Figma |
-| `figma connect unpublish` | Removes published connections |
-| `figma connect create <url>` | Generates boilerplate for a specific node URL |
-| `figma connect parse` | Outputs parsed JSON to stdout (dry-run inspection) |
+| Command                      | Description                                                |
+| ---------------------------- | ---------------------------------------------------------- |
+| `figma connect`              | Interactive wizard — detects components, suggests mappings |
+| `figma connect publish`      | Uploads all mapping files to Figma                         |
+| `figma connect unpublish`    | Removes published connections                              |
+| `figma connect create <url>` | Generates boilerplate for a specific node URL              |
+| `figma connect parse`        | Outputs parsed JSON to stdout (dry-run inspection)         |
 
 ### `figma.config.json`
 
@@ -316,7 +315,7 @@ Placed at project root:
   "codeConnect": {
     "include": ["src/**/*.figma.js"],
     "exclude": ["test/**", "build/**"],
-    "label": "Svelte",
+    "label": "React",
     "language": "html",
     "documentUrlSubstitutions": {
       "https://www.figma.com/design/STAGING_FILE": "https://www.figma.com/design/PROD_FILE"
@@ -327,53 +326,53 @@ Placed at project root:
 
 ### Framework Support and File Formats
 
-| Framework | Parser | File extension | Import |
-| --- | --- | --- | --- |
-| React | `react`(native) | `.figma.tsx` | `@figma/code-connect` |
-| HTML / Web Components | `html`(native) | `.figma.ts` | `@figma/code-connect/html` |
-| Angular | `html`(auto-detect) | `.figma.ts` | `@figma/code-connect/html` |
-| Vue | `html`(auto-detect) | `.figma.ts` | `@figma/code-connect/html` |
-| **Svelte** | **No native parser** | `.figma.js` | Template API |
-| SwiftUI | `swift` | `.figma.swift` | Swift package |
-| Jetpack Compose | `compose` | `.figma.kt` | Gradle plugin |
-| Storybook | `react`(stories) | `.stories.tsx` | `@figma/code-connect` |
+| Framework             | Parser               | File extension | Import                     |
+| --------------------- | -------------------- | -------------- | -------------------------- |
+| React                 | `react`(native)      | `.figma.tsx`   | `@figma/code-connect`      |
+| HTML / Web Components | `html`(native)       | `.figma.ts`    | `@figma/code-connect/html` |
+| Angular               | `html`(auto-detect)  | `.figma.ts`    | `@figma/code-connect/html` |
+| Vue                   | `html`(auto-detect)  | `.figma.ts`    | `@figma/code-connect/html` |
+| **React**             | **No native parser** | `.figma.js`    | Template API               |
+| SwiftUI               | `swift`              | `.figma.swift` | Swift package              |
+| Jetpack Compose       | `compose`            | `.figma.kt`    | Gradle plugin              |
+| Storybook             | `react`(stories)     | `.stories.tsx` | `@figma/code-connect`      |
 
-### Svelte: Template / No-Parser Mode
+### React: Template / No-Parser Mode
 
-Svelte requires the no-parser (template file) approach. The mapping file is a
+React requires the no-parser (template file) approach. The mapping file is a
 plain
 `.js` file with metadata comments:
 
 ```js
 // Button.figma.js
 // @url https://www.figma.com/design/FILE_ID/Name?node-id=X%3AY
-// @source src/lib/components/ui/button/button.svelte
+// @source src/lib/components/ui/button/button.React
 // @component Button
 
 export default {
   imports: ['import { Button } from "$lib/components/ui/button"'],
   example: (figma) => {
     const variant = figma.selectedInstance.getEnum('Variant', {
-      Default:     'default',
-      Secondary:   'secondary',
+      Default: 'default',
+      Secondary: 'secondary',
       Destructive: 'destructive',
-      Outline:     'outline',
-      Ghost:       'ghost',
-    })
+      Outline: 'outline',
+      Ghost: 'ghost',
+    });
     const size = figma.selectedInstance.getEnum('Size', {
       Default: 'default',
-      Small:   'sm',
-      Large:   'lg',
-      Icon:    'icon',
-    })
-    const label = figma.selectedInstance.getString('Label')
-    const disabled = figma.selectedInstance.getBoolean('Disabled')
+      Small: 'sm',
+      Large: 'lg',
+      Icon: 'icon',
+    });
+    const label = figma.selectedInstance.getString('Label');
+    const disabled = figma.selectedInstance.getBoolean('Disabled');
 
     return figma.code`<Button variant="${variant}" size="${size}" ${disabled ? 'disabled' : ''}>
   ${label}
-</Button>`
+</Button>`;
   },
-}
+};
 ```
 
 `figma.config.json` for this project:
@@ -382,7 +381,7 @@ export default {
 {
   "codeConnect": {
     "include": ["src/ui/**/*.figma.js"],
-    "label": "Svelte",
+    "label": "React",
     "language": "html"
   }
 }
@@ -393,16 +392,16 @@ export default {
 When using the native React or HTML parsers, a richer type-safe API is
 available:
 
-| Helper | Figma property type | Returns |
-| --- | --- | --- |
-| `figma.string('Prop')` | Text / string property | String value |
-| `figma.boolean('Prop')` | Boolean property | `true`/`false`(or mapped values) |
-| `figma.enum('Prop', map)` | Variant / string enum | Mapped code value |
-| `figma.instance('Prop')` | Instance-swap property | Nested component snippet |
-| `figma.children('Layer')` | Child layer by name | Nested child snippet |
-| `figma.nestedProps('Layer', map)` | Properties of a nested layer | Object of mapped props |
-| `figma.textContent('Layer')` | Text content of a named layer | String |
-| `figma.className(arr)` | — | CSS class string (filters undefined) |
+| Helper                            | Figma property type           | Returns                              |
+| --------------------------------- | ----------------------------- | ------------------------------------ |
+| `figma.string('Prop')`            | Text / string property        | String value                         |
+| `figma.boolean('Prop')`           | Boolean property              | `true`/`false`(or mapped values)     |
+| `figma.enum('Prop', map)`         | Variant / string enum         | Mapped code value                    |
+| `figma.instance('Prop')`          | Instance-swap property        | Nested component snippet             |
+| `figma.children('Layer')`         | Child layer by name           | Nested child snippet                 |
+| `figma.nestedProps('Layer', map)` | Properties of a nested layer  | Object of mapped props               |
+| `figma.textContent('Layer')`      | Text content of a named layer | String                               |
+| `figma.className(arr)`            | —                             | CSS class string (filters undefined) |
 
 ### Variant Restrictions
 
@@ -416,7 +415,7 @@ figma.connect(DangerButton,  URL, { variant: { Type: 'Danger'  }, example: ... }
 ### How Code Connect Appears in Dev Mode and MCP
 
 In Dev Mode: the Code snippet panel shows the real component code, replacing
-auto-generated approximations. Multiple `label`tabs coexist (e.g., "Svelte",
+auto-generated approximations. Multiple `label`tabs coexist (e.g., "React",
 "React").
 
 In MCP`get_design_context`response:`<CodeConnectSnippet>`wrappers are injected
@@ -440,15 +439,15 @@ Connect component references.
 
 ### Two Deployment Modes
 
-| | Desktop Server | Remote Server |
-| --- | --- | --- |
-| **Endpoint** | `http://127.0.0.1:3845/mcp` | `https://mcp.figma.com/mcp` |
-| **Auth** | None (localhost trust) | OAuth 2.0 only (no PAT) |
-| **Requires** | Figma desktop app + Dev Mode enabled | Any browser |
-| **Selection** | From current desktop selection | From fileKey + nodeId params |
-| **`get_variable_defs`** | ✅ Available | ❌ Not available |
-| **`get_code_connect_map`** | ✅ Works without publishing | ⚠️ Requires library publish |
-| **Asset server** | `localhost:3845/assets/*` | CDN URLs |
+|                            | Desktop Server                       | Remote Server                |
+| -------------------------- | ------------------------------------ | ---------------------------- |
+| **Endpoint**               | `http://127.0.0.1:3845/mcp`          | `https://mcp.figma.com/mcp`  |
+| **Auth**                   | None (localhost trust)               | OAuth 2.0 only (no PAT)      |
+| **Requires**               | Figma desktop app + Dev Mode enabled | Any browser                  |
+| **Selection**              | From current desktop selection       | From fileKey + nodeId params |
+| **`get_variable_defs`**    | ✅ Available                         | ❌ Not available             |
+| **`get_code_connect_map`** | ✅ Works without publishing          | ⚠️ Requires library publish  |
+| **Asset server**           | `localhost:3845/assets/*`            | CDN URLs                     |
 
 **This project uses the desktop server** (`127.0.0.1:3845/mcp`), already
 declared in
@@ -499,15 +498,15 @@ Captures an image of the current selection. Use for:
 - Designs containing imagery the node tree cannot describe (maps, video embeds)
 - Final check before committing generated code
 
-#### `get_variable_defs` *(desktop only)*
+#### `get_variable_defs` _(desktop only)_
 
 Returns all variables and styles used in the selected nodes:
 
 ```json
 {
   "--color-primary-500": { "light": "#0066CC", "dark": "#3399FF" },
-  "--spacing-4":         { "value": "16px" },
-  "--radius-md":         { "value": "6px" }
+  "--spacing-4": { "value": "16px" },
+  "--radius-md": { "value": "6px" }
 }
 ```
 
@@ -522,11 +521,11 @@ Returns the mapping from Figma node IDs to codebase component paths:
 ```json
 {
   "1:234": {
-    "codeConnectSrc":  "src/lib/components/ui/button/button.svelte",
+    "codeConnectSrc": "src/lib/components/ui/button/button.React",
     "codeConnectName": "Button"
   },
   "1:567": {
-    "codeConnectSrc":  "src/lib/components/ui/card/card.svelte",
+    "codeConnectSrc": "src/lib/components/ui/card/card.React",
     "codeConnectName": "Card"
   }
 }
@@ -582,11 +581,11 @@ session.
 
 ### Rate Limits
 
-| Seat type | Limit |
-| --- | --- |
-| Starter / View-Collab | 6 tool calls/month (remote) |
-| Dev / Full seat on paid plan | REST API Tier 1 per-minute limits |
-| Desktop server | No MCP-level limit (desktop app session) |
+| Seat type                    | Limit                                    |
+| ---------------------------- | ---------------------------------------- |
+| Starter / View-Collab        | 6 tool calls/month (remote)              |
+| Dev / Full seat on paid plan | REST API Tier 1 per-minute limits        |
+| Desktop server               | No MCP-level limit (desktop app session) |
 
 ### Relationship to Figma REST API
 
@@ -639,14 +638,14 @@ ones. Setup:
 
 ### Applicability to VaultSpec (2)
 
-**Figma Make is React-only.** This project's frontend is SvelteKit. Make kits
+**Figma Make is React-only.** This project's frontend is React. Make kits
 only
 support React npm packages. Figma Make is therefore **not applicable** to this
 project.
 
 Make may be useful for designer/PM rapid prototyping (exploring UI concepts
 quickly)
-but its output cannot be directly integrated into the SvelteKit codebase.
+but its output cannot be directly integrated into the React codebase.
 
 ---
 
@@ -680,7 +679,7 @@ but its output cannot be directly integrated into the SvelteKit codebase.
                          ┌──────────────────────────────────────────┐
                          │  Dev Mode (developer handoff)            │
                          │  - Inspect: token-precise CSS            │
-                         │  - Code panel: real Svelte snippet       │
+                         │  - Code panel: real React snippet       │
                          │  - Asset download                        │
                          └────────────────┬─────────────────────────┘
                                           │
@@ -693,7 +692,7 @@ but its output cannot be directly integrated into the SvelteKit codebase.
                          │  │ get_variable_defs                │   │
                          │  │  → token names + values          │   │
                          │  │ get_code_connect_map             │   │
-                         │  │  → nodeId → .svelte file path    │   │
+                         │  │  → nodeId → .React file path    │   │
                          │  │ get_screenshot                   │   │
                          │  └──────────────────────────────────┘   │
                          └────────────────┬─────────────────────────┘
@@ -703,8 +702,8 @@ but its output cannot be directly integrated into the SvelteKit codebase.
                          │  Claude Code (AI agent in IDE)           │
                          │  - Receives: design context, tokens,     │
                          │    Code Connect component refs           │
-                         │  - Generates: SvelteKit components       │
-                         │    using shadcn-svelte primitives        │
+                         │  - Generates: React components       │
+                         │    using shadcn-React primitives        │
                          │    with Tailwind token classes           │
                          └──────────────────────────────────────────┘
 ```
@@ -716,14 +715,14 @@ The project CLAUDE.md already mandates this exact pipeline:
 ```text
 Figma (get_design_context)
   → shadcn-ui (list/get components)
-  → Svelte MCP (verify Svelte 5 syntax)
+  → React MCP (verify React 5 syntax)
   → implement
   → browser verification (Playwright/Chrome DevTools)
 ```
 
 Code Connect is the missing piece that elevates step 1 from "approximate layout
 from
-raw node data" to "receive real shadcn-svelte component references with Tailwind
+raw node data" to "receive real shadcn-React component references with Tailwind
 token
 names".
 
@@ -733,24 +732,24 @@ names".
 
 ### Plan Requirements
 
-| Feature | Min Plan |
-| --- | --- |
-| Dev Mode access | Paid (Full or Dev seat) |
-| Code Connect CLI publish | **Organization or Enterprise** |
-| Code Connect UI | Organization or Enterprise |
-| Variables API (REST) | **Enterprise + Full seat** |
-| MCP desktop server | Any paid (Full or Dev seat) |
-| MCP remote server | Any paid (6 calls/month on Starter) |
-| `DEV_MODE_STATUS_UPDATE`webhook | Organization or Enterprise |
+| Feature                         | Min Plan                            |
+| ------------------------------- | ----------------------------------- |
+| Dev Mode access                 | Paid (Full or Dev seat)             |
+| Code Connect CLI publish        | **Organization or Enterprise**      |
+| Code Connect UI                 | Organization or Enterprise          |
+| Variables API (REST)            | **Enterprise + Full seat**          |
+| MCP desktop server              | Any paid (Full or Dev seat)         |
+| MCP remote server               | Any paid (6 calls/month on Starter) |
+| `DEV_MODE_STATUS_UPDATE`webhook | Organization or Enterprise          |
 
-### Svelte-Specific Constraints
+### React-Specific Constraints
 
-1. **No native Code Connect parser for Svelte.** Use`.figma.js` template files
+1. **No native Code Connect parser for React.** Use`.figma.js` template files
    with the
    no-parser API (`figma.selectedInstance.getEnum(...)`, `figma.code\`...\``).
 2. **`"language": "html"`in config** — Code Connect will syntax-highlight the
    snippet
-   as HTML. This is the closest available option; Svelte is not a language
+   as HTML. This is the closest available option; React is not a language
    option.
 3. **Storybook integration is React-only.** Not applicable.
 4. **Make is React-only.** Not applicable.
@@ -758,10 +757,8 @@ names".
 ### MCP Desktop Server Constraints
 
 1. Figma desktop app must be running with a file open in Dev Mode.
-2. Port 3845 must be free.
-3.`get_variable_defs`only works on the desktop server, not the remote server.
-4.`get_code_connect_map`returns`{}` on the remote server unless the component
-library
+2. Port 3845 must be free. 3.`get_variable_defs`only works on the desktop server, not the remote server. 4.`get_code_connect_map`returns`{}` on the remote server unless the component
+   library
    is published in Figma.
 3. Code Connect mapping files must be published (`figma connect publish`) before
    the MCP
@@ -772,9 +769,7 @@ library
 Code Connect files are **not executed at runtime.** The`example`function body is
 parsed as an AST and treated as a string template:
 
-- Ternaries and conditionals output verbatim (not resolved)
--`Array.map()`calls inside`example`do not execute
--`figma.*` helper calls **do resolve** against live Figma property values
+- Ternaries and conditionals output verbatim (not resolved) -`Array.map()`calls inside`example`do not execute -`figma.*` helper calls **do resolve** against live Figma property values
 - The file is safe to import — it has no runtime behaviour
 
 ### Rate Limits (2)
@@ -798,9 +793,9 @@ tiers.
   Mode](https://developers.figma.com/docs/code-connect/no-parser/)
 - [Figma MCP Server Docs](https://developers.figma.com/docs/figma-mcp-server/)
 - [MCP Server Tools
-Reference](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/)
+  Reference](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/)
 - [MCP Desktop Server
-Installation](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/)
+  Installation](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/)
 - [REST API File
   Endpoints](https://developers.figma.com/docs/rest-api/file-endpoints/)
 - [REST API Variables

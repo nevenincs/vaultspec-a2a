@@ -25,7 +25,7 @@ related:
 The A2A Orchestrator bridges the A2A protocol, MCP, and now serves as a
 host for a native **LangGraph** execution engine. To prevent architectural
 drift, we require a strictly defined module hierarchy enforcing the
-separation between the execution graphs, the frontend (SvelteKit), and
+separation between the execution graphs, the frontend (React), and
 external protocol bridges.
 
 ## 2. The Decision
@@ -42,7 +42,7 @@ paths begin with `lib.*`.
 ├── lib/                     # Backend Python package (import as lib.*)
 │   └── (see §2.2)
 └── src/
-    └── ui/                  # Frontend SvelteKit project (see §2.3)
+    └── ui/                  # Frontend React project (see §2.3)
 ```
 
 ### 2.2 Backend Module Hierarchy (`lib/`)
@@ -107,31 +107,31 @@ lib/
 
 #### Key Architectural Shifts vs. Subprocess Hierarchy
 
-| Old Module | New approach in LangGraph Core |
-| --- | --- |
-| `core/process_manager.py` | **DELETED.** Subprocesses are dead. Execution is native Python async functions inside LangGraph. |
-| `core/registry.py` | **DELETED.** LangGraph's `checkpointer` manages session thread IDs and state intrinsically. No manual port-mapping registry needed. |
-| `core/permissions.py` | **REFACTORED.** Permissions are managed via LangGraph's native `interrupt_before` node configurations rather than custom blocking queues. |
-| `providers/claude.py` | **REFACTORED.** Subprocess CLI wrappers are dead. Replaced by `factory.py` dispensing `ChatAnthropic` and `ChatOpenAI` instances via LangChain. |
-| `protocols/acp/` | **DELETED.** The "ACP Richness Gap" is solved dynamically by intercepting LangChain tool-callbacks. We no longer need to parse raw ACP strings. |
+| Old Module                | New approach in LangGraph Core                                                                                                                  |
+| ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------- |
+| `core/process_manager.py` | **DELETED.** Subprocesses are dead. Execution is native Python async functions inside LangGraph.                                                |
+| `core/registry.py`        | **DELETED.** LangGraph's `checkpointer` manages session thread IDs and state intrinsically. No manual port-mapping registry needed.             |
+| `core/permissions.py`     | **REFACTORED.** Permissions are managed via LangGraph's native `interrupt_before` node configurations rather than custom blocking queues.       |
+| `providers/claude.py`     | **REFACTORED.** Subprocess CLI wrappers are dead. Replaced by `factory.py` dispensing `ChatAnthropic` and `ChatOpenAI` instances via LangChain. |
+| `protocols/acp/`          | **DELETED.** The "ACP Richness Gap" is solved dynamically by intercepting LangChain tool-callbacks. We no longer need to parse raw ACP strings. |
 
 ### 2.3 Frontend Module Hierarchy (`src/ui/`)
 
-Standard SvelteKit structure optimized for high-frequency streams.
+Standard React structure optimized for high-frequency streams.
 
 ```text
 ui/src/lib/
 ├── components/              # ADR-005 components
 │   ├── code_viewer/         # CodeMirror 6 (read-only artifact inspector)
 │   ├── diff/                # diff2html renderer
-│   ├── markdown/            # @humanspeak/svelte-markdown (streaming)
+│   ├── markdown/            # @humanspeak/React-markdown (streaming)
 │   ├── permission/          # Permission request modal (LangGraph interrupt consumer)
 │   ├── shadcn_ui/           # Tailwind v4 primitives
 │   └── terminal/            # WebGL xterm.js with backpressure
-├── stores/                  # Svelte 5 Runes state
-│   ├── agent_state.svelte.ts    # Per-thread status, events, artifacts
-│   ├── team_state.svelte.ts     # Aggregate team status
-│   └── permission_queue.svelte.ts # Serialized user prompts
+├── stores/                  # React 5 Runes state
+│   ├── agent_state.React.ts    # Per-thread status, events, artifacts
+│   ├── team_state.React.ts     # Aggregate team status
+│   └── permission_queue.React.ts # Serialized user prompts
 └── api/                     # Data fetching
     ├── websocket.ts         # Backpressure-aware multiplexed client
     └── rest.ts              # Terminal replay buffer & snapshot fetchers
@@ -175,7 +175,7 @@ patches, stubs, or skips.
    act as a facade.
 3. **Strict `__all__` Mandate**: Every sub-sub-module must define a `__all__`
    list.
-4. **Relative Internal Imports**: All imports *within* the `lib/` package
+4. **Relative Internal Imports**: All imports _within_ the `lib/` package
    must use relative import syntax (e.g., `from ..api import schemas`).
 
 ## 6. References

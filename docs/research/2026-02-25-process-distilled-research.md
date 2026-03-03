@@ -1,8 +1,8 @@
 ---
-name: "Process Domain - Distilled"
+name: 'Process Domain - Distilled'
 date: 2026-25-02
 type: distilled
-summary: "Consolidated process lifecycle management: Windows subprocess patterns, graceful shutdown sequences, state machine design, health checks, restart policies, permission management, and monitoring architecture."
+summary: 'Consolidated process lifecycle management: Windows subprocess patterns, graceful shutdown sequences, state machine design, health checks, restart policies, permission management, and monitoring architecture.'
 maturity: 40
 sources:
   - docs/process/2026-25-02-agent-process-lifecycle-research.md
@@ -14,7 +14,7 @@ feature: process-distilled
 
 > [!WARNING]
 > **PARTIAL DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
-> The *orchestration-level* process management strategies (spawning independent
+> The _orchestration-level_ process management strategies (spawning independent
 > agent processes, pywin32 Job Objects for the orchestrator, CTRL_BREAK_EVENT
 > signalling) have been superseded by native LangGraph coroutines running within
 > the Uvicorn event loop.
@@ -86,13 +86,13 @@ to enable `CTRL_BREAK_EVENT`delivery.
 
 ### 1.4 Windows Process Termination Methods
 
-| Method | Graceful? | Kills children? |
-| -------- | ----------- | ----------------- |
-| `os.kill(pid, signal.CTRL_BREAK_EVENT)` | Yes | No |
-| `os.kill(pid, signal.CTRL_C_EVENT)` | Yes | Yes (group) — but affects parent |
-| `process.terminate()` | No | No |
-| `taskkill /T /F /PID {pid}` | No | Yes |
-| `psutil.Process(pid).children() + kill()` | No | Yes (manual) |
+| Method                                    | Graceful? | Kills children?                  |
+| ----------------------------------------- | --------- | -------------------------------- |
+| `os.kill(pid, signal.CTRL_BREAK_EVENT)`   | Yes       | No                               |
+| `os.kill(pid, signal.CTRL_C_EVENT)`       | Yes       | Yes (group) — but affects parent |
+| `process.terminate()`                     | No        | No                               |
+| `taskkill /T /F /PID {pid}`               | No        | Yes                              |
+| `psutil.Process(pid).children() + kill()` | No        | Yes (manual)                     |
 
 Use`psutil` for reliable process tree management (`children(recursive=True)`).
 
@@ -201,18 +201,18 @@ CREATED ──→ STARTING ──→ READY ──→ RUNNING                    
 
 ### 2.1 State Definitions
 
-| State | Description | Transitions |
-| ------- | ------------- | ------------- |
-| CREATED | Definition loaded, not started | → STARTING |
-| STARTING | Process launched, awaiting port ready | → READY, → BACKOFF |
-| READY | Port listening, agent card accessible | → RUNNING |
-| RUNNING | Fully operational, accepting tasks | → DRAINING, → STOPPING, → EXITED |
-| DRAINING | Finishing in-flight tasks, rejecting new | → STOPPING |
-| STOPPING | Shutdown signal sent, awaiting exit | → STOPPED |
-| STOPPED | Clean exit, not running | → STARTING |
-| EXITED | Unexpected process exit | → BACKOFF, → STOPPED |
-| BACKOFF | Waiting before retry | → STARTING, → FATAL |
-| FATAL | Cannot start, manual intervention needed | → STARTING (manual only) |
+| State    | Description                              | Transitions                      |
+| -------- | ---------------------------------------- | -------------------------------- |
+| CREATED  | Definition loaded, not started           | → STARTING                       |
+| STARTING | Process launched, awaiting port ready    | → READY, → BACKOFF               |
+| READY    | Port listening, agent card accessible    | → RUNNING                        |
+| RUNNING  | Fully operational, accepting tasks       | → DRAINING, → STOPPING, → EXITED |
+| DRAINING | Finishing in-flight tasks, rejecting new | → STOPPING                       |
+| STOPPING | Shutdown signal sent, awaiting exit      | → STOPPED                        |
+| STOPPED  | Clean exit, not running                  | → STARTING                       |
+| EXITED   | Unexpected process exit                  | → BACKOFF, → STOPPED             |
+| BACKOFF  | Waiting before retry                     | → STARTING, → FATAL              |
+| FATAL    | Cannot start, manual intervention needed | → STARTING (manual only)         |
 
 ### 2.2 Restart Policies
 
@@ -225,12 +225,12 @@ stable_threshold: 30s uptime resets retry counter
 
 ### 2.3 Health Check Layers
 
-| Layer | Check | Frequency | Detects |
-| ------- | ------- | ----------- | --------- |
-| 1 | `process.returncode is None` | 1s | Process crash |
-| 2 | TCP connect to agent port | 5s (100ms at startup) | Port unreachable |
-| 3 | HTTP GET`/.well-known/agent.json` | 10s | App not loaded |
-| 4 | Task success/failure ratio (sliding window) | Continuous | "Running but broken" |
+| Layer | Check                                       | Frequency             | Detects              |
+| ----- | ------------------------------------------- | --------------------- | -------------------- |
+| 1     | `process.returncode is None`                | 1s                    | Process crash        |
+| 2     | TCP connect to agent port                   | 5s (100ms at startup) | Port unreachable     |
+| 3     | HTTP GET`/.well-known/agent.json`           | 10s                   | App not loaded       |
+| 4     | Task success/failure ratio (sliding window) | Continuous            | "Running but broken" |
 
 Layer 4 feeds the circuit breaker (3 failures → OPEN → 15s cooldown →
 HALF-OPEN → test one request).
@@ -266,8 +266,7 @@ startup (LLM context loading).
 ### 3.3 Hot-Swap Constraints
 
 - Tasks in `WORKING`state are **lost** unless persistent task store is used
-- SSE streams break on agent replacement (clients must reconnect)
--`INPUT_REQUIRED`tasks lose dialogue context
+- SSE streams break on agent replacement (clients must reconnect) -`INPUT_REQUIRED`tasks lose dialogue context
 - Safe swap only when no tasks are in-flight (drain first)
 
 ---
@@ -293,13 +292,13 @@ effect immediately — no agent restart needed.
 
 ### 4.2 Permission Granularity
 
-| Level | Description | v1 Priority |
-| ------- | ------------- | ------------- |
-| Per-agent permission mode | default, acceptEdits, plan, bypassPermissions | Must have |
-| Per-tool allow/deny | Toggle per tool name | Must have |
-| Per-directory scope | Allowed/blocked working directories | Must have |
-| Per-tool content rules | Regex/glob on tool input | Nice to have |
-| Per-file-operation | Read vs write vs delete | Defer |
+| Level                     | Description                                   | v1 Priority  |
+| ------------------------- | --------------------------------------------- | ------------ |
+| Per-agent permission mode | default, acceptEdits, plan, bypassPermissions | Must have    |
+| Per-tool allow/deny       | Toggle per tool name                          | Must have    |
+| Per-directory scope       | Allowed/blocked working directories           | Must have    |
+| Per-tool content rules    | Regex/glob on tool input                      | Nice to have |
+| Per-file-operation        | Read vs write vs delete                       | Defer        |
 
 ### 4.3 ACP Permission Pattern (Reference)
 
@@ -320,11 +319,11 @@ This is the pattern adopted for our WebSocket permission flow.
 
 Map A2A primitives to observability spans:
 
-| Level | A2A Primitive | Observability Concept |
-| ------- | -------------- | ---------------------- |
-| Trace | `contextId` | The entire multi-agent session |
-| Span | `taskId` | Individual agent's task lifecycle |
-| Event | `TaskStatusUpdateEvent`, `TaskArtifactUpdateEvent` | Granular actions, tool calls |
+| Level | A2A Primitive                                      | Observability Concept             |
+| ----- | -------------------------------------------------- | --------------------------------- |
+| Trace | `contextId`                                        | The entire multi-agent session    |
+| Span  | `taskId`                                           | Individual agent's task lifecycle |
+| Event | `TaskStatusUpdateEvent`, `TaskArtifactUpdateEvent` | Granular actions, tool calls      |
 
 ### 5.2 Real-Time vs Historical
 
@@ -336,13 +335,13 @@ infrastructure.
 
 ### 5.3 Dashboard UX Requirements (from ecosystem survey)
 
-| Requirement | Source | v1 Priority |
-| ------------- | -------- | ------------- |
-| Parallel stream view (agent grid, concurrent updates) | AgentOps, CrewAI | Must have |
-| Interactive permission gate (global actionable queue) | ACP PermissionBroker | Must have |
-| Cost & latency matrix (per-agent token usage) | Langfuse, CrewAI | Defer to v2 |
-| Time-travel inspector (scrub backward through context) | AgentOps | Defer to v2 |
-| Dependency graph (which agent blocks which) | CrewAI | Defer to v2 |
+| Requirement                                            | Source               | v1 Priority |
+| ------------------------------------------------------ | -------------------- | ----------- |
+| Parallel stream view (agent grid, concurrent updates)  | AgentOps, CrewAI     | Must have   |
+| Interactive permission gate (global actionable queue)  | ACP PermissionBroker | Must have   |
+| Cost & latency matrix (per-agent token usage)          | Langfuse, CrewAI     | Defer to v2 |
+| Time-travel inspector (scrub backward through context) | AgentOps             | Defer to v2 |
+| Dependency graph (which agent blocks which)            | CrewAI               | Defer to v2 |
 
 ---
 

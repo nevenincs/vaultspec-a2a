@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: audit
 feature: full-backend-swarm-2
-description: "Second-pass 6-agent swarm audit of all lib/ modules and MCP server producing 54 findings (1 CRITICAL, 12 HIGH, 23 MEDIUM, 18 LOW); critical finding is GraphInterrupt swallowed as crash in aggregator."
+description: 'Second-pass 6-agent swarm audit of all lib/ modules and MCP server producing 54 findings (1 CRITICAL, 12 HIGH, 23 MEDIUM, 18 LOW); critical finding is GraphInterrupt swallowed as crash in aggregator.'
 related:
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
   - docs/adrs/2026-02-26-009-module-hierarchy-adr.md
@@ -24,14 +24,14 @@ regressions, mock/testing mandate enforcement, test meaningfulness.
 
 ## Summary by Module
 
-| Module | CRIT | HIGH | MED | LOW | Total |
-| -------- | ------ | ------ | ----- | ----- | ------- |
-| `lib/core/` | 1 | 4 | 6 | 4 | 15 |
-| `lib/api/` | 0 | 3 | 4 | 5 | 12 |
-| `lib/providers/` | 0 | 2 | 6 | 4 | 12 |
-| `lib/database/`+`lib/protocols/` | 0 | 0 | 4 | 5 | 9 |
-| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 0 | 3 | 5 | 4 | 12 |
-| Cross-cutting test quality | 0 | 5 | 5 | 3 | 13 |
+| Module                                         | CRIT | HIGH | MED | LOW | Total |
+| ---------------------------------------------- | ---- | ---- | --- | --- | ----- |
+| `lib/core/`                                    | 1    | 4    | 6   | 4   | 15    |
+| `lib/api/`                                     | 0    | 3    | 4   | 5   | 12    |
+| `lib/providers/`                               | 0    | 2    | 6   | 4   | 12    |
+| `lib/database/`+`lib/protocols/`               | 0    | 0    | 4   | 5   | 9     |
+| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 0    | 3    | 5   | 4   | 12    |
+| Cross-cutting test quality                     | 0    | 5    | 5   | 3   | 13    |
 
 ---
 
@@ -147,61 +147,61 @@ with`--`is interpreted as a git flag.
 
 ### Core (6)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| M1 | Test`test_compile_unknown_topology_raises` directly mutates a Pydantic model (`team.topology.type = "unknown_topology"`) — fragile if model becomes frozen | `test_graph.py:183` |
-| M2 | `compact_context`inserts a`SystemMessage`as compaction summary — may break models enforcing strict Human/AI alternation | `context.py:108-115` |
-| M3 | `_compile_star`silently skips workers whose`agent_id`is not in`agent_configs`— supervisor with zero routes produces trivially useless graph instead of failing fast | `graph.py:235-244` |
-| M4 | `subscription_count()`returns number of subscribed clients, not total subscriptions — docstring says "active subscriptions across all clients" which is misleading | `aggregator.py:289-291` |
-| M5 | Pipeline_loop with a single node (degenerate case) creates a valid but pointless self-loop graph with no warning | `graph.py:408-412` |
-| M6 | `AgentPermissionsConfig`docstring references "LangGraph interrupt_before" but this was superseded — stale docs will mislead contributors | `team_config.py:78` |
+| ID  | Finding                                                                                                                                                             | Location                |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| M1  | Test`test_compile_unknown_topology_raises` directly mutates a Pydantic model (`team.topology.type = "unknown_topology"`) — fragile if model becomes frozen          | `test_graph.py:183`     |
+| M2  | `compact_context`inserts a`SystemMessage`as compaction summary — may break models enforcing strict Human/AI alternation                                             | `context.py:108-115`    |
+| M3  | `_compile_star`silently skips workers whose`agent_id`is not in`agent_configs`— supervisor with zero routes produces trivially useless graph instead of failing fast | `graph.py:235-244`      |
+| M4  | `subscription_count()`returns number of subscribed clients, not total subscriptions — docstring says "active subscriptions across all clients" which is misleading  | `aggregator.py:289-291` |
+| M5  | Pipeline_loop with a single node (degenerate case) creates a valid but pointless self-loop graph with no warning                                                    | `graph.py:408-412`      |
+| M6  | `AgentPermissionsConfig`docstring references "LangGraph interrupt_before" but this was superseded — stale docs will mislead contributors                            | `team_config.py:78`     |
 
 ### API (4)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| M7 | `test_endpoints.py`bypasses lifespan;`get_checkpointer`and`get_task_group`are not overridden — graph compilation uses`None`checkpointer implicitly | `test_endpoints.py:50-71` |
-| M8 | `AgentSummary`in`events.py`requires`provider: Provider`and`model: Model`as non-optional, but`_AgentStatusEntry`in`rest.py`makes them optional — type mismatch between WS and REST representations | `events.py:111-123`, `rest.py:98-99` |
-| M9 | `websocket.py`imports telemetry unconditionally while`app.py`guards with`try/except ImportError`— inconsistent error handling | `websocket.py:25-26` |
-| M10 | `_handle_ping`is a no-op — client PING receives no response, violating conventional WS keepalive expectations | `websocket.py:359-362` |
+| ID  | Finding                                                                                                                                                                                           | Location                             |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| M7  | `test_endpoints.py`bypasses lifespan;`get_checkpointer`and`get_task_group`are not overridden — graph compilation uses`None`checkpointer implicitly                                                | `test_endpoints.py:50-71`            |
+| M8  | `AgentSummary`in`events.py`requires`provider: Provider`and`model: Model`as non-optional, but`_AgentStatusEntry`in`rest.py`makes them optional — type mismatch between WS and REST representations | `events.py:111-123`, `rest.py:98-99` |
+| M9  | `websocket.py`imports telemetry unconditionally while`app.py`guards with`try/except ImportError`— inconsistent error handling                                                                     | `websocket.py:25-26`                 |
+| M10 | `_handle_ping`is a no-op — client PING receives no response, violating conventional WS keepalive expectations                                                                                     | `websocket.py:359-362`               |
 
 ### Providers (6)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| M11 | `model_copy`for`permission_callback`isolation is in`worker.py`, not `AcpChatModel`— any direct caller of`_astream`bypassing worker node shares the callback | `worker.py:131-141` |
-| M12 | `_on_terminal_create`spawns subprocess without`CREATE_NEW_PROCESS_GROUP`on Windows — grandchildren become orphans when killed | `acp_chat_model.py:800-808` |
-| M13 | `session/request_permission`absent from`_CAPABILITY_REQUIREMENTS`with no comment explaining the intentional exclusion | `acp_chat_model.py:69-77` |
-| M14 | `_on_request_permission`auto-selects`options[0]`in autonomous mode without null-check on malformed option dict | `acp_chat_model.py:650` |
-| M15 | Probe tests use`_FakeWriter`— borderline mock pattern; could use`asyncio.StreamReader/Writer`pipe pairs instead | `probes/tests/test_protocol.py:129-138` |
-| M16 | `gemini_auth`atomic write has no`os.fsync()`before rename — power failure may lose credential data | `gemini_auth.py:149-151` |
+| ID  | Finding                                                                                                                                                     | Location                                |
+| --- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| M11 | `model_copy`for`permission_callback`isolation is in`worker.py`, not `AcpChatModel`— any direct caller of`_astream`bypassing worker node shares the callback | `worker.py:131-141`                     |
+| M12 | `_on_terminal_create`spawns subprocess without`CREATE_NEW_PROCESS_GROUP`on Windows — grandchildren become orphans when killed                               | `acp_chat_model.py:800-808`             |
+| M13 | `session/request_permission`absent from`_CAPABILITY_REQUIREMENTS`with no comment explaining the intentional exclusion                                       | `acp_chat_model.py:69-77`               |
+| M14 | `_on_request_permission`auto-selects`options[0]`in autonomous mode without null-check on malformed option dict                                              | `acp_chat_model.py:650`                 |
+| M15 | Probe tests use`_FakeWriter`— borderline mock pattern; could use`asyncio.StreamReader/Writer`pipe pairs instead                                             | `probes/tests/test_protocol.py:129-138` |
+| M16 | `gemini_auth`atomic write has no`os.fsync()`before rename — power failure may lose credential data                                                          | `gemini_auth.py:149-151`                |
 
 ### Database / Protocols (4)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| M17 | WAL mode never tested against a real file DB —`:memory:`SQLite ignores WAL;`verify_wal_mode()`exists but is never called in any test | `test_database.py:4` |
-| M18 | `ThreadStatus`enum not re-exported from`lib/database/__init__.py`— facade violation (ADR-009 §5.2) | `database/__init__.py` |
-| M19 | `crud.py`imports from sibling`lib/core/exceptions`— cross-module dependency violates ADR-009 §5.1 independence | `crud.py:25` |
-| M20 | `protocols/a2a/`and`protocols/adapter/`are empty stubs with no`__all__`— violates ADR-009 §5.3 mandate | `protocols/a2a/__init__.py` |
+| ID  | Finding                                                                                                                              | Location                    |
+| --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
+| M17 | WAL mode never tested against a real file DB —`:memory:`SQLite ignores WAL;`verify_wal_mode()`exists but is never called in any test | `test_database.py:4`        |
+| M18 | `ThreadStatus`enum not re-exported from`lib/database/__init__.py`— facade violation (ADR-009 §5.2)                                   | `database/__init__.py`      |
+| M19 | `crud.py`imports from sibling`lib/core/exceptions`— cross-module dependency violates ADR-009 §5.1 independence                       | `crud.py:25`                |
+| M20 | `protocols/a2a/`and`protocols/adapter/`are empty stubs with no`__all__`— violates ADR-009 §5.3 mandate                               | `protocols/a2a/__init__.py` |
 
 ### Utils / Telemetry / Workspace (5) — retaining M numbering from original
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| M21 | `resolve_env_vars`inherits all process env vars including secrets — no scrubbing of`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | `environment.py:66` |
-| M22 | `merge_worktree`does not handle detached HEAD —`wt_branch`becomes literal`"HEAD"`causing silent wrong-ref operations | `git_manager.py:328-330` |
-| M23 | `_capture_printer`in tests mutates module-level`_console.file`without thread safety | `test_printer.py:32-45` |
+| ID  | Finding                                                                                                                           | Location                 |
+| --- | --------------------------------------------------------------------------------------------------------------------------------- | ------------------------ |
+| M21 | `resolve_env_vars`inherits all process env vars including secrets — no scrubbing of`ANTHROPIC_API_KEY`, `CLAUDE_CODE_OAUTH_TOKEN` | `environment.py:66`      |
+| M22 | `merge_worktree`does not handle detached HEAD —`wt_branch`becomes literal`"HEAD"`causing silent wrong-ref operations              | `git_manager.py:328-330` |
+| M23 | `_capture_printer`in tests mutates module-level`_console.file`without thread safety                                               | `test_printer.py:32-45`  |
 
 ### Test Quality (5) — from cross-cutting audit
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| T1 | 3 MCP standalone connectivity tests only assert`isinstance(result, str)`— validate nothing about success vs error | `mcp/tests/test_server.py:196-219` |
-| T2 | 2 telemetry span tests only assert`span is not None`— never verify attributes were set | `test_telemetry.py:203, 209` |
-| T3 | `test_messages_field_excluded_from_json_check`calls`json.dumps()`without asserting the result | `test_state.py:162` |
-| T4 | `test_compile_team_graph_accepts_workspace_root`only checks node keys, not that workspace_root was actually threaded through | `test_graph.py:96` |
-| T5 | 10 source modules have zero test coverage (probe launchers:`claude.py`, `openai.py`, `zhipu.py`, `_http.py`; protocol stubs: `a2a/`, `adapter/`; schema bases: `base.py`, `snapshots.py`; DB models directly; instrumentation.py) | Multiple locations |
+| ID  | Finding                                                                                                                                                                                                                           | Location                           |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| T1  | 3 MCP standalone connectivity tests only assert`isinstance(result, str)`— validate nothing about success vs error                                                                                                                 | `mcp/tests/test_server.py:196-219` |
+| T2  | 2 telemetry span tests only assert`span is not None`— never verify attributes were set                                                                                                                                            | `test_telemetry.py:203, 209`       |
+| T3  | `test_messages_field_excluded_from_json_check`calls`json.dumps()`without asserting the result                                                                                                                                     | `test_state.py:162`                |
+| T4  | `test_compile_team_graph_accepts_workspace_root`only checks node keys, not that workspace_root was actually threaded through                                                                                                      | `test_graph.py:96`                 |
+| T5  | 10 source modules have zero test coverage (probe launchers:`claude.py`, `openai.py`, `zhipu.py`, `_http.py`; protocol stubs: `a2a/`, `adapter/`; schema bases: `base.py`, `snapshots.py`; DB models directly; instrumentation.py) | Multiple locations                 |
 
 ---
 
@@ -209,41 +209,41 @@ with`--`is interpreted as a git flag.
 
 ### Core (4) (2)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| L1 | `__init__.py`relies on lazy`__getattr__`for`compile_team_graph`— type checkers flag it as unresolvable | `core/__init__.py:108-121` |
-| L2 | `settings = Settings()`module-level singleton reads env at import time — tests that change env after import don't affect it | `config.py:112` |
-| L3 | `_NICKNAME_PATTERN`docstring says "4-char-hex" suffix but`thread_id[:4]`can be 2 chars | `metadata.py:27, 147` |
-| L4 | `test_first_substring_match_wins`has weak assertion`result["next"] in ("coder", "reviewer")`— masks non-determinism | `test_supervisor.py:184` |
+| ID  | Finding                                                                                                                     | Location                   |
+| --- | --------------------------------------------------------------------------------------------------------------------------- | -------------------------- |
+| L1  | `__init__.py`relies on lazy`__getattr__`for`compile_team_graph`— type checkers flag it as unresolvable                      | `core/__init__.py:108-121` |
+| L2  | `settings = Settings()`module-level singleton reads env at import time — tests that change env after import don't affect it | `config.py:112`            |
+| L3  | `_NICKNAME_PATTERN`docstring says "4-char-hex" suffix but`thread_id[:4]`can be 2 chars                                      | `metadata.py:27, 147`      |
+| L4  | `test_first_substring_match_wins`has weak assertion`result["next"] in ("coder", "reviewer")`— masks non-determinism         | `test_supervisor.py:184`   |
 
 ### API (5)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| L5 | `app.py:main()`uses`settings.host`(good) but ADR-015 §2.3 shows hardcoded`0.0.0.0`— ADR should be updated | `app.py:271-277` |
-| L6 | `lib.api`facade doesn't re-export`ArtifactSnapshot`, `MessageSnapshot`, `ToolCallSnapshot` | `api/__init__.py:19` |
-| L7 | No thread_id format validation in`send_message_endpoint`or`get_thread_state_endpoint` | `endpoints.py:536, 596` |
-| L8 | `test_websocket.py`uses`threading.Thread`+`asyncio.new_event_loop()`— fragile async pattern | `test_websocket.py:140-154` |
-| L9 | ADR-011 §2.5 mandates importable factory functions in`schemas/tests/`— currently private fixtures | `schemas/tests/test_schemas.py` |
+| ID  | Finding                                                                                                   | Location                        |
+| --- | --------------------------------------------------------------------------------------------------------- | ------------------------------- |
+| L5  | `app.py:main()`uses`settings.host`(good) but ADR-015 §2.3 shows hardcoded`0.0.0.0`— ADR should be updated | `app.py:271-277`                |
+| L6  | `lib.api`facade doesn't re-export`ArtifactSnapshot`, `MessageSnapshot`, `ToolCallSnapshot`                | `api/__init__.py:19`            |
+| L7  | No thread_id format validation in`send_message_endpoint`or`get_thread_state_endpoint`                     | `endpoints.py:536, 596`         |
+| L8  | `test_websocket.py`uses`threading.Thread`+`asyncio.new_event_loop()`— fragile async pattern               | `test_websocket.py:140-154`     |
+| L9  | ADR-011 §2.5 mandates importable factory functions in`schemas/tests/`— currently private fixtures         | `schemas/tests/test_schemas.py` |
 
 ### Providers (4)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| L10 | `ProviderFactory.create`truthiness check`if oauth_token`passes empty string`""`to env_vars | `factory.py:80-90` |
-| L11 | `authenticate()`sends token in plain JSON-RPC payload — any future debug logging would expose it | `acp_chat_model.py:1234-1251` |
+| ID  | Finding                                                                                                     | Location                       |
+| --- | ----------------------------------------------------------------------------------------------------------- | ------------------------------ |
+| L10 | `ProviderFactory.create`truthiness check`if oauth_token`passes empty string`""`to env_vars                  | `factory.py:80-90`             |
+| L11 | `authenticate()`sends token in plain JSON-RPC payload — any future debug logging would expose it            | `acp_chat_model.py:1234-1251`  |
 | L12 | Gemini live tests lack`pytest.skip`guard for missing OAuth creds — raises`FileNotFoundError`instead of skip | `test_acp_chat_model.py:63-92` |
-| L13 | `probes/`directory missing`__init__.py`— inconsistent with project pattern | `providers/probes/` |
+| L13 | `probes/`directory missing`__init__.py`— inconsistent with project pattern                                  | `providers/probes/`            |
 
 ### Database / Protocols (5)
 
-| ID | Finding | Location |
-| ---- | --------- | ---------- |
-| L14 | `test_update_thread_status`uses invalid status`"working"`— not a valid`ThreadStatus`enum value | `test_database.py:229` |
-| L15 | MCP`_KNOWN_PRESETS`hardcoded fallback may diverge from actual presets | `mcp/server.py:46-48` |
-| L16 | No test covers the TOCTOU race path for nickname conflicts — only the pre-check branch is exercised | `crud.py:124-131` |
-| L17 | `IntegrityError`nickname detection uses`"nickname" in str(exc).lower()`— fragile string matching | `crud.py:130` |
-| L18 | MCP`get_thread_status`hardcodes`ws://` scheme — wrong for TLS deployments (`https`→`wss`) | `mcp/server.py:148` |
+| ID  | Finding                                                                                             | Location               |
+| --- | --------------------------------------------------------------------------------------------------- | ---------------------- |
+| L14 | `test_update_thread_status`uses invalid status`"working"`— not a valid`ThreadStatus`enum value      | `test_database.py:229` |
+| L15 | MCP`_KNOWN_PRESETS`hardcoded fallback may diverge from actual presets                               | `mcp/server.py:46-48`  |
+| L16 | No test covers the TOCTOU race path for nickname conflicts — only the pre-check branch is exercised | `crud.py:124-131`      |
+| L17 | `IntegrityError`nickname detection uses`"nickname" in str(exc).lower()`— fragile string matching    | `crud.py:130`          |
+| L18 | MCP`get_thread_status`hardcodes`ws://` scheme — wrong for TLS deployments (`https`→`wss`)           | `mcp/server.py:148`    |
 
 ---
 
@@ -251,25 +251,25 @@ with`--`is interpreted as a git flag.
 
 ### Mandate Compliance
 
-| Check | Result |
-| ------- | -------- |
-| No`unittest.mock`imports | **PASS** — zero occurrences across all 28 test files |
-| No`unittest`imports | **PASS** — zero occurrences |
+| Check                                | Result                                                   |
+| ------------------------------------ | -------------------------------------------------------- |
+| No`unittest.mock`imports             | **PASS** — zero occurrences across all 28 test files     |
+| No`unittest`imports                  | **PASS** — zero occurrences                              |
 | No`@patch`/`monkeypatch`(except env) | **PASS** — all`monkeypatch`uses are`setenv`/`delenv`only |
-| No`MagicMock`/`AsyncMock`/`Mock()` | **PASS** — zero occurrences |
-| pytest only | **PASS** — all tests use pytest |
+| No`MagicMock`/`AsyncMock`/`Mock()`   | **PASS** — zero occurrences                              |
+| pytest only                          | **PASS** — all tests use pytest                          |
 
 ### Test Meaningfulness Assessment
 
-| Module | Quality | Notes |
-| -------- | --------- | ------- |
-| `lib/core/tests/` | **Strong** | Worker/supervisor tests exercise real`BaseChatModel`(FakeListChatModel). Aggregator tests comprehensive. Context preservation regression test present. Graph tests improved from prior audit. |
-| `lib/api/tests/` | **Strong** | FastAPI TestClient throughout. Round-trip serialization for all 12 events and 6 commands. Schema fixtures cover all REST models. |
-| `lib/providers/tests/` | **Good** | Live subprocess tests gated behind`@pytest.mark.live`. Protocol tests thorough but use `_FakeWriter`(borderline). |
-| `lib/database/tests/` | **Good** | Real SQLite operations. WAL mode untested on file DB (M17). |
-| `lib/protocols/mcp/tests/` | **Mixed** | App-integrated tests strong; 3 standalone connectivity tests vacuous (T1). |
-| `lib/telemetry/tests/` | **Weak** | Span tests only assert`is not None`. Config tests are documented no-ops due to import-time freezing. |
-| `lib/workspace/tests/` | **Good** | Real git repos via`tmp_path`. Merge conflict tests present but use bare `Exception`instead of domain type. |
+| Module                     | Quality    | Notes                                                                                                                                                                                         |
+| -------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `lib/core/tests/`          | **Strong** | Worker/supervisor tests exercise real`BaseChatModel`(FakeListChatModel). Aggregator tests comprehensive. Context preservation regression test present. Graph tests improved from prior audit. |
+| `lib/api/tests/`           | **Strong** | FastAPI TestClient throughout. Round-trip serialization for all 12 events and 6 commands. Schema fixtures cover all REST models.                                                              |
+| `lib/providers/tests/`     | **Good**   | Live subprocess tests gated behind`@pytest.mark.live`. Protocol tests thorough but use `_FakeWriter`(borderline).                                                                             |
+| `lib/database/tests/`      | **Good**   | Real SQLite operations. WAL mode untested on file DB (M17).                                                                                                                                   |
+| `lib/protocols/mcp/tests/` | **Mixed**  | App-integrated tests strong; 3 standalone connectivity tests vacuous (T1).                                                                                                                    |
+| `lib/telemetry/tests/`     | **Weak**   | Span tests only assert`is not None`. Config tests are documented no-ops due to import-time freezing.                                                                                          |
+| `lib/workspace/tests/`     | **Good**   | Real git repos via`tmp_path`. Merge conflict tests present but use bare `Exception`instead of domain type.                                                                                    |
 
 ---
 

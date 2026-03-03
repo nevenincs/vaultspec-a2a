@@ -4,8 +4,6 @@ node_modules/
 knowledge/repositories/*/
 __pycache__/
 *.pyc
-.svelte-kit/
-build/
 *.db
 *.db-shm
 *.db-wal

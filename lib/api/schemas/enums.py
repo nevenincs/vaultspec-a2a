@@ -2,7 +2,7 @@
 
 These enums define the discriminators and status types used in WebSocket
 messages and REST payloads between the backend orchestrator and the
-SvelteKit control surface.
+React control surface.
 
 Note: ``Provider`` and ``Model`` live in ``lib.utils.enums`` and are
 imported (not duplicated) where needed.

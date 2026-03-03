@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
+
 if TYPE_CHECKING:
     from .state import TeamState
 
@@ -19,7 +20,7 @@ __all__ = ["build_anchoring_context"]
 _ANCHOR_PATH_CAP = 10  # max vault paths per doc-type in the summary
 
 
-def build_anchoring_context(state: "TeamState") -> str | None:
+def build_anchoring_context(state: TeamState) -> str | None:
     """Produce a per-invocation anchoring summary from TeamState.
 
     Returns None when active_feature is None or missing (no feature bound).

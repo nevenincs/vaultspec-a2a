@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: audit
 feature: code-connect
-description: "Initial Code Connect audit of all 27 .figma.tsx mapping files identifying 12 TypeScript errors, 3 type-correctness issues, and 2 figma.config.json problems before fixes."
+description: 'Initial Code Connect audit of all 27 .figma.tsx mapping files identifying 12 TypeScript errors, 3 type-correctness issues, and 2 figma.config.json problems before fixes.'
 related:
   - docs/adrs/2026-02-28-018-react-tailwind-figma-migration-adr.md
   - docs/adrs/2026-03-01-019-figma-developer-workflow-adr.md
@@ -44,12 +44,7 @@ enum validation, and dry-run publish verification.
 
 **Files affected**: 7 files
 
--`message-bubble.figma.tsx`(lines 21, 47)
--`thought-block.figma.tsx`(line 22)
--`tool-call-card.figma.tsx`(line 32)
--`artifact-card.figma.tsx`(line 25)
--`error-alert.figma.tsx`(line 21)
--`inspector-panel.figma.tsx`(line 38)
+-`message-bubble.figma.tsx`(lines 21, 47) -`thought-block.figma.tsx`(line 22) -`tool-call-card.figma.tsx`(line 32) -`artifact-card.figma.tsx`(line 25) -`error-alert.figma.tsx`(line 21) -`inspector-panel.figma.tsx`(line 38)
 
 **Issue**: All event mock objects include`sequence: N` but the TypeScript types
 (`UserMessageEvent`, `AgentMessageEvent`, `ThoughtEvent`, `ToolCallEvent`,
@@ -216,14 +211,12 @@ MCP`get_metadata` tool.
 
 - CVA variants: `default`, `destructive`, `outline`, `secondary`, `ghost`,
   `link`, `terminal`-- **all 7 mapped correctly**
-- CVA sizes:`default`, `sm`, `lg`, `icon`-- **all 4 mapped correctly**
--`figma.boolean('Disabled')`and`figma.string('Label')` are appropriate
+- CVA sizes:`default`, `sm`, `lg`, `icon`-- **all 4 mapped correctly** -`figma.boolean('Disabled')`and`figma.string('Label')` are appropriate
 
 **Badge** (`badge.figma.tsx`vs`badge.tsx`):
 
 - CVA variants: `default`, `secondary`, `destructive`, `outline`-- **all 4
-  mapped correctly**
--`figma.string('Label')`is appropriate
+  mapped correctly** -`figma.string('Label')`is appropriate
 
 ### Component Prop Accuracy (non-event components)
 

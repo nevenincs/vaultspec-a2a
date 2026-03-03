@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: langgraph-reference
-description: "Reference audit of 7 key LangGraph areas against our lib/ implementation identifying 5 critical correctness issues including loop router always-FINISH default and conditional edge routing bugs."
+description: 'Reference audit of 7 key LangGraph areas against our lib/ implementation identifying 5 critical correctness issues including loop router always-FINISH default and conditional edge routing bugs.'
 related:
   - docs/adrs/2026-02-27-013-team-composition-topology-adr.md
   - docs/adrs/2026-02-26-008-orchestration-topology-pipeline-adr.md
@@ -31,7 +31,7 @@ scenarios.
 
 ### Finding: Loop Router Always Defaults to FINISH
 
-**Location:** `lib/core/graph.py:325-336` (_loop_router function)
+**Location:** `lib/core/graph.py:325-336` (\_loop_router function)
 
 ```python
 def _loop_router(state: TeamState) -> str:
@@ -151,19 +151,12 @@ def increment_counter(state: TeamState):
 
 ### Handled Events
 
--`on_chat_model_stream`→ MessageChunkEvent
--`on_tool_start`→ ToolCallStartEvent
--`on_tool_end`→ ToolCallUpdateEvent
--`on_chain_start`/`on_chain_end`→ AgentStatusEvent
--`on_custom_event`→ ThoughtChunkEvent
+-`on_chat_model_stream`→ MessageChunkEvent -`on_tool_start`→ ToolCallStartEvent -`on_tool_end`→ ToolCallUpdateEvent -`on_chain_start`/`on_chain_end`→ AgentStatusEvent -`on_custom_event`→ ThoughtChunkEvent
 
 **Evidence from LangGraph Tests:**
 test_pregel_async.py uses`version="v2"`with events like:
 
--`on_chain_stream`(chunk data during chain execution)
--`on_chat_model_start`/`on_chat_model_end`(boundary events)
--`on_tool_error`(tool failure — NOT handled)
--`on_retriever_start`, `on_retriever_end`, `on_retriever_stream`
+-`on_chain_stream`(chunk data during chain execution) -`on_chat_model_start`/`on_chat_model_end`(boundary events) -`on_tool_error`(tool failure — NOT handled) -`on_retriever_start`, `on_retriever_end`, `on_retriever_stream`
 
 - `on_parser_start`, `on_parser_end`, `on_parser_stream`
 
@@ -286,7 +279,7 @@ No action needed. This pattern is canonical in LangGraph.
 
 ### Finding: Single Resume Value Per Node Execution
 
-**Location:** `lib/core/nodes/worker.py:47-61` (_interrupt_permission_callback)
+**Location:** `lib/core/nodes/worker.py:47-61` (\_interrupt_permission_callback)
 
 ```python
 resume_value = interrupt(
@@ -422,15 +415,15 @@ async def process_langgraph_event(
 
 ## Summary Table
 
-| Issue | Severity | Component | Impact |
-| ------- | ---------- | ----------- | -------- |
-| 1. Loop router defaults to FINISH | CRITICAL | graph.py:_loop_router | Loops never iterate >1x |
-| 2. Counter wrapper runs after interrupt | HIGH | graph.py:_loop_node_with_counter | Incorrect iteration counts |
-| 3. Incomplete v2 event handling | MEDIUM | aggregator.py:process_langgraph_event | Missing tool/retriever observability |
-| 4. No recursion_limit set | MEDIUM | graph.py:compile_team_graph | May hit recursion error at 25 iterations |
-| 5. NotRequired state field | LOW | state.py:TeamState | No issue found |
-| 6. Multiple interrupt resume | LOW | nodes/worker.py | No issue found (pattern correct) |
-| 7. Agent ID attribution | HIGH | aggregator.py:ingest | Events misattributed to wrong agent |
+| Issue                                   | Severity | Component                             | Impact                                   |
+| --------------------------------------- | -------- | ------------------------------------- | ---------------------------------------- |
+| 1. Loop router defaults to FINISH       | CRITICAL | graph.py:\_loop_router                | Loops never iterate >1x                  |
+| 2. Counter wrapper runs after interrupt | HIGH     | graph.py:\_loop_node_with_counter     | Incorrect iteration counts               |
+| 3. Incomplete v2 event handling         | MEDIUM   | aggregator.py:process_langgraph_event | Missing tool/retriever observability     |
+| 4. No recursion_limit set               | MEDIUM   | graph.py:compile_team_graph           | May hit recursion error at 25 iterations |
+| 5. NotRequired state field              | LOW      | state.py:TeamState                    | No issue found                           |
+| 6. Multiple interrupt resume            | LOW      | nodes/worker.py                       | No issue found (pattern correct)         |
+| 7. Agent ID attribution                 | HIGH     | aggregator.py:ingest                  | Events misattributed to wrong agent      |
 
 ---
 
@@ -438,7 +431,7 @@ async def process_langgraph_event(
 
 ### CRITICAL (Fix Immediately)
 
-1. **Fix _loop_router** to check if worker node sets "next" or require explicit
+1. **Fix \_loop_router** to check if worker node sets "next" or require explicit
    routing field from worker
 
 ### HIGH (Fix Before Release)

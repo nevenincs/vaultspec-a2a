@@ -13,7 +13,11 @@ import { NotificationPills } from '../ui/notification-pills';
 import { ShaderBackground } from '../ui/shader-background';
 import { appStore } from '../../store/app-store';
 import { initWsBridge } from '../../bridge/ws-bridge';
-import { useThreadsQuery, useRespondToPermission, useCreateThread } from '../../queries';
+import {
+  useThreadsQuery,
+  useRespondToPermission,
+  useCreateThread,
+} from '../../queries';
 import { useTeamPresetsQuery, useTeamStatusQuery } from '../../queries/use-team';
 import { useThreadStateQuery } from '../../queries/use-thread-state';
 import { wsClient } from '../../api/websocket-client';
@@ -42,7 +46,7 @@ export function AppShell() {
     toggleContextPanel,
   } = useStore(
     appStore,
-    useShallow(s => ({
+    useShallow((s) => ({
       activeTabId: s.activeTabId,
       tabs: s.tabs,
       streamEvents: s.streamEvents,
@@ -64,7 +68,7 @@ export function AppShell() {
     })),
   );
 
-  const connectionState = useStore(appStore, s => s.connectionState);
+  const connectionState = useStore(appStore, (s) => s.connectionState);
 
   // ── TanStack Query hooks ───────────────────────────────────────────────
   const { data: threads = [] } = useThreadsQuery();
@@ -80,8 +84,8 @@ export function AppShell() {
   // ── Derived state ──────────────────────────────────────────────────────
   const activeThread = useMemo(() => {
     if (!activeTabId) return null;
-    if (!tabs.some(t => t.threadId === activeTabId)) return null;
-    return threads.find(t => t.thread_id === activeTabId) || null;
+    if (!tabs.some((t) => t.threadId === activeTabId)) return null;
+    return threads.find((t) => t.thread_id === activeTabId) || null;
   }, [activeTabId, tabs, threads]);
 
   const activeEvents = useMemo(
@@ -89,17 +93,21 @@ export function AppShell() {
     [activeTabId, streamEvents],
   );
 
-  const isDark = themeMode === 'dark' || (themeMode === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+  const isDark =
+    themeMode === 'dark' ||
+    (themeMode === 'system' &&
+      window.matchMedia('(prefers-color-scheme: dark)').matches);
 
   // Per-thread permission requests for the active thread
   const activeThreadPermissions = useMemo(
-    () => activeTabId ? permissionQueue.filter(p => p.thread_id === activeTabId) : [],
+    () =>
+      activeTabId ? permissionQueue.filter((p) => p.thread_id === activeTabId) : [],
     [permissionQueue, activeTabId],
   );
 
   // Set of thread IDs with pending permissions (for sidebar indicators)
   const threadsWithPermissions = useMemo(
-    () => new Set(permissionQueue.map(p => p.thread_id)),
+    () => new Set(permissionQueue.map((p) => p.thread_id)),
     [permissionQueue],
   );
 
@@ -127,26 +135,29 @@ export function AppShell() {
 
   const nextTab = useCallback(() => {
     if (tabs.length === 0) return;
-    const idx = tabs.findIndex(t => t.threadId === activeTabId);
+    const idx = tabs.findIndex((t) => t.threadId === activeTabId);
     const nextIdx = (idx + 1) % tabs.length;
     activateTab(tabs[nextIdx].threadId);
   }, [tabs, activeTabId, activateTab]);
 
   const prevTab = useCallback(() => {
     if (tabs.length === 0) return;
-    const idx = tabs.findIndex(t => t.threadId === activeTabId);
+    const idx = tabs.findIndex((t) => t.threadId === activeTabId);
     const prevIdx = (idx - 1 + tabs.length) % tabs.length;
     activateTab(tabs[prevIdx].threadId);
   }, [tabs, activeTabId, activateTab]);
 
-  const activateTabByIndex = useCallback((index: number) => {
-    if (tabs.length === 0) return;
-    if (index === -1) {
-      activateTab(tabs[tabs.length - 1].threadId);
-    } else if (index < tabs.length) {
-      activateTab(tabs[index].threadId);
-    }
-  }, [tabs, activateTab]);
+  const activateTabByIndex = useCallback(
+    (index: number) => {
+      if (tabs.length === 0) return;
+      if (index === -1) {
+        activateTab(tabs[tabs.length - 1].threadId);
+      } else if (index < tabs.length) {
+        activateTab(tabs[index].threadId);
+      }
+    },
+    [tabs, activateTab],
+  );
 
   const focusSidebarSearch = useCallback(() => {
     sidebarSearchRef.current?.();
@@ -167,17 +178,25 @@ export function AppShell() {
 
   // ── Boot log ──────────────────────────────────────────────────────────
   useEffect(() => {
-    log.info('app.boot', `VaultSpec initialized — ${threads.length} threads, ${agents.length} agents loaded`, undefined, { surface: true, dismissAfter: 3000 });
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    log.info(
+      'app.boot',
+      `VaultSpec initialized — ${threads.length} threads, ${agents.length} agents loaded`,
+      undefined,
+      { surface: true, dismissAfter: 3000 },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const handleSend = useCallback(
-    (message: string, opts?: {
-      preset?: TeamPreset;
-      repo?: string;
-      branch?: string;
-      featureTag?: string;
-    }) => {
+    (
+      message: string,
+      opts?: {
+        preset?: TeamPreset;
+        repo?: string;
+        branch?: string;
+        featureTag?: string;
+      },
+    ) => {
       if (!activeThread) {
         createThreadMutation.mutate({
           message,
@@ -193,7 +212,9 @@ export function AppShell() {
 
   const isEmptyThread = activeThread && activeEvents.length === 0;
   const isNewThread = isEmptyThread || !activeThread;
-  const activeTeam = activeThread ? teamPresets.find(p => p.id === activeThread.team_preset) : null;
+  const activeTeam = activeThread
+    ? teamPresets.find((p) => p.id === activeThread.team_preset)
+    : null;
 
   const handleToggleContext = useCallback(() => {
     toggleContextPanel(contextDocuments);
@@ -212,7 +233,10 @@ export function AppShell() {
 
       const onMouseMove = (ev: MouseEvent) => {
         if (!isResizingInspector.current) return;
-        const newWidth = Math.max(260, Math.min(700, startWidth - (ev.clientX - startX)));
+        const newWidth = Math.max(
+          260,
+          Math.min(700, startWidth - (ev.clientX - startX)),
+        );
         setInspectorWidth(newWidth);
       };
 
@@ -233,9 +257,9 @@ export function AppShell() {
   );
 
   return (
-    <div className="h-screen w-screen flex flex-col bg-background text-foreground overflow-hidden">
+    <div className="bg-background text-foreground flex h-screen w-screen flex-col overflow-hidden">
       <ShaderBackground />
-      <div className="flex-1 flex min-h-0">
+      <div className="flex min-h-0 flex-1">
         {/* Sidebar */}
         <Sidebar
           threads={threads}
@@ -249,7 +273,11 @@ export function AppShell() {
         />
 
         {/* Main Content Area */}
-        <main className="flex-1 flex flex-col min-h-0 min-w-0" role="main" aria-label="Message stream">
+        <main
+          className="flex min-h-0 min-w-0 flex-1 flex-col"
+          role="main"
+          aria-label="Message stream"
+        >
           {/* Tab Bar */}
           <TabBar
             tabs={tabs}
@@ -261,9 +289,9 @@ export function AppShell() {
           />
 
           {/* Stream + Inspector row */}
-          <div className="flex-1 flex min-h-0 min-w-0">
+          <div className="flex min-h-0 min-w-0 flex-1">
             {/* Stream Panel */}
-            <div className="flex-1 flex flex-col min-h-0 min-w-0">
+            <div className="flex min-h-0 min-w-0 flex-1 flex-col">
               {hasActiveTab ? (
                 <>
                   <MessageStream
@@ -299,10 +327,15 @@ export function AppShell() {
               ) : (
                 <>
                   {/* Empty state — no active tab */}
-                  <div className="flex-1 flex items-center justify-center" data-focus-section="stream">
+                  <div
+                    className="flex flex-1 items-center justify-center"
+                    data-focus-section="stream"
+                  >
                     <div className="text-center select-none">
-                      <h2 className="text-[1rem] font-semibold text-foreground/60 mb-1">VaultSpec</h2>
-                      <p className="text-[0.75rem] text-muted-foreground">
+                      <h2 className="text-foreground/60 mb-1 text-[1rem] font-semibold">
+                        VaultSpec
+                      </h2>
+                      <p className="text-muted-foreground text-[0.75rem]">
                         Select a task from the sidebar, or create a new one below.
                       </p>
                     </div>
@@ -326,7 +359,7 @@ export function AppShell() {
             {/* Inspector Panel */}
             {inspectorTarget && (
               <div
-                className="relative shrink-0 h-full"
+                className="relative h-full shrink-0"
                 style={{ width: `${inspectorWidth / 16}rem` }}
                 role="complementary"
                 aria-label="Inspector panel"
@@ -336,7 +369,7 @@ export function AppShell() {
                 <div
                   onMouseDown={handleInspectorMouseDown}
                   tabIndex={0}
-                  className="absolute top-0 left-0 w-1 h-full cursor-col-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-30"
+                  className="hover:bg-primary/30 active:bg-primary/50 absolute top-0 left-0 z-30 h-full w-1 cursor-col-resize transition-colors"
                   role="separator"
                   aria-orientation="vertical"
                   aria-label="Resize inspector panel"

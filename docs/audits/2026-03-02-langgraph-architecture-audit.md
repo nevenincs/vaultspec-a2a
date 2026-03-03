@@ -16,26 +16,27 @@ Where findings from both sources overlap they are marked **⚠ confirmed**.
 
 ## Already Correct — Do Not Change
 
-| Item | Location | Status |
-|---|---|---|
-| `messages` uses `add_messages` reducer | `state.py:101` | ✓ ID-based dedup prevents ghost duplicates on retry |
-| `loop_count` is last-write-wins (no reducer) | `state.py:98` | ✓ Sequential pipeline_loop — no concurrent write race |
-| `interrupt_before=[]` always | `graph.py:186` | ✓ ADR-013 override in force |
-| `model_copy()` per invocation for permission_callback | `worker.py:151` | ✓ Isolates callback reference correctly |
-| `artifacts` uses custom dedup reducer | `state.py:84` | ✓ |
-| Logging added to `worker.py` / `supervisor.py` / `graph.py` | recent | ✓ |
+| Item                                                        | Location        | Status                                                |
+| ----------------------------------------------------------- | --------------- | ----------------------------------------------------- |
+| `messages` uses `add_messages` reducer                      | `state.py:101`  | ✓ ID-based dedup prevents ghost duplicates on retry   |
+| `loop_count` is last-write-wins (no reducer)                | `state.py:98`   | ✓ Sequential pipeline_loop — no concurrent write race |
+| `interrupt_before=[]` always                                | `graph.py:186`  | ✓ ADR-013 override in force                           |
+| `model_copy()` per invocation for permission_callback       | `worker.py:151` | ✓ Isolates callback reference correctly               |
+| `artifacts` uses custom dedup reducer                       | `state.py:84`   | ✓                                                     |
+| Logging added to `worker.py` / `supervisor.py` / `graph.py` | recent          | ✓                                                     |
 
 ---
 
 ## CRITICAL
 
 ### C1 — Supervisor routing failure is silent (no state field, only a log)
+
 **File:** `lib/core/nodes/supervisor.py:88-92`
 
 The warning log added in the latest session is not visible to callers, the API,
 or the frontend. When the supervisor cannot parse a valid worker name from the
 LLM response it silently returns `{"next": "FINISH"}`, which ends the graph.
-There is no state field that records *why* the graph ended; the client sees a
+There is no state field that records _why_ the graph ended; the client sees a
 normal completion.
 
 **Doc mandate:** Nodes that fail to produce intended state should surface the
@@ -49,6 +50,7 @@ expose it.
 ---
 
 ### C2 — Supervisor uses fragile text parsing; structured output is the canonical approach
+
 **File:** `lib/core/nodes/supervisor.py:72-82`
 
 `with_structured_output(RouteSchema)` is the LangGraph-recommended way to
@@ -63,19 +65,22 @@ Longer-term this should become `Command(goto=response.next)` which collapses
 routing state + edge dispatch into one step.
 
 **Doc mandate:**
+
 > "Structured output fails loudly (Pydantic validation error) rather than
 > silently misrouting."
 
 **Fix direction (two-phase):**
-1. *Short term*: sort `options` by descending length before substring scan so
+
+1. _Short term_: sort `options` by descending length before substring scan so
    longer names always match first (prevents `"code"` eating `"coder"`).
-2. *Medium term*: switch supervisor to `llm.with_structured_output(RouteSchema)`
+2. _Medium term_: switch supervisor to `llm.with_structured_output(RouteSchema)`
    where `RouteSchema` is a Pydantic model with
    `next: Literal["worker1", "worker2", ..., "FINISH"]`.
 
 ---
 
 ### C3 — `state["next"]` KeyError crashes graph on first star-topology invocation
+
 **File:** `lib/core/graph.py:299` (conditional edge lambda)
 
 ```python
@@ -98,6 +103,7 @@ undefined → `KeyError` propagates through LangGraph as an uncaught exception.
 ## HIGH
 
 ### H1 — No `RetryPolicy` on any node
+
 **Files:** `lib/core/graph.py:267-283`, `lib/core/graph.py:363-378`,
 `lib/core/graph.py:508-516`
 
@@ -106,6 +112,7 @@ argument. Every transient LLM failure (rate limit, 429, connection reset,
 5xx) immediately fails the entire multi-agent run.
 
 **Doc internals** (`pregel/_retry.py`):
+
 - `default_retry_on` retries on `ConnectionError` and
   `httpx.HTTPStatusError` with status ≥ 500.
 - It does NOT retry `RuntimeError`, `ValueError`, `OSError` — auth errors and
@@ -136,6 +143,7 @@ irreversible side effects.
 ---
 
 ### H2 — Worker exceptions propagate without agent identity in the exception
+
 **File:** `lib/core/nodes/worker.py:168-176`
 
 The `try/except` added in the latest session logs the agent name, but the
@@ -169,6 +177,7 @@ are exhausted.
 ---
 
 ### H3 — Supervisor node receives full message history (no context compaction)
+
 **File:** `lib/core/nodes/supervisor.py:52-54`
 
 Worker nodes call `compact_context()` when approaching `_CONTEXT_LIMIT`
@@ -193,6 +202,7 @@ Import `_CONTEXT_LIMIT`, `compact_context`, `should_compact` from
 ---
 
 ### H4 — `next: str` declared required in `TeamState`; no default
+
 **File:** `lib/core/state.py:102`
 
 `next: str` (no `NotRequired`) means the TypedDict technically requires `next`
@@ -206,6 +216,7 @@ on a star topology is fragile.
 ---
 
 ### H5 — Loop count not logged; loop termination invisible in traces
+
 **File:** `lib/core/graph.py:479-496` (`_loop_node_with_counter`)
 
 The wrapper increments `loop_count` silently. There is no log entry when a
@@ -221,6 +232,7 @@ on each iteration, and at WARNING when the loop terminates due to `max_loops`.
 ## MEDIUM
 
 ### M1 — Supervisor routing LLM tokens are visible to users
+
 **File:** `lib/core/nodes/supervisor.py:52`
 
 Supervisor routing is an internal control-flow decision. Its tokens stream to
@@ -239,13 +251,16 @@ response = await routing_model.ainvoke(messages)
 ---
 
 ### M2 — `Command` objects not used; older `state["next"]` pattern
+
 **File:** `lib/core/graph.py:293-299`, `lib/core/nodes/supervisor.py:67`
 
 The current pattern is:
+
 1. Supervisor returns `{"next": route_name}` → writes to state channel.
 2. Conditional edge reads `state["next"]` → dispatches to worker.
 
 The canonical LangGraph pattern is `Command(goto=route_name)` which:
+
 - Collapses update + dispatch into one step (no intermediate state write).
 - Eliminates the `state["next"]` field entirely from `TeamState`.
 - Makes routing intent explicit and type-safe.
@@ -256,6 +271,7 @@ but is two steps where one suffices.
 ---
 
 ### M3 — Routing options use insertion-order substring scan
+
 **File:** `lib/core/nodes/supervisor.py:77-82`
 
 When `options = ["coder", "code", "reviewer", "FINISH"]` and the supervisor
@@ -276,6 +292,7 @@ for option in sorted(options, key=len, reverse=True):
 ---
 
 ### M4 — `_wrap_loop_node` captures no `max_loops` reference for logging
+
 **File:** `lib/core/graph.py:439-456`
 
 `_wrap_loop_node()` only receives the `worker_node` callable. It has no
@@ -288,6 +305,7 @@ so the inner function can log `"loop iteration {n}/{max}"`.
 ---
 
 ### M5 — No test coverage for star topology KeyError on missing `next`
+
 **File:** `lib/core/tests/test_graph.py`
 
 No test exercises what happens when a star-topology graph is invoked with
@@ -297,6 +315,7 @@ causes C3.
 ---
 
 ### M6 — No test for supervisor routing ambiguity (substring collision)
+
 **File:** `lib/core/tests/test_graph.py`
 
 No unit test creates a supervisor with workers named `"code"` and `"coder"`
@@ -308,6 +327,7 @@ and verifies the correct one is selected when the supervisor responds
 ## LOW
 
 ### L1 — Log truncation at 80/120 chars may hide routing information
+
 **File:** `lib/core/nodes/supervisor.py:90-92`
 
 `text[:120]` in the warning log may cut off the actual routing keyword if the
@@ -317,6 +337,7 @@ DEBUG and truncated at WARNING.
 ---
 
 ### L2 — `_resolve_supervisor_model` capability log uses `.value` without guard
+
 **File:** `lib/core/graph.py:101`
 
 `capability.value if capability else "default"` — already correct after the
@@ -325,6 +346,7 @@ recent logging additions. Confirm this guard is present (verified: it is).
 ---
 
 ### L3 — `recursion_limit` defaults are low for multi-agent pipelines
+
 **Files:** `lib/core/tests/test_e2e_live.py:136`, `probes/probe_graph_openai.py:91`
 
 Pipeline tests use `recursion_limit: 20`. A three-agent pipeline with one
@@ -337,18 +359,18 @@ usually fine for pipelines, but document the budget calculation.
 
 ## Prioritised Action Plan
 
-| Priority | ID | Work item | Effort |
-|---|---|---|---|
-| 1 | C3 | `state.get("next", "")` in conditional edge lambda + `NotRequired` | XS |
-| 2 | C2-phase1 | Sort options by descending length (M3) | XS |
-| 3 | H1 | Add `RetryPolicy` to all `add_node()` calls | S |
-| 4 | C1 | Add `routing_error: NotRequired[str]` to `TeamState`; return it on FINISH fallback | S |
-| 5 | H2 | `WorkerExecutionError` domain exception | S |
-| 6 | H3 | Context compaction in supervisor node | S |
-| 7 | M1 | `TAG_NOSTREAM` on supervisor routing model | XS |
-| 8 | H5 + M4 | Loop count logging with `max_loops` in wrapper | S |
-| 9 | C2-phase2 | Structured output (`with_structured_output`) for supervisor routing | M |
-| 10 | M2 | Migrate routing to `Command(goto=...)` | L |
+| Priority | ID        | Work item                                                                          | Effort |
+| -------- | --------- | ---------------------------------------------------------------------------------- | ------ |
+| 1        | C3        | `state.get("next", "")` in conditional edge lambda + `NotRequired`                 | XS     |
+| 2        | C2-phase1 | Sort options by descending length (M3)                                             | XS     |
+| 3        | H1        | Add `RetryPolicy` to all `add_node()` calls                                        | S      |
+| 4        | C1        | Add `routing_error: NotRequired[str]` to `TeamState`; return it on FINISH fallback | S      |
+| 5        | H2        | `WorkerExecutionError` domain exception                                            | S      |
+| 6        | H3        | Context compaction in supervisor node                                              | S      |
+| 7        | M1        | `TAG_NOSTREAM` on supervisor routing model                                         | XS     |
+| 8        | H5 + M4   | Loop count logging with `max_loops` in wrapper                                     | S      |
+| 9        | C2-phase2 | Structured output (`with_structured_output`) for supervisor routing                | M      |
+| 10       | M2        | Migrate routing to `Command(goto=...)`                                             | L      |
 
 XS = < 30 min, S = 30–90 min, M = half-day, L = full-day.
 
@@ -356,10 +378,10 @@ XS = < 30 min, S = 30–90 min, M = half-day, L = full-day.
 
 ## ADR Impact
 
-| ADR | Impact |
-|---|---|
+| ADR          | Impact                                                                                          |
+| ------------ | ----------------------------------------------------------------------------------------------- |
 | ADR-013 §2.5 | `Command(goto=...)` replaces `state["next"]` + conditional edge (M2) — future ADR update needed |
-| ADR-013 §2.3 | No change — provider resolution chain is correct |
-| ADR-013 §2.7 | No change — `interrupt_before=[]` is confirmed correct |
-| ADR-008 | `routing_error` field addition to `TeamState` is backward-compatible (NotRequired) |
-| ADR-002 | Supervisor compaction (H3) is consistent with existing context management strategy |
+| ADR-013 §2.3 | No change — provider resolution chain is correct                                                |
+| ADR-013 §2.7 | No change — `interrupt_before=[]` is confirmed correct                                          |
+| ADR-008      | `routing_error` field addition to `TeamState` is backward-compatible (NotRequired)              |
+| ADR-002      | Supervisor compaction (H3) is consistent with existing context management strategy              |

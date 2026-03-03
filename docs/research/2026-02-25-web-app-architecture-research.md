@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: web-app-architecture
-description: "Backend and frontend framework comparison covering FastAPI vs Starlette, SvelteKit evaluation, state management strategies, and deployment model."
-name: "Web App Architecture"
+description: 'Backend and frontend framework comparison covering FastAPI vs Starlette, React evaluation, state management strategies, and deployment model.'
+name: 'Web App Architecture'
 maturity: 30
-summary: "Backend and frontend framework comparison covering FastAPI vs Starlette, SvelteKit evaluation, state management strategies, and deployment model."
+summary: 'Backend and frontend framework comparison covering FastAPI vs Starlette, React evaluation, state management strategies, and deployment model.'
 ---
 
 # Phase 3 Research: Web Application Architecture for Agent Team Control Surface
@@ -152,22 +152,20 @@ overhead for WebSocket paths, and we want the REST API features.
 
 ## Part 2: Frontend Framework Comparison
 
-### SvelteKit
+### React
 
 ### Architecture (as used by Open WebUI)
 
-- Open WebUI uses SvelteKit frontend + FastAPI backend (three-tier
+- Open WebUI uses React frontend + FastAPI backend (three-tier
   architecture).
 - File-based routing with nested layouts for initialization (root layout handles
   WebSocket/auth/theming, app layout loads models/tools/settings).
 - Frontend is compiled to a static SPA (HTML/CSS/JS) -- no runtime coupling to
-  the backend. Backend serves these static assets alongside API endpoints.
--`src/lib/`for reusable components, i18n, API logic, state management.
--`src/routes/` for page definitions.
+  the backend. Backend serves these static assets alongside API endpoints. -`src/lib/`for reusable components, i18n, API logic, state management. -`src/routes/` for page definitions.
 
-### Svelte 5 Runes for Real-Time State
+### React 5 Runes for Real-Time State
 
-- Svelte 5's runes (`$state`, `$derived`, `$effect`) provide signal-based
+- React 5's runes (`$state`, `$derived`, `$effect`) provide signal-based
   fine-grained reactivity. Only the specific DOM nodes dependent on changed data
   re-render -- no virtual DOM diffing.
 - This is ideal for high-frequency streaming updates (hundreds of events/sec)
@@ -179,22 +177,22 @@ overhead for WebSocket paths, and we want the REST API features.
 
 ### WebSocket Integration
 
-- SvelteKit is adding native WebSocket support (currently in testing).
-- Current stable approach: plain WebSocket API in `onMount()`with Svelte stores
+- React is adding native WebSocket support (currently in testing).
+- Current stable approach: plain WebSocket API in `onMount()`with React stores
   or runes for reactive state distribution.
 - No framework-specific WebSocket abstraction needed -- vanilla JS WebSocket
-  works naturally with Svelte's reactivity.
+  works naturally with React's reactivity.
 
 ### xterm.js Integration
 
--`xterm-svelte`is an actively maintained SvelteKit wrapper for xterm.js.
+-`xterm-React`is an actively maintained React wrapper for xterm.js.
 
-- Handles addon management and stays current with both SvelteKit and xterm.js
+- Handles addon management and stays current with both React and xterm.js
   releases.
 - Clean component API:`<Xterm bind:terminal on:data={handleInput} />`.
 
 **Verdict:** Best balance of performance, bundle size, and developer experience
-for real-time dashboards. Open WebUI proves the SvelteKit + FastAPI pattern
+for real-time dashboards. Open WebUI proves the React + FastAPI pattern
 works
 at scale.
 
@@ -223,7 +221,7 @@ at scale.
 -`xterm-react`and`react-xtermjs` provide React wrappers.
 
 - React's lifecycle management (useEffect cleanup, ref forwarding) adds
-  complexity to xterm.js integration compared to Svelte's simpler model.
+  complexity to xterm.js integration compared to React's simpler model.
 
 **Bundle Size:** 40-100KB baseline (React + ReactDOM), plus router, state
 management library. Typical app: 150-300KB.
@@ -270,14 +268,14 @@ multi-panel real-time dashboards.
 
 ### Architecture: (2)
 
-- Fine-grained reactivity via signals (similar concept to Svelte 5 runes).
+- Fine-grained reactivity via signals (similar concept to React 5 runes).
 - No virtual DOM -- updates the exact DOM nodes that depend on changed data.
 - JSX syntax (React-like) but with fundamentally different rendering model.
 - Bundle size: ~7KB baseline.
 
 ### Performance
 
-- Lighthouse score: 98 (vs Svelte 96, React ~85).
+- Lighthouse score: 98 (vs React 96, React ~85).
 - Fastest runtime performance in JS framework benchmarks.
 - Ideal for high-frequency DOM updates -- each signal change updates only
   its subscribers.
@@ -286,26 +284,26 @@ multi-panel real-time dashboards.
 
 - Smallest ecosystem of all options. Limited component libraries.
 - No xterm.js wrapper exists -- would need to build custom integration.
-- SolidStart (SSR framework) is less mature than SvelteKit or Next.js.
+- SolidStart (SSR framework) is less mature than React or Next.js.
 - Fewer developers familiar with it -- harder to find resources/help.
 
 **Verdict:** Technically excellent for our performance needs but ecosystem
 immaturity is a real cost. No xterm.js wrapper means building and maintaining
 custom integration code.
 
-### Frontend Recommendation: SvelteKit
+### Frontend Recommendation: React
 
-**Choose SvelteKit (Svelte 5)** for these reasons:
+**Choose React (React 5)** for these reasons:
 
 1. Fine-grained reactivity via runes handles high-frequency streaming without
    performance tricks.
-2. Proven architecture: Open WebUI demonstrates SvelteKit + FastAPI at scale.
-3. `xterm-svelte`provides maintained xterm.js integration.
+2. Proven architecture: Open WebUI demonstrates React + FastAPI at scale.
+3. `xterm-React`provides maintained xterm.js integration.
 4. Smallest bundle size among full-featured frameworks (3-10KB baseline).
 5. Compiles to static SPA -- trivial to serve from FastAPI backend.
 6. Vite-based build tooling with fast HMR during development.
 7. Growing ecosystem with good component library support (Skeleton,
-   shadcn-svelte).
+   shadcn-React).
 
 ---
 
@@ -334,7 +332,7 @@ of server state. All mutations go through the server.
 - Exponential backoff with jitter: start 1s, double each attempt, max 30s,
   random jitter to prevent thundering herd.
 - Heartbeat/ping-pong to detect stale connections (Uvicorn provides this via
- `--ws-ping-interval`).
+  `--ws-ping-interval`).
 
 ### State Recovery on Reconnect
 
@@ -407,16 +405,16 @@ connected WebSocket clients.
 
 ### For a single-user local dev tool, SQLite is the clear choice
 
-| Factor | SQLite | Redis | PostgreSQL |
-| -------- | -------- | ------- | ------------ |
-| Installation | Built into Python stdlib | Separate server process | Separate server process |
-| Zero-config | Yes | No | No |
-| Persistence | Durable by default | Requires config (RDB/AOF) | Durable by default |
-| Single-user perf | Excellent | Overkill | Overkill |
-| Disk footprint | Single file | Separate process + data | Separate process + data |
-| Distribution model | `pip install` | Docker/system package | Docker/system package |
-| Async support | `aiosqlite` | `redis.asyncio` | `asyncpg` |
-| Query capability | Full SQL | Key-value + data structures | Full SQL |
+| Factor             | SQLite                   | Redis                       | PostgreSQL              |
+| ------------------ | ------------------------ | --------------------------- | ----------------------- |
+| Installation       | Built into Python stdlib | Separate server process     | Separate server process |
+| Zero-config        | Yes                      | No                          | No                      |
+| Persistence        | Durable by default       | Requires config (RDB/AOF)   | Durable by default      |
+| Single-user perf   | Excellent                | Overkill                    | Overkill                |
+| Disk footprint     | Single file              | Separate process + data     | Separate process + data |
+| Distribution model | `pip install`            | Docker/system package       | Docker/system package   |
+| Async support      | `aiosqlite`              | `redis.asyncio`             | `asyncpg`               |
+| Query capability   | Full SQL                 | Key-value + data structures | Full SQL                |
 
 ### SQLite advantages for our use case
 
@@ -425,8 +423,7 @@ connected WebSocket clients.
 - WAL mode enables concurrent reads during writes (important for streaming
   events while querying history).
 - For event volumes we expect (tens of thousands of events per session), SQLite
-  handles this trivially.
--`aiosqlite`provides async interface compatible with FastAPI's async handlers.
+  handles this trivially. -`aiosqlite`provides async interface compatible with FastAPI's async handlers.
 
 **When to consider Redis:** Only if we need pub/sub between multiple server
 processes. For single-process, single-user tool, SQLite + in-memory state is
@@ -459,7 +456,7 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 ### How Open WebUI does it
 
 - Published on PyPI as `open-webui`.
-- SvelteKit frontend is compiled to static assets and included in the Python
+- React frontend is compiled to static assets and included in the Python
   package.
 - Backend serves compiled frontend assets alongside API endpoints.
 - `pip install open-webui`then`open-webui serve`starts everything.
@@ -467,14 +464,14 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 
 ### Implementation: (2)
 
-1. SvelteKit app compiled with`vite build`producing`build/`directory of
+1. React app compiled with`vite build`producing`build/`directory of
    static assets (HTML, CSS, JS).
 2. Static assets included in Python package via`pyproject.toml`package data.
 3. FastAPI serves static files from the bundled directory:
 
-  ```python
-   app.mount("/", StaticFiles(directory=static_dir, html=True))
-   ```
+```python
+ app.mount("/", StaticFiles(directory=static_dir, html=True))
+```
 
 1. CLI entry point starts uvicorn programmatically:
 
@@ -553,9 +550,9 @@ core use case.
 
 ### Static Asset Bundling Strategy
 
-### Vite (via SvelteKit)
+### Vite (via React)
 
-- SvelteKit uses Vite as its build tool.
+- React uses Vite as its build tool.
 - `vite build`produces optimized, hashed static assets.
 - Tree-shaking, code splitting, CSS extraction handled automatically.
 - esbuild is used internally by Vite for dependency pre-bundling (fast).
@@ -573,34 +570,34 @@ core use case.
 
 ## Comparison Matrix
 
-| Criterion | FastAPI + SvelteKit | FastAPI + React | Starlette + SvelteKit | FastAPI + HTMX |
-| ----------- | -------------------- | ----------------- | ----------------------- | ---------------- |
-| **WebSocket perf** | Excellent | Excellent | Excellent | Good |
-| **REST API** | Great (auto docs) | Great (auto docs) | Manual | Great |
-| **Terminal (xterm.js)** | xterm-svelte | xterm-react | xterm-svelte | Not viable |
-| **High-freq updates** | Excellent (runes) | Poor (VDOM) | Excellent (runes) | N/A |
-| **Bundle size** | ~10-30KB | ~150-300KB | ~10-30KB | ~29KB |
-| **Dev experience** | Great | Good | Moderate | Great (simple) |
-| **Ecosystem** | Good, growing | Excellent | Good, growing | Limited |
-| **Deployment** | pip install | pip install | pip install | pip install |
-| **State recovery** | Snapshot + replay | Snapshot + replay | Snapshot + replay | Server-side |
-| **Complexity** | Moderate | High | Moderate | Low |
+| Criterion               | FastAPI + React   | FastAPI + React   | Starlette + React | FastAPI + HTMX |
+| ----------------------- | ----------------- | ----------------- | ----------------- | -------------- |
+| **WebSocket perf**      | Excellent         | Excellent         | Excellent         | Good           |
+| **REST API**            | Great (auto docs) | Great (auto docs) | Manual            | Great          |
+| **Terminal (xterm.js)** | xterm-React       | xterm-react       | xterm-React       | Not viable     |
+| **High-freq updates**   | Excellent (runes) | Poor (VDOM)       | Excellent (runes) | N/A            |
+| **Bundle size**         | ~10-30KB          | ~150-300KB        | ~10-30KB          | ~29KB          |
+| **Dev experience**      | Great             | Good              | Moderate          | Great (simple) |
+| **Ecosystem**           | Good, growing     | Excellent         | Good, growing     | Limited        |
+| **Deployment**          | pip install       | pip install       | pip install       | pip install    |
+| **State recovery**      | Snapshot + replay | Snapshot + replay | Snapshot + replay | Server-side    |
+| **Complexity**          | Moderate          | High              | Moderate          | Low            |
 
-| Criterion | SQLite | Redis | PostgreSQL |
-| ----------- | -------- | ------- | ------------ |
-| **Zero-config** | Yes | No | No |
-| **Distribution** | Built-in | External | External |
-| **Event persistence** | Good | Requires config | Good |
-| **Async Python** | aiosqlite | redis.asyncio | asyncpg |
-| **Single-user perf** | Excellent | Overkill | Overkill |
+| Criterion             | SQLite    | Redis           | PostgreSQL |
+| --------------------- | --------- | --------------- | ---------- |
+| **Zero-config**       | Yes       | No              | No         |
+| **Distribution**      | Built-in  | External        | External   |
+| **Event persistence** | Good      | Requires config | Good       |
+| **Async Python**      | aiosqlite | redis.asyncio   | asyncpg    |
+| **Single-user perf**  | Excellent | Overkill        | Overkill   |
 
-| Criterion | pip install | Docker | Single binary |
-| ----------- | ------------- | -------- | --------------- |
-| **Install simplicity** | High | Medium | High |
-| **Prerequisites** | Python | Docker | None |
-| **Local FS access** | Native | Volume mounts | Native |
-| **Update mechanism** | pip upgrade | docker pull | Download |
-| **Build complexity** | Low | Low | High |
+| Criterion              | pip install | Docker        | Single binary |
+| ---------------------- | ----------- | ------------- | ------------- |
+| **Install simplicity** | High        | Medium        | High          |
+| **Prerequisites**      | Python      | Docker        | None          |
+| **Local FS access**    | Native      | Volume mounts | Native        |
+| **Update mechanism**   | pip upgrade | docker pull   | Download      |
+| **Build complexity**   | Low         | Low           | High          |
 
 ---
 
@@ -608,14 +605,14 @@ core use case.
 
 ### Recommended Stack
 
-| Layer | Choice | Rationale |
-| ------- | -------- | ----------- |
-| **Backend** | **FastAPI** | DI, auto-docs, same Starlette WebSocket core |
-| **Frontend** | **SvelteKit (Svelte 5)** | Runes reactivity, xterm-svelte, proven with FastAPI (Open WebUI) |
-| **State store** | **SQLite** (via aiosqlite) | Zero-config, built into Python, WAL mode for concurrent access |
-| **Event transport** | **WebSocket** (not SSE) | Need bidirectional: user sends commands, approves permissions, types in terminals |
-| **Deployment** | **`pip install` + uvicorn** | Follow Open WebUI/Jupyter model, include compiled SvelteKit assets |
-| **Build tooling** | **Vite** (via SvelteKit) | Fast builds, tree-shaking, code splitting |
+| Layer               | Choice                      | Rationale                                                                         |
+| ------------------- | --------------------------- | --------------------------------------------------------------------------------- |
+| **Backend**         | **FastAPI**                 | DI, auto-docs, same Starlette WebSocket core                                      |
+| **Frontend**        | **React (React 5)**         | Runes reactivity, xterm-React, proven with FastAPI (Open WebUI)                   |
+| **State store**     | **SQLite** (via aiosqlite)  | Zero-config, built into Python, WAL mode for concurrent access                    |
+| **Event transport** | **WebSocket** (not SSE)     | Need bidirectional: user sends commands, approves permissions, types in terminals |
+| **Deployment**      | **`pip install` + uvicorn** | Follow Open WebUI/Jupyter model, include compiled React assets                    |
+| **Build tooling**   | **Vite** (via React)        | Fast builds, tree-shaking, code splitting                                         |
 
 ### Architecture Summary
 
@@ -627,7 +624,7 @@ User Browser
     |
 FastAPI (uvicorn)
     |
-    |--- Static file serving (compiled SvelteKit SPA)
+    |--- Static file serving (compiled React SPA)
     |--- WebSocket ConnectionManager (per-client multiplexed connection)
     |--- Agent Process Supervisor (lifespan task group)
     |--- Event Store (SQLite via aiosqlite, WAL mode)
@@ -647,7 +644,7 @@ FastAPI (uvicorn)
 1. **Event sourcing to SQLite** for persistence. In-memory projections for
    live state. SQLite event log enables history, replay, and debugging.
 
-1. **SvelteKit compiled to static SPA** bundled in Python package. No Node.js
+1. **React compiled to static SPA** bundled in Python package. No Node.js
    runtime needed in production -- just Python + uvicorn.
 
 1. **Lifespan-managed process supervisor** using anyio task groups for
@@ -661,14 +658,14 @@ FastAPI (uvicorn)
 
 - [FastAPI WebSocket Docs](https://fastapi.tiangolo.com/advanced/websockets/)
 - [Starlette in 2026: Building Fast Async
-Services](https://thelinuxcode.com/python-starlette-in-2026-building-fast-async-services-with-clear-architecture/)
+  Services](https://thelinuxcode.com/python-starlette-in-2026-building-fast-async-services-with-clear-architecture/)
 - [WebSocket Servers in Python with FastAPI or
-Starlette](https://teachmeidea.com/websocket-servers-in-python-with-fastapi-or-starlette/)
+  Starlette](https://teachmeidea.com/websocket-servers-in-python-with-fastapi-or-starlette/)
 - [FastAPI Lifespan Events](https://fastapi.tiangolo.com/advanced/events/)
 - [Starlette Lifespan Docs](https://www.starlette.io/lifespan/)
 - [Uvicorn Settings](https://www.uvicorn.org/settings/)
 - [Realtime Channels with FastAPI +
-Broadcaster](https://dev.to/sangarshanan/realtime-channels-with-fastapi-broadcaster-47jh)
+  Broadcaster](https://dev.to/sangarshanan/realtime-channels-with-fastapi-broadcaster-47jh)
 
 ### Part 2: Frontend
 
@@ -677,30 +674,30 @@ Broadcaster](https://dev.to/sangarshanan/realtime-channels-with-fastapi-broadcas
 - [Open WebUI Frontend Structure
   (DeepWiki)](https://deepwiki.com/open-webui/open-webui/2.1-frontend-structure)
 - [Building a Real-time Dashboard with FastAPI and
-  Svelte](https://testdriven.io/blog/fastapi-svelte/)
-- [SvelteKit + FastAPI Interactive UIs
-2025](https://johal.in/next-gen-frontend-architectures-sveltekit-with-python-fastapi-backend-for-interactive-uis-2025/)
-- [xterm-svelte](https://github.com/BattlefieldDuck/xterm-svelte)
+  React](https://testdriven.io/blog/fastapi-React/)
+- [React + FastAPI Interactive UIs
+  2025](https://johal.in/next-gen-frontend-architectures-React-with-python-fastapi-backend-for-interactive-uis-2025/)
+- [xterm-React](https://github.com/BattlefieldDuck/xterm-React)
 - [xterm-react](https://github.com/PabloLION/xterm-react/)
-- [Svelte 5 Runes: Fine-Grained
-Reactivity](https://leapcell.io/blog/svelte-5-and-the-granular-reactivity-revolution-with-runes)
+- [React 5 Runes: Fine-Grained
+  Reactivity](https://leapcell.io/blog/React-5-and-the-granular-reactivity-revolution-with-runes)
 - [SolidJS Creator on Fine-Grained
-Reactivity](https://thenewstack.io/solidjs-creator-on-fine-grained-reactivity-as-next-frontier/)
+  Reactivity](https://thenewstack.io/solidjs-creator-on-fine-grained-reactivity-as-next-frontier/)
 - [Frontend Framework Benchmarks
-2025](https://www.frontendtools.tech/blog/best-frontend-frameworks-2025-comparison)
+  2025](https://www.frontendtools.tech/blog/best-frontend-frameworks-2025-comparison)
 - [HTMX + Alpine.js
-Combined](https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html)
+  Combined](https://www.infoworld.com/article/3856520/htmx-and-alpine-js-how-to-combine-two-great-lean-front-ends.html)
 - [AutoGen Agent Integration with FastAPI +
-WebSockets](https://newsletter.victordibia.com/p/integrating-autogen-agents-into-your)
+  WebSockets](https://newsletter.victordibia.com/p/integrating-autogen-agents-into-your)
 
 ### Part 3: State Management
 
 - [WebSocket Reconnection Logic
-(2026)](https://oneuptime.com/blog/post/2026-01-27-websocket-reconnection/view)
+  (2026)](https://oneuptime.com/blog/post/2026-01-27-websocket-reconnection/view)
 - [WebSocket Architecture Best Practices
   (Ably)](https://ably.com/topic/websocket-architecture-best-practices)
 - [Grafana Live
-Setup](https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-live/)
+  Setup](https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-live/)
 - [Jupyter Kernel State Recovery
   Proposal](https://github.com/jupyter-server/jupyter_server/issues/1274)
 - [JupyterLab WebSocket
@@ -709,17 +706,17 @@ Setup](https://grafana.com/docs/grafana/latest/setup-grafana/set-up-grafana-live
   (Airbyte)](https://airbyte.com/data-engineering-resources/sqlite-vs-redis)
 - [SSE vs WebSocket Comparison](https://websocket.org/comparisons/sse/)
 - [SSE Beat WebSockets for 95% of
-Apps](https://dev.to/polliog/server-sent-events-beat-websockets-for-95-of-real-time-apps-heres-why-a4l)
+  Apps](https://dev.to/polliog/server-sent-events-beat-websockets-for-95-of-real-time-apps-heres-why-a4l)
 
 ### Part 4: Deployment
 
 - [Open WebUI on PyPI](https://pypi.org/project/open-webui/)
 - [Open WebUI Installation Methods
-(DeepWiki)](https://deepwiki.com/open-webui/open-webui/3.1-installation-methods)
+  (DeepWiki)](https://deepwiki.com/open-webui/open-webui/3.1-installation-methods)
 - [Open WebUI Build System
-(DeepWiki)](https://deepwiki.com/open-webui/open-webui/16.3-redis-integration-for-distribution)
+  (DeepWiki)](https://deepwiki.com/open-webui/open-webui/16.3-redis-integration-for-distribution)
 - [Vite Backend Integration](https://vite.dev/guide/backend-integration)
 - [PyInstaller vs Nuitka vs
-cx_Freeze](https://sparxeng.com/blog/software/python-standalone-executable-generators-pyinstaller-nuitka-cx-freeze)
+  cx_Freeze](https://sparxeng.com/blog/software/python-standalone-executable-generators-pyinstaller-nuitka-cx-freeze)
 - [Dify Docker Compose
   Deployment](https://docs.dify.ai/en/self-host/quick-start/docker-compose)

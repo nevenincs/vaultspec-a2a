@@ -1,14 +1,14 @@
 ---
-name: "A2A Streaming and Async"
+name: 'A2A Streaming and Async'
 date: 2026-25-02
 type: reference
-summary: "SSE streaming protocol specifics, push notification webhooks, and security architecture including JWT verification and JWKS key management."
+summary: 'SSE streaming protocol specifics, push notification webhooks, and security architecture including JWT verification and JWKS key management.'
 maturity: 80
 ---
 
 # A2A Streaming and Asynchronous Operations
 
- long-running tasks through two primary mechanisms:
+long-running tasks through two primary mechanisms:
 **Server-Sent Events (SSE)** for continuous connections and **Push Notifications
 (Webhooks)** for disconnected or ultra-long-running scenarios.
 
@@ -79,15 +79,15 @@ cannot maintain persistent connections.
 1. **Configuration**: Client sets `PushNotificationConfig` with
    `authentication.scheme: "Bearer"`.
 2. **Notification (Server)**:
-    - Generates JWT signed with **Private Key**.
-    - **JWT Header**: Includes `alg` and `kid` (Key ID).
-    - **JWT Claims**: `iss` (issuer), `aud` (audience), `iat` (issued at), `exp`
-      (expires), `jti` (JWT ID), and `taskId`.
-    - **Public Key**: Made available via a **JWKS endpoint**.
+   - Generates JWT signed with **Private Key**.
+   - **JWT Header**: Includes `alg` and `kid` (Key ID).
+   - **JWT Claims**: `iss` (issuer), `aud` (audience), `iat` (issued at), `exp`
+     (expires), `jti` (JWT ID), and `taskId`.
+   - **Public Key**: Made available via a **JWKS endpoint**.
 3. **Verification (Client Webhook)**:
-    - Extracts JWT from `Authorization` header.
-    - Identifies `kid` from header.
-    - Fetches/Caches Public Key from Server's **JWKS endpoint**.
-    - Verifies signature and validates claims (`iss`, `aud`, `iat`, `exp`,
-      `jti`).
-    - Validates `PushNotificationConfig.token` if present.
+   - Extracts JWT from `Authorization` header.
+   - Identifies `kid` from header.
+   - Fetches/Caches Public Key from Server's **JWKS endpoint**.
+   - Verifies signature and validates claims (`iss`, `aud`, `iat`, `exp`,
+     `jti`).
+   - Validates `PushNotificationConfig.token` if present.

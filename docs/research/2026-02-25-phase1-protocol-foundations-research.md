@@ -1,8 +1,8 @@
 ---
-name: "Protocol Foundations"
+name: 'Protocol Foundations'
 date: 2026-25-02
 type: research
-summary: "Phase 1 deliverable covering A2A SSE event-to-UI render mapping, ACP web-native host feasibility, and WebSocket multiplexing protocol design."
+summary: 'Phase 1 deliverable covering A2A SSE event-to-UI render mapping, ACP web-native host feasibility, and WebSocket multiplexing protocol design.'
 maturity: 45
 feature: protocol-foundations
 ---
@@ -22,22 +22,19 @@ feature: protocol-foundations
 A2A SSE streams are `data: {json-rpc}\n\n`formatted. No named events, no
 event IDs. Each payload is a JSON-RPC 2.0 response wrapping one of:
 
-| Event Type | What It Contains | UI Render Capability |
-| --- | --- | --- |
-| `Task` | Full task state snapshot (status, history, artifacts, metadata) | Full panel refresh: status badge, message history, artifact list |
-| `TaskStatusUpdateEvent` | State change + optional`Message`with`Part[]`+`final`flag | Status badge update, progress text, "agent is thinking/working" indicator |
-| `TaskArtifactUpdateEvent` | `Artifact`with`Part[]`+`append`flag +`last_chunk`flag | Code file streaming (append chunks), file list update, completion indicator |
-| `Message` | Direct response (role, parts, metadata) | Chat message bubble, immediate response rendering |
+| Event Type                | What It Contains                                                | UI Render Capability                                                        |
+| ------------------------- | --------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `Task`                    | Full task state snapshot (status, history, artifacts, metadata) | Full panel refresh: status badge, message history, artifact list            |
+| `TaskStatusUpdateEvent`   | State change + optional`Message`with`Part[]`+`final`flag        | Status badge update, progress text, "agent is thinking/working" indicator   |
+| `TaskArtifactUpdateEvent` | `Artifact`with`Part[]`+`append`flag +`last_chunk`flag           | Code file streaming (append chunks), file list update, completion indicator |
+| `Message`                 | Direct response (role, parts, metadata)                         | Chat message bubble, immediate response rendering                           |
 
 ### 1.2 What the status message actually is
 
 `TaskStatusUpdateEvent.status.message` is **not free text**. It is a full
 `Message`object with`role`, `parts[]`, `metadata`. Each `Part`can be:
 
--`text`(string) — agent's progress description
--`raw`(bytes) — binary data
--`url`(string) — reference to external resource
--`data`(JSON value) — structured data
+-`text`(string) — agent's progress description -`raw`(bytes) — binary data -`url`(string) — reference to external resource -`data`(JSON value) — structured data
 
 This means status updates can carry rich content for UI rendering — not just
 "working..." strings.
@@ -52,10 +49,7 @@ Event 2: {artifactId: "abc", append: true,  lastChunk: false, parts: [{text: "  
 Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n# done"}]}
 ```
 
-- Same `artifactId`= same file
--`append: true`= concatenate with previous
--`lastChunk: true`= file complete
--`Part.filename`and`Part.media_type`identify the file
+- Same `artifactId`= same file -`append: true`= concatenate with previous -`lastChunk: true`= file complete -`Part.filename`and`Part.media_type`identify the file
 
 ### 1.4 Connection model
 
@@ -121,19 +115,19 @@ class WebSocketStreamWriter:
 
 ACP streams 11 discriminated update types via `session/update`:
 
-| Update Type | Discriminator | UI Rendering |
-| --- | --- | --- |
-| `UserMessageChunk` | `user_message_chunk` | User chat bubble |
-| `AgentMessageChunk` | `agent_message_chunk` | Agent chat bubble (streaming) |
-| `AgentThoughtChunk` | `agent_thought_chunk` | Thinking/reasoning panel |
-| `ToolCallStart` | `tool_call` | Tool call card (name, status) |
-| `ToolCallProgress` | `tool_call_update` | Tool call progress bar / output |
-| `AgentPlanUpdate` | `plan` | Plan checklist / step list |
-| `AvailableCommandsUpdate` | `available_commands_update` | Command palette |
-| `CurrentModeUpdate` | `current_mode_id` | Mode indicator badge |
-| `ConfigOptionUpdate` | `config_option_update` | Settings panel |
-| `SessionInfoUpdate` | `session_info_update` | Session metadata (title, etc.) |
-| `UsageUpdate` | `usage_update` | Token/cost counter |
+| Update Type               | Discriminator               | UI Rendering                    |
+| ------------------------- | --------------------------- | ------------------------------- |
+| `UserMessageChunk`        | `user_message_chunk`        | User chat bubble                |
+| `AgentMessageChunk`       | `agent_message_chunk`       | Agent chat bubble (streaming)   |
+| `AgentThoughtChunk`       | `agent_thought_chunk`       | Thinking/reasoning panel        |
+| `ToolCallStart`           | `tool_call`                 | Tool call card (name, status)   |
+| `ToolCallProgress`        | `tool_call_update`          | Tool call progress bar / output |
+| `AgentPlanUpdate`         | `plan`                      | Plan checklist / step list      |
+| `AvailableCommandsUpdate` | `available_commands_update` | Command palette                 |
+| `CurrentModeUpdate`       | `current_mode_id`           | Mode indicator badge            |
+| `ConfigOptionUpdate`      | `config_option_update`      | Settings panel                  |
+| `SessionInfoUpdate`       | `session_info_update`       | Session metadata (title, etc.)  |
+| `UsageUpdate`             | `usage_update`              | Token/cost counter              |
 
 This is **far richer** than A2A's streaming. ACP distinguishes between
 agent messages, thinking, tool calls, and plan updates at the protocol level.
@@ -212,8 +206,8 @@ WebSocket.
   "request_id": "req-123",
   "tool_call": { "title": "Delete old_auth.py", "kind": "write" },
   "options": [
-    {"id": "approve", "label": "Approve", "kind": "allow_once"},
-    {"id": "reject", "label": "Reject", "kind": "reject_once"}
+    { "id": "approve", "label": "Approve", "kind": "allow_once" },
+    { "id": "reject", "label": "Reject", "kind": "reject_once" }
   ]
 }
 ```

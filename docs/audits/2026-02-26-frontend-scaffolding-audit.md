@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: audit
 feature: frontend-scaffolding
-description: "Four-auditor review of the SvelteKit 5 SPA scaffolding producing 32 unique findings (7 critical, 8 high, 10 moderate, 7 low) including SvelteMap in-place mutation and WebSocket reconnection gaps."
+description: 'Four-auditor review of the React 5 SPA scaffolding producing 32 unique findings (7 critical, 8 high, 10 moderate, 7 low) including Map in-place mutation and WebSocket reconnection gaps.'
 related:
   - docs/adrs/2026-02-26-005-frontend-rendering-stack-adr.md
   - docs/adrs/2026-02-26-007-tech-stack-deployment-adr.md
@@ -13,7 +13,7 @@ related:
 # Frontend Scaffolding Audit Report
 
 **Date:** 2026-02-26
-**Scope:** `src/ui/`— SvelteKit 5 frontend scaffolding (Steps 1–9)
+**Scope:** `src/ui/`— React 5 frontend scaffolding (Steps 1–9)
 **Audited against:** ADR-005, ADR-007, ADR-009, ADR-011, UI Spec, Scaffolding
 Plan, Pydantic schemas
 **Auditors:** Orchestrator, Coder (self-review), Researcher-1 (ADR compliance),
@@ -23,10 +23,10 @@ Researcher-2 (research doc gap analysis)
 
 ## Executive Summary
 
-The scaffolding produced a buildable SvelteKit 5 SPA with 473-line typed API
+The scaffolding produced a buildable React 5 SPA with 473-line typed API
 layer, 3 reactive stores, 6 REST wrappers, a WebSocket client, 3 routes, and
-9 component stubs — backed by 21 shadcn-svelte component sets. Automated checks
-pass: svelte-check (836 files, 0 errors, 0 warnings), Prettier clean.
+9 component stubs — backed by 21 shadcn-React component sets. Automated checks
+pass: React-check (836 files, 0 errors, 0 warnings), Prettier clean.
 
 Cross-referencing against binding ADRs, user-approved UI spec, and Pydantic
 schemas reveals **32 unique findings** after de-duplication across all 4
@@ -38,28 +38,28 @@ TypeScript types are 100% field-accurate against Pydantic models.
 
 ## CRITICAL (7) — Will break functionality
 
-### C-1: SvelteMap in-place mutation — tool call updates invisible to UI
+### C-1: Map in-place mutation — tool call updates invisible to UI
 
-**File:**`agent-state.svelte.ts:257-267`
+**File:**`agent-state.React.ts:257-267`
 **Found by:** Coder (unique)
 
 `#applyToolCallUpdate`mutates fields on the existing`ThreadToolCall`object
-retrieved from the SvelteMap but never calls`thread.toolCalls.set(id, existing)`
-afterward. SvelteMap only triggers reactivity on `set`/`delete`, not on in-place
+retrieved from the Map but never calls`thread.toolCalls.set(id, existing)`
+afterward. Map only triggers reactivity on `set`/`delete`, not on in-place
 mutation of stored values. Tool call status transitions (pending → in_progress →
 completed) will **not re-render** in the UI.
 
 **Fix:** Add `thread.toolCalls.set(event.tool_call_id, existing)`at end of
 method.
 
-### C-2: SvelteMap in-place mutation — artifact streaming invisible to UI
+### C-2: Map in-place mutation — artifact streaming invisible to UI
 
-**File:**`agent-state.svelte.ts:272-273`
+**File:**`agent-state.React.ts:272-273`
 **Found by:** Coder (unique)
 
 Same pattern as C-1: `#applyArtifactUpdate` append path mutates
 `existing.content += event.content`and`existing.filename = event.filename`
-without re-setting the SvelteMap entry. Streaming artifact content will not
+without re-setting the Map entry. Streaming artifact content will not
 update in the UI.
 
 **Fix:** Add `thread.artifacts.set(event.artifact_id, existing)`at end of
@@ -67,7 +67,7 @@ append branch.
 
 ### C-3:`$derived`calls`getOrCreateThread`— side effect in derivation
 
-**File:**`thread/[id]/+page.svelte:13`
+**File:**`thread/[id]/+page.React:13`
 **Found by:** Researcher-2 (unique), confirmed by Orchestrator
 
 ```ts
@@ -75,7 +75,7 @@ let thread: ThreadState = $derived(agentState.getOrCreateThread(threadId));
 ```
 
 `getOrCreateThread`mutates the store (creates a new ThreadState + sets it in
-the SvelteMap). Svelte 5 runes documentation explicitly warns against side
+the Map). React 5 runes documentation explicitly warns against side
 effects in derivations — they can cause infinite re-derivation loops when the
 mutation triggers reactivity on the same dependency graph.
 
@@ -84,11 +84,11 @@ mutation triggers reactivity on the same dependency graph.
 
 ### C-4: `$effect(() => loadThreads())`may loop infinitely
 
-**File:**`+page.svelte:32-34`
+**File:**`+page.React:32-34`
 **Found by:** Orchestrator, Coder
 
 The `$effect`calls`loadThreads()`which sets`$state` variables (`threads`,
-`loading`). If Svelte 5's tracking system considers those state mutations as
+`loading`). If React 5's tracking system considers those state mutations as
 dependencies that re-trigger the effect, this creates an infinite REST call
 loop. Should use `onMount`for one-time data fetching.
 
@@ -96,7 +96,7 @@ loop. Should use `onMount`for one-time data fetching.
 
 ### C-5: `isStaleEvent()`exists but never called in WS handler
 
-**File:**`websocket.svelte.ts:111-113, :128-151`
+**File:**`websocket.React.ts:111-113, :128-151`
 **Found by:** Orchestrator, Researcher-1, Researcher-2
 
 The `isStaleEvent()`method correctly checks sequence numbers, but`onmessage`
@@ -109,7 +109,7 @@ messages, tool call restarts, etc.).
 
 ### C-6: Double event handling — permission_request enqueued twice
 
-**File:** `+layout.svelte:34-39`
+**File:** `+layout.React:34-39`
 **Found by:** Orchestrator, Researcher-1, Researcher-2
 
 The layout registers a specific handler for `PERMISSION_REQUEST` (→
@@ -129,7 +129,7 @@ delegates to appropriate stores.
 
 ### C-7: No WS subscribe/unsubscribe on thread navigation
 
-**File:** `thread/[id]/+page.svelte`
+**File:** `thread/[id]/+page.React`
 **Found by:** Orchestrator, Researcher-1, Coder
 
 ADR-011 §2.1 requires explicit `SubscribeCommand`to receive thread-scoped
@@ -146,7 +146,7 @@ on destroy.
 
 ### H-1: No reconnection protocol (ADR-011 §2.3)
 
-**Files:** `websocket.svelte.ts`, `+layout.svelte`
+**Files:** `websocket.React.ts`, `+layout.React`
 **Found by:** Orchestrator, Researcher-1, Researcher-2
 
 The WebSocket client reconnects via `#open()` after backoff but does NOT
@@ -157,17 +157,17 @@ filtering. The`clientId` `$state`field exists but is never assigned.
 
 ### H-2: Thread page uses Card.Root, not AlertDialog for permissions
 
-**Files:**`thread/[id]/+page.svelte:151-170`
+**Files:**`thread/[id]/+page.React:151-170`
 **Found by:** Orchestrator, Researcher-1
 
 UI Spec §5 mandates a non-dismissible centered modal. The thread page uses a
 raw `<div>`with`bg-black/50`overlay and`Card.Root`which is dismissible by
-click-outside. The proper`PermissionModal.svelte` component exists (uses
+click-outside. The proper`PermissionModal.React` component exists (uses
 `AlertDialog.Root`) but is not imported.
 
 ### H-3: PermissionModal AlertDialog is also dismissible
 
-**File:** `PermissionModal.svelte:15`
+**File:** `PermissionModal.React:15`
 **Found by:** Researcher-1 (unique)
 
 Even the dedicated PermissionModal component, while using `AlertDialog.Root`,
@@ -176,7 +176,7 @@ says "cannot be dismissed without responding."
 
 ### H-4: Sidebar empty — no thread list, team status, connection indicator
 
-**Files:**`+layout.svelte:62-67`, `+page.svelte`
+**Files:**`+layout.React:62-67`, `+page.React`
 **Found by:** Orchestrator, Researcher-1
 
 UI Spec §2 defines a 240px collapsible sidebar with thread list (top), team
@@ -186,7 +186,7 @@ in the main content area.
 
 ### H-5: Tool calls rendered separately, not in chronological stream
 
-**File:**`thread/[id]/+page.svelte:65-131`
+**File:**`thread/[id]/+page.React:65-131`
 **Found by:** Researcher-1 (unique), confirmed by Orchestrator
 
 UI Spec §3 requires a single chronological stream interleaving messages, tool
@@ -195,7 +195,7 @@ calls (L91-110), then all artifacts (L113-131) — destroying temporal context.
 
 ### H-6: Thread creation hardcodes `initial_message: 'Hello'`
 
-**File:** `+page.svelte:23-26`
+**File:** `+page.React:23-26`
 **Found by:** Orchestrator, Researcher-1
 
 UI Spec §10 specifies inline thread creation — user types in the input bar and
@@ -204,7 +204,7 @@ their first message creates the thread. Current implementation sends
 
 ### H-7: WS`on()`method accepts`string`instead of`ServerEventType`
 
-**File:** `websocket.svelte.ts:71`
+**File:** `websocket.React.ts:71`
 **Found by:** Orchestrator
 
 `on(type: string, handler: EventHandler)`should accept`ServerEventType`for
@@ -212,7 +212,7 @@ type safety. Currently any arbitrary string can be passed as an event type.
 
 ### H-8:`clientId`never set from ConnectedEvent
 
-**File:**`websocket.svelte.ts:17-18, :121-126`
+**File:**`websocket.React.ts:17-18, :121-126`
 **Found by:** Researcher-2, Coder
 
 The `clientId` `$state`field exists but the`onopen`/`onmessage`handler never
@@ -225,7 +225,7 @@ client identity tracking.
 
 | ### M-1:`ThreadMessage.role`type`| string`makes union meaningless |
 
-**File:**`agent-state.svelte.ts:31`
+**File:**`agent-state.React.ts:31`
 **Found by:** Orchestrator, Coder
 
 | `role: 'assistant' | 'user' | 'thought' | string`— the`| string` widens |
@@ -234,7 +234,7 @@ the type to accept any string, defeating the named variants. Should be just
 
 ### M-2: `ThreadToolCall.kind`and`.status`typed as`string`not enums
 
-**File:**`agent-state.svelte.ts:40-42`
+**File:**`agent-state.React.ts:40-42`
 **Found by:** Orchestrator
 
 Should use `ToolKind`and`ToolCallStatus`types from`types.ts`, matching the
@@ -242,7 +242,7 @@ Pydantic models. The current `string`types allow invalid values.
 
 ### M-3:`#messageAccumulators`never cleaned up (memory leak)
 
-**File:**`agent-state.svelte.ts:73`
+**File:**`agent-state.React.ts:73`
 **Found by:** Orchestrator, Coder
 
 The plain Map accumulating streaming message chunks grows indefinitely. No
@@ -250,7 +250,7 @@ cleanup occurs when messages finish or threads are removed.
 
 ### M-4: `restoreFromSnapshot`skips`pending_permissions`
 
-**File:** `agent-state.svelte.ts:152-203`
+**File:** `agent-state.React.ts:152-203`
 **Found by:** Coder (unique)
 
 The restore function processes messages, tool_calls, artifacts, plan, and
@@ -259,7 +259,7 @@ On reconnect, pending permission requests won't be shown.
 
 ### M-5: `restoreFromSnapshot`loses`detail`field
 
-**File:**`agent-state.svelte.ts:196-198`
+**File:**`agent-state.React.ts:196-198`
 **Found by:** Orchestrator
 
 Sets `lifecycleState`and`nodeName` from first agent but never restores
@@ -267,7 +267,7 @@ Sets `lifecycleState`and`nodeName` from first agent but never restores
 
 ### M-6: `lastSequence`initial value -1 vs WS client returning 0
 
-**File:**`agent-state.svelte.ts:62`, `websocket.svelte.ts:95-96`
+**File:**`agent-state.React.ts:62`, `websocket.React.ts:95-96`
 **Found by:** Orchestrator
 
 Store initializes to -1, but `getLastSequence`returns 0 for unknown threads.
@@ -276,7 +276,7 @@ client (0 <= 0).
 
 ### M-7: No error handling on REST calls in components
 
-**Files:**`+page.svelte:22-29`, `thread/[id]/+page.svelte:22-27`
+**Files:**`+page.React:22-29`, `thread/[id]/+page.React:22-27`
 **Found by:** Orchestrator, Coder
 
 `handleSendMessage()`and`handleNewThread()`call REST endpoints without
@@ -284,7 +284,7 @@ try/catch. Errors will be uncaught promise rejections.
 
 ### M-8: No ErrorEvent wired to sonner toast
 
-**File:**`agent-state.svelte.ts:140-141`
+**File:**`agent-state.React.ts:140-141`
 **Found by:** Orchestrator
 
 `<Toaster />` from sonner is mounted in layout but no ErrorEvent handler calls
@@ -292,7 +292,7 @@ try/catch. Errors will be uncaught promise rejections.
 
 ### M-9: Unsafe`as`casts in WS onmessage
 
-**File:**`websocket.svelte.ts:134-139`
+**File:**`websocket.React.ts:134-139`
 **Found by:** Researcher-1, Coder
 
 `(event as { thread_id: string })` — should use proper type narrowing with
@@ -300,11 +300,11 @@ try/catch. Errors will be uncaught promise rejections.
 
 ### M-10: TeamStatusPanel missing Tooltip.Provider wrapper
 
-**File:**`TeamStatusPanel.svelte:15-22`
+**File:**`TeamStatusPanel.React:15-22`
 **Found by:** Researcher-1 (unique)
 
 `Tooltip.Root`used without a`Tooltip.Provider`ancestor will error at runtime
-in shadcn-svelte/Bits UI.
+in shadcn-React/Bits UI.
 
 ---
 
@@ -336,8 +336,8 @@ mutations.
 
 ### L-5: No ESLint config for`src/ui/`
 
-Root ESLint config excludes `src/ui/` to avoid Svelte 5 parse errors. No local
-ESLint config with svelte parser exists for hand-written files.
+Root ESLint config excludes `src/ui/` to avoid React 5 parse errors. No local
+ESLint config with React parser exists for hand-written files.
 **Found by:** Coder (unique)
 
 ### L-6: Stores barrel missing interface type re-exports
@@ -359,13 +359,13 @@ private in Python but exported as public in`types.ts`.
 These component stubs use `<pre>`placeholders. Expected for scaffolding phase
 but tracked for Phase 3 remediation.
 
-| Component | Required Library (ADR-005) | Current State |
-| ----------- | -------------------------- | --------------- |
-| MarkdownRenderer | @humanspeak/svelte-markdown | raw`<pre>` |
-| DiffViewer | diff2html | raw`<pre>`, comment names wrong lib |
-| ArtifactViewer | CodeMirror 6 (read-only) | raw `<pre>` |
-| TerminalOutput | xterm.js v5 + WebGL addon | raw`<pre>` |
-| app.css | xterm.js Preflight isolation | Not present |
+| Component        | Required Library (ADR-005)   | Current State                       |
+| ---------------- | ---------------------------- | ----------------------------------- |
+| MarkdownRenderer | @humanspeak/React-markdown   | raw`<pre>`                          |
+| DiffViewer       | diff2html                    | raw`<pre>`, comment names wrong lib |
+| ArtifactViewer   | CodeMirror 6 (read-only)     | raw `<pre>`                         |
+| TerminalOutput   | xterm.js v5 + WebGL addon    | raw`<pre>`                          |
+| app.css          | xterm.js Preflight isolation | Not present                         |
 
 ---
 
@@ -374,15 +374,15 @@ but tracked for Phase 3 remediation.
 All 51 TypeScript types in`types.ts`verified field-by-field against Pydantic
 schemas. Result: **100% alignment** (confirmed by all 4 auditors independently).
 
-| Module | Types | Match |
-| -------- | ------- | ------- |
-| enums | 11 const objects + types | Exact |
-| events (component) | ToolCallLocation, ToolCallContent (3), PlanEntry, PermissionOption, AgentSummary | Exact |
-| events (server) | 12 event interfaces | Exact |
-| commands | 6 command interfaces + union | Exact |
-| rest | 8 interfaces | Exact |
-| snapshots | 7 interfaces | Exact (private prefix dropped, see L-7) |
-| base | EventEnvelope, ClientCommand | Exact |
+| Module             | Types                                                                            | Match                                   |
+| ------------------ | -------------------------------------------------------------------------------- | --------------------------------------- |
+| enums              | 11 const objects + types                                                         | Exact                                   |
+| events (component) | ToolCallLocation, ToolCallContent (3), PlanEntry, PermissionOption, AgentSummary | Exact                                   |
+| events (server)    | 12 event interfaces                                                              | Exact                                   |
+| commands           | 6 command interfaces + union                                                     | Exact                                   |
+| rest               | 8 interfaces                                                                     | Exact                                   |
+| snapshots          | 7 interfaces                                                                     | Exact (private prefix dropped, see L-7) |
+| base               | EventEnvelope, ClientCommand                                                     | Exact                                   |
 
 ---
 
@@ -395,18 +395,18 @@ schemas. Result: **100% alignment** (confirmed by all 4 auditors independently).
 - Permission queue REST-only pattern correct (per ADR-011)
 - Build clean (836 files, 0 errors, 0 warnings)
 - Prettier formatting clean
-- SvelteMap usage for fine-grained reactivity is correct architectural choice
+- Map usage for fine-grained reactivity is correct architectural choice
 
 ---
 
 ## Severity Summary
 
-| Severity | Count |
-| ---------- | ------- |
-| CRITICAL | 7 |
-| HIGH | 8 |
-| MODERATE | 10 |
-| LOW | 7 |
+| Severity  | Count  |
+| --------- | ------ |
+| CRITICAL  | 7      |
+| HIGH      | 8      |
+| MODERATE  | 10     |
+| LOW       | 7      |
 | **Total** | **32** |
 
 ---
@@ -415,7 +415,7 @@ schemas. Result: **100% alignment** (confirmed by all 4 auditors independently).
 
 ### Phase 1 — Reactivity + Protocol (blocks all integration testing)
 
-1. **C-1 + C-2**: SvelteMap re-set after mutation (trivial 2-line fix, highest
+1. **C-1 + C-2**: Map re-set after mutation (trivial 2-line fix, highest
    impact)
 2. **C-3**: Remove side effect from`$derived`— use`onMount`/`$effect`for
    creation,`.get()`in`$derived`
@@ -437,7 +437,7 @@ schemas. Result: **100% alignment** (confirmed by all 4 auditors independently).
 
 ### Phase 3 — Rendering fidelity (progressive enhancement)
 
-1. Integrate`@humanspeak/svelte-markdown`into MarkdownRenderer
+1. Integrate`@humanspeak/React-markdown`into MarkdownRenderer
 2. Replace DiffViewer with diff2html
 3. Integrate CodeMirror 6 into ArtifactViewer
 4. Integrate xterm.js v5 with Preflight isolation in app.css
@@ -460,8 +460,8 @@ schemas. Result: **100% alignment** (confirmed by all 4 auditors independently).
 
 ## Open Decision: SPA Fallback Value
 
-`svelte.config.js`uses`fallback: 'index.html'`. Researcher-1 flagged this
-as a violation (SvelteKit convention is `200.html`). However, this depends on
+`React.config.js`uses`fallback: 'index.html'`. Researcher-1 flagged this
+as a violation (React convention is `200.html`). However, this depends on
 how FastAPI's static file mount is configured (ADR-007). If FastAPI serves the
 SPA shell on all 404s as `index.html`, the current value is correct. If
 using a CDN or generic static server, `200.html` is needed. **Needs team

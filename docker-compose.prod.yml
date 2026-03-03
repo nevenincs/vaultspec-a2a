@@ -10,21 +10,27 @@ services:
       dockerfile: Dockerfile
       target: api
     ports:
-      - "8000:8000"
+      - '8000:8000'
     volumes:
       - db-data:/app/data
     environment:
-      VAULTSPEC_DATABASE_URL: "sqlite+aiosqlite:////app/data/vaultspec.db"
-      VAULTSPEC_AUTO_SPAWN_WORKER: "false"
-      VAULTSPEC_WORKER_URL: "http://worker:8001"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
+      VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
+      OTEL_EXPORTER_OTLP_INSECURE: 'true'
     env_file: .env
     depends_on:
       - jaeger
       - worker
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -38,15 +44,21 @@ services:
     volumes:
       - db-data:/app/data
     environment:
-      VAULTSPEC_DATABASE_URL: "sqlite+aiosqlite:////app/data/vaultspec.db"
-      VAULTSPEC_API_BASE_URL: "http://api:8000"
-      OTEL_EXPORTER_OTLP_ENDPOINT: "http://jaeger:4317"
-      OTEL_EXPORTER_OTLP_INSECURE: "true"
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_API_BASE_URL: 'http://api:8000'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
+      OTEL_EXPORTER_OTLP_INSECURE: 'true'
     env_file: .env
     depends_on:
       - jaeger
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')"]
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -55,11 +67,11 @@ services:
   jaeger:
     image: jaegertracing/jaeger:latest
     ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "16686:16686"
+      - '4317:4317'
+      - '4318:4318'
+      - '16686:16686'
     environment:
-      COLLECTOR_OTLP_ENABLED: "true"
+      COLLECTOR_OTLP_ENABLED: 'true'
 
 volumes:
   db-data:

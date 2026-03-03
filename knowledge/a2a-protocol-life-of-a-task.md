@@ -1,8 +1,8 @@
 ---
-name: "A2A Life of a Task"
+name: 'A2A Life of a Task'
 date: 2026-25-02
 type: reference
-summary: "Task lifecycle patterns covering stateless vs stateful responses, contextId grouping, parallel follow-ups, and artifact mutation tracking."
+summary: 'Task lifecycle patterns covering stateless vs stateful responses, contextId grouping, parallel follow-ups, and artifact mutation tracking.'
 maturity: 80
 ---
 
@@ -12,10 +12,10 @@ maturity: 80
 exchanges to complex, long-running processes. When an agent receives a message
 from a client, it can respond in one of two fundamental ways:
 
-* **Respond with a Stateless Message:** This type of response is typically used
+- **Respond with a Stateless Message:** This type of response is typically used
   for immediate, self-contained interactions that conclude without requiring
   further state management.
-* **Initiate a Stateful Task:** If the response is a Task, the agent will
+- **Initiate a Stateful Task:** If the response is a Task, the agent will
   process it through a defined lifecycle, communicating progress and requiring
   input as needed, until it reaches an interrupted state (e.g., input-required,
   auth-required) or a terminal state (e.g., completed, canceled, rejected,
@@ -27,12 +27,12 @@ A `contextId` is a crucial identifier that logically groups multiple Task
 objects and independent Message objects, providing continuity across a series of
 interactions.
 
-* When a client sends a message for the first time, the agent responds with a
+- When a client sends a message for the first time, the agent responds with a
   new `contextId`. If a task is initiated, it will also have a `taskId`.
-* Clients can send subsequent messages and include the same `contextId` to
+- Clients can send subsequent messages and include the same `contextId` to
   indicate that they are continuing their previous interaction within the same
   context.
-* Clients optionally attach the `taskId` to a subsequent message to indicate
+- Clients optionally attach the `taskId` to a subsequent message to indicate
   that it continues that specific task.
 
 The `contextId` enables collaboration towards a common goal or a shared
@@ -45,27 +45,27 @@ internal conversational state or its LLM context.
 The choice between responding with a Message or a Task depends on the nature of
 the interaction and the agent's capabilities:
 
-* **Messages for Trivial Interactions:** Message objects are suitable for
+- **Messages for Trivial Interactions:** Message objects are suitable for
   transactional interactions that don't require long-running processing or
   complex state management. An agent might use messages to negotiate the
   acceptance or scope of a task before committing to a Task object.
-* **Tasks for Stateful Interactions:** Once an agent maps the intent of an
+- **Tasks for Stateful Interactions:** Once an agent maps the intent of an
   incoming message to a supported capability that requires substantial,
   trackable work over an extended period, the agent responds with a Task object.
 
 Conceptually, agents operate at different levels of complexity:
 
-* **Message-only Agents:** Always respond with Message objects. They typically
+- **Message-only Agents:** Always respond with Message objects. They typically
   don't manage complex state or long-running executions, and use `contextId` to
   tie messages together. These agents might directly wrap LLM invocations and
   simple tools.
-* **Task-generating Agents:** Always respond with Task objects, even for
+- **Task-generating Agents:** Always respond with Task objects, even for
   responses, which are then modeled as completed tasks. Once a task is created,
   the agent will only return Task objects in response to messages sent, and once
   a task is complete, no more messages can be sent. This approach avoids
   deciding between Task versus Message, but creates completed task objects for
   even simple interactions.
-* **Hybrid Agents:** Generate both Message and Task objects. These agents use
+- **Hybrid Agents:** Generate both Message and Task objects. These agents use
   messages to negotiate agent capability and the scope of work for a task, then
   send a Task object to track execution and manage states like input-required or
   error handling. Once a task is created, the agent will only return Task
@@ -88,13 +88,13 @@ it cannot restart. Any subsequent interaction related to that task, such as a
 refinement, must initiate a new task within the same `contextId`. This principle
 offers several benefits:
 
-* **Task Immutability:** Clients reliably reference tasks and their associated
+- **Task Immutability:** Clients reliably reference tasks and their associated
   state, artifacts, and messages, providing a clean mapping of inputs to
   outputs. This is valuable for orchestration and traceability.
-* **Clear Unit of Work:** Every new request, refinement, or follow-up becomes a
+- **Clear Unit of Work:** Every new request, refinement, or follow-up becomes a
   distinct task. This simplifies bookkeeping, allows for granular tracking of an
   agent's work, and enables tracing each artifact to a specific unit of work.
-* **Easier Implementation:** This removes ambiguity for agent developers
+- **Easier Implementation:** This removes ambiguity for agent developers
   regarding whether to create a new task or restart an existing one.
 
 ## PARALLEL FOLLOW-UPS
@@ -106,10 +106,10 @@ prerequisite task is complete.
 
 For example:
 
-* **Task 1:** Book a flight to Helsinki.
-* **Task 2:** Based on Task 1, book a hotel.
-* **Task 3:** Based on Task 1, book a snowmobile activity.
-* **Task 4:** Based on Task 2, add a spa reservation to the hotel booking.
+- **Task 1:** Book a flight to Helsinki.
+- **Task 2:** Based on Task 1, book a hotel.
+- **Task 3:** Based on Task 1, book a snowmobile activity.
+- **Task 4:** Based on Task 2, add a spa reservation to the hotel booking.
 
 ## REFERENCING PREVIOUS ARTIFACTS
 
@@ -143,8 +143,8 @@ reference the specific artifact they intend to refine, ideally the "latest"
 version from their perspective. If the artifact reference is not provided, the
 serving agent can:
 
-* Attempt to infer the intended artifact based on the current `contextId`.
-* If there is ambiguity or insufficient context, the agent should respond with
+- Attempt to infer the intended artifact based on the current `contextId`.
+- If there is ambiguity or insufficient context, the agent should respond with
   an `input-required` task state to request clarification from the client.
 
 ## EXAMPLE FOLLOW-UP SCENARIO
@@ -217,9 +217,7 @@ The following example illustrates a typical task flow with a follow-up:
       "role": "user",
       "messageId": "msg-user-002",
       "contextId": "ctx-conversation-abc",
-      "referenceTaskIds": [
-        "task-boat-gen-123"
-      ],
+      "referenceTaskIds": ["task-boat-gen-123"],
       "parts": [
         {
           "text": "Please modify the sailboat to be red."

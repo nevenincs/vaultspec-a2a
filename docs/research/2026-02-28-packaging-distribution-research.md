@@ -2,14 +2,14 @@
 date: 2026-02-28
 type: research
 feature: packaging-distribution
-description: "Research into packaging, distribution, and CLI entry-point strategies."
+description: 'Research into packaging, distribution, and CLI entry-point strategies.'
 ---
 
 # Packaging & Distribution Research
 
 **Date**: 2026-02-28
 **Status**: Research Complete — Pending ADR Decisions
-**Scope**: Python 3.13 backend (FastAPI/LangGraph/uv/hatchling) + SvelteKit 5
+**Scope**: Python 3.13 backend (FastAPI/LangGraph/uv/hatchling) + React 5
 frontend, monorepo, Windows-primary development
 
 ---
@@ -41,14 +41,14 @@ Python+Node monorepo with complex AI/ML dependencies.
 
 ### 2.1 Open-Source Hybrid Projects
 
-| Project | Backend | Frontend | Build System | Task Runner | Distribution |
-| --------- | --------- | ---------- | ------------- | ------------- | ------------- |
-| **LangFlow** | FastAPI/LangChain | React/Vite | hatchling + uv workspace | Makefile | PyPI wheel (embedded) |
-| **Open WebUI** | FastAPI | SvelteKit | hatchling `force-include` | Makefile (Docker) | Docker + PyPI |
-| **Chainlit** | FastAPI/Socket.IO | React/Vite | hatchling`CustomBuildHook` | None (hook is coordinator) | PyPI wheel (embedded) |
-| **Dify** | Flask | Next.js | Poetry | Docker Compose | Docker only |
-| **Gradio** | FastAPI | Svelte/JS | hatchling custom hook | `gradio cc build` | PyPI wheel (embedded) |
-| **Streamlit** | Tornado | React | setuptools | Make | PyPI wheel (embedded) |
+| Project        | Backend           | Frontend   | Build System               | Task Runner                | Distribution          |
+| -------------- | ----------------- | ---------- | -------------------------- | -------------------------- | --------------------- |
+| **LangFlow**   | FastAPI/LangChain | React/Vite | hatchling + uv workspace   | Makefile                   | PyPI wheel (embedded) |
+| **Open WebUI** | FastAPI           | React      | hatchling `force-include`  | Makefile (Docker)          | Docker + PyPI         |
+| **Chainlit**   | FastAPI/Socket.IO | React/Vite | hatchling`CustomBuildHook` | None (hook is coordinator) | PyPI wheel (embedded) |
+| **Dify**       | Flask             | Next.js    | Poetry                     | Docker Compose             | Docker only           |
+| **Gradio**     | FastAPI           | React/JS   | hatchling custom hook      | `gradio cc build`          | PyPI wheel (embedded) |
+| **Streamlit**  | Tornado           | React      | setuptools                 | Make                       | PyPI wheel (embedded) |
 
 **Dominant pattern**: hatchling build hook triggers`npm run build`, copies
 output into Python package directory, wheel ships everything. FastAPI serves
@@ -56,15 +56,15 @@ static assets via `StaticFiles(html=True)`.
 
 ### 2.2 Knowledge Repository Patterns
 
-| Repo | Build System | Task Runner | Docker | Monorepo Strategy |
-| ------ | ------------- | ------------- | -------- | ------------------- |
-| **a2a-python** | hatchling + uv-dynamic-versioning | Shell scripts | Compose (test only) | Single package, optional extras |
-| **a2a-samples** | hatchling per agent | None (uv workspace) | Minimal per-agent | uv workspace, shared lockfile |
-| **acp-python-sdk** | pdm-backend | Makefile (uv targets) | None | Single package |
-| **claude-agent-sdk** | hatchling | None | Dockerfile.test | Single package, src/ layout |
-| **langgraph/cli** | hatchling | Makefile | Programmatic compose generation | Multi-lib, independent |
-| **deepagents** | setuptools (mixed) | Root Makefile | None | Multi-lib, independent lockfiles |
-| **toad** | hatchling (pinned) | Makefile | None | uv workspace, single member |
+| Repo                 | Build System                      | Task Runner           | Docker                          | Monorepo Strategy                |
+| -------------------- | --------------------------------- | --------------------- | ------------------------------- | -------------------------------- |
+| **a2a-python**       | hatchling + uv-dynamic-versioning | Shell scripts         | Compose (test only)             | Single package, optional extras  |
+| **a2a-samples**      | hatchling per agent               | None (uv workspace)   | Minimal per-agent               | uv workspace, shared lockfile    |
+| **acp-python-sdk**   | pdm-backend                       | Makefile (uv targets) | None                            | Single package                   |
+| **claude-agent-sdk** | hatchling                         | None                  | Dockerfile.test                 | Single package, src/ layout      |
+| **langgraph/cli**    | hatchling                         | Makefile              | Programmatic compose generation | Multi-lib, independent           |
+| **deepagents**       | setuptools (mixed)                | Root Makefile         | None                            | Multi-lib, independent lockfiles |
+| **toad**             | hatchling (pinned)                | Makefile              | None                            | uv workspace, single member      |
 
 ### Cross-cutting observations
 
@@ -72,8 +72,7 @@ static assets via `StaticFiles(html=True)`.
 - Makefile is the common task orchestrator, always delegating to`uv run`
 - hatchling dominates as build backend
 - Docker is used sparingly (test infra or deployment, not dev workflow)
-- `ty`(Astral type checker) is replacing mypy across ACP-world repos
--`prek` replacing pre-commit in ACP-world repos
+- `ty`(Astral type checker) is replacing mypy across ACP-world repos -`prek` replacing pre-commit in ACP-world repos
 
 ---
 
@@ -82,7 +81,7 @@ static assets via `StaticFiles(html=True)`.
 ### 3.1 How It Works
 
 ```text
-src/ui/ (SvelteKit source)
+src/ui/ (React source)
   └── npm run build → src/ui/build/ (static HTML/JS/CSS)
        └── hatch_build.py copies to → lib/api/static/
             └── uv build → wheel includes lib/api/static/**
@@ -105,7 +104,7 @@ path = "hatch_build.py"
 ### 3.3 Build Hook (hatch_build.py)
 
 ```python
-"""Hatchling build hook: builds SvelteKit frontend and embeds in wheel."""
+"""Hatchling build hook: builds React frontend and embeds in wheel."""
 
 import shutil
 import subprocess
@@ -151,9 +150,9 @@ app.include_router(api_router, prefix="/api")
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
 ```
 
-### 3.5 SvelteKit Adapter
+### 3.5 React Adapter
 
-Currently using `@sveltejs/adapter-static` — this is correct for the embedded
+Currently using `Vite SPA` — this is correct for the embedded
 pattern. Output is pure HTML/JS/CSS with no Node runtime needed. No change
 required.
 
@@ -217,7 +216,7 @@ services:
     build:
       context: .
       target: runtime
-    ports: ["8000:8000"]
+    ports: ['8000:8000']
     volumes:
       - db-data:/app/data
     environment:
@@ -231,16 +230,16 @@ services:
     image: node:22-alpine
     working_dir: /app/src/ui
     command: npm run dev -- --host 0.0.0.0
-    ports: ["5173:5173"]
+    ports: ['5173:5173']
     volumes:
       - ./src/ui:/app/src/ui
 
   jaeger:
     image: jaegertracing/all-in-one:latest
     ports:
-      - "4317:4317"   # OTLP gRPC receiver
-      - "4318:4318"   # OTLP HTTP receiver
-      - "16686:16686" # Jaeger UI
+      - '4317:4317' # OTLP gRPC receiver
+      - '4318:4318' # OTLP HTTP receiver
+      - '16686:16686' # Jaeger UI
     environment:
       - COLLECTOR_OTLP_ENABLED=true
 
@@ -274,11 +273,7 @@ volumes:
   "forwardPorts": [8000, 5173],
   "customizations": {
     "vscode": {
-      "extensions": [
-        "ms-python.python",
-        "charliermarsh.ruff",
-        "svelte.svelte-vscode"
-      ]
+      "extensions": ["ms-python.python", "charliermarsh.ruff", "React.React-vscode"]
     }
   }
 }
@@ -387,14 +382,14 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 
 ### 6.1 Decision Matrix
 
-| Strategy | Complexity | User Experience | PyPI-Ready | Blocks |
-| ---------- | ----------- | ---------------- | ----------- | -------- |
-| **A. PyPI wheel (embedded frontend)** | Medium | `pip install vaultspec-a2a` | Yes | Frontend build hook |
-| **B. Docker image** | Low | `docker run vaultspec-a2a` | N/A | None |
-| **C. GitHub install** | Low | `pip install git+https://...` | N/A | None |
-| **D. uvx ephemeral** | Low | `uvx vaultspec-a2a` | Yes | PyPI publish |
-| **E. Binary (PyInstaller)** | High | Download`.exe` | N/A | Build pipeline |
-| **F. Desktop (Tauri)** | Very High | Native app | N/A | Rust toolchain |
+| Strategy                              | Complexity | User Experience               | PyPI-Ready | Blocks              |
+| ------------------------------------- | ---------- | ----------------------------- | ---------- | ------------------- |
+| **A. PyPI wheel (embedded frontend)** | Medium     | `pip install vaultspec-a2a`   | Yes        | Frontend build hook |
+| **B. Docker image**                   | Low        | `docker run vaultspec-a2a`    | N/A        | None                |
+| **C. GitHub install**                 | Low        | `pip install git+https://...` | N/A        | None                |
+| **D. uvx ephemeral**                  | Low        | `uvx vaultspec-a2a`           | Yes        | PyPI publish        |
+| **E. Binary (PyInstaller)**           | High       | Download`.exe`                | N/A        | Build pipeline      |
+| **F. Desktop (Tauri)**                | Very High  | Native app                    | N/A        | Rust toolchain      |
 
 > **Update (ADR-015):** The claude-agent-sdk git dependency has been
 > removed (zero imports). pywin32 and winfcntl also removed. The PyPI
@@ -407,8 +402,7 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 
 - Justfile for dev bootstrap (`just setup`, `just dev`, `just test`)
 - Dockerfile + docker-compose.yml with Jaeger
-- `.devcontainer`for Codespaces/VS Code
--`.env.example` template
+- `.devcontainer`for Codespaces/VS Code -`.env.example` template
 
 **Phase 2 (Next):** PyPI distribution
 
@@ -442,13 +436,7 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 
 ### 7.2 Remaining: New Files to Create
 
-1. `Justfile`— task runner for dev workflow
-2.`Dockerfile`— multi-stage build
-3.`docker-compose.yml`— dev environment (with Jaeger)
-4.`.devcontainer/devcontainer.json`— VS Code dev container
-5.`hatch_build.py`— frontend build hook (Phase 2)
-6.`.env.example`— environment template
-7.`.dockerignore`— exclude knowledge/, node_modules/, .venv/, etc.
+1. `Justfile`— task runner for dev workflow 2.`Dockerfile`— multi-stage build 3.`docker-compose.yml`— dev environment (with Jaeger) 4.`.devcontainer/devcontainer.json`— VS Code dev container 5.`hatch_build.py`— frontend build hook (Phase 2) 6.`.env.example`— environment template 7.`.dockerignore`— exclude knowledge/, node_modules/, .venv/, etc.
 
 ### 7.3 Remaining: ADR Topics
 
@@ -468,7 +456,7 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 2. Should we adopt `mise`for polyglot version pinning, or keep uv + volta
    separate?
 3. Is the`lib`package name acceptable for PyPI, or should we rename to
-  `vaultspec_a2a`for the public module?
+   `vaultspec_a2a`for the public module?
 4. ~~Should we vendor`claude-agent-sdk`or wait for PyPI release?~~
    **Resolved** — removed entirely (ADR-015).
 5. Do we need a`langgraph.json` manifest for LangGraph CLI deployment
@@ -484,35 +472,35 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 ### Hybrid Project References
 
 - [LangFlow build
-system](https://deepwiki.com/langflow-ai/langflow/2-build-system-and-package-management)
+  system](https://deepwiki.com/langflow-ai/langflow/2-build-system-and-package-management)
 - [LangFlow
-DEVELOPMENT.md](https://github.com/langflow-ai/langflow/blob/main/DEVELOPMENT.md)
+  DEVELOPMENT.md](https://github.com/langflow-ai/langflow/blob/main/DEVELOPMENT.md)
 - [Open WebUI
-architecture](https://deepwiki.com/open-webui/open-webui/17.1-installation-and-setup)
+  architecture](https://deepwiki.com/open-webui/open-webui/17.1-installation-and-setup)
 - [Chainlit developer
   guide](https://deepwiki.com/Chainlit/chainlit/11-developer-guide)
 - [Gradio
   pyproject.toml](https://github.com/gradio-app/gradio/blob/main/pyproject.toml)
 - [Embedding React in
-FastAPI](https://medium.com/@asafshakarzy/embedding-a-react-frontend-inside-a-fastapi-python-package-in-a-monorepo-c00f99e90471)
+  FastAPI](https://medium.com/@asafshakarzy/embedding-a-react-frontend-inside-a-fastapi-python-package-in-a-monorepo-c00f99e90471)
 
 ### Docker & Containerization
 
 - [uv in Docker
   (official)](https://docs.astral.sh/uv/guides/integration/docker/)
 - [Optimal uv Dockerfile —
-Depot](https://depot.dev/docs/container-builds/how-to-guides/optimal-dockerfiles/python-uv-dockerfile)
+  Depot](https://depot.dev/docs/container-builds/how-to-guides/optimal-dockerfiles/python-uv-dockerfile)
 - [Production Python Docker with uv —
   Hynek](https://hynek.me/articles/docker-uv/)
 - [Python base image
-recommendations](https://pythonspeed.com/articles/base-image-python-docker-images/)
+  recommendations](https://pythonspeed.com/articles/base-image-python-docker-images/)
 - [SQLite in
-Docker](https://oneuptime.com/blog/post/2026-02-08-how-to-run-sqlite-in-docker-when-and-how/view)
+  Docker](https://oneuptime.com/blog/post/2026-02-08-how-to-run-sqlite-in-docker-when-and-how/view)
 - [Docker Compose Watch](https://docs.docker.com/compose/how-tos/file-watch/)
-- [SvelteKit Docker
-guide](https://khromov.se/dockerizing-your-sveltekit-applications-a-practical-guide/)
+- [React Docker
+  guide](https://khromov.se/dockerizing-your-React-applications-a-practical-guide/)
 - [Dify Docker
-deployment](https://deepwiki.com/langgenius/dify-docs/3.2-docker-compose-deployment)
+  deployment](https://deepwiki.com/langgenius/dify-docs/3.2-docker-compose-deployment)
 
 ### Developer Experience
 
@@ -526,11 +514,11 @@ deployment](https://deepwiki.com/langgenius/dify-docs/3.2-docker-compose-deploym
 - [Hatch build
   hooks](https://hatch.pypa.io/latest/plugins/build-hook/reference/)
 - [PyPI git dependency
-discussion](https://discuss.python.org/t/packages-installed-from-pypi-cannot-depend-on-packages-which-are-not-also-hosted-on-pypi/3736)
+  discussion](https://discuss.python.org/t/packages-installed-from-pypi-cannot-depend-on-packages-which-are-not-also-hosted-on-pypi/3736)
 - [uv tools docs](https://docs.astral.sh/uv/concepts/tools/)
 - [PEP 508 markers](https://peps.python.org/pep-0631/)
 - [GitHub Actions PyPI
-publish](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/)
+  publish](https://packaging.python.org/en/latest/guides/publishing-package-distribution-releases-using-github-actions-ci-cd-workflows/)
 - [PyInstaller vs Nuitka](https://coderslegacy.com/nuitka-vs-pyinstaller/)
 - [Tauri + FastAPI
   template](https://github.com/fudanglp/tauri-fastapi-full-stack-template)

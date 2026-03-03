@@ -1,8 +1,8 @@
 ---
-name: "Control Surface Research Plan"
+name: 'Control Surface Research Plan'
 date: 2026-25-02
 type: plan
-summary: "Eight-phase research roadmap from protocol foundations through architecture decision records for the agent team control surface."
+summary: 'Eight-phase research roadmap from protocol foundations through architecture decision records for the agent team control surface.'
 maturity: 30
 ---
 
@@ -44,6 +44,7 @@ communication between a web UI and agent processes.
 ### 1.1 A2A Streaming Primitives
 
 **Research questions**:
+
 - What exactly can an SSE client receive during agent execution?
 - Can a single SSE connection multiplex events from multiple agents?
 - What is the reconnection protocol when SSE drops?
@@ -52,6 +53,7 @@ communication between a web UI and agent processes.
   structured enough for UI rendering, or just free text?
 
 **Sources to investigate**:
+
 - A2A specification proto files: message definitions for streaming
 - `a2a-python` SSE transport implementation
 - `a2a-python` client resubscription logic
@@ -62,6 +64,7 @@ communication between a web UI and agent processes.
 ### 1.2 ACP Session Protocol
 
 **Research questions**:
+
 - Can ACP's `session/update` notification stream be consumed by a web
   client, or is it stdio-only?
 - What would it take to bridge ACP stdio streams to WebSocket?
@@ -72,6 +75,7 @@ communication between a web UI and agent processes.
 - Is the ACP protocol documented enough to implement a web-native host?
 
 **Sources to investigate**:
+
 - ACP Python SDK interfaces.py — full protocol surface
 - ACP contrib/session_state.py — SessionAccumulator internals
 - ACP contrib/tool_calls.py — ToolCallTracker internals
@@ -83,6 +87,7 @@ communication between a web UI and agent processes.
 ### 1.3 WebSocket as Unified Transport
 
 **Research questions**:
+
 - Can A2A's SSE be proxied to WebSocket for bidirectional capability?
 - What WebSocket libraries integrate with Starlette/FastAPI?
 - What message format for the WebSocket channel? (JSON events? Protocol
@@ -93,6 +98,7 @@ communication between a web UI and agent processes.
   state recovery after disconnect)
 
 **Sources to investigate**:
+
 - Starlette WebSocket documentation
 - FastAPI WebSocket patterns
 - Open-source agent UI projects (Open WebUI, LibreChat, LobeChat)
@@ -110,6 +116,7 @@ display agent output with syntax highlighting and interactive capability.
 ### 2.1 xterm.js Ecosystem
 
 **Research questions**:
+
 - What is xterm.js's architecture? (core, addons, rendering)
 - How does xterm.js handle ANSI escape codes for color/formatting?
 - What addons exist for search, fit, web links, Unicode?
@@ -118,6 +125,7 @@ display agent output with syntax highlighting and interactive capability.
 - How do projects like VS Code's terminal, Theia, code-server use it?
 
 **Sources to investigate**:
+
 - xterm.js GitHub repository and documentation
 - xterm.js addon ecosystem (xterm-addon-fit, xterm-addon-search, etc.)
 - node-pty or conpty for backend PTY allocation
@@ -129,6 +137,7 @@ display agent output with syntax highlighting and interactive capability.
 ### 2.2 Syntax Highlighting in Terminal Context
 
 **Research questions**:
+
 - How do you syntax-highlight code output in a terminal emulator?
   (ANSI codes? Overlaid HTML? Post-processing?)
 - What libraries handle code syntax highlighting on the web?
@@ -139,6 +148,7 @@ display agent output with syntax highlighting and interactive capability.
 - What about diff highlighting for code review views?
 
 **Sources to investigate**:
+
 - Shiki documentation (VSCode's syntax engine, WASM-based)
 - Monaco Editor (VS Code's editor component) — for code panels
 - CodeMirror 6 architecture — for interactive code editing
@@ -151,6 +161,7 @@ code panel vs. hybrid approach).
 ### 2.3 Agent Output Rendering
 
 **Research questions**:
+
 - What format does agent output arrive in? (plain text, markdown,
   ANSI-colored, structured JSON, mixed?)
 - How do existing agent UIs render streaming LLM output?
@@ -160,6 +171,7 @@ code panel vs. hybrid approach).
 - What about rendering file diffs, code blocks, error traces?
 
 **Sources to investigate**:
+
 - Claude Code CLI — how it renders to terminal currently
 - ACP session/update payloads — exact content format
 - Open WebUI / LibreChat message rendering
@@ -178,26 +190,29 @@ and map the full system architecture.
 ### 3.1 Web Framework Selection
 
 **Research questions**:
+
 - What Python web frameworks support both HTTP API and WebSocket
   simultaneously? (FastAPI, Starlette, Django Channels, Sanic)
 - What frontend frameworks are best suited for real-time streaming UIs?
-  (React, Svelte, SolidJS, HTMX+Alpine)
+  (React, React, SolidJS, HTMX+Alpine)
 - What is the build/deploy story? (single binary? Docker? pip install?)
 - What existing "agent IDE" or "agent dashboard" projects exist that
   we can learn from or extend?
 
 **Candidates to evaluate**:
+
 - **Backend**: FastAPI (already in A2A stack) vs. Starlette (lighter)
-- **Frontend**: React (ecosystem) vs. Svelte (performance, simplicity)
+- **Frontend**: React (ecosystem) vs. React (performance, simplicity)
   vs. HTMX (minimal JS, SSE-native)
 - **Hybrid**: Gradio (fast prototyping) vs. Streamlit vs. Panel
 - **Full-stack**: Next.js (if going Node) vs. Python-native
 
 **Sources to investigate**:
+
 - FastAPI WebSocket documentation and patterns
-- Svelte + SvelteKit for real-time apps
+- React + React for real-time apps
 - HTMX SSE extension documentation
-- Open WebUI source code (full agent UI in Svelte)
+- Open WebUI source code (full agent UI in React)
 - Dify source code (agent workflow builder)
 - Langflow source code (LangChain visual builder)
 
@@ -206,6 +221,7 @@ and map the full system architecture.
 ### 3.2 State Management Architecture
 
 **Research questions**:
+
 - How do you maintain consistent state between server and all connected
   web clients?
 - What happens when a client disconnects and reconnects? (state recovery)
@@ -214,6 +230,7 @@ and map the full system architecture.
 - How do existing real-time apps (Figma, Google Docs, Slack) solve this?
 
 **Topics to investigate**:
+
 - Server-side event sourcing patterns
 - CRDT (Conflict-free Replicated Data Types) for collaborative state
 - Redux/Zustand/Pinia patterns for client-side state
@@ -225,6 +242,7 @@ and map the full system architecture.
 ### 3.3 Authentication and Multi-User Concerns
 
 **Research questions**:
+
 - Is this single-user (local dev tool) or multi-user?
 - If single-user, do we still need auth? (localhost binding sufficient?)
 - If multi-user, how do agent permissions map to user permissions?
@@ -242,6 +260,7 @@ localhost-only, no auth needed").
 ### 4.1 Process Management Patterns
 
 **Research questions**:
+
 - How do you spawn, monitor, and kill Python subprocesses from an async
   web server?
 - What are the pitfalls of `asyncio.create_subprocess_exec` for
@@ -252,6 +271,7 @@ localhost-only, no auth needed").
 - What does graceful shutdown look like? (SIGTERM → wait → SIGKILL?)
 
 **Sources to investigate**:
+
 - Python asyncio subprocess documentation
 - supervisord, circus, or pm2 patterns
 - Jupyter kernel management (how Jupyter spawns/kills kernels)
@@ -263,6 +283,7 @@ localhost-only, no auth needed").
 ### 4.2 Agent Hot-Swap and Team Composition
 
 **Research questions**:
+
 - Can you replace an agent mid-task? What happens to the A2A task?
 - How do you drain an agent (let current work finish) vs. kill it?
 - How does the orchestrator update its routing table when agents
@@ -271,6 +292,7 @@ localhost-only, no auth needed").
 - How do A2A samples handle agent unavailability?
 
 **Sources to investigate**:
+
 - A2A protocol spec — agent availability and error handling
 - Kubernetes rolling update patterns (conceptual analog)
 - Circuit breaker pattern implementations
@@ -281,6 +303,7 @@ localhost-only, no auth needed").
 ### 4.3 MCP Permission Management
 
 **Research questions**:
+
 - How are MCP tool permissions currently managed? (per-server config?)
 - Can permissions be changed at runtime, or only at startup?
 - What does the Claude Agent SDK's permission model look like?
@@ -289,6 +312,7 @@ localhost-only, no auth needed").
 - What granularity is needed? (per-tool? per-directory? per-operation?)
 
 **Sources to investigate**:
+
 - Claude Agent SDK types.py — PermissionMode, permission structures
 - MCP specification — security and authorization
 - ACP permission request/response protocol
@@ -306,6 +330,7 @@ multi-turn conversations from a web UI.
 ### 5.1 A2A Message Injection
 
 **Research questions**:
+
 - Can you send an A2A message to a task that's in `WORKING` state?
   (Not `INPUT_REQUIRED` — just inject a message mid-work)
 - What happens if you send a new message with the same `contextId`
@@ -316,6 +341,7 @@ multi-turn conversations from a web UI.
   instructions?
 
 **Sources to investigate**:
+
 - A2A spec: message routing rules
 - A2A spec: contextId semantics for concurrent tasks
 - a2a-samples multiagent host: how follow-up messages are routed
@@ -326,6 +352,7 @@ multi-turn conversations from a web UI.
 ### 5.2 Multi-Turn Conversation UI
 
 **Research questions**:
+
 - What's the UX for chatting with an agent team? (single chat thread?
   per-agent threads? threaded conversation?)
 - How do existing multi-agent UIs handle this? (AutoGen Studio,
@@ -334,6 +361,7 @@ multi-turn conversations from a web UI.
 - What about showing agent-to-agent messages (not just user↔agent)?
 
 **Sources to investigate**:
+
 - AutoGen Studio source code and UI patterns
 - CrewAI Studio (if open source)
 - ChatDev visualization of agent conversations
@@ -371,6 +399,7 @@ failure point.
 ### 6.2 Complexity Inventory
 
 **Research task**: For each control surface feature, estimate:
+
 - Protocol support (does A2A/ACP/MCP provide it natively?)
 - Custom code required (what must we build from scratch?)
 - Library dependencies (what third-party code do we need?)
@@ -378,6 +407,7 @@ failure point.
 - Backend complexity (trivial? Moderate? Hard?)
 
 Features to assess:
+
 1. Agent status monitoring (real-time)
 2. Task list with filtering and sorting
 3. Artifact browser (view generated code)
@@ -405,6 +435,7 @@ Frontend JS ←HTTP→ Static Assets
 ```
 
 For each boundary:
+
 - What serialization format crosses it?
 - What happens when it fails?
 - What is the latency?
@@ -421,16 +452,16 @@ this problem.
 
 ### 7.1 Agent UI Projects
 
-| Project | What to Study | Why |
-|---------|--------------|-----|
-| **Open WebUI** | Full-stack agent UI, Svelte, WebSocket | Mature, open source, similar scope |
-| **AutoGen Studio** | Multi-agent conversation UI | Direct competitor pattern |
-| **Dify** | Workflow builder + agent execution | Production-grade agent platform |
-| **Langflow** | Visual agent builder | UI patterns for agent composition |
-| **LobeChat** | Chat UI with plugin system | Clean agent interaction patterns |
-| **code-server** | VS Code in browser | Terminal + editor in web context |
-| **Jupyter** | Kernel management, notebook UI | Process management patterns |
-| **Grafana** | Real-time dashboard | Monitoring UI patterns |
+| Project            | What to Study                         | Why                                |
+| ------------------ | ------------------------------------- | ---------------------------------- |
+| **Open WebUI**     | Full-stack agent UI, React, WebSocket | Mature, open source, similar scope |
+| **AutoGen Studio** | Multi-agent conversation UI           | Direct competitor pattern          |
+| **Dify**           | Workflow builder + agent execution    | Production-grade agent platform    |
+| **Langflow**       | Visual agent builder                  | UI patterns for agent composition  |
+| **LobeChat**       | Chat UI with plugin system            | Clean agent interaction patterns   |
+| **code-server**    | VS Code in browser                    | Terminal + editor in web context   |
+| **Jupyter**        | Kernel management, notebook UI        | Process management patterns        |
+| **Grafana**        | Real-time dashboard                   | Monitoring UI patterns             |
 
 **For each project**: Read architecture docs, understand tech stack,
 identify reusable patterns, note what works and what doesn't.
@@ -439,13 +470,13 @@ identify reusable patterns, note what works and what doesn't.
 
 ### 7.2 Terminal-in-Browser Projects
 
-| Project | What to Study | Why |
-|---------|--------------|-----|
-| **xterm.js** | Core terminal emulator | Likely our terminal component |
-| **Wetty** | Web terminal over SSH | Full stack reference |
-| **ttyd** | Terminal sharing via WebSocket | Lightweight reference |
-| **Theia** | Cloud IDE with terminal | Enterprise-grade reference |
-| **Gotty** | Terminal sharing (Go) | Simple architecture reference |
+| Project      | What to Study                  | Why                           |
+| ------------ | ------------------------------ | ----------------------------- |
+| **xterm.js** | Core terminal emulator         | Likely our terminal component |
+| **Wetty**    | Web terminal over SSH          | Full stack reference          |
+| **ttyd**     | Terminal sharing via WebSocket | Lightweight reference         |
+| **Theia**    | Cloud IDE with terminal        | Enterprise-grade reference    |
+| **Gotty**    | Terminal sharing (Go)          | Simple architecture reference |
 
 **Deliverable**: Terminal implementation options document.
 
@@ -471,6 +502,7 @@ Based on all preceding research, write ADRs for:
 ### 8.2 Prototype Scope Definition
 
 Define the minimum viable control surface:
+
 - Which features are v1 vs. v2?
 - What can be stubbed vs. must be real?
 - What's the simplest architecture that proves the concept?

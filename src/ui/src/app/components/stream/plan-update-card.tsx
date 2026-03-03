@@ -20,14 +20,14 @@ export function PlanUpdateCard({
       <button
         onClick={() => onInspect({ type: 'plan', event })}
         aria-label={`Plan updated: ${completed} of ${total} completed`}
-        className="w-full text-left rounded-terminal border border-border/50 bg-muted/10 px-3 py-1.5 hover:bg-muted/20 transition-colors"
+        className="rounded-terminal border-border/50 bg-muted/10 hover:bg-muted/20 w-full border px-3 py-1.5 text-left transition-colors"
       >
         <div className="flex items-center gap-2">
-          <ListChecks className={`w-3.5 h-3.5 ${plan.text} opacity-60 shrink-0`} />
-          <span className="text-[0.75rem] font-mono text-muted-foreground/60">
+          <ListChecks className={`h-3.5 w-3.5 ${plan.text} shrink-0 opacity-60`} />
+          <span className="text-muted-foreground/60 font-mono text-[0.75rem]">
             Plan updated
           </span>
-          <span className="text-[0.625rem] text-muted-foreground/40 font-mono">
+          <span className="text-muted-foreground/40 font-mono text-[0.625rem]">
             {completed}/{total}
           </span>
         </div>

@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: research
 feature: a2a-langgraph-patterns
-description: "Reference patterns for A2A protocol implementation on top of LangGraph."
+description: 'Reference patterns for A2A protocol implementation on top of LangGraph.'
 ---
 
 # A2A SDK & LangGraph Reference Patterns for Compliance Audit
@@ -59,7 +59,7 @@ late-joining subscribers. Each consumer drains its own queue independently.
 
 1. **Keep bounded queues** (our`maxsize=512`is fine).
 2. **Replace`await queue.put(event)`with`put_nowait()`+ drop-oldest on
-  `QueueFull`** to prevent one slow client from stalling all broadcasts:
+   `QueueFull`** to prevent one slow client from stalling all broadcasts:
 
    ```python
    for client_id, queue in list(self._subscribers.items()):
@@ -263,7 +263,7 @@ async def lifespan(app: FastAPI):
 
 ## Issue 5: loop_count Increment Pattern in LangGraph (COMP-001 — CRITICAL)
 
-### Reference Implementation (pregel/_loop.py:1119-1120, 460-469, 811-813)
+### Reference Implementation (pregel/\_loop.py:1119-1120, 460-469, 811-813)
 
 LangGraph uses a **step counter + stop limit** pattern at the graph execution
 engine level, NOT at the node/state level:
@@ -352,7 +352,7 @@ LangGraph provides two loop-limiting mechanisms:
 
 1. **Application-level state counter**: For domain-specific loop control (like
    "retry code generation at most 3 times"), the canonical pattern is to put an
-  `iterations: int`field in the state, have the **looping node increment it**,
+   `iterations: int`field in the state, have the **looping node increment it**,
    and have the **routing function read it**.
 
 **Our bug**:`_loop_router`reads`state.get("loop_count", 0)`but no node
@@ -523,8 +523,7 @@ problem:
 2. Late-joining subscribers get a child queue via `tap()`.
 3. Each child has its own `asyncio.Queue`, so slow children don't block the
    parent or siblings.
-4. `enqueue_event()`recursively pushes to all children.
-5.`close()`recursively closes all children.
+4. `enqueue_event()`recursively pushes to all children. 5.`close()`recursively closes all children.
 
 This does NOT solve the "missed historical events" problem —`tap()` only
 delivers future events. For replay of missed events, A2A relies on the
@@ -568,15 +567,15 @@ Our CORS configuration should be **restrictive by default**:
    intent to be wide-open).
 2. Use environment-configurable origins:
 
-  ```python
-   app.add_middleware(
-       CORSMiddleware,
-       allow_origins=settings.cors_allowed_origins,  # default: ["http://localhost:5173"]
-       allow_credentials=True,
-       allow_methods=["GET", "POST"],
-       allow_headers=["*"],
-   )
-   ```
+```python
+ app.add_middleware(
+     CORSMiddleware,
+     allow_origins=settings.cors_allowed_origins,  # default: ["http://localhost:5173"]
+     allow_credentials=True,
+     allow_methods=["GET", "POST"],
+     allow_headers=["*"],
+ )
+```
 
 1. For development, allow localhost origins. For production, restrict to the
    actual frontend domain.
@@ -585,13 +584,13 @@ Our CORS configuration should be **restrictive by default**:
 
 ## Summary of Findings
 
-| Issue | A2A Pattern | Our Gap | Severity |
-| ------- | ------------ | --------- | ---------- |
-| 1. Backpressure | Blocking put (per-task isolation) | Blocking put (shared iteration) — one slow client blocks all | HIGH |
-| 2. Permission WS rejection | JSON-RPC method validation, structured errors | Silent swallow | MEDIUM |
-| 3. Authentication | Abstract User + CallContext plumbing, no concrete impl | Zero auth plumbing | MEDIUM |
-| 4. anyio task_group | Not used in A2A (plain asyncio) | ADR says anyio, code uses asyncio | LOW |
-| 5. loop_count (CRITICAL) | State field incremented by node, read by router | Field exists but never incremented — **infinite loop** | CRITICAL |
-| 6. Subscriber cleanup | Two-phase: deregister then drain/close | Pop only, no drain | MEDIUM |
-| 7. Tap/fan-out | Per-task parent queue with child taps | Single shared subscriber dict | LOW (future) |
-| 8. CORS | Not configured (deployer concern) | Should be restrictive | LOW |
+| Issue                      | A2A Pattern                                            | Our Gap                                                      | Severity     |
+| -------------------------- | ------------------------------------------------------ | ------------------------------------------------------------ | ------------ |
+| 1. Backpressure            | Blocking put (per-task isolation)                      | Blocking put (shared iteration) — one slow client blocks all | HIGH         |
+| 2. Permission WS rejection | JSON-RPC method validation, structured errors          | Silent swallow                                               | MEDIUM       |
+| 3. Authentication          | Abstract User + CallContext plumbing, no concrete impl | Zero auth plumbing                                           | MEDIUM       |
+| 4. anyio task_group        | Not used in A2A (plain asyncio)                        | ADR says anyio, code uses asyncio                            | LOW          |
+| 5. loop_count (CRITICAL)   | State field incremented by node, read by router        | Field exists but never incremented — **infinite loop**       | CRITICAL     |
+| 6. Subscriber cleanup      | Two-phase: deregister then drain/close                 | Pop only, no drain                                           | MEDIUM       |
+| 7. Tap/fan-out             | Per-task parent queue with child taps                  | Single shared subscriber dict                                | LOW (future) |
+| 8. CORS                    | Not configured (deployer concern)                      | Should be restrictive                                        | LOW          |

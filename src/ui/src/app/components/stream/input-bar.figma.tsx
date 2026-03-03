@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { InputBar } from './input-bar'
+import figma from '@figma/code-connect';
+import { InputBar } from './input-bar';
 
 /**
  * Code Connect mapping for InputBar.
@@ -24,13 +24,17 @@ import { InputBar } from './input-bar'
  * - activeThread?: ThreadSummary | null
  * - isDark?: boolean
  */
-figma.connect(InputBar, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <InputBar
-      agentState="idle"
-      onSend={() => {}}
-      teamPresets={[]}
-      isNewThread={true}
-    />
-  ),
-})
+figma.connect(
+  InputBar,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <InputBar
+        agentState="idle"
+        onSend={() => {}}
+        teamPresets={[]}
+        isNewThread={true}
+      />
+    ),
+  },
+);

@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: coding-teams-architecture
-description: "End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design."
-name: "Coding Teams Architecture"
+description: 'End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design.'
+name: 'Coding Teams Architecture'
 maturity: 35
-summary: "End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design."
+summary: 'End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design.'
 ---
 
 # Research: Architecture & App Considerations for Coding Agent Teams
@@ -618,25 +618,25 @@ queue, and a chat input for sending instructions to the team.
 
 ### 7.1 Core (Decided)
 
-| Component | Choice | Reason |
-| ----------- | -------- | -------- |
-| Language | Python 3.13 | Per project constraints |
-| Package mgr | uv | Per project constraints |
-| A2A SDK | a2a-python | Official SDK, full protocol support |
-| MCP SDK | mcp-python-sdk | For CLI integration + tool serving |
-| HTTP framework | Starlette or FastAPI | A2A SDK ships adapters for both |
-| ASGI server | Uvicorn | Standard, used by all samples |
+| Component      | Choice               | Reason                              |
+| -------------- | -------------------- | ----------------------------------- |
+| Language       | Python 3.13          | Per project constraints             |
+| Package mgr    | uv                   | Per project constraints             |
+| A2A SDK        | a2a-python           | Official SDK, full protocol support |
+| MCP SDK        | mcp-python-sdk       | For CLI integration + tool serving  |
+| HTTP framework | Starlette or FastAPI | A2A SDK ships adapters for both     |
+| ASGI server    | Uvicorn              | Standard, used by all samples       |
 
 ### 7.2 To Decide
 
-| Component | Options | Notes |
-| ----------- | --------- | ------- |
-| Agent framework | Vanilla A2A SDK / LangGraph / Claude Agent SDK | Vanilla gives most control; LangGraph adds checkpointing; Claude SDK adds hooks |
-| Task store | InMemory / SQLite / PostgreSQL | SQLite for local dev is pragmatic; A2A SDK has SQLAlchemy adapters |
-| Web UI framework | Vanilla JS / HTMX / Gradio / React | Gradio is quick but limited; HTMX fits the SSE streaming model well |
-| WebSocket lib | Starlette built-in / FastAPI WebSockets | No additional dependency needed |
-| Process management | asyncio subprocesses / supervisord / custom | asyncio.create_subprocess_exec is simplest for local |
-| LLM provider | Anthropic / Google / OpenAI / LiteLLM | A2A is model-agnostic; LiteLLM gives flexibility |
+| Component          | Options                                        | Notes                                                                           |
+| ------------------ | ---------------------------------------------- | ------------------------------------------------------------------------------- |
+| Agent framework    | Vanilla A2A SDK / LangGraph / Claude Agent SDK | Vanilla gives most control; LangGraph adds checkpointing; Claude SDK adds hooks |
+| Task store         | InMemory / SQLite / PostgreSQL                 | SQLite for local dev is pragmatic; A2A SDK has SQLAlchemy adapters              |
+| Web UI framework   | Vanilla JS / HTMX / Gradio / React             | Gradio is quick but limited; HTMX fits the SSE streaming model well             |
+| WebSocket lib      | Starlette built-in / FastAPI WebSockets        | No additional dependency needed                                                 |
+| Process management | asyncio subprocesses / supervisord / custom    | asyncio.create_subprocess_exec is simplest for local                            |
+| LLM provider       | Anthropic / Google / OpenAI / LiteLLM          | A2A is model-agnostic; LiteLLM gives flexibility                                |
 
 ### 7.3 Agent Internal Architecture
 

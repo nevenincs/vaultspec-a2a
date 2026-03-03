@@ -38,8 +38,19 @@ _PRESETS_DIR = Path(__file__).parent.parent / "presets"
 _AGENTS_DIR = _PRESETS_DIR / "agents"
 _TEAMS_DIR = _PRESETS_DIR / "teams"
 
-_ALL_AGENT_IDS = ["vaultspec-supervisor", "vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer", "vaultspec-analyst"]
-_ALL_TEAM_IDS = ["vaultspec-adaptive-coder", "vaultspec-structured-coder", "vaultspec-iterative-coder", "vaultspec-solo-coder"]
+_ALL_AGENT_IDS = [
+    "vaultspec-supervisor",
+    "vaultspec-planner",
+    "vaultspec-coder",
+    "vaultspec-reviewer",
+    "vaultspec-analyst",
+]
+_ALL_TEAM_IDS = [
+    "vaultspec-adaptive-coder",
+    "vaultspec-structured-coder",
+    "vaultspec-iterative-coder",
+    "vaultspec-solo-coder",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -312,7 +323,11 @@ class TestTeamConfigFromToml:
         """vaultspec-structured-coder has planner → coder → reviewer order."""
         cfg = load_team_config("vaultspec-structured-coder")
         assert cfg.topology.type == TopologyType.PIPELINE
-        assert cfg.topology.order == ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
+        assert cfg.topology.order == [
+            "vaultspec-planner",
+            "vaultspec-coder",
+            "vaultspec-reviewer",
+        ]
 
     def test_coding_loop_loop_node(self) -> None:
         """vaultspec-iterative-coder has reviewer as the loop_node."""
@@ -605,7 +620,9 @@ class TestTeamExtendedConfigDefaults:
         # Enriched presets may have persona directives and graph settings;
         # verify the fields parse without error and have valid types.
         assert cfg.persona.directive is None or isinstance(cfg.persona.directive, str)
-        assert cfg.graph.step_timeout_seconds is None or isinstance(cfg.graph.step_timeout_seconds, int)
+        assert cfg.graph.step_timeout_seconds is None or isinstance(
+            cfg.graph.step_timeout_seconds, int
+        )
         assert cfg.graph.recursion_limit >= 1
 
 

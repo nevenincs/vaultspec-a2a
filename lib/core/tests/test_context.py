@@ -155,7 +155,8 @@ class TestCompactContext:
         assert result["messages"][0].content == sys_msg.content
         # A compaction summary HumanMessage must appear somewhere in the result
         summary_msgs = [
-            m for m in result["messages"]
+            m
+            for m in result["messages"]
             if isinstance(m, HumanMessage) and "compacted" in str(m.content).lower()
         ]
         assert summary_msgs, "Expected a compaction summary HumanMessage in result"
@@ -304,7 +305,8 @@ class TestCompactContext:
 
         # (d) placeholder text says "removed" not "summarized"
         placeholder = next(
-            m for m in result["messages"]
+            m
+            for m in result["messages"]
             if isinstance(m, HumanMessage) and "compacted" in str(m.content).lower()
         )
         assert "removed" in str(placeholder.content)

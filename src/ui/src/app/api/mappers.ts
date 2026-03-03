@@ -5,15 +5,16 @@
  * different shapes and enum values. These mappers handle the translation.
  */
 
-import type {
-  WireThreadSummary,
-  WireAgentSummary,
-  AgentStatusEntry,
-  TeamPresetSummary,
-  PermissionRequestEvent,
-  ToolCallStatus as WireToolCallStatus,
-  ToolKind as WireToolKind,
-} from '../data/wire-types';
+import type { components } from '../data/wire-types';
+
+type WireThreadSummary = components['schemas']['ThreadSummary'];
+type WireAgentSummary = components['schemas']['AgentSummary'];
+type AgentStatusEntry = components['schemas']['AgentStatusEntry'];
+type TeamPresetSummary = components['schemas']['TeamPresetSummary'];
+type PermissionRequestEvent = components['schemas']['PermissionRequestEvent'];
+type WireToolCallStatus = components['schemas']['ToolCallStatus'];
+type WireToolKind = components['schemas']['ToolKind'];
+
 import type {
   ThreadSummary,
   AgentSummary,

@@ -21,10 +21,7 @@
       "command": "npx",
       "args": ["@playwright/mcp@latest"]
     },
-    "svelte": {
-      "command": "npx",
-      "args": ["-y", "@sveltejs/mcp@latest"]
-    },
+
     "shadcn-ui": {
       "command": "npx",
       "args": ["-y", "shadcn-ui-mcp-server@latest"]

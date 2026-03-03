@@ -12,11 +12,7 @@ import {
 } from 'lucide-react';
 import { Button } from '../ui/button';
 import { Input } from '../ui/input';
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from '../ui/popover';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
 import type { AgentLifecycleState, TeamPreset, ThreadSummary } from '../../data/types';
 import { getAgentColor } from '../../utils/agent-colors';
 import { MarkdownEditor, getEditorTextarea } from './markdown-editor';
@@ -47,12 +43,15 @@ const MAX_INPUT_HEIGHT = 480;
 
 interface InputBarProps {
   agentState: AgentLifecycleState;
-  onSend: (message: string, opts?: {
-    preset?: TeamPreset;
-    repo?: string;
-    branch?: string;
-    featureTag?: string;
-  }) => void;
+  onSend: (
+    message: string,
+    opts?: {
+      preset?: TeamPreset;
+      repo?: string;
+      branch?: string;
+      featureTag?: string;
+    },
+  ) => void;
   onStop?: () => void;
   teamPresets?: TeamPreset[];
   selectedPreset?: TeamPreset | null;
@@ -71,12 +70,13 @@ function wrapSelection(
   textarea: HTMLTextAreaElement,
   before: string,
   after: string,
-  setMessage: (v: string) => void
+  setMessage: (v: string) => void,
 ) {
   const { selectionStart, selectionEnd, value } = textarea;
   const selected = value.slice(selectionStart, selectionEnd);
   const replacement = `${before}${selected || 'text'}${after}`;
-  const newValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
+  const newValue =
+    value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
   setMessage(newValue);
 
   requestAnimationFrame(() => {
@@ -85,7 +85,10 @@ function wrapSelection(
       textarea.setSelectionRange(selectionStart, selectionStart + replacement.length);
     } else {
       // Select placeholder "text"
-      textarea.setSelectionRange(selectionStart + before.length, selectionStart + before.length + 4);
+      textarea.setSelectionRange(
+        selectionStart + before.length,
+        selectionStart + before.length + 4,
+      );
     }
     textarea.focus();
   });
@@ -94,7 +97,7 @@ function wrapSelection(
 function insertLinePrefix(
   textarea: HTMLTextAreaElement,
   prefix: string,
-  setMessage: (v: string) => void
+  setMessage: (v: string) => void,
 ) {
   const { selectionStart, value } = textarea;
   // Find start of current line
@@ -136,17 +139,23 @@ export function InputBar({
   const isCreateMode = !!isNewThread;
 
   // ── Auto-expansion logic ───────────────────────────────────────────────────
-  const handleHeightChange = useCallback((contentHeight: number) => {
-    if (isResizing.current) return;
-    
-    // Calculate required height for the bar (content + widgets + padding)
-    const padding = 64; 
-    const targetHeight = Math.max(MIN_INPUT_HEIGHT, Math.min(MAX_INPUT_HEIGHT, contentHeight + padding));
-    
-    if (!userHasResized.current || message === '') {
-      setInputHeight(targetHeight);
-    }
-  }, [message]);
+  const handleHeightChange = useCallback(
+    (contentHeight: number) => {
+      if (isResizing.current) return;
+
+      // Calculate required height for the bar (content + widgets + padding)
+      const padding = 64;
+      const targetHeight = Math.max(
+        MIN_INPUT_HEIGHT,
+        Math.min(MAX_INPUT_HEIGHT, contentHeight + padding),
+      );
+
+      if (!userHasResized.current || message === '') {
+        setInputHeight(targetHeight);
+      }
+    },
+    [message],
+  );
 
   // ── Create-mode local state ──────────────────────────────────────────────
   const [createRepo, setCreateRepo] = useState(MOCK_REPOS[0]);
@@ -161,7 +170,7 @@ export function InputBar({
   const existingFeatureTags = useMemo(() => {
     if (!threads) return [];
     const tags = new Set<string>();
-    threads.forEach(t => {
+    threads.forEach((t) => {
       if (t.feature_tag) tags.add(t.feature_tag);
     });
     return Array.from(tags).sort();
@@ -192,7 +201,7 @@ export function InputBar({
     (agentName: string) => {
       const before = message.slice(0, mentionState.startPos);
       const after = message.slice(
-        mentionState.startPos + mentionState.query.length + 1
+        mentionState.startPos + mentionState.query.length + 1,
       );
       const newMessage = `${before}@${agentName} ${after}`;
       setMessage(newMessage);
@@ -209,38 +218,35 @@ export function InputBar({
         }
       });
     },
-    [message, mentionState.startPos, mentionState.query]
+    [message, mentionState.startPos, mentionState.query],
   );
 
-  const handleInputChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const val = e.target.value;
-      setMessage(val);
+  const handleInputChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const val = e.target.value;
+    setMessage(val);
 
-      const cursorPos = e.target.selectionStart ?? val.length;
-      const textBeforeCursor = val.slice(0, cursorPos);
-      const lastAtIndex = textBeforeCursor.lastIndexOf('@');
+    const cursorPos = e.target.selectionStart ?? val.length;
+    const textBeforeCursor = val.slice(0, cursorPos);
+    const lastAtIndex = textBeforeCursor.lastIndexOf('@');
 
-      if (lastAtIndex >= 0) {
-        const charBefore = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' ';
-        if (charBefore === ' ' || charBefore === '\n' || lastAtIndex === 0) {
-          const query = textBeforeCursor.slice(lastAtIndex + 1);
-          if (!query.includes(' ')) {
-            setMentionState({
-              active: true,
-              query,
-              startPos: lastAtIndex,
-              selectedIndex: 0,
-            });
-            return;
-          }
+    if (lastAtIndex >= 0) {
+      const charBefore = lastAtIndex > 0 ? textBeforeCursor[lastAtIndex - 1] : ' ';
+      if (charBefore === ' ' || charBefore === '\n' || lastAtIndex === 0) {
+        const query = textBeforeCursor.slice(lastAtIndex + 1);
+        if (!query.includes(' ')) {
+          setMentionState({
+            active: true,
+            query,
+            startPos: lastAtIndex,
+            selectedIndex: 0,
+          });
+          return;
         }
       }
+    }
 
-      setMentionState((prev) => (prev.active ? { ...prev, active: false } : prev));
-    },
-    []
-  );
+    setMentionState((prev) => (prev.active ? { ...prev, active: false } : prev));
+  }, []);
 
   const handleSend = () => {
     if (!canSend) return;
@@ -318,7 +324,8 @@ export function InputBar({
         const { selectionStart, selectionEnd, value } = textarea;
         const selected = value.slice(selectionStart, selectionEnd);
         const replacement = `[${selected || 'text'}](url)`;
-        const newValue = value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
+        const newValue =
+          value.slice(0, selectionStart) + replacement + value.slice(selectionEnd);
         setMessage(newValue);
         requestAnimationFrame(() => {
           if (selected) {
@@ -347,7 +354,8 @@ export function InputBar({
       e.preventDefault();
       if (textarea) {
         const { selectionStart, selectionEnd, value } = textarea;
-        const newValue = value.slice(0, selectionStart) + '  ' + value.slice(selectionEnd);
+        const newValue =
+          value.slice(0, selectionStart) + '  ' + value.slice(selectionEnd);
         setMessage(newValue);
         requestAnimationFrame(() => {
           textarea.setSelectionRange(selectionStart + 2, selectionStart + 2);
@@ -375,7 +383,7 @@ export function InputBar({
         if (!isResizing.current) return;
         const newHeight = Math.max(
           MIN_INPUT_HEIGHT,
-          Math.min(MAX_INPUT_HEIGHT, startHeight - (ev.clientY - startY))
+          Math.min(MAX_INPUT_HEIGHT, startHeight - (ev.clientY - startY)),
         );
         setInputHeight(newHeight);
       };
@@ -393,7 +401,7 @@ export function InputBar({
       globalThis.document.addEventListener('mousemove', onMouseMove);
       globalThis.document.addEventListener('mouseup', onMouseUp);
     },
-    [inputHeight]
+    [inputHeight],
   );
 
   const borderColor = isInputRequired
@@ -403,12 +411,12 @@ export function InputBar({
   const placeholder = isInputRequired
     ? 'Agent needs input...'
     : isWorking
-    ? ''
-    : isCreateMode
-    ? 'Describe the task for your team...'
-    : selectedPreset
-    ? `Message ${selectedPreset.name}...`
-    : 'Message team...';
+      ? ''
+      : isCreateMode
+        ? 'Describe the task for your team...'
+        : selectedPreset
+          ? `Message ${selectedPreset.name}...`
+          : 'Message team...';
 
   const displayRepo = isCreateMode ? createRepo : activeThread?.source_repo;
   const displayBranch = isCreateMode ? createBranch : activeThread?.source_branch;
@@ -423,34 +431,35 @@ export function InputBar({
       <div
         onMouseDown={handleResizeMouseDown}
         tabIndex={0}
-        className="absolute top-0 left-0 right-0 h-1.5 cursor-row-resize hover:bg-primary/30 active:bg-primary/50 transition-colors z-30 -translate-y-0.5"
+        className="hover:bg-primary/30 active:bg-primary/50 absolute top-0 right-0 left-0 z-30 h-1.5 -translate-y-0.5 cursor-row-resize transition-colors"
         role="separator"
         aria-orientation="horizontal"
         aria-label="Resize input area"
       />
 
-      <div className="flex flex-col h-full px-4 pt-2 pb-2">
-        <div className="flex items-center gap-1 shrink-0 h-8 overflow-x-auto">
-          {teamPresets && onSelectPreset && (
-            isCreateMode ? (
+      <div className="flex h-full flex-col px-4 pt-2 pb-2">
+        <div className="flex h-8 shrink-0 items-center gap-1 overflow-x-auto">
+          {teamPresets &&
+            onSelectPreset &&
+            (isCreateMode ? (
               <WidgetPicker
-                icon={<Users className="w-3 h-3 text-oxide-icon" />}
+                icon={<Users className="text-oxide-icon h-3 w-3" />}
                 value={selectedPreset?.name || 'Select team...'}
-                items={teamPresets.map(p => ({
+                items={teamPresets.map((p) => ({
                   id: p.id,
                   label: p.name,
                   description: p.description,
                   isSelected: selectedPreset?.id === p.id,
                   extra: (
-                    <div className="flex gap-1 mt-1 flex-wrap">
+                    <div className="mt-1 flex flex-wrap gap-1">
                       {p.agents.map((a) => {
                         const c = getAgentColor(a);
                         return (
                           <span
                             key={a}
-                            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full text-[0.5625rem] font-mono border ${c.badge}`}
+                            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[0.5625rem] ${c.badge}`}
                           >
-                            <span className={`w-1 h-1 rounded-full ${c.dot}`} />
+                            <span className={`h-1 w-1 rounded-full ${c.dot}`} />
                             {a}
                           </span>
                         );
@@ -459,23 +468,22 @@ export function InputBar({
                   ),
                 }))}
                 onSelect={(id) => {
-                  const preset = teamPresets.find(p => p.id === id);
+                  const preset = teamPresets.find((p) => p.id === id);
                   if (preset) onSelectPreset(preset);
                 }}
               />
             ) : (
               <WidgetReadOnly
-                icon={<Users className="w-3 h-3 text-oxide-icon" />}
+                icon={<Users className="text-oxide-icon h-3 w-3" />}
                 value={selectedPreset?.name || ''}
               />
-            )
-          )}
+            ))}
 
           {isCreateMode ? (
             <WidgetPicker
-              icon={<FolderGit2 className="w-3 h-3 text-oxide-icon" />}
+              icon={<FolderGit2 className="text-oxide-icon h-3 w-3" />}
               value={createRepo || 'Repository...'}
-              items={MOCK_REPOS.map(r => ({
+              items={MOCK_REPOS.map((r) => ({
                 id: r,
                 label: r,
                 isSelected: createRepo === r,
@@ -484,7 +492,7 @@ export function InputBar({
             />
           ) : displayRepo ? (
             <WidgetReadOnly
-              icon={<FolderGit2 className="w-3 h-3 text-oxide-icon" />}
+              icon={<FolderGit2 className="text-oxide-icon h-3 w-3" />}
               value={displayRepo}
             />
           ) : null}
@@ -501,7 +509,7 @@ export function InputBar({
             />
           ) : displayBranch ? (
             <WidgetReadOnly
-              icon={<GitBranch className="w-3 h-3 text-oxide-icon" />}
+              icon={<GitBranch className="text-oxide-icon h-3 w-3" />}
               value={displayBranch}
             />
           ) : null}
@@ -518,7 +526,7 @@ export function InputBar({
             />
           ) : displayFeature ? (
             <WidgetReadOnly
-              icon={<Tag className="w-3 h-3 text-oxide-icon" />}
+              icon={<Tag className="text-oxide-icon h-3 w-3" />}
               value={`#${displayFeature}`}
             />
           ) : null}
@@ -532,23 +540,23 @@ export function InputBar({
               className="h-7 gap-1.5 px-3"
               onClick={onStop}
             >
-              <Pause className="w-3 h-3" />
+              <Pause className="h-3 w-3" />
               Interrupt
             </Button>
           )}
         </div>
 
-        <div className="flex items-end gap-2 flex-1 min-h-0 relative mt-1">
+        <div className="relative mt-1 flex min-h-0 flex-1 items-end gap-2">
           {mentionState.active && filteredAgents.length > 0 && (
             <div
               ref={mentionPopupRef}
               role="listbox"
               aria-label="Mention agent"
-              className="absolute bottom-full left-0 mb-1 w-56 bg-popover border border-border rounded-ui shadow-xl z-40 overflow-hidden"
+              className="bg-popover border-border rounded-ui absolute bottom-full left-0 z-40 mb-1 w-56 overflow-hidden border shadow-xl"
             >
               <div className="py-1">
                 <div className="px-3 py-1.5">
-                  <span className="text-[0.625rem] font-bold uppercase tracking-widest text-oxide-metadata">
+                  <span className="text-oxide-metadata text-[0.625rem] font-bold tracking-widest uppercase">
                     Mention agent
                   </span>
                 </div>
@@ -565,11 +573,11 @@ export function InputBar({
                         e.preventDefault();
                         insertMention(agent);
                       }}
-                      className={`w-full text-left px-3 py-1.5 flex items-center gap-2 text-[0.75rem] transition-colors ${
+                      className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[0.75rem] transition-colors ${
                         isSelected ? 'bg-accent' : 'hover:bg-accent/50'
                       }`}
                     >
-                      <span className={`w-2 h-2 rounded-full ${c.dot}`} />
+                      <span className={`h-2 w-2 rounded-full ${c.dot}`} />
                       <span className={`font-mono ${c.text}`}>{agent}</span>
                     </button>
                   );
@@ -587,18 +595,18 @@ export function InputBar({
             placeholder={placeholder}
             disabled={isWorking}
             isDark={isDark}
-            className="flex-1 bg-oxide-terminal-input rounded-terminal border border-border/40 focus-within:border-primary/40 transition-colors"
+            className="bg-oxide-terminal-input rounded-terminal border-border/40 focus-within:border-primary/40 flex-1 border transition-colors"
             inputClassName={isInputRequired ? 'border-status-warning/50' : ''}
           />
           <Button
             size="icon"
             variant="default"
-            className="h-9 w-9 shrink-0 rounded-control"
+            className="rounded-control h-9 w-9 shrink-0"
             disabled={!canSend}
             onClick={handleSend}
             aria-label="Send message"
           >
-            <Send className="w-4 h-4" />
+            <Send className="h-4 w-4" />
           </Button>
         </div>
       </div>
@@ -610,9 +618,9 @@ export function InputBar({
 
 function WidgetReadOnly({ icon, value }: { icon: React.ReactNode; value: string }) {
   return (
-    <div className="flex items-center gap-1.5 h-7 px-2 text-[0.6875rem] text-muted-foreground cursor-default select-none rounded-control bg-muted/30 border border-transparent shrink-0">
+    <div className="text-muted-foreground rounded-control bg-muted/30 flex h-7 shrink-0 cursor-default items-center gap-1.5 border border-transparent px-2 text-[0.6875rem] select-none">
       {icon}
-      <span className="truncate max-w-[10rem]">{value}</span>
+      <span className="max-w-[10rem] truncate">{value}</span>
     </div>
   );
 }
@@ -639,10 +647,10 @@ function WidgetPicker({
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-1.5 h-7 px-2 text-[0.6875rem] text-foreground/80 hover:text-foreground rounded-control border border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 transition-colors cursor-pointer shrink-0">
+        <button className="text-foreground/80 hover:text-foreground rounded-control border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 border px-2 text-[0.6875rem] transition-colors">
           {icon}
-          <span className="truncate max-w-[10rem]">{value}</span>
-          <ChevronDown className="w-2.5 h-2.5 opacity-50 shrink-0" />
+          <span className="max-w-[10rem] truncate">{value}</span>
+          <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-80 p-1.5" align="start">
@@ -650,19 +658,26 @@ function WidgetPicker({
           {items.map((item) => (
             <button
               key={item.id}
-              onClick={() => { onSelect(item.id); setOpen(false); }}
+              onClick={() => {
+                onSelect(item.id);
+                setOpen(false);
+              }}
               aria-label={`Select ${item.label}`}
-              className={`w-full text-left rounded-control px-2.5 py-2 hover:bg-accent transition-colors flex items-start gap-2 ${
+              className={`rounded-control hover:bg-accent flex w-full items-start gap-2 px-2.5 py-2 text-left transition-colors ${
                 item.isSelected ? 'bg-accent' : ''
               }`}
             >
-              <div className="flex-1 min-w-0">
+              <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
                   <span className="text-[0.75rem]">{item.label}</span>
-                  {item.isSelected && <Check className="w-3 h-3 text-primary shrink-0" />}
+                  {item.isSelected && (
+                    <Check className="text-primary h-3 w-3 shrink-0" />
+                  )}
                 </div>
                 {item.description && (
-                  <p className="text-[0.625rem] text-muted-foreground mt-0.5">{item.description}</p>
+                  <p className="text-muted-foreground mt-0.5 text-[0.625rem]">
+                    {item.description}
+                  </p>
                 )}
                 {item.extra}
               </div>
@@ -709,31 +724,40 @@ function BranchPicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) onToggleNewBranch(false); }}>
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) onToggleNewBranch(false);
+      }}
+    >
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-1.5 h-7 px-2 text-[0.6875rem] text-foreground/80 hover:text-foreground rounded-control border border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 transition-colors cursor-pointer shrink-0">
-          <GitBranch className="w-3 h-3" />
-          <span className="truncate max-w-[10rem]">{value || 'Branch...'}</span>
-          <ChevronDown className="w-2.5 h-2.5 opacity-50 shrink-0" />
+        <button className="text-foreground/80 hover:text-foreground rounded-control border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 border px-2 text-[0.6875rem] transition-colors">
+          <GitBranch className="h-3 w-3" />
+          <span className="max-w-[10rem] truncate">{value || 'Branch...'}</span>
+          <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-64 p-1.5" align="start">
-        <div className="space-y-0.5 max-h-[16rem] overflow-y-auto">
+        <div className="max-h-[16rem] space-y-0.5 overflow-y-auto">
           {branches.map((b) => (
             <button
               key={b}
-              onClick={() => { onSelect(b); setOpen(false); }}
-              className={`w-full text-left rounded-control px-2.5 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-[0.75rem] font-mono ${
+              onClick={() => {
+                onSelect(b);
+                setOpen(false);
+              }}
+              className={`rounded-control hover:bg-accent flex w-full items-center gap-2 px-2.5 py-1.5 text-left font-mono text-[0.75rem] transition-colors ${
                 value === b ? 'bg-accent' : ''
               }`}
             >
-              <GitBranch className="w-3 h-3 shrink-0 text-muted-foreground" />
+              <GitBranch className="text-muted-foreground h-3 w-3 shrink-0" />
               <span className="flex-1 truncate">{b}</span>
-              {value === b && <Check className="w-3 h-3 text-primary shrink-0" />}
+              {value === b && <Check className="text-primary h-3 w-3 shrink-0" />}
             </button>
           ))}
         </div>
-        <div className="border-t border-border mt-1 pt-1">
+        <div className="border-border mt-1 border-t pt-1">
           {showNewBranch ? (
             <div className="flex items-center gap-1.5 px-1">
               <Input
@@ -746,18 +770,25 @@ function BranchPicker({
                 }}
                 placeholder="feat/my-branch"
                 autoFocus
-                className="flex-1 h-7 px-2 text-[0.6875rem] font-mono"
+                className="h-7 flex-1 px-2 font-mono text-[0.6875rem]"
               />
-              <Button size="icon" className="h-7 w-7 shrink-0" onClick={handleCreateBranch} disabled={!newBranchInput.trim()}>
-                <Check className="w-3 h-3" />
+              <Button
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={handleCreateBranch}
+                disabled={!newBranchInput.trim()}
+              >
+                <Check className="h-3 w-3" />
               </Button>
             </div>
           ) : (
             <button
-              onClick={() => { onToggleNewBranch(true); }}
-              className="w-full text-left rounded-control px-2.5 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-[0.75rem] text-muted-foreground"
+              onClick={() => {
+                onToggleNewBranch(true);
+              }}
+              className="rounded-control hover:bg-accent text-muted-foreground flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[0.75rem] transition-colors"
             >
-              <Plus className="w-3 h-3" />
+              <Plus className="h-3 w-3" />
               <span>New branch</span>
             </button>
           )}
@@ -801,36 +832,47 @@ function FeatureTagPicker({
   };
 
   return (
-    <Popover open={open} onOpenChange={(v) => { setOpen(v); if (!v) onToggleNewFeature(false); }}>
+    <Popover
+      open={open}
+      onOpenChange={(v) => {
+        setOpen(v);
+        if (!v) onToggleNewFeature(false);
+      }}
+    >
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-1.5 h-7 px-2 text-[0.6875rem] text-foreground/80 hover:text-foreground rounded-control border border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 transition-colors cursor-pointer shrink-0">
-          <Tag className="w-3 h-3" />
-          <span className="truncate max-w-[10rem]">{value ? `#${value}` : 'Feature...'}</span>
-          <ChevronDown className="w-2.5 h-2.5 opacity-50 shrink-0" />
+        <button className="text-foreground/80 hover:text-foreground rounded-control border-border/50 hover:border-border bg-oxide-terminal-bg hover:bg-muted/60 flex h-7 shrink-0 cursor-pointer items-center gap-1.5 border px-2 text-[0.6875rem] transition-colors">
+          <Tag className="h-3 w-3" />
+          <span className="max-w-[10rem] truncate">
+            {value ? `#${value}` : 'Feature...'}
+          </span>
+          <ChevronDown className="h-2.5 w-2.5 shrink-0 opacity-50" />
         </button>
       </PopoverTrigger>
       <PopoverContent className="w-56 p-1.5" align="start">
-        <div className="space-y-0.5 max-h-[16rem] overflow-y-auto">
+        <div className="max-h-[16rem] space-y-0.5 overflow-y-auto">
           {existingTags.length === 0 && !showNewFeature && (
-            <div className="px-2.5 py-2 text-[0.6875rem] text-muted-foreground italic">
+            <div className="text-muted-foreground px-2.5 py-2 text-[0.6875rem] italic">
               No existing features
             </div>
           )}
           {existingTags.map((tag) => (
             <button
               key={tag}
-              onClick={() => { onSelect(tag); setOpen(false); }}
-              className={`w-full text-left rounded-control px-2.5 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-[0.75rem] ${
+              onClick={() => {
+                onSelect(tag);
+                setOpen(false);
+              }}
+              className={`rounded-control hover:bg-accent flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[0.75rem] transition-colors ${
                 value === tag ? 'bg-accent' : ''
               }`}
             >
-              <Tag className="w-3 h-3 shrink-0 text-muted-foreground" />
+              <Tag className="text-muted-foreground h-3 w-3 shrink-0" />
               <span className="flex-1 truncate">#{tag}</span>
-              {value === tag && <Check className="w-3 h-3 text-primary shrink-0" />}
+              {value === tag && <Check className="text-primary h-3 w-3 shrink-0" />}
             </button>
           ))}
         </div>
-        <div className="border-t border-border mt-1 pt-1">
+        <div className="border-border mt-1 border-t pt-1">
           {showNewFeature ? (
             <div className="flex items-center gap-1.5 px-1">
               <Input
@@ -842,18 +884,23 @@ function FeatureTagPicker({
                 }}
                 placeholder="my-feature"
                 autoFocus
-                className="flex-1 h-7 px-2 text-[0.6875rem] font-mono"
+                className="h-7 flex-1 px-2 font-mono text-[0.6875rem]"
               />
-              <Button size="icon" className="h-7 w-7 shrink-0" onClick={handleCreateFeature} disabled={!newFeatureInput.trim()}>
-                <Check className="w-3 h-3" />
+              <Button
+                size="icon"
+                className="h-7 w-7 shrink-0"
+                onClick={handleCreateFeature}
+                disabled={!newFeatureInput.trim()}
+              >
+                <Check className="h-3 w-3" />
               </Button>
             </div>
           ) : (
             <button
               onClick={() => onToggleNewFeature(true)}
-              className="w-full text-left rounded-control px-2.5 py-1.5 hover:bg-accent transition-colors flex items-center gap-2 text-[0.75rem] text-muted-foreground"
+              className="rounded-control hover:bg-accent text-muted-foreground flex w-full items-center gap-2 px-2.5 py-1.5 text-left text-[0.75rem] transition-colors"
             >
-              <Plus className="w-3 h-3" />
+              <Plus className="h-3 w-3" />
               <span>New feature</span>
             </button>
           )}

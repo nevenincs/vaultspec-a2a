@@ -1,5 +1,5 @@
 ---
-name: "Backend Gaps: LangGraph Aggregator, SQLite Schema, Workspace Management"
+name: 'Backend Gaps: LangGraph Aggregator, SQLite Schema, Workspace Management'
 date: 2026-02-27
 type: research
 summary: >
@@ -26,13 +26,13 @@ related:
 LangGraph exposes four first-class streaming primitives via its compiled graph.
 All are async and are the canonical source of data for the Event Aggregator:
 
-| Method | `stream_mode` | Granularity | Best use |
-| --- | --- | --- | --- |
-| `astream(input, config, stream_mode="values")` | `"values"` | Full state snapshot per step | Snapshot replay |
-| `astream(input, config, stream_mode="updates")` | `"updates"` | Per-node delta dict | Live agent status panels |
-| `astream(input, config, stream_mode="messages")` | `"messages"` | Token-by-token from any LLM invocation | Streaming chat bubbles |
-| `astream(input, config, stream_mode="debug")` | `"debug"` | Checkpoint + task events | Deep debugging |
-| `astream_events(input, config, version="v2")` | N/A (LangChain callbacks) | Granular on_*_start/end events | Tool calls, thought blocks |
+| Method                                           | `stream_mode`             | Granularity                            | Best use                   |
+| ------------------------------------------------ | ------------------------- | -------------------------------------- | -------------------------- |
+| `astream(input, config, stream_mode="values")`   | `"values"`                | Full state snapshot per step           | Snapshot replay            |
+| `astream(input, config, stream_mode="updates")`  | `"updates"`               | Per-node delta dict                    | Live agent status panels   |
+| `astream(input, config, stream_mode="messages")` | `"messages"`              | Token-by-token from any LLM invocation | Streaming chat bubbles     |
+| `astream(input, config, stream_mode="debug")`    | `"debug"`                 | Checkpoint + task events               | Deep debugging             |
+| `astream_events(input, config, version="v2")`    | N/A (LangChain callbacks) | Granular on\_\*\_start/end events      | Tool calls, thought blocks |
 
 **Key insight from source code** (`langgraph/types.py` line 95–109):
 
@@ -68,23 +68,21 @@ stream that fires for every operation in the graph. Each event has this shape:
 
 ### High-value events for our wire protocol
 
-| LangChain event | Maps to server event | Notes |
-| --- | --- | --- |
-| `on_chat_model_stream` | `message_chunk` | `data["chunk"].content`= token text |
-| `on_chat_model_end` | (no event needed) | Marks completion of a turn |
-| `on_tool_start` | `tool_call_start` | `data["input"]`= tool args |
-| `on_tool_end` | `tool_call_update` | `data["output"]`= tool result |
-| `on_chain_start`(node entry) | `agent_status`→`working` | `name`= node name |
-| `on_chain_end`(node exit) | `agent_status`→`idle` | After final node |
-| `on_custom_event` | `thought_chunk` | Via`StreamWriter`in nodes |
+| LangChain event              | Maps to server event     | Notes                               |
+| ---------------------------- | ------------------------ | ----------------------------------- |
+| `on_chat_model_stream`       | `message_chunk`          | `data["chunk"].content`= token text |
+| `on_chat_model_end`          | (no event needed)        | Marks completion of a turn          |
+| `on_tool_start`              | `tool_call_start`        | `data["input"]`= tool args          |
+| `on_tool_end`                | `tool_call_update`       | `data["output"]`= tool result       |
+| `on_chain_start`(node entry) | `agent_status`→`working` | `name`= node name                   |
+| `on_chain_end`(node exit)    | `agent_status`→`idle`    | After final node                    |
+| `on_custom_event`            | `thought_chunk`          | Via`StreamWriter`in nodes           |
 
 ### Noise to filter
 
 - Internal LangGraph pregel events tagged with`TAG_HIDDEN`
 - Duplicate `on_chain_start`/`on_chain_end`from sub-runnables
-  (check`metadata["langgraph_node"]`to scope to the graph's own nodes)
--`on_retriever_*`events (not relevant unless we add RAG)
--`on_prompt_*` events (template expansion, low value)
+  (check`metadata["langgraph_node"]`to scope to the graph's own nodes) -`on_retriever_*`events (not relevant unless we add RAG) -`on_prompt_*` events (template expansion, low value)
 
 Filter pattern:
 
@@ -126,7 +124,7 @@ The central `EventAggregator`in`lib/core/aggregator.py`should:
    - Use `asyncio.create_task`+`asyncio.sleep(0.05)`timer pattern
 
 1. **Thread-ID envelope**: Every outbound WebSocket frame MUST carry
-  `thread_id`as the top-level discriminator (per ADR-011`EventEnvelope`).
+   `thread_id`as the top-level discriminator (per ADR-011`EventEnvelope`).
 
 ### Skeleton pattern
 
@@ -281,11 +279,11 @@ into WebSocket handlers via FastAPI Dependency Injection.
 
 ### 1.5 Backpressure Strategy
 
-| Source | Bounded by | Drop policy |
-| --- | --- | --- |
-| LangGraph`astream_events`→ Queue | `maxsize=512` | `await q.put()`blocks generator coroutine (natural backpressure) |
-| Queue → WebSocket broadcast | WebSocket send timeout | Remove dead sockets from subscriber set |
-| Token chunk debounce buffer | 4KB max or 50ms flush | Always flush before sending non-chunk events |
+| Source                           | Bounded by             | Drop policy                                                      |
+| -------------------------------- | ---------------------- | ---------------------------------------------------------------- |
+| LangGraph`astream_events`→ Queue | `maxsize=512`          | `await q.put()`blocks generator coroutine (natural backpressure) |
+| Queue → WebSocket broadcast      | WebSocket send timeout | Remove dead sockets from subscriber set                          |
+| Token chunk debounce buffer      | 4KB max or 50ms flush  | Always flush before sending non-chunk events                     |
 
 **Critical**: Never use`q.put_nowait()`. Always `await q.put()`to propagate
 backpressure to the LangGraph generator, preventing memory blowup if a browser
@@ -509,11 +507,11 @@ without the overhead of Alembic.
 
 Python has no official async git library. Options:
 
-| Approach | Pros | Cons |
-| --- | --- | --- |
-| `asyncio.create_subprocess_exec(["git", ...])` | Zero dependencies, native async | Must parse stdout, no object model |
-| `gitpython`via`asyncio.to_thread` | Rich object model | gitpython is sync-only; blocks thread pool |
-| `pygit2`via`asyncio.to_thread` | Fast C bindings, libgit2 | Same blocking issue; libgit2 not great on Windows |
+| Approach                                       | Pros                            | Cons                                              |
+| ---------------------------------------------- | ------------------------------- | ------------------------------------------------- |
+| `asyncio.create_subprocess_exec(["git", ...])` | Zero dependencies, native async | Must parse stdout, no object model                |
+| `gitpython`via`asyncio.to_thread`              | Rich object model               | gitpython is sync-only; blocks thread pool        |
+| `pygit2`via`asyncio.to_thread`                 | Fast C bindings, libgit2        | Same blocking issue; libgit2 not great on Windows |
 
 **Recommendation**: Use`asyncio.create_subprocess_exec`for all git
 operations. This is the safest approach on Windows, avoids blocking the
@@ -583,7 +581,9 @@ async def create_worktree(
 
 ```markdown
 agent/{role}/{thread_id_short}
+
 # Examples:
+
 agent/coder/a1b2c3d4
 agent/reviewer/a1b2c3d4
 ```
@@ -834,19 +834,13 @@ the`git merge`call) — not for the entire`_run_git` wrapper.
 ## 5. References
 
 -`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`
-  — Source of `AsyncSqliteSaver.setup()`schema
--`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/store/sqlite/base.py`
-  — Source of `store`table MIGRATIONS list
--`knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py`
-  — `StreamMode`literal definition
--`knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/debug.py`
-  — `TaskPayload`, `CheckpointPayload`, `map_debug_checkpoint`
+— Source of `AsyncSqliteSaver.setup()`schema -`knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/store/sqlite/base.py`
+— Source of `store`table MIGRATIONS list -`knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py`
+— `StreamMode`literal definition -`knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/debug.py`
+— `TaskPayload`, `CheckpointPayload`, `map_debug_checkpoint`
 
 - `docs/adrs/001-process-and-workspace-management.md`— Global Git Mutex,
-  dual-mode workspaces
--`docs/adrs/004-event-aggregation-server-side-replay.md`— Aggregator
-requirements
--`docs/adrs/007-tech-stack-deployment.md`— SQLite WAL, aiosqlite, lifespan
-management
--`docs/adrs/009-approved-module-hierarchy.md`—`lib/database/`, `lib/workspace/`,
-`lib/core/aggregator.py`
+  dual-mode workspaces -`docs/adrs/004-event-aggregation-server-side-replay.md`— Aggregator
+  requirements -`docs/adrs/007-tech-stack-deployment.md`— SQLite WAL, aiosqlite, lifespan
+  management -`docs/adrs/009-approved-module-hierarchy.md`—`lib/database/`, `lib/workspace/`,
+  `lib/core/aggregator.py`

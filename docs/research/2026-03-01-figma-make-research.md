@@ -2,7 +2,7 @@
 date: 2026-03-01
 type: research
 feature: figma-make
-description: "Research into Figma Make AI-driven design-to-code generation capabilities."
+description: 'Research into Figma Make AI-driven design-to-code generation capabilities.'
 ---
 
 # Figma Make: Comprehensive Research
@@ -37,17 +37,17 @@ prompts and visual context.
 
 ## 2. Timeline: Announcement and Release
 
-| Date | Milestone |
-| --- | --- |
-| **May 7, 2025** | Announced at Config 2025 in San Francisco (beta launch) |
-| **August 13, 2025** | General availability -- all Figma AI features moved out of beta |
-| **November 2025** | Schema 2025: Make Kits announced (early access); npm package imports begin rolling out |
-| **December 2025** | Available in Figma for Government |
-| **January 2026** | Claude integration for FigJam diagrams |
-| **February 18, 2026** | "Code to Canvas" partnership with Anthropic launched |
+| Date                  | Milestone                                                                                                |
+| --------------------- | -------------------------------------------------------------------------------------------------------- |
+| **May 7, 2025**       | Announced at Config 2025 in San Francisco (beta launch)                                                  |
+| **August 13, 2025**   | General availability -- all Figma AI features moved out of beta                                          |
+| **November 2025**     | Schema 2025: Make Kits announced (early access); npm package imports begin rolling out                   |
+| **December 2025**     | Available in Figma for Government                                                                        |
+| **January 2026**      | Claude integration for FigJam diagrams                                                                   |
+| **February 18, 2026** | "Code to Canvas" partnership with Anthropic launched                                                     |
 | **February 20, 2026** | Custom MCP connectors + 6 new partner connectors (Amplitude, Box, Dovetail, Granola, Marvin, zeroheight) |
-| **February 2026** | AI model selection: Claude Sonnet 4.6 and Claude Opus 4.6 now available in Make |
-| **March 2026** | Credit-based payment system begins |
+| **February 2026**     | AI model selection: Claude Sonnet 4.6 and Claude Opus 4.6 now available in Make                          |
+| **March 2026**        | Credit-based payment system begins                                                                       |
 
 ---
 
@@ -95,7 +95,7 @@ projects. There are no sub-agents for specialized roles (unlike Claude Code).
 
 ### Figma Make currently supports ONLY React (React 18+)
 
-- It does NOT generate Svelte, Vue, Angular, or plain HTML/CSS/JS natively
+- It does NOT generate React, Vue, Angular, or plain HTML/CSS/JS natively
 - The codebase output is React + TypeScript + Tailwind CSS
 - Third-party Figma plugins (Builder.io, FireJet, Figroot, etc.) support other
   frameworks, but they are separate tools
@@ -124,21 +124,21 @@ Figma Make generates React code with Tailwind CSS styling:
 
 ## 6. How Figma Make Differs from Code Connect
 
-| Aspect | **Figma Make** | **Code Connect** |
-| --- | --- | --- |
-| **Purpose** | AI-powered design-to-code generation | Links existing code components to Figma designs |
-| **Direction** | Generates NEW code from designs | Surfaces EXISTING production code in Dev Mode |
-| **Output** | React apps, prototypes, web apps | Code snippets displayed in Dev Mode inspect panel |
-| **Users** | Designers, PMs, non-coders, prototypers | Design system engineers, developers |
-| **Code quality** | AI-generated (requires refinement) | Your actual production code |
-| **Framework** | React only | React, React Native, SwiftUI, Jetpack Compose, HTML/Web Components, Storybook |
-| **MCP role** | Consumer of MCP connectors for context | Provider of component mappings TO the MCP Server |
-| **Plan required** | All paid plans (limited free) | Organization and Enterprise plans |
+| Aspect            | **Figma Make**                          | **Code Connect**                                                              |
+| ----------------- | --------------------------------------- | ----------------------------------------------------------------------------- |
+| **Purpose**       | AI-powered design-to-code generation    | Links existing code components to Figma designs                               |
+| **Direction**     | Generates NEW code from designs         | Surfaces EXISTING production code in Dev Mode                                 |
+| **Output**        | React apps, prototypes, web apps        | Code snippets displayed in Dev Mode inspect panel                             |
+| **Users**         | Designers, PMs, non-coders, prototypers | Design system engineers, developers                                           |
+| **Code quality**  | AI-generated (requires refinement)      | Your actual production code                                                   |
+| **Framework**     | React only                              | React, React Native, SwiftUI, Jetpack Compose, HTML/Web Components, Storybook |
+| **MCP role**      | Consumer of MCP connectors for context  | Provider of component mappings TO the MCP Server                              |
+| **Plan required** | All paid plans (limited free)           | Organization and Enterprise plans                                             |
 
 ### Key Distinction
 
-- **Make** = *generating* new code from designs (prototyping, MVPs)
-- **Code Connect** = *linking* existing design system code to Figma
+- **Make** = _generating_ new code from designs (prototyping, MVPs)
+- **Code Connect** = _linking_ existing design system code to Figma
   (consistency, adoption)
 
 ---
@@ -375,12 +375,12 @@ Figma components support four property types:
 
 ## 13. Access and Pricing
 
-| Seat Type | Capabilities |
-| --- | --- |
-| **Full seat (paid)** | Full AI features, publish/share Make files, create templates |
+| Seat Type                | Capabilities                                                      |
+| ------------------------ | ----------------------------------------------------------------- |
+| **Full seat (paid)**     | Full AI features, publish/share Make files, create templates      |
 | **View/Collab/Dev seat** | Unlimited Make files in drafts, AI features in available products |
-| **Starter plan** | Unlimited drafts, share up to 3 Make files with team |
-| **Free** | Limited capabilities |
+| **Starter plan**         | Unlimited drafts, share up to 3 Make files with team              |
+| **Free**                 | Limited capabilities                                              |
 
 - AI toggle must be enabled by team/org admin
 - Make Kits: early access (apply required)
@@ -428,8 +428,8 @@ Figma components support four property types:
 
 ## 15. Key Takeaways for VaultSpec
 
-1. **Make is React-only**: If VaultSpec needs Svelte (per current frontend
-   architecture), Make cannot directly generate Svelte code. However, Make's
+1. **Make is React-only**: If VaultSpec needs React (per current frontend
+   architecture), Make cannot directly generate React code. However, Make's
    prototyping capabilities could still inform design decisions.
 
 1. **Code Connect + MCP is the production path**: For production-quality code
@@ -461,15 +461,15 @@ Figma components support four property types:
 - [Schema 2025 Design Systems
   Recap](https://www.figma.com/blog/schema-2025-design-systems-recap/)
 - [Explore Figma Make - Help
-Center](https://help.figma.com/hc/en-us/articles/31304412302231-Explore-Figma-Make)
+  Center](https://help.figma.com/hc/en-us/articles/31304412302231-Explore-Figma-Make)
 - [Beyond the Basics: Using Figma
-Make](https://help.figma.com/hc/en-us/articles/35710574222487-Beyond-the-basics-Using-Figma-Make)
+  Make](https://help.figma.com/hc/en-us/articles/35710574222487-Beyond-the-basics-Using-Figma-Make)
 - [Bring Your Design System Package - Developer
-Docs](https://developers.figma.com/docs/code/bring-your-design-system-package/)
+  Docs](https://developers.figma.com/docs/code/bring-your-design-system-package/)
 - [Use Packages and Third-Party
-Libraries](https://developers.figma.com/docs/code/use-packages-and-third-party-libraries/)
+  Libraries](https://developers.figma.com/docs/code/use-packages-and-third-party-libraries/)
 - [Use Your Design System Package in
-Make](https://help.figma.com/hc/en-us/articles/35946832653975-Use-your-design-system-package-in-Figma-Make)
+  Make](https://help.figma.com/hc/en-us/articles/35946832653975-Use-your-design-system-package-in-Figma-Make)
 - [Working with React - Developer
   Docs](https://developers.figma.com/docs/code/working-with-react/)
 - [Code Connect - Help
@@ -477,17 +477,17 @@ Make](https://help.figma.com/hc/en-us/articles/35946832653975-Use-your-design-sy
 - [Code Connect - Developer
   Docs](https://developers.figma.com/docs/code-connect/)
 - [Code Connect MCP
-Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
+  Integration](https://developers.figma.com/docs/figma-mcp-server/code-connect-integration/)
 - [Select AI Model in
-Make](https://help.figma.com/hc/en-us/articles/36400680326551-Select-an-AI-model-to-use-in-Figma-Make)
+  Make](https://help.figma.com/hc/en-us/articles/36400680326551-Select-an-AI-model-to-use-in-Figma-Make)
 - [Figma Make MCP
-Connectors](https://www.cmswire.com/digital-experience/figma-make-adds-custom-model-context-protocol-6-new-connectors/)
+  Connectors](https://www.cmswire.com/digital-experience/figma-make-adds-custom-model-context-protocol-6-new-connectors/)
 - [Partner MCP Connectors - Help
-Center](https://help.figma.com/hc/en-us/articles/35440096186007-Use-verified-partner-MCP-connectors-in-Figma-Make)
+  Center](https://help.figma.com/hc/en-us/articles/35440096186007-Use-verified-partner-MCP-connectors-in-Figma-Make)
 - [Custom MCP Connectors - Help
-Center](https://help.figma.com/hc/en-us/articles/38147204302743-Create-and-use-custom-MCP-connectors-in-Figma-Make)
+  Center](https://help.figma.com/hc/en-us/articles/38147204302743-Create-and-use-custom-MCP-connectors-in-Figma-Make)
 - [Add Backend to Make - Help
-Center](https://help.figma.com/hc/en-us/articles/32640822050199-Add-a-backend-to-a-functional-prototype-or-web-app)
+  Center](https://help.figma.com/hc/en-us/articles/32640822050199-Add-a-backend-to-a-functional-prototype-or-web-app)
 - [Code to Canvas - Figma
   Blog](https://www.figma.com/blog/introducing-claude-code-to-figma/)
 - [Figma Make Review -
@@ -496,9 +496,9 @@ Center](https://help.figma.com/hc/en-us/articles/32640822050199-Add-a-backend-to
 - [Figma Make Won't Work Until You Do
   This](https://learn.thedesignsystem.guide/p/figma-make-wont-work-until-you-do)
 - [How to Get Your Design System into Figma
-Make](https://finchy.medium.com/how-to-get-your-design-system-into-figma-make-3ac735205e7f)
+  Make](https://finchy.medium.com/how-to-get-your-design-system-into-figma-make-3ac735205e7f)
 - [Guide to Dev
-Mode](https://help.figma.com/hc/en-us/articles/15023124644247-Guide-to-Dev-Mode)
+  Mode](https://help.figma.com/hc/en-us/articles/15023124644247-Guide-to-Dev-Mode)
 - [Introducing Figma's Dev Mode MCP
   Server](https://www.figma.com/blog/introducing-figmas-dev-mode-mcp-server/)
 - [Figma Make - Official Page](https://www.figma.com/make/)

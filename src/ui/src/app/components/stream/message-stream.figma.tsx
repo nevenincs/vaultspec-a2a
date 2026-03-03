@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { MessageStream } from './message-stream'
+import figma from '@figma/code-connect';
+import { MessageStream } from './message-stream';
 
 /**
  * Code Connect mapping for MessageStream.
@@ -21,13 +21,17 @@ import { MessageStream } from './message-stream'
  * - contextDocumentCount?: number — badge count on context button
  * - isDark?: boolean — for syntax highlighter theme selection
  */
-figma.connect(MessageStream, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <MessageStream
-      events={[]}
-      onInspect={() => {}}
-      emptyState={false}
-      agentState="idle"
-    />
-  ),
-})
+figma.connect(
+  MessageStream,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <MessageStream
+        events={[]}
+        onInspect={() => {}}
+        emptyState={false}
+        agentState="idle"
+      />
+    ),
+  },
+);

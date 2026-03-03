@@ -1,8 +1,8 @@
 ---
-name: "MCP Landscape Derisking"
+name: 'MCP Landscape Derisking'
 date: 2026-03-02
 type: research
-summary: "Deep-dive on MCP transport, validation, errors, resources, lifespan, and sampling to derisk upcoming coding tasks."
+summary: 'Deep-dive on MCP transport, validation, errors, resources, lifespan, and sampling to derisk upcoming coding tasks.'
 maturity: 80
 feature: mcp-landscape
 ---
@@ -21,11 +21,11 @@ feature: mcp-landscape
 
 FastMCP supports three transport mechanisms:
 
-| Transport | Invocation | Use Case |
-|-----------|-----------|----------|
-| `stdio` (default) | `mcp.run()` | Subprocess integration (IDE launches server as child process) |
-| `sse` | `mcp.run(transport="sse")` | Legacy streaming; superseded by streamable-http |
-| `streamable-http` | `mcp.run(transport="streamable-http")` | Production HTTP deployment (recommended) |
+| Transport         | Invocation                             | Use Case                                                      |
+| ----------------- | -------------------------------------- | ------------------------------------------------------------- |
+| `stdio` (default) | `mcp.run()`                            | Subprocess integration (IDE launches server as child process) |
+| `sse`             | `mcp.run(transport="sse")`             | Legacy streaming; superseded by streamable-http               |
+| `streamable-http` | `mcp.run(transport="streamable-http")` | Production HTTP deployment (recommended)                      |
 
 ### 1.2 FastMCP Default
 
@@ -154,22 +154,22 @@ The MCP spec defines two distinct error surfaces:
 
 **Protocol Errors** — JSON-RPC error responses (the call itself failed):
 
-| Code | Name | When |
-|------|------|------|
-| `-32700` | Parse Error | Malformed JSON |
-| `-32600` | Invalid Request | Missing required JSON-RPC fields |
-| `-32601` | Method Not Found | Unknown tool name |
-| `-32602` | Invalid Params | Parameter validation failure |
-| `-32603` | Internal Error | Server implementation bug |
-| `-32002` | Resource Not Found | MCP-specific: requested resource absent |
-| `-32000` to `-32099` | Server Error | Implementation-specific errors |
+| Code                 | Name               | When                                    |
+| -------------------- | ------------------ | --------------------------------------- |
+| `-32700`             | Parse Error        | Malformed JSON                          |
+| `-32600`             | Invalid Request    | Missing required JSON-RPC fields        |
+| `-32601`             | Method Not Found   | Unknown tool name                       |
+| `-32602`             | Invalid Params     | Parameter validation failure            |
+| `-32603`             | Internal Error     | Server implementation bug               |
+| `-32002`             | Resource Not Found | MCP-specific: requested resource absent |
+| `-32000` to `-32099` | Server Error       | Implementation-specific errors          |
 
 **Tool Execution Errors** — successful JSON-RPC response with `isError: true`:
 
 ```json
 {
   "result": {
-    "content": [{"type": "text", "text": "Thread 'abc' not found."}],
+    "content": [{ "type": "text", "text": "Thread 'abc' not found." }],
     "isError": true
   }
 }
@@ -184,14 +184,14 @@ The spec is explicit:
 > **Protocol Errors** indicate issues with the request structure itself that
 > models are less likely to be able to fix.
 
-| Failure Mode | Error Type | Rationale |
-|-------------|-----------|-----------|
-| Unknown tool name | Protocol (`-32601`) | Handled by SDK automatically |
-| Wrong param type | Protocol (`-32602`) | Handled by SDK automatically |
-| Thread not found | Tool execution (`isError: true`) | LLM can retry with different ID |
-| API server unreachable | Tool execution (`isError: true`) | LLM can inform user |
-| Rate limited | Tool execution (`isError: true`) | LLM can wait and retry |
-| Internal server error | Protocol (`-32603`) | Unrecoverable |
+| Failure Mode           | Error Type                       | Rationale                       |
+| ---------------------- | -------------------------------- | ------------------------------- |
+| Unknown tool name      | Protocol (`-32601`)              | Handled by SDK automatically    |
+| Wrong param type       | Protocol (`-32602`)              | Handled by SDK automatically    |
+| Thread not found       | Tool execution (`isError: true`) | LLM can retry with different ID |
+| API server unreachable | Tool execution (`isError: true`) | LLM can inform user             |
+| Rate limited           | Tool execution (`isError: true`) | LLM can wait and retry          |
+| Internal server error  | Protocol (`-32603`)              | Unrecoverable                   |
 
 ### 3.3 How FastMCP Surfaces Tool Execution Errors
 
@@ -232,24 +232,26 @@ sets `isError: true` properly.
 
 ### 4.1 Core Distinction
 
-| Aspect | Resources | Tools |
-|--------|----------|-------|
-| **Control** | Application-driven (user/host decides) | Model-driven (LLM decides) |
-| **Analogy** | GET requests (read data) | POST requests (perform actions) |
-| **Side effects** | None (read-only) | May have side effects |
-| **Discovery** | `resources/list` + URI templates | `tools/list` |
-| **Invocation** | `resources/read` by URI | `tools/call` by name |
-| **Context loading** | Loaded into context before conversation | Called during conversation |
+| Aspect              | Resources                               | Tools                           |
+| ------------------- | --------------------------------------- | ------------------------------- |
+| **Control**         | Application-driven (user/host decides)  | Model-driven (LLM decides)      |
+| **Analogy**         | GET requests (read data)                | POST requests (perform actions) |
+| **Side effects**    | None (read-only)                        | May have side effects           |
+| **Discovery**       | `resources/list` + URI templates        | `tools/list`                    |
+| **Invocation**      | `resources/read` by URI                 | `tools/call` by name            |
+| **Context loading** | Loaded into context before conversation | Called during conversation      |
 
 ### 4.2 When to Use Resources
 
 Use resources when:
+
 - Data should be loaded **before** the LLM starts reasoning (context priming)
 - The **user or application** should control what data is available
 - Data is **read-only** with no side effects
 - Data has a natural **URI** (files, configs, database records)
 
 Examples for vaultspec:
+
 - `vaultspec://presets/teams/{team_id}` — team preset TOML content
 - `vaultspec://presets/agents/{agent_id}` — agent definition content
 - `vaultspec://threads/{thread_id}/plan` — current plan for a thread
@@ -257,6 +259,7 @@ Examples for vaultspec:
 ### 4.3 When to Use Tools
 
 Use tools when:
+
 - The **LLM** should decide when to invoke the operation
 - The operation has **side effects** (create, cancel, send message)
 - The operation requires **parameters** that the LLM constructs
@@ -283,6 +286,7 @@ tools to call).
 where the LLM drives all interactions. This is correct.
 
 **Phase 2 (future)**: Add resources for read-only context:
+
 - Team preset definitions as resources (IDE can show them in sidebar)
 - Agent definitions as resources
 - Thread state snapshots as resources (for context priming)
@@ -341,6 +345,7 @@ async def start_thread(
 Our MCP server currently creates a **shared `httpx.AsyncClient`** at module
 level (from MCP-05 fix). The lifespan pattern is the official SDK way to do
 this and provides:
+
 - Proper async initialization (module-level `AsyncClient()` may miss event loop)
 - Guaranteed cleanup on shutdown
 - Type-safe context access in tools
@@ -349,6 +354,7 @@ this and provides:
 
 **Migrate to lifespan pattern.** Replace the module-level shared client with
 a lifespan-managed `AppContext` containing:
+
 - `httpx.AsyncClient` — shared HTTP client for REST API calls
 - `api_base_url: str` — from settings, avoiding repeated access
 - Any future shared state (caches, connection pools)
@@ -411,11 +417,11 @@ it, `create_message` will fail.
 
 ### 6.4 Use Cases for Vaultspec
 
-| Use Case | Feasibility | Notes |
-|----------|-------------|-------|
-| Summarize thread status | Low priority | Our tools already return formatted text |
-| Generate thread title from message | Interesting | Could improve UX but adds latency |
-| Classify task complexity for preset selection | Interesting | But adds a round-trip |
+| Use Case                                      | Feasibility  | Notes                                   |
+| --------------------------------------------- | ------------ | --------------------------------------- |
+| Summarize thread status                       | Low priority | Our tools already return formatted text |
+| Generate thread title from message            | Interesting  | Could improve UX but adds latency       |
+| Classify task complexity for preset selection | Interesting  | But adds a round-trip                   |
 
 ### 6.5 Recommendation for Vaultspec
 
@@ -428,14 +434,14 @@ based on task description).
 
 ## 7. Summary of Recommendations
 
-| Topic | Recommendation | Priority |
-|-------|---------------|----------|
-| Transport | Keep stdio (current); document streamable-http for future deployment | LOW |
-| Input validation | Consider Pydantic input models for complex tools | MEDIUM |
-| Error handling | **Raise exceptions instead of returning error strings** | HIGH |
-| Resources | Add in Phase 2 for read-only context (presets, agents, plans) | LOW |
-| Lifespan | **Migrate to official lifespan pattern** for shared httpx client | MEDIUM |
-| Sampling | Do not use in v1; revisit later | LOW |
+| Topic            | Recommendation                                                       | Priority |
+| ---------------- | -------------------------------------------------------------------- | -------- |
+| Transport        | Keep stdio (current); document streamable-http for future deployment | LOW      |
+| Input validation | Consider Pydantic input models for complex tools                     | MEDIUM   |
+| Error handling   | **Raise exceptions instead of returning error strings**              | HIGH     |
+| Resources        | Add in Phase 2 for read-only context (presets, agents, plans)        | LOW      |
+| Lifespan         | **Migrate to official lifespan pattern** for shared httpx client     | MEDIUM   |
+| Sampling         | Do not use in v1; revisit later                                      | LOW      |
 
 ---
 

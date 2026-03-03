@@ -17,12 +17,7 @@
  *   <ShaderBackground />  — mount once inside the root layout
  */
 
-import {
-  useEffect,
-  useRef,
-  useCallback,
-  type CSSProperties,
-} from 'react';
+import { useEffect, useRef, useCallback, type CSSProperties } from 'react';
 
 export type ShaderPreset = 'soft' | 'aurora' | 'plasma';
 
@@ -157,24 +152,28 @@ function buildFragSource(preset: ShaderPreset): string {
 const DEFAULT_COLORS: Record<ShaderPreset, [number[], number[], number[]]> = {
   soft: [
     [0.035, 0.038, 0.045], // near-black base
-    [0.055, 0.070, 0.095], // subtle blue-grey
+    [0.055, 0.07, 0.095], // subtle blue-grey
     [0.045, 0.055, 0.075], // mid tone
   ],
   aurora: [
-    [0.02, 0.025, 0.04],   // deep dark
-    [0.04, 0.12, 0.10],    // teal-green glow
-    [0.06, 0.05, 0.14],    // violet accent
+    [0.02, 0.025, 0.04], // deep dark
+    [0.04, 0.12, 0.1], // teal-green glow
+    [0.06, 0.05, 0.14], // violet accent
   ],
   plasma: [
-    [0.06, 0.02, 0.08],    // deep purple
-    [0.02, 0.06, 0.10],    // cyan
-    [0.08, 0.04, 0.02],    // amber
+    [0.06, 0.02, 0.08], // deep purple
+    [0.02, 0.06, 0.1], // cyan
+    [0.08, 0.04, 0.02], // amber
   ],
 };
 
 // ── WebGL helpers ─────────────────────────────────────────────────────────────
 
-function compileShader(gl: WebGLRenderingContext, type: number, source: string): WebGLShader | null {
+function compileShader(
+  gl: WebGLRenderingContext,
+  type: number,
+  source: string,
+): WebGLShader | null {
   const shader = gl.createShader(type);
   if (!shader) return null;
   gl.shaderSource(shader, source);
@@ -186,7 +185,10 @@ function compileShader(gl: WebGLRenderingContext, type: number, source: string):
   return shader;
 }
 
-function buildProgram(gl: WebGLRenderingContext, preset: ShaderPreset): WebGLProgram | null {
+function buildProgram(
+  gl: WebGLRenderingContext,
+  preset: ShaderPreset,
+): WebGLProgram | null {
   const vert = compileShader(gl, gl.VERTEX_SHADER, VERT);
   const frag = compileShader(gl, gl.FRAGMENT_SHADER, buildFragSource(preset));
   if (!vert || !frag) return null;
@@ -262,10 +264,10 @@ export function ShaderBackground({
     gl.enableVertexAttribArray(posLoc);
     gl.vertexAttribPointer(posLoc, 2, gl.FLOAT, false, 0, 0);
 
-    const uRes    = gl.getUniformLocation(prog, 'u_resolution');
-    const uTime   = gl.getUniformLocation(prog, 'u_time');
-    const uOpac   = gl.getUniformLocation(prog, 'u_opacity');
-    const uSpeed  = gl.getUniformLocation(prog, 'u_speed');
+    const uRes = gl.getUniformLocation(prog, 'u_resolution');
+    const uTime = gl.getUniformLocation(prog, 'u_time');
+    const uOpac = gl.getUniformLocation(prog, 'u_opacity');
+    const uSpeed = gl.getUniformLocation(prog, 'u_speed');
     const uBright = gl.getUniformLocation(prog, 'u_brightness');
     const uColor0 = gl.getUniformLocation(prog, 'u_color0');
     const uColor1 = gl.getUniformLocation(prog, 'u_color1');
@@ -288,7 +290,7 @@ export function ShaderBackground({
       const dpr = window.devicePixelRatio || 1;
       const w = window.innerWidth;
       const h = window.innerHeight;
-      canvas!.width  = Math.round(w * dpr);
+      canvas!.width = Math.round(w * dpr);
       canvas!.height = Math.round(h * dpr);
       gl!.viewport(0, 0, canvas!.width, canvas!.height);
     }
@@ -328,7 +330,10 @@ export function ShaderBackground({
     <canvas
       ref={canvasRef}
       aria-hidden="true"
-      className={className ?? 'fixed inset-0 -z-10 h-full w-full pointer-events-none dark:opacity-100 opacity-0 transition-opacity duration-500'}
+      className={
+        className ??
+        'pointer-events-none fixed inset-0 -z-10 h-full w-full opacity-0 transition-opacity duration-500 dark:opacity-100'
+      }
       style={style}
     />
   );

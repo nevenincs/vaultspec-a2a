@@ -246,15 +246,14 @@ class Executor:
             # eviction within the same process) or req.team_preset supplied
             # by the API (handles cold-restart recovery when caller provides it).
             preset_info = self._graph_presets.get(req.thread_id)
-            team_preset = (
-                preset_info[0] if preset_info else req.team_preset
-            )
-            workspace_root = (
-                preset_info[1] if preset_info else req.workspace_root
-            )
+            team_preset = preset_info[0] if preset_info else req.team_preset
+            workspace_root = preset_info[1] if preset_info else req.workspace_root
             if team_preset:
                 recompile_req = req.model_copy(
-                    update={"team_preset": team_preset, "workspace_root": workspace_root}
+                    update={
+                        "team_preset": team_preset,
+                        "workspace_root": workspace_root,
+                    }
                 )
                 try:
                     graph = self._compile_graph(recompile_req)
@@ -300,9 +299,7 @@ class Executor:
             except Exception:
                 logger.debug("Could not load team config for recursion_limit fallback")
         effective_recursion_limit = (
-            req.recursion_limit
-            or team_recursion_limit
-            or _GRAPH_RECURSION_LIMIT
+            req.recursion_limit or team_recursion_limit or _GRAPH_RECURSION_LIMIT
         )
         config = {
             "configurable": {"thread_id": req.thread_id},

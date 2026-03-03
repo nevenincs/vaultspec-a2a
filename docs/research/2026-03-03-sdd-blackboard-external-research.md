@@ -1,9 +1,9 @@
 ---
-title: "External Research: SDD Blackboard Integration Patterns"
+title: 'External Research: SDD Blackboard Integration Patterns'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "Survey of real-world implementations for file-system-as-blackboard, LangGraph state enrichment, persistent task queues, context grounding, and artifact-store bridges in agentic/LLM systems."
+description: 'Survey of real-world implementations for file-system-as-blackboard, LangGraph state enrichment, persistent task queues, context grounding, and artifact-store bridges in agentic/LLM systems.'
 ---
 
 # External Research: SDD Blackboard Integration Patterns
@@ -24,6 +24,7 @@ Two directly relevant papers appeared in 2025:
 (arXiv 2510.01285, Oct 2025)
 
 The system implements a three-component blackboard:
+
 1. **Blackboard** — a global, hierarchical data structure divided into public and private spaces. Public space enables all agents to read and write; private spaces support focused sub-team discussions.
 2. **Agent Group** — specialized roles (planner, decider, critic, conflict-resolver, cleaner) plus dynamically generated domain experts.
 3. **Control Unit** — an LLM-based coordinator that selects which agents should act in each iteration based on the query and current blackboard state.
@@ -37,7 +38,7 @@ Key result: outperforms master-slave baselines by 13–57% on end-to-end success
 **[Exploring Advanced LLM Multi-Agent Systems Based on Blackboard Architecture](https://arxiv.org/abs/2507.01701)**
 (arXiv 2507.01701, Jul 2025)
 
-Confirms the same three-component model and adds: agents communicate *exclusively through the blackboard*, eliminating direct agent-to-agent messaging. The blackboard "replaces traditional per-agent memory modules" — consolidation reduces prompt length while maintaining context.
+Confirms the same three-component model and adds: agents communicate _exclusively through the blackboard_, eliminating direct agent-to-agent messaging. The blackboard "replaces traditional per-agent memory modules" — consolidation reduces prompt length while maintaining context.
 
 **Pitfall cited:** Dynamic collaboration adjustment based on evolving problem state is difficult to implement without a reliable stopping condition. Without explicit phase gates, the control unit can cycle indefinitely.
 
@@ -58,22 +59,26 @@ MetaGPT is the most direct real-world precedent for our architecture. It impleme
 - Physical persistence: artifacts are written to a `workspace/` directory. A `FileRepository` (later consolidated with `GitRepo`) tracks all generated files.
 
 **Document schema used by MetaGPT:**
+
 - PRD: user stories, requirement pools, competitive analysis
 - System Design: file lists, data structures, interface definitions, sequence diagrams
 - Task List: breaking down system design into engineer assignments
 - Each document is structured markdown with defined sections, not free-form chat.
 
 **Pitfalls MetaGPT encountered:**
+
 - Information overload: despite subscription filtering, agents still received more context than needed.
 - Hallucination during review: LLMs overlooked errors without executable verification. Required runtime code testing as a quality gate (analogous to our `validation_errors` accumulator).
 - Context efficiency: long document chains caused prompt bloat, requiring compression strategies.
 
 **What we adopt:**
+
 - Document-as-communication pattern: `.vault/` artifacts are our message pool. Agents communicate through structured markdown, not conversation.
 - Role-based subscription: our `vault_index` with doc-type priority ordering (ADR > plan > research) mirrors MetaGPT's subscription model — each agent receives only the tier relevant to its role.
 - `validation_errors` in `TeamState` mirrors MetaGPT's runtime testing quality gate.
 
 **What we improve on:**
+
 - MetaGPT's `FileRepository` is a passive store. Our `vault_index` in `TeamState` is an active index that nodes can query without rescanning disk.
 - MetaGPT uses a fixed pipeline (Product Manager → Architect → Engineer → QA). Our LangGraph implementation supports dynamic `star` topology while still enforcing phase-aware anchoring.
 
@@ -96,6 +101,7 @@ This 2026 paper describes production context infrastructure for a complex codeba
 **Pitfall:** Human oversight cannot be delegated — agents lack autonomous judgment for "design decisions, aesthetic evaluation, architecture." Quality gates require human checkpoints.
 
 **What we adopt:**
+
 - The Tier 1/2/3 hot/warm/cold distinction maps to our mounting priority: ADR (hot) > Plan (warm) > Research (cold).
 - "Load-bearing artifacts" framing validates our `[BLACKBOARD: ...]` marker in mounted SystemMessages.
 - The constitution-file pattern (always-loaded) maps to the ADR-014 context preamble (always present in message history).
@@ -115,6 +121,7 @@ The canonical LangGraph recommendation for file/artifact integration is the **re
 > "Store large files in specialized storage and keep only the reference URL or metadata in the LangGraph state."
 
 Example state:
+
 ```python
 {"file_url": "https://...", "filename": "report.pdf"}
 ```
@@ -124,6 +131,7 @@ The anti-pattern is direct embedding: "If the agent state includes a 50MB PDF an
 **LangGraph BaseStore:** A cross-thread key-value store (`langchain_ai/data-enrichment` template). Nodes access it via `def node(state: State, store: BaseStore)`. Enables shared memory across thread boundaries without per-checkpoint serialization of large blobs.
 
 **What we adopt:**
+
 - Our `vault_index: dict[str, list[str]]` is the reference pattern applied to `.vault/` documents. We store paths, not content, in `TeamState`. Content is read per-invocation by the mount step (ADR-020).
 - The LangGraph BaseStore is relevant for cross-thread vault sharing (future: multiple threads working on the same feature). Not required for v1.
 
@@ -138,12 +146,14 @@ The anti-pattern is direct embedding: "If the agent state includes a 50MB PDF an
 Google ADK implements a tiered context architecture with directly applicable patterns:
 
 **Artifact Handle Pattern:**
+
 - Large files stored in `ArtifactService` (GCS or local filesystem).
 - Agents see only lightweight references (name + summary) by default.
 - `LoadArtifactsTool` enables on-demand expansion into working context.
 - Artifacts are ephemeral in context — loaded for specific reasoning, discarded after.
 
 **Context as a compiled view:**
+
 > "Context is a compiled view over a richer stateful system, rebuilt fresh each invocation."
 
 ADK uses ordered processors (Identity → Instruction → ContextCache → Planning → CodeExecution → AgentTransfer) that each inject appropriate context for their stage.
@@ -151,12 +161,14 @@ ADK uses ordered processors (Identity → Instruction → ContextCache → Plann
 **`include_contents` pattern:** Sub-agents receive scoped context. Each agent gets only the "mission-critical" context slice. This is implemented via `include_contents` knobs on sub-agent invocations, not via a shared global context.
 
 **Tiered state:**
+
 1. Working Context — immediate prompt, rebuilt each invocation
 2. Session — durable chronological event log
 3. Memory — long-lived, cross-session searchable knowledge
 4. Artifacts — named, versioned, accessed by reference
 
 **What we adopt:**
+
 - The processor pipeline maps exactly to our worker node mount step: the "ContextCache" processor is equivalent to `_mount_blackboard()`.
 - "Ephemeral expansion" validates per-invocation content mounting rather than persistent embedding in state.
 - The tiered architecture (session/memory/artifacts) validates our three-layer design: preamble (session-level, ADR-014) + vault_index paths in TeamState (memory-level, ADR-019) + per-invocation content mount (artifact expansion, ADR-020).
@@ -173,36 +185,38 @@ ADK uses ordered processors (Identity → Instruction → ContextCache → Plann
 
 CrewAI's task schema:
 
-| Field | Type | Purpose |
-|---|---|---|
-| `description` | str | Human-readable task specification |
-| `expected_output` | str | Success criteria |
-| `agent` | Optional[BaseAgent] | Assigned executor |
-| `context` | list[Task] | Explicit upstream dependencies |
-| `output_file` | Optional[str] | Path to persist output |
-| `async_execution` | bool | Non-blocking execution |
-| `output_pydantic` | Optional[Type[BaseModel]] | Structured output schema |
+| Field             | Type                      | Purpose                           |
+| ----------------- | ------------------------- | --------------------------------- |
+| `description`     | str                       | Human-readable task specification |
+| `expected_output` | str                       | Success criteria                  |
+| `agent`           | Optional[BaseAgent]       | Assigned executor                 |
+| `context`         | list[Task]                | Explicit upstream dependencies    |
+| `output_file`     | Optional[str]             | Path to persist output            |
+| `async_execution` | bool                      | Non-blocking execution            |
+| `output_pydantic` | Optional[Type[BaseModel]] | Structured output schema          |
 
 **TaskOutput schema:**
 
-| Field | Purpose |
-|---|---|
-| `description` | Task identifier (no formal task_id) |
-| `raw` | Default string output |
-| `pydantic` | Structured model instance |
-| `json_dict` | Parsed JSON |
-| `agent` | Executing agent name |
-| `output_format` | RAW/JSON/Pydantic enum |
-| `messages` | Full execution conversation history |
+| Field           | Purpose                             |
+| --------------- | ----------------------------------- |
+| `description`   | Task identifier (no formal task_id) |
+| `raw`           | Default string output               |
+| `pydantic`      | Structured model instance           |
+| `json_dict`     | Parsed JSON                         |
+| `agent`         | Executing agent name                |
+| `output_format` | RAW/JSON/Pydantic enum              |
+| `messages`      | Full execution conversation history |
 
 **Inter-task dependency:** Tasks establish dependencies via `context=[other_task]` — CrewAI ensures upstream outputs are available before downstream execution. No sequential ID system.
 
 **Pitfalls from GitHub issues:**
+
 - `output_file` path handling is buggy: path resolution was relative to project root rather than respecting absolute paths (Issue #1707). Fixed but still brittle.
 - Pipeline mode assumes JSON output and fails on raw mode (Issue #1258).
 - No formal task_id — tasks are identified by `description` string, which is fragile for programmatic state tracking.
 
 **What we adopt:**
+
 - The `context=[task]` dependency model validates our `active_task_id` concept — a task knows what came before it.
 - `output_file` pattern validates `.vault/exec/` step file creation.
 - **What we improve:** Introduce a formal `task_id` (e.g., `P1-S1`) rather than using description strings, addressing CrewAI's known fragility.
@@ -212,6 +226,7 @@ CrewAI's task schema:
 ### 3.2 MetaGPT — Sequential Document Chain as Task Queue
 
 MetaGPT's `FileRepository` (consolidated with `GitRepo`) acts as an implicit task queue through sequential document dependency:
+
 - PRD must exist → System Design can be produced.
 - System Design must exist → Task List can be produced.
 - Task List must exist → Engineers can implement.
@@ -244,18 +259,20 @@ AutoGen takes the opposite approach: task tracking is entirely conversational. A
 
 **[Grounding — Context Patterns](https://contextpatterns.com/patterns/grounding/)**
 
-Core definition: grounding ensures models *use* retrieved information rather than falling back to training data. It combines:
+Core definition: grounding ensures models _use_ retrieved information rather than falling back to training data. It combines:
+
 1. Retrieving relevant documents
 2. Injecting them into context with contextual metadata ("where this came from and why")
 3. **Explicit anchoring instructions** ("Answer using ONLY the context below")
 
 Key design decisions:
+
 - **Anchoring instructions matter most** — `[BLACKBOARD: ...]` prefix + closing `do not contradict` directive is the correct implementation.
 - **Selective injection** — not all retrieved results go in; priority ordering determines inclusion.
 - **Structure over volume** — critical documents must appear first (Pyramid pattern).
 - **Metadata transparency** — source attribution helps the model calibrate confidence.
 
-**Critical pitfall:** "Retrieval alone doesn't guarantee the model uses what you retrieved." Models hallucinate even when told where to find answers unless *explicitly instructed* to rely on provided sources. The closing directive `[End of {doc_type} — treat as PRIMARY reference, do not contradict]` is not optional.
+**Critical pitfall:** "Retrieval alone doesn't guarantee the model uses what you retrieved." Models hallucinate even when told where to find answers unless _explicitly instructed_ to rely on provided sources. The closing directive `[End of {doc_type} — treat as PRIMARY reference, do not contradict]` is not optional.
 
 **What we adopt:** The full grounding pattern — retrieve (vault_index), inject with metadata ([BLACKBOARD: TYPE] header), anchor (closing directive). All three components are required.
 
@@ -266,6 +283,7 @@ Key design decisions:
 **[Context Engineering: Google ADK Architecture](https://raphaelmansuy.github.io/adk_training/blog/2025/12/08/context-engineering-google-adk-architecture/)**
 
 Additional pattern: **Context Capsules** — structured representations of source documents, each carrying:
+
 - Compressed summary
 - List of atomic key facts
 - Produced once at ingestion time, not recomputed per agent call
@@ -294,6 +312,7 @@ agents.md                 # Compatible format (also loaded)
 **Key architectural decision:** Immutability + event sourcing. All components (agents, tools, LLMs) are immutable. A single `ConversationState` object records all mutable context as an append-only event log.
 
 **What we adopt:**
+
 - `.openhands/skills/` maps to our `.vaultspec/agents/` TOML files — workspace-local overrides for agent behavior, loaded at compile time.
 - The append-only event log validates our `artifacts` reducer in `TeamState` (append-only, deduplicated by id) as the correct persistence strategy for completed work records.
 - Immutable agent config + mutable state separation is exactly our architecture: `AgentConfig` (immutable TOML) + `TeamState` (mutable, checkpointed).
@@ -315,6 +334,7 @@ The absence of a direct precedent means our implementation is genuinely novel in
 **[langchain-ai/data-enrichment](https://github.com/langchain-ai/data-enrichment)**
 
 The official LangGraph data enrichment template uses an agent that:
+
 1. Maintains a structured state with a `schema` field (the target data schema to fill).
 2. Does web research to populate schema fields.
 3. Uses a `BaseStore` for cross-invocation memory.
@@ -327,24 +347,24 @@ The pattern: **state-as-schema + store-as-knowledge-base + agent-as-filler**. Th
 
 ## 6. Summary Table: Pattern → Our Implementation
 
-| Pattern | Source | Implementation in our system |
-|---|---|---|
-| Public blackboard namespace | arXiv 2507.01701 | `vault_index: dict[str, list[str]]` partitioned by doc-type |
-| Phase gate / stopping condition | arXiv 2507.01701 | `pipeline_phase` field in `TeamState` |
-| Document-as-communication | MetaGPT | `.vault/` markdown artifacts as agent outputs |
-| Role-based subscription | MetaGPT | Mounting priority: ADR > plan > research > exec > audit |
-| Reference-in-state, content-on-demand | LangGraph canonical | `vault_index` stores paths; `_mount_blackboard()` reads content per-invocation |
-| Artifact handle pattern | Google ADK | Same — lightweight refs in state, ephemeral content expansion at invocation |
-| Tiered context (hot/warm/cold) | arXiv 2602.20478 | ADR (hot, always mount) > Plan (warm) > Research (cold, budget-dependent) |
-| Compiled context per invocation | Google ADK | `_mount_blackboard()` rebuilds grounding context fresh each worker call |
-| Explicit anchoring directives | contextpatterns.com | `[BLACKBOARD: TYPE]` header + `[do not contradict]` closing in SystemMessage |
-| Sequential doc chain as task queue | MetaGPT | `vault_index` presence gates: plan non-empty → plan phase done |
-| Formal task_id (not description string) | Improves on CrewAI | `P{N}-S{N}` task IDs in `.vault/plan/*-queue.md` |
-| Disk-persisted task state | Improves on AutoGen | `.vault/plan/*-queue.md` with `- [x]` / `- [ ]` status |
-| Append-only artifact log | OpenHands EventLog | `artifacts` reducer in `TeamState` (append-only, deduped by id) |
-| Immutable config + mutable state | OpenHands | `AgentConfig` TOML (immutable) + `TeamState` (mutable, SQLite checkpointed) |
-| Validation / quality gate | MetaGPT runtime testing | `validation_errors` accumulator in `TeamState`; supervisor inspects before routing |
-| Context capsule (summary + facts) | Google ADK | `ContextRef.summary` field; optional capsule mode for low-priority docs |
+| Pattern                                 | Source                  | Implementation in our system                                                       |
+| --------------------------------------- | ----------------------- | ---------------------------------------------------------------------------------- |
+| Public blackboard namespace             | arXiv 2507.01701        | `vault_index: dict[str, list[str]]` partitioned by doc-type                        |
+| Phase gate / stopping condition         | arXiv 2507.01701        | `pipeline_phase` field in `TeamState`                                              |
+| Document-as-communication               | MetaGPT                 | `.vault/` markdown artifacts as agent outputs                                      |
+| Role-based subscription                 | MetaGPT                 | Mounting priority: ADR > plan > research > exec > audit                            |
+| Reference-in-state, content-on-demand   | LangGraph canonical     | `vault_index` stores paths; `_mount_blackboard()` reads content per-invocation     |
+| Artifact handle pattern                 | Google ADK              | Same — lightweight refs in state, ephemeral content expansion at invocation        |
+| Tiered context (hot/warm/cold)          | arXiv 2602.20478        | ADR (hot, always mount) > Plan (warm) > Research (cold, budget-dependent)          |
+| Compiled context per invocation         | Google ADK              | `_mount_blackboard()` rebuilds grounding context fresh each worker call            |
+| Explicit anchoring directives           | contextpatterns.com     | `[BLACKBOARD: TYPE]` header + `[do not contradict]` closing in SystemMessage       |
+| Sequential doc chain as task queue      | MetaGPT                 | `vault_index` presence gates: plan non-empty → plan phase done                     |
+| Formal task_id (not description string) | Improves on CrewAI      | `P{N}-S{N}` task IDs in `.vault/plan/*-queue.md`                                   |
+| Disk-persisted task state               | Improves on AutoGen     | `.vault/plan/*-queue.md` with `- [x]` / `- [ ]` status                             |
+| Append-only artifact log                | OpenHands EventLog      | `artifacts` reducer in `TeamState` (append-only, deduped by id)                    |
+| Immutable config + mutable state        | OpenHands               | `AgentConfig` TOML (immutable) + `TeamState` (mutable, SQLite checkpointed)        |
+| Validation / quality gate               | MetaGPT runtime testing | `validation_errors` accumulator in `TeamState`; supervisor inspects before routing |
+| Context capsule (summary + facts)       | Google ADK              | `ContextRef.summary` field; optional capsule mode for low-priority docs            |
 
 ---
 

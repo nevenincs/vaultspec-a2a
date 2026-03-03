@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: a2a-reference
-description: "Comparative analysis of A2A SDK reference implementations against our lib/ identifying critical drift in EventAggregator backpressure strategy and missing task state machine completion protocol."
+description: 'Comparative analysis of A2A SDK reference implementations against our lib/ identifying critical drift in EventAggregator backpressure strategy and missing task state machine completion protocol.'
 related:
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
   - docs/adrs/2026-02-26-003-protocol-bridging-translation-adr.md
@@ -88,7 +88,7 @@ else:
 
 - No timeout at queue level; caller (EventConsumer) applies timeout
 
-### Our Implementation: EventAggregator._broadcast()
+### Our Implementation: EventAggregator.\_broadcast()
 
 ### Architecture: (2)
 
@@ -408,7 +408,7 @@ finally:
 
 1. **Shared setup** — Consolidates TaskManager, queue, ResultAggregator creation
 2. **Task registration** — Tracks running agents in `_running_agents: dict[str,
-   asyncio.Task]`
+asyncio.Task]`
 3. **Exception cleanup** — On error, cancel producer task immediately
 4. **Graceful vs. immediate cleanup** — If interrupted (auth_required or
    non-blocking), cleanup runs in background
@@ -556,7 +556,7 @@ def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
 - On next iteration, exception is raised in consumer context (not async task
   context)
 
-### Our Implementation: lib/api/websocket.svelte.ts (frontend)
+### Our Implementation: lib/api/websocket.React.ts (frontend)
 
 ### What we have: (4)
 
@@ -594,48 +594,48 @@ def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
 
 ### Drift 1: Backpressure Philosophy
 
-| Aspect | A2A | Us | Impact |
-| -------- | ----- | ---- | ---- |
-| Full queue behavior | Block upstream | Drop oldest event | ✅ Correct for use case |
-| Queue model | Hierarchical parents/children | Flat subscribers | ✅ OK, different architecture |
-| **Assessment** | RPC-style request-response | Real-time fan-out | No action needed |
+| Aspect              | A2A                           | Us                | Impact                        |
+| ------------------- | ----------------------------- | ----------------- | ----------------------------- |
+| Full queue behavior | Block upstream                | Drop oldest event | ✅ Correct for use case       |
+| Queue model         | Hierarchical parents/children | Flat subscribers  | ✅ OK, different architecture |
+| **Assessment**      | RPC-style request-response    | Real-time fan-out | No action needed              |
 
 ### Drift 2: Task State Machine
 
-| Aspect | A2A | Us | Impact |
-| -------- | ----- | ---- | ---- |
-| Terminal state protection | Lock + flag gate | None | ❌ **CRITICAL** |
-| Transition validation | TaskUpdater enforces | No validation | ❌ **CRITICAL** |
-| Rejection vs. cancellation | Distinct states | Collapsed to cancelled | ⚠️ **HIGH** |
-| Final flag auto-setting | Automatic on terminal | Manual | ⚠️ **HIGH** |
+| Aspect                     | A2A                   | Us                     | Impact          |
+| -------------------------- | --------------------- | ---------------------- | --------------- |
+| Terminal state protection  | Lock + flag gate      | None                   | ❌ **CRITICAL** |
+| Transition validation      | TaskUpdater enforces  | No validation          | ❌ **CRITICAL** |
+| Rejection vs. cancellation | Distinct states       | Collapsed to cancelled | ⚠️ **HIGH**     |
+| Final flag auto-setting    | Automatic on terminal | Manual                 | ⚠️ **HIGH**     |
 
 ### Drift 3: Result Aggregation
 
-| Aspect | A2A | Us | Impact |
-| -------- | ----- | ---- | ---- |
-| Interrupt awareness | Yes (auth_required) | No | ⚠️ **HIGH** (optional for our design) |
-| Background continuation | Yes, with callback | No | ⚠️ **HIGH** (optional) |
-| Early exit on Message | Yes | N/A (no result agg) | ✅ OK |
-| Push notifications | Via event_callback | Partial in endpoints | ⚠️ **HIGH** |
+| Aspect                  | A2A                 | Us                   | Impact                                |
+| ----------------------- | ------------------- | -------------------- | ------------------------------------- |
+| Interrupt awareness     | Yes (auth_required) | No                   | ⚠️ **HIGH** (optional for our design) |
+| Background continuation | Yes, with callback  | No                   | ⚠️ **HIGH** (optional)                |
+| Early exit on Message   | Yes                 | N/A (no result agg)  | ✅ OK                                 |
+| Push notifications      | Via event_callback  | Partial in endpoints | ⚠️ **HIGH**                           |
 
 ### Drift 4: Request Handler
 
-| Aspect | A2A | Us | Impact |
-| -------- | ----- | ---- | ---- |
-| Setup abstraction | `_setup_message_execution()` | Inline in endpoints | ⚠️ **MODERATE** |
-| Exception handling | try/except + producer.cancel() | None | ❌ **CRITICAL** |
-| Background task tracking | `_background_tasks`set + callback | None | ❌ **CRITICAL** |
-| Producer deduplication | `_running_agents`dict | None | ❌ **CRITICAL** |
-| Streaming disconnection | CancelledError → bg consume | No handling | ❌ **CRITICAL** |
+| Aspect                   | A2A                               | Us                  | Impact          |
+| ------------------------ | --------------------------------- | ------------------- | --------------- |
+| Setup abstraction        | `_setup_message_execution()`      | Inline in endpoints | ⚠️ **MODERATE** |
+| Exception handling       | try/except + producer.cancel()    | None                | ❌ **CRITICAL** |
+| Background task tracking | `_background_tasks`set + callback | None                | ❌ **CRITICAL** |
+| Producer deduplication   | `_running_agents`dict             | None                | ❌ **CRITICAL** |
+| Streaming disconnection  | CancelledError → bg consume       | No handling         | ❌ **CRITICAL** |
 
 ### Drift 5: Streaming Termination
 
-| Aspect | A2A | Us | Impact |
-| -------- | ----- | ---- | ---- |
-| Final event detection | Yes (explicit close) | No | ❌ **CRITICAL** |
-| Queue closure | Explicit after final | No | ❌ **CRITICAL** |
-| Timeout polling | Yes (0.5s intervals) | No | ⚠️ **HIGH** |
-| Exception propagation | Via callback | Via task result | ✅ Different model OK |
+| Aspect                | A2A                  | Us              | Impact                |
+| --------------------- | -------------------- | --------------- | --------------------- |
+| Final event detection | Yes (explicit close) | No              | ❌ **CRITICAL**       |
+| Queue closure         | Explicit after final | No              | ❌ **CRITICAL**       |
+| Timeout polling       | Yes (0.5s intervals) | No              | ⚠️ **HIGH**           |
+| Exception propagation | Via callback         | Via task result | ✅ Different model OK |
 
 ---
 
@@ -700,8 +700,7 @@ def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
 
 ### Our Implementation
 
-- `lib/core/aggregator.py`(EventAggregator)
--`lib/api/endpoints.py` (REST handlers)
+- `lib/core/aggregator.py`(EventAggregator) -`lib/api/endpoints.py` (REST handlers)
 
 ---
 

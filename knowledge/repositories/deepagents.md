@@ -1,8 +1,8 @@
 ---
-name: "DeepAgents Reference"
+name: 'DeepAgents Reference'
 date: 2026-25-02
 type: reference
-summary: "LangChain DeepAgents framework reference covering planning, reasoning loops, and evaluation blueprints for autonomous agents."
+summary: 'LangChain DeepAgents framework reference covering planning, reasoning loops, and evaluation blueprints for autonomous agents.'
 maturity: 50
 ---
 

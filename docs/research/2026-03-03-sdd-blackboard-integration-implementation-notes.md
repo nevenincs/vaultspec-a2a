@@ -1,11 +1,11 @@
 ---
-title: "SDD Blackboard Integration — Implementation Derisking Notes"
-date: "2026-03-03"
+title: 'SDD Blackboard Integration — Implementation Derisking Notes'
+date: '2026-03-03'
 type: research
-tags: ["#research", "#sdd-blackboard-integration"]
+tags: ['#research', '#sdd-blackboard-integration']
 related:
-  - "[[2026-03-03-sdd-blackboard-integration-019-teamstate-enrichment]]"
-  - "[[2026-03-03-sdd-blackboard-integration-022-contextual-anchoring]]"
+  - '[[2026-03-03-sdd-blackboard-integration-019-teamstate-enrichment]]'
+  - '[[2026-03-03-sdd-blackboard-integration-022-contextual-anchoring]]'
 ---
 
 # sdd-blackboard-integration — implementation derisking notes
@@ -36,6 +36,7 @@ class State(TypedDict):
 **Source:** https://docs.langchain.com/oss/python/langgraph/durable-execution
 
 Key behaviour:
+
 - When a `NotRequired` key is absent from the graph input, LangGraph treats it
   as absent from state — not as `None`, not as a default value. The channel
   simply does not exist in that checkpoint.
@@ -127,6 +128,7 @@ this. Storing `Path` objects, `ContextRef` Pydantic models, or any non-primitive
 in these fields would cause a serialization error at checkpoint time.
 
 **Source:** https://docs.langchain.com/oss/python/langgraph/functional-api
+
 > "Use python primitives like dictionaries, lists, strings, numbers, and
 > booleans to ensure that your inputs and outputs are serializable."
 
@@ -380,6 +382,7 @@ receive the feature context appended at the end of the prompt instead.
 ## 3. Interaction Between `add_messages` and Custom Reducers
 
 `add_messages` is a specialized reducer that:
+
 1. Appends new messages by default.
 2. Deduplicates by message `id` (updates existing message if same `id`).
 3. Handles `RemoveMessage` objects to delete specific messages by id.
@@ -398,16 +401,16 @@ should not be relied upon since individual reducers are independent.
 
 ## 4. Known Pitfalls Summary
 
-| Pitfall | Context | Mitigation |
-| --- | --- | --- |
-| `NotRequired` + `Annotated` invalid syntax | `NotRequired[Annotated[T, fn]]` does not work | Use `Annotated[T, fn]` for reducer fields; `NotRequired[T]` for scalar fields only |
-| `KeyError` on absent `NotRequired` keys | Old checkpoints lack new keys | Use `state.get("field", default)` for all `NotRequired` fields |
-| Reducer called with empty default | First write to `Annotated` field | Reducer must handle `{}` / `[]` as `existing` argument |
-| Non-primitive values in state | Storing `Path`, Pydantic models, etc. | Only store `str`, `int`, `bool`, `dict`, `list` — convert `Path` to `str` before storing |
-| Anchoring `SystemMessage` entering `add_messages` | Accidentally returning anchoring message | Never return the ephemeral anchoring list to state; return only routing/metadata keys |
-| Route map missing gate-redirect target | `workers[0]` not in `route_map` | Verify all possible path-function return values exist in `route_map` |
-| `compact_context` removing vault preamble | ADR-014 preamble compressed | Per-invocation `_build_anchoring_context` is immune; reconstructed fresh each call |
-| `JsonPlusSerializer` failing on custom types | Non-JSON-serializable state values | `vault_index` paths must be `str`, not `Path`; `validation_errors` must be `list[str]` |
+| Pitfall                                           | Context                                       | Mitigation                                                                               |
+| ------------------------------------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| `NotRequired` + `Annotated` invalid syntax        | `NotRequired[Annotated[T, fn]]` does not work | Use `Annotated[T, fn]` for reducer fields; `NotRequired[T]` for scalar fields only       |
+| `KeyError` on absent `NotRequired` keys           | Old checkpoints lack new keys                 | Use `state.get("field", default)` for all `NotRequired` fields                           |
+| Reducer called with empty default                 | First write to `Annotated` field              | Reducer must handle `{}` / `[]` as `existing` argument                                   |
+| Non-primitive values in state                     | Storing `Path`, Pydantic models, etc.         | Only store `str`, `int`, `bool`, `dict`, `list` — convert `Path` to `str` before storing |
+| Anchoring `SystemMessage` entering `add_messages` | Accidentally returning anchoring message      | Never return the ephemeral anchoring list to state; return only routing/metadata keys    |
+| Route map missing gate-redirect target            | `workers[0]` not in `route_map`               | Verify all possible path-function return values exist in `route_map`                     |
+| `compact_context` removing vault preamble         | ADR-014 preamble compressed                   | Per-invocation `_build_anchoring_context` is immune; reconstructed fresh each call       |
+| `JsonPlusSerializer` failing on custom types      | Non-JSON-serializable state values            | `vault_index` paths must be `str`, not `Path`; `validation_errors` must be `list[str]`   |
 
 ---
 

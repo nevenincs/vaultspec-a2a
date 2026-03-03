@@ -1,8 +1,8 @@
 ---
-name: "LangGraph Reference"
+name: 'LangGraph Reference'
 date: 2026-25-02
 type: reference
-summary: "LangGraph reference covering state graphs, nodes, edges, and checkpointers for building stateful multi-actor agent applications."
+summary: 'LangGraph reference covering state graphs, nodes, edges, and checkpointers for building stateful multi-actor agent applications.'
 maturity: 55
 ---
 

@@ -1,21 +1,67 @@
 """Supervisor node for LangGraph agent routing."""
 
 import logging
+
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
+from langgraph.types import interrupt
 
 from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..phase import infer_phase_from_vault_index
 from ..state import TeamState
 
+
 _logger = logging.getLogger(__name__)
 
 
 __all__ = ["create_supervisor_node"]
+
+
+@dataclass(frozen=True, slots=True)
+class _GateResult:
+    blocked: bool
+    warning: bool
+    message: str
+
+
+# Maps target phase → (required vault_index key, is_hard_gate)
+_PHASE_PREREQUISITES: dict[str, tuple[str, bool]] = {
+    "adr": ("research", False),  # SOFT — warn only
+    "plan": ("adr", True),  # HARD — block
+    "exec": ("plan", True),  # HARD — block
+    "audit": ("exec", True),  # HARD — block
+}
+
+
+def _check_phase_prerequisites(
+    target_phase: str,
+    vault_index: dict[str, list[str]],
+) -> _GateResult:
+    """Check phase prerequisite per ADR-023 gate table.
+
+    Returns a _GateResult indicating whether to block, warn, or pass.
+    Workers without a mapping in _PHASE_PREREQUISITES are always passed.
+    """
+    prereq = _PHASE_PREREQUISITES.get(target_phase)
+    if prereq is None:
+        return _GateResult(blocked=False, warning=False, message="")
+
+    required_key, is_hard = prereq
+    if vault_index.get(required_key):
+        return _GateResult(blocked=False, warning=False, message="")
+
+    msg = (
+        f"Phase gate: routing to '{target_phase}' requires "
+        f'vault_index["{required_key}"] to be non-empty.'
+    )
+    if is_hard:
+        return _GateResult(blocked=True, warning=False, message=msg)
+    return _GateResult(blocked=False, warning=True, message=msg)
 
 
 class SupervisorNode(Protocol):
@@ -32,13 +78,20 @@ def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
+    worker_phase_map: dict[str, str] | None = None,
+    autonomous: bool = False,
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
     Args:
-        model: The LangChain chat model to use for this node.
-        system_prompt: The system prompt defining the supervisor's behavior.
-        workers: A list of available worker names to route to.
+        model:            The LangChain chat model to use for this node.
+        system_prompt:    The system prompt defining the supervisor's behavior.
+        workers:          A list of available worker names to route to.
+        worker_phase_map: Optional mapping of worker_id → pipeline phase for
+                          ADR-023 phase artifact prerequisite gates. Workers
+                          absent from the map are exempt from gating.
+        autonomous:       When True, skip plan approval interrupt (headless
+                          MCP-launched runs — no human present to approve).
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -98,8 +151,10 @@ def create_supervisor_node(
                     next_route = option
                     break
 
-        unparseable = next_route == "FINISH" and text not in options and not any(
-            opt.lower() in text.lower() for opt in options
+        unparseable = (
+            next_route == "FINISH"
+            and text not in options
+            and not any(opt.lower() in text.lower() for opt in options)
         )
         if unparseable:
             _logger.warning(
@@ -128,6 +183,95 @@ def create_supervisor_node(
                         f"FINISH blocked: {len(errors)} validation error(s) must be resolved first."
                     ),
                 }
+
+            # ADR-025 gate: review artifact required when feature is active and exec phase reached
+            active_feature = state.get("active_feature")
+            if (
+                active_feature
+                and vault_index.get("exec")
+                and not vault_index.get("audit")
+            ):
+                _logger.warning(
+                    "supervisor blocked FINISH: no review artifact in vault_index['audit'] — "
+                    "rerouting to first available worker",
+                )
+                next_route = workers[0] if workers else "FINISH"
+                return {
+                    "next": next_route,
+                    "pipeline_phase": inferred_phase,
+                    "routing_error": (
+                        'FINISH blocked: no review artifact in vault_index["audit"]. '
+                        "A reviewer agent must produce an audit artifact before completion."
+                    ),
+                }
+
+        # ADR-023: phase artifact prerequisite gates
+        if worker_phase_map and state.get("active_feature"):
+            target_phase = worker_phase_map.get(next_route)
+            if target_phase:
+                gate_result = _check_phase_prerequisites(target_phase, vault_index)
+                if gate_result.blocked:
+                    _logger.warning(
+                        "supervisor phase gate blocked: %s", gate_result.message
+                    )
+                    return {
+                        "next": next_route,
+                        "pipeline_phase": inferred_phase,
+                        "routing_error": gate_result.message,
+                    }
+                if gate_result.warning:
+                    _logger.warning(
+                        "supervisor phase gate warning: %s", gate_result.message
+                    )
+                    return {
+                        "next": next_route,
+                        "pipeline_phase": inferred_phase,
+                        "routing_error": gate_result.message,
+                    }
+
+        # ADR-024: plan approval interrupt — fires when routing to an exec worker,
+        # a plan artifact exists, the feature is active, and the plan has not yet
+        # been approved.  Skipped in autonomous mode (no human present).
+        if (
+            not autonomous
+            and worker_phase_map
+            and worker_phase_map.get(next_route) == "exec"
+            and state.get("active_feature")
+            and vault_index.get("plan")
+            and not state.get("plan_approved")
+        ):
+            _logger.info(
+                "supervisor plan approval interrupt: feature=%r exec_worker=%r",
+                state.get("active_feature"),
+                next_route,
+            )
+            resume_value: dict[str, Any] = interrupt(
+                {
+                    "type": "plan_approval_request",
+                    "feature": state.get("active_feature"),
+                    "plan_paths": vault_index.get("plan", []),
+                    "exec_worker": next_route,
+                }
+            )
+            if resume_value.get("approved"):
+                _logger.info(
+                    "plan approved by user — routing to exec_worker=%r", next_route
+                )
+                return {
+                    "next": next_route,
+                    "pipeline_phase": inferred_phase,
+                    "plan_approved": True,
+                }
+            _logger.info(
+                "plan rejected by user — rerouting to first worker for revision"
+            )
+            return {
+                "next": workers[0] if workers else "FINISH",
+                "pipeline_phase": inferred_phase,
+                "routing_error": (
+                    "Plan rejected by user — revise before proceeding to execution."
+                ),
+            }
 
         _logger.debug("supervisor routed to %r (raw=%r)", next_route, text[:80])
         return {"next": next_route, "pipeline_phase": inferred_phase}

@@ -30,30 +30,22 @@ def test_single_phase_audit() -> None:
 
 
 def test_highest_wins_audit_over_exec() -> None:
-    result = infer_phase_from_vault_index(
-        {"exec": ["e.md"], "audit": ["a.md"]}
-    )
+    result = infer_phase_from_vault_index({"exec": ["e.md"], "audit": ["a.md"]})
     assert result == "audit"
 
 
 def test_highest_wins_exec_over_plan() -> None:
-    result = infer_phase_from_vault_index(
-        {"plan": ["p.md"], "exec": ["e.md"]}
-    )
+    result = infer_phase_from_vault_index({"plan": ["p.md"], "exec": ["e.md"]})
     assert result == "exec"
 
 
 def test_highest_wins_plan_over_adr() -> None:
-    result = infer_phase_from_vault_index(
-        {"adr": ["a.md"], "plan": ["p.md"]}
-    )
+    result = infer_phase_from_vault_index({"adr": ["a.md"], "plan": ["p.md"]})
     assert result == "plan"
 
 
 def test_highest_wins_adr_over_reference() -> None:
-    result = infer_phase_from_vault_index(
-        {"reference": ["r.md"], "adr": ["a.md"]}
-    )
+    result = infer_phase_from_vault_index({"reference": ["r.md"], "adr": ["a.md"]})
     assert result == "adr"
 
 
@@ -75,9 +67,7 @@ def test_unknown_phases_ignored() -> None:
 
 
 def test_empty_lists_treated_as_absent() -> None:
-    result = infer_phase_from_vault_index(
-        {"audit": [], "exec": [], "plan": ["p.md"]}
-    )
+    result = infer_phase_from_vault_index({"audit": [], "exec": [], "plan": ["p.md"]})
     assert result == "plan"
 
 

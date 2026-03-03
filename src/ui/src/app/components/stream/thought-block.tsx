@@ -12,18 +12,18 @@ export function ThoughtBlock({ event }: { event: ThoughtEvent }) {
         onClick={() => setExpanded(!expanded)}
         aria-expanded={expanded}
         aria-label={expanded ? 'Collapse thought' : 'Expand thought'}
-        className="flex items-center gap-1.5 text-[0.75rem] text-muted-foreground hover:text-foreground transition-colors w-full text-left"
+        className="text-muted-foreground hover:text-foreground flex w-full items-center gap-1.5 text-left text-[0.75rem] transition-colors"
       >
         {expanded ? (
-          <ChevronDown className="w-3 h-3 shrink-0" />
+          <ChevronDown className="h-3 w-3 shrink-0" />
         ) : (
-          <ChevronRight className="w-3 h-3 shrink-0" />
+          <ChevronRight className="h-3 w-3 shrink-0" />
         )}
         <span className="italic">Thinking…</span>
       </button>
       {expanded && (
-        <div className="mt-1 px-3 py-2 rounded-terminal bg-muted/20 border border-border/50">
-          <p className="text-[0.75rem] text-muted-foreground italic whitespace-pre-wrap font-mono">
+        <div className="rounded-terminal bg-muted/20 border-border/50 mt-1 border px-3 py-2">
+          <p className="text-muted-foreground font-mono text-[0.75rem] whitespace-pre-wrap italic">
             {event.content}
           </p>
         </div>

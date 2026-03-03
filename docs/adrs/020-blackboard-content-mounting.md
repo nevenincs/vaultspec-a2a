@@ -2,7 +2,7 @@
 adr_id: 020
 title: Blackboard Content Mounting
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/014-thread-metadata-context-injection.md
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
@@ -40,12 +40,12 @@ in the actual document text without incurring tool-call overhead per invocation.
 
 ADR-022 anchoring and ADR-020 mounting are **complementary, not redundant**:
 
-| | ADR-022 Anchoring | ADR-020 Mounting |
-|---|---|---|
-| **Injects** | Feature tag, phase, vault path list | Actual file content |
-| **When** | Every supervisor + worker invocation | Worker invocations only |
-| **Token cost** | ~200–400 tokens | Up to 20,000 tokens |
-| **Message position** | [2] — after persona | [3] — after anchoring |
+|                      | ADR-022 Anchoring                    | ADR-020 Mounting        |
+| -------------------- | ------------------------------------ | ----------------------- |
+| **Injects**          | Feature tag, phase, vault path list  | Actual file content     |
+| **When**             | Every supervisor + worker invocation | Worker invocations only |
+| **Token cost**       | ~200–400 tokens                      | Up to 20,000 tokens     |
+| **Message position** | [2] — after persona                  | [3] — after anchoring   |
 
 ### 1.2 Prior Art
 

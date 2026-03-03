@@ -2,14 +2,14 @@
 date: 2026-02-28
 type: research
 feature: figma-mcp-react-pivot
-description: "Research into Figma MCP server and the React + Tailwind frontend pivot strategy."
+description: 'Research into Figma MCP server and the React + Tailwind frontend pivot strategy.'
 ---
 
 # Figma MCP + React Pivot — Research
 
 **Date**: 2026-02-28
 **Status**: Active
-**Scope**: Figma MCP integration, Code Connect setup, SvelteKit → React pivot
+**Scope**: Figma MCP integration, Code Connect setup, React → React pivot
 
 ---
 
@@ -18,16 +18,16 @@ description: "Research into Figma MCP server and the React + Tailwind frontend p
 ### What We Have
 
 - **Figma Make project**:
-`https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface`
+  `https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface`
   - File key: `EAs7Eh1lxKVzBqzke5HASU`
   - This is an AI-generated React+Tailwind v4 app (not a traditional Figma
     Design file)
 - **Exported React code**: `knowledge/repositories/VaultSpec-A2A Control
-  Surface/src/`
+Surface/src/`
   - 23+ React components (layout, stream, inspector, permission, ui primitives)
   - Tailwind v4 styling, shadcn/ui (radix-ui) primitives
   - Material UI icons
-- **Existing SvelteKit 5 frontend**: `src/ui/` — full port of the above, 140+
+- **Existing React 5 frontend**: `src/ui/` — full port of the above, 140+
   component files
 - **Backend**: FastAPI + LangGraph, 702 tests passing, fully operational
 - **`FIGMA_ACCESS_TOKEN`**: Already in `.env`
@@ -39,7 +39,7 @@ description: "Research into Figma MCP server and the React + Tailwind frontend p
 - `get_design_context`defaults to React+Tailwind output
 - Code Connect has the richest support for React (AI prop mapping, interactive
   setup)
-- Eliminates the React→Svelte translation layer entirely
+- Eliminates the React→React translation layer entirely
 
 ---
 
@@ -56,31 +56,27 @@ description: "Research into Figma MCP server and the React + Tailwind frontend p
 
 ### Tools Reference
 
-| Tool | File Types | Purpose |
-| ------ | ----------- | --------- |
-| `get_design_context` | Design, Make | Returns structured code (React+Tailwind default) for a layer/selection |
-| `get_screenshot` | Design, FigJam | Visual capture of a selection |
-| `get_variable_defs` | Design | Design tokens (colors, spacing, typography) |
-| `get_metadata` | Design | Sparse XML node map (IDs, names, types, positions) |
-| `get_code_connect_map` | Design | Maps Figma node IDs → code components |
-| `add_code_connect_map` | Design | Registers a node→component mapping |
-| `create_design_system_rules` | N/A | Generates rules file for agent context |
-| `get_figjam` | FigJam | FigJam metadata + screenshots |
-| `generate_diagram` | N/A | Mermaid → FigJam diagram |
+| Tool                         | File Types     | Purpose                                                                |
+| ---------------------------- | -------------- | ---------------------------------------------------------------------- |
+| `get_design_context`         | Design, Make   | Returns structured code (React+Tailwind default) for a layer/selection |
+| `get_screenshot`             | Design, FigJam | Visual capture of a selection                                          |
+| `get_variable_defs`          | Design         | Design tokens (colors, spacing, typography)                            |
+| `get_metadata`               | Design         | Sparse XML node map (IDs, names, types, positions)                     |
+| `get_code_connect_map`       | Design         | Maps Figma node IDs → code components                                  |
+| `add_code_connect_map`       | Design         | Registers a node→component mapping                                     |
+| `create_design_system_rules` | N/A            | Generates rules file for agent context                                 |
+| `get_figjam`                 | FigJam         | FigJam metadata + screenshots                                          |
+| `generate_diagram`           | N/A            | Mermaid → FigJam diagram                                               |
 
 ### Parameters
 
 -`fileKey`(string): From URL path segment after`/design/`or`/make/`
 
-- `nodeId`(string): From URL`node-id=`query param (hyphen format OK)
--`depth`(number, optional): Node tree traversal depth
--`clientFrameworks`(string, optional): Code Connect label filter (e.g., "React")
+- `nodeId`(string): From URL`node-id=`query param (hyphen format OK) -`depth`(number, optional): Node tree traversal depth -`clientFrameworks`(string, optional): Code Connect label filter (e.g., "React")
 
 ### Desktop-Specific Behavior
 
-- Selection-based: No URL needed — uses currently selected node in Figma
--`fileKey`auto-detected from open file
--`nodeId`optional if something is selected
+- Selection-based: No URL needed — uses currently selected node in Figma -`fileKey`auto-detected from open file -`nodeId`optional if something is selected
 
 ---
 
@@ -146,18 +142,18 @@ npx figma connect --token=$FIGMA_ACCESS_TOKEN
 
 ### CLI Commands
 
-| Command | Purpose |
-| --------- | --------- |
-| `npx figma connect` | Interactive setup wizard |
-| `npx figma connect publish` | Publish mappings to Figma |
-| `npx figma connect unpublish --node=URL --label=React` | Remove mapping |
-| `npx figma connect create "FIGMA_URL"` | Create mapping for specific node |
+| Command                                                | Purpose                          |
+| ------------------------------------------------------ | -------------------------------- |
+| `npx figma connect`                                    | Interactive setup wizard         |
+| `npx figma connect publish`                            | Publish mappings to Figma        |
+| `npx figma connect unpublish --node=URL --label=React` | Remove mapping                   |
+| `npx figma connect create "FIGMA_URL"`                 | Create mapping for specific node |
 
 ### Code Connect File Example (React)
 
 ```tsx
-import figma from '@figma/code-connect'
-import { Button } from './Button'
+import figma from '@figma/code-connect';
+import { Button } from './Button';
 
 figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
   props: {
@@ -175,32 +171,25 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
       {props.label}
     </Button>
   ),
-})
+});
 ```
 
 ### Prop Mapping Functions
 
-- `figma.string(prop)`— text property → string
--`figma.boolean(prop, valueMap?)`— boolean property, optional true/false mapping
--`figma.enum(prop, valueMap)`— variant → code values
--`figma.instance(prop)`— instance swap → nested component
--`figma.children(layerName)`— child layers by name
--`figma.nestedProps(layer, propMap)`— properties from nested instance
--`figma.textContent(layer)`— text from child layer
--`figma.className(parts[])`— concatenate Tailwind classes
+- `figma.string(prop)`— text property → string -`figma.boolean(prop, valueMap?)`— boolean property, optional true/false mapping -`figma.enum(prop, valueMap)`— variant → code values -`figma.instance(prop)`— instance swap → nested component -`figma.children(layerName)`— child layers by name -`figma.nestedProps(layer, propMap)`— properties from nested instance -`figma.textContent(layer)`— text from child layer -`figma.className(parts[])`— concatenate Tailwind classes
 
 ---
 
 ## 5. Make vs Design File Nuances
 
-| Aspect | Figma Design | Figma Make |
-| -------- | ------------- | ------------ |
-| `get_design_context` | Yes | Yes |
-| `get_screenshot` | Yes | ? |
-| `get_variable_defs` | Yes | No (Design only) |
-| `get_code_connect_map` | Yes | No (Design only) |
-| Code Connect | Full support | Limited |
-| MCP Resources | N/A | Yes (fetches code files) |
+| Aspect                 | Figma Design | Figma Make               |
+| ---------------------- | ------------ | ------------------------ |
+| `get_design_context`   | Yes          | Yes                      |
+| `get_screenshot`       | Yes          | ?                        |
+| `get_variable_defs`    | Yes          | No (Design only)         |
+| `get_code_connect_map` | Yes          | No (Design only)         |
+| Code Connect           | Full support | Limited                  |
+| MCP Resources          | N/A          | Yes (fetches code files) |
 
 **Key insight**: Make is best used via the Resources capability (download code
 files)
@@ -218,18 +207,17 @@ need a **Figma Design file** with the components.
 
 ## 6. Rate Limits
 
-| Plan | Seat | Limit |
-| ------ | ------ | ------- |
-| Enterprise | Full/Dev | 600/day |
+| Plan             | Seat     | Limit   |
+| ---------------- | -------- | ------- |
+| Enterprise       | Full/Dev | 600/day |
 | Organization/Pro | Full/Dev | 200/day |
-| Starter | Any | 6/month |
+| Starter          | Any      | 6/month |
 
 ---
 
 ## 7. Known Issues & Gotchas
 
-1. Default output is React+Tailwind — perfect for our pivot
-2.`get_screenshot`may report incorrect MIME type (jpeg for PNG)
+1. Default output is React+Tailwind — perfect for our pivot 2.`get_screenshot`may report incorrect MIME type (jpeg for PNG)
 2. Desktop MCP requires Figma Desktop open with server enabled
 3. Large frames may exceed token limits — use`get_metadata`first, then
    selective`get_design_context`

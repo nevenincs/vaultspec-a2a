@@ -29,8 +29,6 @@ venv/
 # Node.js
 node_modules/
 
-# SvelteKit
-.svelte-kit/
 build/
 vaultspec.db
 data/

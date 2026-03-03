@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: plan
 feature: frontend-ui-spec
-description: "Binding UI specification for the VaultSpec Control Surface frontend, defining all component layouts, interaction behaviors, and event-to-UI mappings."
+description: 'Binding UI specification for the VaultSpec Control Surface frontend, defining all component layouts, interaction behaviors, and event-to-UI mappings.'
 related_adrs:
   - docs/adrs/2026-02-26-005-frontend-rendering-stack-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -23,9 +23,7 @@ component implementation, layout decisions, and interaction behavior.
 ### Companion documents
 
 - `docs/plans/2026-02-26-frontend-scaffolding-plan.md`— technical
-  scaffolding steps
--`docs/adrs/005-frontend-rendering-stack.md`— rendering stack decisions
--`docs/adrs/011-frontend-backend-contract.md` — wire protocol contract
+  scaffolding steps -`docs/adrs/005-frontend-rendering-stack.md`— rendering stack decisions -`docs/adrs/011-frontend-backend-contract.md` — wire protocol contract
 
 ---
 
@@ -120,12 +118,12 @@ The sidebar is divided into two stacked sections:
 
 Each thread entry displays:
 
-| Element | Source | Behavior |
-| ------------------- | ----------------------- | ------------------------------- |
-| Status dot | `AgentLifecycleState` | Color-coded (see §6) |
-| Title | `ThreadSummary.title` | Truncated with ellipsis |
-| State label | `agent_state` | Text badge (working, idle...) |
-| Relative time | `updated_at` | "3m ago", "1h ago", etc. |
+| Element       | Source                | Behavior                      |
+| ------------- | --------------------- | ----------------------------- |
+| Status dot    | `AgentLifecycleState` | Color-coded (see §6)          |
+| Title         | `ThreadSummary.title` | Truncated with ellipsis       |
+| State label   | `agent_state`         | Text badge (working, idle...) |
+| Relative time | `updated_at`          | "3m ago", "1h ago", etc.      |
 
 - **Click**: navigates to`/thread/[id]`, subscribes to thread
 - **Active thread**: highlighted background, bold title
@@ -136,11 +134,11 @@ Each thread entry displays:
 Fixed-height panel at the bottom of the sidebar. Displays all agents from
 `TeamStatusEvent.agents`:
 
-| Element | Source | Display |
-| ------------ | --------------------------- | ----------------------------- |
-| Status dot | `AgentSummary.state` | Color-coded (see §6) |
-| Name | `AgentSummary.node_name` | Agent display name |
-| State | `AgentSummary.state` | Text label |
+| Element    | Source                   | Display              |
+| ---------- | ------------------------ | -------------------- |
+| Status dot | `AgentSummary.state`     | Color-coded (see §6) |
+| Name       | `AgentSummary.node_name` | Agent display name   |
+| State      | `AgentSummary.state`     | Text label           |
 
 ---
 
@@ -150,25 +148,25 @@ Fixed-height panel at the bottom of the sidebar. Displays all agents from
 
 The central stream renders server events chronologically as inline elements:
 
-| Server Event | UI Element | Alignment | Style |
-| -------------------------- | ------------------------- | ----------- | ---------------------- |
-| `SendMessageCommand` | Chat bubble | Right | User message color |
-| `MessageChunkEvent` | Chat bubble (streaming) | Left | Agent message color |
-| `ThoughtChunkEvent` | Collapsible thought | Left | Dimmed, italic |
-| `ToolCallStartEvent` | Tool call card | Left | Bordered card |
-| `ToolCallUpdateEvent` | Updates existing card | — | Delta-merge |
-| `ArtifactUpdateEvent` | Artifact card | Left | File icon + name |
-| `PlanUpdateEvent` | Plan update card | Left | Checklist summary |
-| `PermissionRequestEvent` | Modal overlay | Center | Blocking modal |
-| `AgentStatusEvent` | Inline status badge | Center | Subtle divider-style |
-| `ErrorEvent` | Error alert | Full | Red/destructive |
+| Server Event             | UI Element              | Alignment | Style                |
+| ------------------------ | ----------------------- | --------- | -------------------- |
+| `SendMessageCommand`     | Chat bubble             | Right     | User message color   |
+| `MessageChunkEvent`      | Chat bubble (streaming) | Left      | Agent message color  |
+| `ThoughtChunkEvent`      | Collapsible thought     | Left      | Dimmed, italic       |
+| `ToolCallStartEvent`     | Tool call card          | Left      | Bordered card        |
+| `ToolCallUpdateEvent`    | Updates existing card   | —         | Delta-merge          |
+| `ArtifactUpdateEvent`    | Artifact card           | Left      | File icon + name     |
+| `PlanUpdateEvent`        | Plan update card        | Left      | Checklist summary    |
+| `PermissionRequestEvent` | Modal overlay           | Center    | Blocking modal       |
+| `AgentStatusEvent`       | Inline status badge     | Center    | Subtle divider-style |
+| `ErrorEvent`             | Error alert             | Full      | Red/destructive      |
 
 ### 4.2 Chat Bubbles (MessageChunkEvent)
 
 - **User messages**: right-aligned, distinct background color
 - **Agent messages**: left-aligned, default surface color
 - **Streaming**: text streams in character-by-character with cursor indicator
-- **Markdown**: rendered via`@humanspeak/svelte-markdown`with intelligent
+- **Markdown**: rendered via`@humanspeak/React-markdown`with intelligent
   token caching (O(n) streaming). Code blocks show raw`<pre>`during
   streaming, Shiki highlights on completion (deferred, per ADR-005).
 - **Agent label**: small text above the bubble showing`agent_id` when
@@ -181,7 +179,7 @@ The central stream renders server events chronologically as inline elements:
 ```text
   ┌─ 💭 Thinking...          [▶] ─┐
   └─────────────────────────────────┘
-  ```
+```
 
 - **Expanded state**: shows full streaming content
 
@@ -191,7 +189,7 @@ The central stream renders server events chronologically as inline elements:
   │ handling in middleware to        │
   │ understand the auth flow...     │
   └─────────────────────────────────┘
-  ```
+```
 
 - **Visual**: dimmed opacity (~60%), italic text, smaller font size
 - **Interaction**: click `[▶/▼]` to toggle
@@ -284,7 +282,7 @@ Full-width destructive alert using shadcn `Alert` component:
   ┌───────────────────────┐
   │  ▼ 3 new messages     │
   └───────────────────────┘
-  ```
+```
 
 - Click badge: scrolls to bottom and resumes auto-scroll
 - Scroll to bottom manually: also resumes auto-scroll
@@ -333,11 +331,11 @@ Shown when clicking a tool call card.
 
 **Tab content by `ToolCallContent`type**:
 
-| Content Type | Output Tab | Diff Tab | JSON Tab |
-| --------------------------- | --------------------- | ----------------------- | ---------------- |
-| `ToolCallContentText` | Rendered text/code | — | Raw JSON |
-| `ToolCallContentDiff` | New text | Side-by-side diff | Raw JSON |
-| `ToolCallContentTerminal` | Terminal output | — | Raw JSON |
+| Content Type              | Output Tab         | Diff Tab          | JSON Tab |
+| ------------------------- | ------------------ | ----------------- | -------- |
+| `ToolCallContentText`     | Rendered text/code | —                 | Raw JSON |
+| `ToolCallContentDiff`     | New text           | Side-by-side diff | Raw JSON |
+| `ToolCallContentTerminal` | Terminal output    | —                 | Raw JSON |
 
 ### 5.3 Plan Inspector
 
@@ -364,9 +362,7 @@ Shown when clicking a plan update card or plan icon.
 
 **Status icons**:
 
-- `☑`completed — green
--`■`in_progress — blue with subtle pulse animation
--`☐`pending — gray
+- `☑`completed — green -`■`in_progress — blue with subtle pulse animation -`☐`pending — gray
 
 **Priority badges**:`HIGH`(red),`MED`(yellow),`LOW`(gray)
 
@@ -388,16 +384,16 @@ Shown when clicking an artifact card.
 Each`AgentLifecycleState`maps to a visual indicator used consistently
 across the sidebar thread list, team status panel, and stream badges:
 
-| State | Dot Color | Icon | Animation | Label Text |
-| ------------------ | ------------ | --------- | ------------------ | ---------------- |
-| `submitted` | Gray | `○` | Pulse (slow) | "submitted" |
-| `idle` | Green | `○` | None | "idle" |
-| `working` | Blue | `●` | Pulse (active) | "working" |
-| `input_required` | Yellow | `△` | Pulse (attention) | "input needed" |
-| `auth_required` | Orange | `⚠` | Pulse (warning) | "auth needed" |
-| `completed` | Green | `✓` | None | "completed" |
-| `failed` | Red | `✗` | None | "failed" |
-| `cancelled` | Gray | `—` | None | "cancelled" |
+| State            | Dot Color | Icon | Animation         | Label Text     |
+| ---------------- | --------- | ---- | ----------------- | -------------- |
+| `submitted`      | Gray      | `○`  | Pulse (slow)      | "submitted"    |
+| `idle`           | Green     | `○`  | None              | "idle"         |
+| `working`        | Blue      | `●`  | Pulse (active)    | "working"      |
+| `input_required` | Yellow    | `△`  | Pulse (attention) | "input needed" |
+| `auth_required`  | Orange    | `⚠`  | Pulse (warning)   | "auth needed"  |
+| `completed`      | Green     | `✓`  | None              | "completed"    |
+| `failed`         | Red       | `✗`  | None              | "failed"       |
+| `cancelled`      | Gray      | `—`  | None              | "cancelled"    |
 
 ---
 
@@ -438,26 +434,26 @@ across the sidebar thread list, team status panel, and stream badges:
 
 ### 7.3 Modal Content
 
-| Element | Source | Display |
-| ----------------- | ------------------------------------- | --------------------------- |
-| Title | Static | "Permission Required" |
-| Agent name | `agent_id` | Agent identifier |
-| Tool name | `tool_name` | Tool being invoked |
-| Tool kind | `tool_kind` (`ToolKind`enum) | Icon + label |
-| Description | `message` | Human-readable request |
-| Options | `options: PermissionOption[]` | Buttons per option |
-| Queue position | Permission queue length | "N of M pending" |
+| Element        | Source                        | Display                |
+| -------------- | ----------------------------- | ---------------------- |
+| Title          | Static                        | "Permission Required"  |
+| Agent name     | `agent_id`                    | Agent identifier       |
+| Tool name      | `tool_name`                   | Tool being invoked     |
+| Tool kind      | `tool_kind` (`ToolKind`enum)  | Icon + label           |
+| Description    | `message`                     | Human-readable request |
+| Options        | `options: PermissionOption[]` | Buttons per option     |
+| Queue position | Permission queue length       | "N of M pending"       |
 
 ### 7.4 Option Buttons
 
 Each`PermissionOption`renders as a button:
 
-| `PermissionOptionKind` | Button Style | Label Example |
-| ------------------------ | --------------- | ---------------------- |
-| `allow` | Primary | "Allow" |
-| `deny` | Destructive | "Deny" |
-| `allow_always` | Secondary | "Always Allow" |
-| `deny_always` | Ghost | "Always Deny" |
+| `PermissionOptionKind` | Button Style | Label Example  |
+| ---------------------- | ------------ | -------------- |
+| `allow`                | Primary      | "Allow"        |
+| `deny`                 | Destructive  | "Deny"         |
+| `allow_always`         | Secondary    | "Always Allow" |
+| `deny_always`          | Ghost        | "Always Deny"  |
 
 ---
 
@@ -477,28 +473,28 @@ Pinned to the bottom of the stream panel:
 
 ### 8.2 Elements
 
-| Element | Behavior |
-| ------------------ | --------------------------------------------------- |
+| Element        | Behavior                                          |
+| -------------- | ------------------------------------------------- |
 | Provider/Model | Dropdown selector. Shows current provider + model |
-| | tier. Defaults to project defaults. |
-| Status badge | Color-coded dot + state label from current agent |
-| Stop button | Visible when agent state is `working`. Sends |
-| | `AgentControlCommand`with`action: "cancel"`. |
-| Textarea | Single-line default, auto-grows to multi-line. |
-| | Max height: 200px (then scrolls internally). |
-| Send button | `[↑]`icon. Disabled when agent is`working`or |
-| | input is empty. |
+|                | tier. Defaults to project defaults.               |
+| Status badge   | Color-coded dot + state label from current agent  |
+| Stop button    | Visible when agent state is `working`. Sends      |
+|                | `AgentControlCommand`with`action: "cancel"`.      |
+| Textarea       | Single-line default, auto-grows to multi-line.    |
+|                | Max height: 200px (then scrolls internally).      |
+| Send button    | `[↑]`icon. Disabled when agent is`working`or      |
+|                | input is empty.                                   |
 
 ### 8.3 States
 
-| Agent State | Input Behavior |
-| ------------------ | ---------------------------------------------------- |
-| `idle` | Input enabled. Send button active. No stop button. |
-| `working` | Input disabled (grayed out). Stop button visible. |
-| `input_required` | Input enabled with attention styling (yellow |
-| | border). Placeholder: "Agent needs input..." |
-| `completed` | Input enabled. Status shows "completed". |
-| `failed` | Input enabled. Status shows "failed" in red. |
+| Agent State      | Input Behavior                                     |
+| ---------------- | -------------------------------------------------- |
+| `idle`           | Input enabled. Send button active. No stop button. |
+| `working`        | Input disabled (grayed out). Stop button visible.  |
+| `input_required` | Input enabled with attention styling (yellow       |
+|                  | border). Placeholder: "Agent needs input..."       |
+| `completed`      | Input enabled. Status shows "completed".           |
+| `failed`         | Input enabled. Status shows "failed" in red.       |
 
 ### 8.4 Keyboard
 
@@ -523,25 +519,25 @@ Full-width bar at the bottom of the application window:
 
 ### 9.2 Sections
 
-| Section (left) | Content |
-| -------------------- | ------------------------------------------------ |
+| Section (left)    | Content                                       |
+| ----------------- | --------------------------------------------- |
 | Connection status | Dot + label: Connected / Reconnecting / Error |
 
-| Section (center) | Content |
-| -------------------- | ------------------------------------------------ |
-| Thread count | Total threads · active (working) count |
+| Section (center) | Content                                |
+| ---------------- | -------------------------------------- |
+| Thread count     | Total threads · active (working) count |
 
-| Section (right) | Content |
-| -------------------- | ------------------------------------------------ |
-| Heartbeat | `♥`+ time since last heartbeat |
+| Section (right) | Content                        |
+| --------------- | ------------------------------ |
+| Heartbeat       | `♥`+ time since last heartbeat |
 
 ### 9.3 Connection States
 
-| WebSocket State | Dot Color | Label | Bar Style |
-| ------------------ | ----------- | -------------------------- | ---------------- |
-| Connected | Green | "Connected" | Default |
-| Reconnecting | Yellow | "Reconnecting (Ns)..." | Yellow bg tint |
-| Disconnected | Red | "Disconnected" | Red bg tint |
+| WebSocket State | Dot Color | Label                  | Bar Style      |
+| --------------- | --------- | ---------------------- | -------------- |
+| Connected       | Green     | "Connected"            | Default        |
+| Reconnecting    | Yellow    | "Reconnecting (Ns)..." | Yellow bg tint |
+| Disconnected    | Red       | "Disconnected"         | Red bg tint    |
 
 ---
 
@@ -554,8 +550,7 @@ Full-width bar at the bottom of the application window:
 3. Stream area clears to empty state
 4. Input bar is focused with cursor ready
 5. User types first message
-6. User sends (Enter or click send)
-7.`POST /threads`fires with`initial_message`from input and
+6. User sends (Enter or click send) 7.`POST /threads`fires with`initial_message`from input and
    selected`provider`/`model` from input bar dropdown
 7. Thread starts streaming events
 
@@ -584,18 +579,18 @@ When a new thread has no messages yet:
 
 ### 11.1 Strategy
 
-Use shadcn-svelte's built-in theming system (`mode-watcher`or equivalent
-Svelte 5 theme provider). **No custom color values** — rely entirely on
+Use shadcn-React's built-in theming system (`mode-watcher`or equivalent
+React 5 theme provider). **No custom color values** — rely entirely on
 the shadcn CSS variable system.
 
 ### 11.2 Modes
 
 Three modes are mandatory:
 
-| Mode | Behavior |
-| -------- | ------------------------------------------------- |
-| Dark | Default. Dark backgrounds, light text. |
-| Light | Light backgrounds, dark text. |
+| Mode   | Behavior                                      |
+| ------ | --------------------------------------------- |
+| Dark   | Default. Dark backgrounds, light text.        |
+| Light  | Light backgrounds, dark text.                 |
 | System | Follows OS`prefers-color-scheme` media query. |
 
 ### 11.3 Toggle Location
@@ -607,15 +602,15 @@ Theme toggle button in the sidebar header (sun/moon icon). Persisted to
 
 ## 12. Keyboard Shortcuts
 
-| Shortcut | Action |
-| ----------------- | --------------------------------- |
-| `Ctrl+N` | Create new thread |
-| `Ctrl+I` | Toggle inspector panel |
-| `Ctrl+K` | Open command palette |
-| `Escape` | Close inspector or modal |
-| `Ctrl+Enter` | Send message |
-| `Ctrl+.` | Toggle sidebar |
-| `Ctrl+1..9` | Switch to thread N |
+| Shortcut       | Action                    |
+| -------------- | ------------------------- |
+| `Ctrl+N`       | Create new thread         |
+| `Ctrl+I`       | Toggle inspector panel    |
+| `Ctrl+K`       | Open command palette      |
+| `Escape`       | Close inspector or modal  |
+| `Ctrl+Enter`   | Send message              |
+| `Ctrl+.`       | Toggle sidebar            |
+| `Ctrl+1..9`    | Switch to thread N        |
 | `Ctrl+Shift+T` | Reopen last closed thread |
 
 All shortcuts are discoverable via the`Ctrl+K`command palette.
@@ -633,8 +628,7 @@ All shortcuts are discoverable via the`Ctrl+K`command palette.
 ### 13.2 No Threads
 
 - Sidebar thread list shows: "No threads yet"
-- Stream area shows centered prompt: "Create a new thread to get started"
--`[+ New Thread]`button is prominent
+- Stream area shows centered prompt: "Create a new thread to get started" -`[+ New Thread]`button is prominent
 
 ### 13.3 Disconnected
 
@@ -647,25 +641,25 @@ All shortcuts are discoverable via the`Ctrl+K`command palette.
 
 ## 14. Component-to-shadcn Mapping
 
-| UI Element | shadcn Component(s) |
-| -------------------- | ---------------------------------------- |
-| Chat bubbles | `Card`(custom styled) |
-| Tool call cards | `Card`+`Badge` |
-| Thought blocks | `Collapsible`+`Card` |
-| Artifact cards | `Card`+`Badge` |
-| Permission modal | `AlertDialog`(non-dismissible) |
-| Inspector panel | `Sheet`(side) or custom panel |
-| Inspector tabs | `Tabs` |
-| Input bar | `Textarea`+`Button`+`Select` |
-| Sidebar | `ScrollArea`+ custom layout |
-| Status bar | Custom flex layout +`Badge` |
-| Plan checklist | Custom list +`Badge`+`Checkbox` |
-| Error alerts | `Alert`(destructive variant) |
-| Theme toggle | `Button`(icon variant) |
-| Command palette | `Command`(cmdk) |
+| UI Element         | shadcn Component(s)                   |
+| ------------------ | ------------------------------------- |
+| Chat bubbles       | `Card`(custom styled)                 |
+| Tool call cards    | `Card`+`Badge`                        |
+| Thought blocks     | `Collapsible`+`Card`                  |
+| Artifact cards     | `Card`+`Badge`                        |
+| Permission modal   | `AlertDialog`(non-dismissible)        |
+| Inspector panel    | `Sheet`(side) or custom panel         |
+| Inspector tabs     | `Tabs`                                |
+| Input bar          | `Textarea`+`Button`+`Select`          |
+| Sidebar            | `ScrollArea`+ custom layout           |
+| Status bar         | Custom flex layout +`Badge`           |
+| Plan checklist     | Custom list +`Badge`+`Checkbox`       |
+| Error alerts       | `Alert`(destructive variant)          |
+| Theme toggle       | `Button`(icon variant)                |
+| Command palette    | `Command`(cmdk)                       |
 | New messages badge | `Button`(floating, absolute position) |
-| Thread list items | Custom`Button`variant |
-| Team status items | Custom flex row +`Badge` |
+| Thread list items  | Custom`Button`variant                 |
+| Team status items  | Custom flex row +`Badge`              |
 
 ---
 
@@ -682,7 +676,7 @@ Store.applyEvent(event)     ← dispatches on event.type
     └─► permission-queue    ← FIFO queue of permission requests
          │
          ▼
-    Svelte 5 Runes ($state/$derived)
+    React 5 Runes ($state/$derived)
          │
          ▼
     Component re-render (fine-grained, per-field)

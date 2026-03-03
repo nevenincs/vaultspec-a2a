@@ -2,7 +2,7 @@
 adr_id: 024
 title: Plan Approval Interrupt
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md

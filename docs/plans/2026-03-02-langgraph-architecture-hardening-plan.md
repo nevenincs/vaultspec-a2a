@@ -53,17 +53,20 @@ lib/core/tests/
 ### BATCH 1 — Defensive correctness (XS/S, no API surface change)
 
 **T01** — Fix `state["next"]` KeyError in star topology conditional edge
+
 - File: `lib/core/graph.py` (conditional edge lambda)
 - Change: `lambda state: state["next"]` → `lambda state: state.get("next", "")`
 - Also mark `next: NotRequired[str]` in `state.py`
 - Test: add `test_star_missing_next_field` to `test_graph.py`
 
 **T02** — Fix substring routing collision (sort options by descending length)
+
 - File: `lib/core/nodes/supervisor.py`
 - Change: `for option in options` → `for option in sorted(options, key=len, reverse=True)`
 - Test: add `test_supervisor_routing_substring_collision`
 
 **T03** — Add `routing_error` field to `TeamState`
+
 - File: `lib/core/state.py`
 - Change: add `routing_error: NotRequired[str]`
 - File: `lib/core/nodes/supervisor.py`
@@ -71,6 +74,7 @@ lib/core/tests/
 - Test: add `test_supervisor_sets_routing_error_on_parse_failure`
 
 **T04** — Add `WorkerExecutionError` domain exception
+
 - File: `lib/core/exceptions.py` (add class)
 - File: `lib/core/nodes/worker.py` (wrap ainvoke catch)
 - Test: add `test_worker_exception_wraps_with_context`
@@ -78,6 +82,7 @@ lib/core/tests/
 ### BATCH 2 — Robustness additions (S, may touch API surface)
 
 **T05** — Add `RetryPolicy` to all `add_node()` calls
+
 - File: `lib/core/graph.py`
 - Change: define `_WORKER_RETRY = RetryPolicy(initial_interval=1.0, backoff_factor=2.0, max_interval=30.0, max_attempts=3, jitter=True)`
 - Apply to all three topology builders' `add_node()` calls (workers + supervisor)
@@ -85,23 +90,27 @@ lib/core/tests/
 - Test: verify node metadata preserved after adding retry param
 
 **T06** — Add context compaction to supervisor node
+
 - File: `lib/core/nodes/supervisor.py`
 - Change: import + apply `should_compact` / `compact_context` from `..context`
 - Test: add `test_supervisor_compacts_on_large_state`
 
 **T07** — Add `TAG_NOSTREAM` to supervisor routing model invocation
+
 - File: `lib/core/nodes/supervisor.py`
 - Change: `routing_model = model.with_config({"tags": [TAG_NOSTREAM]})`; use for ainvoke
 - Import: `from langgraph.constants import TAG_NOSTREAM`
 - Test: streaming test to verify no routing tokens in `on_chat_model_stream` events
 
 **T08** — Add loop iteration logging to `_wrap_loop_node`
+
 - File: `lib/core/graph.py`
 - Change: pass `max_loops` and `loop_node_id` into wrapper factory; add DEBUG log per iteration, WARNING on max_loops hit
 
 ### BATCH 3 — Structured output for supervisor routing (M)
 
 **T09** — Structured output for supervisor routing
+
 - File: `lib/core/nodes/supervisor.py`
 - Change: replace text-parsing with `model.with_structured_output(RouteSchema)` where `RouteSchema` is a Pydantic model with `next: Literal[workers..., "FINISH"]`
 - Dependency: T02 can be removed after this is in place
@@ -111,6 +120,7 @@ lib/core/tests/
 ### BATCH 4 — Command routing migration (L, future)
 
 **T10** — Migrate supervisor to `Command(goto=...)` routing
+
 - File: `lib/core/graph.py`, `lib/core/nodes/supervisor.py`, `lib/core/state.py`
 - Change: remove `next: str` from TeamState; supervisor returns `Command(goto=route)`
 - Dependency: T09 complete
@@ -122,6 +132,7 @@ lib/core/tests/
 ## Continuous Research Protocol
 
 ### docs-researcher loop
+
 1. Pick one research topic from the queue (see below)
 2. Query LangGraph source in `knowledge/repositories/langgraph/` or MCP docs
 3. Map findings to the current codebase
@@ -130,6 +141,7 @@ lib/core/tests/
    will add new topics)
 
 **Initial research queue:**
+
 - `Send` API applicability — can any of our topologies benefit from parallel dispatch?
 - `CachePolicy` — any deterministic nodes that could be cached?
 - `step_timeout` — should we configure it on `Pregel` for production?
@@ -142,6 +154,7 @@ lib/core/tests/
 - `PregelTask.error` field — can we read node errors from `aget_state().tasks`?
 
 ### codebase-researcher loop
+
 1. After each coder commit (or every N minutes), re-read the files under change
 2. Check: do the new changes introduce any anti-patterns from the docs checklist?
 3. Check: are there other files that reference the changed APIs and need updating?

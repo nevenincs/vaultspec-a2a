@@ -22,18 +22,18 @@ Every `POST /threads` compiles a new graph instance from a team preset
 `initial_message`, and carries zero provenance information. There are six
 concrete gaps:
 
-| Gap | Current State | Impact |
-| --- | --- | --- |
-| **No human-readable identity** | Thread IDs are UUIDs (`a3f2...`). | Unusable in the UI sidebar — users cannot distinguish threads at a glance. |
-| **No source repository** | Not tracked. | When the orchestrator serves multiple repos, there is no way to attribute a thread to a project. |
-| **No source branch** | Not tracked. | No way to correlate a thread with a feature branch. CI traceability is broken. |
-| **No caller identification** | Not tracked. | Cannot distinguish whether Claude CLI, Gemini CLI, the REST API, or the MCP bridge initiated the work. |
-| **No feature tag** | Not tracked. | The vaultspec SDD pipeline mandates a `feature_tag` that groups all research, ADR, plan, and execution documents. Agents reference `.vault/{stage}/yyyy-mm-dd-<feature>-*` paths in their system prompts but have no mechanism to receive the `<feature>` value. |
-| **No workspace binding** | `Settings.workspace_root` exists but is never threaded from the endpoint to `load_team_config()`, `load_agent_config()`, or the ACP session. | Workspace-local TOML overrides (ADR-012 §2.8, ADR-013 §2.8) are dead code. Agents cannot resolve `.vault/` paths to real filesystem locations. |
+| Gap                            | Current State                                                                                                                                | Impact                                                                                                                                                                                                                                                           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No human-readable identity** | Thread IDs are UUIDs (`a3f2...`).                                                                                                            | Unusable in the UI sidebar — users cannot distinguish threads at a glance.                                                                                                                                                                                       |
+| **No source repository**       | Not tracked.                                                                                                                                 | When the orchestrator serves multiple repos, there is no way to attribute a thread to a project.                                                                                                                                                                 |
+| **No source branch**           | Not tracked.                                                                                                                                 | No way to correlate a thread with a feature branch. CI traceability is broken.                                                                                                                                                                                   |
+| **No caller identification**   | Not tracked.                                                                                                                                 | Cannot distinguish whether Claude CLI, Gemini CLI, the REST API, or the MCP bridge initiated the work.                                                                                                                                                           |
+| **No feature tag**             | Not tracked.                                                                                                                                 | The vaultspec SDD pipeline mandates a `feature_tag` that groups all research, ADR, plan, and execution documents. Agents reference `.vault/{stage}/yyyy-mm-dd-<feature>-*` paths in their system prompts but have no mechanism to receive the `<feature>` value. |
+| **No workspace binding**       | `Settings.workspace_root` exists but is never threaded from the endpoint to `load_team_config()`, `load_agent_config()`, or the ACP session. | Workspace-local TOML overrides (ADR-012 §2.8, ADR-013 §2.8) are dead code. Agents cannot resolve `.vault/` paths to real filesystem locations.                                                                                                                   |
 
 The net effect: agents are launched into a vacuum. The supervisor's system
 prompt says "check `.vault/` for existing artifacts" but the agent has no
-idea *which* workspace, *which* feature, or *which* documents are relevant.
+idea _which_ workspace, _which_ feature, or _which_ documents are relevant.
 
 ### 1.1 The Vaultspec SDD Pipeline
 
@@ -52,7 +52,7 @@ Feature Request
 Every document in the pipeline carries a YAML frontmatter `tags:` field:
 
 ```yaml
-tags: ["#plan", "#auth-flow"]
+tags: ['#plan', '#auth-flow']
 ```
 
 The `feature_tag` (e.g., `auth-flow`) is the grouping key. All four agent
@@ -176,8 +176,8 @@ graph_input = {
 
 **Why a SystemMessage in graph_input, not a template variable in TOML?**
 
-ADR-012 §5 explicitly constrains: *"System prompts in TOML are loaded
-verbatim — no interpolation, no template variables for v1."* The context
+ADR-012 §5 explicitly constrains: _"System prompts in TOML are loaded
+verbatim — no interpolation, no template variables for v1."_ The context
 preamble lives in the message stream, not the system prompt, which:
 
 - Preserves ADR-012's constraint.
@@ -413,7 +413,7 @@ template expansion.
 Injecting full document contents into the initial messages would consume
 thousands of tokens before the first agent even reasons about the task.
 The agents already have ACP filesystem read capability (ADR-012 §2.6).
-Providing *references* (paths + stage labels) lets agents self-serve:
+Providing _references_ (paths + stage labels) lets agents self-serve:
 the planner reads research and ADRs, the coder reads the plan, the
 reviewer reads the plan and exec records. Each agent pulls exactly what
 it needs, when it needs it.

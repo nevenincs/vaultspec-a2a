@@ -12,8 +12,6 @@ API-C1: all dependency overrides are applied via the shared make_app()
 helper in conftest.py so tests never touch the production vaultspec.db.
 """
 
-import pytest
-
 from fastapi.testclient import TestClient
 
 from ...core.aggregator import EventAggregator
@@ -49,9 +47,7 @@ class TestCreateThread:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -184,9 +180,7 @@ class TestSendMessage:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -218,9 +212,7 @@ class TestSendMessage:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -337,9 +329,7 @@ class TestTeamStatus:
         assert data["active_threads"] == []
         assert data["pending_permissions"] == []
 
-    def test_pending_permissions_surface_from_aggregator(
-        self, session_factory
-    ) -> None:
+    def test_pending_permissions_surface_from_aggregator(self, session_factory) -> None:
         """Pending permissions stored in aggregator appear in team status."""
         from datetime import UTC, datetime
 
@@ -410,9 +400,7 @@ class TestPermissionRespond:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             # Create a thread first so the permission endpoint can find it.
@@ -449,9 +437,7 @@ class TestPermissionRespond:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             # First create a thread with a team_preset so it's stored in DB.
@@ -544,9 +530,7 @@ class TestCreateThreadAutonomous:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -573,9 +557,7 @@ class TestCreateThreadAutonomous:
         from .conftest import _CapturedDispatch
 
         captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(
-            session_factory, captured_dispatch=captured
-        )
+        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(

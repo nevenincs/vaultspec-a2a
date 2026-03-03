@@ -1,8 +1,8 @@
 ---
-name: "Protocols Domain - Distilled"
+name: 'Protocols Domain - Distilled'
 date: 2026-25-02
 type: distilled
-summary: "Wire-level protocol details for A2A, MCP, and ACP. SSE event format, state mapping tables, artifact streaming mechanics, reconnection behavior, WebSocket protocol design. Complements the architecture distilled doc (which covers protocol-level architectural decisions)."
+summary: 'Wire-level protocol details for A2A, MCP, and ACP. SSE event format, state mapping tables, artifact streaming mechanics, reconnection behavior, WebSocket protocol design. Complements the architecture distilled doc (which covers protocol-level architectural decisions).'
 maturity: 45
 sources:
   - docs/protocols/2026-25-02-phase1-protocol-foundations.md
@@ -15,10 +15,10 @@ feature: protocols-distilled
 > [!WARNING]
 > **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
 > The protocol strategies described in this document (A2A SSE streaming, ACP
-translation) have been superseded by native LangGraph streaming
-(`astream_events`) and MCP tools. This document remains for historical context.
-Please refer to ADR-003, ADR-004, and ADR-006 for the current binding
-architecture.
+> translation) have been superseded by native LangGraph streaming
+> (`astream_events`) and MCP tools. This document remains for historical context.
+> Please refer to ADR-003, ADR-004, and ADR-006 for the current binding
+> architecture.
 
 **Date**: 2026-02-25
 **Status**: Distilled from Phase 1 protocol foundations + MCP/A2A compliance
@@ -34,22 +34,19 @@ architecture distilled doc for those)
 A2A SSE streams use `data: {json-rpc}\n\n`format. No named events. No event
 IDs. Each payload is a JSON-RPC 2.0 response wrapping one of four event types:
 
-| Event Type | Payload | UI Capability |
-| ----------- | --------- | --------------- |
-| `Task` | Full task state snapshot (status, history, artifacts, metadata) | Full panel refresh |
-| `TaskStatusUpdateEvent` | State change + optional`Message`with`Part[]`+`final`flag | Status badge, progress text |
-| `TaskArtifactUpdateEvent` | `Artifact`with`Part[]`+`append`flag +`last_chunk`flag | Code file streaming, file list |
-| `Message` | Direct response (role, parts, metadata) | Chat message bubble |
+| Event Type                | Payload                                                         | UI Capability                  |
+| ------------------------- | --------------------------------------------------------------- | ------------------------------ |
+| `Task`                    | Full task state snapshot (status, history, artifacts, metadata) | Full panel refresh             |
+| `TaskStatusUpdateEvent`   | State change + optional`Message`with`Part[]`+`final`flag        | Status badge, progress text    |
+| `TaskArtifactUpdateEvent` | `Artifact`with`Part[]`+`append`flag +`last_chunk`flag           | Code file streaming, file list |
+| `Message`                 | Direct response (role, parts, metadata)                         | Chat message bubble            |
 
 ### 1.2 Status Messages Are Rich
 
 `TaskStatusUpdateEvent.status.message`is a full`Message`object (not free
 text). Each`Part`can be:
 
--`text`(string) — progress description
--`raw`(bytes) — binary data
--`url`(string) — external resource reference
--`data`(JSON) — structured data
+-`text`(string) — progress description -`raw`(bytes) — binary data -`url`(string) — external resource reference -`data`(JSON) — structured data
 
 Status updates can carry rich content for UI rendering, not just "working..."
 strings.
@@ -64,10 +61,7 @@ Event 2: {artifactId: "abc", append: true,  lastChunk: false, parts: [{text: "  
 Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n# done"}]}
 ```
 
-- Same `artifactId`= same file
--`append: true`= concatenate with previous chunks
--`lastChunk: true`= file complete
--`Part.filename`and`Part.media_type` identify the file
+- Same `artifactId`= same file -`append: true`= concatenate with previous chunks -`lastChunk: true`= file complete -`Part.filename`and`Part.media_type` identify the file
 
 ### 1.4 Connection Model
 
@@ -109,16 +103,16 @@ orchestrator must implement its own event persistence for recovery.
 
 A2A defines 8 task states:
 
-| State | Type | Description |
-| ------- | ------ | ------------ |
-| `SUBMITTED` | Initial | Received but not started |
-| `WORKING` | Active | Agent is processing |
-| `INPUT_REQUIRED` | Interrupted | Agent needs user input |
-| `AUTH_REQUIRED` | Interrupted | Agent needs credentials |
-| `COMPLETED` | Terminal | Successfully finished |
-| `FAILED` | Terminal | Error occurred |
-| `CANCELED` | Terminal | Cooperatively cancelled |
-| `REJECTED` | Terminal | Agent refused the task |
+| State            | Type        | Description              |
+| ---------------- | ----------- | ------------------------ |
+| `SUBMITTED`      | Initial     | Received but not started |
+| `WORKING`        | Active      | Agent is processing      |
+| `INPUT_REQUIRED` | Interrupted | Agent needs user input   |
+| `AUTH_REQUIRED`  | Interrupted | Agent needs credentials  |
+| `COMPLETED`      | Terminal    | Successfully finished    |
+| `FAILED`         | Terminal    | Error occurred           |
+| `CANCELED`       | Terminal    | Cooperatively cancelled  |
+| `REJECTED`       | Terminal    | Agent refused the task   |
 
 Interrupted states are non-terminal — task resumes when client responds with
 `SendMessage`carrying the same`task_id`and`context_id`.
@@ -127,12 +121,12 @@ Terminal states are immutable — a new task is needed for follow-up work.
 
 ### 3.1 A2A Native Async Modes
 
-| Mode | Mechanism | Use Case |
-| ------ | ----------- | ---------- |
-| Blocking | `SendMessage(config={blocking=true})` | Simple, holds connection |
-| Polling | `GetTask(task_id)`in a loop | Non-blocking, client controls frequency |
-| Push notifications | Webhook URL in`PushNotificationConfig` | Server pushes state changes |
-| SSE streaming | `sendMessageStream` | Real-time event stream |
+| Mode               | Mechanism                              | Use Case                                |
+| ------------------ | -------------------------------------- | --------------------------------------- |
+| Blocking           | `SendMessage(config={blocking=true})`  | Simple, holds connection                |
+| Polling            | `GetTask(task_id)`in a loop            | Non-blocking, client controls frequency |
+| Push notifications | Webhook URL in`PushNotificationConfig` | Server pushes state changes             |
+| SSE streaming      | `sendMessageStream`                    | Real-time event stream                  |
 
 ### 3.2 What A2A Deliberately Omits
 
@@ -154,16 +148,16 @@ All orchestration logic is the client's responsibility.
 
 MCP experimental tasks define 5 states:
 
-| MCP State | A2A State | Compatible? |
-| ----------- | ----------- | ------------ |
-| `working` | `WORKING` | Direct match |
+| MCP State        | A2A State        | Compatible?                         |
+| ---------------- | ---------------- | ----------------------------------- |
+| `working`        | `WORKING`        | Direct match                        |
 | `input_required` | `INPUT_REQUIRED` | Same concept, different wire format |
-| `completed` | `COMPLETED` | Direct match |
-| `failed` | `FAILED` | Direct match |
-| `cancelled` | `CANCELED` | Spelling difference only |
-| — | `SUBMITTED` | No MCP equivalent |
-| — | `REJECTED` | No MCP equivalent |
-| — | `AUTH_REQUIRED` | No MCP equivalent |
+| `completed`      | `COMPLETED`      | Direct match                        |
+| `failed`         | `FAILED`         | Direct match                        |
+| `cancelled`      | `CANCELED`       | Spelling difference only            |
+| —                | `SUBMITTED`      | No MCP equivalent                   |
+| —                | `REJECTED`       | No MCP equivalent                   |
+| —                | `AUTH_REQUIRED`  | No MCP equivalent                   |
 
 ### 4.1 Translation Rules
 
@@ -171,9 +165,7 @@ MCP experimental tasks define 5 states:
 
 ### A2A → MCP (lossy)
 
--`SUBMITTED`→`working`+ statusMessage="submitted"
--`REJECTED`→`failed`+ statusMessage="rejected"
--`AUTH_REQUIRED`→`input_required` (collapsed to generic input request)
+-`SUBMITTED`→`working`+ statusMessage="submitted" -`REJECTED`→`failed`+ statusMessage="rejected" -`AUTH_REQUIRED`→`input_required` (collapsed to generic input request)
 
 ### 4.2 Enum Wire Format
 
@@ -243,19 +235,19 @@ doc for the tool surface design.)
 
 ACP provides 11 discriminated update types (vs A2A's generic`Message.parts[]`):
 
-| # | Update Type | Discriminator | UI Rendering |
-| --- | ------------ | -------------- | ------------- |
-| 1 | UserMessageChunk | `user_message_chunk` | User chat bubble |
-| 2 | AgentMessageChunk | `agent_message_chunk` | Agent chat (streaming) |
-| 3 | AgentThoughtChunk | `agent_thought_chunk` | Thinking/reasoning panel |
-| 4 | ToolCallStart | `tool_call` | Tool call card |
-| 5 | ToolCallProgress | `tool_call_update` | Progress bar / output |
-| 6 | AgentPlanUpdate | `plan` | Plan checklist |
-| 7 | AvailableCommandsUpdate | `available_commands_update` | Command palette |
-| 8 | CurrentModeUpdate | `current_mode_id` | Mode indicator |
-| 9 | ConfigOptionUpdate | `config_option_update` | Settings panel |
-| 10 | SessionInfoUpdate | `session_info_update` | Session metadata |
-| 11 | UsageUpdate | `usage_update` | Token/cost counter |
+| #   | Update Type             | Discriminator               | UI Rendering             |
+| --- | ----------------------- | --------------------------- | ------------------------ |
+| 1   | UserMessageChunk        | `user_message_chunk`        | User chat bubble         |
+| 2   | AgentMessageChunk       | `agent_message_chunk`       | Agent chat (streaming)   |
+| 3   | AgentThoughtChunk       | `agent_thought_chunk`       | Thinking/reasoning panel |
+| 4   | ToolCallStart           | `tool_call`                 | Tool call card           |
+| 5   | ToolCallProgress        | `tool_call_update`          | Progress bar / output    |
+| 6   | AgentPlanUpdate         | `plan`                      | Plan checklist           |
+| 7   | AvailableCommandsUpdate | `available_commands_update` | Command palette          |
+| 8   | CurrentModeUpdate       | `current_mode_id`           | Mode indicator           |
+| 9   | ConfigOptionUpdate      | `config_option_update`      | Settings panel           |
+| 10  | SessionInfoUpdate       | `session_info_update`       | Session metadata         |
+| 11  | UsageUpdate             | `usage_update`              | Token/cost counter       |
 
 ### 6.1 ACP Web Transport Feasibility
 
@@ -321,8 +313,8 @@ merging needed.
   "request_id": "req-123",
   "tool_call": { "title": "Delete old_auth.py", "kind": "write" },
   "options": [
-    {"id": "approve", "label": "Approve", "kind": "allow_once"},
-    {"id": "reject", "label": "Reject", "kind": "reject_once"}
+    { "id": "approve", "label": "Approve", "kind": "allow_once" },
+    { "id": "reject", "label": "Reject", "kind": "reject_once" }
   ]
 }
 ```
@@ -345,19 +337,19 @@ per-agent UI components. Follows Grafana Live pattern.
 
 ## 8. A2A ↔ MCP Feature Comparison
 
-| Feature | A2A | MCP Tasks | Gap |
-| --------- | ----- | ----------- | ----- |
-| Task lifecycle | 8 states | 5 states | MCP lacks submitted, rejected, auth_required |
-| Polling | GetTask RPC | tasks/get | Both supported, different wire |
-| Streaming | SSE (native) | Not supported | MCP has no task streaming |
-| Push notifications | Full webhook protocol | Not supported | A2A only |
-| Elicitation | input_required + SendMessage | elicitation/create | Same concept, different mechanism |
-| Auth interruption | auth_required | Not supported | Needs custom handling |
-| Cancellation | CancelTask RPC | tasks/cancel | Both supported |
-| Blocking mode | blocking=true flag | Not supported | A2A only |
-| Context grouping | contextId | Not supported | A2A groups related tasks |
-| Task referencing | referenceTaskIds | Not supported | A2A links task chains |
-| Agent discovery | Agent Cards | Tool listing | Different abstractions |
+| Feature            | A2A                          | MCP Tasks          | Gap                                          |
+| ------------------ | ---------------------------- | ------------------ | -------------------------------------------- |
+| Task lifecycle     | 8 states                     | 5 states           | MCP lacks submitted, rejected, auth_required |
+| Polling            | GetTask RPC                  | tasks/get          | Both supported, different wire               |
+| Streaming          | SSE (native)                 | Not supported      | MCP has no task streaming                    |
+| Push notifications | Full webhook protocol        | Not supported      | A2A only                                     |
+| Elicitation        | input_required + SendMessage | elicitation/create | Same concept, different mechanism            |
+| Auth interruption  | auth_required                | Not supported      | Needs custom handling                        |
+| Cancellation       | CancelTask RPC               | tasks/cancel       | Both supported                               |
+| Blocking mode      | blocking=true flag           | Not supported      | A2A only                                     |
+| Context grouping   | contextId                    | Not supported      | A2A groups related tasks                     |
+| Task referencing   | referenceTaskIds             | Not supported      | A2A links task chains                        |
+| Agent discovery    | Agent Cards                  | Tool listing       | Different abstractions                       |
 
 **A2A is the richer protocol.** MCP provides a useful subset for CLI
 integration. The translation layer is the cost of CLI compatibility.

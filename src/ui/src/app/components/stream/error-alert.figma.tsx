@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { ErrorAlert } from './error-alert'
+import figma from '@figma/code-connect';
+import { ErrorAlert } from './error-alert';
 
 /**
  * Code Connect mapping for ErrorAlert.
@@ -10,17 +10,21 @@ import { ErrorAlert } from './error-alert'
  * Props:
  * - event: ErrorStreamEvent — { type: 'error', message, code?, ... }
  */
-figma.connect(ErrorAlert, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <ErrorAlert
-      event={{
-        id: 'evt-7',
-        type: 'error',
-        thread_id: 'thread-1',
-        message: 'Agent exceeded token limit',
-        code: 'TOKEN_LIMIT',
-        timestamp: new Date().toISOString(),
-      }}
-    />
-  ),
-})
+figma.connect(
+  ErrorAlert,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <ErrorAlert
+        event={{
+          id: 'evt-7',
+          type: 'error',
+          thread_id: 'thread-1',
+          message: 'Agent exceeded token limit',
+          code: 'TOKEN_LIMIT',
+          timestamp: new Date().toISOString(),
+        }}
+      />
+    ),
+  },
+);

@@ -25,12 +25,12 @@ This document covers five research scopes for hardening the TOML-based team conf
 
 The four built-in presets use topology-descriptive IDs:
 
-| File | Current ID | Current display_name |
-|------|-----------|---------------------|
-| `coding-star.toml` | `coding-star` | `Coding Star Team` |
+| File                   | Current ID        | Current display_name   |
+| ---------------------- | ----------------- | ---------------------- |
+| `coding-star.toml`     | `coding-star`     | `Coding Star Team`     |
 | `coding-pipeline.toml` | `coding-pipeline` | `Coding Pipeline Team` |
-| `coding-loop.toml` | `coding-loop` | `Coding Loop Team` |
-| `solo-coder.toml` | `solo-coder` | `Solo Coder` |
+| `coding-loop.toml`     | `coding-loop`     | `Coding Loop Team`     |
+| `solo-coder.toml`      | `solo-coder`      | `Solo Coder`           |
 
 These names expose internal topology implementation details (`star`, `pipeline`, `loop`) rather than communicating the team's functional purpose to an end user.
 
@@ -38,7 +38,7 @@ ADR-013 §2.9 lists these as "built-in presets" but provides no naming conventio
 
 ### Problems
 
-- `coding-star` tells a user nothing about *why* they would choose this preset
+- `coding-star` tells a user nothing about _why_ they would choose this preset
 - `coding-loop` vs `coding-pipeline` requires knowledge of LangGraph topologies to differentiate
 - No namespace prefix — the `solo-coder` ID could collide with user-defined presets
 - `display_name` values are nearly identical to the IDs (just title-cased topology labels)
@@ -47,12 +47,12 @@ ADR-013 §2.9 lists these as "built-in presets" but provides no naming conventio
 
 The naming convention should follow: `vaultspec-{function}-{qualifier}` where function describes the workflow purpose and qualifier differentiates teams operating similarly.
 
-| Current ID | Proposed ID | Proposed display_name | Rationale |
-|-----------|------------|----------------------|-----------|
-| `coding-star` | `vaultspec-adaptive-coder` | `Vaultspec Adaptive Coder` | Star topology supervisor dynamically routes — adaptive routing |
-| `coding-pipeline` | `vaultspec-structured-coder` | `Vaultspec Structured Coder` | Fixed pipeline — predictable, structured flow |
-| `coding-loop` | `vaultspec-iterative-coder` | `Vaultspec Iterative Coder` | Review loop — iterative refinement until acceptance |
-| `solo-coder` | `vaultspec-solo-coder` | `Vaultspec Solo Coder` | Single worker — minimal, direct execution |
+| Current ID        | Proposed ID                  | Proposed display_name        | Rationale                                                      |
+| ----------------- | ---------------------------- | ---------------------------- | -------------------------------------------------------------- |
+| `coding-star`     | `vaultspec-adaptive-coder`   | `Vaultspec Adaptive Coder`   | Star topology supervisor dynamically routes — adaptive routing |
+| `coding-pipeline` | `vaultspec-structured-coder` | `Vaultspec Structured Coder` | Fixed pipeline — predictable, structured flow                  |
+| `coding-loop`     | `vaultspec-iterative-coder`  | `Vaultspec Iterative Coder`  | Review loop — iterative refinement until acceptance            |
+| `solo-coder`      | `vaultspec-solo-coder`       | `Vaultspec Solo Coder`       | Single worker — minimal, direct execution                      |
 
 ### Description Field
 
@@ -90,6 +90,7 @@ self-contained tasks. Fastest to spin up; no planning or review phase.
 ### Migration
 
 The `id` field is used as the `team_preset` column in the database and in `DispatchRequest`. A rename requires either:
+
 1. A DB migration adding the new IDs (both old and new resolve via `load_team_config`)
 2. A compatibility shim in `load_team_config()` that maps old IDs → new TOML files
 
@@ -102,6 +103,7 @@ Option 2 is lower risk: keep the old `.toml` files as symlinks or thin wrappers 
 ### Current State
 
 **`lib/core/team_config.py`** — `TeamDefaultsConfig`:
+
 ```python
 class TeamDefaultsConfig(BaseModel):
     provider: Provider = Provider.CLAUDE
@@ -111,6 +113,7 @@ class TeamDefaultsConfig(BaseModel):
 No `provider_fallback` list. The `ModelConfig` used in `WorkerRef` and `AgentConfig` similarly has no fallback list.
 
 **`lib/core/graph.py`** — `_resolve_model_for_worker()` (single-pass):
+
 ```python
 provider = (
     worker_ref.model.provider
@@ -122,6 +125,7 @@ provider = (
 ```
 
 **`lib/providers/factory.py`** — `ProviderFactory.create()`:
+
 ```python
 def create(self, provider: Provider, ...) -> BaseChatModel:
     if provider == Provider.CLAUDE:
@@ -163,6 +167,7 @@ agent = "coder"
 ### Pydantic Schema Changes
 
 **`lib/core/team_config.py`**:
+
 ```python
 class TeamDefaultsConfig(BaseModel):
     provider: Provider = Provider.CLAUDE
@@ -213,6 +218,7 @@ def _resolve_model_for_worker(...) -> BaseChatModel:
 ### ADR Impact
 
 ADR-012 §3 (model block) and ADR-013 §2.3 (model resolution precedence) need amendments to document:
+
 1. `provider_fallback` field addition
 2. Fallback inheritance rules (worker override > team defaults)
 3. Logging behavior on fallback
@@ -224,6 +230,7 @@ ADR-012 §3 (model block) and ADR-013 §2.3 (model resolution precedence) need a
 ### Current State
 
 **`autonomous` flag flow** (traced through codebase):
+
 ```
 CreateThreadRequest.autonomous: bool = False
   → POST /threads endpoint
@@ -241,6 +248,7 @@ CreateThreadRequest.autonomous: bool = False
 `interrupt_before=[]` always — the interrupt mechanism is the `interrupt()` call inside `worker_node`, not pre-node graph pauses.
 
 **`AgentPermissionsConfig`** (ADR-012 §6, `lib/core/team_config.py`):
+
 ```python
 class AgentPermissionsConfig(BaseModel):
     require_approval_for: list[str] = Field(default_factory=list)
@@ -270,6 +278,7 @@ auto_approve = true           # NEW: team defaults to autonomous mode
 ### Pydantic Schema Changes
 
 **New `TeamPermissionsConfig`** in `lib/core/team_config.py`:
+
 ```python
 class TeamPermissionsConfig(BaseModel):
     auto_approve: bool = False           # default: supervised
@@ -277,6 +286,7 @@ class TeamPermissionsConfig(BaseModel):
 ```
 
 **Updated `TeamConfig`**:
+
 ```python
 class TeamConfig(BaseModel):
     ...
@@ -286,6 +296,7 @@ class TeamConfig(BaseModel):
 ### Endpoint Integration
 
 In `POST /threads` endpoint (`lib/api/endpoints.py`), after loading `TeamConfig`:
+
 ```python
 team_config = load_team_config(req.team_preset)
 # If the team declares auto_approve, use it as the default.
@@ -302,6 +313,7 @@ This requires `CreateThreadRequest.autonomous` to become `bool | None` (currentl
 ### Dead Code Cleanup
 
 `AgentPermissionsConfig.require_approval_for` should either:
+
 - Be removed if ADR-013 §2.7 is officially superseded
 - Be documented as "reserved for future use" with a comment
 - Be wired up (not recommended — adds complexity, interrupt_before=[] is an intentional architectural decision)
@@ -325,6 +337,7 @@ auto_approve = true    # solo-coder is headless by default
 ### Current State
 
 **`lib/core/presets/agents/supervisor.toml`**:
+
 ```toml
 [agent]
 id = "supervisor"
@@ -341,6 +354,7 @@ You are Grand Architect, an expert software engineering team supervisor...
 ```
 
 **`lib/core/graph.py`** — `_build_supervisor_prompt()`:
+
 ```python
 def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig) -> str:
     roster = _build_agent_roster(team_config)
@@ -353,6 +367,7 @@ def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig)
 The supervisor persona is entirely defined in `supervisor.toml`. There is no mechanism for a team TOML to inject team-specific behavioral directives into the supervisor prompt.
 
 **Problems**:
+
 - `vaultspec-adaptive-coder` and `vaultspec-iterative-coder` should give different routing guidance to their supervisors
 - Currently every team gets the exact same supervisor prompt regardless of topology
 - No way to specialize the supervisor's persona (e.g., "for this team, prioritize review quality over speed")
@@ -374,6 +389,7 @@ marks the task APPROVED. Prioritize correctness over speed — loop up to
 ```
 
 Also add an optional `supervisor_display_name` override:
+
 ```toml
 [team.persona]
 supervisor_display_name = "Quality Arbiter"   # overrides supervisor.toml display_name for this team
@@ -383,6 +399,7 @@ directive = "..."
 ### Pydantic Schema Changes
 
 **New `TeamPersonaConfig`** in `lib/core/team_config.py`:
+
 ```python
 class TeamPersonaConfig(BaseModel):
     directive: str | None = None
@@ -390,6 +407,7 @@ class TeamPersonaConfig(BaseModel):
 ```
 
 **Updated `TeamConfig`**:
+
 ```python
 class TeamConfig(BaseModel):
     ...
@@ -419,6 +437,7 @@ def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig)
 ### Display Name Override
 
 In `_build_agent_roster()` or wherever the supervisor's `display_name` is referenced:
+
 ```python
 supervisor_name = (
     team_config.persona.supervisor_display_name
@@ -430,18 +449,21 @@ supervisor_name = (
 ### Recommended Directives per Preset
 
 **`vaultspec-adaptive-coder`**:
+
 ```
 Route dynamically based on task needs. You may skip the planning phase
 for simple tasks. Use the reviewer only when correctness is uncertain.
 ```
 
 **`vaultspec-structured-coder`**:
+
 ```
 Always route planner → coder → reviewer in strict sequence. Do not skip
 phases. Each agent must complete before the next begins.
 ```
 
 **`vaultspec-iterative-coder`**:
+
 ```
 Route planner → coder → reviewer. If the reviewer requests changes, route
 back to the coder. Accept output only when the reviewer explicitly outputs
@@ -458,15 +480,15 @@ APPROVED. Maximum iterations: 3.
 
 From ADR-013 and the existing preset files:
 
-| Feature | TOML field | Location |
-|---------|-----------|----------|
-| Topology | `[team.topology] type` | `TeamConfig` |
-| Pipeline order | `[team.topology] order` | `PipelineConfig` |
-| Loop node | `[team.topology] loop_node` | `PipelineLoopConfig` |
-| Max loops | `[team.topology] max_loops` | `PipelineLoopConfig` |
-| Provider | `[team.defaults] provider` | `TeamDefaultsConfig` |
-| Capability | `[team.defaults] capability` | `TeamDefaultsConfig` |
-| Worker model | `[[team.workers]] [model]` | `WorkerRef.model` |
+| Feature        | TOML field                   | Location             |
+| -------------- | ---------------------------- | -------------------- |
+| Topology       | `[team.topology] type`       | `TeamConfig`         |
+| Pipeline order | `[team.topology] order`      | `PipelineConfig`     |
+| Loop node      | `[team.topology] loop_node`  | `PipelineLoopConfig` |
+| Max loops      | `[team.topology] max_loops`  | `PipelineLoopConfig` |
+| Provider       | `[team.defaults] provider`   | `TeamDefaultsConfig` |
+| Capability     | `[team.defaults] capability` | `TeamDefaultsConfig` |
+| Worker model   | `[[team.workers]] [model]`   | `WorkerRef.model`    |
 
 ### Not Yet Exposed — Gap Analysis
 
@@ -475,6 +497,7 @@ From ADR-013 and the existing preset files:
 **Current**: `settings.graph_node_timeout_seconds = 300` (global, from env var only).
 
 **Graph wiring** (`lib/core/graph.py`):
+
 ```python
 compiled = graph.compile(
     checkpointer=checkpointer,
@@ -485,6 +508,7 @@ compiled = graph.compile(
 `step_timeout` is a Pregel-level config — it limits per-node execution time. Currently only configurable globally via env var.
 
 **Proposed TOML**:
+
 ```toml
 [team.graph]
 step_timeout_seconds = 120    # per-node timeout; overrides global settings value
@@ -497,6 +521,7 @@ step_timeout_seconds = 120    # per-node timeout; overrides global settings valu
 **Current**: `settings.graph_node_timeout_seconds` covers node timeout but `recursion_limit` (max supersteps) is not exposed. LangGraph default is 25.
 
 **Proposed TOML**:
+
 ```toml
 [team.graph]
 recursion_limit = 50    # max supersteps; default 25 in LangGraph
@@ -509,6 +534,7 @@ recursion_limit = 50    # max supersteps; default 25 in LangGraph
 **Current**: No retry policy wired. `_resolve_model_for_worker` raises on first failure.
 
 **Proposed TOML**:
+
 ```toml
 [team.graph]
 retry_on_exception = true       # enable RetryPolicy on graph nodes
@@ -517,6 +543,7 @@ retry_on_timeout = true         # retry on asyncio.TimeoutError
 ```
 
 **Implementation** (`lib/core/graph.py`):
+
 ```python
 from langgraph.pregel import RetryPolicy
 
@@ -536,6 +563,7 @@ Note: RetryPolicy is attached per-node at `add_node()` time, not at `compile()`.
 **Current**: Thread IDs are UUIDs. No namespace prefix.
 
 **Proposed TOML**:
+
 ```toml
 [team]
 thread_id_prefix = "vs-adaptive-"    # prepended to UUID for readable thread IDs
@@ -568,6 +596,7 @@ max_attempts = 3               # RetryPolicy max_attempts (only if retry_on_exce
 ### Pydantic Schema Changes
 
 **New `TeamGraphConfig`** in `lib/core/team_config.py`:
+
 ```python
 class TeamGraphConfig(BaseModel):
     step_timeout_seconds: int | None = None     # None → use global settings value
@@ -577,6 +606,7 @@ class TeamGraphConfig(BaseModel):
 ```
 
 **Updated `TeamConfig`**:
+
 ```python
 class TeamConfig(BaseModel):
     ...
@@ -587,39 +617,44 @@ class TeamConfig(BaseModel):
 
 ## Implementation Priority
 
-| Change | Risk | Effort | Priority |
-|--------|------|--------|----------|
-| Rename preset IDs (with compat shim) | LOW | LOW | HIGH |
-| Add `description` to all presets | LOW | LOW | HIGH |
-| `[team.permissions] auto_approve` | MEDIUM | MEDIUM | HIGH |
-| `[team.persona] directive` | LOW | LOW | MEDIUM |
-| `[team.graph] step_timeout_seconds` | LOW | LOW | MEDIUM |
-| `[team.graph] recursion_limit` | LOW | LOW | MEDIUM |
-| `provider_fallback` chain | MEDIUM | MEDIUM | MEDIUM |
-| `[team.graph] retry_on_exception` | MEDIUM | HIGH | LOW |
-| Dead code: `require_approval_for` | LOW | LOW | LOW |
-| ADR-013 §2.7 amendment | LOW | LOW | HIGH |
+| Change                               | Risk   | Effort | Priority |
+| ------------------------------------ | ------ | ------ | -------- |
+| Rename preset IDs (with compat shim) | LOW    | LOW    | HIGH     |
+| Add `description` to all presets     | LOW    | LOW    | HIGH     |
+| `[team.permissions] auto_approve`    | MEDIUM | MEDIUM | HIGH     |
+| `[team.persona] directive`           | LOW    | LOW    | MEDIUM   |
+| `[team.graph] step_timeout_seconds`  | LOW    | LOW    | MEDIUM   |
+| `[team.graph] recursion_limit`       | LOW    | LOW    | MEDIUM   |
+| `provider_fallback` chain            | MEDIUM | MEDIUM | MEDIUM   |
+| `[team.graph] retry_on_exception`    | MEDIUM | HIGH   | LOW      |
+| Dead code: `require_approval_for`    | LOW    | LOW    | LOW      |
+| ADR-013 §2.7 amendment               | LOW    | LOW    | HIGH     |
 
 ---
 
 ## Files Requiring Changes
 
 ### TOML Presets
+
 - `lib/core/presets/teams/coding-star.toml` → rename + add `[team.permissions]`, `[team.persona]`, `[team.graph]`
 - `lib/core/presets/teams/coding-pipeline.toml` → same
 - `lib/core/presets/teams/coding-loop.toml` → same (+ `auto_approve = false`, directive for loop guidance)
 - `lib/core/presets/teams/solo-coder.toml` → same (+ `auto_approve = true`)
 
 ### Python Schema
+
 - `lib/core/team_config.py` — add `TeamPermissionsConfig`, `TeamPersonaConfig`, `TeamGraphConfig`; update `TeamConfig`
 
 ### Core Graph
+
 - `lib/core/graph.py` — `_build_supervisor_prompt()` (persona directive injection), `_resolve_model_for_worker()` (fallback chain), `compile_team_graph()` (step_timeout, recursion_limit from team config)
 
 ### API Endpoint
+
 - `lib/api/endpoints.py` — `CreateThreadRequest.autonomous: bool | None = None`, team default resolution
 
 ### ADRs
+
 - `docs/adrs/012-agent-definition-schema.md` — add `provider_fallback` to model block
 - `docs/adrs/013-team-composition-topology.md` — add new blocks (`[team.permissions]`, `[team.persona]`, `[team.graph]`), amend §2.7 to supersede `interrupt_before` approach, add `provider_fallback`
 

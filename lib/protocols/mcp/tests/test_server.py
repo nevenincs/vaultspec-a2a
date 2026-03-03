@@ -24,6 +24,7 @@ import pytest_asyncio
 
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.memory import MemorySaver
+from mcp.server.fastmcp.exceptions import ToolError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -39,10 +40,7 @@ from ....api.endpoints import (
 from ....core.aggregator import EventAggregator
 from ....database.models import Base
 from ....database.session import get_db
-from mcp.server.fastmcp.exceptions import ToolError
-
 from ..server import (
-    _get_client,
     _reset_client,
     _ws_url_from_api_base,
     cancel_thread,
@@ -63,8 +61,9 @@ from ..server import (
 # stale client must be discarded to avoid "Event loop is closed" errors.
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(autouse=True)
-def _reset_shared_client() -> None:  # noqa: PT004
+def _reset_shared_client() -> None:
     """Discard the shared httpx client before each test."""
     _reset_client()
 

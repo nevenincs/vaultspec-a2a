@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: plan
 feature: integration-fixes
-description: "Critical path fixes to achieve end-to-end orchestration, resolving async I/O, git mutex, terminal sandbox, CORS, and checkpointer integration issues identified in the architectural audit."
+description: 'Critical path fixes to achieve end-to-end orchestration, resolving async I/O, git mutex, terminal sandbox, CORS, and checkpointer integration issues identified in the architectural audit.'
 related_adrs:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-25-002-llm-context-provider-abstraction-adr.md
@@ -30,40 +30,40 @@ related_research:
 
 ### Binding ADRs
 
-| ADR | Path | Relevance to This Plan |
-| --- | --- | --- |
-| ADR-001 | `docs/adrs/001-process-and-workspace-management.md` | H4 (git mutex), H5 (async tools), H6 (terminal sandbox) |
-| ADR-002 | `docs/adrs/002-llm-context-provider-abstraction.md` | Context — provider architecture |
-| ADR-003 | `docs/adrs/003-protocol-bridging-translation.md` | C1 (interrupt/resume requires checkpointer) |
+| ADR     | Path                                                    | Relevance to This Plan                                         |
+| ------- | ------------------------------------------------------- | -------------------------------------------------------------- |
+| ADR-001 | `docs/adrs/001-process-and-workspace-management.md`     | H4 (git mutex), H5 (async tools), H6 (terminal sandbox)        |
+| ADR-002 | `docs/adrs/002-llm-context-provider-abstraction.md`     | Context — provider architecture                                |
+| ADR-003 | `docs/adrs/003-protocol-bridging-translation.md`        | C1 (interrupt/resume requires checkpointer)                    |
 | ADR-004 | `docs/adrs/004-event-aggregation-server-side-replay.md` | C1 (checkpoint-sqlite), C2 (aggregator.ingest), H2 (lifecycle) |
-| ADR-005 | `docs/adrs/005-frontend-rendering-stack.md` | Context — frontend expectations |
-| ADR-006 | `docs/adrs/006-protocol-ecosystem-bridge.md` | H1 (sandbox), H4 (fs write), H5 (async I/O), H6 (terminal) |
-| ADR-007 | `docs/adrs/007-tech-stack-deployment.md` | C3 (anyio task group), H7 (database path), M2 (CORS) |
-| ADR-008 | `docs/adrs/008-orchestration-topology-pipeline.md` | C1 (checkpointer mandate) |
-| ADR-009 | `docs/adrs/009-approved-module-hierarchy.md` | Context — facade and import patterns |
-| ADR-010 | `docs/adrs/010-observability-telemetry-integration.md` | Context — OTel already wired |
-| ADR-011 | `docs/adrs/011-frontend-backend-contract.md` | C2 (POST /threads), H3 (team status), M3 (WS rejection) |
-| ADR-012 | `docs/adrs/012-agent-definition-schema.md` | H3 (AgentSummary from node metadata) |
-| ADR-013 | `docs/adrs/013-team-composition-topology.md` | H3 (team status with agent roster) |
+| ADR-005 | `docs/adrs/005-frontend-rendering-stack.md`             | Context — frontend expectations                                |
+| ADR-006 | `docs/adrs/006-protocol-ecosystem-bridge.md`            | H1 (sandbox), H4 (fs write), H5 (async I/O), H6 (terminal)     |
+| ADR-007 | `docs/adrs/007-tech-stack-deployment.md`                | C3 (anyio task group), H7 (database path), M2 (CORS)           |
+| ADR-008 | `docs/adrs/008-orchestration-topology-pipeline.md`      | C1 (checkpointer mandate)                                      |
+| ADR-009 | `docs/adrs/009-approved-module-hierarchy.md`            | Context — facade and import patterns                           |
+| ADR-010 | `docs/adrs/010-observability-telemetry-integration.md`  | Context — OTel already wired                                   |
+| ADR-011 | `docs/adrs/011-frontend-backend-contract.md`            | C2 (POST /threads), H3 (team status), M3 (WS rejection)        |
+| ADR-012 | `docs/adrs/012-agent-definition-schema.md`              | H3 (AgentSummary from node metadata)                           |
+| ADR-013 | `docs/adrs/013-team-composition-topology.md`            | H3 (team status with agent roster)                             |
 
 ### Audit and Research Documents
 
-| Document | Path | Role |
-| --- | --- | --- |
-| Architectural Review Audit | `docs/audits/2026-02-27-architectural-review-audit.md` | Source of all findings in this plan |
-| Prior Active Audit (Rev 2) | `docs/audits/2026-27-02-active-audit.md` | Superseded — stale |
-| Backend Foundational Gaps Plan | `docs/plans/2026-02-27-backend-foundational-gaps-plan.md` | Prior plan — 9 gaps addressed |
-| Backend Gaps Prompt | `docs/prompts/backend-foundational-gaps.md` | Original gap definitions |
-| Research: Backend Gaps | `docs/research/2026-02-27-backend-gaps-research.md` | Aggregator, SQLite, workspace patterns |
-| Research: Model Matrix | `docs/research/2026-02-27-model-capability-matrix.md` | Provider capabilities |
+| Document                       | Path                                                      | Role                                   |
+| ------------------------------ | --------------------------------------------------------- | -------------------------------------- |
+| Architectural Review Audit     | `docs/audits/2026-02-27-architectural-review-audit.md`    | Source of all findings in this plan    |
+| Prior Active Audit (Rev 2)     | `docs/audits/2026-27-02-active-audit.md`                  | Superseded — stale                     |
+| Backend Foundational Gaps Plan | `docs/plans/2026-02-27-backend-foundational-gaps-plan.md` | Prior plan — 9 gaps addressed          |
+| Backend Gaps Prompt            | `docs/prompts/backend-foundational-gaps.md`               | Original gap definitions               |
+| Research: Backend Gaps         | `docs/research/2026-02-27-backend-gaps-research.md`       | Aggregator, SQLite, workspace patterns |
+| Research: Model Matrix         | `docs/research/2026-02-27-model-capability-matrix.md`     | Provider capabilities                  |
 
 ### Reference Implementations
 
-| File | Relevance |
-| --- | --- |
-| `knowledge/repositories/toad/src/toad/acp/agent.py` | Lines 348-468: Host-side RPC handler patterns for H4, H5, H6 |
-| `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py` | `AsyncSqliteSaver`bootstrap for C1, H2 |
-| `lib/core/tests/test_graph.py:19` | Correct checkpointer usage pattern (`async with`) |
+| File                                                                                         | Relevance                                                    |
+| -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `knowledge/repositories/toad/src/toad/acp/agent.py`                                          | Lines 348-468: Host-side RPC handler patterns for H4, H5, H6 |
+| `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py` | `AsyncSqliteSaver`bootstrap for C1, H2                       |
+| `lib/core/tests/test_graph.py:19`                                                            | Correct checkpointer usage pattern (`async with`)            |
 
 ---
 
@@ -134,19 +134,19 @@ execute graphs, stream events, and handle interrupt/resume.
 
 1. In`_lifespan()`, create `AsyncSqliteSaver`from the application database path:
 
-  ```python
-   async with AsyncSqliteSaver.from_conn_string(db_path) as checkpointer:
-       app.state.checkpointer = checkpointer
-       # ... rest of lifespan
-   ```
+```python
+ async with AsyncSqliteSaver.from_conn_string(db_path) as checkpointer:
+     app.state.checkpointer = checkpointer
+     # ... rest of lifespan
+```
 
-   The `async with`manages`__aenter__`/`__aexit__`(H2).
+The `async with`manages`__aenter__`/`__aexit__`(H2).
 
 1. Store`checkpointer`in`app.state`so endpoints can access it.
 
 1. In`create_thread_endpoint()` (`endpoints.py`), pass
    `app.state.checkpointer`to
-  `compile_team_graph()`:
+   `compile_team_graph()`:
 
    ```python
    graph = compile_team_graph(
@@ -162,9 +162,7 @@ execute graphs, stream events, and handle interrupt/resume.
 
 ### Validation
 
--`graph.aget_state(config)`returns a non-empty`StateSnapshot`after invocation
--`interrupt()`in worker.py persists state to SQLite
--`Command(resume=...)` in permission endpoint resumes the correct checkpoint
+-`graph.aget_state(config)`returns a non-empty`StateSnapshot`after invocation -`interrupt()`in worker.py persists state to SQLite -`Command(resume=...)` in permission endpoint resumes the correct checkpoint
 
 ---
 
@@ -229,9 +227,7 @@ processing)
 
 1. Replace all `asyncio.create_task()`calls
    with`app.state.task_group.start_soon()`:
-   - `app.py:102`(heartbeat or aggregator background tasks)
-   -`endpoints.py:376`(graph invocation background task)
-   -`endpoints.py:494`(permission resume background task)
+   - `app.py:102`(heartbeat or aggregator background tasks) -`endpoints.py:376`(graph invocation background task) -`endpoints.py:494`(permission resume background task)
 
 1. Remove`# noqa: RUF006`comments — they are no longer needed.
 
@@ -259,8 +255,7 @@ is safe for real multi-agent coding sessions.
 
 1. Define a single source of truth for the database file path in `config.py`.
 2. `init_db()`in`session.py`must accept the path from settings, not use a
-   hardcoded default.
-3.`AsyncSqliteSaver` (Fix 1) must use the same database file.
+   hardcoded default. 3.`AsyncSqliteSaver` (Fix 1) must use the same database file.
 3. Parse the SQLAlchemy URL (`sqlite+aiosqlite:///vaultspec.db`) into a plain
    path for
    `AsyncSqliteSaver.from_conn_string()`.
@@ -271,12 +266,12 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H1
 **ADR Mandate:** ADR-001 SS2
-**Files:** `lib/providers/acp_chat_model.py`(_sandbox_path)
+**Files:** `lib/providers/acp_chat_model.py`(\_sandbox_path)
 
 ### Requirements: (5)
 
 1. Replace`str(resolved).startswith(str(cwd.resolve()))`with
-  `resolved.is_relative_to(cwd.resolve())`(Python 3.9+, available in 3.13).
+   `resolved.is_relative_to(cwd.resolve())`(Python 3.9+, available in 3.13).
 
 ---
 
@@ -289,11 +284,11 @@ is safe for real multi-agent coding sessions.
 ### Requirements: (6)
 
 1. Query`aggregator._node_metadata`(or expose a public method like
-  `aggregator.get_agent_summaries()`) to build `AgentSummary`objects.
+   `aggregator.get_agent_summaries()`) to build `AgentSummary`objects.
 2. Each`AgentSummary`must include`role`, `display_name`, `description`sourced
    from
    the node metadata set during`builder.add_node(...,
-   metadata={...})`in`graph.py`.
+metadata={...})`in`graph.py`.
 3. Include `provider`and`model`from the resolved agent config.
 
 ---
@@ -302,12 +297,11 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H4
 **ADR Mandate:** ADR-001 SS2
-**Files:**`lib/providers/acp_chat_model.py`(_on_fs_write_text_file)
+**Files:**`lib/providers/acp_chat_model.py`(\_on_fs_write_text_file)
 
 ### Requirements: (7)
 
-1.`_on_fs_write_text_file`must acquire the global git mutex before writing.
-2. The mutex is in`workspace/git_manager.py`. Either:
+1.`_on_fs_write_text_file`must acquire the global git mutex before writing. 2. The mutex is in`workspace/git_manager.py`. Either:
 
 - Inject a reference to the mutex into `AcpChatModel`, or
 - Use a module-level shared lock accessible from providers.
@@ -320,14 +314,14 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H5
 **ADR Mandate:** ADR-001 SS5
-**Files:**`lib/providers/acp_chat_model.py`(_on_fs_read_text_file,_on_fs_write_text_file)
+**Files:**`lib/providers/acp_chat_model.py`(\_on_fs_read_text_file,\_on_fs_write_text_file)
 
 ### Requirements: (8)
 
 1. Replace`file_path.read_text()`with`await
-   asyncio.to_thread(file_path.read_text)`.
+asyncio.to_thread(file_path.read_text)`.
 2. Replace `file_path.write_text()`with`await
-   asyncio.to_thread(file_path.write_text, content)`.
+asyncio.to_thread(file_path.write_text, content)`.
 3. Alternative: use `aiofiles`if already in dependencies.
 
 ---
@@ -335,7 +329,7 @@ is safe for real multi-agent coding sessions.
 ### Fix 9: Terminal Command Validation (H6)
 
 **Source:** Audit H6
-**Files:**`lib/providers/acp_chat_model.py`(_on_terminal_create)
+**Files:**`lib/providers/acp_chat_model.py`(\_on_terminal_create)
 
 ### Requirements: (9)
 
@@ -371,18 +365,18 @@ resolved.
 1. When `PERMISSION_RESPONSE`is received over WebSocket, send
    an`ErrorEvent`back:
 
-  ```python
-   error = ErrorEvent(
-       type=ServerEventType.ERROR,
-       thread_id=cmd.thread_id,
-       agent_id=None,
-       timestamp=datetime.now(UTC),
-       sequence=0,
-       code="INVALID_CHANNEL",
-       message="Permission responses must be submitted via REST: POST /api/permissions/{id}/respond",
-   )
-   await websocket.send_json(error.model_dump(mode="json"))
-   ```
+```python
+ error = ErrorEvent(
+     type=ServerEventType.ERROR,
+     thread_id=cmd.thread_id,
+     agent_id=None,
+     timestamp=datetime.now(UTC),
+     sequence=0,
+     code="INVALID_CHANNEL",
+     message="Permission responses must be submitted via REST: POST /api/permissions/{id}/respond",
+ )
+ await websocket.send_json(error.model_dump(mode="json"))
+```
 
 ---
 
@@ -395,7 +389,7 @@ resolved.
 ### Requirements: (11)
 
 1. Change `allow_origins=["*"]`to`allow_origins=["http://localhost:5173",
-   "http://127.0.0.1:5173"]`.
+"http://127.0.0.1:5173"]`.
 2. Optionally make configurable via `settings.cors_origins`.
 
 ---
@@ -403,12 +397,12 @@ resolved.
 ### Fix 13: State Snapshot Timestamps (M5)
 
 **Source:** Audit M5
-**Files:** `lib/api/endpoints.py`(_enrich_snapshot_from_state)
+**Files:** `lib/api/endpoints.py`(\_enrich_snapshot_from_state)
 
 ### Requirements: (12)
 
 1. Use actual message creation timestamps from the LangGraph state rather than
-  `datetime.now(UTC)`.
+   `datetime.now(UTC)`.
 
 ---
 
@@ -432,11 +426,8 @@ resolved.
 
 ### Requirements: (14)
 
-1. Wire `AGENT_CONTROL`command to graph cancellation:
-   -`pause`→ not directly supported by LangGraph (defer)
-   -`cancel`→ call`aggregator.cancel(thread_id)`which should terminate the
-    `astream_events`task
-   -`resume`→ re-invoke the graph from the last checkpoint
+1. Wire `AGENT_CONTROL`command to graph cancellation: -`pause`→ not directly supported by LangGraph (defer) -`cancel`→ call`aggregator.cancel(thread_id)`which should terminate the
+   `astream_events`task -`resume`→ re-invoke the graph from the last checkpoint
 
 ---
 
@@ -449,7 +440,7 @@ resolved.
 ### Requirements: (15)
 
 1. Add middleware or configure `StaticFiles`to set`Cache-Control: public,
-   max-age=31536000`
+max-age=31536000`
    for hashed asset files (`.js`, `.css`with content hash in filename).
 2. Set`Cache-Control: no-cache`for`index.html`.
 
@@ -508,54 +499,54 @@ Phase 3 (all parallel, depends on Phase 1 complete):
 
 ### After Phase 1 (End-to-End Functional)
 
-| # | Criterion | Source |
-| --- | --- | --- |
-| V1 | `uvicorn lib.api.app:create_app --factory`starts without errors | Prior plan V1 |
-| V2 | `AsyncSqliteSaver`initialized in lifespan with`async with` | Audit C1, H2 |
-| V3 | `POST /threads`with`initial_message`triggers graph execution | Audit C2 |
-| V4 | WebSocket subscriber receives streaming events after thread creation | ADR-004 |
-| V5 | `interrupt()`in worker.py persists state to SQLite | ADR-003 |
-| V6 | `POST /permissions/{id}/respond`resumes graph from checkpoint | ADR-011 SS3.1 |
-| V7 | `GET /threads/{id}/state`returns meaningful`StateSnapshot` | ADR-011 SS2.3 |
-| V8 | No`asyncio.create_task()`in app.py or endpoints.py | Audit C3, ADR-007 SS5 |
-| V9 | Background tasks survive for their full duration (no GC) | Audit C3 |
+| #   | Criterion                                                            | Source                |
+| --- | -------------------------------------------------------------------- | --------------------- |
+| V1  | `uvicorn lib.api.app:create_app --factory`starts without errors      | Prior plan V1         |
+| V2  | `AsyncSqliteSaver`initialized in lifespan with`async with`           | Audit C1, H2          |
+| V3  | `POST /threads`with`initial_message`triggers graph execution         | Audit C2              |
+| V4  | WebSocket subscriber receives streaming events after thread creation | ADR-004               |
+| V5  | `interrupt()`in worker.py persists state to SQLite                   | ADR-003               |
+| V6  | `POST /permissions/{id}/respond`resumes graph from checkpoint        | ADR-011 SS3.1         |
+| V7  | `GET /threads/{id}/state`returns meaningful`StateSnapshot`           | ADR-011 SS2.3         |
+| V8  | No`asyncio.create_task()`in app.py or endpoints.py                   | Audit C3, ADR-007 SS5 |
+| V9  | Background tasks survive for their full duration (no GC)             | Audit C3              |
 
 ### After Phase 2 (Production Safe)
 
-| # | Criterion | Source |
-| --- | --- | --- |
-| V10 | Single database path used by app, checkpointer, and session | Audit H7 |
-| V11 | `_sandbox_path`uses`is_relative_to()` | Audit H1 |
+| #   | Criterion                                                      | Source   |
+| --- | -------------------------------------------------------------- | -------- |
+| V10 | Single database path used by app, checkpointer, and session    | Audit H7 |
+| V11 | `_sandbox_path`uses`is_relative_to()`                          | Audit H1 |
 | V12 | `GET /team/status`returns`AgentSummary`list from node metadata | Audit H3 |
-| V13 | `fs/write_text_file`acquires git mutex before writing | Audit H4 |
-| V14 | File read/write uses`asyncio.to_thread()`or`aiofiles` | Audit H5 |
-| V15 | `terminal/create`validates commands | Audit H6 |
+| V13 | `fs/write_text_file`acquires git mutex before writing          | Audit H4 |
+| V14 | File read/write uses`asyncio.to_thread()`or`aiofiles`          | Audit H5 |
+| V15 | `terminal/create`validates commands                            | Audit H6 |
 
 ### After Phase 3 (Protocol Compliant)
 
-| # | Criterion | Source |
-| --- | --- | --- |
+| #   | Criterion                                        | Source   |
+| --- | ------------------------------------------------ | -------- |
 | V16 | `PERMISSION_RESPONSE`over WS returns`ErrorEvent` | Audit M3 |
-| V17 | CORS allows only`localhost:5173` origins | Audit M2 |
-| V18 | State snapshot uses actual message timestamps | Audit M5 |
-| V19 | Config loading catches specific exceptions | Audit M7 |
+| V17 | CORS allows only`localhost:5173` origins         | Audit M2 |
+| V18 | State snapshot uses actual message timestamps    | Audit M5 |
+| V19 | Config loading catches specific exceptions       | Audit M7 |
 
 ### Regression Guard
 
-| # | Criterion | Source |
-| --- | --- | --- |
-| V20 | All existing tests pass (`pytest lib/`) | Prior plan V30 |
-| V21 | `from lib.core import compile_team_graph`works | Prior plan V19 |
-| V22 | `from lib.providers import AcpChatModel, ProviderFactory`works | Prior plan V20 |
-| V23 | TOML preset loading still works | Prior plan V24, V25 |
+| #   | Criterion                                                      | Source              |
+| --- | -------------------------------------------------------------- | ------------------- |
+| V20 | All existing tests pass (`pytest lib/`)                        | Prior plan V30      |
+| V21 | `from lib.core import compile_team_graph`works                 | Prior plan V19      |
+| V22 | `from lib.providers import AcpChatModel, ProviderFactory`works | Prior plan V20      |
+| V23 | TOML preset loading still works                                | Prior plan V24, V25 |
 
 ---
 
 ## Risk Register
 
-| # | Risk | Severity | Mitigation |
-| --- | --- | --- | --- |
-| R1 | **Checkpointer + application DB sharing SQLite file.** Under high concurrency, WAL still permits only one writer. Checkpointer writes and application CRUD writes may contend. | MEDIUM | Use separate`aiosqlite`connections. Protect application writes with`asyncio.Lock()`. Consider separate DB files if contention is observed. |
-| R2 | **`anyio.create_task_group()`cancellation semantics.** When the lifespan exits,`anyio`cancels all tasks in the group. Long-running graph executions may be interrupted mid-turn. | MEDIUM | Implement graceful shutdown: set a flag that prevents new graph invocations, then wait for running tasks to reach a checkpoint before exiting. |
-| R3 | **Git mutex acquisition from AcpChatModel.** The mutex is in`workspace/git_manager.py`but AcpChatModel is in`providers/`. Cross-module dependency may create import cycles. | LOW | Pass the mutex as a parameter to `AcpChatModel`or use a shared module-level lock in`utils/`. |
-| R4 | **Terminal sandbox scope.** Allowlisting commands is difficult when agents need to run arbitrary build/test commands. Over-restriction breaks functionality; under-restriction is a security risk. | MEDIUM | For v1, log all commands and restrict `cwd`. Defer fine-grained sandboxing to v2 after real usage patterns are observed. |
+| #   | Risk                                                                                                                                                                                               | Severity | Mitigation                                                                                                                                     |
+| --- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| R1  | **Checkpointer + application DB sharing SQLite file.** Under high concurrency, WAL still permits only one writer. Checkpointer writes and application CRUD writes may contend.                     | MEDIUM   | Use separate`aiosqlite`connections. Protect application writes with`asyncio.Lock()`. Consider separate DB files if contention is observed.     |
+| R2  | **`anyio.create_task_group()`cancellation semantics.** When the lifespan exits,`anyio`cancels all tasks in the group. Long-running graph executions may be interrupted mid-turn.                   | MEDIUM   | Implement graceful shutdown: set a flag that prevents new graph invocations, then wait for running tasks to reach a checkpoint before exiting. |
+| R3  | **Git mutex acquisition from AcpChatModel.** The mutex is in`workspace/git_manager.py`but AcpChatModel is in`providers/`. Cross-module dependency may create import cycles.                        | LOW      | Pass the mutex as a parameter to `AcpChatModel`or use a shared module-level lock in`utils/`.                                                   |
+| R4  | **Terminal sandbox scope.** Allowlisting commands is difficult when agents need to run arbitrary build/test commands. Over-restriction breaks functionality; under-restriction is a security risk. | MEDIUM   | For v1, log all commands and restrict `cwd`. Defer fine-grained sandboxing to v2 after real usage patterns are observed.                       |

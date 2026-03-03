@@ -96,11 +96,7 @@ function tokenize(src: string): Token[] {
 }
 
 /** Tokenise inline markdown (bold, italic, code, links, mentions, strikethrough). */
-function tokenizeInline(
-  src: string,
-  out: Token[],
-  textType: Token['type'] = 'text'
-) {
+function tokenizeInline(src: string, out: Token[], textType: Token['type'] = 'text') {
   const re =
     /(\*\*\*(.+?)\*\*\*)|(\*\*(.+?)\*\*)|(\*(.+?)\*)|(_(.+?)_)|(`([^`]+?)`)|(~~(.+?)~~)|(\[([^\]]*)\]\(([^)]*)\))|(@[A-Za-z][\w]*)/g;
 
@@ -143,7 +139,7 @@ function tokenizeInline(
 }
 
 // ── Component ────────────────────────────────────────────────────────────────
- 
+
 interface MarkdownEditorProps {
   value: string;
   onChange: (e: ChangeEvent<HTMLTextAreaElement>) => void;
@@ -156,7 +152,7 @@ interface MarkdownEditorProps {
   inputClassName?: string;
   isDark?: boolean;
 }
- 
+
 export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
   function MarkdownEditor(
     {
@@ -170,11 +166,11 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
       inputClassName = '',
       isDark,
     },
-    ref
+    ref,
   ) {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const highlightRef = useRef<HTMLDivElement>(null);
- 
+
     // Sync scroll positions
     const syncScroll = useCallback(() => {
       if (textareaRef.current && highlightRef.current) {
@@ -182,14 +178,14 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
         highlightRef.current.scrollLeft = textareaRef.current.scrollLeft;
       }
     }, []);
- 
+
     useEffect(() => {
       const ta = textareaRef.current;
       if (!ta) return;
       ta.addEventListener('scroll', syncScroll);
       return () => ta.removeEventListener('scroll', syncScroll);
     }, [syncScroll]);
- 
+
     // Auto-expand logic
     useEffect(() => {
       if (textareaRef.current && onHeightChange) {
@@ -202,14 +198,14 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
         }
       }
     }, [value, onHeightChange]);
- 
+
     const tokens = tokenize(value);
     const highlighted = renderTokens(tokens);
- 
+
     // Shared typography classes — must match exactly between textarea and highlight div
     const sharedTypography =
       'font-mono text-[0.8125rem] leading-[1.625] px-3 py-2 whitespace-pre-wrap break-words';
- 
+
     // Token styles that adapt to dark/light mode
     const tokenStyle: Record<Token['type'], string> = {
       text: '',
@@ -231,7 +227,7 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
       mention: 'text-accent-2 font-medium',
       strikethrough: 'text-muted-foreground line-through',
     };
- 
+
     function renderTokens(tokens: Token[]): ReactNode[] {
       return tokens.map((t, i) => {
         const cls = tokenStyle[t.type];
@@ -243,21 +239,23 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
         );
       });
     }
- 
+
     return (
       <div ref={ref} className={`relative h-full min-h-[2.25rem] ${className}`}>
         {/* Highlight layer — behind the textarea */}
         <div
           ref={highlightRef}
           aria-hidden
-          className={`absolute inset-0 ${sharedTypography} overflow-hidden pointer-events-none rounded-terminal border border-transparent`}
+          className={`absolute inset-0 ${sharedTypography} rounded-terminal pointer-events-none overflow-hidden border border-transparent`}
           style={{ overflowWrap: 'anywhere' }}
         >
-          {value ? highlighted : (
+          {value ? (
+            highlighted
+          ) : (
             <span className="text-muted-foreground">{placeholder}</span>
           )}
         </div>
- 
+
         {/* Textarea — on top, with transparent text so the highlight shows through */}
         <textarea
           ref={textareaRef}
@@ -267,20 +265,20 @@ export const MarkdownEditor = forwardRef<HTMLDivElement, MarkdownEditorProps>(
           disabled={disabled}
           placeholder=""
           aria-label={placeholder || 'Message input'}
-          className={`absolute inset-0 w-full h-full resize-none ${sharedTypography} bg-transparent text-transparent caret-foreground selection:bg-primary/20 selection:text-transparent rounded-terminal border border-border focus:outline-none focus:ring-1 focus:ring-ring transition-all ${
-            disabled ? 'opacity-50 cursor-not-allowed' : ''
+          className={`absolute inset-0 h-full w-full resize-none ${sharedTypography} caret-foreground selection:bg-primary/20 rounded-terminal border-border focus:ring-ring border bg-transparent text-transparent transition-all selection:text-transparent focus:ring-1 focus:outline-none ${
+            disabled ? 'cursor-not-allowed opacity-50' : ''
           } ${inputClassName}`}
           style={{ overflowWrap: 'anywhere' }}
           spellCheck={false}
         />
       </div>
     );
-  }
+  },
 );
 
 // Re-export ref getter for parent components that need cursor positioning
 export function getEditorTextarea(
-  editorEl: HTMLElement | null
+  editorEl: HTMLElement | null,
 ): HTMLTextAreaElement | null {
   if (!editorEl) return null;
   return editorEl.querySelector('textarea');

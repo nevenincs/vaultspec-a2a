@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: research
 feature: console-printer
-description: "Research into dual-mode terminal output strategy using rich for the CLI."
+description: 'Research into dual-mode terminal output strategy using rich for the CLI.'
 ---
 
 # Console & Terminal Printing Strategy

@@ -35,8 +35,8 @@ the v1 architecture.
 2. **FastAPI & Uvicorn Instrumentation:** The REST API and WebSocket
    interfaces will be instrumented using standard
    `opentelemetry-instrumentation-fastapi`.
-3. **Exporting vs. Dashboarding:** The bespoke SvelteKit control surface is
-   restricted strictly to *real-time control* (agent lifecycles, streaming
+3. **Exporting vs. Dashboarding:** The bespoke React control surface is
+   restricted strictly to _real-time control_ (agent lifecycles, streaming
    state). We will not build complex historical time-travel or cost-matrix
    widgets in v1. Instead, all spans and token metrics will be exported via
    OTLP (OpenTelemetry Protocol) to standard external observability backends
@@ -50,7 +50,7 @@ the v1 architecture.
   blocked on an MCP tool call or context transfer.
 - **Separation of Concerns:** By explicitly delegating historical aggregation
   and cost/latency analysis to external OTel-compatible backends, we
-  dramatically reduce the scope and complexity of our bespoke SvelteKit
+  dramatically reduce the scope and complexity of our bespoke React
   frontend UI.
 
 ## 4. Rejected Alternatives
@@ -59,7 +59,7 @@ the v1 architecture.
   implement tracing guarantees that v1 debugging will be a nightmare,
   especially when dealing with complex asynchronous streaming endpoints.
 - **Building Custom Time-Travel Debugger:** Rejected. Creating a custom tool
-  to visualize the LangGraph execution history inside the SvelteKit dashboard
+  to visualize the LangGraph execution history inside the React dashboard
   is redundant when tools like LangSmith and Grafana already exist.
 
 ## 5. Implementation Constraints & Pitfalls

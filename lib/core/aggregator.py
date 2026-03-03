@@ -20,6 +20,8 @@ from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
 
+from langgraph.types import Command
+
 from ..api.schemas.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -39,8 +41,6 @@ from ..api.schemas.events import (
     ToolCallStartEvent,
     ToolCallUpdateEvent,
 )
-from langgraph.types import Command
-
 from ..telemetry.instrumentation import get_meter, get_tracer
 from .exceptions import EventAggregatorError
 
@@ -110,6 +110,8 @@ def _evict_oldest(d: dict, max_entries: int) -> None:
     # Sort by timestamp (value), evict the oldest.
     for key in sorted(d, key=d.__getitem__)[:to_remove]:
         del d[key]
+
+
 _CHUNK_BUFFER_MAX_BYTES = 4096  # 4KB buffer threshold
 
 # ---------------------------------------------------------------------------
@@ -381,7 +383,9 @@ class EventAggregator:
         if client_id in self._subscriptions:
             self._subscriptions[client_id].difference_update(thread_ids)
 
-    def add_broadcast_hook(self, hook: Callable[[ServerEvent], Awaitable[None]]) -> None:
+    def add_broadcast_hook(
+        self, hook: Callable[[ServerEvent], Awaitable[None]]
+    ) -> None:
         """Register a hook called on every broadcast (worker bridge relay)."""
         self._broadcast_hooks.append(hook)
 
@@ -799,14 +803,14 @@ class EventAggregator:
         self._pending_permissions.pop(request_id, None)
 
     def get_pending_permissions(
-        self, thread_id: str | None = None,
+        self,
+        thread_id: str | None = None,
     ) -> list[PermissionRequestEvent]:
         """Return pending permission requests, optionally filtered by thread (MCP-R5)."""
         if thread_id is None:
             return list(self._pending_permissions.values())
         return [
-            ev for ev in self._pending_permissions.values()
-            if ev.thread_id == thread_id
+            ev for ev in self._pending_permissions.values() if ev.thread_id == thread_id
         ]
 
     async def emit_error(
@@ -1067,56 +1071,103 @@ class EventAggregator:
                 payload = getattr(interrupt_obj, "value", interrupt_obj)
                 if not isinstance(payload, dict):
                     continue
-                if payload.get("type") != "permission_request":
+                interrupt_type = payload.get("type")
+                if interrupt_type not in (
+                    "permission_request",
+                    "plan_approval_request",
+                ):
                     continue
 
                 request_id = f"{thread_id}:{uuid4().hex}"
-                tool_name: str = payload.get("tool_name", "unknown")
-                acp_options: list[dict[str, Any]] = payload.get("options", [])
 
-                options: list[dict[str, Any]] = [
-                    {
-                        "option_id": opt.get(
-                            "optionId", opt.get("option_id", "allow_once")
-                        ),
-                        "name": opt.get(
-                            "label", opt.get("name", opt.get("optionId", "Allow"))
-                        ),
-                        "kind": _map_acp_option_kind(
-                            opt.get("optionId", opt.get("option_id", ""))
-                        ),
-                    }
-                    for opt in acp_options
-                ]
-                if not options:
-                    options = [
+                if interrupt_type == "plan_approval_request":
+                    feature: str = payload.get("feature") or "unknown"
+                    plan_paths: list[str] = payload.get("plan_paths") or []
+                    exec_worker: str = payload.get("exec_worker") or "unknown"
+                    plan_summary = (
+                        f"{len(plan_paths)} plan document(s)"
+                        if plan_paths
+                        else "no plan documents"
+                    )
+                    description = (
+                        f"Approve plan for feature '{feature}' before "
+                        f"routing to {exec_worker} ({plan_summary})"
+                    )
+                    options: list[dict[str, Any]] = [
                         {
-                            "option_id": "allow_once",
-                            "name": "Allow",
+                            "option_id": "approve",
+                            "name": "Approve Plan",
                             "kind": PermissionOptionKind.ALLOW_ONCE,
                         },
                         {
-                            "option_id": "deny_once",
-                            "name": "Deny",
+                            "option_id": "reject",
+                            "name": "Reject — Revise Plan",
                             "kind": PermissionOptionKind.REJECT_ONCE,
                         },
                     ]
+                    await self.emit_permission_request(
+                        thread_id=thread_id,
+                        agent_id=task.name,
+                        request_id=request_id,
+                        description=description,
+                        options=options,
+                        tool_call="plan_approval",
+                    )
+                    await self.emit_agent_status(
+                        thread_id=thread_id,
+                        agent_id=task.name,
+                        node_name=task.name,
+                        state=AgentLifecycleState.INPUT_REQUIRED,
+                        detail=f"Awaiting plan approval for feature '{feature}'",
+                    )
+                else:
+                    # permission_request — existing ACP tool approval path
+                    tool_name: str = payload.get("tool_name", "unknown")
+                    acp_options: list[dict[str, Any]] = payload.get("options", [])
 
-                await self.emit_permission_request(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    request_id=request_id,
-                    description=f"Permission required: {tool_name}",
-                    options=options,
-                    tool_call=tool_name,
-                )
-                await self.emit_agent_status(
-                    thread_id=thread_id,
-                    agent_id=task.name,
-                    node_name=task.name,
-                    state=AgentLifecycleState.INPUT_REQUIRED,
-                    detail=f"Awaiting approval for {tool_name}",
-                )
+                    options = [
+                        {
+                            "option_id": opt.get(
+                                "optionId", opt.get("option_id", "allow_once")
+                            ),
+                            "name": opt.get(
+                                "label", opt.get("name", opt.get("optionId", "Allow"))
+                            ),
+                            "kind": _map_acp_option_kind(
+                                opt.get("optionId", opt.get("option_id", ""))
+                            ),
+                        }
+                        for opt in acp_options
+                    ]
+                    if not options:
+                        options = [
+                            {
+                                "option_id": "allow_once",
+                                "name": "Allow",
+                                "kind": PermissionOptionKind.ALLOW_ONCE,
+                            },
+                            {
+                                "option_id": "deny_once",
+                                "name": "Deny",
+                                "kind": PermissionOptionKind.REJECT_ONCE,
+                            },
+                        ]
+
+                    await self.emit_permission_request(
+                        thread_id=thread_id,
+                        agent_id=task.name,
+                        request_id=request_id,
+                        description=f"Permission required: {tool_name}",
+                        options=options,
+                        tool_call=tool_name,
+                    )
+                    await self.emit_agent_status(
+                        thread_id=thread_id,
+                        agent_id=task.name,
+                        node_name=task.name,
+                        state=AgentLifecycleState.INPUT_REQUIRED,
+                        detail=f"Awaiting approval for {tool_name}",
+                    )
 
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
@@ -1211,9 +1262,7 @@ class EventAggregator:
                         recoverable=False,
                     )
                 elif _is_step_timeout:
-                    logger.warning(
-                        "Graph step_timeout fired for thread %s", thread_id
-                    )
+                    logger.warning("Graph step_timeout fired for thread %s", thread_id)
                     span.set_attribute("error.type", "step_timeout")
                     await self.emit_error(
                         thread_id=thread_id,
@@ -1243,7 +1292,9 @@ class EventAggregator:
                 await self._flush_chunk_buffer(thread_id)
                 # AGG-03: prune per-thread debounce timestamp maps so they
                 # don't grow unbounded across many completed ingests.
-                stale_tool_keys = [k for k in self._tool_update_last_emit if k[0] == thread_id]
+                stale_tool_keys = [
+                    k for k in self._tool_update_last_emit if k[0] == thread_id
+                ]
                 for k in stale_tool_keys:
                     del self._tool_update_last_emit[k]
                 self._plan_update_last_emit.pop(thread_id, None)

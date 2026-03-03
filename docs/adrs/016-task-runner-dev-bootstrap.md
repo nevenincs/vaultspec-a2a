@@ -35,14 +35,14 @@ like Makefile require Git Bash or WSL workarounds.
 
 ### 1.1 Reference Project Survey
 
-| Project | Task Runner | Windows Support |
-| --------- | ------------ | ----------------- |
-| LangChain | Makefile | Requires WSL/Git Bash |
-| LangGraph | Makefile | Requires WSL/Git Bash |
-| DeepAgents | Makefile | Requires WSL/Git Bash |
-| acp-python-sdk | Makefile | Requires WSL/Git Bash |
-| Open WebUI | Makefile (Docker) | Docker Desktop |
-| Dify | Docker Compose | Docker Desktop |
+| Project        | Task Runner       | Windows Support       |
+| -------------- | ----------------- | --------------------- |
+| LangChain      | Makefile          | Requires WSL/Git Bash |
+| LangGraph      | Makefile          | Requires WSL/Git Bash |
+| DeepAgents     | Makefile          | Requires WSL/Git Bash |
+| acp-python-sdk | Makefile          | Requires WSL/Git Bash |
+| Open WebUI     | Makefile (Docker) | Docker Desktop        |
+| Dify           | Docker Compose    | Docker Desktop        |
 
 None of the reference projects support native PowerShell development.
 This is a gap we can fill.
@@ -55,15 +55,15 @@ Adopt `just` (Justfile) as the project's task runner.
 
 **Why `just` over alternatives:**
 
-| Criterion | Makefile | Justfile | Taskfile.dev |
-| ----------- | --------- | ---------- | ------------- |
-| Windows/PWSH native | No | Yes (`set windows-shell`) | Yes |
-| Install | Pre-installed (Unix) | `winget install Casey.Just` | Go binary |
-| Syntax | Tab-sensitive, POSIX shell | Simple, no tabs | YAML |
-| `.env` loading | Manual | `set dotenv-load := true` | Manual |
-| Platform branching | Awkward | `os()` function | `{{OS}}` variable |
-| Adoption in Rust ecosystem | Low | High | Low |
-| Complexity | Low | Low | Medium |
+| Criterion                  | Makefile                   | Justfile                    | Taskfile.dev      |
+| -------------------------- | -------------------------- | --------------------------- | ----------------- |
+| Windows/PWSH native        | No                         | Yes (`set windows-shell`)   | Yes               |
+| Install                    | Pre-installed (Unix)       | `winget install Casey.Just` | Go binary         |
+| Syntax                     | Tab-sensitive, POSIX shell | Simple, no tabs             | YAML              |
+| `.env` loading             | Manual                     | `set dotenv-load := true`   | Manual            |
+| Platform branching         | Awkward                    | `os()` function             | `{{OS}}` variable |
+| Adoption in Rust ecosystem | Low                        | High                        | Low               |
+| Complexity                 | Low                        | Low                         | Medium            |
 
 `just` is the only task runner that supports native PowerShell recipes
 while remaining simple and low-overhead. It is a single static binary
@@ -239,8 +239,8 @@ project root.
 
 ## 5. Compliance Matrix
 
-| ADR | Relationship | Status |
-| ----- | ------------- | -------- |
-| ADR-007 (Tech Stack) | Aligns — `just` orchestrates the uv + npm stack | Compliant |
-| ADR-009 (Module Hierarchy) | No impact | N/A |
-| ADR-015 (Dep Hygiene) | Builds on — `just audit` runs `uv run deptry lib/` | Compliant |
+| ADR                        | Relationship                                       | Status    |
+| -------------------------- | -------------------------------------------------- | --------- |
+| ADR-007 (Tech Stack)       | Aligns — `just` orchestrates the uv + npm stack    | Compliant |
+| ADR-009 (Module Hierarchy) | No impact                                          | N/A       |
+| ADR-015 (Dep Hygiene)      | Builds on — `just audit` runs `uv run deptry lib/` | Compliant |

@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { StreamEvent } from '../../data/types';
-import type { ServerEvent } from '../../data/wire-types';
+import type { components } from '../../data/wire-types';
+type ServerEvent = components['schemas']['ServerEvent'];
 import { mapToolKind, mapToolCallStatus } from '../../api/mappers';
 import { wsClient } from '../../api/websocket-client';
 import type { AppStore } from '../app-store';
@@ -121,9 +122,9 @@ export const createStreamSlice: StateCreator<
       }
 
       case 'tool_call_start': {
-        const loc = event.locations[0];
-        const textC = event.content.find((c) => c.content_type === 'text');
-        const diffC = event.content.find((c) => c.content_type === 'diff');
+        const loc = event.locations?.[0];
+        const textC = event.content?.find((c) => c.content_type === 'text');
+        const diffC = event.content?.find((c) => c.content_type === 'diff');
         set(
           (draft) => {
             if (!draft.streamEvents[threadId]) {

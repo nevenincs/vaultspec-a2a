@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: agents-distilled
-description: "Consolidated provider analysis for Claude, Gemini, Codex, and GLM-5 covering authentication, protocol support, and integration requirements."
-name: "Agents Domain - Distilled"
+description: 'Consolidated provider analysis for Claude, Gemini, Codex, and GLM-5 covering authentication, protocol support, and integration requirements.'
+name: 'Agents Domain - Distilled'
 maturity: 45
-summary: "Consolidated provider analysis for Claude, Gemini, Codex, and GLM-5 covering authentication, protocol support, and integration requirements. Refuted hypotheses removed. Contradictions and gaps explicitly identified."
+summary: 'Consolidated provider analysis for Claude, Gemini, Codex, and GLM-5 covering authentication, protocol support, and integration requirements. Refuted hypotheses removed. Contradictions and gaps explicitly identified.'
 sources:
   - docs/agents/2026-25-02-claude-agent-support.md
   - docs/agents/2026-25-02-gemini-agent-support.md
@@ -235,12 +235,12 @@ via Architecture Decision Records before implementation.
 
 The four providers present four different ACP integration stories:
 
-| Provider | ACP Status |
-| ---------- | ----------- |
-| Gemini | Native ACP (v0.28.0+) |
-| Claude | Adapter required (`claude-code-acp`package) |
-| Codex | Custom wrapper required (no package exists) |
-| GLM-5 | Custom wrapper required (adaptable from OpenAI) |
+| Provider | ACP Status                                      |
+| -------- | ----------------------------------------------- |
+| Gemini   | Native ACP (v0.28.0+)                           |
+| Claude   | Adapter required (`claude-code-acp`package)     |
+| Codex    | Custom wrapper required (no package exists)     |
+| GLM-5    | Custom wrapper required (adaptable from OpenAI) |
 
 **Resolved by ADR-006**: ACP has been formally abandoned in favor of
 orchestrating agents as native nodes within a LangGraph`StateGraph`. Adapter
@@ -248,23 +248,23 @@ heterogeneity is no longer a concern.
 
 ### C2: A2A Integration Uses Three Distinct Patterns
 
-| Pattern | Providers |
-| --------- | ----------- |
-| MCP → A2A bridge | Claude, Codex |
-| Native A2A (experimental) | Gemini |
-| Custom A2A server | GLM-5 |
+| Pattern                   | Providers     |
+| ------------------------- | ------------- |
+| MCP → A2A bridge          | Claude, Codex |
+| Native A2A (experimental) | Gemini        |
+| Custom A2A server         | GLM-5         |
 
 **Resolved by ADR-006**: The A2A protocol has been abandoned. All agents are
 executed as native python LangChain runnables wrapped in LangGraph nodes.
 
 ### C3: Subscription Bypass Mechanisms Vary in Robustness
 
-| Provider | Mechanism | Fragility |
-| ---------- | ----------- | ----------- |
-| Claude | `CLAUDE_CODE_OAUTH_TOKEN`env var | Medium — token generated via CLI command |
-| Gemini | OAuth refresh token extraction | High — relies on cached browser token |
-| Codex | Cached browser session token | High — generated via interactive login |
-| GLM-5 | Native subscription API key | Low — officially issued, no bypass needed |
+| Provider | Mechanism                        | Fragility                                 |
+| -------- | -------------------------------- | ----------------------------------------- |
+| Claude   | `CLAUDE_CODE_OAUTH_TOKEN`env var | Medium — token generated via CLI command  |
+| Gemini   | OAuth refresh token extraction   | High — relies on cached browser token     |
+| Codex    | Cached browser session token     | High — generated via interactive login    |
+| GLM-5    | Native subscription API key      | Low — officially issued, no bypass needed |
 
 **Resolved by ADR-002**: We mandate the use of static, long-lived setup tokens
 (e.g.,`CLAUDE_CODE_OAUTH_TOKEN`) generated out-of-band by the developer. This

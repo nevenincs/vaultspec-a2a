@@ -12,13 +12,25 @@ interface TabBarProps {
   closeTab: (threadId: string) => void;
 }
 
-export function TabBar({ tabs, activeTabId, threads, activateTab, pinTab, closeTab }: TabBarProps) {
+export function TabBar({
+  tabs,
+  activeTabId,
+  threads,
+  activateTab,
+  pinTab,
+  closeTab,
+}: TabBarProps) {
   if (tabs.length === 0) return null;
 
   return (
-    <div className="flex items-end border-b border-border bg-oxide-sidebar-bg shrink-0 overflow-x-auto h-9" role="tablist" aria-label="Open tasks" data-focus-section="tab-bar">
+    <div
+      className="border-border bg-oxide-sidebar-bg flex h-9 shrink-0 items-end overflow-x-auto border-b"
+      role="tablist"
+      aria-label="Open tasks"
+      data-focus-section="tab-bar"
+    >
       {tabs.map((tab) => {
-        const thread = threads.find(t => t.thread_id === tab.threadId);
+        const thread = threads.find((t) => t.thread_id === tab.threadId);
         const isActive = activeTabId === tab.threadId;
         const label = thread?.nickname || thread?.title || tab.threadId;
         const dot = thread ? agentStateDot(thread.agent_state) : null;
@@ -129,7 +141,7 @@ function TabItem({
       role="tab"
       aria-selected={isActive}
       aria-label={`${label}${isPinned ? '' : ' (transient)'}${isActive ? ', active' : ''}`}
-      className={`group relative flex items-center gap-1.5 h-full px-4 cursor-pointer select-none shrink-0 max-w-[14rem] border-r border-border/40 transition-all font-mono tracking-tight ${
+      className={`group border-border/40 relative flex h-full max-w-[14rem] shrink-0 cursor-pointer items-center gap-1.5 border-r px-4 font-mono tracking-tight transition-all select-none ${
         isActive
           ? 'bg-oxide-terminal-bg text-foreground shadow-[inset_0_2px_0_var(--primary)]'
           : 'bg-oxide-sidebar-bg text-oxide-metadata hover:text-foreground hover:bg-oxide-terminal-bg/50'
@@ -137,14 +149,14 @@ function TabItem({
     >
       {/* Status dot */}
       {dot && (
-        <span className="shrink-0 flex items-center justify-center [&>svg]:w-3 [&>svg]:h-3 [&>span]:w-2 [&>span]:h-2">
+        <span className="flex shrink-0 items-center justify-center [&>span]:h-2 [&>span]:w-2 [&>svg]:h-3 [&>svg]:w-3">
           {dot}
         </span>
       )}
 
       {/* Label — italic when transient */}
       <span
-        className={`text-[0.6875rem] truncate font-bold uppercase ${
+        className={`truncate text-[0.6875rem] font-bold uppercase ${
           isPinned ? '' : 'italic opacity-60'
         }`}
       >
@@ -155,9 +167,9 @@ function TabItem({
       <button
         onClick={handleCloseClick}
         aria-label={`Close tab: ${label}`}
-        className="shrink-0 ml-1.5 p-0.5 rounded-control opacity-60 hover:opacity-100 hover:bg-muted transition-all"
+        className="rounded-control hover:bg-muted ml-1.5 shrink-0 p-0.5 opacity-60 transition-all hover:opacity-100"
       >
-        <X className="w-3 h-3" />
+        <X className="h-3 w-3" />
       </button>
     </div>
   );

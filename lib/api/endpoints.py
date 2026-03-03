@@ -31,14 +31,14 @@ from uuid import uuid4
 import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.aggregator import EventAggregator
-from ..core.graph import _build_initial_vault_index
 from ..core.exceptions import ConfigError, NicknameConflictError
+from ..core.graph import _build_initial_vault_index
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..core.preamble import build_context_preamble
 from ..core.team_config import (
@@ -115,9 +115,7 @@ def get_checkpointer(request: Request) -> AsyncSqliteSaver:
 
 def get_worker_client(request: Request) -> httpx.AsyncClient:
     """FastAPI dependency for the httpx client pointing at the worker."""
-    client: httpx.AsyncClient | None = getattr(
-        request.app.state, "worker_client", None
-    )
+    client: httpx.AsyncClient | None = getattr(request.app.state, "worker_client", None)
     if client is None:
         raise RuntimeError("Worker httpx client not initialised in app state")
     return client
@@ -517,7 +515,10 @@ async def get_thread_state_endpoint(
                 # _enrich_snapshot_from_state
                 class _MinimalState:
                     """Minimal adapter for _enrich_snapshot_from_state."""
-                    def __init__(self, values: dict, config: dict | None = None) -> None:
+
+                    def __init__(
+                        self, values: dict, config: dict | None = None
+                    ) -> None:
                         self.values = values
                         self.config = config
 
@@ -685,6 +686,7 @@ async def get_team_status_endpoint(
 # GET /teams -- List available team presets (ADR-013 S6)
 # ---------------------------------------------------------------------------
 
+
 @router.get("/teams", response_model=TeamPresetsResponse)
 async def list_team_presets_endpoint() -> TeamPresetsResponse:
     """Return all available team presets for the team picker UI.
@@ -831,7 +833,11 @@ async def cancel_thread_endpoint(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     # Only cancel threads that are in a cancellable state.
-    if thread.status in (ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED):
+    if thread.status in (
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+    ):
         return CancelThreadResponse(
             thread_id=thread_id,
             status=thread.status,

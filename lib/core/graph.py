@@ -40,14 +40,24 @@ logger = logging.getLogger(__name__)
 __all__ = ["compile_team_graph"]
 
 _VAULT_STAGE_PATTERNS: dict[str, str] = {
-    "research":  ".vault/research/*{tag}*.md",
+    "research": ".vault/research/*{tag}*.md",
     "reference": ".vault/reference/*{tag}*.md",
-    "adr":       ".vault/adr/*{tag}*.md",
-    "plan":      ".vault/plan/*{tag}*.md",
-    "exec":      ".vault/exec/*{tag}*/**/*.md",
-    "audit":     ".vault/audit/*{tag}*.md",
+    "adr": ".vault/adr/*{tag}*.md",
+    "plan": ".vault/plan/*{tag}*.md",
+    "exec": ".vault/exec/*{tag}*/**/*.md",
+    "audit": ".vault/audit/*{tag}*.md",
 }
 _VAULT_INDEX_CAP = 50
+
+# ADR-023: maps AgentConfig.role → pipeline phase for worker_phase_map derivation.
+# Roles not in this map are exempt from phase prerequisite gating.
+_ROLE_TO_PHASE: dict[str, str] = {
+    "researcher": "research",
+    "analyst": "adr",
+    "planner": "plan",
+    "coder": "exec",
+    "reviewer": "audit",
+}
 
 # Transient exceptions that warrant a retry at the LangGraph node level.
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -213,7 +223,9 @@ def _build_supervisor_prompt(
     if "{{AGENT_ROSTER}}" in base_prompt:
         result = base_prompt.replace("{{AGENT_ROSTER}}", roster)
     else:
-        result = base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
+        result = (
+            base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
+        )
     if directive:
         result = result + f"\n\n## Team Directive\n\n{directive.strip()}"
     if feature_context:
@@ -289,6 +301,7 @@ def compile_team_graph(
             supervisor_agent_config,
             workspace_root,
             autonomous=autonomous,
+            feature_tag=feature_tag,
         )
     elif topology.type == TopologyType.PIPELINE:
         _compile_pipeline(
@@ -316,10 +329,14 @@ def compile_team_graph(
 
     # TOML-05: apply per-preset graph settings.
     # step_timeout: explicit caller param wins; fall back to team TOML value.
-    effective_timeout = step_timeout if step_timeout is not None else (
-        float(team_config.graph.step_timeout_seconds)
-        if team_config.graph.step_timeout_seconds is not None
-        else None
+    effective_timeout = (
+        step_timeout
+        if step_timeout is not None
+        else (
+            float(team_config.graph.step_timeout_seconds)
+            if team_config.graph.step_timeout_seconds is not None
+            else None
+        )
     )
     if effective_timeout is not None:
         graph.step_timeout = effective_timeout
@@ -337,6 +354,7 @@ def _compile_star(
     supervisor_agent_config: AgentConfig | None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
+    feature_tag: str | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -388,10 +406,19 @@ def _compile_star(
             "description": "Routes tasks to the appropriate specialist.",
         }
 
+    # ADR-023: derive worker_phase_map from agent roles for phase prerequisite gates.
+    worker_phase_map: dict[str, str] = {
+        cfg.id: _ROLE_TO_PHASE[cfg.role]
+        for cfg in resolved_agents
+        if cfg.role in _ROLE_TO_PHASE
+    }
+
     supervisor_node = create_supervisor_node(
         model=supervisor_model,
         system_prompt=supervisor_prompt,
         workers=worker_ids,
+        worker_phase_map=worker_phase_map or None,
+        autonomous=autonomous,
     )
     builder.add_node(
         "supervisor", supervisor_node, metadata=sv_meta, retry_policy=_NODE_RETRY_POLICY
@@ -418,6 +445,8 @@ def _compile_star(
             agent_cfg.persona.system_prompt,
             name=agent_cfg.id,
             autonomous=autonomous,
+            workspace_root=workspace_root,
+            feature_tag=feature_tag,
         )
         builder.add_node(
             agent_cfg.id,
@@ -430,6 +459,10 @@ def _compile_star(
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
+        # ADR-020: insert mount node between supervisor routing and worker invocation.
+        mount_fn = create_mount_node(workspace_root)
+        builder.add_node(f"mount_{agent_cfg.id}", mount_fn)
+        builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
 
     # M3: fail fast if no workers compiled — a supervisor with zero routes
@@ -440,7 +473,8 @@ def _compile_star(
             "All worker AgentConfigs are missing or unresolvable."
         )
 
-    route_map: dict[str, str] = {wid: wid for wid in compiled_worker_ids}
+    # ADR-020: supervisor routes to mount_{wid} which then edges to wid.
+    route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = END
     builder.add_conditional_edges(
         "supervisor",

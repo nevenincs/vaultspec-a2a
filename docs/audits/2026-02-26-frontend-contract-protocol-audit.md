@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: audit
 feature: frontend-contract-protocol
-description: "Protocol audit comparing the frontend-backend wire contract in lib/api/schemas/ against A2A proto, A2A Python SDK, ACP schema, and Toad reference, confirming intentional divergence per ADR-006."
+description: 'Protocol audit comparing the frontend-backend wire contract in lib/api/schemas/ against A2A proto, A2A Python SDK, ACP schema, and Toad reference, confirming intentional divergence per ADR-006.'
 related:
   - docs/adrs/2026-02-26-006-protocol-ecosystem-bridge-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -15,17 +15,12 @@ related:
 **Scope:** `lib/api/schemas/`(ADR-011 wire contract) audited against:
 
 -`knowledge/repositories/A2A/specification/a2a.proto`(808 lines, canonical
-  protobuf)
--`knowledge/repositories/a2a-python/src/a2a/types.py`(2041 lines, SDK
-  Pydantic models)
--`knowledge/repositories/acp-python-sdk/src/acp/schema.py`(2841 lines, ACP
-  models)
--`knowledge/repositories/toad/src/toad/acp/protocol.py`(ACP TypedDict
-  reference)
--`knowledge/repositories/a2a-samples/samples/python/agents/langgraph/`(A2A +
-  LangGraph integration example)
--`knowledge/a2a-protocol-definitions.md`, `a2a-protocol-key-concepts.md`,
-  `a2a-protocol-streaming-and-async.md`, `a2a-protocol-life-of-a-task.md`
+protobuf) -`knowledge/repositories/a2a-python/src/a2a/types.py`(2041 lines, SDK
+Pydantic models) -`knowledge/repositories/acp-python-sdk/src/acp/schema.py`(2841 lines, ACP
+models) -`knowledge/repositories/toad/src/toad/acp/protocol.py`(ACP TypedDict
+reference) -`knowledge/repositories/a2a-samples/samples/python/agents/langgraph/`(A2A +
+LangGraph integration example) -`knowledge/a2a-protocol-definitions.md`, `a2a-protocol-key-concepts.md`,
+`a2a-protocol-streaming-and-async.md`, `a2a-protocol-life-of-a-task.md`
 
 - `knowledge/repositories/a2a-python-sdk-guide.md`(SDK architecture guide)
 
@@ -44,7 +39,7 @@ This means:
 - A2A`Task`, `Message`, `Part`, `Artifact`are NOT carried directly over our
   WebSocket.
 - ACP concepts (tool calls, permissions, plans) are consumed internally by
- `AcpChatModel` and translated into LangChain objects, then further
+  `AcpChatModel` and translated into LangChain objects, then further
   translated by the Event Aggregator into our custom frontend events.
 
 **However**, the A2A and ACP protocols are authoritative references for:
@@ -90,13 +85,13 @@ class AgentLifecycleState(StrEnum):
 
 ### Gaps identified
 
-| Issue | Severity | Detail |
-| ------- | ---------- | -------- |
-| Missing `submitted`state | HIGH | A2A's initial state when a task is created/acknowledged. Our frontend has no way to show "task received but not yet processing." The aggregator emits`working`immediately, but the gap between user message submission and first agent activity is real. |
-| Missing`auth_required`state | MEDIUM | A2A defines this for when an agent needs authentication credentials. Relevant when`AcpChatModel`reports auth failures from CLIs. Currently these would surface as generic`failed`states. |
-| Missing`rejected`state | LOW | A2A uses this when an agent declines a task. Less relevant in our LangGraph-native architecture where the supervisor controls routing. |
-| `cancelled`spelling | LOW | A2A uses American`canceled`(single l). Our enum uses British`cancelled`(double l). Cosmetic but could cause interop friction if A2A bridge is ever added. |
-| `input_required`value format | MEDIUM | A2A uses hyphenated`input-required`. We use underscored `input_required`. Consistent within our own protocol, but diverges from A2A convention. |
+| Issue                        | Severity | Detail                                                                                                                                                                                                                                                   |
+| ---------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Missing `submitted`state     | HIGH     | A2A's initial state when a task is created/acknowledged. Our frontend has no way to show "task received but not yet processing." The aggregator emits`working`immediately, but the gap between user message submission and first agent activity is real. |
+| Missing`auth_required`state  | MEDIUM   | A2A defines this for when an agent needs authentication credentials. Relevant when`AcpChatModel`reports auth failures from CLIs. Currently these would surface as generic`failed`states.                                                                 |
+| Missing`rejected`state       | LOW      | A2A uses this when an agent declines a task. Less relevant in our LangGraph-native architecture where the supervisor controls routing.                                                                                                                   |
+| `cancelled`spelling          | LOW      | A2A uses American`canceled`(single l). Our enum uses British`cancelled`(double l). Cosmetic but could cause interop friction if A2A bridge is ever added.                                                                                                |
+| `input_required`value format | MEDIUM   | A2A uses hyphenated`input-required`. We use underscored `input_required`. Consistent within our own protocol, but diverges from A2A convention.                                                                                                          |
 
 **Recommendation:** Add `SUBMITTED = "submitted"`and`AUTH_REQUIRED =
 "auth_required"`to`AgentLifecycleState`.
@@ -127,10 +122,7 @@ class Part(RootModel[TextPart | FilePart | DataPart]):
 
 ### Our schema
 
-- `MessageChunkEvent.content: str`— flat string
--`ThoughtChunkEvent.content: str`— flat string
--`ArtifactUpdateEvent.content: str`— flat string
--`MessageSnapshot.content: str`— flat string
+- `MessageChunkEvent.content: str`— flat string -`ThoughtChunkEvent.content: str`— flat string -`ArtifactUpdateEvent.content: str`— flat string -`MessageSnapshot.content: str`— flat string
 
 **Gap:** Every content field in our schemas is a flat`str`. This works for
 streaming text tokens but cannot carry files, structured data, or metadata.
@@ -188,12 +180,12 @@ class ArtifactUpdateEvent(EventEnvelope):
 
 ### Gaps
 
-| Issue | Severity | Detail |
-| ------- | ---------- | -------- |
-| `content: str`instead of`parts` | MEDIUM | Cannot carry binary or structured artifacts. Acceptable for text-only MVP. |
-| `filename`not in A2A artifact | LOW | A2A uses`FilePart.file.name`inside the parts list. Our flattened`filename`is simpler for the frontend. |
-| Missing`description`field | LOW | A2A artifacts can carry descriptions for display. |
-| Missing`metadata`field | LOW | Limits extensibility. |
+| Issue                           | Severity | Detail                                                                                                 |
+| ------------------------------- | -------- | ------------------------------------------------------------------------------------------------------ |
+| `content: str`instead of`parts` | MEDIUM   | Cannot carry binary or structured artifacts. Acceptable for text-only MVP.                             |
+| `filename`not in A2A artifact   | LOW      | A2A uses`FilePart.file.name`inside the parts list. Our flattened`filename`is simpler for the frontend. |
+| Missing`description`field       | LOW      | A2A artifacts can carry descriptions for display.                                                      |
+| Missing`metadata`field          | LOW      | Limits extensibility.                                                                                  |
 
 ### 2.4 Task and Message Models
 
@@ -278,9 +270,7 @@ more reliable.
 
 The ACP SDK defines THREE distinct tool call models:
 
-- `ToolCallStart`— initial tool invocation
--`ToolCallProgress`— incremental updates (replaces content array)
--`ToolCallUpdate` — partial updates merging into existing state
+- `ToolCallStart`— initial tool invocation -`ToolCallProgress`— incremental updates (replaces content array) -`ToolCallUpdate` — partial updates merging into existing state
 
 **Toad protocol** (`protocol.py:202-228`):
 
@@ -315,9 +305,9 @@ camelCase (ACP convention), which is expected.
 
 ### Gaps: (2)
 
-| Issue | Severity | Detail |
-| ------- | ---------- | -------- |
-| Missing`raw_input`/`raw_output` | LOW | ACP carries the raw LLM tool call input/output. Useful for debugging but noisy for the frontend. Can be added later. |
+| Issue                           | Severity | Detail                                                                                                               |
+| ------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------- |
+| Missing`raw_input`/`raw_output` | LOW      | ACP carries the raw LLM tool call input/output. Useful for debugging but noisy for the frontend. Can be added later. |
 
 ### 3.2 ToolCallContent
 
@@ -359,10 +349,10 @@ class ToolCallContentTerminal(BaseModel):
 
 ### Gaps: (3)
 
-| Issue | Severity | Detail |
-| ------- | ---------- | -------- |
-| Discriminator name: `content_type`vs`type` | LOW | ACP uses`type`. We use `content_type`to avoid shadowing Python's`type`builtin. Reasonable divergence. |
-| `ToolCallContentContent`vs`ToolCallContentText` | MEDIUM | ACP's first variant is`content`type carrying a full`ContentBlock`(which itself is a union of text/image/audio/embedded/resource-link). Our`ToolCallContentText`only carries a`text: str`. We lose the ability to carry images or embedded resources in tool call content. |
+| Issue                                           | Severity | Detail                                                                                                                                                                                                                                                                    |
+| ----------------------------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Discriminator name: `content_type`vs`type`      | LOW      | ACP uses`type`. We use `content_type`to avoid shadowing Python's`type`builtin. Reasonable divergence.                                                                                                                                                                     |
+| `ToolCallContentContent`vs`ToolCallContentText` | MEDIUM   | ACP's first variant is`content`type carrying a full`ContentBlock`(which itself is a union of text/image/audio/embedded/resource-link). Our`ToolCallContentText`only carries a`text: str`. We lose the ability to carry images or embedded resources in tool call content. |
 
 **Recommendation:** For MVP, `text` is sufficient since CLI tool outputs are
 text. Document the gap for future iteration.
@@ -451,7 +441,7 @@ aggregator should:
 - Map LangGraph `astream_events`→ our 12 event types
 - Use`thread_id`as the equivalent of A2A`context_id`
 - Use `sequence`counters for ordering (A2A has no equivalent — it uses
- `final: bool`instead)
+  `final: bool`instead)
 
 ## 5. Summary of Findings
 
@@ -472,15 +462,15 @@ aggregator should:
 
 ### Gaps to Address
 
-| # | Gap | Source | Severity | Action |
-| --- | ----- | -------- | ---------- | -------- |
-| 1 | Missing `submitted`and`auth_required`lifecycle states | A2A TaskState | HIGH | Add to`AgentLifecycleState` |
-| 2 | No`metadata: dict[str, Any]`extensibility on events | A2A pattern | MEDIUM | Add optional`metadata`to`EventEnvelope`and connection events |
-| 3 | No`context_id`field on events/commands | A2A Task/Message | MEDIUM | Our`thread_id`serves this role. Add`context_id`as alias or document the mapping explicitly. |
-| 4 | `content: str`cannot carry non-text data | A2A Part union | LOW (MVP) | Acceptable for streaming tokens. Flag for future`Part`-based content. |
-| 5 | Missing `final`flag on terminal events | A2A TaskStatusUpdateEvent | LOW | Can be inferred from terminal states, but explicit flag is cleaner. |
-| 6 | `ToolCallContentText`only carries`str`, not full `ContentBlock` | ACP ToolCallContentContent | LOW (MVP) | Sufficient for text tool outputs. |
-| 7 | `ArtifactUpdateEvent`uses flat`content: str`, not `parts` | A2A Artifact | LOW (MVP) | Acceptable for text artifacts. |
+| #   | Gap                                                             | Source                     | Severity  | Action                                                                                      |
+| --- | --------------------------------------------------------------- | -------------------------- | --------- | ------------------------------------------------------------------------------------------- |
+| 1   | Missing `submitted`and`auth_required`lifecycle states           | A2A TaskState              | HIGH      | Add to`AgentLifecycleState`                                                                 |
+| 2   | No`metadata: dict[str, Any]`extensibility on events             | A2A pattern                | MEDIUM    | Add optional`metadata`to`EventEnvelope`and connection events                                |
+| 3   | No`context_id`field on events/commands                          | A2A Task/Message           | MEDIUM    | Our`thread_id`serves this role. Add`context_id`as alias or document the mapping explicitly. |
+| 4   | `content: str`cannot carry non-text data                        | A2A Part union             | LOW (MVP) | Acceptable for streaming tokens. Flag for future`Part`-based content.                       |
+| 5   | Missing `final`flag on terminal events                          | A2A TaskStatusUpdateEvent  | LOW       | Can be inferred from terminal states, but explicit flag is cleaner.                         |
+| 6   | `ToolCallContentText`only carries`str`, not full `ContentBlock` | ACP ToolCallContentContent | LOW (MVP) | Sufficient for text tool outputs.                                                           |
+| 7   | `ArtifactUpdateEvent`uses flat`content: str`, not `parts`       | A2A Artifact               | LOW (MVP) | Acceptable for text artifacts.                                                              |
 
 ### What Does NOT Need to Change
 
@@ -490,7 +480,7 @@ aggregator should:
   envelope. JSON-RPC is an A2A transport detail.
 - **No`AgentCard`model needed in frontend schemas** — agent discovery is
   internal to the LangGraph graph. The frontend sees agents via
- `AgentSummary`in`TeamStatusEvent`.
+  `AgentSummary`in`TeamStatusEvent`.
 - **`kind`vs`type`discriminator naming** — A2A uses`kind`, we use
   `type`. Both are valid. Ours is more conventional for WebSocket protocols.
 
@@ -499,15 +489,12 @@ aggregator should:
 ### Immediate (before next iteration)
 
 1. Add `SUBMITTED = "submitted"`and`AUTH_REQUIRED = "auth_required"`to
-  `AgentLifecycleState`enum.
-| 2. Add`metadata: dict[str, Any] | None = None`to`EventEnvelope`base |
+   `AgentLifecycleState`enum.
+   | 2. Add`metadata: dict[str, Any] | None = None`to`EventEnvelope`base |
    model.
-| 3. Add`metadata: dict[str, Any] | None = None`to`ConnectedEvent`and |
-  `HeartbeatEvent`.
+   | 3. Add`metadata: dict[str, Any] | None = None`to`ConnectedEvent`and |
+   `HeartbeatEvent`.
 
 ### Deferred (future iteration, additive)
 
-1. Typed `Part`union for`MessageSnapshot.content`(text/file/data).
-2.`final: bool`field on terminal server events.
-3.`raw_input`/`raw_output`on tool call events for debugging.
-4.`description`field on`ArtifactUpdateEvent`.
+1. Typed `Part`union for`MessageSnapshot.content`(text/file/data). 2.`final: bool`field on terminal server events. 3.`raw_input`/`raw_output`on tool call events for debugging. 4.`description`field on`ArtifactUpdateEvent`.

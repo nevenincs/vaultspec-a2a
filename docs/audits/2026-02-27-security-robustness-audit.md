@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: security-robustness
-description: "Security and robustness audit identifying 3 critical issues including sandbox path bypass, subprocess command injection, and unchecked loop_count, plus 5 high and 6 medium findings."
+description: 'Security and robustness audit identifying 3 critical issues including sandbox path bypass, subprocess command injection, and unchecked loop_count, plus 5 high and 6 medium findings.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-003-protocol-bridging-translation-adr.md
@@ -129,7 +129,7 @@ agent TOML config files (ADR-012) are user-editable, and`AcpChatModel.command`is
 a Pydantic field accepting any`list[str]`. If a workspace-local TOML file
 provides a malicious command, it passes through unvalidated.
 | **Fix:** Validate each element in `self.command`against a strict pattern (no
-shell metacharacters:`;`, ` | `, `&`, `$`, `` ` ``, `(`, `)`, `>`).
+shell metacharacters:`;`, `|`, `&`, `$`, `` ` ``, `(`, `)`, `>`).
 Alternatively, switch to `create_subprocess_exec`with the command list (ADR-006
 notes that`create_subprocess_shell`is only needed for`.CMD`shim resolution on
 Windows for Gemini). |
@@ -254,9 +254,9 @@ validation that:
 
 1. The`request_id`corresponds to an actual pending interrupt.
 2. The client is authorized to respond to this thread.
-**Fix:** Maintain a set of pending`request_id`values in the`GraphRegistry`. Only
-accept responses for IDs that were actually emitted by a
-`PermissionRequestEvent`. Delete the ID after use (one-shot).
+   **Fix:** Maintain a set of pending`request_id`values in the`GraphRegistry`. Only
+   accept responses for IDs that were actually emitted by a
+   `PermissionRequestEvent`. Delete the ID after use (one-shot).
 
 ---
 
@@ -649,13 +649,13 @@ API (e.g., pass env dict to `Settings()`).
 **Evidence:**
 
 - Line 60:`test_configure_telemetry_sdk_disabled(monkeypatch:
-  pytest.MonkeyPatch)`uses`monkeypatch.setenv("OTEL_SDK_DISABLED", "true")`
+pytest.MonkeyPatch)`uses`monkeypatch.setenv("OTEL_SDK_DISABLED", "true")`
 - Line 96: `test_configure_telemetry_langsmith_off(monkeypatch:
   pytest.MonkeyPatch)`uses`monkeypatch.delenv("LANGCHAIN_TRACING_V2",
   raising=False)`
-**Note:** The test itself acknowledges on line 68 that "monkeypatching the env
-var does not affect already-imported modules" -- the test is actually
-ineffective at testing what it claims.
+  **Note:** The test itself acknowledges on line 68 that "monkeypatching the env
+  var does not affect already-imported modules" -- the test is actually
+  ineffective at testing what it claims.
 
 ---
 
@@ -802,7 +802,7 @@ module is unimplemented.
 - **lib/database/models.py** -- Clean SQLAlchemy declarative models with proper
   FK constraints and indexes.
 - **lib/database/session.py** -- WAL mode correctly set via `PRAGMA
-  journal_mode=WAL`. Connection lifecycle properly managed.
+journal_mode=WAL`. Connection lifecycle properly managed.
 - **lib/database/**init**.py** -- Proper facade with `X as X`re-exports
   and`__all__`.
 - **lib/core/state.py** -- Clean TypedDict with custom reducers.

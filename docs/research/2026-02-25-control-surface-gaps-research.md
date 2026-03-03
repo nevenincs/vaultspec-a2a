@@ -1,8 +1,8 @@
 ---
-name: "Control Surface Gaps Research"
+name: 'Control Surface Gaps Research'
 date: 2026-25-02
 type: research
-summary: "Rigorous technical decisions for SvelteKit agent rendering, replacing experimental tech with robust Server-Side Replay, @humanspeak token caching, and resolving Tailwind v4 styling conflicts."
+summary: 'Rigorous technical decisions for React agent rendering, replacing experimental tech with robust Server-Side Replay, @humanspeak token caching, and resolving Tailwind v4 styling conflicts.'
 maturity: 65
 feature: control-surface-gaps
 ---
@@ -12,7 +12,7 @@ feature: control-surface-gaps
 **Date**: 2026-02-25
 **Domain**: Control Surface & Rendering
 
-## 1. Streaming Markdown: `@humanspeak/svelte-markdown` over Incremark (Gap G2)
+## 1. Streaming Markdown: `@humanspeak/React-markdown` over Incremark (Gap G2)
 
 **Architectural Problem**: LLMs stream markdown via WebSockets
 character-by-character. Standard parsers (`marked.js`) re-parse the entire
@@ -21,27 +21,27 @@ freezes the browser on long documents (e.g., 50k+ tokens).
 
 **Inclusion/Exclusion Decision**:
 
-- **Excluded**: `svelte-markdown`(legacy). Uses standard reactivity; suffers
+- **Excluded**: `React-markdown`(legacy). Uses standard reactivity; suffers
   catastrophic $O(n^2)$ lag.
 - **Excluded**:`Incremark`. While it achieves $O(n)$ via a custom parser, it is
-  marked as experimental, has sparse documentation for Svelte bindings, and uses
+  marked as experimental, has sparse documentation for React bindings, and uses
   non-standard rendering paths.
-- **Included**: `@humanspeak/svelte-markdown`.
+- **Included**: `@humanspeak/React-markdown`.
 
 **Rationale**:
-It is explicitly built for Svelte 5 Runes. It solves the performance penalty not
+It is explicitly built for React 5 Runes. It solves the performance penalty not
 by replacing the parser, but via **Intelligent Token Caching**. It caches
 `Marked.js`AST tokens for completed blocks (like paragraphs or code blocks) and
 only re-renders the "active" tail node. This yields a 50–200x performance
 increase while retaining full compatibility with the massive`Marked.js` plugin
 ecosystem.
 
-**Implementation Reference (Svelte 5 Runes)**:
+**Implementation Reference (React 5 Runes)**:
 
-```svelte
+```React
 <script lang="ts">
-  import Markdown from '@humanspeak/svelte-markdown';
-  // $props() triggers fine-grained updates on the component 
+  import Markdown from '@humanspeak/React-markdown';
+  // $props() triggers fine-grained updates on the component
   // without rebuilding the entire DOM tree.
   let { streamedContent } = $props<{ streamedContent: string }>();
 </script>
@@ -53,7 +53,7 @@ ecosystem.
 
 ## 2. xterm.js Backpressure (Gap G1)
 
-**Architectural Problem**: The Svelte UI uses `@xterm/addon-attach`to
+**Architectural Problem**: The React UI uses `@xterm/addon-attach`to
 ingest`stdout` from the agent via WebSockets. The xterm parser runs on the
 browser's main thread. If a Python agent dumps a 100MB build log, the browser's
 memory will exhaust (OOM) because WebSockets do not natively propagate TCP
@@ -64,25 +64,25 @@ The application must explicitly multiplex control signals into the WebSocket
 stream.
 
 ```javascript
-// Svelte Client
+// React Client
 let isPaused = false;
 
 socket.onmessage = (event) => {
-    const payload = JSON.parse(event.data);
-    
-    // term.write returns false if internal buffer > high watermark (~1MB)
-    if (!term.write(payload.text) && !isPaused) {
-        isPaused = true;
-        socket.send(JSON.stringify({ action: "pause", agent_id: payload.agent_id }));
-    }
+  const payload = JSON.parse(event.data);
+
+  // term.write returns false if internal buffer > high watermark (~1MB)
+  if (!term.write(payload.text) && !isPaused) {
+    isPaused = true;
+    socket.send(JSON.stringify({ action: 'pause', agent_id: payload.agent_id }));
+  }
 };
 
 // Emitted when the buffer drains below the low watermark
 term.onDrain(() => {
-    if (isPaused) {
-        isPaused = false;
-        socket.send(JSON.stringify({ action: "resume", agent_id: payload.agent_id }));
-    }
+  if (isPaused) {
+    isPaused = false;
+    socket.send(JSON.stringify({ action: 'resume', agent_id: payload.agent_id }));
+  }
 });
 ```
 
@@ -95,7 +95,7 @@ terminal UI is destroyed. We need to restore the agent's historical
 **Inclusion/Exclusion Decision**:
 
 - **Excluded**:`@xterm/addon-serialize`. The official NPM registry explicitly
-  marks this as *"⚠️ experimental... under construction ⚠️"*. It attempts to
+  marks this as _"⚠️ experimental... under construction ⚠️"_. It attempts to
   read the DOM/Canvas to guess the terminal state. It routinely fails to restore
   private modes, alternate screen buffers (like `vim`), and complex cursor
   states.
@@ -104,7 +104,7 @@ terminal UI is destroyed. We need to restore the agent's historical
 **Rationale**:
 The UI should be a stateless projection. The Orchestrator's SQLite database must
 maintain a rolling ring-buffer (e.g., the last 2000 lines) of raw ANSI bytes
-emitted by the agent process. On UI mount, the Svelte client requests this
+emitted by the agent process. On UI mount, the React client requests this
 buffer via REST, pipes it into a fresh `xterm.js` instance, and then opens the
 WebSocket for live updates. This guarantees 100% accurate terminal
 reconstruction without relying on experimental frontend serialization.
@@ -123,8 +123,8 @@ offload rendering to the GPU.
 
 ```css
 /* app.css */
-@import "tailwindcss";
-@import "xterm/css/xterm.css";
+@import 'tailwindcss';
+@import 'xterm/css/xterm.css';
 
 /* Force CSS specificity to override Tailwind's Preflight inside the terminal */
 @layer utilities {
@@ -137,17 +137,17 @@ offload rendering to the GPU.
 }
 ```
 
-**Mandate**: The Svelte application *must* initialize `xterm.js`using
+**Mandate**: The React application _must_ initialize `xterm.js`using
 the`@xterm/addon-webgl`plugin to bypass DOM-styling conflicts entirely,
 drastically improving rendering performance.
 
-## 5. shadcn-svelte vs. Streaming Block Reactivity (Gap G5)
+## 5. shadcn-React vs. Streaming Block Reactivity (Gap G5)
 
-**Architectural Problem**:`shadcn-svelte`provides high-quality components, but
+**Architectural Problem**:`shadcn-React`provides high-quality components, but
 its Code Block component is tightly coupled with`Shiki`(a heavy WASM syntax
-highlighter). If integrated naively into`@humanspeak/svelte-markdown`, Shiki
+highlighter). If integrated naively into`@humanspeak/React-markdown`, Shiki
 will attempt to synchronously re-highlight the entire code block on the main
-thread during *every incoming WebSocket chunk*, causing the stream to freeze to
+thread during _every incoming WebSocket chunk_, causing the stream to freeze to
 <10 FPS.
 
 **Inclusion/Exclusion Decision**:

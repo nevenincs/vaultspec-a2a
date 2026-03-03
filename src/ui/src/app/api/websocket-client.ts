@@ -10,18 +10,18 @@
  * - Permission responses MUST go via REST (WS is rejected by server)
  */
 
-import type {
-  ServerEvent,
-  ConnectedEvent,
-  HeartbeatEvent,
-  ClientMessage,
-  SubscribeCommand,
-  UnsubscribeCommand,
-  SendMessageCommand,
-  AgentControlCommand,
-  PingCommand,
-  AgentControlAction,
-} from '../data/wire-types';
+import type { components } from '../data/wire-types';
+
+export type ServerEvent = components['schemas']['ServerEvent'];
+export type ConnectedEvent = components['schemas']['ConnectedEvent'];
+export type HeartbeatEvent = components['schemas']['HeartbeatEvent'];
+export type ClientMessage = components['schemas']['ClientMessage'];
+export type SubscribeCommand = components['schemas']['SubscribeCommand'];
+export type UnsubscribeCommand = components['schemas']['UnsubscribeCommand'];
+export type SendMessageCommand = components['schemas']['SendMessageCommand'];
+export type AgentControlCommand = components['schemas']['AgentControlCommand'];
+export type PingCommand = components['schemas']['PingCommand'];
+export type AgentControlAction = components['schemas']['AgentControlAction'];
 
 export type ConnectionState =
   | 'connecting'

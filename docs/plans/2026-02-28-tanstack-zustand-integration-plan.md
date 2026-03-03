@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: plan
 feature: tanstack-zustand
-description: "Implementation plan for replacing the monolithic useAppState hook with TanStack Query v5 (server state) and Zustand v5 (client/real-time state) to eliminate prop drilling and enable selective re-renders."
+description: 'Implementation plan for replacing the monolithic useAppState hook with TanStack Query v5 (server state) and Zustand v5 (client/real-time state) to eliminate prop drilling and enable selective re-renders.'
 related_adrs:
   - docs/adrs/2026-02-28-018-react-tailwind-figma-migration-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -39,16 +39,16 @@ eliminates prop drilling, and enables selective re-renders.
 
 ## Architecture Decisions
 
-| Decision | Choice | Why |
-| ---------- | -------- | ----- |
-| Zustand store type | Single **vanilla** store (`createStore`from`zustand/vanilla`) | WS callback runs outside React and needs `store.getState()`directly |
-| Store composition | 5 slices merged into one store | Atomic WS dispatch across stream + permission + connection state |
-| Middleware stack | `devtools > persist > immer`(outermost → innermost) | Immer for chunk accumulation mutations; persist for UI prefs only |
-| Persist scope | `themeMode`, `sidebarCollapsed`, `sidebarWidth`only | Tabs/stream/inspector are session-transient |
-| queryClient location | Module-level singleton (not inside Zustand) | WS bridge needs direct`setQueryData`; React `QueryClientProvider`is a thin wrapper |
-| WS → TQ cache updates | `setQueryData`(not`invalidateQueries`) for `team_status`/`agent_status` | WS event has complete data — no need to refetch |
-| Component state consumption | Direct`useStore(appStore, selector)`+ TQ hooks | Eliminates prop drilling;`useShallow`prevents render storms |
-| Chunk index | `_chunkIndex: Map` inside stream slice | Immer passes Maps unproxied; O(1) lookup preserved |
+| Decision                    | Choice                                                                  | Why                                                                                |
+| --------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Zustand store type          | Single **vanilla** store (`createStore`from`zustand/vanilla`)           | WS callback runs outside React and needs `store.getState()`directly                |
+| Store composition           | 5 slices merged into one store                                          | Atomic WS dispatch across stream + permission + connection state                   |
+| Middleware stack            | `devtools > persist > immer`(outermost → innermost)                     | Immer for chunk accumulation mutations; persist for UI prefs only                  |
+| Persist scope               | `themeMode`, `sidebarCollapsed`, `sidebarWidth`only                     | Tabs/stream/inspector are session-transient                                        |
+| queryClient location        | Module-level singleton (not inside Zustand)                             | WS bridge needs direct`setQueryData`; React `QueryClientProvider`is a thin wrapper |
+| WS → TQ cache updates       | `setQueryData`(not`invalidateQueries`) for `team_status`/`agent_status` | WS event has complete data — no need to refetch                                    |
+| Component state consumption | Direct`useStore(appStore, selector)`+ TQ hooks                          | Eliminates prop drilling;`useShallow`prevents render storms                        |
+| Chunk index                 | `_chunkIndex: Map` inside stream slice                                  | Immer passes Maps unproxied; O(1) lookup preserved                                 |
 
 ---
 
@@ -122,15 +122,11 @@ AppStore = StreamSlice & ConnectionSlice & PermissionSlice & TabSlice & UiSlice
 
 ### StreamSlice
 
-- `streamEvents: Record<string, StreamEvent[]>`— per-thread event arrays
--`_chunkIndex: Map<string, { threadId: string; idx: number }>`— O(1) chunk
-lookup
--`handleWireEvent(threadId, event)`— full WS event switch (message_chunk,
-thought_chunk, tool_call_start/update, artifact_update, plan_update,
-agent_status stream, error)
--`hydrateThreadEvents(threadId, events, lastSequence)`— snapshot → store +
-rebuild index
--`clearThreadEvents(threadId)`— cleanup on tab close
+- `streamEvents: Record<string, StreamEvent[]>`— per-thread event arrays -`_chunkIndex: Map<string, { threadId: string; idx: number }>`— O(1) chunk
+  lookup -`handleWireEvent(threadId, event)`— full WS event switch (message_chunk,
+  thought_chunk, tool_call_start/update, artifact_update, plan_update,
+  agent_status stream, error) -`hydrateThreadEvents(threadId, events, lastSequence)`— snapshot → store +
+  rebuild index -`clearThreadEvents(threadId)`— cleanup on tab close
 
 ### ConnectionSlice
 
@@ -142,13 +138,11 @@ rebuild index
 ### PermissionSlice
 
 - `permissionQueue: PermissionRequest[]`
-- `pushPermission(wireEvent)`— maps + appends
--`removePermission(requestId)`— optimistic removal on respond
+- `pushPermission(wireEvent)`— maps + appends -`removePermission(requestId)`— optimistic removal on respond
 
 ### TabSlice
 
-| -`tabs: EditorTab[]`, `activeTabId: string | null` |
--`openTransient(threadId)`, `openPinned(threadId)`, `pinTab(threadId)`,
+| -`tabs: EditorTab[]`, `activeTabId: string | null` | -`openTransient(threadId)`, `openPinned(threadId)`, `pinTab(threadId)`,
 `closeTab(threadId)`, `activateTab(threadId)`, `clearActiveTab()`
 
 - `closeTab`also calls`wsClient.unsubscribe()`
@@ -157,9 +151,8 @@ rebuild index
 
 - `themeMode: ThemeMode`(persisted),`sidebarCollapsed:
   boolean`(persisted),`sidebarWidth: number`(persisted)
-| -`inspectorTarget: InspectorTarget | null`, `contextDocuments:
-ContextDocument[]` |
--`setThemeMode(mode)`— also applies to`document.documentElement.classList`
+  | -`inspectorTarget: InspectorTarget | null`, `contextDocuments:
+ContextDocument[]` | -`setThemeMode(mode)`— also applies to`document.documentElement.classList`
 - `toggleSidebar()`, `setSidebarWidth(w)`, `openInspector(target)`,
   `closeInspector()`, `openDocument(doc)`, `toggleContextPanel(docs)`
 
@@ -179,19 +172,19 @@ team.presets()        → ['team', 'presets']
 
 ### Queries
 
-| Hook | Endpoint | staleTime | Notes |
-| ------ | ---------- | ----------- | ------- |
-| `useThreadsQuery` | `GET /api/threads` | 30s | Maps via`mapThreadSummary` |
-| `useThreadStateQuery(id)` | `GET /api/threads/{id}/state` | Infinity | Enabled only when tab has no events; hydrates Zustand store |
-| `useTeamStatusQuery` | `GET /api/team/status` | 10s | WS`setQueryData`supplements |
-| `useTeamPresetsQuery` | `GET /api/teams` | 5min | Near-static data |
+| Hook                      | Endpoint                      | staleTime | Notes                                                       |
+| ------------------------- | ----------------------------- | --------- | ----------------------------------------------------------- |
+| `useThreadsQuery`         | `GET /api/threads`            | 30s       | Maps via`mapThreadSummary`                                  |
+| `useThreadStateQuery(id)` | `GET /api/threads/{id}/state` | Infinity  | Enabled only when tab has no events; hydrates Zustand store |
+| `useTeamStatusQuery`      | `GET /api/team/status`        | 10s       | WS`setQueryData`supplements                                 |
+| `useTeamPresetsQuery`     | `GET /api/teams`              | 5min      | Near-static data                                            |
 
 ### Mutations
 
-| Hook | Endpoint | Side Effects |
-| ------ | ---------- | ------------- |
-| `useCreateThread` | `POST /api/threads` | Optimistic prepend to thread list cache;`appStore.openPinned()`; `wsClient.subscribe()` |
-| `useRespondToPermission` | `POST /api/permissions/{id}/respond` | Optimistic`removePermission()` from Zustand queue |
+| Hook                     | Endpoint                             | Side Effects                                                                            |
+| ------------------------ | ------------------------------------ | --------------------------------------------------------------------------------------- |
+| `useCreateThread`        | `POST /api/threads`                  | Optimistic prepend to thread list cache;`appStore.openPinned()`; `wsClient.subscribe()` |
+| `useRespondToPermission` | `POST /api/permissions/{id}/respond` | Optimistic`removePermission()` from Zustand queue                                       |
 
 ---
 
@@ -202,13 +195,9 @@ team.presets()        → ['team', 'presets']
 1. **Connection callback** → `appStore.getState().setConnectionState()`
 2. **Heartbeat callback** → `appStore.getState().setLastHeartbeat()`
 3. **Event callback** → switch on `event.type`:
-| - `message_chunk | thought_chunk | tool_call_start | tool_call_update |
-artifact_update | plan_update | error`→`appStore.getState().handleWireEvent()` |
-   -`agent_status`→ **dual dispatch**:`handleWireEvent()`(stream)
-   +`queryClient.setQueryData(team.status(), ...)`(update agent in TQ cache)
-   -`team_status`→`queryClient.setQueryData(team.status(), mapped agents)`(full
-   replacement, no stream event)
-   -`permission_request`→`appStore.getState().pushPermission(event)`
+   | - `message_chunk | thought_chunk | tool_call_start | tool_call_update |
+artifact_update | plan_update | error`→`appStore.getState().handleWireEvent()` | -`agent_status`→ **dual dispatch**:`handleWireEvent()`(stream) +`queryClient.setQueryData(team.status(), ...)`(update agent in TQ cache) -`team_status`→`queryClient.setQueryData(team.status(), mapped agents)`(full
+   replacement, no stream event) -`permission_request`→`appStore.getState().pushPermission(event)`
    - Sequence tracking: `wsClient.updateLastSequence()`for all events
      with`sequence`
 
@@ -228,7 +217,7 @@ Returns cleanup function (calls `wsClient.disconnect()`).
 5. `wsClient.updateLastSequence()`set from snapshot — WS fills the gap going
    forward
 6. Components re-render via`useStore(appStore, s =>
-   s.streamEvents[activeTabId])`
+s.streamEvents[activeTabId])`
 
 ---
 
@@ -262,7 +251,7 @@ export function Sidebar() {
 Components that need only 1 property skip `useShallow`:
 
 ```tsx
-const connectionState = useStore(appStore, s => s.connectionState);
+const connectionState = useStore(appStore, (s) => s.connectionState);
 ```
 
 ---
@@ -272,7 +261,7 @@ const connectionState = useStore(appStore, s => s.connectionState);
 ### Phase 1: Infrastructure (non-breaking)
 
 1. Install deps: `npm install @tanstack/react-query
-   @tanstack/react-query-devtools zustand immer`
+@tanstack/react-query-devtools zustand immer`
 2. Create `store/`directory with all 5 slices +`app-store.ts`+`index.ts`
 3. Create `queries/`directory with`query-client.ts`, `query-keys.ts`, all hooks
 4. Create `bridge/ws-bridge.ts`
@@ -288,14 +277,9 @@ const connectionState = useStore(appStore, s => s.connectionState);
 
 ### Phase 3: Component migration (one at a time)
 
-1. `StatusBar`— simplest (2 store selectors)
-2.`TabBar`— store selectors +`useThreadsQuery`
-2. `PermissionModal`— store selector +`useRespondToPermission`mutation
-4.`Sidebar`— store selectors +`useThreadsQuery`
-3. `InputBar`—`useTeamPresetsQuery`+`useCreateThread`mutation + store selectors
-6.`MessageStream`— continues receiving`events`as prop (no change needed)
-7.`InspectorPanel`— store selectors
-8.`AppShell`— remove`useAppState()`, use hooks directly, remove prop passing
+1. `StatusBar`— simplest (2 store selectors) 2.`TabBar`— store selectors +`useThreadsQuery`
+2. `PermissionModal`— store selector +`useRespondToPermission`mutation 4.`Sidebar`— store selectors +`useThreadsQuery`
+3. `InputBar`—`useTeamPresetsQuery`+`useCreateThread`mutation + store selectors 6.`MessageStream`— continues receiving`events`as prop (no change needed) 7.`InspectorPanel`— store selectors 8.`AppShell`— remove`useAppState()`, use hooks directly, remove prop passing
 4. **Verify after each**: app functional, no regressions
 
 ### Phase 4: Cleanup
@@ -330,10 +314,6 @@ const connectionState = useStore(appStore, s => s.connectionState);
 
 ## Files to Reference (no changes needed)
 
--`src/ui/src/app/api/rest-client.ts`— REST singleton, used by TQ hooks
--`src/ui/src/app/api/websocket-client.ts`— WS singleton, used by bridge + tab
-slice
--`src/ui/src/app/api/mappers.ts`— wire→frontend translation, used by slices +
-hooks
--`src/ui/src/app/data/types.ts`— all frontend presentation types
--`src/ui/src/app/data/wire-types.ts` — all wire types from backend
+-`src/ui/src/app/api/rest-client.ts`— REST singleton, used by TQ hooks -`src/ui/src/app/api/websocket-client.ts`— WS singleton, used by bridge + tab
+slice -`src/ui/src/app/api/mappers.ts`— wire→frontend translation, used by slices +
+hooks -`src/ui/src/app/data/types.ts`— all frontend presentation types -`src/ui/src/app/data/wire-types.ts` — all wire types from backend

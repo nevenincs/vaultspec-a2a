@@ -2,7 +2,7 @@
 date: 2026-03-01
 type: plan
 feature: figma-architecture
-description: "Bootstrap the complete Figma → Code Connect → MCP → Svelte implementation pipeline so AI-assisted UI development uses real component references and design tokens."
+description: 'Bootstrap the complete Figma → Code Connect → MCP → React implementation pipeline so AI-assisted UI development uses real component references and design tokens.'
 related_adrs:
   - docs/adrs/2026-03-01-019-figma-developer-workflow-adr.md
   - docs/adrs/2026-02-28-018-react-tailwind-figma-migration-adr.md
@@ -22,13 +22,12 @@ related_research:
 
 ## Objective
 
-Bootstrap the complete Figma → Code Connect → MCP → Svelte implementation
+Bootstrap the complete Figma → Code Connect → MCP → React implementation
 pipeline
 so that AI-assisted UI development in `src/ui/`has:
 
 1. Real component references (not invented) in MCP responses via Code Connect
-2. Design token names (not hard-coded values) via Figma Variable code syntax
-   +`get_variable_defs`
+2. Design token names (not hard-coded values) via Figma Variable code syntax +`get_variable_defs`
 3. A validated canonical agent workflow that exercises all four MCP tools
 
 ---
@@ -37,12 +36,12 @@ so that AI-assisted UI development in `src/ui/`has:
 
 Before any code work begins, these must be confirmed:
 
-| # | Action | Owner | Notes |
-| --- | --- | --- | --- |
-| P1 | Confirm Figma subscription tier is Organisation or Enterprise | Team lead | Required for Code Connect CLI publishing |
-| P2 | Confirm developer PAT exists with `Code Connect: Write`+`File content: Read`scopes | Each developer | Required for`figma connect publish` |
-| P3 | Identify the Figma file key for the VaultSpec design file | Designer | Extracted from file URL |
-| P4 | Confirm Figma desktop app is installed on all developer machines | Each developer | Required for MCP desktop server |
+| #   | Action                                                                             | Owner          | Notes                                    |
+| --- | ---------------------------------------------------------------------------------- | -------------- | ---------------------------------------- |
+| P1  | Confirm Figma subscription tier is Organisation or Enterprise                      | Team lead      | Required for Code Connect CLI publishing |
+| P2  | Confirm developer PAT exists with `Code Connect: Write`+`File content: Read`scopes | Each developer | Required for`figma connect publish`      |
+| P3  | Identify the Figma file key for the VaultSpec design file                          | Designer       | Extracted from file URL                  |
+| P4  | Confirm Figma desktop app is installed on all developer machines                   | Each developer | Required for MCP desktop server          |
 
 ---
 
@@ -66,28 +65,28 @@ project.
 
 ### 0.2 Component Audit
 
-- List all Figma components that have corresponding shadcn-svelte
+- List all Figma components that have corresponding shadcn-React
   implementations:
 
-| Figma Component | Code Connect target | shadcn-svelte file |
-| --- | --- | --- |
-| Button | Button | `src/ui/components/ui/button/button.svelte` |
-| Card | Card | `src/ui/components/ui/card/card.svelte` |
-| Badge | Badge | `src/ui/components/ui/badge/badge.svelte` |
-| Input | Input | `src/ui/components/ui/input/input.svelte` |
-| Textarea | Textarea | `src/ui/components/ui/textarea/textarea.svelte` |
-| Select | Select | `src/ui/components/ui/select/select.svelte` |
-| Tabs | Tabs | `src/ui/components/ui/tabs/tabs.svelte` |
-| Alert | Alert | `src/ui/components/ui/alert/alert.svelte` |
-| AlertDialog | AlertDialog | `src/ui/components/ui/alert-dialog/alert-dialog.svelte` |
-| Sheet | Sheet | `src/ui/components/ui/sheet/sheet.svelte` |
-| Collapsible | Collapsible | `src/ui/components/ui/collapsible/collapsible.svelte` |
-| ScrollArea | ScrollArea | `src/ui/components/ui/scroll-area/scroll-area.svelte` |
-| Checkbox | Checkbox | `src/ui/components/ui/checkbox/checkbox.svelte` |
+| Figma Component | Code Connect target | shadcn-React file                                      |
+| --------------- | ------------------- | ------------------------------------------------------ |
+| Button          | Button              | `src/ui/components/ui/button/button.React`             |
+| Card            | Card                | `src/ui/components/ui/card/card.React`                 |
+| Badge           | Badge               | `src/ui/components/ui/badge/badge.React`               |
+| Input           | Input               | `src/ui/components/ui/input/input.React`               |
+| Textarea        | Textarea            | `src/ui/components/ui/textarea/textarea.React`         |
+| Select          | Select              | `src/ui/components/ui/select/select.React`             |
+| Tabs            | Tabs                | `src/ui/components/ui/tabs/tabs.React`                 |
+| Alert           | Alert               | `src/ui/components/ui/alert/alert.React`               |
+| AlertDialog     | AlertDialog         | `src/ui/components/ui/alert-dialog/alert-dialog.React` |
+| Sheet           | Sheet               | `src/ui/components/ui/sheet/sheet.React`               |
+| Collapsible     | Collapsible         | `src/ui/components/ui/collapsible/collapsible.React`   |
+| ScrollArea      | ScrollArea          | `src/ui/components/ui/scroll-area/scroll-area.React`   |
+| Checkbox        | Checkbox            | `src/ui/components/ui/checkbox/checkbox.React`         |
 
-*(This table must be updated once the actual Figma file is available and
+_(This table must be updated once the actual Figma file is available and
 components
-confirmed.)*
+confirmed.)_
 
 ---
 
@@ -107,8 +106,8 @@ At the project root (alongside `package.json`):
 {
   "codeConnect": {
     "include": ["src/ui/**/*.figma.js"],
-    "exclude": ["node_modules/**", ".svelte-kit/**"],
-    "label": "Svelte",
+    "exclude": ["node_modules/**", ".React-kit/**"],
+    "label": "React",
     "language": "html"
   }
 }
@@ -122,8 +121,8 @@ In `package.json`:
 {
   "scripts": {
     "figma:publish": "figma connect publish",
-    "figma:parse":   "figma connect parse",
-    "figma:create":  "figma connect create"
+    "figma:parse": "figma connect parse",
+    "figma:create": "figma connect create"
   }
 }
 ```
@@ -133,12 +132,12 @@ In `package.json`:
 ## Phase 2: Write Code Connect Mapping Files
 
 For each component identified in Phase 0, create a `.figma.js`file alongside the
-corresponding`.svelte` source.
+corresponding`.React` source.
 
 ### 2.1 File Naming Convention
 
 ```text
-src/ui/components/ui/button/button.svelte
+src/ui/components/ui/button/button.React
 src/ui/components/ui/button/button.figma.js    ← new
 ```
 
@@ -147,37 +146,37 @@ src/ui/components/ui/button/button.figma.js    ← new
 ```js
 // button.figma.js
 // @url https://www.figma.com/design/<FILE_KEY>/VaultSpec?node-id=<NODE_ID>
-// @source src/ui/components/ui/button/button.svelte
+// @source src/ui/components/ui/button/button.React
 // @component Button
 
 export default {
   imports: ['import { Button } from "$lib/components/ui/button"'],
   example: (figma) => {
     const variant = figma.selectedInstance.getEnum('Variant', {
-      Default:     'default',
-      Secondary:   'secondary',
+      Default: 'default',
+      Secondary: 'secondary',
       Destructive: 'destructive',
-      Outline:     'outline',
-      Ghost:       'ghost',
-      Link:        'link',
-    })
+      Outline: 'outline',
+      Ghost: 'ghost',
+      Link: 'link',
+    });
     const size = figma.selectedInstance.getEnum('Size', {
       Default: 'default',
-      Small:   'sm',
-      Large:   'lg',
-      Icon:    'icon',
-    })
-    const label    = figma.selectedInstance.getString('Label')
-    const disabled = figma.selectedInstance.getBoolean('Disabled')
+      Small: 'sm',
+      Large: 'lg',
+      Icon: 'icon',
+    });
+    const label = figma.selectedInstance.getString('Label');
+    const disabled = figma.selectedInstance.getBoolean('Disabled');
 
     return figma.code`<Button
   variant="${variant}"
   size="${size}"${disabled ? '\n  disabled' : ''}
 >
   ${label}
-</Button>`
+</Button>`;
   },
-}
+};
 ```
 
 To get the `node-id`for each component: open the component in Figma →
@@ -188,10 +187,7 @@ right-click →
 
 1.`npx figma connect create
 "https://www.figma.com/design/<KEY>/...?node-id=<ID>"`
-   generates a boilerplate file
-2. Fill in variant/prop mappings based on the component's Figma property panel
-3. `npx figma connect parse`to validate without uploading
-4. Commit the`.figma.js` file to version control
+generates a boilerplate file 2. Fill in variant/prop mappings based on the component's Figma property panel 3. `npx figma connect parse`to validate without uploading 4. Commit the`.figma.js` file to version control
 
 ---
 
@@ -212,7 +208,7 @@ For each published component:
 1. Open the Figma file in Dev Mode
 2. Select the component node
 3. Open the Code panel (right sidebar)
-4. Confirm the "Svelte" tab shows the real snippet from the `.figma.js`file
+4. Confirm the "React" tab shows the real snippet from the `.figma.js`file
 5. Change a variant in the property panel — confirm the snippet updates
 
 ### 3.3 Validate MCP`get_code_connect_map`
@@ -230,7 +226,7 @@ Expected response:
 ```json
 {
   "<nodeId>": {
-    "codeConnectSrc":  "src/ui/components/ui/button/button.svelte",
+    "codeConnectSrc": "src/ui/components/ui/button/button.React",
     "codeConnectName": "Button"
   }
 }
@@ -262,13 +258,9 @@ Run a test UI task through the complete pipeline:
 
 1. Select a Figma frame (e.g., the Sidebar component)
 2. Execute the canonical call sequence:
-   - `get_metadata`(frame summary)
-   -`get_design_context`(full layout + Code Connect snippets)
-   -`get_screenshot`(visual reference)
-   -`get_variable_defs`(token names)
-   -`get_code_connect_map`(component paths)
+   - `get_metadata`(frame summary) -`get_design_context`(full layout + Code Connect snippets) -`get_screenshot`(visual reference) -`get_variable_defs`(token names) -`get_code_connect_map`(component paths)
 3. Inspect the`get_design_context`response: confirm`<CodeConnectSnippet>`blocks
-   are present and contain real Svelte import statements
+   are present and contain real React import statements
 4. Ask the agent to implement the frame
 5. Verify the generated code:
    - Uses`import { Button } from "$lib/components/ui/button"`(not invented
@@ -283,8 +275,7 @@ Run a test UI task through the complete pipeline:
 
 Automated token synchronisation requires:
 
-- Enterprise Figma plan (for `file_variables:write`REST API access)
--`LIBRARY_PUBLISH` webhook registration
+- Enterprise Figma plan (for `file_variables:write`REST API access) -`LIBRARY_PUBLISH` webhook registration
 
 When prerequisites are met:
 
@@ -305,26 +296,26 @@ This phase is deferred and tracked separately.
 ## Success Criteria
 
 - [ ] `figma connect publish`completes without errors for all audited components
-- [ ] Dev Mode shows "Svelte" tab with real component snippet for every
-  published component
+- [ ] Dev Mode shows "React" tab with real component snippet for every
+      published component
 - [ ]`get_code_connect_map`returns non-empty mapping for all published node IDs
 - [ ]`get_variable_defs`returns token names (not raw values) for all variables
   in scope
-- [ ] An AI-generated Svelte component matches the Figma design within visual
-  tolerance
-  and uses no invented imports or hard-coded values
+- [ ] An AI-generated React component matches the Figma design within visual
+      tolerance
+      and uses no invented imports or hard-coded values
 
 ---
 
 ## Appendix:`figma.selectedInstance`Template API Reference
 
-| Method | Figma property type | Example |
-| --- | --- | --- |
-| `.getString('Name')` | Text / string property | `getString('Label')` |
-| `.getBoolean('Name')` | Boolean property | `getBoolean('Disabled')` |
-| `.getEnum('Name', map)` | Variant / string enum | `getEnum('Variant', { Primary: 'primary' })` |
-| `.findInstance('LayerName')` | Named child instance | `findInstance('Icon')` |
-| `.executeTemplate()` | Nested Code Connect | call after`findInstance` |
+| Method                       | Figma property type    | Example                                      |
+| ---------------------------- | ---------------------- | -------------------------------------------- |
+| `.getString('Name')`         | Text / string property | `getString('Label')`                         |
+| `.getBoolean('Name')`        | Boolean property       | `getBoolean('Disabled')`                     |
+| `.getEnum('Name', map)`      | Variant / string enum  | `getEnum('Variant', { Primary: 'primary' })` |
+| `.findInstance('LayerName')` | Named child instance   | `findInstance('Icon')`                       |
+| `.executeTemplate()`         | Nested Code Connect    | call after`findInstance`                     |
 
 The`figma.code`tagged template literal handles attribute formatting:
 

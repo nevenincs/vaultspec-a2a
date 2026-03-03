@@ -40,31 +40,45 @@ repos:
         name: Check documentation links (Lychee)
         entry: lychee
         language: system
-        args: ["--no-progress", "--exclude-path", "README.md", "--accept", "200..=299,403,429,504"]
+        args:
+          [
+            '--no-progress',
+            '--exclude-path',
+            'README.md',
+            '--accept',
+            '200..=299,403,429,504',
+          ]
         types: [markdown]
 
       - id: markdownlint
         name: Lint Markdown style (markdownlint)
         entry: npx --yes markdownlint-cli
         language: system
-        args: ["--config", ".markdownlint.json", "README.md", "knowledge/*.md", ".gemini/*.md"]
+        args:
+          [
+            '--config',
+            '.markdownlint.json',
+            'README.md',
+            'knowledge/*.md',
+            '.gemini/*.md',
+          ]
         types: [markdown]
         pass_filenames: false
 
       # ── Frontend Hooks ──────────────────────────────────────────
 
       - id: eslint
-        name: Lint JS/TS/Svelte (ESLint)
+        name: Lint JS/TS (ESLint)
         entry: npx eslint --fix
         language: system
-        types_or: [javascript, ts, svelte]
+        types_or: [javascript, ts]
         pass_filenames: true
 
       - id: prettier
-        name: Format JS/TS/Svelte/CSS (Prettier)
+        name: Format JS/TS/CSS (Prettier)
         entry: npx prettier --write --ignore-unknown
         language: system
-        types_or: [javascript, ts, svelte, css, html, json]
+        types_or: [javascript, ts, css, html, json]
         pass_filenames: true
 
       - id: stylelint
@@ -73,10 +87,3 @@ repos:
         language: system
         types: [css]
         pass_filenames: true
-
-      - id: svelte-check
-        name: Type-check Svelte codebase
-        entry: npx svelte-check --fail-on-warnings
-        language: system
-        types: [svelte]
-        pass_filenames: false

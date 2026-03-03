@@ -1,9 +1,9 @@
 ---
-title: "Derisking: Blackboard Content Mounting"
+title: 'Derisking: Blackboard Content Mounting'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "Implementation risk analysis for reading .vault/ file content and injecting it into worker context per-invocation."
+description: 'Implementation risk analysis for reading .vault/ file content and injecting it into worker context per-invocation.'
 ---
 
 # Derisking: Blackboard Content Mounting

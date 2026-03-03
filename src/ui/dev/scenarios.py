@@ -1,4 +1,4 @@
-"""Fixture scenario data for visual testing of the SvelteKit 5 frontend.
+"""Fixture scenario data for visual testing of the React 5 frontend.
 
 All data is in wire-protocol format — matching the TypeScript types in
 src/ui/src/lib/api/types.ts exactly. Field names, enum values, and JSON

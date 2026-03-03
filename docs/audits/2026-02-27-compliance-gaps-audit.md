@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: protocol-compliance-gaps
-description: "LangGraph, A2A SDK, ACP protocol, and ADR compliance audit identifying critical gaps including loop_count never incremented and WebSocket permission_response not rejected."
+description: 'LangGraph, A2A SDK, ACP protocol, and ADR compliance audit identifying critical gaps including loop_count never incremented and WebSocket permission_response not rejected.'
 related:
   - docs/adrs/2026-02-26-003-protocol-bridging-translation-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -90,20 +90,20 @@ client will continue with potentially incompatible behavior.
 
 ## ADR-006 section 5.1 COMPLIANCE MATRIX
 
-| # | Pattern | Line in acp_chat_model.py | Status | Notes |
-| --- | --------- | -------------------------- | -------- | ------- |
-| 1 | `create_subprocess_shell(command_str)` | line 166-174 | **PASS** | Uses`asyncio.create_subprocess_shell(shell_command, ...)`with single string |
-| 2 | `limit=10*1024*1024`on stdout/stderr | line 173 | **PASS** | `limit=10 * 1024 * 1024` |
-| 3 | Stdin:`json.dumps(req).encode("utf-8") + b"\n"` | lines 704, 725, 754, 282 | **PASS** | Consistently uses`json.dumps(req).encode("utf-8") + b"\n"` |
-| 4 | Stdout:`while line := await process.stdout.readline()` | line 348 | **PASS** | Uses walrus operator readline loop |
-| 5 | Bidirectional dispatch: responses vs notifications | lines 374-394 | **PASS** | `_dispatch_packet`checks for`result`/`error`(response) vs`method`with`id`(server RPC) vs`method`without`id`(notification) |
-| 6 | Session lifecycle: initialize -> session/new -> session/prompt | lines 194-196 | **PASS** | `_initialize_session`->`_setup_session`->`_setup_prompt` |
-| 7 | Tool call tracking dict keyed by`toolCallId` | line 647 | **PASS** | `self._tool_calls[tid] = dict(update)` |
-| 8 | `end_turn`detection from session/prompt response | line 403 | **PASS** | `result.get("stopReason") == "end_turn"`triggers`ctx.prompt_done.set()` |
-| 9 | Windows pipe cleanup via`_transport.close()` | lines 291-293 | **PASS** | `transport = getattr(ctx.process, "_transport", None); if transport is not None: transport.close()` |
-| 10 | `session/cancel`proper JSON-RPC with 3s timeout | lines 268-284 | **PASS** | Sends with`rpc_id`, awaits `ctx.response_futures[rpc_id]`with`timeout=3.0` |
-| 11 | `_handle_server_rpc`handles all 7 fs/terminal methods | lines 412-421 | **PASS** | Dispatch table covers:`session/request_permission`, `fs/read_text_file`, `fs/write_text_file`, `terminal/create`, `terminal/kill`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`(8 methods total, 7 fs/terminal + 1 permission) |
-| 12 | `_process_stdout_loop`handles batch JSON-RPC (list) | lines 361-366 | **PASS** | `if isinstance(parsed, list): for item in parsed: ...` |
+| #   | Pattern                                                        | Line in acp_chat_model.py | Status   | Notes                                                                                                                                                                                                                                             |
+| --- | -------------------------------------------------------------- | ------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | `create_subprocess_shell(command_str)`                         | line 166-174              | **PASS** | Uses`asyncio.create_subprocess_shell(shell_command, ...)`with single string                                                                                                                                                                       |
+| 2   | `limit=10*1024*1024`on stdout/stderr                           | line 173                  | **PASS** | `limit=10 * 1024 * 1024`                                                                                                                                                                                                                          |
+| 3   | Stdin:`json.dumps(req).encode("utf-8") + b"\n"`                | lines 704, 725, 754, 282  | **PASS** | Consistently uses`json.dumps(req).encode("utf-8") + b"\n"`                                                                                                                                                                                        |
+| 4   | Stdout:`while line := await process.stdout.readline()`         | line 348                  | **PASS** | Uses walrus operator readline loop                                                                                                                                                                                                                |
+| 5   | Bidirectional dispatch: responses vs notifications             | lines 374-394             | **PASS** | `_dispatch_packet`checks for`result`/`error`(response) vs`method`with`id`(server RPC) vs`method`without`id`(notification)                                                                                                                         |
+| 6   | Session lifecycle: initialize -> session/new -> session/prompt | lines 194-196             | **PASS** | `_initialize_session`->`_setup_session`->`_setup_prompt`                                                                                                                                                                                          |
+| 7   | Tool call tracking dict keyed by`toolCallId`                   | line 647                  | **PASS** | `self._tool_calls[tid] = dict(update)`                                                                                                                                                                                                            |
+| 8   | `end_turn`detection from session/prompt response               | line 403                  | **PASS** | `result.get("stopReason") == "end_turn"`triggers`ctx.prompt_done.set()`                                                                                                                                                                           |
+| 9   | Windows pipe cleanup via`_transport.close()`                   | lines 291-293             | **PASS** | `transport = getattr(ctx.process, "_transport", None); if transport is not None: transport.close()`                                                                                                                                               |
+| 10  | `session/cancel`proper JSON-RPC with 3s timeout                | lines 268-284             | **PASS** | Sends with`rpc_id`, awaits `ctx.response_futures[rpc_id]`with`timeout=3.0`                                                                                                                                                                        |
+| 11  | `_handle_server_rpc`handles all 7 fs/terminal methods          | lines 412-421             | **PASS** | Dispatch table covers:`session/request_permission`, `fs/read_text_file`, `fs/write_text_file`, `terminal/create`, `terminal/kill`, `terminal/output`, `terminal/wait_for_exit`, `terminal/release`(8 methods total, 7 fs/terminal + 1 permission) |
+| 12  | `_process_stdout_loop`handles batch JSON-RPC (list)            | lines 361-366             | **PASS** | `if isinstance(parsed, list): for item in parsed: ...`                                                                                                                                                                                            |
 
 ---
 
@@ -326,101 +326,101 @@ and `version`fields. TOAD`agent.py:649`sends`title: toad.TITLE`.
 
 ### ADR-001: Process & Workspace Management
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| Managed CLI subprocesses via AcpChatModel | PASS | Correctly implemented |
-| Zero PTY / Zero Batch | PASS | `create_subprocess_shell`with piped stdin/stdout/stderr |
-| Workspace isolation (worktrees) | PASS | `lib/workspace/git_manager.py`exists |
-| Global Git Mutex | NOT VERIFIED | `git_manager.py`exists but not read in detail for this audit |
+| Clause                                    | Status       | Notes                                                        |
+| ----------------------------------------- | ------------ | ------------------------------------------------------------ |
+| Managed CLI subprocesses via AcpChatModel | PASS         | Correctly implemented                                        |
+| Zero PTY / Zero Batch                     | PASS         | `create_subprocess_shell`with piped stdin/stdout/stderr      |
+| Workspace isolation (worktrees)           | PASS         | `lib/workspace/git_manager.py`exists                         |
+| Global Git Mutex                          | NOT VERIFIED | `git_manager.py`exists but not read in detail for this audit |
 
 ### ADR-004: Event Aggregation & State Replay
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| Sequence numbers monotonic per thread_id | PASS | `aggregator.py:183-186`uses`defaultdict(int)`incremented atomically |
-| Fan-out to subscribed clients only | PASS | `_broadcast`checks`thread_id in client_subs`at`aggregator.py:306` |
-| Backpressure bounded queue per client | **PARTIAL** | Queue is bounded (maxsize=512) but uses blocking put instead of oldest-drop (see A2A-003) |
-| State replay via REST | PASS | `GET /threads/{id}/state`at`endpoints.py:288-333`calls`graph.aget_state()` |
+| Clause                                   | Status      | Notes                                                                                     |
+| ---------------------------------------- | ----------- | ----------------------------------------------------------------------------------------- |
+| Sequence numbers monotonic per thread_id | PASS        | `aggregator.py:183-186`uses`defaultdict(int)`incremented atomically                       |
+| Fan-out to subscribed clients only       | PASS        | `_broadcast`checks`thread_id in client_subs`at`aggregator.py:306`                         |
+| Backpressure bounded queue per client    | **PARTIAL** | Queue is bounded (maxsize=512) but uses blocking put instead of oldest-drop (see A2A-003) |
+| State replay via REST                    | PASS        | `GET /threads/{id}/state`at`endpoints.py:288-333`calls`graph.aget_state()`                |
 
 ### ADR-006: Protocol Ecosystem & Bridge Strategy
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| All 12 AcpChatModel subprocess patterns | **11/12 PASS** | Only missing fs/read_text_file line/limit params (ACP-005) |
-| session/cancel as proper RPC with 3s timeout | PASS | `acp_chat_model.py:268-284` |
-| Host-side RPC handlers (7 methods) | PASS | 8 handlers registered in dispatch table |
+| Clause                                       | Status         | Notes                                                      |
+| -------------------------------------------- | -------------- | ---------------------------------------------------------- |
+| All 12 AcpChatModel subprocess patterns      | **11/12 PASS** | Only missing fs/read_text_file line/limit params (ACP-005) |
+| session/cancel as proper RPC with 3s timeout | PASS           | `acp_chat_model.py:268-284`                                |
+| Host-side RPC handlers (7 methods)           | PASS           | 8 handlers registered in dispatch table                    |
 
 ### ADR-007: Tech Stack & Deployment
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| ProactorEventLoop on Windows | PASS | Default on Python 3.13/Windows, no special config needed |
-| No uvloop | PASS | Not imported anywhere |
-| AsyncSqliteSaver from langgraph-checkpoint-sqlite | PASS | Imported in`graph.py:16` |
-| WAL mode: PRAGMA journal_mode=WAL | PASS | `session.py:51`sets WAL on every connection |
-| CORS middleware | PASS | `app.py:147-154`adds CORSMiddleware in dev mode |
-| anyio.create_task_group() in lifespan | **FAIL** | ADR-007 section 5 specifies`anyio.create_task_group()`but`app.py`uses plain lifespan context manager with no task group. Background tasks are created with`asyncio.create_task()`instead. |
+| Clause                                            | Status   | Notes                                                                                                                                                                                     |
+| ------------------------------------------------- | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| ProactorEventLoop on Windows                      | PASS     | Default on Python 3.13/Windows, no special config needed                                                                                                                                  |
+| No uvloop                                         | PASS     | Not imported anywhere                                                                                                                                                                     |
+| AsyncSqliteSaver from langgraph-checkpoint-sqlite | PASS     | Imported in`graph.py:16`                                                                                                                                                                  |
+| WAL mode: PRAGMA journal_mode=WAL                 | PASS     | `session.py:51`sets WAL on every connection                                                                                                                                               |
+| CORS middleware                                   | PASS     | `app.py:147-154`adds CORSMiddleware in dev mode                                                                                                                                           |
+| anyio.create_task_group() in lifespan             | **FAIL** | ADR-007 section 5 specifies`anyio.create_task_group()`but`app.py`uses plain lifespan context manager with no task group. Background tasks are created with`asyncio.create_task()`instead. |
 
 ### ADR-009: Facade Pattern & Module Hierarchy
 
-| Sub-module | `__all__` | `X as X` | Relative imports | Status |
-| ------------ | ----------- | ---------- | ----------------- | -------- |
-| `lib/api/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/api/schemas/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/core/__init__.py` | PASS | Uses lazy`__getattr__`for some | PASS | CLEAN |
-| `lib/core/nodes/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/providers/__init__.py` | PASS | Uses lazy`__getattr__`for some | PASS | CLEAN |
-| `lib/database/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/telemetry/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/workspace/__init__.py` | PASS | PASS | PASS | CLEAN |
-| `lib/utils/__init__.py` | PASS | **FAIL** | PASS | Missing`X as X`pattern -- uses bare`from .enums import AgentState, Environment, LogLevel, Provider` |
-| `lib/core/registry.py` | DELETED | N/A | N/A | CLEAN (per ADR-009) |
-| `lib/core/permissions.py` | DELETED | N/A | N/A | CLEAN (per ADR-009) |
+| Sub-module                    | `__all__` | `X as X`                       | Relative imports | Status                                                                                              |
+| ----------------------------- | --------- | ------------------------------ | ---------------- | --------------------------------------------------------------------------------------------------- |
+| `lib/api/__init__.py`         | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/api/schemas/__init__.py` | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/core/__init__.py`        | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
+| `lib/core/nodes/__init__.py`  | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/providers/__init__.py`   | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
+| `lib/database/__init__.py`    | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/telemetry/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/workspace/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `lib/utils/__init__.py`       | PASS      | **FAIL**                       | PASS             | Missing`X as X`pattern -- uses bare`from .enums import AgentState, Environment, LogLevel, Provider` |
+| `lib/core/registry.py`        | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
+| `lib/core/permissions.py`     | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
 
 ### ADR-010: Observability & Telemetry
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| OpenTelemetry from day one | PASS | `lib/telemetry/instrumentation.py`exists with TracerProvider setup |
-| FastAPI auto-instrumentation | PASS | `TelemetryMiddleware`in`app.py:158` |
-| LangSmith tracing | PASS | Referenced in telemetry config |
-| Trace ID in WebSocket frames | PASS | `websocket.py:315-318`injects`_trace`dict |
+| Clause                       | Status | Notes                                                              |
+| ---------------------------- | ------ | ------------------------------------------------------------------ |
+| OpenTelemetry from day one   | PASS   | `lib/telemetry/instrumentation.py`exists with TracerProvider setup |
+| FastAPI auto-instrumentation | PASS   | `TelemetryMiddleware`in`app.py:158`                                |
+| LangSmith tracing            | PASS   | Referenced in telemetry config                                     |
+| Trace ID in WebSocket frames | PASS   | `websocket.py:315-318`injects`_trace`dict                          |
 
 ### ADR-011: Frontend-Backend Wire Contract
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| 12 ServerEvent types | PASS | All defined in`schemas/events.py` |
-| 6 ClientCommand types | PASS | All defined in`schemas/commands.py` |
-| 6 REST endpoints | PASS + 1 extra | 6 ADR-011 routes +`GET /teams`(ADR-013) |
-| Permission response REST-only enforcement | **FAIL** | See COMP-002 -- WS permission_response not rejected |
-| Sequence monotonic per thread | PASS | `aggregator.py:183-186` |
-| HeartbeatEvent every 30s | PASS | `websocket.py:340`uses`_HEARTBEAT_INTERVAL = 30.0` |
-| Reconnection protocol (snapshot + sequence) | PASS | `GET /threads/{id}/state`returns`last_sequence` |
+| Clause                                      | Status         | Notes                                               |
+| ------------------------------------------- | -------------- | --------------------------------------------------- |
+| 12 ServerEvent types                        | PASS           | All defined in`schemas/events.py`                   |
+| 6 ClientCommand types                       | PASS           | All defined in`schemas/commands.py`                 |
+| 6 REST endpoints                            | PASS + 1 extra | 6 ADR-011 routes +`GET /teams`(ADR-013)             |
+| Permission response REST-only enforcement   | **FAIL**       | See COMP-002 -- WS permission_response not rejected |
+| Sequence monotonic per thread               | PASS           | `aggregator.py:183-186`                             |
+| HeartbeatEvent every 30s                    | PASS           | `websocket.py:340`uses`_HEARTBEAT_INTERVAL = 30.0`  |
+| Reconnection protocol (snapshot + sequence) | PASS           | `GET /threads/{id}/state`returns`last_sequence`     |
 
 ### ADR-012: Agent Definition Schema
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| AgentConfig Pydantic model | PASS | `lib/core/team_config.py` |
-| TOML loading via tomllib | PASS | `from_toml()`uses`tomllib.load()` |
-| Preset agents in`lib/core/presets/agents/` | PASS | Directory exists |
-| ACP capability binding (agent_config -> clientCapabilities) | PASS | `acp_chat_model.py:682-699`reads from`agent_config.capabilities` |
-| Config discovery order (workspace -> preset -> error) | PASS | `load_agent_config()`in`team_config.py` |
+| Clause                                                      | Status | Notes                                                            |
+| ----------------------------------------------------------- | ------ | ---------------------------------------------------------------- |
+| AgentConfig Pydantic model                                  | PASS   | `lib/core/team_config.py`                                        |
+| TOML loading via tomllib                                    | PASS   | `from_toml()`uses`tomllib.load()`                                |
+| Preset agents in`lib/core/presets/agents/`                  | PASS   | Directory exists                                                 |
+| ACP capability binding (agent_config -> clientCapabilities) | PASS   | `acp_chat_model.py:682-699`reads from`agent_config.capabilities` |
+| Config discovery order (workspace -> preset -> error)       | PASS   | `load_agent_config()`in`team_config.py`                          |
 
 ### ADR-013: Team Composition & Topology
 
-| Clause | Status | Notes |
-| -------- | -------- | ------- |
-| TeamConfig Pydantic model | PASS | `lib/core/team_config.py` |
-| 3 topology types (star, pipeline, pipeline_loop) | PASS | All three in`graph.py` |
-| loop_count field in TeamState | PASS (declared) | `state.py:100` |
-| loop_count incremented by loop_node | **CRITICAL FAIL** | See COMP-001 |
-| Supervisor prompt enhancement with agent roster | PASS | `graph.py:67-82` |
-| interrupt_before assembly | PASS | `graph.py:120-125` |
-| Model resolution precedence (worker > agent > team) | PASS | `graph.py:30-53` |
-| CreateThreadRequest gains team_preset | PASS | In`schemas/rest.py` |
-| GET /teams endpoint | PASS | `endpoints.py:425-451` |
+| Clause                                              | Status            | Notes                     |
+| --------------------------------------------------- | ----------------- | ------------------------- |
+| TeamConfig Pydantic model                           | PASS              | `lib/core/team_config.py` |
+| 3 topology types (star, pipeline, pipeline_loop)    | PASS              | All three in`graph.py`    |
+| loop_count field in TeamState                       | PASS (declared)   | `state.py:100`            |
+| loop_count incremented by loop_node                 | **CRITICAL FAIL** | See COMP-001              |
+| Supervisor prompt enhancement with agent roster     | PASS              | `graph.py:67-82`          |
+| interrupt_before assembly                           | PASS              | `graph.py:120-125`        |
+| Model resolution precedence (worker > agent > team) | PASS              | `graph.py:30-53`          |
+| CreateThreadRequest gains team_preset               | PASS              | In`schemas/rest.py`       |
+| GET /teams endpoint                                 | PASS              | `endpoints.py:425-451`    |
 
 ---
 
@@ -485,11 +485,11 @@ The following areas passed all compliance checks:
 - **Wire contract schema completeness** (51 Pydantic types, all 12 events, all 6
   commands)
 - **Sequence number management** (monotonic per thread, atomically incremented)
-| - **Session lifecycle ordering** (initialize -> session/new | load ->
-session/prompt) |
-- **Windows pipe cleanup** (_transport.close() pattern)
+  | - **Session lifecycle ordering** (initialize -> session/new | load ->
+  session/prompt) |
+- **Windows pipe cleanup** (\_transport.close() pattern)
 - **session/cancel as proper RPC** (with 3-second timeout)
-- **Batch JSON-RPC handling** (array dispatch in _process_stdout_loop)
+- **Batch JSON-RPC handling** (array dispatch in \_process_stdout_loop)
 - **Facade pattern compliance** (all sub-modules except lib/utils have correct
   **all** and X as X)
 - **Registry and permissions deletion** (ADR-009 mandate fulfilled)

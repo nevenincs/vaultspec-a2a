@@ -35,9 +35,24 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
-    ("vaultspec-adaptive-coder", "star", {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}, True),
-    ("vaultspec-structured-coder", "pipeline", {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}, False),
-    ("vaultspec-iterative-coder", "pipeline_loop", {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}, False),
+    (
+        "vaultspec-adaptive-coder",
+        "star",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        True,
+    ),
+    (
+        "vaultspec-structured-coder",
+        "pipeline",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        False,
+    ),
+    (
+        "vaultspec-iterative-coder",
+        "pipeline_loop",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        False,
+    ),
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
 ]
 
@@ -62,7 +77,9 @@ async def test_compile_graph_structure(
     """
     team = load_team_config(preset)
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    supervisor_cfg = load_agent_config("vaultspec-supervisor") if has_supervisor else None
+    supervisor_cfg = (
+        load_agent_config("vaultspec-supervisor") if has_supervisor else None
+    )
 
     graph = compile_team_graph(
         team_config=team,
@@ -113,7 +130,15 @@ async def test_compile_team_graph_accepts_workspace_root(
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer", "supervisor"} == node_keys
+    assert {
+        "vaultspec-planner",
+        "vaultspec-coder",
+        "vaultspec-reviewer",
+        "supervisor",
+        "mount_vaultspec-planner",
+        "mount_vaultspec-coder",
+        "mount_vaultspec-reviewer",
+    } == node_keys
 
 
 # ---------------------------------------------------------------------------
@@ -357,47 +382,53 @@ def test_worker_retry_on_timeout_wrapped_in_worker_error_is_retried() -> None:
     T05: Pregel passes WorkerExecutionError to the predicate. We inspect
     __cause__ to evaluate the original failure — TimeoutError is transient.
     """
-    from ..exceptions import WorkerExecutionError  # noqa: PLC0415
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..exceptions import WorkerExecutionError
+    from ..graph import _worker_retry_on
 
     cause = TimeoutError("connection timed out")
-    wrapped = WorkerExecutionError(worker="coder", model="AcpChatModel", message_count=5)
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=5
+    )
     wrapped.__cause__ = cause
     assert _worker_retry_on(wrapped) is True
 
 
 def test_worker_retry_on_connection_error_is_retried() -> None:
     """ConnectionError is retried via default_retry_on delegation."""
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..graph import _worker_retry_on
 
     assert _worker_retry_on(ConnectionError("connection refused")) is True
 
 
 def test_worker_retry_on_connection_error_wrapped_in_worker_error_is_retried() -> None:
     """WorkerExecutionError wrapping ConnectionError is retried via __cause__ inspection."""
-    from ..exceptions import WorkerExecutionError  # noqa: PLC0415
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..exceptions import WorkerExecutionError
+    from ..graph import _worker_retry_on
 
     cause = ConnectionError("refused")
-    wrapped = WorkerExecutionError(worker="coder", model="AcpChatModel", message_count=3)
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=3
+    )
     wrapped.__cause__ = cause
     assert _worker_retry_on(wrapped) is True
 
 
 def test_worker_retry_on_runtime_error_not_retried() -> None:
     """RuntimeError is not retried — not a transient network failure."""
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..graph import _worker_retry_on
 
     assert _worker_retry_on(RuntimeError("boom")) is False
 
 
 def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
     """WorkerExecutionError wrapping RuntimeError is not retried."""
-    from ..exceptions import WorkerExecutionError  # noqa: PLC0415
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..exceptions import WorkerExecutionError
+    from ..graph import _worker_retry_on
 
     cause = RuntimeError("deterministic failure")
-    wrapped = WorkerExecutionError(worker="coder", model="AcpChatModel", message_count=2)
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=2
+    )
     wrapped.__cause__ = cause
     assert _worker_retry_on(wrapped) is False
 
@@ -412,8 +443,8 @@ async def test_compile_team_graph_step_timeout_set() -> None:
     """compile_team_graph sets step_timeout on the compiled Pregel graph."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ..graph import compile_team_graph  # noqa: PLC0415
-    from ..team_config import load_agent_config, load_team_config  # noqa: PLC0415
+    from ..graph import compile_team_graph
+    from ..team_config import load_agent_config, load_team_config
 
     team = load_team_config("vaultspec-adaptive-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -433,8 +464,8 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ..graph import compile_team_graph  # noqa: PLC0415
-    from ..team_config import load_agent_config, load_team_config  # noqa: PLC0415
+    from ..graph import compile_team_graph
+    from ..team_config import load_agent_config, load_team_config
 
     team = load_team_config("vaultspec-adaptive-coder")
     assert team.graph.step_timeout_seconds == 300
@@ -458,8 +489,8 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
 
 def test_build_supervisor_prompt_injects_directive() -> None:
     """_build_supervisor_prompt appends team directive after roster when set."""
-    from ..graph import _build_supervisor_prompt  # noqa: PLC0415
-    from ..team_config import AgentConfig  # noqa: PLC0415
+    from ..graph import _build_supervisor_prompt
+    from ..team_config import AgentConfig
 
     agents: list[AgentConfig] = []
     base = "You are a supervisor."
@@ -470,7 +501,7 @@ def test_build_supervisor_prompt_injects_directive() -> None:
 
 def test_build_supervisor_prompt_no_directive() -> None:
     """_build_supervisor_prompt does not add directive section when directive is None."""
-    from ..graph import _build_supervisor_prompt  # noqa: PLC0415
+    from ..graph import _build_supervisor_prompt
 
     base = "You are a supervisor."
     result = _build_supervisor_prompt([], base, directive=None)
@@ -482,8 +513,8 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
     """compile_team_graph sets recursion_limit from team TOML on the compiled graph."""
     from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
-    from ..graph import compile_team_graph  # noqa: PLC0415
-    from ..team_config import load_agent_config, load_team_config  # noqa: PLC0415
+    from ..graph import compile_team_graph
+    from ..team_config import load_agent_config, load_team_config
 
     # vaultspec-solo-coder has recursion_limit = 10
     team = load_team_config("vaultspec-solo-coder")
@@ -506,19 +537,14 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
 
 def test_resolve_model_for_worker_falls_back_on_primary_failure() -> None:
     """When primary provider raises ValueError, fallback provider is tried."""
-    from unittest.mock import MagicMock, patch  # noqa: PLC0415
+    from unittest.mock import MagicMock, patch
 
-    from ..graph import _resolve_model_for_worker  # noqa: PLC0415
-    from ..team_config import (  # noqa: PLC0415
-        AgentConfig,
-        AgentModelConfig,
-        TeamConfig,
-        WorkerOverrideConfig,
-        WorkerRef,
+    from ...utils.enums import Provider
+    from ..graph import _resolve_model_for_worker
+    from ..team_config import (
         load_agent_config,
         load_team_config,
     )
-    from ...utils.enums import Provider  # noqa: PLC0415
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")
@@ -531,12 +557,16 @@ def test_resolve_model_for_worker_falls_back_on_primary_failure() -> None:
             raise ValueError("Claude unavailable")
         return fallback_model
 
-    with patch("lib.core.graph.ProviderFactory.create", side_effect=_create_side_effect):
+    with patch(
+        "lib.core.graph.ProviderFactory.create", side_effect=_create_side_effect
+    ):
         # Inject a fallback chain via agent model config
         agent_cfg = agent_cfg.model_copy(
-            update={"model": agent_cfg.model.model_copy(
-                update={"provider_fallback": [Provider.OPENAI]}
-            )}
+            update={
+                "model": agent_cfg.model.model_copy(
+                    update={"provider_fallback": [Provider.OPENAI]}
+                )
+            }
         )
         result = _resolve_model_for_worker(worker_ref, agent_cfg, team)
 
@@ -545,27 +575,31 @@ def test_resolve_model_for_worker_falls_back_on_primary_failure() -> None:
 
 def test_resolve_model_for_worker_raises_when_all_exhausted() -> None:
     """ValueError is raised when all providers in the chain fail."""
-    from unittest.mock import patch  # noqa: PLC0415
+    from unittest.mock import patch
 
-    from ..graph import _resolve_model_for_worker  # noqa: PLC0415
-    from ..team_config import load_agent_config, load_team_config  # noqa: PLC0415
-    from ...utils.enums import Provider  # noqa: PLC0415
+    from ...utils.enums import Provider
+    from ..graph import _resolve_model_for_worker
+    from ..team_config import load_agent_config, load_team_config
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")
     agent_cfg = agent_cfg.model_copy(
-        update={"model": agent_cfg.model.model_copy(
-            update={"provider_fallback": [Provider.OPENAI]}
-        )}
+        update={
+            "model": agent_cfg.model.model_copy(
+                update={"provider_fallback": [Provider.OPENAI]}
+            )
+        }
     )
     worker_ref = team.workers[0]
 
-    with patch(
-        "lib.core.graph.ProviderFactory.create",
-        side_effect=ValueError("all down"),
+    with (
+        patch(
+            "lib.core.graph.ProviderFactory.create",
+            side_effect=ValueError("all down"),
+        ),
+        pytest.raises(ValueError, match="All providers exhausted"),
     ):
-        with pytest.raises(ValueError, match="All providers exhausted"):
-            _resolve_model_for_worker(worker_ref, agent_cfg, team)
+        _resolve_model_for_worker(worker_ref, agent_cfg, team)
 
 
 # ---------------------------------------------------------------------------
@@ -575,9 +609,9 @@ def test_resolve_model_for_worker_raises_when_all_exhausted() -> None:
 
 def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
     """GraphRecursionError must never be retried — retrying would just hit the limit again."""
-    from langgraph.errors import GraphRecursionError  # noqa: PLC0415
+    from langgraph.errors import GraphRecursionError
 
-    from ..graph import _worker_retry_on  # noqa: PLC0415
+    from ..graph import _worker_retry_on
 
     exc = GraphRecursionError("Recursion limit of 100 reached")
     assert _worker_retry_on(exc) is False
@@ -631,7 +665,12 @@ async def test_graph_execution_routing(
     async for event in graph.astream_events(initial_state, config, version="v2"):
         if event["event"] == "on_chain_end":
             node_name = event["name"]
-            if node_name in ("supervisor", "vaultspec-coder", "vaultspec-planner", "vaultspec-reviewer"):
+            if node_name in (
+                "supervisor",
+                "vaultspec-coder",
+                "vaultspec-planner",
+                "vaultspec-reviewer",
+            ):
                 executed_nodes.append(node_name)
 
     # Validate state was checkpointed

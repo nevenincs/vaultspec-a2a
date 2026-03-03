@@ -1,8 +1,8 @@
 ---
-name: "Architecture Domain - Distilled"
+name: 'Architecture Domain - Distilled'
 date: 2026-25-02
 type: distilled
-summary: "Consolidated system architecture covering topology, tech stack, component inventory, data flows, build order, and risk register. Synthesized from 6 research documents. 15 refuted hypotheses removed. 7 contradictions and 11 knowledge gaps explicitly identified."
+summary: 'Consolidated system architecture covering topology, tech stack, component inventory, data flows, build order, and risk register. Synthesized from 6 research documents. 15 refuted hypotheses removed. 7 contradictions and 11 knowledge gaps explicitly identified.'
 maturity: 50
 sources:
   - docs/architecture/2026-25-02-coding-teams-research.md
@@ -19,9 +19,9 @@ feature: architecture-distilled
 > [!WARNING]
 > **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
 > The architecture described in this document (A2A, Ephemeral Subprocesses,
-Manual Process Management) has been superseded by the native LangGraph
-architecture. This document remains for historical context. Please refer to ADRs
-001-009 for the current binding architecture.
+> Manual Process Management) has been superseded by the native LangGraph
+> architecture. This document remains for historical context. Please refer to ADRs
+> 001-009 for the current binding architecture.
 
 **Date**: 2026-02-25
 **Status**: Distilled from Phases 1–6 research + gap analysis audit
@@ -42,11 +42,11 @@ CLI-agnostic: not coupled to any single vendor's agent framework.
 
 Three protocols at distinct layers:
 
-| Layer | Protocol | Role |
-| ------- | ---------- | ------ |
-| Client ↔ Agent | ACP | Session control, streaming, permissions (IDE integration) |
-| Agent ↔ Agent | A2A | Discovery, tasks, artifacts, multi-turn collaboration |
-| Agent ↔ Tools | MCP | Tool calling, resource access, prompts |
+| Layer          | Protocol | Role                                                      |
+| -------------- | -------- | --------------------------------------------------------- |
+| Client ↔ Agent | ACP      | Session control, streaming, permissions (IDE integration) |
+| Agent ↔ Agent  | A2A      | Discovery, tasks, artifacts, multi-turn collaboration     |
+| Agent ↔ Tools  | MCP      | Tool calling, resource access, prompts                    |
 
 **Adopted position**: A2A + MCP are the implementation pair. ACP concepts
 (SessionAccumulator, PermissionBroker) are ported as patterns without adopting
@@ -185,11 +185,11 @@ lifecycle.
 
 ACP concepts ported without ACP transport:
 
-| ACP Pattern | Our Adaptation |
-| ------------- | --------------- |
-| SessionAccumulator | Per-agent state accumulator consuming A2A events |
-| PermissionBroker | Permission request routing: agent → WebSocket → browser → response |
-| ToolCallTracker | Tool call monitoring per agent |
+| ACP Pattern        | Our Adaptation                                                     |
+| ------------------ | ------------------------------------------------------------------ |
+| SessionAccumulator | Per-agent state accumulator consuming A2A events                   |
+| PermissionBroker   | Permission request routing: agent → WebSocket → browser → response |
+| ToolCallTracker    | Tool call monitoring per agent                                     |
 
 The `request_permission` blocking pattern (agent pauses until user responds) is
 the cleanest human-in-the-loop mechanism and is adopted as the core permission
@@ -201,32 +201,32 @@ flow.
 
 ### 2.1 Settled Choices
 
-| Layer | Choice | Rationale |
-| ------- | -------- | ----------- |
-| Language | Python 3.13 | Project constraint |
-| Package manager | uv | Project constraint |
-| Backend framework | FastAPI | DI, auto-docs, same Starlette WebSocket core |
-| ASGI server | Uvicorn | Standard, used by all A2A samples |
-| Frontend framework | SvelteKit (Svelte 5) | Runes reactivity, xterm-svelte, proven with FastAPI |
-| UI Component System | shadcn-svelte + Tailwind v4 | High-readability primitives, fast CSS engine, overrides Vanilla CSS mandate |
-| Terminal emulator | xterm.js via xterm-svelte | Universal standard |
-| Code viewer | CodeMirror 6 | 124KB vs Monaco 2MB, read-only, incremental updates |
-| Syntax highlighting | Shiki | VS Code quality, WASM-based |
-| Markdown rendering | @humanspeak/svelte-markdown | Token caching O(n) streaming, avoids O(n²) re-parse |
-| State store | SQLite via aiosqlite | Zero-config, WAL mode, single-file |
-| Build tool | Vite (via SvelteKit) | Fast, standard |
-| A2A SDK | a2a-python | Official, full protocol support |
-| MCP SDK | mcp-python-sdk | For CLI integration + tool serving |
-| Deployment | pip install + uvicorn | Follow Jupyter/Open WebUI model |
+| Layer               | Choice                     | Rationale                                                                   |
+| ------------------- | -------------------------- | --------------------------------------------------------------------------- |
+| Language            | Python 3.13                | Project constraint                                                          |
+| Package manager     | uv                         | Project constraint                                                          |
+| Backend framework   | FastAPI                    | DI, auto-docs, same Starlette WebSocket core                                |
+| ASGI server         | Uvicorn                    | Standard, used by all A2A samples                                           |
+| Frontend framework  | React (React 5)            | Runes reactivity, xterm-React, proven with FastAPI                          |
+| UI Component System | shadcn-React + Tailwind v4 | High-readability primitives, fast CSS engine, overrides Vanilla CSS mandate |
+| Terminal emulator   | xterm.js via xterm-React   | Universal standard                                                          |
+| Code viewer         | CodeMirror 6               | 124KB vs Monaco 2MB, read-only, incremental updates                         |
+| Syntax highlighting | Shiki                      | VS Code quality, WASM-based                                                 |
+| Markdown rendering  | @humanspeak/React-markdown | Token caching O(n) streaming, avoids O(n²) re-parse                         |
+| State store         | SQLite via aiosqlite       | Zero-config, WAL mode, single-file                                          |
+| Build tool          | Vite (via React)           | Fast, standard                                                              |
+| A2A SDK             | a2a-python                 | Official, full protocol support                                             |
+| MCP SDK             | mcp-python-sdk             | For CLI integration + tool serving                                          |
+| Deployment          | pip install + uvicorn      | Follow Jupyter/Open WebUI model                                             |
 
 ### 2.2 Undecided
 
-| Component | Options | Status |
-| ----------- | --------- | -------- |
-| Agent framework | Vanilla A2A SDK / LangGraph | Initial lean toward LangGraph for stateful agents; never confirmed |
-| LLM provider abstraction | Direct SDKs / LiteLLM | LiteLLM mentioned but never evaluated |
-| WebSocket lib | Starlette built-in | Effectively decided (comes with FastAPI) |
-| Process management | asyncio subprocesses | Effectively decided (simplest for local) |
+| Component                | Options                     | Status                                                             |
+| ------------------------ | --------------------------- | ------------------------------------------------------------------ |
+| Agent framework          | Vanilla A2A SDK / LangGraph | Initial lean toward LangGraph for stateful agents; never confirmed |
+| LLM provider abstraction | Direct SDKs / LiteLLM       | LiteLLM mentioned but never evaluated                              |
+| WebSocket lib            | Starlette built-in          | Effectively decided (comes with FastAPI)                           |
+| Process management       | asyncio subprocesses        | Effectively decided (simplest for local)                           |
 
 ---
 
@@ -234,41 +234,41 @@ flow.
 
 ### 3.1 Reusable (No Custom Code)
 
-| Component | Source |
-| ----------- | -------- |
-| A2A server/client, Agent Card serving | a2a-python SDK |
-| Event queue + streaming | a2a-python EventQueue |
-| Task persistence (SQLAlchemy) | a2a-python server/models.py |
-| MCP server with decorators | mcp-python-sdk |
-| MCP client (tool discovery/calling) | mcp-python-sdk |
-| HTTP + WebSocket + REST | FastAPI/Starlette |
-| Terminal emulation | xterm.js via xterm-svelte |
-| Code viewing | CodeMirror 6 |
+| Component                             | Source                      |
+| ------------------------------------- | --------------------------- |
+| A2A server/client, Agent Card serving | a2a-python SDK              |
+| Event queue + streaming               | a2a-python EventQueue       |
+| Task persistence (SQLAlchemy)         | a2a-python server/models.py |
+| MCP server with decorators            | mcp-python-sdk              |
+| MCP client (tool discovery/calling)   | mcp-python-sdk              |
+| HTTP + WebSocket + REST               | FastAPI/Starlette           |
+| Terminal emulation                    | xterm.js via xterm-React    |
+| Code viewing                          | CodeMirror 6                |
 
 ### 3.2 Requires Adaptation
 
-| Component | Source | Adaptation |
-| ----------- | -------- | ----------- |
-| SessionAccumulator | ACP contrib | Port to A2A event types |
-| PermissionBroker | ACP contrib | Port to our approval flow |
-| Content helpers | ACP contrib | Inform A2A Part construction |
-| xterm-svelte | npm package | WebSocket stdout relay integration |
+| Component          | Source      | Adaptation                         |
+| ------------------ | ----------- | ---------------------------------- |
+| SessionAccumulator | ACP contrib | Port to A2A event types            |
+| PermissionBroker   | ACP contrib | Port to our approval flow          |
+| Content helpers    | ACP contrib | Inform A2A Part construction       |
+| xterm-React        | npm package | WebSocket stdout relay integration |
 
 ### 3.3 Must Build From Scratch
 
-| Component | Complexity | Notes |
-| ----------- | ----------- | ------- |
-| **Process Manager** | HIGH | Windows subprocess lifecycle, CTRL_BREAK_EVENT, health probes, restart, port allocation. Highest risk. |
-| **Event Aggregator** | HIGH | Multi-SSE fan-in, state accumulation, reconnection, WebSocket fan-out |
-| **Scoped MCP Tool Server** | MEDIUM | Per-agent filesystem isolation, path validation, command allowlists |
-| **Provider Adapter Layer** | MEDIUM | Per-provider CLI/API wrappers (see agents distilled doc) |
-| **LLM Client Abstraction** | MEDIUM | Tool-calling translation across providers |
-| **Permission Manager** | MEDIUM | Runtime policy engine, approval flow |
-| **WebSocket Connection Manager** | MEDIUM | Channel multiplexing, reconnection |
-| **Agent Registry** | LOW | id→port→health mapping |
-| **Workspace Manager** | LOW | Git worktree lifecycle |
-| **Message Router** | LOW | User→agent routing in team context |
-| **Port Allocator** | LOW | Free port discovery + tracking |
+| Component                        | Complexity | Notes                                                                                                  |
+| -------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------ |
+| **Process Manager**              | HIGH       | Windows subprocess lifecycle, CTRL_BREAK_EVENT, health probes, restart, port allocation. Highest risk. |
+| **Event Aggregator**             | HIGH       | Multi-SSE fan-in, state accumulation, reconnection, WebSocket fan-out                                  |
+| **Scoped MCP Tool Server**       | MEDIUM     | Per-agent filesystem isolation, path validation, command allowlists                                    |
+| **Provider Adapter Layer**       | MEDIUM     | Per-provider CLI/API wrappers (see agents distilled doc)                                               |
+| **LLM Client Abstraction**       | MEDIUM     | Tool-calling translation across providers                                                              |
+| **Permission Manager**           | MEDIUM     | Runtime policy engine, approval flow                                                                   |
+| **WebSocket Connection Manager** | MEDIUM     | Channel multiplexing, reconnection                                                                     |
+| **Agent Registry**               | LOW        | id→port→health mapping                                                                                 |
+| **Workspace Manager**            | LOW        | Git worktree lifecycle                                                                                 |
+| **Message Router**               | LOW        | User→agent routing in team context                                                                     |
+| **Port Allocator**               | LOW        | Free port discovery + tracking                                                                         |
 
 ### 3.4 Complexity Tiers
 
@@ -280,7 +280,7 @@ permission flow, chat with contextId, xterm.js setup, CodeMirror viewer, Agent
 Card routing, MCP tool surface, git worktree management
 
 **Tier 1 (well-understood, library-backed):** A2A server/client, MCP tools,
-SQLite persistence, Agent Cards, REST API, static file serving, basic Svelte
+SQLite persistence, Agent Cards, REST API, static file serving, basic React
 components
 
 ---
@@ -290,7 +290,7 @@ components
 ### 4.1 End-to-End: User → Agent → Result
 
 ```text
-Browser (SvelteKit)
+Browser (React)
   │ WebSocket JSON: {type: "send_message", agent_id, message}
   ▼
 FastAPI WebSocket Handler
@@ -309,28 +309,28 @@ SSE Stream → Orchestrator Event Aggregator
   │ Parse, update task state, translate
   ▼
 WebSocket broadcast → Browser
-  │ Svelte 5 runes → per-agent component update
+  │ React 5 runes → per-agent component update
   ▼
 Rendered UI
 ```
 
 ### 4.2 Serialization Boundaries
 
-| Boundary | Format | Key Failure Mode |
-| ---------- | -------- | ----------------- |
-| Browser ↔ WebSocket | JSON | Connection drop |
-| FastAPI ↔ A2A Agent | JSON-RPC over HTTP/SSE | Agent crash, port unreachable |
-| Agent ↔ MCP Tool Server | JSON-RPC over stdio | Subprocess crash, pipe broken |
-| Agent ↔ LLM API | HTTP JSON | Timeout, rate limit, auth failure |
-| FastAPI ↔ SQLite | SQL via aiosqlite | DB locked (WAL mitigates) |
+| Boundary                | Format                 | Key Failure Mode                  |
+| ----------------------- | ---------------------- | --------------------------------- |
+| Browser ↔ WebSocket     | JSON                   | Connection drop                   |
+| FastAPI ↔ A2A Agent     | JSON-RPC over HTTP/SSE | Agent crash, port unreachable     |
+| Agent ↔ MCP Tool Server | JSON-RPC over stdio    | Subprocess crash, pipe broken     |
+| Agent ↔ LLM API         | HTTP JSON              | Timeout, rate limit, auth failure |
+| FastAPI ↔ SQLite        | SQL via aiosqlite      | DB locked (WAL mitigates)         |
 
 ### 4.3 Async Handoff Points
 
-| Handoff | Risk |
-| --------- | ------ |
-| WebSocket → A2A client | Task leak if not cancelled |
-| A2A SSE → Event aggregator | Generator not closed on disconnect |
-| Agent executor → EventQueue | Queue full (1024), producer blocks |
+| Handoff                      | Risk                                   |
+| ---------------------------- | -------------------------------------- |
+| WebSocket → A2A client       | Task leak if not cancelled             |
+| A2A SSE → Event aggregator   | Generator not closed on disconnect     |
+| Agent executor → EventQueue  | Queue full (1024), producer blocks     |
 | Process Manager → subprocess | Windows ProactorEventLoop restrictions |
 
 ---
@@ -348,26 +348,26 @@ Layer 2 (needs Layer 1):
   Web Backend (FastAPI)
 
 Layer 3 (needs Layer 2):
-  Web Frontend (SvelteKit)
+  Web Frontend (React)
   Workspace Manager
 
 ```
 
 ### Sizing Estimate
 
-| Component | Files | Weight |
-| ----------- | ------- | -------- |
-| Process Manager | 3–5 | Heavy |
-| Event Aggregator | 3–4 | Heavy |
-| Frontend (SvelteKit) | 10–15 | Heavy |
-| Permission Manager | 2–3 | Medium |
-| Coding Agent Template | 2–3 | Medium |
-| Scoped MCP Tool Server | 2–3 | Medium |
-| Web Backend (FastAPI) | 3–5 | Medium |
-| Agent Registry | 1–2 | Light |
-| MCP Tool Surface | 1–2 | Light |
-| Workspace Manager | 1–2 | Light |
-| **Total** | **~30–45** | |
+| Component              | Files      | Weight |
+| ---------------------- | ---------- | ------ |
+| Process Manager        | 3–5        | Heavy  |
+| Event Aggregator       | 3–4        | Heavy  |
+| Frontend (React)       | 10–15      | Heavy  |
+| Permission Manager     | 2–3        | Medium |
+| Coding Agent Template  | 2–3        | Medium |
+| Scoped MCP Tool Server | 2–3        | Medium |
+| Web Backend (FastAPI)  | 3–5        | Medium |
+| Agent Registry         | 1–2        | Light  |
+| MCP Tool Surface       | 1–2        | Light  |
+| Workspace Manager      | 1–2        | Light  |
+| **Total**              | **~30–45** |        |
 
 Heaviest work: Process Manager, Event Aggregator, Frontend components.
 
@@ -400,15 +400,15 @@ Heaviest work: Process Manager, Event Aggregator, Frontend components.
 
 ## 7. Risk Register
 
-| Risk | Impact | Likelihood | Mitigation |
-| ------ | -------- | ----------- | ----------- |
-| Windows subprocess issues | High | High | Build Process Manager first, test early |
-| Agent LLM costs spiral | High | Medium | Budget per task, token tracking, hard limits |
-| MCP tasks never stabilize | Medium | Medium | Already mitigated: using stable tools |
-| xterm.js memory with many agents | Medium | Low | Limit scrollback (5K lines) |
-| A2A SDK breaking changes | Medium | Low | Pin version, abstract behind thin layer |
-| SvelteKit learning curve | Low | Medium | Svelte 5 is simpler than React |
-| SQLite contention | Low | Low | WAL mode, single-user |
+| Risk                             | Impact | Likelihood | Mitigation                                   |
+| -------------------------------- | ------ | ---------- | -------------------------------------------- |
+| Windows subprocess issues        | High   | High       | Build Process Manager first, test early      |
+| Agent LLM costs spiral           | High   | Medium     | Budget per task, token tracking, hard limits |
+| MCP tasks never stabilize        | Medium | Medium     | Already mitigated: using stable tools        |
+| xterm.js memory with many agents | Medium | Low        | Limit scrollback (5K lines)                  |
+| A2A SDK breaking changes         | Medium | Low        | Pin version, abstract behind thin layer      |
+| React learning curve             | Low    | Medium     | React 5 is simpler than React                |
+| SQLite contention                | Low    | Low        | WAL mode, single-user                        |
 
 ---
 
@@ -469,7 +469,7 @@ layered later if the API stabilizes.
 Coding-teams research says "Leaning toward: Vanilla A2A SDK for orchestrator
 
 - LangGraph internally for agents that need stateful reasoning loops." No
-subsequent document confirms or rejects this.
+  subsequent document confirms or rejects this.
 
 **Resolved by ADR-008**: LangGraph is officially adopted as the core
 orchestrator engine. Vanilla A2A SDK is abandoned.

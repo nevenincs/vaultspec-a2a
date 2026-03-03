@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: control-surface-rendering
-description: "Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output."
-name: "Control Surface Rendering"
+description: 'Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output.'
+name: 'Control Surface Rendering'
 maturity: 25
-summary: "Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output."
+summary: 'Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output.'
 ---
 
 # Research Phase 2: Terminal Emulation, Syntax Highlighting, and Agent Output Rendering
@@ -70,18 +70,18 @@ glyphs by pixel height for efficient GPU texture uploads.
 
 All addons are scoped under `@xterm/`since v5.4.0:
 
-| Addon | Package | Purpose |
-| ------- | --------- | --------- |
-| **Fit** | `@xterm/addon-fit` | Auto-resize terminal to container element |
-| **WebGL** | `@xterm/addon-webgl` | GPU-accelerated rendering via WebGL2 context |
-| **Canvas** | `@xterm/addon-canvas` | Canvas-based renderer (fallback for WebGL) |
-| **Search** | `@xterm/addon-search` | Text search within terminal buffer |
-| **Web Links** | `@xterm/addon-web-links` | Clickable URL detection |
-| **Unicode11** | `@xterm/addon-unicode11` | Correct character widths for Unicode 11 |
-| **Image** | `@xterm/addon-image` | Inline image display (sixel, iTerm2 protocol) |
-| **Serialize** | `@xterm/addon-serialize` | Serialize terminal state to string/HTML |
-| **Attach** | `@xterm/addon-attach` | WebSocket attachment to backend process |
-| **Clipboard** | `@xterm/addon-clipboard` | Browser clipboard access |
+| Addon         | Package                  | Purpose                                       |
+| ------------- | ------------------------ | --------------------------------------------- |
+| **Fit**       | `@xterm/addon-fit`       | Auto-resize terminal to container element     |
+| **WebGL**     | `@xterm/addon-webgl`     | GPU-accelerated rendering via WebGL2 context  |
+| **Canvas**    | `@xterm/addon-canvas`    | Canvas-based renderer (fallback for WebGL)    |
+| **Search**    | `@xterm/addon-search`    | Text search within terminal buffer            |
+| **Web Links** | `@xterm/addon-web-links` | Clickable URL detection                       |
+| **Unicode11** | `@xterm/addon-unicode11` | Correct character widths for Unicode 11       |
+| **Image**     | `@xterm/addon-image`     | Inline image display (sixel, iTerm2 protocol) |
+| **Serialize** | `@xterm/addon-serialize` | Serialize terminal state to string/HTML       |
+| **Attach**    | `@xterm/addon-attach`    | WebSocket attachment to backend process       |
+| **Clipboard** | `@xterm/addon-clipboard` | Browser clipboard access                      |
 
 Custom addons can be written by exporting an object with`activate()` and
 `dispose()` methods.
@@ -98,7 +98,7 @@ Browser (xterm.js) <--WebSocket--> Backend Server <--PTY--> Shell Process
 
 - **Node.js**: `node-pty`spawns the shell; data piped via`ws`or`socket.io`
   WebSocket to xterm.js frontend. `ptyProcess.write()`sends input,
- `ptyProcess.onData`emits output.
+  `ptyProcess.onData`emits output.
 - **Python**:`pyxtermjs`uses Flask +`flask-socketio`+`pty`module.
 - **Go**: SSH-to-WebSocket bridges for remote terminal access.
 
@@ -140,15 +140,15 @@ VS Code uses natively.
 
 ### 1.6 Performance Characteristics
 
-| Metric | Value |
-| -------- | ------- |
-| **Bundle size (core)** | ~265KB (v5, minified) |
-| **Memory (160x24, 5K scrollback)** | ~34MB |
-| **Memory impact of truecolor** | Nearly doubles buffer consumption |
-| **Buffer copy (160x24, 5K scrollback)** | 30-60ms |
-| **Write buffer hard limit** | 50MB |
-| **Serialization speed** | ~25MB/s |
-| **Infinite scrollback** | Not supported; must set explicit max |
+| Metric                                  | Value                                |
+| --------------------------------------- | ------------------------------------ |
+| **Bundle size (core)**                  | ~265KB (v5, minified)                |
+| **Memory (160x24, 5K scrollback)**      | ~34MB                                |
+| **Memory impact of truecolor**          | Nearly doubles buffer consumption    |
+| **Buffer copy (160x24, 5K scrollback)** | 30-60ms                              |
+| **Write buffer hard limit**             | 50MB                                 |
+| **Serialization speed**                 | ~25MB/s                              |
+| **Infinite scrollback**                 | Not supported; must set explicit max |
 
 **Key concern for control surface**: Running multiple terminal instances (one
 per
@@ -186,7 +186,7 @@ Shiki uses **VS Code's TextMate grammar engine** (Oniguruma) compiled to
 quality as VS Code.
 
 - **WASM-based**: Oniguruma (C library) compiled to WASM. Uses
- `WebAssembly.instantiateStreaming()`for parallel download/compilation.
+  `WebAssembly.instantiateStreaming()`for parallel download/compilation.
 - **ESM distribution**: All grammars, themes, and WASM are served as ESM, lazy-
   loaded on demand. Can be imported from CDN with a single line.
 - **WASM binary embedded as base64**: Shipped as an ES module to avoid dangling
@@ -243,14 +243,14 @@ block rendering.
 
 ### 2.4 Comparative Summary: Syntax Highlighters
 
-| Feature | Shiki | Prism.js | highlight.js |
-| --------- | ------- | ---------- | ------------- |
-| **Quality** | VS Code-grade | Good | Good |
-| **Speed** | Slowest (7x Prism) | Fastest | 2x slower than Prism |
-| **Bundle** | ~250KB + WASM | ~2KB core | ~30KB core |
-| **Streaming** | No | No | No |
-| **Maintenance** | Active | Stale | Active |
-| **Best for** | Build-time, code blocks | Real-time, lightweight | General purpose |
+| Feature         | Shiki                   | Prism.js               | highlight.js         |
+| --------------- | ----------------------- | ---------------------- | -------------------- |
+| **Quality**     | VS Code-grade           | Good                   | Good                 |
+| **Speed**       | Slowest (7x Prism)      | Fastest                | 2x slower than Prism |
+| **Bundle**      | ~250KB + WASM           | ~2KB core              | ~30KB core           |
+| **Streaming**   | No                      | No                     | No                   |
+| **Maintenance** | Active                  | Stale                  | Active               |
+| **Best for**    | Build-time, code blocks | Real-time, lightweight | General purpose      |
 
 ### 2.5 Monaco Editor as Read-Only Viewer
 
@@ -395,7 +395,7 @@ traditional CLIs that manage output imperatively.
 
 - **Markdown**: Currently renders as raw markdown syntax in the terminal
   (literal
- `**bold**`, `# Header`, etc.). A feature request exists for proper terminal
+  `**bold**`, `# Header`, etc.). A feature request exists for proper terminal
   markdown rendering.
 - **Thinking blocks**: Displayed as gray italic text. Toggled via Ctrl+O
   (verbose mode). Extended thinking is enabled by default.
@@ -420,7 +420,7 @@ stream is ANSI-encoded text. A web control surface could:
 Open WebUI is the most mature open-source LLM chat interface and provides an
 excellent reference implementation.
 
-**Stack**: Svelte (frontend) + FastAPI (backend) + Socket.IO (real-time)
+**Stack**: React (frontend) + FastAPI (backend) + Socket.IO (real-time)
 
 #### Content Rendering Pipeline (3 stages)
 
@@ -428,17 +428,17 @@ excellent reference implementation.
 2. **Token generation**:`marked.js`with custom extensions lexes content into
    tokens. Extensions handle: math formulas, citations, footnotes, mentions,
    specialized formatting.
-3. **Recursive rendering**:`MarkdownTokens.svelte` dispatches each token type
+3. **Recursive rendering**:`MarkdownTokens.React` dispatches each token type
    to its handler component.
 
 #### Component Hierarchy
 
 ```text
-ContentRenderer.svelte (entry point)
-  -> Markdown.svelte (configures marked.js, lexes tokens)
-    -> MarkdownTokens.svelte (recursive token dispatcher)
-      -> MarkdownInlineTokens.svelte (links, emphasis, strong, code, images)
-      -> CodeBlock.svelte (syntax highlighted code with execution support)
+ContentRenderer.React (entry point)
+  -> Markdown.React (configures marked.js, lexes tokens)
+    -> MarkdownTokens.React (recursive token dispatcher)
+      -> MarkdownInlineTokens.React (links, emphasis, strong, code, images)
+      -> CodeBlock.React (syntax highlighted code with execution support)
       -> KaTeX (math formulas, inline + block)
       -> DOMPurify (HTML sanitization for XSS prevention)
 ```
@@ -500,7 +500,7 @@ Source: <https://developer.chrome.com/docs/ai/render-llm-responses>
 
 **Website**: <https://www.incremark.com>
 **Packages**: `@incremark/core`, `@incremark/react`, `@incremark/vue`,
-`@incremark/svelte`, `@incremark/solid`
+`@incremark/React`, `@incremark/solid`
 
 - **O(n) incremental parsing** vs O(n^2) for traditional re-parse-everything
   approach.
@@ -508,7 +508,7 @@ Source: <https://developer.chrome.com/docs/ai/render-llm-responses>
 - Up to **65x faster** on longer documents.
 - Framework-agnostic core with framework-specific renderers.
 - Supports GFM, Math, Mermaid, custom components.
-- SSR support with Nuxt, Next.js, SvelteKit.
+- SSR support with Nuxt, Next.js, React.
 
 #### marked.js
 
@@ -541,13 +541,13 @@ Source: <https://developer.chrome.com/docs/ai/render-llm-responses>
 - **No streaming optimization** -- re-renders entire tree on each update.
 - Can be extended with MDX for embedding React components in markdown.
 
-#### svelte-markdown
+#### React-markdown
 
-**Repository**: <https://github.com/pablo-abc/svelte-markdown>
+**Repository**: <https://github.com/pablo-abc/React-markdown>
 
 - Inspired by react-markdown.
 - Accepts`source`prop (string or pre-parsed tokens).
-- Custom`renderers`prop maps node types to Svelte components.
+- Custom`renderers`prop maps node types to React components.
 - No streaming optimization.
 
 #### llm-ui (React)
@@ -608,7 +608,7 @@ in the wild:
 
 1. **Structured protocol**: The agent sends structured events indicating content
    type (e.g.,`{"type": "text", "content": "..."}`vs
-  `{"type": "tool_result", "tool": "bash", "output": "..."}`). The renderer
+   `{"type": "tool_result", "tool": "bash", "output": "..."}`). The renderer
    dispatches to different components based on type.
 
 1. **Dual-channel rendering**: Agent reasoning/text rendered via markdown
@@ -632,11 +632,7 @@ in the wild:
 
 No real alternatives exist at this quality level. Key addons to include:
 
-- `@xterm/addon-fit`(required -- auto-resize)
--`@xterm/addon-webgl`(required -- GPU rendering)
--`@xterm/addon-search`(useful for agent output search)
--`@xterm/addon-serialize`(useful for session persistence)
--`@xterm/addon-web-links`(clickable URLs in output)
+- `@xterm/addon-fit`(required -- auto-resize) -`@xterm/addon-webgl`(required -- GPU rendering) -`@xterm/addon-search`(useful for agent output search) -`@xterm/addon-serialize`(useful for session persistence) -`@xterm/addon-web-links`(clickable URLs in output)
 
 **Memory budget concern**: Plan for ~34MB per terminal instance at 5K
 scrollback.
@@ -661,16 +657,16 @@ persistence-to-storage for historical output.
 
 ### Recommendation: Incremark or Streamdown
 
-| Criteria | Incremark | Streamdown |
-| ---------- | ----------- | ------------ |
-| **Performance** | O(n) incremental, 65x faster | Better than naive, details unclear |
-| **Framework support** | React, Vue, Svelte, Solid | React only |
-| **Maturity** | Newer, less battle-tested | Vercel-backed, production at scale |
-| **Bundle size** | Small (core is framework-agnostic) | Smaller in v2 |
-| **Custom components** | Supported | Supported (plugin architecture) |
+| Criteria              | Incremark                          | Streamdown                         |
+| --------------------- | ---------------------------------- | ---------------------------------- |
+| **Performance**       | O(n) incremental, 65x faster       | Better than naive, details unclear |
+| **Framework support** | React, Vue, React, Solid           | React only                         |
+| **Maturity**          | Newer, less battle-tested          | Vercel-backed, production at scale |
+| **Bundle size**       | Small (core is framework-agnostic) | Smaller in v2                      |
+| **Custom components** | Supported                          | Supported (plugin architecture)    |
 
-If the control surface uses **Svelte** (like Open WebUI), choose **Incremark**
-for its Svelte support and O(n) performance. If using **React**, either works,
+If the control surface uses **React** (like Open WebUI), choose **Incremark**
+for its React support and O(n) performance. If using **React**, either works,
 but Streamdown has stronger production backing.
 
 For **tool calls and structured output**, supplement with a pattern-matching
@@ -770,25 +766,25 @@ Control Surface Frontend
   CodeMirror](https://sourcegraph.com/blog/migrating-monaco-codemirror)
 - [Replit: Betting on CodeMirror](https://blog.replit.com/codemirror)
 - [bat Terminal Output
-(DeepWiki)](https://deepwiki.com/sharkdp/bat/5.3-terminal-output-and-ansi-processing)
+  (DeepWiki)](https://deepwiki.com/sharkdp/bat/5.3-terminal-output-and-ansi-processing)
 
 ### Agent Output Rendering
 
 - [How Claude Code is Built (Pragmatic
-Engineer)](https://newsletter.pragmaticengineer.com/p/how-claude-code-is-built)
+  Engineer)](https://newsletter.pragmaticengineer.com/p/how-claude-code-is-built)
 - [Claude Code Dependencies
-Analysis](https://www.southbridge.ai/blog/claude-code-an-analysis-dependencies)
+  Analysis](https://www.southbridge.ai/blog/claude-code-an-analysis-dependencies)
 - [Open WebUI Content Rendering Pipeline
   (DeepWiki)](https://deepwiki.com/open-webui/open-webui/5.2-application-layout)
 - [Open WebUI Markdown System
-(DeepWiki)](https://deepwiki.com/open-webui/open-webui/4.1-request-processing-flow)
+  (DeepWiki)](https://deepwiki.com/open-webui/open-webui/4.1-request-processing-flow)
 - [Chrome: Best Practices for Rendering Streamed LLM
   Responses](https://developer.chrome.com/docs/ai/render-llm-responses)
 - [Streamdown GitHub (Vercel)](https://github.com/vercel/streamdown)
 - [Streamdown Documentation](https://streamdown.ai/docs)
 - [Incremark Website](https://www.incremark.com/)
 - [Incremark: From O(n^2) to
-O(n)](https://dev.to/kingshuaishuai/from-on2-to-on-building-a-streaming-markdown-renderer-for-the-ai-era-3k0f)
+  O(n)](https://dev.to/kingshuaishuai/from-on2-to-on-building-a-streaming-markdown-renderer-for-the-ai-era-3k0f)
 - [llm-ui Website](https://llm-ui.com/)
 - [llm-ui Code Block Docs](https://llm-ui.com/docs/blocks/code/)
 - [react-diff-view GitHub](https://github.com/otakustay/react-diff-view)

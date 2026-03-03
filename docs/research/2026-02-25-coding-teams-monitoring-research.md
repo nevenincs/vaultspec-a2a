@@ -1,8 +1,8 @@
 ---
-name: "Monitoring and Observability"
+name: 'Monitoring and Observability'
 date: 2026-25-02
 type: research
-summary: "Survey of AgentOps, Langfuse, and CrewAI observability solutions with hierarchical telemetry model and real-time dashboard UX requirements."
+summary: 'Survey of AgentOps, Langfuse, and CrewAI observability solutions with hierarchical telemetry model and real-time dashboard UX requirements.'
 maturity: 25
 feature: coding-teams-monitoring
 ---
@@ -91,7 +91,7 @@ class TeamTelemetryHub:
     def __init__(self):
         self.active_sessions: dict[str, SessionState] = {}
         # Connects to Langfuse/OTel for durable logging
-        self.otel_sink = OpenTelemetryExporter() 
+        self.otel_sink = OpenTelemetryExporter()
 
     async def ingest_a2a_event(self, agent_id: str, event: A2AEvent):
         # 1. Update the real-time state for the WebSocket Dashboard
@@ -138,9 +138,9 @@ combined with the **SessionAccumulator** pattern from Toad.
 Should the A2A Orchestrator attempt to build its own bespoke time-series
 database for the Dashboard, or should it rely on exporting OpenTelemetry data to
 a self-hosted Langfuse container for the historical view, restricting the
-bespoke Python UI to *strictly* real-time (ephemeral) orchestration?
+bespoke Python UI to _strictly_ real-time (ephemeral) orchestration?
 
-*Recommendation*: Restrict the bespoke UI to real-time control (streaming,
+_Recommendation_: Restrict the bespoke UI to real-time control (streaming,
 permissions, pausing) and use standard OpenTelemetry exports for historical
 debugging and cost analysis to avoid reinventing complex observability
 infrastructure.

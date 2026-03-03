@@ -1,7 +1,5 @@
 """Tests for build_anchoring_context (ADR-022)."""
 
-import pytest
-
 from ..anchoring import _ANCHOR_PATH_CAP, build_anchoring_context
 
 
@@ -78,7 +76,7 @@ class TestBuildAnchoringContext:
         )
         result = build_anchoring_context(state)
         assert result is not None
-        assert f"(+ 5 more)" in result
+        assert "(+ 5 more)" in result
         # The last visible path should be index _ANCHOR_PATH_CAP - 1
         assert f"`docs/spec/{_ANCHOR_PATH_CAP - 1}.md`" in result
         # The first over-cap path should NOT appear

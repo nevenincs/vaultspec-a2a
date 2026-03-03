@@ -1,27 +1,27 @@
 ---
-name: "A2A Protocol Definitions"
+name: 'A2A Protocol Definitions'
 date: 2026-25-02
 type: reference
-summary: "Technical reference for A2A v1 service operations, core data structures, enums, task states, and Agent Card schema."
+summary: 'Technical reference for A2A v1 service operations, core data structures, enums, task states, and Agent Card schema.'
 maturity: 85
 ---
 
 # A2A Protocol Technical Specifications (v1)
 
- the normative A2A protocol definitions based on the
+the normative A2A protocol definitions based on the
 `proto3` specification.
 
 ## 1. Core Service Operations (A2AService)
 
-| Method | Request Type | Response Type | Description |
-| :--- | :--- | :--- | :--- |
-| `SendMessage` | `SendMessageRequest` | `SendMessageResponse` | Sends a message to the agent. |
-| `SendStreamingMessage` | `SendMessageRequest` | `stream StreamResponse` | Streaming version of SendMessage. |
-| `GetTask` | `GetTaskRequest` | `Task` | Retrieves current state of a task. |
-| `ListTasks` | `ListTasksRequest` | `ListTasksResponse` | Lists tasks with filtering/pagination. |
-| `CancelTask` | `CancelTaskRequest` | `Task` | Cancels an active task. |
-| `SubscribeToTask` | `SubscribeToTaskRequest` | `stream StreamResponse` | Subscribes to real-time task updates. |
-| `GetExtendedAgentCard` | `GetExtendedAgentCardRequest` | `AgentCard` | Returns detailed card for authenticated agents. |
+| Method                 | Request Type                  | Response Type           | Description                                     |
+| :--------------------- | :---------------------------- | :---------------------- | :---------------------------------------------- |
+| `SendMessage`          | `SendMessageRequest`          | `SendMessageResponse`   | Sends a message to the agent.                   |
+| `SendStreamingMessage` | `SendMessageRequest`          | `stream StreamResponse` | Streaming version of SendMessage.               |
+| `GetTask`              | `GetTaskRequest`              | `Task`                  | Retrieves current state of a task.              |
+| `ListTasks`            | `ListTasksRequest`            | `ListTasksResponse`     | Lists tasks with filtering/pagination.          |
+| `CancelTask`           | `CancelTaskRequest`           | `Task`                  | Cancels an active task.                         |
+| `SubscribeToTask`      | `SubscribeToTaskRequest`      | `stream StreamResponse` | Subscribes to real-time task updates.           |
+| `GetExtendedAgentCard` | `GetExtendedAgentCardRequest` | `AgentCard`             | Returns detailed card for authenticated agents. |
 
 ## 2. Core Data Structures
 

@@ -2,7 +2,7 @@
 date: 2026-02-25
 type: audit
 feature: scope-assessment
-description: "Component inventory with complexity tiers, dependency graph, risk register, and sizing estimates for the coding teams implementation."
+description: 'Component inventory with complexity tiers, dependency graph, risk register, and sizing estimates for the coding teams implementation.'
 related:
   - docs/adrs/2026-02-26-007-tech-stack-deployment-adr.md
   - docs/adrs/2026-02-26-009-module-hierarchy-adr.md
@@ -107,20 +107,20 @@ MCP Tool Surface (CLI bridge)
 Backend (FastAPI)
 ├── WebSocket handler (connection manager, broadcast, channel multiplexing)
 ├── REST API (agents CRUD, tasks list, artifacts serve, permissions CRUD)
-├── Static file mount (SvelteKit bundle)
+├── Static file mount (React bundle)
 ├── WebSocket reconnection + state replay from SQLite event log
 └── Session management (single-user: no auth, localhost binding)
 
-Frontend (SvelteKit / Svelte 5)
+Frontend (React / React 5)
 ├── Agent panel grid (status badge, current task, agent name)
-├── Terminal view per agent (xterm.js via xterm-svelte, WebSocket relay)
+├── Terminal view per agent (xterm.js via xterm-React, WebSocket relay)
 ├── Chat interface (send messages, see responses, contextId carry)
 ├── Permission modal (approve/reject with tool call details)
 ├── Agent controls (start/stop/restart buttons)
 ├── Task list table (status, agent, timestamps, filtering)
 ├── Artifact viewer (file tree + CodeMirror 6 read-only)
 ├── WebSocket client (single connection, channel demux, reconnection)
-└── State management (Svelte 5 runes, server-authoritative)
+└── State management (React 5 runes, server-authoritative)
 ```
 
 ### Must be built — Agent Templates
@@ -158,7 +158,7 @@ Workspace Manager
 - Agent Card definitions (JSON structure)
 - REST API for CRUD operations (FastAPI standard)
 - Static file serving (FastAPI mount)
-- Basic Svelte components (badges, buttons, tables)
+- Basic React components (badges, buttons, tables)
 
 ### Tier 2: Moderate complexity (patterns exist, must adapt)
 
@@ -226,7 +226,7 @@ Workspace Manager
            ▼               ▼
     ┌─────────────┐ ┌──────────────┐
     │ Workspace   │ │ Web Frontend │
-    │ Manager     │ │ (SvelteKit)  │
+    │ Manager     │ │ (React)  │
     │             │ │              │
     │ • worktrees │ │ • Panels     │
     │ • branches  │ │ • Terminal   │
@@ -253,8 +253,7 @@ Every sample runs on Linux/Mac. Windows subprocess lifecycle is different:
 
 - `process.terminate()`is SIGKILL (no grace period)
 - Need CTRL_BREAK_EVENT with CREATE_NEW_PROCESS_GROUP for graceful
-- ProactorEventLoop (IOCP) is required and has limitations
--`create_subprocess_exec`only works from main thread
+- ProactorEventLoop (IOCP) is required and has limitations -`create_subprocess_exec`only works from main thread
 - No`os.killpg()`equivalent — need Job Objects for child cleanup
 
 This is the single biggest platform risk.
@@ -315,7 +314,7 @@ stack works unchanged over WebSocket.
 
 ### 4. xterm.js integration
 
-xterm-svelte wraps xterm.js for Svelte. Backend sends stdout lines over
+xterm-React wraps xterm.js for React. Backend sends stdout lines over
 WebSocket, frontend writes to terminal. Established pattern used by
 code-server, Theia, JupyterLab.
 
@@ -323,16 +322,16 @@ code-server, Theia, JupyterLab.
 
 ## Risk Register
 
-| Risk | Impact | Likelihood | Mitigation |
-| --- | --- | --- | --- |
-| Windows subprocess issues | High | High | Early spike: build ProcessManager first, test on Windows |
-| MCP tasks never stabilize | Medium | Medium | Already mitigated: using stable tools, not experimental |
-| CLI tools don't support our MCP tools well | Medium | Low | MCP tools are standard; any LLM can call them |
-| xterm.js memory with many agents | Medium | Low | Limit scrollback (5K lines), persist to SQLite |
-| Agent LLM costs spiral | High | Medium | Budget per task, token tracking, hard limits |
-| A2A SDK breaking changes | Medium | Low | Pin version, abstract behind thin layer |
-| SvelteKit learning curve | Low | Medium | Svelte 5 is simpler than React; Open WebUI proves pattern |
-| SQLite contention under load | Low | Low | WAL mode, single-user tool, unlikely bottleneck |
+| Risk                                       | Impact | Likelihood | Mitigation                                               |
+| ------------------------------------------ | ------ | ---------- | -------------------------------------------------------- |
+| Windows subprocess issues                  | High   | High       | Early spike: build ProcessManager first, test on Windows |
+| MCP tasks never stabilize                  | Medium | Medium     | Already mitigated: using stable tools, not experimental  |
+| CLI tools don't support our MCP tools well | Medium | Low        | MCP tools are standard; any LLM can call them            |
+| xterm.js memory with many agents           | Medium | Low        | Limit scrollback (5K lines), persist to SQLite           |
+| Agent LLM costs spiral                     | High   | Medium     | Budget per task, token tracking, hard limits             |
+| A2A SDK breaking changes                   | Medium | Low        | Pin version, abstract behind thin layer                  |
+| React learning curve                       | Low    | Medium     | React 5 is simpler than React; Open WebUI proves pattern |
+| SQLite contention under load               | Low    | Low        | WAL mode, single-user tool, unlikely bottleneck          |
 
 ---
 
@@ -340,19 +339,19 @@ code-server, Theia, JupyterLab.
 
 Not time estimates. Component count and relative weight.
 
-| Component | Files | Relative Weight | Notes |
-| --- | --- | --- | --- |
-| Process Manager | 3-5 | Heavy | Windows-specific, state machine, health checks |
-| Event Aggregator | 3-4 | Heavy | SSE management, state accumulation, replay |
-| Agent Registry | 1-2 | Light | Dict + persistence |
-| Permission Manager | 2-3 | Medium | Rules, routing, persistence |
-| MCP Tool Surface | 1-2 | Light | 5 tool functions |
-| Web Backend (FastAPI) | 3-5 | Medium | WebSocket, REST, static |
-| Coding Agent Template | 2-3 | Medium | Executor, LLM glue, card |
-| Scoped MCP Tool Server | 2-3 | Medium | fs/git/cmd with path validation |
-| Workspace Manager | 1-2 | Light | Git worktree operations |
-| Frontend (SvelteKit) | 10-15 | Heavy | Multiple interactive components |
-| **Total** | **~30-45 files** | | |
+| Component              | Files            | Relative Weight | Notes                                          |
+| ---------------------- | ---------------- | --------------- | ---------------------------------------------- |
+| Process Manager        | 3-5              | Heavy           | Windows-specific, state machine, health checks |
+| Event Aggregator       | 3-4              | Heavy           | SSE management, state accumulation, replay     |
+| Agent Registry         | 1-2              | Light           | Dict + persistence                             |
+| Permission Manager     | 2-3              | Medium          | Rules, routing, persistence                    |
+| MCP Tool Surface       | 1-2              | Light           | 5 tool functions                               |
+| Web Backend (FastAPI)  | 3-5              | Medium          | WebSocket, REST, static                        |
+| Coding Agent Template  | 2-3              | Medium          | Executor, LLM glue, card                       |
+| Scoped MCP Tool Server | 2-3              | Medium          | fs/git/cmd with path validation                |
+| Workspace Manager      | 1-2              | Light           | Git worktree operations                        |
+| Frontend (React)       | 10-15            | Heavy           | Multiple interactive components                |
+| **Total**              | **~30-45 files** |                 |                                                |
 
 The heaviest work is in three places: **Process Manager**, **Event
 Aggregator**, and **Frontend components**. Everything else composes

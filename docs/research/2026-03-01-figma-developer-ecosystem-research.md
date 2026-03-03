@@ -1,15 +1,15 @@
 ---
-name: "Figma Developer Ecosystem Research"
+name: 'Figma Developer Ecosystem Research'
 date: 2026-03-01
 type: research
 summary: >
   Comprehensive research into the Figma developer ecosystem: Code Connect (UI/CLI),
   Figma MCP Server (Remote/Desktop), Figma Make, Figma Design API, and their
   bidirectional workflows. Evaluated for React + TanStack + Tailwind CSS pivot
-  from Svelte. Covers three bidirectional scenarios and architectural implications.
+  from React. Covers three bidirectional scenarios and architectural implications.
 status: active
 supersedes:
-  - docs/adrs/005-frontend-rendering-stack.md (Svelte → React pivot)
+  - docs/adrs/005-frontend-rendering-stack.md (React → React pivot)
 companions:
   - docs/figma/2026-03-01-figma-make-research.md
   - docs/research/2026-03-01-figma-design-api-research.md
@@ -25,7 +25,7 @@ feature: figma-developer-ecosystem
 **Date**: 2026-03-01
 **Status**: Active Research
 **Scope**: Code Connect, Figma MCP Server, Figma Make, Figma Design API,
-bidirectional design ↔ code workflows. Framework pivot: Svelte → React +
+bidirectional design ↔ code workflows. Framework pivot: React → React +
 TanStack + Tailwind CSS.
 
 ---
@@ -53,12 +53,12 @@ TanStack + Tailwind CSS.
 Figma's developer ecosystem as of March 2026 consists of four interlocking
 tools that form a bidirectional design-to-code pipeline:
 
-| Tool | Direction | Purpose |
-| ------ | ----------- | --------- |
-| **Code Connect** (UI/CLI) | Code → Figma Dev Mode | Maps codebase components to Figma components, providing real code snippets in Dev Mode |
+| Tool                            | Direction                  | Purpose                                                                                   |
+| ------------------------------- | -------------------------- | ----------------------------------------------------------------------------------------- |
+| **Code Connect** (UI/CLI)       | Code → Figma Dev Mode      | Maps codebase components to Figma components, providing real code snippets in Dev Mode    |
 | **MCP Server** (Remote/Desktop) | Figma → Code (AI-mediated) | Exposes structured design context to AI coding agents for design-informed code generation |
-| **Figma Make** | Prompt → Code/Prototype | AI-powered prompt-to-code capability generating working prototypes from designs or text |
-| **Design API** (REST + Plugin) | Bidirectional (Enterprise) | Programmatic read/write access to files, components, variables, and styles |
+| **Figma Make**                  | Prompt → Code/Prototype    | AI-powered prompt-to-code capability generating working prototypes from designs or text   |
+| **Design API** (REST + Plugin)  | Bidirectional (Enterprise) | Programmatic read/write access to files, components, variables, and styles                |
 
 The **canonical workflow loop** is:
 
@@ -69,7 +69,7 @@ Figma Design → MCP Server → AI Agent → Local Code → Code Connect → Fig
 ```
 
 **Critical pivot**: This research evaluates the ecosystem for **React +
-TanStack + Tailwind CSS** instead of Svelte. The MCP server's default output
+TanStack + Tailwind CSS** instead of React. The MCP server's default output
 is React + Tailwind, making this pivot naturally aligned with Figma's tooling.
 
 ---
@@ -137,19 +137,19 @@ mapping file keys to Figma file URLs.
 Code Connect files use `figma.connect()` with the following signature:
 
 ```tsx
-import figma from "@figma/code-connect/react";
-import { Button } from "./Button";
+import figma from '@figma/code-connect/react';
+import { Button } from './Button';
 
-figma.connect(Button, "https://figma.com/design/<fileKey>?node-id=<nodeId>", {
+figma.connect(Button, 'https://figma.com/design/<fileKey>?node-id=<nodeId>', {
   props: {
-    label: figma.string("Text Content"),
-    disabled: figma.boolean("Disabled"),
-    variant: figma.enum("Type", {
-      Primary: "primary",
-      Secondary: "secondary",
+    label: figma.string('Text Content'),
+    disabled: figma.boolean('Disabled'),
+    variant: figma.enum('Type', {
+      Primary: 'primary',
+      Secondary: 'secondary',
     }),
-    icon: figma.instance("Icon"),
-    children: figma.children("*"),
+    icon: figma.instance('Icon'),
+    children: figma.children('*'),
   },
   example: ({ label, disabled, variant, icon }) => (
     <Button disabled={disabled} variant={variant} icon={icon}>
@@ -167,16 +167,16 @@ figma.connect(Button, "https://figma.com/design/<fileKey>?node-id=<nodeId>", {
 
 ### 2.6 Property Mapping Helpers
 
-| Helper | Purpose | Example |
-| -------- | --------- | --------- |
-| `figma.string("Prop")` | Map text content | Labels, titles |
-| `figma.boolean("Prop")` | Map boolean toggle | `{true: <Icon/>, false: <Spacer/>}` |
-| `figma.enum("Prop", {...})` | Map variant options | Figma variants → code values |
-| `figma.instance("Prop")` | Map nested component swap | Returns JSX element |
-| `figma.children("Name")` | Map nested instances | Supports wildcards`"*"` |
-| `figma.nestedProps("Prop", {...})` | Map child instance properties at parent | Composition patterns |
-| `figma.textContent("Layer")` | Extract text from child layer | Static text content |
-| `figma.className([...])` | Concatenate CSS classes | Tailwind utility classes |
+| Helper                             | Purpose                                 | Example                             |
+| ---------------------------------- | --------------------------------------- | ----------------------------------- |
+| `figma.string("Prop")`             | Map text content                        | Labels, titles                      |
+| `figma.boolean("Prop")`            | Map boolean toggle                      | `{true: <Icon/>, false: <Spacer/>}` |
+| `figma.enum("Prop", {...})`        | Map variant options                     | Figma variants → code values        |
+| `figma.instance("Prop")`           | Map nested component swap               | Returns JSX element                 |
+| `figma.children("Name")`           | Map nested instances                    | Supports wildcards`"*"`             |
+| `figma.nestedProps("Prop", {...})` | Map child instance properties at parent | Composition patterns                |
+| `figma.textContent("Layer")`       | Extract text from child layer           | Static text content                 |
+| `figma.className([...])`           | Concatenate CSS classes                 | Tailwind utility classes            |
 
 **Advanced**:`figma.instance("Prop").getProps<T>()` to access child props,
 `figma.instance("Prop").render<T>(props => ...)` for conditional rendering.
@@ -186,13 +186,13 @@ figma.connect(Button, "https://figma.com/design/<fileKey>?node-id=<nodeId>", {
 Different code components can be connected to specific Figma variants:
 
 ```tsx
-figma.connect(PrimaryButton, "https://...", {
-  variant: { Type: "Primary" },
+figma.connect(PrimaryButton, 'https://...', {
+  variant: { Type: 'Primary' },
   example: () => <PrimaryButton />,
 });
 
-figma.connect(SecondaryButton, "https://...", {
-  variant: { Type: "Secondary" },
+figma.connect(SecondaryButton, 'https://...', {
+  variant: { Type: 'Secondary' },
   example: () => <SecondaryButton />,
 });
 ```
@@ -255,21 +255,21 @@ claude mcp add --transport http figma https://mcp.figma.com/mcp
 
 ### 3.3 Tool Inventory (13 Tools)
 
-| Tool | Server | Purpose |
-| ------ | -------- | --------- |
-| `get_design_context` | Both | Structured React + Tailwind representation of selection. Customizable framework output. Works with Figma Design and Make files |
-| `get_variable_defs` | Both | Extracts variables and styles (color, spacing, typography tokens) |
-| `get_code_connect_map` | Both | Retrieves Code Connect mappings (returns`codeConnectSrc`and`codeConnectName`) |
-| `add_code_connect_map` | Both | Adds a mapping between Figma node ID and code component |
-| `get_code_connect_suggestions` | Both | AI-detects and suggests Code Connect mappings |
-| `send_code_connect_mappings` | Both | Confirms Code Connect mappings after review |
-| `get_screenshot` | Both | Takes screenshot of selection for visual reference |
-| `get_metadata` | Both | Sparse XML representation (layer IDs, names, types, positions, sizes) for large designs |
-| `create_design_system_rules` | Both | Creates rule files for design-to-code translation guidance |
-| `get_figjam` | Both | Converts FigJam diagrams to XML with screenshots |
-| `generate_diagram` | Both | Generates FigJam diagrams from Mermaid syntax |
-| `generate_figma_design` | Remote only | **Code → Canvas**: captures live UI and creates editable Figma layers. Claude Code and Codex only |
-| `whoami` | Remote only | Returns authenticated user identity and plan info |
+| Tool                           | Server      | Purpose                                                                                                                        |
+| ------------------------------ | ----------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `get_design_context`           | Both        | Structured React + Tailwind representation of selection. Customizable framework output. Works with Figma Design and Make files |
+| `get_variable_defs`            | Both        | Extracts variables and styles (color, spacing, typography tokens)                                                              |
+| `get_code_connect_map`         | Both        | Retrieves Code Connect mappings (returns`codeConnectSrc`and`codeConnectName`)                                                  |
+| `add_code_connect_map`         | Both        | Adds a mapping between Figma node ID and code component                                                                        |
+| `get_code_connect_suggestions` | Both        | AI-detects and suggests Code Connect mappings                                                                                  |
+| `send_code_connect_mappings`   | Both        | Confirms Code Connect mappings after review                                                                                    |
+| `get_screenshot`               | Both        | Takes screenshot of selection for visual reference                                                                             |
+| `get_metadata`                 | Both        | Sparse XML representation (layer IDs, names, types, positions, sizes) for large designs                                        |
+| `create_design_system_rules`   | Both        | Creates rule files for design-to-code translation guidance                                                                     |
+| `get_figjam`                   | Both        | Converts FigJam diagrams to XML with screenshots                                                                               |
+| `generate_diagram`             | Both        | Generates FigJam diagrams from Mermaid syntax                                                                                  |
+| `generate_figma_design`        | Remote only | **Code → Canvas**: captures live UI and creates editable Figma layers. Claude Code and Codex only                              |
+| `whoami`                       | Remote only | Returns authenticated user identity and plan info                                                                              |
 
 ### 3.4 Default Output & Code Connect Enhancement
 
@@ -288,9 +288,9 @@ Code Connect label to use (e.g., "React").
 
 ### 3.5 Rate Limits
 
-| Plan | Limit |
-| ------ | ------- |
-| Starter / View / Collab seats | 6 tool calls per month |
+| Plan                            | Limit                                     |
+| ------------------------------- | ----------------------------------------- |
+| Starter / View / Collab seats   | 6 tool calls per month                    |
 | Dev / Full seat (Professional+) | Per-minute limits (Tier 1 Figma REST API) |
 
 ### 3.6 Skills (Agent Guidance)
@@ -365,15 +365,15 @@ about intended behavior and interactions that pure static designs don't capture.
 The Figma REST API provides programmatic access to Figma files, components,
 styles, variables, and more. Key endpoint categories:
 
-| Category | Endpoints | Access |
-| ---------- | ----------- | -------- |
-| Files | GET file, GET file nodes, GET images | All plans |
-| Components | GET team components, GET file components | All plans |
-| Styles | GET team styles, GET file styles | All plans |
-| Variables | GET/POST/DELETE local variables | **Enterprise only** |
-| Comments | GET/POST comments | All plans |
-| Webhooks | POST/GET/DELETE webhooks | All plans |
-| Version history | GET file versions | All plans |
+| Category        | Endpoints                                | Access              |
+| --------------- | ---------------------------------------- | ------------------- |
+| Files           | GET file, GET file nodes, GET images     | All plans           |
+| Components      | GET team components, GET file components | All plans           |
+| Styles          | GET team styles, GET file styles         | All plans           |
+| Variables       | GET/POST/DELETE local variables          | **Enterprise only** |
+| Comments        | GET/POST comments                        | All plans           |
+| Webhooks        | POST/GET/DELETE webhooks                 | All plans           |
+| Version history | GET file versions                        | All plans           |
 
 ### 5.2 Variables API (Enterprise Only)
 
@@ -399,14 +399,14 @@ plugin-based workarounds (Figma Token Exporter, Tokens Studio).
 
 ### 5.3 Plugin API vs REST API
 
-| Aspect | Plugin API | REST API |
-| -------- | ----------- | ---------- |
-| Runs in | Figma browser/desktop | External servers/CI |
-| Authentication | Plugin sandbox | Personal Access Token |
-| Variables | All plans | Enterprise only |
-| Write access | Full (within plugin) | Full (Enterprise) |
-| Real-time | Yes | No (polling/webhooks) |
-| Automation | Manual trigger | CI/CD compatible |
+| Aspect         | Plugin API            | REST API              |
+| -------------- | --------------------- | --------------------- |
+| Runs in        | Figma browser/desktop | External servers/CI   |
+| Authentication | Plugin sandbox        | Personal Access Token |
+| Variables      | All plans             | Enterprise only       |
+| Write access   | Full (within plugin)  | Full (Enterprise)     |
+| Real-time      | Yes                   | No (polling/webhooks) |
+| Automation     | Manual trigger        | CI/CD compatible      |
 
 ### 5.4 Design Token Sync Workflow
 
@@ -428,10 +428,7 @@ Figma provides a GitHub Action example for automated sync:
 
 Figma webhooks notify external systems of changes:
 
--`FILE_UPDATE`— File saved
--`FILE_VERSION_UPDATE`— New version created
--`FILE_COMMENT`— Comment added
--`LIBRARY_PUBLISH`— Library published
+-`FILE_UPDATE`— File saved -`FILE_VERSION_UPDATE`— New version created -`FILE_COMMENT`— Comment added -`LIBRARY_PUBLISH`— Library published
 
 Useful for triggering CI/CD pipelines when designs change.
 
@@ -471,8 +468,7 @@ Figma Make (prototype) → MCP Server → AI Agent (Claude Code) → Local React
    Tailwind representation
 4. AI agent generates production React components using actual codebase
    conventions (enhanced by existing Code Connect mappings)
-5. Developer refines code locally
-6.`npx figma connect publish`pushes Code Connect mappings back to Figma
+5. Developer refines code locally 6.`npx figma connect publish`pushes Code Connect mappings back to Figma
 6. In Figma Dev Mode, designers and other developers see the actual
    production code snippets
 
@@ -513,8 +509,7 @@ Code Connect publish → Figma Dev Mode
    (color, spacing, typography)
 5. AI agent calls`get_code_connect_map`→ checks for existing mappings
 6. Agent generates code using actual codebase components and design tokens
-7. Developer reviews, refines, commits
-8.`npx figma connect publish`updates Dev Mode snippets
+7. Developer reviews, refines, commits 8.`npx figma connect publish`updates Dev Mode snippets
 8. Optional:`create_design_system_rules`to persist agent guidance
 
 **Bidirectionality assessment**:
@@ -581,16 +576,16 @@ Developer merges updates into codebase
 
 ### 6.4 Bidirectionality Matrix
 
-| Direction | Mechanism | Strength | Plan Requirement |
-| ----------- | ----------- | ---------- | ----------------- |
-| Figma Design → Code | MCP `get_design_context` | **Strong** | Dev/Full seat |
-| Figma Design → Tokens | MCP`get_variable_defs` | **Strong** | Dev/Full seat |
-| Code → Figma Dev Mode | Code Connect CLI`publish` | **Strong** | Org/Enterprise |
-| Code → Figma Canvas | MCP`generate_figma_design` | **Moderate** (lossy) | Remote MCP + Claude Code/Codex |
-| Tokens → Figma Variables | REST API POST variables | **Strong** (full CRUD) | **Enterprise only** |
-| Figma Make → Code | MCP (Make files as context) | **Moderate** | Make plan |
-| Code → Code Connect mappings | MCP`add_code_connect_map` | **Strong** | Org/Enterprise |
-| Design changes → Code update | MCP round-trip | **Weak** (manual reconciliation) | Dev/Full seat |
+| Direction                    | Mechanism                   | Strength                         | Plan Requirement               |
+| ---------------------------- | --------------------------- | -------------------------------- | ------------------------------ |
+| Figma Design → Code          | MCP `get_design_context`    | **Strong**                       | Dev/Full seat                  |
+| Figma Design → Tokens        | MCP`get_variable_defs`      | **Strong**                       | Dev/Full seat                  |
+| Code → Figma Dev Mode        | Code Connect CLI`publish`   | **Strong**                       | Org/Enterprise                 |
+| Code → Figma Canvas          | MCP`generate_figma_design`  | **Moderate** (lossy)             | Remote MCP + Claude Code/Codex |
+| Tokens → Figma Variables     | REST API POST variables     | **Strong** (full CRUD)           | **Enterprise only**            |
+| Figma Make → Code            | MCP (Make files as context) | **Moderate**                     | Make plan                      |
+| Code → Code Connect mappings | MCP`add_code_connect_map`   | **Strong**                       | Org/Enterprise                 |
+| Design changes → Code update | MCP round-trip              | **Weak** (manual reconciliation) | Dev/Full seat                  |
 
 ---
 
@@ -598,7 +593,7 @@ Developer merges updates into codebase
 
 ### 7.1 Why This Pivot Aligns with Figma
 
-The pivot from Svelte to React + TanStack + Tailwind is **naturally aligned**
+The pivot from React to React + TanStack + Tailwind is **naturally aligned**
 with Figma's developer ecosystem:
 
 1. **MCP default output is React + Tailwind**:`get_design_context` natively
@@ -631,7 +626,7 @@ are added during the developer refinement step after initial code generation.
 
 ### 7.3 Updated Frontend Loop
 
-The previous loop was: Figma → shadcn-ui → Svelte MCP → implement → browser
+The previous loop was: Figma → shadcn-ui → React MCP → implement → browser
 
 The new loop is:
 
@@ -653,24 +648,24 @@ Code Connect publish (back to Figma)
 
 ### 7.4 Impact on Existing ADRs
 
-| ADR | Impact |
-| ----- | -------- |
-| ADR-005 (Frontend Rendering Stack) | **Superseded**: SvelteKit → React + TanStack. shadcn-svelte → shadcn/ui. Svelte Runes → React hooks/signals |
-| ADR-009 (Module Hierarchy) | **Update needed**: `src/ui/` structure changes from SvelteKit to React project |
-| ADR-011 (Wire Contract) | **Minimal impact**: TypeScript types remain the same. WebSocket client unchanged. REST client unchanged |
-| Frontend UI Spec | **No impact**: Layout, components, interactions are framework-agnostic. Only implementation details change |
+| ADR                                | Impact                                                                                                     |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| ADR-005 (Frontend Rendering Stack) | **Superseded**: React → React + TanStack. shadcn-React → shadcn/ui. React Runes → React hooks/signals      |
+| ADR-009 (Module Hierarchy)         | **Update needed**: `src/ui/` structure changes from React to React project                                 |
+| ADR-011 (Wire Contract)            | **Minimal impact**: TypeScript types remain the same. WebSocket client unchanged. REST client unchanged    |
+| Frontend UI Spec                   | **No impact**: Layout, components, interactions are framework-agnostic. Only implementation details change |
 
 ### 7.5 Equivalent Library Mapping
 
-| Svelte Ecosystem | React + TanStack Ecosystem |
-| ----------------- | --------------------------- |
-| SvelteKit | TanStack Router + Vite |
-| Svelte 5 Runes (`$state`, `$derived`, `$effect`) | React hooks (`useState`, `useMemo`, `useEffect`) or signals library |
-| shadcn-svelte | shadcn/ui (React) |
-| Bits UI | Radix UI |
-| `@humanspeak/svelte-markdown` | `react-markdown`+`remark-gfm` |
-| Svelte stores | TanStack Query (server state) + Zustand/Jotai (client state) |
-| SvelteKit adapter-static | Vite build (SPA) |
+| React Ecosystem                                 | React + TanStack Ecosystem                                          |
+| ----------------------------------------------- | ------------------------------------------------------------------- |
+| React                                           | TanStack Router + Vite                                              |
+| React 5 Runes (`$state`, `$derived`, `$effect`) | React hooks (`useState`, `useMemo`, `useEffect`) or signals library |
+| shadcn-React                                    | shadcn/ui (React)                                                   |
+| Bits UI                                         | Radix UI                                                            |
+| `@humanspeak/React-markdown`                    | `react-markdown`+`remark-gfm`                                       |
+| React stores                                    | TanStack Query (server state) + Zustand/Jotai (client state)        |
+| React adapter-static                            | Vite build (SPA)                                                    |
 
 ---
 
@@ -680,14 +675,14 @@ Code Connect publish (back to Figma)
 
 The shadcn/ui React library has a rich Figma ecosystem:
 
-| Kit | Maintainer | Components | License | Notes |
-| ----- | ----------- | ------------ | --------- | ------- |
-| **shadcn/ui Design System** (Community) | Pietro Schirano | All core | Free | Mirrors code implementation exactly |
-| **Obra shadcn/ui** | Obra Studio | All core | MIT | Maintained team, design-to-code plugin |
-| **shadcndesign.com** | Matt Wierzbicki | 2000+ | Premium | Auto-layout, variants, Tailwind CSS variables |
-| **Shadcraft** | Shadcraft | 28 Pro + 25 blocks | Premium | Theme swapping plugin, tweakcn integration |
-| **Shadcn Studio** | Shadcn Studio | 1000+ variants | Premium | Motion, theme generator, MCP integration, Figma-to-code plugin |
-| **Shadcnblocks** | Shadcnblocks | Block designs | Premium | Tailwind palette, component tokens |
+| Kit                                     | Maintainer      | Components         | License | Notes                                                          |
+| --------------------------------------- | --------------- | ------------------ | ------- | -------------------------------------------------------------- |
+| **shadcn/ui Design System** (Community) | Pietro Schirano | All core           | Free    | Mirrors code implementation exactly                            |
+| **Obra shadcn/ui**                      | Obra Studio     | All core           | MIT     | Maintained team, design-to-code plugin                         |
+| **shadcndesign.com**                    | Matt Wierzbicki | 2000+              | Premium | Auto-layout, variants, Tailwind CSS variables                  |
+| **Shadcraft**                           | Shadcraft       | 28 Pro + 25 blocks | Premium | Theme swapping plugin, tweakcn integration                     |
+| **Shadcn Studio**                       | Shadcn Studio   | 1000+ variants     | Premium | Motion, theme generator, MCP integration, Figma-to-code plugin |
+| **Shadcnblocks**                        | Shadcnblocks    | Block designs      | Premium | Tailwind palette, component tokens                             |
 
 ### 8.2 Design Token Alignment
 
@@ -728,31 +723,30 @@ Plugin manifest requirements:
 -`"editorType": ["dev"]`
 
 - `"capabilities": ["codegen"]`
-- `"codegenLanguages"`to specify supported output (e.g., React)
--`"codegenPreferences"`for user customization options
+- `"codegenLanguages"`to specify supported output (e.g., React) -`"codegenPreferences"`for user customization options
 
 ### 9.2 Relevant React Codegen Plugins
 
-| Plugin | Output | Notes |
-| -------- | -------- | ------- |
-| **Anima** | React + Tailwind/CSS/SCSS | Variant/props support, interactive components, responsive flexbox |
-| **Builder.io** | React + Tailwind | AI-powered, trains on codebase style, chat refinement |
-| **Locofy.ai** | React / Next.js / Gatsby | Pixel-perfect, component-based, 240K+ users |
-| **Figroot** | React + Tailwind | Free, no special design file setup required |
-| **DhiWise** | React / Next.js / React Native | Auto-layout aware, variant support |
-| **Replit** | React | Direct iteration with natural language prompts |
+| Plugin         | Output                         | Notes                                                             |
+| -------------- | ------------------------------ | ----------------------------------------------------------------- |
+| **Anima**      | React + Tailwind/CSS/SCSS      | Variant/props support, interactive components, responsive flexbox |
+| **Builder.io** | React + Tailwind               | AI-powered, trains on codebase style, chat refinement             |
+| **Locofy.ai**  | React / Next.js / Gatsby       | Pixel-perfect, component-based, 240K+ users                       |
+| **Figroot**    | React + Tailwind               | Free, no special design file setup required                       |
+| **DhiWise**    | React / Next.js / React Native | Auto-layout aware, variant support                                |
+| **Replit**     | React                          | Direct iteration with natural language prompts                    |
 
 ### 9.3 Codegen Plugins vs MCP Server vs Code Connect
 
-| Aspect | Codegen Plugin | MCP Server | Code Connect |
-| -------- | --------------- | ------------ | -------------- |
-| Runs in | Figma Dev Mode (Inspect panel) | AI coding agent (IDE) | CLI / Figma UI |
-| Trigger | Layer selection | Agent prompt / URL | `npx figma connect publish` |
-| Output | Framework-specific code | React + Tailwind (default) | Code snippets in Dev Mode |
-| Customization | Plugin preferences | Prompt engineering | Property mappings |
-| Codebase awareness | Limited (some train on style) | Via Code Connect mappings | Direct codebase reference |
-| Direction | Design → Code | Design → Code | Code → Design (Dev Mode) |
-| AI-powered | Some (Builder.io, Anima) | Yes (agent-mediated) | No (deterministic) |
+| Aspect             | Codegen Plugin                 | MCP Server                 | Code Connect                |
+| ------------------ | ------------------------------ | -------------------------- | --------------------------- |
+| Runs in            | Figma Dev Mode (Inspect panel) | AI coding agent (IDE)      | CLI / Figma UI              |
+| Trigger            | Layer selection                | Agent prompt / URL         | `npx figma connect publish` |
+| Output             | Framework-specific code        | React + Tailwind (default) | Code snippets in Dev Mode   |
+| Customization      | Plugin preferences             | Prompt engineering         | Property mappings           |
+| Codebase awareness | Limited (some train on style)  | Via Code Connect mappings  | Direct codebase reference   |
+| Direction          | Design → Code                  | Design → Code              | Code → Design (Dev Mode)    |
+| AI-powered         | Some (Builder.io, Anima)       | Yes (agent-mediated)       | No (deterministic)          |
 
 **Recommendation**: Codegen plugins are useful for quick one-off conversions
 but lack the codebase awareness that MCP + Code Connect provides. For our
@@ -839,18 +833,18 @@ Figma Dev Mode updated with latest code snippets
 
 ## 11. Plan & Access Requirements
 
-| Feature | Minimum Plan | Notes |
-| --------- | ------------- | ------- |
-| MCP Remote Server | All plans | 6 calls/month on Starter; per-minute on paid |
-| MCP Desktop Server | Dev/Full seat (paid) | Requires Figma desktop app |
-| Code Connect CLI | All plans (publish) | Publish to Dev Mode |
-| Code Connect UI | Organization/Enterprise | In-Figma mapping experience |
-| `generate_figma_design` | Remote MCP | Claude Code / Codex only |
-| Variables REST API | **Enterprise** | Full CRUD for token sync |
-| Figma Make | Make plan | NPM imports at Schema 2025 |
-| Extended Collections | Enterprise Full seat | Multi-brand inheritance |
-| Make Kits | Early Access (waitlist) | Design library → Make |
-| Check Designs linter | Early Access (waitlist) | Variable alignment audit |
+| Feature                 | Minimum Plan            | Notes                                        |
+| ----------------------- | ----------------------- | -------------------------------------------- |
+| MCP Remote Server       | All plans               | 6 calls/month on Starter; per-minute on paid |
+| MCP Desktop Server      | Dev/Full seat (paid)    | Requires Figma desktop app                   |
+| Code Connect CLI        | All plans (publish)     | Publish to Dev Mode                          |
+| Code Connect UI         | Organization/Enterprise | In-Figma mapping experience                  |
+| `generate_figma_design` | Remote MCP              | Claude Code / Codex only                     |
+| Variables REST API      | **Enterprise**          | Full CRUD for token sync                     |
+| Figma Make              | Make plan               | NPM imports at Schema 2025                   |
+| Extended Collections    | Enterprise Full seat    | Multi-brand inheritance                      |
+| Make Kits               | Early Access (waitlist) | Design library → Make                        |
+| Check Designs linter    | Early Access (waitlist) | Variable alignment audit                     |
 
 **Recommendation**: For our workflow, minimum **Professional plan with Dev
 seats** gives access to MCP (both servers), Code Connect CLI, and reasonable
@@ -886,14 +880,14 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 
 ### 12.2 Risks
 
-| Risk | Severity | Mitigation |
-| ------ | ---------- | ------------ |
-| Enterprise plan required for token automation | HIGH | Use plugin workaround; manual sync for MVP |
-| `generate_figma_design` Claude Code/Codex lock-in | MEDIUM | This is supplementary; core flow is Design → Code |
-| MCP rate limits on non-Enterprise plans | MEDIUM | Batch MCP calls; cache responses locally |
-| Code Connect mapping drift | MEDIUM | CI integration: publish on every deploy |
-| Round-trip information loss (Scenario 3) | HIGH | Treat code → canvas as reference, not source of truth |
-| Figma Make output quality for production use | LOW | Make is for prototyping; production code via MCP + manual |
+| Risk                                              | Severity | Mitigation                                                |
+| ------------------------------------------------- | -------- | --------------------------------------------------------- |
+| Enterprise plan required for token automation     | HIGH     | Use plugin workaround; manual sync for MVP                |
+| `generate_figma_design` Claude Code/Codex lock-in | MEDIUM   | This is supplementary; core flow is Design → Code         |
+| MCP rate limits on non-Enterprise plans           | MEDIUM   | Batch MCP calls; cache responses locally                  |
+| Code Connect mapping drift                        | MEDIUM   | CI integration: publish on every deploy                   |
+| Round-trip information loss (Scenario 3)          | HIGH     | Treat code → canvas as reference, not source of truth     |
+| Figma Make output quality for production use      | LOW      | Make is for prototyping; production code via MCP + manual |
 
 ---
 
@@ -909,20 +903,20 @@ rate limits. Enterprise unlocks automated token sync via Variables API.
 - [Figma MCP Server
   Introduction](https://developers.figma.com/docs/figma-mcp-server/)
 - [MCP Server Tools &
-Prompts](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/)
+  Prompts](https://developers.figma.com/docs/figma-mcp-server/tools-and-prompts/)
 - [MCP Server Remote
-Installation](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/)
+  Installation](https://developers.figma.com/docs/figma-mcp-server/remote-server-installation/)
 - [MCP Server Desktop
-Installation](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/)
+  Installation](https://developers.figma.com/docs/figma-mcp-server/local-server-installation/)
 - [Trigger Specific MCP
-Tools](https://developers.figma.com/docs/figma-mcp-server/trigger-specific-tools/)
+  Tools](https://developers.figma.com/docs/figma-mcp-server/trigger-specific-tools/)
 - [Figma REST API Introduction](https://developers.figma.com/docs/rest-api/)
 - [Code Connect Help
   Center](https://help.figma.com/hc/en-us/articles/23920389749655-Code-Connect)
 - [MCP Server Help Center
-Guide](https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server)
+  Guide](https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figma-MCP-server)
 - [What's New from Schema
-2025](https://help.figma.com/hc/en-us/articles/35794667554839-What-s-new-from-Schema-2025)
+  2025](https://help.figma.com/hc/en-us/articles/35794667554839-What-s-new-from-Schema-2025)
 
 ### Figma Blog
 
@@ -934,7 +928,7 @@ Guide](https://help.figma.com/hc/en-us/articles/32132100833559-Guide-to-the-Figm
 - [Schema 2025: Design Systems for a New
   Era](https://www.figma.com/blog/schema-2025-design-systems-recap/)
 - [The Future of Design Systems is
-Semantic](https://www.figma.com/blog/the-future-of-design-systems-is-semantic/)
+  Semantic](https://www.figma.com/blog/the-future-of-design-systems-is-semantic/)
 - [Design Context, Everywhere You
   Build](https://www.figma.com/blog/design-context-everywhere-you-build/)
 
@@ -960,7 +954,7 @@ Semantic](https://www.figma.com/blog/the-future-of-design-systems-is-semantic/)
 
 - [shadcn/ui Figma Page](https://ui.shadcn.com/docs/figma)
 - [shadcn/ui Design System (Figma
-Community)](https://www.figma.com/community/file/1203061493325953101/shadcn-ui-design-system)
+  Community)](https://www.figma.com/community/file/1203061493325953101/shadcn-ui-design-system)
 - [Figma-Context-MCP (Community)](https://github.com/GLips/Figma-Context-MCP)
 - [Builder.io: Claude Code to Figma
   Tutorial](https://www.builder.io/blog/claude-code-to-figma)

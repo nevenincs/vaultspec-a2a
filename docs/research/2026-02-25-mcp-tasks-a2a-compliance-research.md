@@ -1,8 +1,8 @@
 ---
-name: "MCP Tasks A2A Compliance"
+name: 'MCP Tasks A2A Compliance'
 date: 2026-25-02
 type: research
-summary: "Analysis of MCP experimental async tasks, A2A state mapping, bridge architecture options, and recommendation to build on stable MCP tools."
+summary: 'Analysis of MCP experimental async tasks, A2A state mapping, bridge architecture options, and recommendation to build on stable MCP tools.'
 maturity: 40
 feature: mcp-a2a-compliance
 ---
@@ -60,12 +60,12 @@ use cases:
 **This is the critical unknown.** The MCP SDK documents the task protocol
 but provides **zero information** about which clients support it:
 
-| Client | MCP Tasks Support | Evidence |
-| -------- | ------------------- | ---------- |
-| Claude CLI | **Unknown** | No documentation found |
-| Gemini CLI | **Unknown** | Not mentioned anywhere |
-| Cursor/Windsurf | **Unknown** | Not mentioned anywhere |
-| Custom MCP clients | Yes | SDK provides client APIs |
+| Client             | MCP Tasks Support | Evidence                 |
+| ------------------ | ----------------- | ------------------------ |
+| Claude CLI         | **Unknown**       | No documentation found   |
+| Gemini CLI         | **Unknown**       | Not mentioned anywhere   |
+| Cursor/Windsurf    | **Unknown**       | Not mentioned anywhere   |
+| Custom MCP clients | Yes               | SDK provides client APIs |
 
 If Claude CLI and Gemini CLI don't implement the `call_tool_as_task`flow,
 our entire MCP-as-bridge architecture falls apart. The only confirmed client
@@ -179,16 +179,16 @@ workflow engine.
 
 ### 3.1 State Comparison
 
-| MCP State | A2A State | Compatible? | Notes |
-| ----------- | ----------- | ------------- | ------- |
-| `working` | `WORKING` | Yes | Direct match |
-| `input_required` | `INPUT_REQUIRED` | Yes | Same concept, different wire format |
-| `completed` | `COMPLETED` | Yes | Direct match |
-| `failed` | `FAILED` | Yes | Direct match |
-| `cancelled` | `CANCELED` | Yes | Spelling difference (UK vs US) |
-| — | `SUBMITTED` | No MCP equivalent | A2A has explicit "received but not started" state |
-| — | `REJECTED` | No MCP equivalent | A2A distinguishes rejection from failure |
-| — | `AUTH_REQUIRED` | No MCP equivalent | A2A has dedicated auth interruption |
+| MCP State        | A2A State        | Compatible?       | Notes                                             |
+| ---------------- | ---------------- | ----------------- | ------------------------------------------------- |
+| `working`        | `WORKING`        | Yes               | Direct match                                      |
+| `input_required` | `INPUT_REQUIRED` | Yes               | Same concept, different wire format               |
+| `completed`      | `COMPLETED`      | Yes               | Direct match                                      |
+| `failed`         | `FAILED`         | Yes               | Direct match                                      |
+| `cancelled`      | `CANCELED`       | Yes               | Spelling difference (UK vs US)                    |
+| —                | `SUBMITTED`      | No MCP equivalent | A2A has explicit "received but not started" state |
+| —                | `REJECTED`       | No MCP equivalent | A2A distinguishes rejection from failure          |
+| —                | `AUTH_REQUIRED`  | No MCP equivalent | A2A has dedicated auth interruption               |
 
 **MCP has 5 states. A2A has 8.** The mapping is lossy in one direction:
 
@@ -403,19 +403,19 @@ same A2A backend.
 
 ## 6. A2A Protocol Compliance Summary
 
-| Feature | A2A Support | MCP Task Support | Gap |
-| --------- | ------------- | ------------------ | ----- |
-| Task lifecycle | 8 states | 5 states | MCP lacks submitted, rejected, auth_required |
-| Polling | GetTask RPC | tasks/get | Both supported, different wire format |
-| Streaming | SSE (native) | Not supported | MCP has no streaming for tasks |
-| Push notifications | Full webhook protocol | Not supported | A2A-only feature |
-| Elicitation | input_required + SendMessage | elicitation/create | Same concept, different mechanism |
-| Auth interruption | auth_required | Not supported | Would need custom handling |
-| Cancellation | CancelTask RPC | tasks/cancel | Both supported |
-| Blocking mode | blocking=true flag | Not supported | A2A-only convenience |
-| Context grouping | contextId | Not supported | A2A groups related tasks |
-| Task referencing | referenceTaskIds | Not supported | A2A links task chains |
-| Agent discovery | Agent Cards | Tool listing | Different abstractions |
+| Feature            | A2A Support                  | MCP Task Support   | Gap                                          |
+| ------------------ | ---------------------------- | ------------------ | -------------------------------------------- |
+| Task lifecycle     | 8 states                     | 5 states           | MCP lacks submitted, rejected, auth_required |
+| Polling            | GetTask RPC                  | tasks/get          | Both supported, different wire format        |
+| Streaming          | SSE (native)                 | Not supported      | MCP has no streaming for tasks               |
+| Push notifications | Full webhook protocol        | Not supported      | A2A-only feature                             |
+| Elicitation        | input_required + SendMessage | elicitation/create | Same concept, different mechanism            |
+| Auth interruption  | auth_required                | Not supported      | Would need custom handling                   |
+| Cancellation       | CancelTask RPC               | tasks/cancel       | Both supported                               |
+| Blocking mode      | blocking=true flag           | Not supported      | A2A-only convenience                         |
+| Context grouping   | contextId                    | Not supported      | A2A groups related tasks                     |
+| Task referencing   | referenceTaskIds             | Not supported      | A2A links task chains                        |
+| Agent discovery    | Agent Cards                  | Tool listing       | Different abstractions                       |
 
 **A2A is the richer protocol.** MCP tasks provide a useful subset for CLI
 integration, but the orchestrator must use A2A natively for full team

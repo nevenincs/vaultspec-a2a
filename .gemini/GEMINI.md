@@ -63,15 +63,13 @@ steps is not permitted.
 
 - **shadcn-ui** (`shadcn-ui__*`): MUST be queried before introducing any UI
   primitive. Use `list_shadcn_components`, `get_component_details`, and
-  `get_component_examples` to get the canonical shadcn-svelte implementation.
+  `get_component_examples` to get the canonical shadcn implementation.
   Do not hand-roll components that the library already provides.
 
 #### Step 3 — Framework correctness
 
-- **svelte** (`svelte__*`): MUST be consulted for all Svelte 5 syntax, Runes
-  API (`$state`, `$derived`, `$effect`, `$props`), and SvelteKit patterns.
-  After writing or modifying a component, call this tool again to verify
-  correctness before committing.
+- **tailwind**
+- **react**
 
 #### Step 4 — Browser verification
 
@@ -83,8 +81,7 @@ steps is not permitted.
 
 ### Workflow Rules
 
-- The canonical frontend loop is: **Figma → shadcn-ui → Svelte MCP →
-  implement → browser verification**. Each step gates the next.
+- Use the Figma Code Connect mapping if applicable and / or the MCP server to fetch figma designs. UI tanstack query msut be implemented manually based on the backend edge shape.
 - MCP server responses override training knowledge. When there is a conflict,
   the MCP response is authoritative.
 - Never approximate a Figma design from memory; always fetch fresh data.
@@ -124,9 +121,9 @@ steps is not permitted.
   `from ..core import Registry`). Absolute imports are strictly reserved for
   external third-party dependencies.
 - **Import Policy**: Consumers should prefer importing from the sub-module root
-   (e.g., `from lib.core import Registry`) rather than deep-importing from
-   sub-sub-modules. This facilitates refactoring and decouples internal
-   hierarchy from the public interface.
+  (e.g., `from lib.core import Registry`) rather than deep-importing from
+  sub-sub-modules. This facilitates refactoring and decouples internal
+  hierarchy from the public interface.
 
 - Every feature implementation must be accompanied by `research`, `ADRs` (to
   articulate reasons) and a `plan`.

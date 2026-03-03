@@ -29,26 +29,26 @@ refreshes.
 We will handle Event Aggregation and State Replay via the following
 mechanisms:
 
-* **Native LangGraph Stream Aggregator:** A central Python component
+- **Native LangGraph Stream Aggregator:** A central Python component
   within the orchestrator will serve as the Event Aggregator. Its
   responsibilities include:
-  * Ingesting LangGraph's `astream` (node state updates) and
+  - Ingesting LangGraph's `astream` (node state updates) and
     `astream_events` (granular LangChain callback events like tokens
     streaming, tool starts, tool ends).
-  * Performing necessary payload transformations (e.g., adding
+  - Performing necessary payload transformations (e.g., adding
     universally formatted timestamps, grouping `run_id`s, structuring
     message arrays).
-  * Broadcasting these unified JSON events over a single, multiplexed
+  - Broadcasting these unified JSON events over a single, multiplexed
     WebSocket connection to the Control Surface frontend.
-* **SQLite Checkpoint Sourcing:** Rather than reinventing a custom
+- **SQLite Checkpoint Sourcing:** Rather than reinventing a custom
   event-sourcing database, all graph state transitions and checkpoints
   are inherently persisted by LangGraph's `checkpointer` (via
   `langgraph-checkpoint-sqlite`).
-* **Server-Side State Replay:** Upon a frontend reconnect or refresh,
+- **Server-Side State Replay:** Upon a frontend reconnect or refresh,
   the Control Surface will request the latest persisted Graph State for
   a given `thread_id` via a dedicated REST endpoint.
-  * The server will retrieve the state using `graph.get_state(config)`.
-  * This state object (containing the entire message history and
+  - The server will retrieve the state using `graph.get_state(config)`.
+  - This state object (containing the entire message history and
     current node values) serves as the "source of truth", allowing the
     frontend to immediately render the full conversational history and
     UI components without needing to replay individual granular events,
@@ -57,15 +57,15 @@ mechanisms:
 
 ## 3. Rationale
 
-* **Unified Stream & Ecosystem Alignment:** Utilizing LangGraph's native
+- **Unified Stream & Ecosystem Alignment:** Utilizing LangGraph's native
   `astream_events` provides a rich, deeply integrated stream of
   execution data (far superior to parsing raw stdout text). Aggregating
   this centrally simplifies client-side logic.
-* **Checkpoint Reliability:** LangGraph's `checkpointer` is specifically
+- **Checkpoint Reliability:** LangGraph's `checkpointer` is specifically
   designed for this exact use case—fault-tolerant state persistence.
   Leaning on it entirely removes the need for us to maintain separate,
   complex SQLite event-sourcing schemas for conversational history.
-* **Robust Frontend Recovery:** Reconstructing UI from a final holistic
+- **Robust Frontend Recovery:** Reconstructing UI from a final holistic
   State Object (rather than streaming thousands of historical delta
   events to the browser just to rebuild state on the client) is
   dramatically faster and far less prone to race conditions or sync
@@ -73,31 +73,31 @@ mechanisms:
 
 ## 4. Rejected Alternatives
 
-* **Raw Subprocess Stdout Ring Buffers (Original Design):** Rejected.
+- **Raw Subprocess Stdout Ring Buffers (Original Design):** Rejected.
   Since we no longer run CLI binaries as subprocesses, there is no raw
   ANSI stdout/stderr to capture. Agents run natively as python
   functions.
-* **Custom Event Logging Database:** Rejected. LangGraph's
+- **Custom Event Logging Database:** Rejected. LangGraph's
   `checkpoint-sqlite` covers 95% of our event persistence needs
   natively. Building a parallel, custom event-sourcing database
   introduces unnecessary complexity and potential data divergence.
 
 ## 5. Implementation Constraints & Pitfalls
 
-* **Payload Bloat:** LangGraph `astream_events` can be extremely noisy
+- **Payload Bloat:** LangGraph `astream_events` can be extremely noisy
   (e.g., emitting an event for every single chunk of a streaming LLM
   response). The Event Aggregator must carefully batch or debounce
   certain high-frequency events before broadcasting them over the
   WebSocket to prevent blowing out the browser's memory or network
   queue.
-* **Differentiating Threads:** The multiplexed WebSocket must strictly
+- **Differentiating Threads:** The multiplexed WebSocket must strictly
   encapsulate all payloads with their corresponding LangGraph
   `thread_id` to ensure the frontend routes updates to the correct
   agent UI instance.
 
 ## 6. Negative Consequences
 
-* **Loss of "Terminal" View:** Because we are no longer piping raw ANSI
+- **Loss of "Terminal" View:** Because we are no longer piping raw ANSI
   stdout, the "Terminal" view concept in the Control Surface is
   deprecated. It must be replaced with structured UI components (e.g.,
   Chat Bubbles, Tool Call components, Markdown renderers) that
@@ -107,5 +107,5 @@ mechanisms:
 
 ## 7. References
 
-* [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
-* [Control Surface Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)
+- [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
+- [Control Surface Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)

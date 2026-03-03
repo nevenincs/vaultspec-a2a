@@ -1,5 +1,5 @@
-import figma from '@figma/code-connect'
-import { TabBar } from './tab-bar'
+import figma from '@figma/code-connect';
+import { TabBar } from './tab-bar';
 
 /**
  * Code Connect mapping for TabBar.
@@ -15,15 +15,19 @@ import { TabBar } from './tab-bar'
  * - pinTab: (threadId) => void
  * - closeTab: (threadId) => void
  */
-figma.connect(TabBar, 'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface', {
-  example: () => (
-    <TabBar
-      tabs={[]}
-      activeTabId={null}
-      threads={[]}
-      activateTab={() => {}}
-      pinTab={() => {}}
-      closeTab={() => {}}
-    />
-  ),
-})
+figma.connect(
+  TabBar,
+  'https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface',
+  {
+    example: () => (
+      <TabBar
+        tabs={[]}
+        activeTabId={null}
+        threads={[]}
+        activateTab={() => {}}
+        pinTab={() => {}}
+        closeTab={() => {}}
+      />
+    ),
+  },
+);

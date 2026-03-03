@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: plan
 feature: provider-abstraction
-description: "Implementation plan for the LLM Context and Provider Abstraction layer per ADR-002, securely instantiating LangChain BaseChatModel connections to external LLM providers."
+description: 'Implementation plan for the LLM Context and Provider Abstraction layer per ADR-002, securely instantiating LangChain BaseChatModel connections to external LLM providers.'
 related_adrs:
   - docs/adrs/2026-02-25-002-llm-context-provider-abstraction-adr.md
   - docs/adrs/2026-02-26-009-module-hierarchy-adr.md
@@ -23,11 +23,11 @@ LangChain `BaseChatModel` interfaces.
 > [!CAUTION]
 > **API Keys for Testing**
 > Since this project strictly forbids mocks in tests (`GEMINI.md`: "Mocks are
-FORBIDDEN. Every test must run live real code against real services."), the
-integration tests will make real network calls to the LLM APIs.
+> FORBIDDEN. Every test must run live real code against real services."), the
+> integration tests will make real network calls to the LLM APIs.
 > You must ensure that your local `.env`file or environment variables are
-populated with valid keys for the providers you have access to
-(e.g.,`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `ZHIPU_API_KEY`).
+> populated with valid keys for the providers you have access to
+> (e.g.,`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `ZHIPU_API_KEY`).
 
 ## Proposed Changes
 

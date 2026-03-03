@@ -23,14 +23,14 @@ packaged, containerized, or distributed. A systematic audit of
 `pyproject.toml` against actual codebase imports reveals three categories
 of issues:
 
-| Category | Finding | Impact |
-| ---------- | --------- | -------- |
-| **Dead dependencies** | `pywin32>=311` and `winfcntl>=1.1.9` are listed as unconditional runtime deps but are **imported nowhere** in the codebase (0 matches across all of `lib/`). | `uv sync` / `pip install` **fails on Linux and macOS** because pywin32 has no non-Windows wheels. Cross-platform install, Docker builds, and CI on Ubuntu are all broken. |
-| **Phantom dependency** | `claude-agent-sdk` is pinned to a git URL (`git+https://github.com/anthropics/claude-agent-sdk-python.git@main`) but is **imported nowhere** in the codebase. | Blocks PyPI distribution entirely (PyPI rejects packages with git-based deps). Adds ~3,100 lines of unused transitive code to the venv. Couples the lockfile to GitHub availability. |
-| **Speculative deps** | 8 additional runtime deps (`PyYAML`, `a2a-sdk`, `agent-client-protocol`, `fastmcp`, `langchain-anthropic`, `langchain-google-genai`, `langchain-mcp-adapters`, `sse-starlette`) are **imported nowhere** — added speculatively as the architecture evolved to use ACP subprocess wrappers instead of direct SDK calls. | Bloated dependency surface (25 → 17 runtime deps). Slower installs, larger venv, false sense of coupling. |
-| **Misscoped OTel** | OpenTelemetry packages are in `[project.optional-dependencies] telemetry` with try/except guards in `app.py`. | ADR-010 mandates observability. Optional OTel contradicts the mandate — telemetry must be unconditional. |
-| **Transitive `anyio`** | `anyio` is directly imported in 3 files (`app.py`, `endpoints.py`) but only available transitively. | Fragile — if a transitive dep drops anyio, the project breaks silently. |
-| **Missing entry point** | No `main()` function, no `__main__.py`, no `[project.scripts]` entry exists. | The server can only be started via manual `uvicorn` CLI invocation. No `uvx`, `pipx`, or `vaultspec` CLI command is possible. |
+| Category                | Finding                                                                                                                                                                                                                                                                                                                | Impact                                                                                                                                                                               |
+| ----------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Dead dependencies**   | `pywin32>=311` and `winfcntl>=1.1.9` are listed as unconditional runtime deps but are **imported nowhere** in the codebase (0 matches across all of `lib/`).                                                                                                                                                           | `uv sync` / `pip install` **fails on Linux and macOS** because pywin32 has no non-Windows wheels. Cross-platform install, Docker builds, and CI on Ubuntu are all broken.            |
+| **Phantom dependency**  | `claude-agent-sdk` is pinned to a git URL (`git+https://github.com/anthropics/claude-agent-sdk-python.git@main`) but is **imported nowhere** in the codebase.                                                                                                                                                          | Blocks PyPI distribution entirely (PyPI rejects packages with git-based deps). Adds ~3,100 lines of unused transitive code to the venv. Couples the lockfile to GitHub availability. |
+| **Speculative deps**    | 8 additional runtime deps (`PyYAML`, `a2a-sdk`, `agent-client-protocol`, `fastmcp`, `langchain-anthropic`, `langchain-google-genai`, `langchain-mcp-adapters`, `sse-starlette`) are **imported nowhere** — added speculatively as the architecture evolved to use ACP subprocess wrappers instead of direct SDK calls. | Bloated dependency surface (25 → 17 runtime deps). Slower installs, larger venv, false sense of coupling.                                                                            |
+| **Misscoped OTel**      | OpenTelemetry packages are in `[project.optional-dependencies] telemetry` with try/except guards in `app.py`.                                                                                                                                                                                                          | ADR-010 mandates observability. Optional OTel contradicts the mandate — telemetry must be unconditional.                                                                             |
+| **Transitive `anyio`**  | `anyio` is directly imported in 3 files (`app.py`, `endpoints.py`) but only available transitively.                                                                                                                                                                                                                    | Fragile — if a transitive dep drops anyio, the project breaks silently.                                                                                                              |
+| **Missing entry point** | No `main()` function, no `__main__.py`, no `[project.scripts]` entry exists.                                                                                                                                                                                                                                           | The server can only be started via manual `uvicorn` CLI invocation. No `uvx`, `pipx`, or `vaultspec` CLI command is possible.                                                        |
 
 The dependency stack and module declarations need careful pruning and
 updating. The project accumulated 25+ runtime deps without systematic
@@ -67,19 +67,19 @@ execution.
 Remove the following 11 packages from `pyproject.toml`
 `[project.dependencies]` — all confirmed zero imports in `lib/`:
 
-| Package | Why it was there | Why it's dead |
-| --------- | ----------------- | --------------- |
-| `pywin32` | Precautionary for Windows subprocess | Code uses only stdlib `subprocess.CREATE_NEW_PROCESS_GROUP`. Remains available transitively via `mcp>=1.26.0` (correctly guarded). |
-| `winfcntl` | Precautionary fcntl compat | Zero consumers anywhere. |
-| `claude-agent-sdk` | Design research reference | AcpChatModel uses raw ACP JSON-RPC, not the SDK's stream-json. Eliminates only git-based dep (PyPI blocker). |
-| `PyYAML` | Speculative | Not imported. Config uses pydantic-settings, not YAML. |
-| `a2a-sdk` | Speculative | Not imported. A2A protocol handled at HTTP/WS level. |
-| `agent-client-protocol` | Speculative | Not imported. ACP implemented from scratch in `acp_chat_model.py`. |
-| `fastmcp` | Confusion with `mcp.server.fastmcp` | `FastMCP` is imported from `mcp` package, not `fastmcp` (different PyPI package). |
-| `langchain-anthropic` | Early direct LLM calls | Claude now invoked via ACP subprocess, not LangChain provider. |
-| `langchain-google-genai` | Early direct LLM calls | Gemini now invoked via ACP subprocess, not LangChain provider. |
-| `langchain-mcp-adapters` | Speculative MCP integration | Not imported. MCP handled directly via `mcp` package. |
-| `sse-starlette` | Speculative SSE support | Not imported. SSE handled by FastAPI/Starlette natively. |
+| Package                  | Why it was there                     | Why it's dead                                                                                                                      |
+| ------------------------ | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `pywin32`                | Precautionary for Windows subprocess | Code uses only stdlib `subprocess.CREATE_NEW_PROCESS_GROUP`. Remains available transitively via `mcp>=1.26.0` (correctly guarded). |
+| `winfcntl`               | Precautionary fcntl compat           | Zero consumers anywhere.                                                                                                           |
+| `claude-agent-sdk`       | Design research reference            | AcpChatModel uses raw ACP JSON-RPC, not the SDK's stream-json. Eliminates only git-based dep (PyPI blocker).                       |
+| `PyYAML`                 | Speculative                          | Not imported. Config uses pydantic-settings, not YAML.                                                                             |
+| `a2a-sdk`                | Speculative                          | Not imported. A2A protocol handled at HTTP/WS level.                                                                               |
+| `agent-client-protocol`  | Speculative                          | Not imported. ACP implemented from scratch in `acp_chat_model.py`.                                                                 |
+| `fastmcp`                | Confusion with `mcp.server.fastmcp`  | `FastMCP` is imported from `mcp` package, not `fastmcp` (different PyPI package).                                                  |
+| `langchain-anthropic`    | Early direct LLM calls               | Claude now invoked via ACP subprocess, not LangChain provider.                                                                     |
+| `langchain-google-genai` | Early direct LLM calls               | Gemini now invoked via ACP subprocess, not LangChain provider.                                                                     |
+| `langchain-mcp-adapters` | Speculative MCP integration          | Not imported. MCP handled directly via `mcp` package.                                                                              |
+| `sse-starlette`          | Speculative SSE support              | Not imported. SSE handled by FastAPI/Starlette natively.                                                                           |
 
 ### 2.2 Remove Phantom Dependency
 
@@ -346,7 +346,7 @@ uv sync
   published to PyPI (pending the frontend embedding work in a future
   ADR).
 - **CLI usability**: `vaultspec` command available after install. `uvx
-  vaultspec-a2a` works for ephemeral use.
+vaultspec-a2a` works for ephemeral use.
 - **Dependency hygiene**: `deptry` in CI catches future dep drift
   automatically. Reduced from 144 → 100 resolved packages.
 - **Mandatory observability**: OTel is always installed, always
@@ -378,12 +378,12 @@ uv sync
 
 ## 5. Compliance Matrix
 
-| ADR | Relationship | Status |
-| ----- | ------------- | -------- |
-| ADR-007 (Tech Stack) | Aligns — removes undeclared platform coupling | Compliant |
-| ADR-009 (Module Hierarchy) | Aligns — `lib/api/app.py` gains `main()` in its public surface | Compliant |
-| ADR-010 (Observability) | **Enforces** — OTel promoted from optional to mandatory runtime dep | Compliant |
-| Research doc | Implements "Immediate Action Items §7.1" from packaging research | Compliant |
+| ADR                        | Relationship                                                        | Status    |
+| -------------------------- | ------------------------------------------------------------------- | --------- |
+| ADR-007 (Tech Stack)       | Aligns — removes undeclared platform coupling                       | Compliant |
+| ADR-009 (Module Hierarchy) | Aligns — `lib/api/app.py` gains `main()` in its public surface      | Compliant |
+| ADR-010 (Observability)    | **Enforces** — OTel promoted from optional to mandatory runtime dep | Compliant |
+| Research doc               | Implements "Immediate Action Items §7.1" from packaging research    | Compliant |
 
 ## 6. Open Questions
 

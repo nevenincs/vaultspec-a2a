@@ -199,6 +199,12 @@ class TestTeamStateStructure:
             "pipeline_phase",
             "vault_index",
             "validation_errors",
+            # ADR-020: transient mounted document content
+            "mounted_context",
+            # ADR-021: task queue pointer
+            "current_task_id",
+            # ADR-024: plan approval gate
+            "plan_approved",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

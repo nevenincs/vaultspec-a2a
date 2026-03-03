@@ -2,7 +2,7 @@
 adr_id: 019
 title: TeamState Enrichment for SDD Blackboard Awareness
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/008-orchestration-topology-pipeline.md
   - docs/adrs/013-team-composition-topology.md
@@ -25,12 +25,12 @@ whether artifact validation has surfaced errors.
 
 Three concrete gaps follow from this:
 
-| Gap | Current State | Impact |
-| --- | --- | --- |
-| **No feature identity in state** | `feature_tag` lives only on `ThreadMetadata` (ADR-014, DB layer). After the initial context preamble is injected at thread creation, the graph itself loses access to the feature tag. | Supervisor and worker nodes cannot query which feature is active without parsing conversation history --- which is unreliable and slow. |
-| **No pipeline phase** | `TeamState` has `loop_count` for iteration guards but no semantic phase label. | The supervisor cannot make phase-aware routing decisions (e.g., "research is done, now route to planner"). Without a phase gate, blackboard systems cycle indefinitely (arXiv 2507.01701). |
-| **No vault index** | `artifacts` stores in-memory dicts of completed agent outputs. There is no index of physical `.vault/` documents keyed by doc-type. | Nodes cannot programmatically determine which binding documents (ADRs, plans, research) exist for the active feature without re-scanning disk on every invocation. |
-| **No validation error accumulator** | There is no field to surface artifact quality failures to the supervisor. | The supervisor routes to FINISH even when the previous worker produced a malformed artifact. MetaGPT encountered the same issue --- without a quality gate, hallucinated or malformed outputs proceed silently (MetaGPT, arXiv 2308.00352). |
+| Gap                                 | Current State                                                                                                                                                                          | Impact                                                                                                                                                                                                                                      |
+| ----------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **No feature identity in state**    | `feature_tag` lives only on `ThreadMetadata` (ADR-014, DB layer). After the initial context preamble is injected at thread creation, the graph itself loses access to the feature tag. | Supervisor and worker nodes cannot query which feature is active without parsing conversation history --- which is unreliable and slow.                                                                                                     |
+| **No pipeline phase**               | `TeamState` has `loop_count` for iteration guards but no semantic phase label.                                                                                                         | The supervisor cannot make phase-aware routing decisions (e.g., "research is done, now route to planner"). Without a phase gate, blackboard systems cycle indefinitely (arXiv 2507.01701).                                                  |
+| **No vault index**                  | `artifacts` stores in-memory dicts of completed agent outputs. There is no index of physical `.vault/` documents keyed by doc-type.                                                    | Nodes cannot programmatically determine which binding documents (ADRs, plans, research) exist for the active feature without re-scanning disk on every invocation.                                                                          |
+| **No validation error accumulator** | There is no field to surface artifact quality failures to the supervisor.                                                                                                              | The supervisor routes to FINISH even when the previous worker produced a malformed artifact. MetaGPT encountered the same issue --- without a quality gate, hallucinated or malformed outputs proceed silently (MetaGPT, arXiv 2308.00352). |
 
 ### 1.1 Relationship to ADR-014
 

@@ -1,8 +1,8 @@
 ---
-name: "Control Surface Domain - Distilled"
+name: 'Control Surface Domain - Distilled'
 date: 2026-25-02
 type: distilled
-summary: "Consolidated rendering stack decisions: Tailwind v4 + shadcn-svelte, terminal emulation (xterm.js), syntax highlighting (Shiki + CodeMirror 6), streaming markdown (Incremark), diff rendering (diff2html). Memory budgets and architecture patterns from survey of 17 reference projects."
+summary: 'Consolidated rendering stack decisions: Tailwind v4 + shadcn-React, terminal emulation (xterm.js), syntax highlighting (Shiki + CodeMirror 6), streaming markdown (Incremark), diff rendering (diff2html). Memory budgets and architecture patterns from survey of 17 reference projects.'
 maturity: 45
 sources:
   - docs/control-surface/2026-25-02-agent-ui-terminal-dashboard-research.md
@@ -15,31 +15,31 @@ feature: control-surface-distilled
 **Date**: 2026-02-25
 **Status**: Distilled from agent UI survey + rendering stack research
 **Scope**: Frontend rendering decisions, component choices, memory budgets.
-Tech stack decisions (SvelteKit, FastAPI, etc.) are in the architecture
+Tech stack decisions (React, FastAPI, etc.) are in the architecture
 distilled doc.
 
 ---
 
 ## 1. UI Framework & Design System
 
-### 1.1 Decision: shadcn-svelte + Tailwind CSS v4
+### 1.1 Decision: shadcn-React + Tailwind CSS v4
 
 The project explicitly deviates from the initial "Vanilla CSS" preference to
-adopt **Tailwind CSS v4** and **shadcn-svelte**.
+adopt **Tailwind CSS v4** and **shadcn-React**.
 
 - **Tailwind v4 (Oxide Engine):** Provides microsecond incremental builds via a
   Rust-based engine, eliminates `tailwind.config.js` in favor of CSS-first
   variables (`@theme`), and supports modern features like container queries
   natively.
-- **shadcn-svelte + Bits UI:** Entirely Svelte 5 Runes-native. Provides the
+- **shadcn-React + Bits UI:** Entirely React 5 Runes-native. Provides the
   highly readable, data-dense "Vercel aesthetic" necessary for complex
   monitoring dashboards, without the overhead of monolithic libraries.
 
 **Rationale:** The development velocity gained by using pre-built, accessible,
 keyboard-navigable primitives (Modals, Resizable Panes, Dropdowns) outweighs the
 benefits of strict Vanilla CSS. Carbon Components was evaluated but rejected due
-to its reliance on Svelte 4 legacy syntax (`on:click`, `bind:value`), which
-conflicts with the project's modern Svelte 5 Runes architecture.
+to its reliance on React 4 legacy syntax (`on:click`, `bind:value`), which
+conflicts with the project's modern React 5 Runes architecture.
 
 ---
 
@@ -52,25 +52,25 @@ code-server, JupyterLab, and every major web terminal project.
 
 ### Required addons
 
-| Addon | Purpose |
-| ------- | --------- |
-| `@xterm/addon-fit` | Auto-resize terminal to container |
-| `@xterm/addon-webgl` | GPU-accelerated rendering (WebGL2) |
-| `@xterm/addon-search` | Text search in terminal buffer |
+| Addon                    | Purpose                                     |
+| ------------------------ | ------------------------------------------- |
+| `@xterm/addon-fit`       | Auto-resize terminal to container           |
+| `@xterm/addon-webgl`     | GPU-accelerated rendering (WebGL2)          |
+| `@xterm/addon-search`    | Text search in terminal buffer              |
 | `@xterm/addon-serialize` | Session persistence (serialize framebuffer) |
-| `@xterm/addon-web-links` | Clickable URLs in output |
+| `@xterm/addon-web-links` | Clickable URLs in output                    |
 
-**SvelteKit integration**:`xterm-svelte`provides a maintained wrapper.
+**React integration**:`xterm-React`provides a maintained wrapper.
 
 ### 2.2 Memory Budget
 
-| Metric | Value |
-| -------- | ------- |
-| Core bundle | ~265KB (v5, minified) |
-| Memory per terminal (160x24, 5K scrollback) | ~34MB |
-| Truecolor impact | Nearly doubles buffer consumption |
-| Write buffer hard limit | 50MB |
-| Serialization speed | ~25MB/s |
+| Metric                                      | Value                             |
+| ------------------------------------------- | --------------------------------- |
+| Core bundle                                 | ~265KB (v5, minified)             |
+| Memory per terminal (160x24, 5K scrollback) | ~34MB                             |
+| Truecolor impact                            | Nearly doubles buffer consumption |
+| Write buffer hard limit                     | 50MB                              |
+| Serialization speed                         | ~25MB/s                           |
 
 **Multi-agent impact**: 5 agents at 5K scrollback = ~170MB for terminals alone.
 
@@ -106,19 +106,19 @@ Still experimental.
 
 Three rendering contexts, each with its own highlighting strategy:
 
-| Context | Library | Rationale |
-| --------- | --------- | ----------- |
-| Terminal output | Native ANSI | xterm.js interprets ANSI codes natively. Tools like`bat`and`rich`emit highlighted output that renders correctly with no extra work. |
-| Code blocks in agent messages | Shiki (lazy-loaded) | VS Code-grade highlighting via TextMate grammars + WASM. ~250KB + WASM, so must be lazy-loaded. |
-| Code viewer / artifact inspector | CodeMirror 6 | 124KB bundle (vs Monaco's 2MB+). Read-only mode, efficient incremental updates via transactions. Supports search, folding. |
+| Context                          | Library             | Rationale                                                                                                                           |
+| -------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------- |
+| Terminal output                  | Native ANSI         | xterm.js interprets ANSI codes natively. Tools like`bat`and`rich`emit highlighted output that renders correctly with no extra work. |
+| Code blocks in agent messages    | Shiki (lazy-loaded) | VS Code-grade highlighting via TextMate grammars + WASM. ~250KB + WASM, so must be lazy-loaded.                                     |
+| Code viewer / artifact inspector | CodeMirror 6        | 124KB bundle (vs Monaco's 2MB+). Read-only mode, efficient incremental updates via transactions. Supports search, folding.          |
 
 ### 3.2 What Was Eliminated
 
-| Library | Reason |
-| --------- | -------- |
-| Monaco Editor | 2MB+ bundle. Sourcegraph cut 43% of their JS by replacing it with CodeMirror. Only justified if full editing is needed. |
-| Prism.js | No longer actively maintained. |
-| Tree-sitter (browser) | Interesting for structural parsing but overkill for highlighting. Deferred to future. |
+| Library               | Reason                                                                                                                  |
+| --------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Monaco Editor         | 2MB+ bundle. Sourcegraph cut 43% of their JS by replacing it with CodeMirror. Only justified if full editing is needed. |
+| Prism.js              | No longer actively maintained.                                                                                          |
+| Tree-sitter (browser) | Interesting for structural parsing but overkill for highlighting. Deferred to future.                                   |
 
 ### 3.3 ANSI + Structured Highlighting Coexistence
 
@@ -138,23 +138,23 @@ multiple chunks (e.g., code fence opens in one chunk, closes many chunks
 later). Traditional parsers (marked, markdown-it) re-parse the entire
 accumulated document on each chunk: O(n²) performance.
 
-### 4.2 Decision: @humanspeak/svelte-markdown
+### 4.2 Decision: @humanspeak/React-markdown
 
 > **Superseded**: The initial recommendation of Incremark was overridden during
 > gap analysis (see control-surface-gaps-research.md §1). ADR-005 formalizes
-> `@humanspeak/svelte-markdown`as the binding choice.
+> `@humanspeak/React-markdown`as the binding choice.
 
-| Criteria | @humanspeak/svelte-markdown | Incremark | Streamdown |
-| ---------- | ----------------------------- | ----------- | ------------ |
-| Performance | O(n) via Intelligent Token Caching | O(n) incremental | Better than naive |
-| Svelte 5 Runes | Native, first-class | Sparse documentation | React only |
-| Parser ecosystem | Full`Marked.js`plugin compat | Custom parser | Custom parser |
-| Maturity | Actively maintained | Experimental, sparse docs | Vercel-backed |
+| Criteria         | @humanspeak/React-markdown         | Incremark                 | Streamdown        |
+| ---------------- | ---------------------------------- | ------------------------- | ----------------- |
+| Performance      | O(n) via Intelligent Token Caching | O(n) incremental          | Better than naive |
+| React 5 Runes    | Native, first-class                | Sparse documentation      | React only        |
+| Parser ecosystem | Full`Marked.js`plugin compat       | Custom parser             | Custom parser     |
+| Maturity         | Actively maintained                | Experimental, sparse docs | Vercel-backed     |
 
-**@humanspeak/svelte-markdown wins** because it solves the O(n²) problem via
+**@humanspeak/React-markdown wins** because it solves the O(n²) problem via
 token caching (caching completed AST blocks, only re-rendering the active tail)
 while retaining full compatibility with the`Marked.js`plugin ecosystem and
-being built natively for Svelte 5 Runes.
+being built natively for React 5 Runes.
 
 ### 4.3 Chrome's Official Best Practices
 
@@ -172,8 +172,7 @@ being built natively for Svelte 5 Runes.
 For the artifact viewer / code review panel. Key properties:
 
 - 124KB minified+gzipped (basic setup)
-- Redux-esque unidirectional data flow
--`EditorState.readOnly` facet for trivial read-only mode
+- Redux-esque unidirectional data flow -`EditorState.readOnly` facet for trivial read-only mode
 - Efficient incremental updates via transactions (good for streaming artifact
   content)
 - Lazy-loadable language support
@@ -185,7 +184,7 @@ For the artifact viewer / code review panel. Key properties:
 
 ### 6.1 Decision: diff2html
 
-Framework-agnostic (works with Svelte). Converts git unified diff output to
+Framework-agnostic (works with React). Converts git unified diff output to
 HTML. Uses highlight.js for syntax highlighting within diffs. Side-by-side and
 line-by-line views.
 
@@ -205,7 +204,7 @@ Agent Backend (A2A protocol)
 Control Surface Frontend
     |
     +-- Agent Message Renderer
-    |     +-- Streaming Markdown (@humanspeak/svelte-markdown)
+    |     +-- Streaming Markdown (@humanspeak/React-markdown)
     |     +-- Code Blocks (Shiki, lazy-loaded)
     |     +-- Tool Call Components (custom, structured dispatch)
     |     +-- Thinking Block Components (collapsible)
@@ -225,13 +224,9 @@ Control Surface Frontend
 
 Agent events carry typed content. The renderer dispatches based on type:
 
-- `text`→ Streaming markdown (@humanspeak/svelte-markdown)
--`tool_result`→ Tool call component (terminal-styled, monospace)
--`code_artifact`→ CodeMirror 6 viewer
--`thinking`→ Collapsible thinking panel
--`diff`→ diff2html renderer
+- `text`→ Streaming markdown (@humanspeak/React-markdown) -`tool_result`→ Tool call component (terminal-styled, monospace) -`code_artifact`→ CodeMirror 6 viewer -`thinking`→ Collapsible thinking panel -`diff`→ diff2html renderer
 
-This mirrors how Open WebUI dispatches`MarkdownTokens.svelte`and how llm-ui
+This mirrors how Open WebUI dispatches`MarkdownTokens.React`and how llm-ui
 uses`useLLMOutput`pattern matching.
 
 ---
@@ -240,24 +235,24 @@ uses`useLLMOutput`pattern matching.
 
 ### 8.1 Most Relevant References
 
-| Project | Stars | Key Pattern Learned |
-| --------- | ------- | ------------------- |
-| Open WebUI | ~45K | SvelteKit + FastAPI pairing; SSE + WebSocket hybrid |
-| Grafana | ~66K | Single WebSocket with channel multiplexing (adopted) |
-| Supervisor | — | Process state machine (STARTING → RUNNING → STOPPING → STOPPED) |
-| Theia | ~20K | JSON-RPC over WebSocket for structured communication |
-| AutoGen Studio | ~42K | Inner monologue rendering; cost tracking per task |
-| Portainer | ~32K | Lightweight agent pattern for remote process management |
+| Project        | Stars | Key Pattern Learned                                             |
+| -------------- | ----- | --------------------------------------------------------------- |
+| Open WebUI     | ~45K  | React + FastAPI pairing; SSE + WebSocket hybrid                 |
+| Grafana        | ~66K  | Single WebSocket with channel multiplexing (adopted)            |
+| Supervisor     | —     | Process state machine (STARTING → RUNNING → STOPPING → STOPPED) |
+| Theia          | ~20K  | JSON-RPC over WebSocket for structured communication            |
+| AutoGen Studio | ~42K  | Inner monologue rendering; cost tracking per task               |
+| Portainer      | ~32K  | Lightweight agent pattern for remote process management         |
 
 ### 8.2 Patterns Not Adopted
 
-| Pattern | Projects | Why Not |
-| --------- | ---------- | --------- |
+| Pattern                  | Projects                | Why Not                                             |
+| ------------------------ | ----------------------- | --------------------------------------------------- |
 | React Flow visual editor | Dify, Langflow, Flowise | Not building a drag-and-drop workflow editor for v1 |
-| Celery task queue | Dify | Overkill for local single-user tool |
-| GraphQL API | CrewAI Visualizer | REST + WebSocket is simpler for our use case |
-| AngularJS | Portainer (legacy) | Not relevant |
-| Streamlit | CrewAI Studio | Not production-grade for rich UIs |
+| Celery task queue        | Dify                    | Overkill for local single-user tool                 |
+| GraphQL API              | CrewAI Visualizer       | REST + WebSocket is simpler for our use case        |
+| AngularJS                | Portainer (legacy)      | Not relevant                                        |
+| Streamlit                | CrewAI Studio           | Not production-grade for rich UIs                   |
 
 ---
 
@@ -294,17 +289,17 @@ production use." No specification for the custom flow control exists. This
 matters when agents produce high-volume output (e.g., verbose build logs).
 
 **Status**: ✅ Mitigated by ADR-004. The primary render target shifts away from
-raw xterm.js to structured Svelte components reading the LangGraph state.
+raw xterm.js to structured React components reading the LangGraph state.
 Terminal emulation becomes purely auxiliary.
 
-### G2: Streaming Markdown Library Maturity for Svelte
+### G2: Streaming Markdown Library Maturity for React
 
-Incremark is "newer, less battle-tested" and its Svelte renderer is the least
+Incremark is "newer, less battle-tested" and its React renderer is the least
 documented of its framework bindings. If it has stability issues, the fallback
-is`svelte-markdown`+`marked.js`with O(n²) performance.
+is`React-markdown`+`marked.js`with O(n²) performance.
 
 **Status**: ✅ Resolved by ADR-005. Incremark was abandoned. We officially
-adopted`@humanspeak/svelte-markdown`which natively handles intelligent token
+adopted`@humanspeak/React-markdown`which natively handles intelligent token
 caching securely.
 
 ### G3: Terminal Serialize/Reconnect in Production

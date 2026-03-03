@@ -2,7 +2,7 @@
 date: 2026-02-25
 type: audit
 feature: architecture-gap-analysis
-description: "Systematic audit of all coding-teams research identifying ten critical gaps in server management, code reuse, provider abstraction, and error handling."
+description: 'Systematic audit of all coding-teams research identifying ten critical gaps in server management, code reuse, provider abstraction, and error handling.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-25-002-llm-context-provider-abstraction-adr.md
@@ -21,18 +21,18 @@ gaps introduced by overlapping implementation options.
 
 ## Findings Summary
 
-| # | Gap | Severity | Blocker? |
-| --- | --- | :------: | :------: |
-| 1 | No provider adapter interface | CRITICAL | Yes |
-| 2 | LLM integration layer missing | CRITICAL | Yes |
-| 3 | Process manager underspecified | HIGH | Yes |
-| 4 | Event aggregator reliability undefined | HIGH | Yes |
-| 5 | Permission flow granularity absent | HIGH | Yes |
-| 6 | Error recovery strategy absent | HIGH | Partial |
-| 7 | State persistence schema missing | MEDIUM | No |
-| 8 | Testing strategy absent | HIGH | Yes |
-| 9 | Context window management unaddressed | HIGH | Partial |
-| 10 | Merge conflict strategy missing | MEDIUM | No |
+| #   | Gap                                    | Severity | Blocker? |
+| --- | -------------------------------------- | :------: | :------: |
+| 1   | No provider adapter interface          | CRITICAL |   Yes    |
+| 2   | LLM integration layer missing          | CRITICAL |   Yes    |
+| 3   | Process manager underspecified         |   HIGH   |   Yes    |
+| 4   | Event aggregator reliability undefined |   HIGH   |   Yes    |
+| 5   | Permission flow granularity absent     |   HIGH   |   Yes    |
+| 6   | Error recovery strategy absent         |   HIGH   | Partial  |
+| 7   | State persistence schema missing       |  MEDIUM  |    No    |
+| 8   | Testing strategy absent                |   HIGH   |   Yes    |
+| 9   | Context window management unaddressed  |   HIGH   | Partial  |
+| 10  | Merge conflict strategy missing        |  MEDIUM  |    No    |
 
 ---
 
@@ -47,7 +47,7 @@ contract. Key omissions:
 
 - No `ProviderAdapter`or`AgentWrapper`protocol definition.
 - No standard launch command patterns. For each provider the exact
- `subprocess.Popen(...)`invocation is unspecified.
+  `subprocess.Popen(...)`invocation is unspecified.
 - Different execution models never reconciled:
   - Claude/Codex: CLI binary wrapping via ACP adapter
   - Gemini: Native A2A support (no wrapping needed)
@@ -300,12 +300,12 @@ resolution policy, and worktree lifecycle.
 
 ## Contradictions Between Documents
 
-| Doc A | Doc B | Contradiction |
-| --- | --- | --- |
-| Architecture (rejects SSE Mode A) | Phase 6 (uses SSE internally) | SSE rejected for users but used agent→orchestrator without justification |
-| Architecture (Option C hybrid) | Scope Assessment ("nothing in samples") | Subprocess spawning assumed as baseline but noted as novel Tier 3 work |
-| Web App Architecture (SQLite only) | Architecture (mentions Postgres) | SQLite for v1 but Postgres mentioned with no migration path |
-| Architecture (ephemeral agents) | Scope Assessment (startup overhead) | Cold-start not measured; deferred to v2 without data |
+| Doc A                              | Doc B                                   | Contradiction                                                            |
+| ---------------------------------- | --------------------------------------- | ------------------------------------------------------------------------ |
+| Architecture (rejects SSE Mode A)  | Phase 6 (uses SSE internally)           | SSE rejected for users but used agent→orchestrator without justification |
+| Architecture (Option C hybrid)     | Scope Assessment ("nothing in samples") | Subprocess spawning assumed as baseline but noted as novel Tier 3 work   |
+| Web App Architecture (SQLite only) | Architecture (mentions Postgres)        | SQLite for v1 but Postgres mentioned with no migration path              |
+| Architecture (ephemeral agents)    | Scope Assessment (startup overhead)     | Cold-start not measured; deferred to v2 without data                     |
 
 ---
 
@@ -316,17 +316,11 @@ resolution policy, and worktree lifecycle.
 **a2a-python SDK (v0.3.0)** — most complete for orchestration:
 
 -`A2AFastAPIApplication`/`A2ARESTFastAPIApplication`— ready-to-use
-  FastAPI server with built-in routing and`.well-known`endpoint.
--`Client`+`ClientFactory`— multi-transport client (JSON-RPC, gRPC,
-  HTTP+JSON). Handles SendMessage, GetTask, streaming.
--`RequestHandler`abstraction — dispatches get_task, cancel_task,
-  message_send to your implementation.
--`AgentExecutor`— abstract base you implement with business logic.
--`EventQueue`— bounded async queue with typed events.
--`TaskModel`+`PushNotificationConfigModel`— SQLAlchemy models with
-  built-in support for PostgreSQL, MySQL, SQLite.
--`PydanticType`/`PydanticListType`— SQLAlchemy custom types for
-  Pydantic serialization. Database layer is already built.
+FastAPI server with built-in routing and`.well-known`endpoint. -`Client`+`ClientFactory`— multi-transport client (JSON-RPC, gRPC,
+HTTP+JSON). Handles SendMessage, GetTask, streaming. -`RequestHandler`abstraction — dispatches get_task, cancel_task,
+message_send to your implementation. -`AgentExecutor`— abstract base you implement with business logic. -`EventQueue`— bounded async queue with typed events. -`TaskModel`+`PushNotificationConfigModel`— SQLAlchemy models with
+built-in support for PostgreSQL, MySQL, SQLite. -`PydanticType`/`PydanticListType`— SQLAlchemy custom types for
+Pydantic serialization. Database layer is already built.
 
 - Transports: JSON-RPC, gRPC, HTTP+JSON all supported client and server.
 - Auth: JWT signing, API keys.
@@ -335,20 +329,16 @@ resolution policy, and worktree lifecycle.
 **mcp-python-sdk** — complete for tool layer:
 
 -`MCPServer`with`@server.tool()`, `@server.resource()`,
-  `@server.prompt()`decorators — high-level ergonomic API.
--`Server`(low-level) — callback-based handler dispatch.
--`Client`+`ClientSession`— unified client for all transports.
+`@server.prompt()`decorators — high-level ergonomic API. -`Server`(low-level) — callback-based handler dispatch. -`Client`+`ClientSession`— unified client for all transports.
 
 - Transports: stdio, SSE (with resumability), HTTP streamable, WebSocket.
-- Auth: OAuth2, Bearer tokens via middleware.
--`Context`dataclass for request-scoped dependency injection.
+- Auth: OAuth2, Bearer tokens via middleware. -`Context`dataclass for request-scoped dependency injection.
 - In-memory transport for testing.
 
 **acp-python-sdk** — narrow but useful patterns:
 
 -`Agent`and`Client`Protocol interfaces — method signatures for
-  initialize, new_session, prompt, session_update, request_permission.
--`AgentSideConnection`/`ClientSideConnection`— JSON-RPC dispatch.
+initialize, new_session, prompt, session_update, request_permission. -`AgentSideConnection`/`ClientSideConnection`— JSON-RPC dispatch.
 
 - Helper builders for content blocks (text, image, audio, resources)
   and message updates (tool calls, thoughts, plans).
@@ -356,12 +346,12 @@ resolution policy, and worktree lifecycle.
 
 ### SDK Composition
 
-| Composition | Feasible? | Notes |
-| --- | :---: | --- |
-| A2A + MCP | Yes | A2A agent embeds MCP client for tools. Samples exist. |
-| MCP + ACP | Maybe | Both use JSON-RPC but different schemas. Bridge needed. |
-| A2A + ACP | Unlikely | Different problem domains. A2A is more general. |
-| All three | No | ACP is IDE-specific (Zed). A2A+MCP is the right pair. |
+| Composition | Feasible? | Notes                                                   |
+| ----------- | :-------: | ------------------------------------------------------- |
+| A2A + MCP   |    Yes    | A2A agent embeds MCP client for tools. Samples exist.   |
+| MCP + ACP   |   Maybe   | Both use JSON-RPC but different schemas. Bridge needed. |
+| A2A + ACP   | Unlikely  | Different problem domains. A2A is more general.         |
+| All three   |    No     | ACP is IDE-specific (Zed). A2A+MCP is the right pair.   |
 
 **Conflicts**: A2A and MCP both provide HTTP servers — need careful
 routing if combined in same process. Message schemas are incompatible
@@ -376,7 +366,7 @@ A2A: API keys/JWT).
 - **mcp-python-sdk**: MCPServer with decorators, tool/resource/prompt
   registration, Client/ClientSession, stdio + SSE transports.
 - **FastAPI**: HTTP + WebSocket + REST + static files + lifespan.
-- **xterm.js**: Terminal emulation (via xterm-svelte wrapper).
+- **xterm.js**: Terminal emulation (via xterm-React wrapper).
 - **CodeMirror 6**: Read-only code viewer.
 - **SQLAlchemy** (via a2a-python): Task persistence already modelled.
 
@@ -385,10 +375,10 @@ A2A: API keys/JWT).
 - **ACP SessionAccumulator**: Port accumulation pattern to A2A event
   types (use the concept, not the ACP transport).
 - **ACP PermissionBroker**: Port permission request pattern. ACP's
- `request_permission()` maps well to our approval flow concept.
+  `request_permission()` maps well to our approval flow concept.
 - **ACP content helpers**: Builders for text/image/audio blocks could
   inform our A2A Part construction utilities.
-- **xterm-svelte**: Integration with SvelteKit + WebSocket stdout relay.
+- **xterm-React**: Integration with React + WebSocket stdout relay.
 
 ### Must Build Custom (no existing library)
 

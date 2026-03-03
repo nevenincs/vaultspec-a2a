@@ -1,9 +1,9 @@
 ---
-title: "Research: Phase Artifact Gates"
+title: 'Research: Phase Artifact Gates'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "What prerequisite artifacts should be required before each phase transition? Gate table, mechanism, and interaction with ADR-026. Research for ADR-023."
+description: 'What prerequisite artifacts should be required before each phase transition? Gate table, mechanism, and interaction with ADR-026. Research for ADR-023.'
 ---
 
 # Research: Phase Artifact Gates
@@ -23,15 +23,16 @@ mechanism, and interaction with ADR-026 deterministic phase inference.
 
 From `Y:/code/vaultspec-worktrees/main/.vaultspec/rules/system/framework.md`:
 
-| Phase    | Skill              | Artifact                    | Requires          |
-|----------|--------------------|-----------------------------|-------------------|
-| Research | vaultspec-research | `.vault/research/...`       | —                 |
-| Specify  | vaultspec-adr      | `.vault/adr/...`            | Research artifact |
-| Plan     | vaultspec-write    | `.vault/plan/...`           | ADR artifact      |
-| Execute  | vaultspec-execute  | `.vault/exec/.../steps`     | Approved plan     |
-| Verify   | vaultspec-review   | `.vault/exec/.../review`    | Completed step(s) |
+| Phase    | Skill              | Artifact                 | Requires          |
+| -------- | ------------------ | ------------------------ | ----------------- |
+| Research | vaultspec-research | `.vault/research/...`    | —                 |
+| Specify  | vaultspec-adr      | `.vault/adr/...`         | Research artifact |
+| Plan     | vaultspec-write    | `.vault/plan/...`        | ADR artifact      |
+| Execute  | vaultspec-execute  | `.vault/exec/.../steps`  | Approved plan     |
+| Verify   | vaultspec-review   | `.vault/exec/.../review` | Completed step(s) |
 
 Supporting phases (optional, invoked when appropriate):
+
 - **Reference** (`vaultspec-reference`): Audit external codebases. No hard prerequisite in the framework doc.
 - **Curate** (`vaultspec-curate`): `.vault/` hygiene. No hard prerequisite.
 
@@ -43,14 +44,14 @@ Supporting phases (optional, invoked when appropriate):
 
 Translating the framework dependency chain into vault_index checks:
 
-| Target phase | Required vault_index entry | Strictness | Rationale |
-|-------------|---------------------------|------------|-----------|
-| `research`  | None                      | —          | Starting phase, no prerequisites |
-| `reference` | None (loose)              | SOFT       | Framework marks reference as "supporting, invoked when appropriate" — not part of the strict chain. Can be invoked at any phase. |
-| `adr`       | `vault_index["research"]` non-empty | SOFT | Framework says "Requires: Research artifact." However, some ADRs are written without formal research (e.g., architectural decisions from direct knowledge). Recommend soft gate: warn but do not block. |
-| `plan`      | `vault_index["adr"]` non-empty | HARD | "Requires: ADR artifact." Planning without a binding ADR produces an ungrounded plan. Hard gate. |
-| `exec`      | `vault_index["plan"]` non-empty | HARD | "Requires: Approved plan." Execution without a plan is the highest-risk gap (also D-02 plan approval). Hard gate. |
-| `audit`     | `vault_index["exec"]` non-empty | HARD | "Requires: Completed step(s)." Reviewing non-existent execution is meaningless. Hard gate. |
+| Target phase | Required vault_index entry          | Strictness | Rationale                                                                                                                                                                                               |
+| ------------ | ----------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `research`   | None                                | —          | Starting phase, no prerequisites                                                                                                                                                                        |
+| `reference`  | None (loose)                        | SOFT       | Framework marks reference as "supporting, invoked when appropriate" — not part of the strict chain. Can be invoked at any phase.                                                                        |
+| `adr`        | `vault_index["research"]` non-empty | SOFT       | Framework says "Requires: Research artifact." However, some ADRs are written without formal research (e.g., architectural decisions from direct knowledge). Recommend soft gate: warn but do not block. |
+| `plan`       | `vault_index["adr"]` non-empty      | HARD       | "Requires: ADR artifact." Planning without a binding ADR produces an ungrounded plan. Hard gate.                                                                                                        |
+| `exec`       | `vault_index["plan"]` non-empty     | HARD       | "Requires: Approved plan." Execution without a plan is the highest-risk gap (also D-02 plan approval). Hard gate.                                                                                       |
+| `audit`      | `vault_index["exec"]` non-empty     | HARD       | "Requires: Completed step(s)." Reviewing non-existent execution is meaningless. Hard gate.                                                                                                              |
 
 **Soft gate:** Log a warning and add a `routing_error` to state, but allow routing to proceed.
 **Hard gate:** Block routing (reroute to a different worker) and add a `routing_error` to state.
@@ -122,7 +123,7 @@ When a hard gate blocks:
 
 ## 5. Interaction with ADR-026 Phase Inference
 
-ADR-026 determines `pipeline_phase` by observing `vault_index` — the highest phase with existing artifacts. The phase artifact gate (ADR-023) checks prerequisites for the *supervisor's routing target*, not the inferred phase.
+ADR-026 determines `pipeline_phase` by observing `vault_index` — the highest phase with existing artifacts. The phase artifact gate (ADR-023) checks prerequisites for the _supervisor's routing target_, not the inferred phase.
 
 These are complementary and non-conflicting:
 
@@ -137,17 +138,17 @@ The gate is stateless with respect to `pipeline_phase` — it checks vault_index
 
 ## 6. Edge Cases
 
-| Scenario | Gate behaviour |
-|----------|---------------|
-| No `active_feature` | All gates skipped — non-feature threads are outside SDD scope |
-| Worker has no phase mapping | Gate is skipped for that worker (conservative: don't block what you don't understand) |
-| Routing to `research` | No gate — research is always allowed as the starting phase |
-| Routing to `reference` | No gate — supporting phase, can be called at any time |
-| Routing to `adr` with no research artifacts | SOFT gate — warning added to routing_error, routing allowed |
-| Routing to `plan` with no ADR artifacts | HARD gate — routing blocked, routing_error set |
-| Routing to `exec` with no plan artifacts | HARD gate — routing blocked (also triggers D-02 plan approval concern) |
-| Routing to `audit` with no exec artifacts | HARD gate — routing blocked |
-| Routing to `exec` with plan artifacts but no plan approval | Handled by ADR-024 (plan approval interrupt) — separate gate |
+| Scenario                                                   | Gate behaviour                                                                        |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------------------- |
+| No `active_feature`                                        | All gates skipped — non-feature threads are outside SDD scope                         |
+| Worker has no phase mapping                                | Gate is skipped for that worker (conservative: don't block what you don't understand) |
+| Routing to `research`                                      | No gate — research is always allowed as the starting phase                            |
+| Routing to `reference`                                     | No gate — supporting phase, can be called at any time                                 |
+| Routing to `adr` with no research artifacts                | SOFT gate — warning added to routing_error, routing allowed                           |
+| Routing to `plan` with no ADR artifacts                    | HARD gate — routing blocked, routing_error set                                        |
+| Routing to `exec` with no plan artifacts                   | HARD gate — routing blocked (also triggers D-02 plan approval concern)                |
+| Routing to `audit` with no exec artifacts                  | HARD gate — routing blocked                                                           |
+| Routing to `exec` with plan artifacts but no plan approval | Handled by ADR-024 (plan approval interrupt) — separate gate                          |
 
 ---
 

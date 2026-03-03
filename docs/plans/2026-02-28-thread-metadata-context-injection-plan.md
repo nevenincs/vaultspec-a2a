@@ -2,7 +2,7 @@
 date: 2026-02-28
 type: plan
 feature: thread-metadata-context-injection
-description: "Implementation plan for ADR-014 adding workspace binding, feature context, and human-readable nicknames to orchestration threads via ThreadMetadata and ContextRef models."
+description: 'Implementation plan for ADR-014 adding workspace binding, feature context, and human-readable nicknames to orchestration threads via ThreadMetadata and ContextRef models.'
 related_adrs:
   - docs/adrs/2026-02-28-014-thread-metadata-context-injection-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -45,15 +45,14 @@ feature, or which documents are relevant. ADR-014
   `summary: str = ""`
 - `ThreadMetadata(BaseModel)`: `nickname: str = ""`(slug
   validated:`^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$`), `workspace_root:
-  str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
+str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
   `callee: str = ""`, `feature_tag: str = ""`, `context_refs: list[ContextRef] =
-  []`
+[]`
 - `discover_context_refs(workspace_root: Path, feature_tag: str) ->
   list[ContextRef]`— glob patterns:`".vault/research/*{tag}*.md"`,
   `".vault/adrs/*{tag}*.md"`, `".vault/plan/*{tag}*.md"`,
-  `".vault/exec/*{tag}*/**/*.md"`— cap at 50
--`generate_nickname(feature_tag: str, topology: str, thread_id: str) -> str`—
-format:`{feature_tag}-{topology}-{thread_id[:4]}`
+  `".vault/exec/*{tag}*/**/*.md"`— cap at 50 -`generate_nickname(feature_tag: str, topology: str, thread_id: str) -> str`—
+  format:`{feature_tag}-{topology}-{thread_id[:4]}`
 
 **Modify** `lib/core/__init__.py`:
 
@@ -84,7 +83,7 @@ format:`{feature_tag}-{topology}-{thread_id[:4]}`
 **Modify**`lib/database/models.py`:
 
 - Rename `agent_config`column to`metadata`(same Text type)
-| - Add`nickname: Mapped[str | None] = mapped_column(default=None)` |
+  | - Add`nickname: Mapped[str | None] = mapped_column(default=None)` |
 - Add`__table_args__ = (Index("ix_threads_nickname", "nickname", unique=True),)`
 
 **Modify** `lib/database/crud.py`:
@@ -95,7 +94,7 @@ format:`{feature_tag}-{topology}-{thread_id[:4]}`
 - Add nickname uniqueness check
   via`select(ThreadModel).where(ThreadModel.nickname == nickname)`before save
 - Raise`NicknameConflictError`on conflict
-| - Add`get_thread_metadata(session, thread_id) -> str | None` |
+  | - Add`get_thread_metadata(session, thread_id) -> str | None` |
 - Add both to`__all__`
 
 **Modify** `lib/database/__init__.py`:
@@ -108,7 +107,7 @@ format:`{feature_tag}-{topology}-{thread_id[:4]}`
 |
 
 - In`_astream()`CWD resolution:`cwd = self.workspace_root or self.cwd or
-  str(Path.cwd())`
+str(Path.cwd())`
 - Same in `_sandbox_path()`and terminal creation paths
 
 **Modify**`lib/providers/factory.py`:
@@ -116,7 +115,7 @@ format:`{feature_tag}-{topology}-{thread_id[:4]}`
 | - Add `workspace_root: Path | None = None`kwarg to`ProviderFactory.create()` |
 
 - Forward`workspace_root=str(workspace_root) if workspace_root else
-  None`to`AcpChatModel()`in Claude/Gemini branches
+None`to`AcpChatModel()`in Claude/Gemini branches
 
 **Modify**`lib/database/tests/test_database.py`:
 
@@ -138,11 +137,10 @@ format:`{feature_tag}-{topology}-{thread_id[:4]}`
 **Modify**`lib/api/schemas/rest.py`:
 
 - Import `ThreadMetadata`from`...core.metadata`
-| - `CreateThreadRequest`: add `metadata: ThreadMetadata | None = None` |
-| -`CreateThreadResponse`: add `nickname: str | None = None` |
-| -`ThreadSummary`: add `nickname: str | None = None`, `feature_tag: str | None
-= None`, `source_branch: str | None = None`, `callee: str | None = None` |
--`_AgentStatusEntry`: unchanged
+  | - `CreateThreadRequest`: add `metadata: ThreadMetadata | None = None` |
+  | -`CreateThreadResponse`: add `nickname: str | None = None` |
+  | -`ThreadSummary`: add `nickname: str | None = None`, `feature_tag: str | None
+= None`, `source_branch: str | None = None`, `callee: str | None = None` | -`_AgentStatusEntry`: unchanged
 
 ### Task 2B: Context Preamble Builder + Regression Test (Coder B)
 
@@ -243,36 +241,31 @@ orchestrator merges.
 
 ## File Impact Summary
 
-| File | Phase | Change |
-| ------ | ------- | -------- |
-| `lib/core/metadata.py` | 1A | **NEW** — ThreadMetadata, ContextRef, discover_context_refs, generate_nickname |
-| `lib/core/preamble.py` | 2B | **NEW** — build_context_preamble |
-| `lib/core/exceptions.py` | 1B | Add NicknameConflictError |
-| `lib/core/__init__.py` | 1A+1B+2B | Re-exports for new types |
-| `lib/database/models.py` | 1B | agent_config→metadata rename, add nickname column + unique index |
-| `lib/database/crud.py` | 1B | Rename param, add nickname, add get_thread_metadata |
-| `lib/database/__init__.py` | 1B | Add get_thread_metadata re-export |
-| `lib/providers/acp_chat_model.py` | 1B | Add workspace_root field, thread to CWD |
-| `lib/providers/factory.py` | 1B | Accept + forward workspace_root |
-| `lib/api/schemas/rest.py` | 2A | Amend CreateThreadRequest, CreateThreadResponse, ThreadSummary |
-| `lib/api/endpoints.py` | 3A+3B+4A | create_thread integration, list enrichment, new metadata endpoint, graph workspace_root |
-| `lib/core/graph.py` | 4A | Accept + thread workspace_root |
-| `lib/core/tests/test_metadata.py` | 1A | **NEW** |
-| `lib/core/tests/test_preamble.py` | 2B | **NEW** |
-| `lib/core/tests/test_context.py` | 2B | Regression test |
-| `lib/database/tests/test_database.py` | 1B | Updated + new tests |
-| `lib/providers/tests/test_factory.py` | 1B | workspace_root kwarg test |
-| `lib/api/tests/test_thread_metadata.py` | 4B | **NEW** — integration tests |
-| `lib/core/tests/test_graph.py` | 4B | workspace_root acceptance test |
+| File                                    | Phase    | Change                                                                                  |
+| --------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
+| `lib/core/metadata.py`                  | 1A       | **NEW** — ThreadMetadata, ContextRef, discover_context_refs, generate_nickname          |
+| `lib/core/preamble.py`                  | 2B       | **NEW** — build_context_preamble                                                        |
+| `lib/core/exceptions.py`                | 1B       | Add NicknameConflictError                                                               |
+| `lib/core/__init__.py`                  | 1A+1B+2B | Re-exports for new types                                                                |
+| `lib/database/models.py`                | 1B       | agent_config→metadata rename, add nickname column + unique index                        |
+| `lib/database/crud.py`                  | 1B       | Rename param, add nickname, add get_thread_metadata                                     |
+| `lib/database/__init__.py`              | 1B       | Add get_thread_metadata re-export                                                       |
+| `lib/providers/acp_chat_model.py`       | 1B       | Add workspace_root field, thread to CWD                                                 |
+| `lib/providers/factory.py`              | 1B       | Accept + forward workspace_root                                                         |
+| `lib/api/schemas/rest.py`               | 2A       | Amend CreateThreadRequest, CreateThreadResponse, ThreadSummary                          |
+| `lib/api/endpoints.py`                  | 3A+3B+4A | create_thread integration, list enrichment, new metadata endpoint, graph workspace_root |
+| `lib/core/graph.py`                     | 4A       | Accept + thread workspace_root                                                          |
+| `lib/core/tests/test_metadata.py`       | 1A       | **NEW**                                                                                 |
+| `lib/core/tests/test_preamble.py`       | 2B       | **NEW**                                                                                 |
+| `lib/core/tests/test_context.py`        | 2B       | Regression test                                                                         |
+| `lib/database/tests/test_database.py`   | 1B       | Updated + new tests                                                                     |
+| `lib/providers/tests/test_factory.py`   | 1B       | workspace_root kwarg test                                                               |
+| `lib/api/tests/test_thread_metadata.py` | 4B       | **NEW** — integration tests                                                             |
+| `lib/core/tests/test_graph.py`          | 4B       | workspace_root acceptance test                                                          |
 
 ## Verification
 
 After all phases:
 
-1.`uv run pytest`— all existing + new tests pass
-2.`uv run ruff check lib/`— zero lint errors
-3. Manual:`POST /threads`with metadata JSON → verify context preamble in
-   LangGraph state
-4. Manual:`GET /threads`→ verify nickname, feature_tag in response
-5. Manual:`GET /threads/{id}/metadata`→ verify full ThreadMetadata
-6. Manual:`POST /threads` without metadata → legacy behavior unchanged
+1.`uv run pytest`— all existing + new tests pass 2.`uv run ruff check lib/`— zero lint errors 3. Manual:`POST /threads`with metadata JSON → verify context preamble in
+LangGraph state 4. Manual:`GET /threads`→ verify nickname, feature_tag in response 5. Manual:`GET /threads/{id}/metadata`→ verify full ThreadMetadata 6. Manual:`POST /threads` without metadata → legacy behavior unchanged

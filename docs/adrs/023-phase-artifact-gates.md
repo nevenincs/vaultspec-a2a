@@ -2,7 +2,7 @@
 adr_id: 023
 title: Phase Artifact Gates
 date: 2026-03-03
-status: Proposed
+status: Implemented
 related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
@@ -47,14 +47,14 @@ The following table translates the framework dependency chain into
 `vault_index` checks (ADR-019). Supporting phases (`reference`, `curate`) are
 orthogonal to the main pipeline and are not gated.
 
-| Target phase | Required `vault_index` entry | Strictness | Rationale |
-|-------------|------------------------------|------------|-----------|
-| `research`  | None | — | Starting phase, no prerequisites |
-| `reference` | None | — | Supporting phase, invoked at any time |
-| `adr`       | `vault_index["research"]` non-empty | SOFT | Framework requires research artifact, but ADRs from direct knowledge are legitimate — warn without blocking |
-| `plan`      | `vault_index["adr"]` non-empty | HARD | Planning without a binding ADR produces an ungrounded plan |
-| `exec`      | `vault_index["plan"]` non-empty | HARD | Execution without an approved plan is the highest-risk gap |
-| `audit`     | `vault_index["exec"]` non-empty | HARD | Reviewing non-existent execution is meaningless |
+| Target phase | Required `vault_index` entry        | Strictness | Rationale                                                                                                   |
+| ------------ | ----------------------------------- | ---------- | ----------------------------------------------------------------------------------------------------------- |
+| `research`   | None                                | —          | Starting phase, no prerequisites                                                                            |
+| `reference`  | None                                | —          | Supporting phase, invoked at any time                                                                       |
+| `adr`        | `vault_index["research"]` non-empty | SOFT       | Framework requires research artifact, but ADRs from direct knowledge are legitimate — warn without blocking |
+| `plan`       | `vault_index["adr"]` non-empty      | HARD       | Planning without a binding ADR produces an ungrounded plan                                                  |
+| `exec`       | `vault_index["plan"]` non-empty     | HARD       | Execution without an approved plan is the highest-risk gap                                                  |
+| `audit`      | `vault_index["exec"]` non-empty     | HARD       | Reviewing non-existent execution is meaningless                                                             |
 
 **SOFT gate:** Allow routing to proceed; add a warning to `routing_error` in
 state and log at WARNING level. The supervisor LLM can observe the warning on
@@ -145,7 +145,7 @@ all quality gates are scoped to SDD-active threads.
 
 ADR-026 (pipeline phase population) determines `pipeline_phase` by observing
 `vault_index` — the highest phase with existing artifacts. ADR-023 checks
-prerequisites for the supervisor's *routing target*, not the inferred phase.
+prerequisites for the supervisor's _routing target_, not the inferred phase.
 These are complementary and non-conflicting:
 
 - **ADR-026:** "What phase are we currently in?" → Answered by vault_index
@@ -186,17 +186,17 @@ directly.
 
 ### Edge Cases
 
-| Scenario | Gate behaviour |
-|----------|----------------|
-| No `active_feature` | All gates skipped — non-feature threads outside SDD scope |
-| Worker has no phase mapping | Gate skipped for that worker (conservative default) |
-| Routing to `research` | No gate — always allowed as starting phase |
-| Routing to `reference` | No gate — supporting phase, invoked at any time |
-| Routing to `adr` with no research artifacts | SOFT gate — warning in `routing_error`, routing allowed |
-| Routing to `plan` with no ADR artifacts | HARD gate — `routing_error` set, routing preserved but blocked |
-| Routing to `exec` with no plan artifacts | HARD gate — highest-risk gap; also intersects with ADR-024 plan approval |
-| Routing to `audit` with no exec artifacts | HARD gate — reviewing non-existent execution blocked |
-| Routing to `exec` with plan artifacts but no plan approval | Handled by ADR-024 (plan approval interrupt) — separate gate |
+| Scenario                                                   | Gate behaviour                                                           |
+| ---------------------------------------------------------- | ------------------------------------------------------------------------ |
+| No `active_feature`                                        | All gates skipped — non-feature threads outside SDD scope                |
+| Worker has no phase mapping                                | Gate skipped for that worker (conservative default)                      |
+| Routing to `research`                                      | No gate — always allowed as starting phase                               |
+| Routing to `reference`                                     | No gate — supporting phase, invoked at any time                          |
+| Routing to `adr` with no research artifacts                | SOFT gate — warning in `routing_error`, routing allowed                  |
+| Routing to `plan` with no ADR artifacts                    | HARD gate — `routing_error` set, routing preserved but blocked           |
+| Routing to `exec` with no plan artifacts                   | HARD gate — highest-risk gap; also intersects with ADR-024 plan approval |
+| Routing to `audit` with no exec artifacts                  | HARD gate — reviewing non-existent execution blocked                     |
+| Routing to `exec` with plan artifacts but no plan approval | Handled by ADR-024 (plan approval interrupt) — separate gate             |
 
 ## 4. Rejected Alternatives
 
@@ -233,7 +233,7 @@ are more standardised.
   routing decision.
 - `worker_phase_map: dict[str, str]` is provided at `create_supervisor_node()`
   compilation time, following the same pattern as the existing `workers:
-  list[str]` parameter.
+list[str]` parameter.
 - The gate is stateless with respect to `pipeline_phase` — it checks
   `vault_index` directly.
 - Workers without a phase mapping in `worker_phase_map` are exempt from

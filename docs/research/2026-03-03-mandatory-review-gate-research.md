@@ -1,9 +1,9 @@
 ---
-title: "Research: Mandatory Review Gate"
+title: 'Research: Mandatory Review Gate'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: "How to enforce mandatory review agent invocation before FINISH. Analysis of prior art and recommended gate mechanism for ADR-025."
+description: 'How to enforce mandatory review agent invocation before FINISH. Analysis of prior art and recommended gate mechanism for ADR-025.'
 ---
 
 # Research: Mandatory Review Gate
@@ -112,6 +112,7 @@ if next_route == "FINISH":
 ```
 
 **Gate condition logic:**
+
 - `active_feature` is set (SDD context is active — gate is irrelevant without a feature)
 - `vault_index["exec"]` is non-empty (exec work has been done — review is required)
 - `vault_index["audit"]` is empty (no review artifact exists yet)
@@ -132,14 +133,14 @@ When `active_feature` is `None` (no SDD context — the thread is not feature-bo
 
 ## 3. Edge Cases
 
-| Scenario | Gate behaviour | Acceptable? |
-|----------|---------------|-------------|
-| No active_feature | Gate skipped | Yes — non-feature threads are out of SDD scope |
-| active_feature set, no exec artifacts yet | Gate skipped (exec non-empty check fails) | Yes — if no execution happened, no review needed |
-| active_feature set, exec artifacts exist, audit artifacts exist | FINISH allowed | Yes — review artifact present |
-| active_feature set, exec artifacts exist, no audit artifacts | FINISH blocked, reroute | Yes — this is the enforcement case |
-| Multiple exec→review cycles (iterative review) | Each FINISH attempt checks vault_index["audit"] | Yes — gate passes once any review artifact exists |
-| Review artifact written but not added to vault_index | Gate blocks incorrectly | Risk — workers must return vault_index updates |
+| Scenario                                                        | Gate behaviour                                  | Acceptable?                                       |
+| --------------------------------------------------------------- | ----------------------------------------------- | ------------------------------------------------- |
+| No active_feature                                               | Gate skipped                                    | Yes — non-feature threads are out of SDD scope    |
+| active_feature set, no exec artifacts yet                       | Gate skipped (exec non-empty check fails)       | Yes — if no execution happened, no review needed  |
+| active_feature set, exec artifacts exist, audit artifacts exist | FINISH allowed                                  | Yes — review artifact present                     |
+| active_feature set, exec artifacts exist, no audit artifacts    | FINISH blocked, reroute                         | Yes — this is the enforcement case                |
+| Multiple exec→review cycles (iterative review)                  | Each FINISH attempt checks vault_index["audit"] | Yes — gate passes once any review artifact exists |
+| Review artifact written but not added to vault_index            | Gate blocks incorrectly                         | Risk — workers must return vault_index updates    |
 
 The last scenario is a dependency on the vault_index update contract (ADR-019 §3 accepted trade-off). Workers that write review artifacts must return `{"vault_index": {"audit": [path]}}`.
 

@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: research
 feature: model-capability-matrix
-description: "Matrix of LLM provider capabilities relevant to A2A agent orchestration."
+description: 'Matrix of LLM provider capabilities relevant to A2A agent orchestration.'
 ---
 
 # Model Capability Matrix — A2A Coding Teams
@@ -18,58 +18,58 @@ selection in the a2a orchestration system.
 
 ### SWE-bench Verified — Real-World Code Fix Tasks
 
-| Rank | Model | Score | Notes |
-| --- | --- | --- | --- |
-| 1 | Claude Opus 4.5 | 80.9% | Self-reported; 79.2% third-party (vals.ai) |
-| 2 | Claude Opus 4.6 | 80.8% | Self-reported; 79.2–79.4% third-party |
-| 3 | MiniMax M2.5 | 80.2% | Open-weight; not in our provider matrix |
-| 4 | GPT-5.2 | 80.0% | Fewer tokens per problem than Claude |
-| 5 | GLM-5 | 77.8% | $0.11/MTok; competitive frontier performance |
-| 6 | Claude Sonnet 4.5 | 77.2% | — |
-| 6† | **Gemini 3 Flash** | **78%** | **Beats Gemini 3 Pro** on coding tasks |
-| 7 | Kimi K2.5 | 76.8% | Not in our provider matrix |
-| 8 | Gemini 3 Pro | 76.2% | Beaten by its own Flash variant |
-| 9 | Claude Haiku 4.5 | 73.3% | "World-class" at price tier |
+| Rank | Model              | Score   | Notes                                        |
+| ---- | ------------------ | ------- | -------------------------------------------- |
+| 1    | Claude Opus 4.5    | 80.9%   | Self-reported; 79.2% third-party (vals.ai)   |
+| 2    | Claude Opus 4.6    | 80.8%   | Self-reported; 79.2–79.4% third-party        |
+| 3    | MiniMax M2.5       | 80.2%   | Open-weight; not in our provider matrix      |
+| 4    | GPT-5.2            | 80.0%   | Fewer tokens per problem than Claude         |
+| 5    | GLM-5              | 77.8%   | $0.11/MTok; competitive frontier performance |
+| 6    | Claude Sonnet 4.5  | 77.2%   | —                                            |
+| 6†   | **Gemini 3 Flash** | **78%** | **Beats Gemini 3 Pro** on coding tasks       |
+| 7    | Kimi K2.5          | 76.8%   | Not in our provider matrix                   |
+| 8    | Gemini 3 Pro       | 76.2%   | Beaten by its own Flash variant              |
+| 9    | Claude Haiku 4.5   | 73.3%   | "World-class" at price tier                  |
 
 > **Critical finding:** Gemini 3 Flash outperforms Gemini 3 Pro on SWE-bench
-Verified (78% vs 76.2%). Flash was specifically optimised for the high-frequency
-iteration pattern that characterises agentic coding. This inverts the naive
-"bigger = better for coding" assumption.
+> Verified (78% vs 76.2%). Flash was specifically optimised for the high-frequency
+> iteration pattern that characterises agentic coding. This inverts the naive
+> "bigger = better for coding" assumption.
 
 ### SWE-bench Pro — Harder, Closer to Real Work
 
-| Model | Score |
-| --- | --- |
-| GPT-5.3-Codex | 56.8% |
-| GPT-5.2-Codex | 56.4% |
-| GPT-5.2 | 55.6% |
-| (All others drop dramatically from Verified scores) | |
+| Model                                               | Score |
+| --------------------------------------------------- | ----- |
+| GPT-5.3-Codex                                       | 56.8% |
+| GPT-5.2-Codex                                       | 56.4% |
+| GPT-5.2                                             | 55.6% |
+| (All others drop dramatically from Verified scores) |       |
 
 > All models score 20–30 points lower on Pro vs Verified. Pro more closely
-reflects actual software engineering difficulty. GPT-5.3-Codex leads here.
+> reflects actual software engineering difficulty. GPT-5.3-Codex leads here.
 
 ### Terminal-Bench 2.0 — Agentic Shell Workflows
 
-| Model | Score |
-| --- | --- |
+| Model                     | Score |
+| ------------------------- | ----- |
 | GPT-5.3-Codex (Codex CLI) | 77.3% |
-| GPT-5.3-Codex | 75.1% |
-| Claude Opus 4.6 (Droid) | 69.9% |
+| GPT-5.3-Codex             | 75.1% |
+| Claude Opus 4.6 (Droid)   | 69.9% |
 
 ---
 
 ## 2. Context Windows, Speed, and Pricing
 
-| Model | Provider | Context | Speed (tok/s) | Input ($/MTok) | Output ($/MTok) |
-| --- | --- | --- | --- | --- | --- |
-| Claude Opus 4.6 | Anthropic | 1M (beta) | — | $5.00 | $25.00 |
-| Claude Sonnet 4.6 | Anthropic | 1M | — | $3.00 | $15.00 |
-| Claude Haiku 4.5 | Anthropic | — | — | $1.00 | $5.00 |
-| Gemini 3 Pro | Google | **2M** | baseline | $2–4 | — |
-| Gemini 3 Flash | Google | 1M | **209** | **$0.50** | $3.00 |
-| GPT-5.2 | OpenAI | 400K | — | ~$3.00 | ~$15.00 |
-| GPT-5.3-Codex | OpenAI | 400K | — | ~$1.75 | $14.00 |
-| GLM-5 | ZhipuAI | 200K | — | **$0.11** | ~$0.11 |
+| Model             | Provider  | Context   | Speed (tok/s) | Input ($/MTok) | Output ($/MTok) |
+| ----------------- | --------- | --------- | ------------- | -------------- | --------------- |
+| Claude Opus 4.6   | Anthropic | 1M (beta) | —             | $5.00          | $25.00          |
+| Claude Sonnet 4.6 | Anthropic | 1M        | —             | $3.00          | $15.00          |
+| Claude Haiku 4.5  | Anthropic | —         | —             | $1.00          | $5.00           |
+| Gemini 3 Pro      | Google    | **2M**    | baseline      | $2–4           | —               |
+| Gemini 3 Flash    | Google    | 1M        | **209**       | **$0.50**      | $3.00           |
+| GPT-5.2           | OpenAI    | 400K      | —             | ~$3.00         | ~$15.00         |
+| GPT-5.3-Codex     | OpenAI    | 400K      | —             | ~$1.75         | $14.00          |
+| GLM-5             | ZhipuAI   | 200K      | —             | **$0.11**      | ~$0.11          |
 
 ### Key Context Observations
 
@@ -257,42 +257,42 @@ structure (Supervisor/Planner → Coder → Reviewer) is empirically validated.
 
 ### Decision Framework
 
-| Role | Priority | Primary Model | Rationale |
-| --- | --- | --- | --- |
-| **Supervisor** | Context + reasoning | Claude Opus MAX | 1M context, multi-agent native, deep routing logic |
-| **Planner** | Reasoning + codebase reading | Claude Sonnet HIGH | Near-Opus reasoning, 5x cheaper, excellent for specs |
-| **Coder (standard)** | Implementation quality | Claude Sonnet MID | Default choice; near-Opus quality, same-provider trust |
-| **Coder (fast)** | Speed + cost | Gemini Flash LOW | 3x faster, 6x cheaper, beats Pro on SWE-bench |
-| **Coder (complex)** | Architecture + long-horizon | Claude Sonnet HIGH | For refactors, migrations, complex feature work |
-| **Coder (budget)** | Cost minimisation | Claude Haiku MID | 73.3% SWE-bench, $1/MTok, 1/3 cost of Sonnet |
-| **Reviewer** | Lint + safety | GLM-5 MID | Sequential tool use fits review; $0.11/MTok; BrowseComp strength |
-| **Reviewer (quality)** | Deep architecture review | Claude Haiku MID | When GLM-5 context limit (200K) is a constraint |
-| **Researcher** | Knowledge retrieval | GLM-5 MID | BrowseComp leader; research/synthesis natural fit |
-| **Researcher (deep)** | ADR/technical research | Claude Sonnet HIGH | Complex multi-source synthesis requiring deep reasoning |
+| Role                   | Priority                     | Primary Model      | Rationale                                                        |
+| ---------------------- | ---------------------------- | ------------------ | ---------------------------------------------------------------- |
+| **Supervisor**         | Context + reasoning          | Claude Opus MAX    | 1M context, multi-agent native, deep routing logic               |
+| **Planner**            | Reasoning + codebase reading | Claude Sonnet HIGH | Near-Opus reasoning, 5x cheaper, excellent for specs             |
+| **Coder (standard)**   | Implementation quality       | Claude Sonnet MID  | Default choice; near-Opus quality, same-provider trust           |
+| **Coder (fast)**       | Speed + cost                 | Gemini Flash LOW   | 3x faster, 6x cheaper, beats Pro on SWE-bench                    |
+| **Coder (complex)**    | Architecture + long-horizon  | Claude Sonnet HIGH | For refactors, migrations, complex feature work                  |
+| **Coder (budget)**     | Cost minimisation            | Claude Haiku MID   | 73.3% SWE-bench, $1/MTok, 1/3 cost of Sonnet                     |
+| **Reviewer**           | Lint + safety                | GLM-5 MID          | Sequential tool use fits review; $0.11/MTok; BrowseComp strength |
+| **Reviewer (quality)** | Deep architecture review     | Claude Haiku MID   | When GLM-5 context limit (200K) is a constraint                  |
+| **Researcher**         | Knowledge retrieval          | GLM-5 MID          | BrowseComp leader; research/synthesis natural fit                |
+| **Researcher (deep)**  | ADR/technical research       | Claude Sonnet HIGH | Complex multi-source synthesis requiring deep reasoning          |
 
 ### Provider-Topology Combinations
 
-| Preset Name | Topology | Supervisor | Coder | Reviewer |
-| --- | --- | --- | --- | --- |
-| `coding-star` | star | Claude Opus | Claude Sonnet (MID) | GLM-5 |
-| `coding-pipeline` | pipeline | — | Claude Sonnet (MID) | GLM-5 |
-| `coding-loop` | pipeline_loop | — | Gemini Flash | GLM-5 |
-| `gemini-star` | star | Gemini Pro | Gemini Flash | GLM-5 |
-| `solo-coder` | pipeline | — | Claude Sonnet (MID) | — |
-| `budget-star` | star | Gemini Flash | GLM-5 | Gemini Flash |
+| Preset Name       | Topology      | Supervisor   | Coder               | Reviewer     |
+| ----------------- | ------------- | ------------ | ------------------- | ------------ |
+| `coding-star`     | star          | Claude Opus  | Claude Sonnet (MID) | GLM-5        |
+| `coding-pipeline` | pipeline      | —            | Claude Sonnet (MID) | GLM-5        |
+| `coding-loop`     | pipeline_loop | —            | Gemini Flash        | GLM-5        |
+| `gemini-star`     | star          | Gemini Pro   | Gemini Flash        | GLM-5        |
+| `solo-coder`      | pipeline      | —            | Claude Sonnet (MID) | —            |
+| `budget-star`     | star          | Gemini Flash | GLM-5               | Gemini Flash |
 
 ---
 
 ## 6. Validated Hypotheses
 
-| Original Hypothesis | Verdict | Evidence |
-| --- | --- | --- |
-| Claude excellent at planning/architecture | **Confirmed** | Developer consensus across multiple sources; Claude preferred for "architecture-level work" |
-| Gemini Flash better/cheaper for implementation | **Confirmed** | Flash beats Pro on SWE-bench (78% vs 76.2%); 6x cheaper; 209 tok/s |
-| Large context → better supervision of long tasks | **Confirmed** | Gemini Pro 2M and Claude Opus 1M are the viable supervisors for large codebases |
-| Fast/cheap models for menial cleanup | **Confirmed** | Haiku 4.5 (73.3%, $1/MTok) and Gemini Flash ($0.50/MTok) are validated |
-| GLM-5 for review/lint/research | **Confirmed with caveat** | BrowseComp leader; confirmed for audit/lint. Cannot parallelise tool calls — unsuitable for coder role |
-| More agents = better results | **Refuted** | Google research: 39–70% degradation in some multi-agent scenarios. 3-role teams validated. |
+| Original Hypothesis                              | Verdict                   | Evidence                                                                                               |
+| ------------------------------------------------ | ------------------------- | ------------------------------------------------------------------------------------------------------ |
+| Claude excellent at planning/architecture        | **Confirmed**             | Developer consensus across multiple sources; Claude preferred for "architecture-level work"            |
+| Gemini Flash better/cheaper for implementation   | **Confirmed**             | Flash beats Pro on SWE-bench (78% vs 76.2%); 6x cheaper; 209 tok/s                                     |
+| Large context → better supervision of long tasks | **Confirmed**             | Gemini Pro 2M and Claude Opus 1M are the viable supervisors for large codebases                        |
+| Fast/cheap models for menial cleanup             | **Confirmed**             | Haiku 4.5 (73.3%, $1/MTok) and Gemini Flash ($0.50/MTok) are validated                                 |
+| GLM-5 for review/lint/research                   | **Confirmed with caveat** | BrowseComp leader; confirmed for audit/lint. Cannot parallelise tool calls — unsuitable for coder role |
+| More agents = better results                     | **Refuted**               | Google research: 39–70% degradation in some multi-agent scenarios. 3-role teams validated.             |
 
 ---
 
@@ -301,18 +301,18 @@ structure (Supervisor/Planner → Coder → Reviewer) is empirically validated.
 - [SWE-bench Leaderboard](https://www.swebench.com/)
 - [SWE-bench February 2026 — marc0.dev](https://www.marc0.dev/en/leaderboard)
 - [Claude Sonnet 4.6 vs Gemini 3 Flash —
-NxCode](https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-gemini-3-flash-ai-model-comparison-2026)
+  NxCode](https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-gemini-3-flash-ai-model-comparison-2026)
 - [Best AI for Developers —
-Cosmic](https://www.cosmicjs.com/blog/best-ai-for-developers-claude-vs-gpt-vs-gemini-technical-comparison-2026)
+  Cosmic](https://www.cosmicjs.com/blog/best-ai-for-developers-claude-vs-gpt-vs-gemini-technical-comparison-2026)
 - [Gemini 3 Flash vs Pro —
-aifreeapi.com](https://www.aifreeapi.com/en/posts/gemini-3-flash-vs-pro-capabilities)
+  aifreeapi.com](https://www.aifreeapi.com/en/posts/gemini-3-flash-vs-pro-capabilities)
 - [Gemini 3 Flash Review — Serenities
   AI](https://serenitiesai.com/articles/gemini-3-flash-pro-review-2026)
 - [Claude Sonnet 4.6 vs Opus 4.6 —
-NxCode](https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-opus-4-6-which-model-to-choose-2026)
+  NxCode](https://www.nxcode.io/resources/news/claude-sonnet-4-6-vs-opus-4-6-which-model-to-choose-2026)
 - [GPT-5.3-Codex — OpenAI](https://openai.com/index/introducing-gpt-5-3-codex/)
 - [GLM-5 Complete Guide —
-NxCode](https://www.nxcode.io/resources/news/glm-5-open-source-744b-model-complete-guide-2026)
+  NxCode](https://www.nxcode.io/resources/news/glm-5-open-source-744b-model-complete-guide-2026)
 - [GLM-5: From Vibe Coding to Agentic Engineering —
   arXiv](https://arxiv.org/html/2602.15763v1)
 - [AI Coding Agents 2026 — Faros

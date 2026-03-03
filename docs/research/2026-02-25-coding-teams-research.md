@@ -2,10 +2,10 @@
 date: 2026-02-25
 type: research
 feature: coding-teams
-description: "Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams."
-name: "Coding Teams Research"
+description: 'Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams.'
+name: 'Coding Teams Research'
 maturity: 30
-summary: "Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams."
+summary: 'Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams.'
 ---
 
 # Research: Coding Agent Teams via A2A Orchestration
@@ -64,14 +64,14 @@ Cards and exchange work via Tasks.
 
 **Core primitives**:
 
-| Primitive | Purpose |
-| ------------- | --------------------------------------------------- |
+| Primitive  | Purpose                                                                                       |
+| ---------- | --------------------------------------------------------------------------------------------- |
 | Agent Card | JSON manifest at `/.well-known/agent-card.json`declaring identity, skills, auth, capabilities |
-| Task | Stateful unit of work with lifecycle:`pending → running → completed/failed/canceled` |
-| Message | Single turn of communication (role: user or agent) |
-| Part | Content container: text, file, or structured data |
-| Artifact | Tangible output (code files, documents, data) |
-| contextId | Groups related tasks into a logical session |
+| Task       | Stateful unit of work with lifecycle:`pending → running → completed/failed/canceled`          |
+| Message    | Single turn of communication (role: user or agent)                                            |
+| Part       | Content container: text, file, or structured data                                             |
+| Artifact   | Tangible output (code files, documents, data)                                                 |
+| contextId  | Groups related tasks into a logical session                                                   |
 
 **Interaction modes**:
 
@@ -130,12 +130,11 @@ pattern:
 
 1. **HostAgent** discovers remote agents by fetching Agent Cards
 2. LLM-driven routing via two tools:
-   - `list_remote_agents()`— returns available agents with descriptions
-   -`send_message(agent_name, message)`— delegates to named agent
+   - `list_remote_agents()`— returns available agents with descriptions -`send_message(agent_name, message)`— delegates to named agent
 3. State tracked per context:`context_id`, `task_id`, `session_active`
 4. Responses aggregated and returned to user
 
-**Key insight**: The host agent is itself an LLM that decides *which* remote
+**Key insight**: The host agent is itself an LLM that decides _which_ remote
 agent to invoke. This is the "supervisor" pattern.
 
 ### 3.2 a2a-samples: JS Coder Agent
@@ -160,12 +159,12 @@ emitting them as soon as they're ready rather than waiting for all files.
 
 Documents four patterns for building A2A agents:
 
-| Pattern | Framework | Best For |
-| --------- | ----------- | ---------- |
-| A | Vanilla A2A SDK | Lightweight agents, direct control |
-| B | Google ADK | Tool-heavy agents (search, APIs) |
-| C | LangGraph + MCP | Stateful workflows with local tools |
-| D | BeeAI Concierge | Master router over multiple agents |
+| Pattern | Framework       | Best For                            |
+| ------- | --------------- | ----------------------------------- |
+| A       | Vanilla A2A SDK | Lightweight agents, direct control  |
+| B       | Google ADK      | Tool-heavy agents (search, APIs)    |
+| C       | LangGraph + MCP | Stateful workflows with local tools |
+| D       | BeeAI Concierge | Master router over multiple agents  |
 
 **Key insight**: Pattern C (LangGraph + MCP) is the most relevant for coding
 agents — stateful reasoning loops with local tool access (file system, git,
@@ -193,8 +192,7 @@ currently active, enabling seamless multi-turn conversations through the router.
 
 Anthropic's SDK for building on Claude Code:
 
-- `ClaudeSDKClient`for bidirectional conversations
--`query()`for one-shot async queries
+- `ClaudeSDKClient`for bidirectional conversations -`query()`for one-shot async queries
 - **Custom in-process MCP servers** via`@tool`decorator
 - **Hooks system**: PreToolUse, PostToolUse, UserPromptSubmit, SessionStart
 - **Permission modes**: default, acceptEdits, plan, bypassPermissions
@@ -237,10 +235,7 @@ integration vector:
 
 **The Team Orchestrator** is exposed as an MCP server with tools like:
 
-- `delegate_task(description, constraints)`— send work to the team
--`check_task_status(task_id)`— poll progress
--`get_artifacts(task_id)`— retrieve completed work
--`cancel_task(task_id)` — abort
+- `delegate_task(description, constraints)`— send work to the team -`check_task_status(task_id)`— poll progress -`get_artifacts(task_id)`— retrieve completed work -`cancel_task(task_id)` — abort
 
 Internally, the orchestrator is an A2A client that routes to specialized agents.
 
@@ -332,12 +327,12 @@ sub-pipeline. This balances simplicity with quality.
 
 ### 6.1 Agent Runtime
 
-| Option | Pros | Cons |
-| -------- | ------ | ------ |
-| Vanilla A2A SDK | Full control, minimal deps | More boilerplate |
-| LangGraph + A2A | Checkpointing, state mgmt, conditional routing | Heavier, Google-adjacent |
-| Claude Agent SDK | Native Claude integration, hooks, permissions | Claude-only agents |
-| CrewAI + A2A | Team-oriented abstractions | Less control |
+| Option           | Pros                                           | Cons                     |
+| ---------------- | ---------------------------------------------- | ------------------------ |
+| Vanilla A2A SDK  | Full control, minimal deps                     | More boilerplate         |
+| LangGraph + A2A  | Checkpointing, state mgmt, conditional routing | Heavier, Google-adjacent |
+| Claude Agent SDK | Native Claude integration, hooks, permissions  | Claude-only agents       |
+| CrewAI + A2A     | Team-oriented abstractions                     | Less control             |
 
 **Leaning toward**: Vanilla A2A SDK for the orchestrator + agent shells,
 LangGraph internally for agents that need stateful reasoning loops.
@@ -365,12 +360,12 @@ provisions them.
 
 ### 6.4 CLI Integration Method
 
-| CLI | Integration Path | Notes |
-| ----- | ----------------- | ------- |
-| Claude CLI | MCP server config in`.claude/settings.json` | Native support, well-documented |
-| Gemini CLI | MCP server config | Supports MCP tools |
-| Cursor/Windsurf | MCP server | IDE agents support MCP |
-| Custom CLI | A2A client directly | Full protocol access |
+| CLI             | Integration Path                            | Notes                           |
+| --------------- | ------------------------------------------- | ------------------------------- |
+| Claude CLI      | MCP server config in`.claude/settings.json` | Native support, well-documented |
+| Gemini CLI      | MCP server config                           | Supports MCP tools              |
+| Cursor/Windsurf | MCP server                                  | IDE agents support MCP          |
+| Custom CLI      | A2A client directly                         | Full protocol access            |
 
 ### 6.5 Model Agnosticism
 
@@ -409,7 +404,7 @@ suits its task:
   coder**:`knowledge/repositories/a2a-samples/samples/js/src/agents/coder/`—
   Coding agent with streaming artifacts
 - **Airbnb routing
-agent**:`knowledge/repositories/a2a-samples/samples/python/agents/airbnb_planner_multiagent/`—
+  agent**:`knowledge/repositories/a2a-samples/samples/python/agents/airbnb_planner_multiagent/`—
   Advanced routing
 
 ### Framework References

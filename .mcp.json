@@ -5,11 +5,7 @@
       "command": "cmd",
       "args": ["/c", "npx", "@playwright/mcp@latest"]
     },
-    "svelte": {
-      "type": "stdio",
-      "command": "cmd",
-      "args": ["/c", "npx", "-y", "@sveltejs/mcp@latest"]
-    },
+
     "shadcn-ui": {
       "type": "stdio",
       "command": "cmd",

@@ -245,3 +245,77 @@ async def test_supervisor_routing_uses_tag_nostream() -> None:
         f"Expected TAG_NOSTREAM ({TAG_NOSTREAM!r}) in captured tags, "
         f"got: {_StubChatModel.captured_tags!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# ADR-022 — validation error gate blocks FINISH
+# ---------------------------------------------------------------------------
+
+
+def _make_state_with_errors(errors: list[str]) -> TeamState:
+    state = _make_state()
+    state["validation_errors"] = errors  # type: ignore[typeddict-unknown-key]
+    return state
+
+
+@pytest.mark.asyncio
+async def test_supervisor_validation_error_gate_blocks_finish() -> None:
+    """When validation_errors are present, FINISH is blocked and rerouted to workers[0].
+
+    ADR-022: supervisor must not allow FINISH while validation errors remain.
+    """
+    model = _StubChatModel(response_text="FINISH")
+    workers = ["planner", "coder"]
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=workers,
+    )
+
+    state = _make_state_with_errors(["missing return type", "unused import"])
+    result = await node(state)
+
+    assert result["next"] == "planner", (
+        f"Expected reroute to first worker 'planner', got {result['next']!r}"
+    )
+    assert "routing_error" in result
+    assert "FINISH blocked" in result["routing_error"]
+    assert "2 validation error(s)" in result["routing_error"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_validation_error_gate_allows_finish_when_no_errors() -> None:
+    """FINISH proceeds normally when validation_errors is empty or absent."""
+    model = _StubChatModel(response_text="FINISH")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["planner", "coder"],
+    )
+
+    # No validation_errors key at all
+    result = await node(_make_state())
+    assert result["next"] == "FINISH"
+    assert "routing_error" not in result
+
+    # Empty validation_errors list
+    state = _make_state_with_errors([])
+    result = await node(state)
+    assert result["next"] == "FINISH"
+    assert "routing_error" not in result
+
+
+@pytest.mark.asyncio
+async def test_supervisor_validation_error_gate_does_not_block_worker_route() -> None:
+    """Routing to a worker (not FINISH) is unaffected by validation errors."""
+    model = _StubChatModel(response_text="coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["planner", "coder"],
+    )
+
+    state = _make_state_with_errors(["some error"])
+    result = await node(state)
+    assert result["next"] == "coder"
+    assert "routing_error" not in result

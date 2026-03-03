@@ -142,8 +142,8 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
         ]
     }
 
-    executed = await _run_and_collect_nodes(graph, state, config, {"coder"})
-    assert "coder" in executed
+    executed = await _run_and_collect_nodes(graph, state, config, {"vaultspec-coder"})
+    assert "vaultspec-coder" in executed
 
     saved = await checkpointer.aget(config)
     assert saved is not None
@@ -198,7 +198,7 @@ async def test_pipeline_team_openai_collaboration(checkpointer: AsyncSqliteSaver
 
     executed = await _run_and_collect_nodes(graph, state, config, set(agent_configs))
 
-    assert executed == {"planner", "coder", "reviewer"}, (
+    assert executed == {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}, (
         f"Expected all pipeline agents to execute, got: {executed}"
     )
 
@@ -245,7 +245,7 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
     state1 = {
         "messages": [HumanMessage(content="Write a Python function called `add(a, b)` that returns a + b.")]
     }
-    await _run_and_collect_nodes(graph, state1, config, {"coder"})
+    await _run_and_collect_nodes(graph, state1, config, {"vaultspec-coder"})
     snap1 = await checkpointer.aget(config)
     assert snap1 is not None
     count_after_t1 = len(snap1["channel_values"]["messages"])
@@ -254,7 +254,7 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
     state2 = {
         "messages": [HumanMessage(content="Now add type hints and a docstring to that function.")]
     }
-    await _run_and_collect_nodes(graph, state2, config, {"coder"})
+    await _run_and_collect_nodes(graph, state2, config, {"vaultspec-coder"})
     snap2 = await checkpointer.aget(config)
     assert snap2 is not None
     messages_t2 = snap2["channel_values"]["messages"]
@@ -360,8 +360,8 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
         ]
     }
 
-    executed = await _run_and_collect_nodes(graph, state, config, {"coder"})
-    assert "coder" in executed
+    executed = await _run_and_collect_nodes(graph, state, config, {"vaultspec-coder"})
+    assert "vaultspec-coder" in executed
 
     saved = await checkpointer.aget(config)
     assert saved is not None
@@ -411,7 +411,7 @@ async def test_pipeline_team_gemini_collaboration(checkpointer: AsyncSqliteSaver
 
     executed = await _run_and_collect_nodes(graph, state, config, set(agent_configs))
 
-    assert executed == {"planner", "coder", "reviewer"}, (
+    assert executed == {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}, (
         f"Expected all pipeline agents to execute, got: {executed}"
     )
 

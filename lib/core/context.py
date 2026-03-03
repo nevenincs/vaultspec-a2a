@@ -79,7 +79,9 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     if current_tokens <= max_tokens:
         return dict(state)  # type: ignore[return-value]
 
-    # Separate system prefix from conversation body
+    # Separate system prefix from conversation body, then pin the first
+    # HumanMessage (the original task) so it is never subject to budget
+    # truncation.
     system_msgs: list[BaseMessage] = []
     body: list[BaseMessage] = []
     for msg in messages:
@@ -88,13 +90,27 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
         else:
             body.append(msg)
 
+    # Pin the first HumanMessage unconditionally — it is the user's original
+    # task and must survive compaction regardless of budget pressure.
+    pinned_human: BaseMessage | None = None
+    remaining_body: list[BaseMessage] = []
+    for msg in body:
+        if pinned_human is None and isinstance(msg, HumanMessage):
+            pinned_human = msg
+        else:
+            remaining_body.append(msg)
+    # Work over the body without the pinned message so the budget calculation
+    # does not accidentally count it twice.
+    body = remaining_body
+
     # Keep enough recent messages to stay under budget after adding the
-    # system prefix + a summary placeholder.  Clamp to zero so that when
-    # system messages alone exceed max_tokens the budget doesn't go negative
-    # and confuse the kept-message selection loop (H5 fix).
+    # system prefix + pinned HumanMessage + a summary placeholder.  Clamp to
+    # zero so that when system messages alone exceed max_tokens the budget
+    # doesn't go negative and confuse the kept-message selection loop (H5 fix).
     summary_overhead = 50  # tokens for the inserted summary message
     system_tokens = estimate_tokens(system_msgs)
-    budget = max(0, max_tokens - system_tokens - summary_overhead)
+    pinned_tokens = estimate_tokens([pinned_human]) if pinned_human else 0
+    budget = max(0, max_tokens - system_tokens - pinned_tokens - summary_overhead)
 
     kept: list[BaseMessage] = []
     kept_tokens = 0
@@ -113,12 +129,13 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     # Build the compacted message list
     summary = HumanMessage(
         content=(
-            "[Context compacted: earlier conversation history was summarized "
+            "[Context compacted: earlier conversation history removed "
             "to stay within the token budget. The core objective and recent "
             "working context are preserved.]"
         )
     )
-    compacted_messages = [*system_msgs, summary, *kept]
+    pinned_list = [pinned_human] if pinned_human else []
+    compacted_messages = [*system_msgs, *pinned_list, summary, *kept]
 
     new_state: TeamState = dict(state)  # type: ignore[assignment]
     new_state["messages"] = compacted_messages

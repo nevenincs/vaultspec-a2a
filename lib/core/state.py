@@ -64,6 +64,32 @@ def _replace_plan(
     return new if new is not None else existing
 
 
+def _merge_vault_index(
+    existing: dict[str, list[str]],
+    new: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Merge-and-deduplicate reducer for vault_index."""
+    merged: dict[str, list[str]] = {k: list(v) for k, v in existing.items()}
+    for doc_type, paths in new.items():
+        seen = set(merged.get(doc_type, []))
+        merged.setdefault(doc_type, [])
+        for p in paths:
+            if p not in seen:
+                merged[doc_type].append(p)
+                seen.add(p)
+    return merged
+
+
+def _append_validation_errors(
+    existing: list[str],
+    new: list[str],
+) -> list[str]:
+    """Append-only reducer. Empty new = clear signal."""
+    if not new:
+        return []
+    return existing + new
+
+
 # ---------------------------------------------------------------------------
 # State TypedDict
 # ---------------------------------------------------------------------------
@@ -100,6 +126,17 @@ class TeamState(TypedDict):
     # --- existing fields ---
     messages: Annotated[list[BaseMessage], add_messages]
     next: NotRequired[str]
+
+    # --- SDD blackboard awareness (ADR-019) ---
+    active_feature: NotRequired[str | None]
+    pipeline_phase: NotRequired[str | None]
+    vault_index: NotRequired[Annotated[dict[str, list[str]], _merge_vault_index]]
+    validation_errors: NotRequired[Annotated[list[str], _append_validation_errors]]
+
+    # --- transient: mounted .vault/ document content (ADR-020) ---
+    # Populated by mount_node before worker invocation; cleared by worker_node after reading.
+    # None when active_feature is unset, vault_index is empty, or workspace_root is None.
+    mounted_context: NotRequired[str | None]
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str]

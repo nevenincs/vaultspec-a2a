@@ -153,11 +153,12 @@ class TestCompactContext:
         # First message should still be the original system message
         assert isinstance(result["messages"][0], SystemMessage)
         assert result["messages"][0].content == sys_msg.content
-        # Second should be the compaction summary (HumanMessage per T14 fix)
-        assert isinstance(result["messages"][1], HumanMessage)
-        summary_content = result["messages"][1].content
-        assert isinstance(summary_content, str)
-        assert "compacted" in summary_content.lower()
+        # A compaction summary HumanMessage must appear somewhere in the result
+        summary_msgs = [
+            m for m in result["messages"]
+            if isinstance(m, HumanMessage) and "compacted" in str(m.content).lower()
+        ]
+        assert summary_msgs, "Expected a compaction summary HumanMessage in result"
         # Should have fewer messages than original
         assert len(result["messages"]) < len(messages)
 
@@ -261,6 +262,53 @@ class TestCompactContext:
         assert isinstance(result["messages"][1], SystemMessage)
         # The preamble content should be preserved (it is a leading SystemMessage)
         assert "Project Context" in str(result["messages"][1].content)
+
+    def test_first_human_message_preserved(self) -> None:
+        """The first HumanMessage (original task) is never dropped during compaction.
+
+        Regression: compaction previously had no protection for the first
+        HumanMessage — it could be silently removed when the budget was
+        exhausted by the system prefix alone.
+        """
+        system_msg = SystemMessage(content="You are a coding assistant.")
+        task_msg = HumanMessage(content="ORIGINAL TASK: implement feature X")
+        messages: list = [system_msg, task_msg]
+        # Flood with large middle messages that will be dropped
+        for i in range(30):
+            messages.append(AIMessage(content=f"middle-{i} " + "z" * 400))
+        last_msg = HumanMessage(content="latest question")
+        messages.append(last_msg)
+
+        state: TeamState = {
+            "messages": messages,
+            "next": "",
+            "current_plan": [],
+            "artifacts": [],
+            "active_agent": "",
+            "thread_id": "",
+            "token_usage": {},
+        }
+
+        result = compact_context(state, max_tokens=200)
+        result_contents = [str(m.content) for m in result["messages"]]
+
+        # (a) preamble SystemMessage survives
+        assert isinstance(result["messages"][0], SystemMessage)
+        assert result["messages"][0].content == system_msg.content
+
+        # (b) first HumanMessage (original task) survives unconditionally
+        assert any("ORIGINAL TASK: implement feature X" in c for c in result_contents)
+
+        # (c) middle messages are dropped
+        assert not any("middle-10" in c for c in result_contents)
+
+        # (d) placeholder text says "removed" not "summarized"
+        placeholder = next(
+            m for m in result["messages"]
+            if isinstance(m, HumanMessage) and "compacted" in str(m.content).lower()
+        )
+        assert "removed" in str(placeholder.content)
+        assert "summarized" not in str(placeholder.content)
 
     def test_non_message_fields_preserved(self) -> None:
         """All non-messages fields are copied unchanged into the compacted state."""

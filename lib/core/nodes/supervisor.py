@@ -4,10 +4,12 @@ import logging
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 
+from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
+from ..phase import infer_phase_from_vault_index
 from ..state import TeamState
 
 _logger = logging.getLogger(__name__)
@@ -53,12 +55,19 @@ def create_supervisor_node(
 
     async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
+        vault_index: dict[str, list[str]] = state.get("vault_index") or {}
+        inferred_phase = infer_phase_from_vault_index(vault_index)
+
         working_state = (
             compact_context(state, CONTEXT_LIMIT)
             if should_compact(state, CONTEXT_LIMIT)
             else state
         )
-        messages = [SystemMessage(content=full_prompt), *working_state.get("messages", [])]
+        anchoring = build_anchoring_context(state)
+        messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
+        if anchoring:
+            messages.append(SystemMessage(content=anchoring))
+        messages.extend(working_state.get("messages", []))
         model_type = type(model).__name__
         _logger.debug(
             "supervisor invoking model=%s messages=%d options=%s",
@@ -99,11 +108,29 @@ def create_supervisor_node(
             )
             return {
                 "next": "FINISH",
+                "pipeline_phase": inferred_phase,
                 "routing_error": f"supervisor could not parse route from: {text!r}",
             }
 
+        if next_route == "FINISH":
+            errors: list[str] = state.get("validation_errors") or []
+            if errors:
+                _logger.warning(
+                    "supervisor blocked FINISH: %d validation error(s) active — "
+                    "rerouting to first available worker",
+                    len(errors),
+                )
+                next_route = workers[0] if workers else "FINISH"
+                return {
+                    "next": next_route,
+                    "pipeline_phase": inferred_phase,
+                    "routing_error": (
+                        f"FINISH blocked: {len(errors)} validation error(s) must be resolved first."
+                    ),
+                }
+
         _logger.debug("supervisor routed to %r (raw=%r)", next_route, text[:80])
-        return {"next": next_route}
+        return {"next": next_route, "pipeline_phase": inferred_phase}
 
     # Ensure __name__ is available for type checkers
     supervisor_node.__name__ = "supervisor_node"

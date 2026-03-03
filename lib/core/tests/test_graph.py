@@ -113,7 +113,7 @@ async def test_compile_team_graph_accepts_workspace_root(
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    assert {"planner", "coder", "reviewer", "supervisor"} == node_keys
+    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer", "supervisor"} == node_keys
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ async def test_compile_interrupt_before_always_empty(
     assert list(graph.interrupt_before_nodes) == []
     # Nodes still present regardless of mode
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    assert {"planner", "coder", "reviewer"} == node_keys
+    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"} == node_keys
 
 
 # ---------------------------------------------------------------------------
@@ -202,7 +202,7 @@ async def test_compile_pipeline_loop_structure(
     # pipeline_loop has no supervisor
     assert "supervisor" not in node_keys
     # All three pipeline nodes present
-    assert {"planner", "coder", "reviewer"} <= node_keys
+    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"} <= node_keys
     # interrupt_before always empty
     assert list(graph.interrupt_before_nodes) == []
 
@@ -220,12 +220,12 @@ async def test_compile_pipeline_loop_single_agent_raises(
     # no pre-loop stages exist (degenerate case).
     bad_topology = TopologyConfig(
         type=TopologyType.PIPELINE_LOOP,
-        order=["reviewer"],
-        loop_node="reviewer",
+        order=["vaultspec-reviewer"],
+        loop_node="vaultspec-reviewer",
         max_loops=3,
     )
     # Must also have reviewer in workers
-    reviewer_ref = WorkerRef(agent_id="reviewer")
+    reviewer_ref = WorkerRef(agent_id="vaultspec-reviewer")
     bad_team = team.model_copy(
         update={"topology": bad_topology, "workers": [reviewer_ref]}
     )
@@ -251,9 +251,9 @@ async def test_compile_pipeline_missing_agent_config_raises(
     agent_configs = {
         w.agent_id: load_agent_config(w.agent_id)
         for w in team.workers
-        if w.agent_id != "planner"
+        if w.agent_id != "vaultspec-planner"
     }
-    with pytest.raises(ConfigError, match="planner"):
+    with pytest.raises(ConfigError, match="vaultspec-planner"):
         compile_team_graph(
             team_config=team,
             agent_configs=agent_configs,
@@ -302,7 +302,7 @@ async def test_loop_router_worker_can_signal_finish(
     # by checking that the graph compiled without error and has the
     # expected conditional edges registered.
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    assert "reviewer" in node_keys
+    assert "vaultspec-reviewer" in node_keys
     # Conditional edges from reviewer should route to planner (revise) or END (FINISH)
     # The graph compiles without error — this validates CORE-C1's fix is in place.
     assert graph is not None
@@ -631,7 +631,7 @@ async def test_graph_execution_routing(
     async for event in graph.astream_events(initial_state, config, version="v2"):
         if event["event"] == "on_chain_end":
             node_name = event["name"]
-            if node_name in ("supervisor", "coder", "planner", "reviewer"):
+            if node_name in ("supervisor", "vaultspec-coder", "vaultspec-planner", "vaultspec-reviewer"):
                 executed_nodes.append(node_name)
 
     # Validate state was checkpointed

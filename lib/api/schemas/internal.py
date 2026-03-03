@@ -17,7 +17,7 @@ class DispatchRequest(BaseModel):
 
     action: str = Field(description="'ingest' | 'resume' | 'cancel'")
     thread_id: str
-    agent_id: str = "supervisor"
+    agent_id: str = "vaultspec-supervisor"
     # For ingest: user message content
     content: str | None = None
     # For resume: permission response option
@@ -29,6 +29,11 @@ class DispatchRequest(BaseModel):
     metadata_json: str | None = None
     context_preamble: str | None = None
     recursion_limit: int = 100
+    # ADR-019: SDD blackboard fields
+    active_feature: str | None = None
+    pipeline_phase: str | None = None
+    vault_index: dict[str, list[str]] = Field(default_factory=dict)
+    validation_errors: list[str] = Field(default_factory=list)
 
 
 class DispatchResponse(BaseModel):

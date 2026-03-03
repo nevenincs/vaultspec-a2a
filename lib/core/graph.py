@@ -27,6 +27,7 @@ from ..providers.acp_exceptions import AcpSessionError
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
 from .exceptions import ConfigError, WorkerExecutionError
+from .nodes.mount import create_mount_node
 from .nodes.supervisor import create_supervisor_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .state import TeamState
@@ -37,6 +38,16 @@ logger = logging.getLogger(__name__)
 
 
 __all__ = ["compile_team_graph"]
+
+_VAULT_STAGE_PATTERNS: dict[str, str] = {
+    "research":  ".vault/research/*{tag}*.md",
+    "reference": ".vault/reference/*{tag}*.md",
+    "adr":       ".vault/adr/*{tag}*.md",
+    "plan":      ".vault/plan/*{tag}*.md",
+    "exec":      ".vault/exec/*{tag}*/**/*.md",
+    "audit":     ".vault/audit/*{tag}*.md",
+}
+_VAULT_INDEX_CAP = 50
 
 # Transient exceptions that warrant a retry at the LangGraph node level.
 _TRANSIENT_EXCEPTIONS: tuple[type[BaseException], ...] = (
@@ -166,10 +177,27 @@ def _resolve_supervisor_model(
     )
 
 
+def _build_initial_vault_index(
+    workspace_root: Path | None,
+    feature_tag: str,
+) -> dict[str, list[str]]:
+    """Scan .vault/ for files matching feature_tag. Returns empty dict when workspace_root is None."""
+    if workspace_root is None:
+        return {}
+    index: dict[str, list[str]] = {}
+    for stage, pattern in _VAULT_STAGE_PATTERNS.items():
+        resolved = pattern.replace("{tag}", feature_tag)
+        matches = sorted(workspace_root.glob(resolved))[:_VAULT_INDEX_CAP]
+        if matches:
+            index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
+    return index
+
+
 def _build_supervisor_prompt(
     resolved_agents: list[AgentConfig],
     base_prompt: str,
     directive: str | None = None,
+    feature_context: str | None = None,
 ) -> str:
     """Inject the agent roster (and optional team directive) into the supervisor prompt.
 
@@ -188,6 +216,11 @@ def _build_supervisor_prompt(
         result = base_prompt + f"\n\nYour team members and their specializations:\n{roster}"
     if directive:
         result = result + f"\n\n## Team Directive\n\n{directive.strip()}"
+    if feature_context:
+        if "{{FEATURE_CONTEXT}}" in result:
+            result = result.replace("{{FEATURE_CONTEXT}}", feature_context)
+        else:
+            result = result + f"\n\n## Feature Context\n\n{feature_context}"
     return result
 
 
@@ -199,6 +232,7 @@ def compile_team_graph(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     step_timeout: float | None = None,
+    feature_tag: str | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -591,9 +625,6 @@ def _compile_pipeline_loop(
     loop_node_id, pre_loop = _validate_pipeline_loop_config(team_config, agent_configs)
     order = team_config.topology.order
 
-    # Map external agent_id (lookup key) → internal node name (agent_cfg.id)
-    node_name_map: dict[str, str] = {}
-
     for agent_id in order:
         if agent_id not in agent_configs:
             raise ConfigError(
@@ -602,7 +633,6 @@ def _compile_pipeline_loop(
                 "loaded before compiling the graph."
             )
         agent_cfg = agent_configs[agent_id]
-        node_name_map[agent_id] = agent_cfg.id
         worker_ref = next(
             (w for w in team_config.workers if w.agent_id == agent_id), None
         )
@@ -637,16 +667,12 @@ def _compile_pipeline_loop(
             retry_policy=_NODE_RETRY_POLICY,
         )
 
-    # Translate external IDs to node names for edge wiring
-    pre_loop_nodes = [node_name_map[aid] for aid in pre_loop]
-    loop_node_name = node_name_map[loop_node_id]
-
-    all_sequential: list[str] = [*pre_loop_nodes, loop_node_name]
+    all_sequential: list[str] = [*pre_loop, loop_node_id]
     builder.add_edge(START, all_sequential[0])
     for i in range(len(all_sequential) - 1):
         builder.add_edge(all_sequential[i], all_sequential[i + 1])
 
-    loop_target: str = pre_loop_nodes[-1] if pre_loop_nodes else all_sequential[0]
+    loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
@@ -657,7 +683,7 @@ def _compile_pipeline_loop(
         return state.get("next", "revise")
 
     builder.add_conditional_edges(
-        loop_node_name,
+        loop_node_id,
         _loop_router,
         {"revise": loop_target, "FINISH": END},
     )

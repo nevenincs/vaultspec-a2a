@@ -302,7 +302,7 @@ class ConnectionManager:
             # received even if no graph is wired yet.
             await self._aggregator.emit_agent_status(
                 thread_id=cmd.thread_id,
-                agent_id=cmd.agent_id or "supervisor",
+                agent_id=cmd.agent_id or "vaultspec-supervisor",
                 node_name="supervisor",
                 state=AgentLifecycleState.SUBMITTED,
                 detail="Message received, awaiting graph integration",

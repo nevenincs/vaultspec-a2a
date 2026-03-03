@@ -37,11 +37,13 @@ from langgraph.types import StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.aggregator import EventAggregator
+from ..core.graph import _build_initial_vault_index
 from ..core.exceptions import ConfigError, NicknameConflictError
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..core.preamble import build_context_preamble
 from ..core.team_config import (
     TeamConfigNotFoundError,
+    discover_team_preset_ids,
     load_team_config,
 )
 from ..database.crud import (
@@ -57,8 +59,10 @@ from .schemas.enums import AgentLifecycleState
 from .schemas.internal import DispatchRequest
 from .schemas.rest import (
     AgentStatusEntry,
+    CancelThreadResponse,
     CreateThreadRequest,
     CreateThreadResponse,
+    PendingPermission,
     PermissionResponseRequest,
     PermissionResponseResult,
     SendMessageRequest,
@@ -267,6 +271,15 @@ async def create_thread_endpoint(
             except (ConfigError, TeamConfigNotFoundError):
                 pass  # fall back to False (supervised)
 
+        # ADR-019: SDD blackboard fields
+        metadata = body.metadata
+        feature_tag = metadata.feature_tag if metadata else None
+        vault_index = (
+            _build_initial_vault_index(ws_root, metadata.feature_tag)
+            if (metadata and metadata.feature_tag)
+            else {}
+        )
+
         dispatch = DispatchRequest(
             action="ingest",
             thread_id=thread.id,
@@ -277,6 +290,10 @@ async def create_thread_endpoint(
             content=body.initial_message,
             context_preamble=context_preamble,
             recursion_limit=_GRAPH_RECURSION_LIMIT,
+            active_feature=feature_tag,
+            pipeline_phase=None,
+            vault_index=vault_index,
+            validation_errors=[],
         )
 
         try:
@@ -342,6 +359,7 @@ async def list_threads_endpoint(
                 thread_id=t.id,
                 title=t.title,
                 status=t.status,
+                team_preset=t.team_preset,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
                 nickname=nickname,
@@ -568,7 +586,7 @@ async def send_message_endpoint(
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await db.commit()
 
-    agent_id = body.agent_id or "supervisor"
+    agent_id = body.agent_id or "vaultspec-supervisor"
 
     # Look up team_preset and workspace_root from DB for lazy recompile
     # (same pattern as respond_to_permission_endpoint, T22).
@@ -628,10 +646,9 @@ async def get_team_status_endpoint(
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions.
 
-    ADR-019 NOTE: The control surface aggregator is lightweight and does not
-    have graphs registered.  Agent summaries and active thread lists will be
-    empty until the worker relay populates them.  A future enhancement will
-    proxy this data from the worker.
+    ADR-019 NOTE: The control surface aggregator is lightweight.  Agent
+    summaries come from node metadata registered via the worker relay.
+    Pending permissions are tracked by the aggregator (MCP-R5).
     """
     active_threads = aggregator.get_active_thread_ids()
     node_summaries = aggregator.get_node_summaries()
@@ -648,14 +665,19 @@ async def get_team_status_endpoint(
         for s in node_summaries
     ]
 
+    pending = [
+        PendingPermission(
+            request_id=ev.request_id,
+            thread_id=ev.thread_id,
+            description=ev.description,
+        )
+        for ev in aggregator.get_pending_permissions()
+    ]
+
     return TeamStatusResponse(
         agents=agents,
         active_threads=active_threads,
-        # TODO(vaultspec): wire pending_permissions from the worker when it
-        # https://github.com/vaultspec/vaultspec-a2a/issues/2
-        # tracks outstanding permission requests.  The local aggregator does
-        # not have graphs registered (ADR-019), so this is always empty.
-        pending_permissions=[],
+        pending_permissions=pending,
     )
 
 
@@ -663,25 +685,16 @@ async def get_team_status_endpoint(
 # GET /teams -- List available team presets (ADR-013 S6)
 # ---------------------------------------------------------------------------
 
-# Built-in preset IDs shipped with the package (ADR-013 S2.9).
-_BUNDLED_TEAM_PRESETS = (
-    "vaultspec-adaptive-coder",
-    "vaultspec-structured-coder",
-    "vaultspec-iterative-coder",
-    "vaultspec-solo-coder",
-)
-
-
 @router.get("/teams", response_model=TeamPresetsResponse)
 async def list_team_presets_endpoint() -> TeamPresetsResponse:
     """Return all available team presets for the team picker UI.
 
-    Scans the bundled preset list and loads each ``TeamConfig``.
+    Dynamically discovers presets by globbing ``lib/core/presets/teams/*.toml``.
     Workspace-local overrides are not included in this listing (they
     shadow individual presets but are not auto-discovered in v1).
     """
     summaries: list[TeamPresetSummary] = []
-    for preset_id in _BUNDLED_TEAM_PRESETS:
+    for preset_id in sorted(discover_team_preset_ids()):
         try:
             tc = load_team_config(preset_id)
         except TeamConfigNotFoundError:
@@ -715,6 +728,7 @@ async def respond_to_permission_endpoint(
     body: PermissionResponseRequest,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    aggregator: EventAggregator = Depends(get_aggregator),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
 
@@ -746,14 +760,15 @@ async def respond_to_permission_endpoint(
         team_preset: str | None = None
         workspace_root: str | None = None
         thread_record = await get_thread(db, thread_id)
-        if thread_record is not None:
-            team_preset = thread_record.team_preset
-            if thread_record.thread_metadata:
-                try:
-                    meta = json.loads(thread_record.thread_metadata)
-                    workspace_root = meta.get("workspace_root")
-                except (json.JSONDecodeError, AttributeError):
-                    pass
+        if thread_record is None:
+            raise HTTPException(status_code=404, detail="Thread not found")
+        team_preset = thread_record.team_preset
+        if thread_record.thread_metadata:
+            try:
+                meta = json.loads(thread_record.thread_metadata)
+                workspace_root = meta.get("workspace_root")
+            except (json.JSONDecodeError, AttributeError):
+                pass
 
         dispatch = DispatchRequest(
             action="resume",
@@ -781,8 +796,70 @@ async def respond_to_permission_endpoint(
             request_id,
         )
 
+    # MCP-R5: clear from aggregator's pending set on successful dispatch.
+    if dispatched:
+        aggregator.resolve_permission(request_id)
+
     return PermissionResponseResult(
         request_id=request_id,
         accepted=dispatched,
         thread_id=thread_id,
+    )
+
+
+# ---------------------------------------------------------------------------
+# POST /threads/{thread_id}/cancel -- Cancel a running thread (MCP-R3)
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/threads/{thread_id}/cancel",
+    response_model=CancelThreadResponse,
+)
+async def cancel_thread_endpoint(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+) -> CancelThreadResponse:
+    """Cancel a running thread by dispatching a cancel action to the worker.
+
+    Sets the thread status to ``cancelled`` in the database and sends a
+    cancel dispatch to the worker process (MCP-R3, ADR-019).
+    """
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    # Only cancel threads that are in a cancellable state.
+    if thread.status in (ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED):
+        return CancelThreadResponse(
+            thread_id=thread_id,
+            status=thread.status,
+            cancelled=False,
+        )
+
+    dispatched = False
+    dispatch = DispatchRequest(action="cancel", thread_id=thread_id)
+    try:
+        resp = await worker_client.post(
+            "/dispatch",
+            json=dispatch.model_dump(),
+        )
+        dispatched = resp.is_success
+    except httpx.HTTPError:
+        logger.warning(
+            "Failed to dispatch cancel to worker for thread %s",
+            thread_id,
+            exc_info=True,
+        )
+
+    # Update DB status regardless of dispatch success — the thread is
+    # considered cancelled from the control surface perspective.
+    await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
+    await db.commit()
+
+    return CancelThreadResponse(
+        thread_id=thread_id,
+        status=ThreadStatus.CANCELLED,
+        cancelled=True,
     )

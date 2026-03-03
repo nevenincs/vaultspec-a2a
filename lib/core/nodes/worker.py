@@ -4,10 +4,11 @@ import logging
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import SystemMessage
+from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
+from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..exceptions import WorkerExecutionError
 from ..state import TeamState
@@ -134,7 +135,14 @@ def create_worker_node(
             if should_compact(state, CONTEXT_LIMIT)
             else state
         )
-        messages = [SystemMessage(content=system_prompt), *working_state["messages"]]
+        anchoring = build_anchoring_context(state)
+        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+        if anchoring:
+            messages.append(SystemMessage(content=anchoring))
+        mounted = state.get("mounted_context")
+        if mounted:
+            messages.append(SystemMessage(content=mounted))
+        messages.extend(working_state["messages"])
         # In supervised mode: wire interrupt-based approval for ACP-backed models.
         # Use model_copy() to avoid mutating the shared model instance — the same
         # AcpChatModel may be reused across concurrent graph invocations, and
@@ -182,6 +190,6 @@ def create_worker_node(
         )
         # Attribute the message to the worker so the supervisor can route correctly.
         response.name = name
-        return {"messages": [response]}
+        return {"messages": [response], "mounted_context": None}
 
     return worker_node

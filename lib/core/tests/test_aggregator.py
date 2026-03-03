@@ -1106,7 +1106,7 @@ class TestEmitInterruptEvents:
             ],
         }
         state = _GraphStateSnapshot(
-            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
+            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
         )
         graph = _InterruptingGraph(state)
 
@@ -1133,7 +1133,7 @@ class TestEmitInterruptEvents:
         )
         perm = perm_events[0]
         assert perm.thread_id == "thread-interrupt"
-        assert perm.agent_id == "coder"
+        assert perm.agent_id == "vaultspec-coder"
         assert "fs/write_text_file" in perm.description
         assert len(perm.options) == 2
 
@@ -1183,7 +1183,7 @@ class TestEmitInterruptEvents:
         # Task exists but with no interrupts — uses _InterruptingGraph
         # so _emit_interrupt_events IS called, but no events emitted since
         # task.interrupts is empty.
-        state = _GraphStateSnapshot(tasks=[_GraphTask("coder", [])])
+        state = _GraphStateSnapshot(tasks=[_GraphTask("vaultspec-coder", [])])
         graph = _InterruptingGraph(state)
 
         config = {"configurable": {"thread_id": "thread-empty-interrupts"}}
@@ -1212,7 +1212,7 @@ class TestEmitInterruptEvents:
 
         interrupt_payload = {"type": "some_other_type", "data": "irrelevant"}
         state = _GraphStateSnapshot(
-            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
+            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
         )
         # Uses _InterruptingGraph so GraphInterrupt is raised and
         # _emit_interrupt_events is triggered, but the payload type is not
@@ -1250,7 +1250,7 @@ class TestEmitInterruptEvents:
             "options": [],  # Empty options — should use defaults
         }
         state = _GraphStateSnapshot(
-            tasks=[_GraphTask("coder", [_InterruptValue(interrupt_payload)])]
+            tasks=[_GraphTask("vaultspec-coder", [_InterruptValue(interrupt_payload)])]
         )
         # Uses _InterruptingGraph so _emit_interrupt_events is called.
         graph = _InterruptingGraph(state)

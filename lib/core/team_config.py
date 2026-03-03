@@ -54,6 +54,7 @@ __all__ = [
     "TopologyType",
     "WorkerOverrideConfig",
     "WorkerRef",
+    "discover_team_preset_ids",
     "load_agent_config",
     "load_team_config",
 ]
@@ -73,6 +74,17 @@ class TopologyType(StrEnum):
 # Bundled preset directories, relative to this file.
 _PRESET_AGENTS_DIR = Path(__file__).parent / "presets" / "agents"
 _PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
+
+
+def discover_team_preset_ids() -> frozenset[str]:
+    """Discover available team preset IDs by globbing the bundled TOML directory.
+
+    Returns a frozenset of TOML file stems from ``lib/core/presets/teams/*.toml``.
+    If the directory does not exist or is empty, returns an empty frozenset.
+    """
+    if _PRESET_TEAMS_DIR.is_dir():
+        return frozenset(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
+    return frozenset()
 
 
 # ---------------------------------------------------------------------------
@@ -143,11 +155,11 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
-        """Ensure agent.id is a valid identifier (allows hyphens for vaultspec- prefix)."""
-        import re
-        if not re.match(r'^[a-zA-Z][a-zA-Z0-9_-]*$', self.id):
+        """Ensure agent.id matches _SAFE_AGENT_ID_RE (alphanumeric, underscores, hyphens)."""
+        if not _SAFE_AGENT_ID_RE.match(self.id):
             raise ValueError(
-                f"agent.id must match ^[a-zA-Z][a-zA-Z0-9_-]*$, got: {self.id!r}"
+                f"Invalid agent.id {self.id!r}: must match pattern "
+                f"{_SAFE_AGENT_ID_RE.pattern!r} (alphanumeric, underscores, hyphens)."
             )
         return self
 

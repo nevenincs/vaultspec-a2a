@@ -245,6 +245,11 @@ class EventAggregator:
         # Debounce flush tasks
         self._debounce_tasks: set[asyncio.Task[None]] = set()
 
+        # MCP-R5: track pending permission requests per thread.
+        # Maps request_id -> PermissionRequestEvent for active requests.
+        # Cleared when a permission response is received.
+        self._pending_permissions: dict[str, PermissionRequestEvent] = {}
+
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -782,7 +787,27 @@ class EventAggregator:
             timestamp=datetime.now(UTC),
             sequence=self._next_sequence(thread_id),
         )
+        # MCP-R5: track pending permission for REST query
+        self._pending_permissions[request_id] = event
         await self._broadcast(event)
+
+    def resolve_permission(self, request_id: str) -> None:
+        """Remove a permission request from the pending set (MCP-R5).
+
+        Called by the permission response endpoint after the user responds.
+        """
+        self._pending_permissions.pop(request_id, None)
+
+    def get_pending_permissions(
+        self, thread_id: str | None = None,
+    ) -> list[PermissionRequestEvent]:
+        """Return pending permission requests, optionally filtered by thread (MCP-R5)."""
+        if thread_id is None:
+            return list(self._pending_permissions.values())
+        return [
+            ev for ev in self._pending_permissions.values()
+            if ev.thread_id == thread_id
+        ]
 
     async def emit_error(
         self,

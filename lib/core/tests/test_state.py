@@ -194,6 +194,11 @@ class TestTeamStateStructure:
             "token_usage",
             "loop_count",
             "routing_error",
+            # ADR-019: SDD blackboard awareness fields
+            "active_feature",
+            "pipeline_phase",
+            "vault_index",
+            "validation_errors",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

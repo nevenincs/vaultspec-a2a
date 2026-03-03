@@ -141,7 +141,7 @@ class TestDiscoverContextRefs:
 
     def test_discovers_adr_docs(self, tmp_path: Path) -> None:
         """Documents matching the ADR glob are discovered."""
-        adr_dir = tmp_path / ".vault" / "adrs"
+        adr_dir = tmp_path / ".vault" / "adr"
         adr_dir.mkdir(parents=True)
         (adr_dir / "014-auth-flow.md").write_text("# ADR")
 
@@ -172,7 +172,7 @@ class TestDiscoverContextRefs:
 
     def test_discovers_multiple_stages(self, tmp_path: Path) -> None:
         """Documents across multiple stages are all discovered."""
-        for subdir in ("research", "adrs", "plan"):
+        for subdir in ("research", "adr", "plan"):
             d = tmp_path / ".vault" / subdir
             d.mkdir(parents=True)
             (d / f"auth-flow-{subdir}.md").write_text(f"# {subdir}")

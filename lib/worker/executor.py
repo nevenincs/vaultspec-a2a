@@ -215,7 +215,7 @@ class Executor:
             "recursion_limit": req.recursion_limit or _GRAPH_RECURSION_LIMIT,
         }
 
-        agent_id = req.agent_id or "supervisor"
+        agent_id = req.agent_id or "vaultspec-supervisor"
 
         try:
             await self._aggregator.ingest(
@@ -308,7 +308,7 @@ class Executor:
             "configurable": {"thread_id": req.thread_id},
             "recursion_limit": effective_recursion_limit,
         }
-        agent_id = req.agent_id or "supervisor"
+        agent_id = req.agent_id or "vaultspec-supervisor"
 
         try:
             # Command(resume=...) is accepted by astream_events in place of

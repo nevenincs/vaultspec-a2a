@@ -105,9 +105,11 @@ def discover_context_refs(
     refs: list[ContextRef] = []
     stage_patterns: dict[str, str] = {
         "research": ".vault/research/*{tag}*.md",
-        "adr": ".vault/adrs/*{tag}*.md",
+        "reference": ".vault/reference/*{tag}*.md",
+        "adr": ".vault/adr/*{tag}*.md",
         "plan": ".vault/plan/*{tag}*.md",
         "exec": ".vault/exec/*{tag}*/**/*.md",
+        "audit": ".vault/audit/*{tag}*.md",
     }
     # C3: sanitize feature_tag by escaping glob metacharacters before injecting
     # it into the pattern.  glob.escape() quotes *, ?, [, ] so they are treated

@@ -2,6 +2,7 @@
 
 import importlib
 
+from .anchoring import build_anchoring_context as build_anchoring_context
 from .config import Settings, settings
 from .context import (
     compact_context as compact_context,
@@ -57,6 +58,7 @@ from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
 from .nodes.supervisor import create_supervisor_node as create_supervisor_node
+from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
 from .nodes.worker import create_worker_node as create_worker_node
 from .preamble import (
     build_context_preamble as build_context_preamble,
@@ -96,6 +98,15 @@ from .team_config import (
     WorkerOverrideConfig as WorkerOverrideConfig,
 )
 from .team_config import (
+    TeamGraphConfig as TeamGraphConfig,
+)
+from .team_config import (
+    TeamPermissionsConfig as TeamPermissionsConfig,
+)
+from .team_config import (
+    TeamPersonaConfig as TeamPersonaConfig,
+)
+from .team_config import (
     WorkerRef as WorkerRef,
 )
 from .team_config import (
@@ -129,6 +140,7 @@ def __getattr__(name: str) -> object:
 __all__ = [
     "AgentCapabilitiesConfig",
     "AgentConfig",
+    "build_anchoring_context",
     "AgentConfigNotFoundError",
     "AgentModelConfig",
     "AgentPermissionsConfig",
@@ -154,6 +166,9 @@ __all__ = [
     "TeamConfig",
     "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
+    "TeamGraphConfig",
+    "TeamPermissionsConfig",
+    "TeamPersonaConfig",
     "TeamState",
     "ThreadMetadata",
     "TokenBudgetExceededError",
@@ -173,6 +188,7 @@ __all__ = [
     "discover_context_refs",
     "estimate_tokens",
     "generate_nickname",
+    "infer_phase_from_vault_index",
     "load_agent_config",
     "load_team_config",
     "prepare_handoff",

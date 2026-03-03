@@ -42,6 +42,7 @@ from starlette.websockets import WebSocket
 from ..core.aggregator import EventAggregator
 from ..core.config import settings
 from ..database.crud import get_thread
+from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.session import close_db, get_session_factory, init_db
 from ..protocols import mcp as mcp_server
 from ..telemetry import TelemetryMiddleware, configure_telemetry
@@ -140,7 +141,7 @@ def _create_dispatch_message_handler(
                 json={
                     "action": "ingest",
                     "thread_id": thread_id,
-                    "agent_id": agent_id or "supervisor",
+                    "agent_id": agent_id or "vaultspec-supervisor",
                     "content": content,
                     "team_preset": team_preset,
                     "workspace_root": workspace_root,
@@ -236,6 +237,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # Database (SQLAlchemy)
     engine = await init_db(db_path)
     logger.info("Database initialised (WAL mode) at %s", db_path)
+
+    # Backfill new state fields into existing checkpoint rows (additive,
+    # idempotent — fills missing keys with zero values, touches nothing else).
+    backfill_teamstate_sdd_fields(db_path)
 
     # LangGraph checkpointer -- READ-ONLY in the control surface (ADR-019).
     # The worker owns the write path.  This connection is safe for concurrent

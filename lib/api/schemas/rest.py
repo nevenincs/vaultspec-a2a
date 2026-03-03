@@ -16,6 +16,7 @@ from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [
     "AgentStatusEntry",
+    "CancelThreadResponse",
     "CreateThreadRequest",
     "CreateThreadResponse",
     "PendingPermission",
@@ -63,6 +64,14 @@ class CreateThreadResponse(BaseModel):
     nickname: str | None = None
 
 
+class CancelThreadResponse(BaseModel):
+    """Response after requesting thread cancellation."""
+
+    thread_id: str
+    status: str
+    cancelled: bool
+
+
 class SendMessageRequest(BaseModel):
     """Send a user message into an existing thread via REST."""
 
@@ -85,6 +94,7 @@ class ThreadSummary(BaseModel):
     title: str | None = None
     status: str
     agent_state: AgentLifecycleState | None = None
+    team_preset: str | None = None
     created_at: datetime
     updated_at: datetime
     # ADR-014: metadata summary fields for UI thread list

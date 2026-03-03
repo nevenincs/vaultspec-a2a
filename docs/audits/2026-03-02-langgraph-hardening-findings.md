@@ -3814,3 +3814,122 @@ These findings were triaged verbally during the earlier session and are now docu
 | PROV-03 | MEDIUM | OPEN | Gemini probe false positive |
 | PROV-04 | MEDIUM | OPEN | OpenAI no request_timeout |
 
+---
+
+## Cycle 46 — MCP Tool Description Audit (2026-03-02)
+
+**File audited**: `lib/protocols/mcp/server.py` (523 lines, 7 tools)
+
+**Tool count**: 7 — start_thread, list_threads, respond_to_permission,
+get_thread_status, send_message, get_team_status, get_pending_permissions.
+(Note: server.py header doc lists 7 but surface-alignment research from earlier
+today was based on a 5-tool version — coder added get_team_status and
+get_pending_permissions since that read. Full audit doc:
+`docs/audits/2026-03-02-mcp-tool-description-audit.md`.)
+
+### Findings
+
+| ID | Severity | Location | Finding |
+|----|----------|----------|---------|
+| MCD-01 | HIGH | FastMCP instructions:79-85 | `respond_to_permission` and `get_team_status` omitted from server instructions string |
+| MCD-02 | HIGH | FastMCP instructions:79-85 | No workflow sequence guidance — LLM cannot infer autonomous vs supervised call order |
+| MCD-03 | MEDIUM | start_thread → team_preset:123 | `_KNOWN_PRESETS` reference is internal Python symbol; valid preset names should be listed verbatim |
+| MCD-04 | MEDIUM | start_thread → workspace_root:128 | "ADR-014" and "ACP agent CWD" are internal jargon; replace with plain behavioural description |
+| MCD-05 | MEDIUM | get_thread_status:321 | Docstring claims "checkpoint ID" in return; MCP-04 removed it — description is stale |
+| MCD-06 | MEDIUM | respond_to_permission → option_id:274 | No guidance on how to discover valid option IDs (must call get_pending_permissions first) |
+| MCD-07 | MEDIUM | respond_to_permission:272 | "ADR-011 §2.2" reference in description body — internal jargon |
+| MCD-08 | LOW | send_message:372 | "(async, returns 202)" parenthetical exposes HTTP implementation detail |
+| MCD-09 | LOW | send_message → message:380 | No documented size constraint; start_thread cap is documented (32k) but send_message has none |
+| MCD-10 | LOW | get_thread_status:317 | Possible status values not enumerated (submitted/running/input_required/completed/failed/cancelled) |
+| MCD-11 | LOW | get_team_status:423 | "ADR-011 §2.2" internal reference in description body |
+| MCD-12 | LOW | list_threads:199 | Thread status values not enumerated in description |
+| MCD-13 | INFO | get_pending_permissions:476 | Calls /api/team/status — subset of get_team_status; overlap not documented |
+
+### Clean paths (no issues)
+- Error handling in all 7 tools: consistent httpx exception hierarchy, correct 404 branching
+- `_ws_url_from_api_base` credential stripping: correct (strips userinfo before returning ws URL)
+- `_MAX_INITIAL_MESSAGE_CHARS` guard in `start_thread`: present and documented
+- `limit` clamping in `list_threads` (1-200): present
+- `_KNOWN_PRESETS` preset validation in `start_thread`: correct runtime guard, good error message
+
+### Proposed fix (P0 — instructions rewrite)
+See `docs/audits/2026-03-02-mcp-tool-description-audit.md` §"Proposed instructions Rewrite"
+for the exact replacement string (covers both autonomous and supervised workflows, names all 7
+tools with their roles).
+
+---
+
+## Cycle 47 — MCP Deep Correctness Audit (2026-03-02)
+
+**Files audited**:
+- `lib/protocols/mcp/server.py` (783 lines, 9 tools — fresh read)
+- `lib/protocols/mcp/tests/test_server.py` (633 lines — fresh read)
+- `lib/api/endpoints.py` cancel + permission endpoints
+- `lib/api/schemas/rest.py` CancelThreadResponse
+
+### CRITICAL: IndentationError in two new tools — module will not import
+
+| ID | Severity | Location | Finding |
+|----|----------|----------|---------|
+| MCP-SYN-01 | CRITICAL | `server.py:692-697` | `list_team_presets`: `resp = await client.get(...)` is over-indented relative to `client = _get_client()` — orphaned indent with no enclosing block. Python IndentationError. |
+| MCP-SYN-02 | CRITICAL | `server.py:756-761` | `cancel_thread`: same pattern — `resp = await client.post(...)` is over-indented. IndentationError. |
+
+**Root cause**: Both tools were added after the `async with httpx.AsyncClient()` →
+`_get_client()` refactor. The inner block indentation from the old `async with`
+was preserved but the enclosing `async with` context manager was removed, leaving
+`resp = ...` orphaned at one extra indent level.
+
+**Impact**: The entire `server.py` module raises `IndentationError` at import
+time. ALL 9 MCP tools are completely unavailable until fixed.
+
+**Fix required** (server.py:692-697):
+```python
+    try:
+        client = _get_client()
+        resp = await client.get(          # de-dent to match client =
+            f"{settings.api_base_url}/api/teams",
+            timeout=_MCP_QUERY_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        presets = data.get("presets", [])
+```
+
+**Fix required** (server.py:756-761):
+```python
+    try:
+        client = _get_client()
+        resp = await client.post(         # de-dent to match client =
+            f"{settings.api_base_url}/api/threads/{thread_id}/cancel",
+            timeout=_MCP_QUERY_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+```
+
+### Other Findings
+
+| ID | Severity | Location | Finding |
+|----|----------|----------|---------|
+| MCP-CLI-01 | MEDIUM | `server.py:46-54` | `_get_client()` global client has no teardown — connection pool never closed on process exit |
+| MCP-TST-03 | LOW | `test_server.py` | No `get_thread_status` happy-path test verifying enriched response (agents + plan fields returned by MCP-R7) |
+| MCP-URL-01 | INFO | `server.py:347` | `respond_to_permission` → `/api/permissions/{id}/respond` matches `endpoints.py:718`. Correct. |
+| MCP-URL-02 | INFO | `server.py:757` | `cancel_thread` → `POST /api/threads/{id}/cancel` matches `endpoints.py:811`. Correct. |
+| MCP-URL-03 | INFO | `server.py:692` | `list_team_presets` → `GET /api/teams` matches `endpoints.py:682`. Correct. |
+| MCP-SCH-01 | INFO | `server.py:762-763` | `cancel_thread` reads `cancelled` + `status` matching `CancelThreadResponse` schema. Correct. |
+| MCP-ERR-01 | INFO | All 9 tools | Error-handling hierarchy (ConnectError→TimeoutException→HTTPStatusError→RequestError) is consistent across all tools. 404 branching correct on per-thread tools. |
+
+### Clean paths
+- MCP-05 shared client applied correctly to tools 1-7 (start_thread through get_pending_permissions)
+- `_HARDCODED_PRESETS` now includes `vaultspec-continuous-audit` (REG-02 resolved)
+- FastMCP `instructions` string updated (MCD-01/02 resolved)
+- All 9 tool descriptions substantially improved (MCD-03 through MCD-12 addressed)
+- URL paths for all 9 tools match actual endpoint definitions
+- Response schema field reads match `CancelThreadResponse` and `PermissionResponseResult`
+- Test file imports all 9 tools; happy-path + error-path coverage for 8 of 9 tools
+- `_ws_url_from_api_base` unit tests: 5 tests, comprehensive
+
+### Action required
+**P0**: Fix MCP-SYN-01 and MCP-SYN-02 (indentation) — coder must de-dent `resp = ...`
+lines in both `list_team_presets` and `cancel_thread` to align with `client = _get_client()`.
+

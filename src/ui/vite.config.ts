@@ -1,5 +1,5 @@
 import tailwindcss from '@tailwindcss/vite';
-import { sveltekit } from '@sveltejs/kit/vite';
+import react from '@vitejs/plugin-react';
 import { defineConfig } from 'vite';
 
 // In Docker, VITE_API_URL points to the fixture-server service name.
@@ -10,8 +10,8 @@ const wsTarget = apiTarget.replace(/^http/, 'ws');
 
 export default defineConfig({
   plugins: [
-    tailwindcss(), // MUST be before sveltekit()
-    sveltekit(),
+    tailwindcss(), // MUST be before react()
+    react(),
   ],
   server: {
     proxy: {

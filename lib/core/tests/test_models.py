@@ -7,6 +7,7 @@ handling (missing keys, extra keys, default values).
 import pytest
 
 from ..models import ArtifactRef, PlanStep, TokenUsageEntry
+from ..state import _append_validation_errors, _merge_vault_index
 
 
 # ---------------------------------------------------------------------------
@@ -29,8 +30,8 @@ class TestTokenUsageEntry:
     def test_from_dict_round_trip(self) -> None:
         """from_dict -> to_dict produces the original dict."""
         original = {"input": 200, "output": 80, "total": 280}
-        entry = TokenUsageEntry.from_dict("planner", original)
-        assert entry.agent_id == "planner"
+        entry = TokenUsageEntry.from_dict("vaultspec-planner", original)
+        assert entry.agent_id == "vaultspec-planner"
         assert entry.to_dict() == original
 
     def test_from_dict_missing_keys_default_to_zero(self) -> None:
@@ -153,3 +154,47 @@ class TestArtifactRef:
             ar = ArtifactRef(id="t", path="/p", type=artifact_type)
             assert ar.type == artifact_type
             assert ar.to_dict()["type"] == artifact_type
+
+
+# ---------------------------------------------------------------------------
+# _merge_vault_index reducer (ADR-019)
+# ---------------------------------------------------------------------------
+
+
+class TestMergeVaultIndex:
+    """Tests for the _merge_vault_index reducer."""
+
+    def test_appends_new_paths(self) -> None:
+        existing: dict[str, list[str]] = {"research": ["a.md"]}
+        new: dict[str, list[str]] = {"research": ["b.md"]}
+        result = _merge_vault_index(existing, new)
+        assert result == {"research": ["a.md", "b.md"]}
+
+    def test_deduplicates(self) -> None:
+        existing: dict[str, list[str]] = {"adr": ["x.md", "y.md"]}
+        new: dict[str, list[str]] = {"adr": ["y.md", "z.md"]}
+        result = _merge_vault_index(existing, new)
+        assert result == {"adr": ["x.md", "y.md", "z.md"]}
+
+    def test_preserves_existing_types(self) -> None:
+        existing: dict[str, list[str]] = {"research": ["a.md"]}
+        new: dict[str, list[str]] = {"plan": ["p.md"]}
+        result = _merge_vault_index(existing, new)
+        assert result == {"research": ["a.md"], "plan": ["p.md"]}
+
+
+# ---------------------------------------------------------------------------
+# _append_validation_errors reducer (ADR-019)
+# ---------------------------------------------------------------------------
+
+
+class TestAppendValidationErrors:
+    """Tests for the _append_validation_errors reducer."""
+
+    def test_appends(self) -> None:
+        result = _append_validation_errors(["err1"], ["err2", "err3"])
+        assert result == ["err1", "err2", "err3"]
+
+    def test_clears_on_empty_new(self) -> None:
+        result = _append_validation_errors(["err1", "err2"], [])
+        assert result == []

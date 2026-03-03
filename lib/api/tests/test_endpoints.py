@@ -211,7 +211,7 @@ class TestSendMessage:
         assert dispatch["action"] == "ingest"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["content"] == "Follow-up message"
-        assert dispatch["agent_id"] == "supervisor"
+        assert dispatch["agent_id"] == "vaultspec-supervisor"
 
     def test_dispatch_includes_team_preset(self, session_factory) -> None:
         """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
@@ -320,8 +320,81 @@ class TestTeamStatus:
         assert "agents" in data
         assert "active_threads" in data
         assert "pending_permissions" in data
-        # pending_permissions is always empty until wired (API-M8 TODO)
+        assert isinstance(data["agents"], list)
+        assert isinstance(data["active_threads"], list)
+        assert isinstance(data["pending_permissions"], list)
+
+    def test_returns_empty_lists_when_no_activity(self, session_factory) -> None:
+        """All lists are empty when no agents registered and no threads active."""
+        app, _agg, _captured, _cp = make_app(session_factory)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["agents"] == []
+        assert data["active_threads"] == []
         assert data["pending_permissions"] == []
+
+    def test_pending_permissions_surface_from_aggregator(
+        self, session_factory
+    ) -> None:
+        """Pending permissions stored in aggregator appear in team status."""
+        from datetime import UTC, datetime
+
+        from ...api.schemas.events import PermissionRequestEvent, ServerEventType
+
+        agg = EventAggregator()
+        # Directly inject a pending permission into the aggregator
+        event = PermissionRequestEvent(
+            type=ServerEventType.PERMISSION_REQUEST,
+            thread_id="thread-abc",
+            agent_id="vaultspec-coder",
+            timestamp=datetime.now(UTC),
+            sequence=1,
+            request_id="thread-abc:perm-001",
+            description="Allow file write?",
+            options=[],
+        )
+        agg._pending_permissions["thread-abc:perm-001"] = event
+
+        app, _agg, _captured, _cp = make_app(session_factory, aggregator=agg)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["pending_permissions"]) == 1
+        perm = data["pending_permissions"][0]
+        assert perm["request_id"] == "thread-abc:perm-001"
+        assert perm["thread_id"] == "thread-abc"
+        assert perm["description"] == "Allow file write?"
+
+    def test_node_summaries_surface_as_agents(self, session_factory) -> None:
+        """Agents registered via aggregator node metadata appear in response."""
+        agg = EventAggregator()
+        agg._node_metadata["vaultspec-coder"] = {
+            "role": "coder",
+            "display_name": "Coder Agent",
+            "description": "Writes code",
+        }
+
+        app, _agg, _captured, _cp = make_app(session_factory, aggregator=agg)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["agents"]) == 1
+        agent = data["agents"][0]
+        assert agent["agent_id"] == "vaultspec-coder"
+        assert agent["node_name"] == "vaultspec-coder"
+        assert agent["role"] == "coder"
+        assert agent["display_name"] == "Coder Agent"
+        assert agent["state"] == "idle"
 
 
 # ---------------------------------------------------------------------------
@@ -342,22 +415,33 @@ class TestPermissionRespond:
         )
 
         with TestClient(app, raise_server_exceptions=True) as client:
+            # Create a thread first so the permission endpoint can find it.
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+
+            # The create dispatch is captured; clear it so we only check resume.
+            captured.requests.clear()
+
             resp = client.post(
-                "/api/permissions/thread-123:req-456/respond",
+                f"/api/permissions/{thread_id}:req-456/respond",
                 json={"option_id": "allow_once"},
             )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["request_id"] == "thread-123:req-456"
+        assert data["request_id"] == f"{thread_id}:req-456"
         assert data["accepted"] is True
-        assert data["thread_id"] == "thread-123"
+        assert data["thread_id"] == thread_id
 
         # Verify resume dispatch was sent to worker
         assert len(captured.requests) == 1
         dispatch = captured.requests[0]
         assert dispatch["action"] == "resume"
-        assert dispatch["thread_id"] == "thread-123"
+        assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
 
     def test_resume_dispatch_includes_team_preset(self, session_factory) -> None:

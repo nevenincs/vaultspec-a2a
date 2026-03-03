@@ -54,7 +54,7 @@ class TestAgentConfigFromToml:
     def test_loads_preset_agent(self, agent_id: str) -> None:
         """Each preset agent TOML produces a valid AgentConfig."""
         cfg = AgentConfig.from_toml(_AGENTS_DIR / f"{agent_id}.toml")
-        assert cfg.id == agent_id.removeprefix("vaultspec-").removeprefix("vaultspec-").removeprefix("vaultspec-")
+        assert cfg.id == agent_id
 
     def test_supervisor_has_correct_fields(self) -> None:
         """Supervisor preset has expected display_name, role, and description."""
@@ -141,23 +141,23 @@ system_prompt = "You are a test agent."
         cfg = AgentConfig.from_toml(toml_file)
         assert cfg.id == "my_agent"
 
-    def test_invalid_id_raises(self, tmp_path: Path) -> None:
-        """An id containing hyphens raises ValidationError."""
-        toml_file = tmp_path / "bad-agent.toml"
+    def test_hyphenated_id_passes(self, tmp_path: Path) -> None:
+        """An id containing hyphens is accepted (vaultspec- prefix pattern)."""
+        toml_file = tmp_path / "good-agent.toml"
         toml_file.write_bytes(
             b"""
 [agent]
-id = "bad-agent"
-display_name = "Bad Agent"
+id = "vaultspec-agent"
+display_name = "Good Agent"
 role = "coder"
-description = "Agent with invalid id."
+description = "Agent with hyphenated id."
 
 [agent.persona]
-system_prompt = "You are a bad agent."
+system_prompt = "You are a good agent."
 """
         )
-        with pytest.raises(ValidationError, match="valid Python identifier"):
-            AgentConfig.from_toml(toml_file)
+        cfg = AgentConfig.from_toml(toml_file)
+        assert cfg.id == "vaultspec-agent"
 
     def test_numeric_id_raises(self, tmp_path: Path) -> None:
         """An id starting with a digit raises ValidationError."""
@@ -174,7 +174,7 @@ description = "Bad."
 system_prompt = "You."
 """
         )
-        with pytest.raises(ValidationError, match="valid Python identifier"):
+        with pytest.raises(ValidationError, match=r"\^\\[a-zA-Z\\]|must match"):
             AgentConfig.from_toml(toml_file)
 
 
@@ -189,7 +189,7 @@ class TestLoadAgentConfigDiscovery:
     def test_finds_bundled_preset(self) -> None:
         """load_agent_config returns a config when only the preset exists."""
         cfg = load_agent_config("vaultspec-planner")
-        assert cfg.id == "planner"
+        assert cfg.id == "vaultspec-planner"
 
     def test_workspace_override_takes_precedence(self, tmp_path: Path) -> None:
         """A workspace .vaultspec/agents/{id}.toml overrides the bundled preset."""
@@ -208,7 +208,7 @@ description = "Workspace override."
 system_prompt = "Custom system prompt."
 """
         )
-        cfg = load_agent_config("planner", workspace_root=tmp_path)
+        cfg = load_agent_config("vaultspec-planner", workspace_root=tmp_path)
         assert cfg.display_name == "Custom Planner"
 
     def test_missing_agent_raises_not_found(self) -> None:
@@ -224,8 +224,8 @@ system_prompt = "Custom system prompt."
 
     def test_workspace_root_none_uses_only_preset(self) -> None:
         """Passing workspace_root=None still finds bundled presets."""
-        cfg = load_agent_config("reviewer", workspace_root=None)
-        assert cfg.id == "reviewer"
+        cfg = load_agent_config("vaultspec-reviewer", workspace_root=None)
+        assert cfg.id == "vaultspec-reviewer"
 
 
 # ---------------------------------------------------------------------------
@@ -312,21 +312,21 @@ class TestTeamConfigFromToml:
         """vaultspec-structured-coder has planner → coder → reviewer order."""
         cfg = load_team_config("vaultspec-structured-coder")
         assert cfg.topology.type == TopologyType.PIPELINE
-        assert cfg.topology.order == ["planner", "coder", "reviewer"]
+        assert cfg.topology.order == ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
 
     def test_coding_loop_loop_node(self) -> None:
         """vaultspec-iterative-coder has reviewer as the loop_node."""
         expected_max_loops = 3
         cfg = load_team_config("vaultspec-iterative-coder")
         assert cfg.topology.type == TopologyType.PIPELINE_LOOP
-        assert cfg.topology.loop_node == "reviewer"
+        assert cfg.topology.loop_node == "vaultspec-reviewer"
         assert cfg.topology.max_loops == expected_max_loops
 
     def test_solo_coder_single_worker(self) -> None:
         """vaultspec-solo-coder has exactly one worker: the coder."""
         cfg = load_team_config("vaultspec-solo-coder")
         assert len(cfg.workers) == 1
-        assert cfg.workers[0].agent_id == "coder"
+        assert cfg.workers[0].agent_id == "vaultspec-coder"
 
     def test_all_preset_teams_have_workers(self) -> None:
         """Every preset team declares at least one worker."""
@@ -346,13 +346,13 @@ class TestWorkerModelOverride:
     def test_coding_star_coder_has_high_capability(self) -> None:
         """vaultspec-adaptive-coder overrides coder to HIGH capability."""
         cfg = load_team_config("vaultspec-adaptive-coder")
-        coder_ref = next(w for w in cfg.workers if w.agent_id == "coder")
+        coder_ref = next(w for w in cfg.workers if w.agent_id == "vaultspec-coder")
         assert coder_ref.model.capability == Model.HIGH
 
     def test_worker_without_override_has_none_fields(self) -> None:
         """Workers with no override have None provider and capability."""
         cfg = load_team_config("vaultspec-adaptive-coder")
-        planner_ref = next(w for w in cfg.workers if w.agent_id == "planner")
+        planner_ref = next(w for w in cfg.workers if w.agent_id == "vaultspec-planner")
         assert planner_ref.model.provider is None
         assert planner_ref.model.capability is None
 

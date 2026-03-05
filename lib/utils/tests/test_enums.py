@@ -62,8 +62,8 @@ class TestProvider:
     """Tests for the Provider enum."""
 
     def test_members(self) -> None:
-        """All four providers are present."""
-        expected = {"claude", "gemini", "openai", "zhipu"}
+        """All providers are present."""
+        expected = {"claude", "gemini", "mock", "openai", "zhipu"}
         assert {m.value for m in Provider} == expected
 
     def test_string_comparison(self) -> None:

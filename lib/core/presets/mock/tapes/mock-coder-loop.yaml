@@ -1,0 +1,245 @@
+name: "mock-coder-loop"
+priority: 100
+matcher: "^/mock-coder-loop/v1/chat/completions$"
+request_mapping:
+  model: "mock-coder-loop"
+response_body: |
+  {% set turn = json.messages | length %}
+  {% if turn <= 2 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-0",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Initiating infinite cascade.\n\n<thought>\nFirst run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_0",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 4 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-1",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nSecond run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_1",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 6 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-2",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nThird run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_2",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 8 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-3",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nFourth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_3",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 10 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-4",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nFifth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_4",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 12 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-5",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nSixth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_5",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 14 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-6",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nSeventh run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_6",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 16 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-7",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nEighth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_7",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% elif turn <= 18 %}
+  {
+      "id": "chatcmpl-mock-coder-loop-8",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nNinth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_8",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% else %}
+  {
+      "id": "chatcmpl-mock-coder-loop-9",
+      "choices": [
+          {
+              "message": {
+                  "role": "assistant",
+                  "content": "Continuing loop cascade.\n\n<thought>\nTenth run.\n</thought>\n",
+                  "tool_calls": [
+                      {
+                          "id": "call_mock_coder_loop_9",
+                          "type": "function",
+                          "function": {
+                              "name": "search_codebase",
+                              "arguments": "{\"Query\": \"loop\"}"
+                          }
+                      }
+                  ]
+              },
+              "finish_reason": "tool_calls"
+          }
+      ]
+  }
+  {% endif %}
+stream:
+  enabled: true
+  lifecycle:
+    on_chunk:
+       template_body: '{"id":"chatcmpl-mock","choices":[{"index":0,"delta":{% if chunk is string %}{"content":{{ chunk | json_encode() }}}{% else %}{"tool_calls":{{ chunk | json_encode() | safe }}}{% endif %},"finish_reason":null}]}'
+    on_stop:
+       template_body: '[DONE]'

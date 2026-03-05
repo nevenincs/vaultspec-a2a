@@ -1,0 +1,45 @@
+name: Evaluation
+
+on:
+  schedule:
+    - cron: "0 6 * * *"  # Nightly at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      suite:
+        description: "Evaluation suite to run (nightly or smoke)"
+        required: false
+        default: "nightly"
+        type: choice
+        options:
+          - nightly
+          - smoke
+
+concurrency:
+  group: eval
+  cancel-in-progress: false
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: eval
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies (with eval extras)
+        run: uv sync --group dev --extra eval
+
+      - name: Run evaluation suite
+        env:
+          LANGSMITH_TRACING: "true"
+          LANGSMITH_API_KEY: ${{ secrets.LANGSMITH_API_KEY }}
+          LANGSMITH_PROJECT: vaultspec-eval
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          SUITE="${{ inputs.suite || 'nightly' }}"
+          uv run python -m evals.suites."$SUITE"

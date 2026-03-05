@@ -34,7 +34,7 @@ from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import verify_wal_mode as verify_wal_mode
-
+from .migrate import run_migrations as run_migrations
 
 __all__ = [
     "ArtifactModel",
@@ -58,6 +58,7 @@ __all__ = [
     "get_thread_metadata",
     "init_db",
     "list_threads",
+    "run_migrations",
     "save_model",
     "sum_cost_by_agent",
     "sum_cost_by_thread",

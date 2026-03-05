@@ -1,0 +1,31 @@
+[team]
+id           = "mock-success-multi"
+display_name = "Mock Success Multi"
+description  = "A team that has multiple members finishing work with success."
+
+[team.defaults]
+provider   = "mock"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["mock-planner", "mock-coder-success", "mock-reviewer"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Simulate multi-agent pipeline success."
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "mock-planner"
+
+[[team.workers]]
+agent_id = "mock-coder-success"
+
+[[team.workers]]
+agent_id = "mock-reviewer"

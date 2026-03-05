@@ -1,0 +1,25 @@
+[team]
+id           = "mock-looping"
+display_name = "Mock Looping Team"
+description  = "Simulates a looping model that never stops generating, useful for UI stress testing."
+
+[team.defaults]
+provider   = "mock"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["mock-coder-loop"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = "Loop infinitely."
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 100
+
+[[team.workers]]
+agent_id = "mock-coder-loop"

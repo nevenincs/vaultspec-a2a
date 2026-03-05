@@ -1,0 +1,20 @@
+[agent]
+id           = "mock-coder-invalid"
+display_name = "Mock Coder Invalid"
+role         = "coder"
+description  = "Mock coder agent that raises an InvalidUpdateError."
+
+[agent.persona]
+system_prompt = "You are a mock coder. Emit your programmed invalid sequence."
+
+[agent.model]
+provider   = "mock"
+capability = "mid"
+
+[agent.capabilities]
+filesystem_read  = true
+filesystem_write = true
+terminal         = true
+
+[agent.permissions]
+require_approval_for = []

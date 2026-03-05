@@ -63,7 +63,7 @@ class ProviderFactory:
 
         # Guard unsupported providers before model resolution to produce a clear error
         # (PROVIDER_DEFAULT_MODELS lookup raises KeyError for unknown providers).
-        supported = {Provider.CLAUDE, Provider.GEMINI, Provider.ZHIPU, Provider.OPENAI}
+        supported = {Provider.CLAUDE, Provider.GEMINI, Provider.MOCK, Provider.ZHIPU, Provider.OPENAI}
         if provider not in supported:
             logger.error("Failed to instantiate: Unsupported provider %s", provider)
             raise ValueError(f"Unsupported provider: {provider}")
@@ -101,6 +101,10 @@ class ProviderFactory:
             provider,
             model_name,
         )
+
+        if provider == Provider.MOCK:
+            from .mock_chat_model import MockChatModel  # noqa: PLC0415
+            return MockChatModel(agent_config=agent_config)
 
         if provider == Provider.CLAUDE:
             oauth_token = settings.claude_code_oauth_token

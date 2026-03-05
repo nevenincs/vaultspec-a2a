@@ -49,6 +49,7 @@ class Provider(StrEnum):
 
     CLAUDE = "claude"
     GEMINI = "gemini"
+    MOCK = "mock"
     OPENAI = "openai"
     ZHIPU = "zhipu"
 
@@ -85,6 +86,12 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "gpt-5.3-codex",
         Model.MAX: "gpt-5.3-codex",
     },
+    Provider.MOCK: {
+        Model.LOW: "mock-low",
+        Model.MID: "mock-mid",
+        Model.HIGH: "mock-high",
+        Model.MAX: "mock-max",
+    },
     Provider.ZHIPU: {
         Model.LOW: "glm-4.7-flash",
         Model.MID: "glm-4.7-flagship",
@@ -98,6 +105,7 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.CLAUDE: Model.MID,
     Provider.GEMINI: Model.MID,
+    Provider.MOCK: Model.MID,
     Provider.OPENAI: Model.HIGH,
     Provider.ZHIPU: Model.HIGH,
 }

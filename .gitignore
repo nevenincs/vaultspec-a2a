@@ -25,10 +25,31 @@ venv/
 
 # antigravity
 .profile
+.claude/
+.gemini/
+.agent/
 
 # Node.js
 node_modules/
 
-build/
+# Playwright
+.playwright-mcp/
+
+# Python caches
+.pytest_cache/
+.ruff_cache/
+
+# Editor settings
+.vscode/
+
+# Temp outputs
+tmp/
+out.txt
+
+# Database artifacts
 vaultspec.db
+vaultspec.db-shm
+vaultspec.db-wal
+
+build/
 data/

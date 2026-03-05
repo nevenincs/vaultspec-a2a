@@ -3,6 +3,7 @@
 import logging
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
@@ -13,6 +14,7 @@ from langgraph.types import interrupt
 from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..phase import infer_phase_from_vault_index
+from ..rules import RuleManager
 from ..state import TeamState
 
 
@@ -118,6 +120,11 @@ def create_supervisor_node(
         )
         anchoring = build_anchoring_context(state)
         messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
+        _ws_root = state.get("workspace_root")
+        if _ws_root:
+            _rules = RuleManager(Path(_ws_root)).compile()
+            if _rules:
+                messages.append(SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{_rules}"))
         if anchoring:
             messages.append(SystemMessage(content=anchoring))
         messages.extend(working_state.get("messages", []))

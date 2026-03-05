@@ -13,6 +13,7 @@ from langgraph.types import interrupt
 from ..anchoring import build_anchoring_context
 from ..context import CONTEXT_LIMIT, compact_context, should_compact
 from ..exceptions import WorkerExecutionError
+from ..rules import RuleManager
 from ..state import TeamState
 from ..task_queue import create_mark_task_complete_tool
 
@@ -149,6 +150,11 @@ def create_worker_node(
         )
         anchoring = build_anchoring_context(state)
         messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+        _ws_root = workspace_root or state.get("workspace_root")
+        if _ws_root:
+            _rules = RuleManager(Path(_ws_root)).compile()
+            if _rules:
+                messages.append(SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{_rules}"))
         if anchoring:
             messages.append(SystemMessage(content=anchoring))
         mounted = state.get("mounted_context")

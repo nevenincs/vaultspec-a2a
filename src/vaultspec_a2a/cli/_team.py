@@ -15,7 +15,8 @@ def team() -> None:
 @team.command()
 @click.option("--preset", required=True, help="Team preset name.")
 @click.option("--message", required=True, help="Initial task instruction.")
-def start(preset: str, message: str) -> None:
+@click.option("--name", default=None, help="Optional thread nickname.")
+def start(preset: str, message: str, name: str | None) -> None:
     """Start a new team from a preset."""
     from ._util import _api_client, _handle_response
 
@@ -24,6 +25,8 @@ def start(preset: str, message: str) -> None:
             "team_preset": preset,
             "initial_message": message,
         }
+        if name:
+            body["nickname"] = name
         resp = client.post("/threads", json=body)
         _handle_response(resp)
         data = resp.json()

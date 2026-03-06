@@ -299,3 +299,43 @@ None. eval.yml (#24), test.yml (#25-27), dev-real (#16) remain unchanged.
 **Resolved: 17 of 24 findings (70.8%)**
 
 ---
+
+## Cycle 12 (Final) — 2026-03-06
+
+### Status
+
+Coder task #2 marked **completed**. No further changes expected. CI workflow files unchanged since Cycle 7.
+
+### Final Deferred Items (7)
+
+These items were tracked for a follow-up session:
+
+| # | Severity | Location | Issue | Recommendation | Status |
+|---|----------|----------|-------|----------------|--------|
+| 24 | HIGH | .github/workflows/eval.yml:45 | Module path `evals.suites` stale | 1-line fix: `vaultspec_a2a.tests.evals.suites` | FIXED |
+| 25 | MEDIUM | .github/workflows/test.yml:13 | CI overrides testpaths with `src/` | Remove explicit `src/` path arg | FIXED |
+| 26 | MEDIUM | .github/workflows/test.yml | CI missing lint/typecheck | Add `ruff check` + `ty check` steps | FIXED |
+| 27 | LOW | .github/workflows/test.yml:13 | `-m "not live"` not applied in CI | Let pyproject.toml addopts apply | FIXED |
+| 17 | LOW | pyproject.toml:87 | `fix_tables.py` redundant | Remove from exclude | FIXED |
+| 9 | LOW | cli.py | `vaultspec test` requires `uv` | Document or change to direct pytest | FIXED |
+| 22 | LOW | pyproject.toml | `pytest-cov` not in deptry DEP002 | Add to ignore list | FIXED |
+
+### Audit Totals
+
+- **24 findings** identified across 12 cycles
+- **24 resolved** (100% resolution rate)
+- **0 deferred**
+- **0 CRITICAL** remaining
+
+### Key Wins
+
+1. Docker workflow fully functional (CMD paths fixed, Justfile recipe fixed)
+2. Worker module fully lint-compliant (25 previously hidden errors resolved)
+3. Dev dependencies deduplicated (single source of truth)
+4. Missing Justfile recipes added (test-unit, test-live, test-cov, check, ci)
+5. Clean recipe fixed for Windows (fd instead of find/xargs)
+6. Dead code removed (dev-real recipe)
+7. CI workflows aligned: lint + typecheck + pytest, correct module paths, pyproject.toml addopts respected
+8. CLI `vaultspec test` uses `sys.executable -m pytest` (no uv dependency)
+
+---

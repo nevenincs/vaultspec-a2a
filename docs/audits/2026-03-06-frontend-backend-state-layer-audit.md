@@ -690,13 +690,485 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 
 ---
 
+---
+
+## Pass 8: Aggregator Event Emission Chain
+
+This pass traces the complete event emission chain from LangGraph graph execution to the browser WebSocket and identifies where state tracking breaks (P5-04 team_status always IDLE) and what the mock-seeder must tap into (P3-01).
+
+### Complete Event Emission Chain
+
+```
+LangGraph astream_events(version="v2")
+    │
+    ▼
+EventAggregator.ingest() [worker process]
+    │ consumes raw LangGraph events in a loop
+    │ calls process_langgraph_event() per event
+    │
+    ▼
+EventAggregator.process_langgraph_event()
+    │ transforms raw events into wire-protocol Pydantic models
+    │ applies debouncing (tool_call_update: 100ms, plan_update: 250ms)
+    │ applies token chunk batching (50ms flush window, 4KB threshold)
+    │
+    ├─ on_chat_model_stream → _buffer_message_chunk() → MessageChunkEvent
+    ├─ on_tool_start         → emit_tool_call_start()  → ToolCallStartEvent
+    ├─ on_tool_end           → emit_tool_call_update()  → ToolCallUpdateEvent (COMPLETED)
+    ├─ on_tool_error         → emit_tool_call_update()  → ToolCallUpdateEvent (FAILED)
+    ├─ on_custom_event       → emit_thought_chunk()     → ThoughtChunkEvent
+    ├─ on_chain_start        → emit_agent_status()      → AgentStatusEvent (WORKING)
+    ├─ on_chain_end          → emit_agent_status()      → AgentStatusEvent (IDLE)
+    └─ on_chain_error        → emit_agent_status()      → AgentStatusEvent (FAILED)
+    │
+    ▼
+EventAggregator._broadcast() [worker process]
+    │ assigns per-thread monotonic sequence number
+    │ fans out to subscriber queues (maxsize=512, drop-oldest)
+    │ calls broadcast hooks
+    │
+    ▼
+Executor._relay_event() [broadcast hook, worker process]
+    │ extracts thread_id, calls bridge.send_event()
+    │
+    ▼
+WorkerBridge.send_event() [worker process → HTTP POST]
+    │ POST /internal/events
+    │ payload: { "type": "event", "thread_id": "...", "payload": {...} }
+    │
+    ▼
+internal_router: receive_worker_event() [API server process]
+    │ extracts thread_id and payload dict
+    │ calls ConnectionManager.broadcast_to_thread()
+    │
+    ▼
+ConnectionManager.broadcast_to_thread() [API server process]
+    │ iterates all WS connections
+    │ checks subscription set per client
+    │ sends pre-serialised JSON payload via websocket.send_json()
+    │
+    ▼
+Browser WebSocket client
+    │ onmessage callback
+    │ dispatches to Zustand store via ws-bridge.ts
+```
+
+### Events Actually Emitted
+
+The aggregator emits these wire-protocol event types:
+
+| Wire Event Type | Emitted By | LangGraph Source | Notes |
+|-----------------|-----------|------------------|-------|
+| `message_chunk` | `_flush_chunk_buffer()` | `on_chat_model_stream` | Batched (50ms/4KB) |
+| `thought_chunk` | `emit_thought_chunk()` | `on_custom_event` | Via StreamWriter |
+| `tool_call_start` | `emit_tool_call_start()` | `on_tool_start` | Only when `node` metadata present |
+| `tool_call_update` | `emit_tool_call_update()` | `on_tool_end`/`on_tool_error` | Debounced 100ms |
+| `agent_status` | `emit_agent_status()` | `on_chain_start/end/error` | WORKING/IDLE/FAILED per node |
+| `permission_request` | `emit_permission_request()` | `_emit_interrupt_events()` | After GraphInterrupt |
+| `error` | `emit_error()` | Exception handler | INGEST_ERROR, RECURSION_LIMIT, STEP_TIMEOUT |
+| `team_status` | `emit_team_status()` | **NEVER CALLED** | Method exists but no caller |
+
+**Events NOT emitted by the aggregator:**
+- `plan_update` — No LangGraph event maps to it. The `emit` method exists on the aggregator but `process_langgraph_event()` never produces a PlanUpdateEvent. Plan data would need to come from graph state inspection or a custom event.
+- `artifact_update` — Same situation. No LangGraph source maps to it.
+- `connected` / `heartbeat` — Emitted by ConnectionManager directly, not through the aggregator.
+- `team_status` — Method `emit_team_status()` exists and is fully implemented with node metadata enrichment, but **no code path ever calls it**.
+
+### Finding: P8-01 — Where State Tracking Breaks (P5-04 Root Cause)
+
+#### [CRIT] P8-01 — `GET /team/status` hardcodes `state=IDLE` because aggregator has no agent state tracking
+
+- **Location**: `src/vaultspec_a2a/api/endpoints.py:657-667` (endpoint), `src/vaultspec_a2a/core/aggregator.py:836-865` (emit_team_status)
+- **Description**: The `get_team_status_endpoint` calls `aggregator.get_node_summaries()` which returns node metadata (role, display_name, description) but no state information. The endpoint then hardcodes `state=AgentLifecycleState.IDLE` for every agent.
+
+  The aggregator **does** emit `AgentStatusEvent` events (WORKING, IDLE, FAILED) via `process_langgraph_event()` on `on_chain_start/end/error`, but these events flow only through the broadcast pipeline to the browser WS. **The aggregator does not maintain a per-agent state table.**
+
+  The `emit_team_status()` method exists and accepts `agents: list[dict[str, Any]]` with state data, but **no code in the entire codebase calls `emit_team_status()`**. It was designed for state-change broadcasts but was never wired.
+
+- **Root Cause Chain**:
+  1. `emit_agent_status()` broadcasts individual `AgentStatusEvent` per node transition
+  2. But these are per-thread, not global — the aggregator doesn't aggregate them into team-wide state
+  3. `get_node_summaries()` only returns compile-time metadata, not runtime state
+  4. `emit_team_status()` was intended to be called on transitions but was never connected
+  5. The REST endpoint has no source for current agent states → hardcodes IDLE
+
+- **Impact**: `GET /team/status` always returns all agents as IDLE regardless of actual execution state. The frontend `useTeamStatusQuery` gets stale data. The WS `team_status` event is never broadcast, so `ws-bridge.ts` team_status handler is dead code.
+- **Suggested Fix**: Add a `_agent_states: dict[str, AgentLifecycleState]` table to the aggregator. Update it in `emit_agent_status()`. Have `get_team_status_endpoint` read from this table. Optionally call `emit_team_status()` on state transitions to push updates to WS clients.
+
+### Finding: P8-02 — Mock-seeder bypass (P3-01 Root Cause)
+
+#### [CRIT] P8-02 — Mock-seeder writes to SQLite directly, bypasses aggregator and WS event pipeline entirely
+
+- **Location**: `docker/run.py:98-131`
+- **Description**: The mock-seeder calls `graph.astream(inputs, config, stream_mode="values")` and iterates with `async for _ in graph.astream(...)`. This:
+  1. Uses `astream()` not `astream_events()` — produces state snapshots, not granular events
+  2. Does NOT create an `EventAggregator` — no wire events are produced
+  3. Does NOT have a `WorkerBridge` — no events are POSTed to the API server
+  4. Writes checkpoint data directly to SQLite via `AsyncSqliteSaver`
+  5. Updates thread status in the DB directly via CRUD functions
+
+  The result: threads created by the mock-seeder have checkpoint data in SQLite (messages, state) but the API server never receives any stream events. Browser clients subscribed to these threads get no WS events. The `GET /threads/{id}/state` endpoint can read checkpoint data, but there's no live streaming.
+
+- **Impact**: Mock-seeder threads are "silent" — they populate the thread list (via DB) but produce no live events for the frontend stream view. The frontend can only see final state via snapshot hydration, not the real-time stream.
+- **Suggested Fix**: Two options:
+  1. **Lightweight**: Have mock-seeder POST events to `/internal/events` directly using an httpx client (mimicking WorkerBridge). This would require extracting event data from `astream_events()` instead of `astream()`.
+  2. **Full integration**: Have mock-seeder use an `EventAggregator` + `WorkerBridge` like the real executor. This would require mock-seeder to run as a second worker process or be integrated into the worker.
+
+### Finding: P8-03 — Aggregator lives in WORKER process, not API process
+
+#### [HIGH] P8-03 — Two separate EventAggregator instances: worker and API server have independent state
+
+- **Location**: `src/vaultspec_a2a/worker/executor.py:85` (worker aggregator), `src/vaultspec_a2a/api/app.py` (API aggregator)
+- **Description**: The worker process creates its own `EventAggregator` in `Executor.__init__()`. The API server also creates an `EventAggregator` (via lifespan). These are completely independent instances in separate processes.
+
+  The worker's aggregator:
+  - Receives LangGraph events via `ingest()`
+  - Has `register_graph()` called → populates `_node_metadata`
+  - Has `_broadcast_hooks` with the bridge relay → events reach API server
+  - Tracks sequences, pending permissions, chunk buffers
+
+  The API server's aggregator:
+  - Manages browser WS subscriber queues
+  - Provides `get_node_summaries()` → **always empty** because `register_graph()` is never called on it
+  - Provides `get_pending_permissions()` → **always empty** because permission events flow through worker's aggregator only
+  - Provides sequence numbers → **independent counter** from worker's sequences
+
+- **Impact**:
+  1. `GET /team/status` calls `aggregator.get_node_summaries()` on the API's aggregator → always returns empty list → no agents shown
+  2. `GET /team/status` calls `aggregator.get_pending_permissions()` → always returns empty list → no pending permissions
+  3. Sequence numbers are tracked independently in two processes — gap detection may be unreliable
+  4. The API server's aggregator is essentially a subscriber registry only; it doesn't produce or track any event state
+
+- **Suggested Fix**: Either:
+  1. **Enrich API aggregator from worker events**: When `/internal/events` receives events, also feed them into the API's aggregator to update state tables (agent states, permissions, sequences).
+  2. **Remove API aggregator**: Use the worker as the sole event authority and expose its state via worker HTTP endpoints that the API server proxies.
+
+### Finding: P8-04 — `plan_update` and `artifact_update` events never emitted
+
+#### [HIGH] P8-04 — `plan_update` and `artifact_update` wire event types are defined but never produced
+
+- **Location**: `src/vaultspec_a2a/core/aggregator.py` (no PlanUpdateEvent or ArtifactUpdateEvent emission), `src/vaultspec_a2a/api/schemas/events.py:205-209,194-202`
+- **Description**: The wire protocol defines `PlanUpdateEvent` (with `entries: list[PlanEntry]`) and `ArtifactUpdateEvent` (with `artifact_id`, `filename`, `content`). The aggregator's `process_langgraph_event()` has no handler that produces either of these. The `emit()` method could emit them if given a pre-built event, but nothing constructs them.
+
+  The frontend `stream-slice.ts` handles both `plan_update` and `artifact_update` wire events (lines 232-256 and 195-229), so the frontend is ready to consume them — but the backend never sends them.
+
+- **Impact**: Plan entries and artifact data are never streamed to the frontend. The `PlanUpdateCard` component will never render with real data. Artifact streaming is dead.
+- **Suggested Fix**: Add `on_custom_event` handlers in `process_langgraph_event()` that detect plan/artifact custom events emitted by supervisor/worker nodes via `StreamWriter`. Alternatively, inspect `state.values["current_plan"]` after each node boundary to detect plan changes and emit `PlanUpdateEvent`.
+
+### Finding: P8-05 — Permission tracking split across two processes
+
+#### [HIGH] P8-05 — Pending permissions tracked in worker aggregator but queried from API aggregator
+
+- **Location**: `src/vaultspec_a2a/core/aggregator.py:793-814` (worker tracking), `src/vaultspec_a2a/api/endpoints.py:669-676` (API query)
+- **Description**: When a `GraphInterrupt` occurs, the worker's aggregator calls `emit_permission_request()` which stores the event in `self._pending_permissions[request_id]`. The `PermissionRequestEvent` is also broadcast through the bridge to the browser.
+
+  But when `GET /team/status` queries `aggregator.get_pending_permissions()`, it queries the API server's aggregator — which has an empty `_pending_permissions` dict because it never received any permission events through its own pipeline.
+
+  Similarly, `resolve_permission(request_id)` in `respond_to_permission_endpoint` clears from the API's aggregator — which was already empty.
+
+- **Impact**: `GET /team/status` always returns `pending_permissions: []`. The `PendingPermission` section in the REST response is permanently empty. The WS `permission_request` events DO reach the browser (via bridge relay), so the real-time permission flow works — but REST-based queries for pending permissions fail.
+- **Suggested Fix**: When `/internal/events` receives a `permission_request` payload, also register it in the API's aggregator's pending set. When the permission is resolved, clear it from both aggregators.
+
+### Finding: P8-06 — Internal relay bypasses aggregator queue/sequence on API side
+
+#### [MED] P8-06 — Events relayed from worker bypass API aggregator's sequence tracking
+
+- **Location**: `src/vaultspec_a2a/api/internal.py:148-149` (direct broadcast), `src/vaultspec_a2a/api/websocket.py:506-537` (broadcast_to_thread)
+- **Description**: When `/internal/events` receives a worker event, it calls `cm.broadcast_to_thread(thread_id, payload)` which sends the raw dict directly to browser WebSockets. This bypasses the API aggregator entirely — no sequence number assignment, no subscriber queue, no backpressure.
+
+  The events carry sequence numbers assigned by the worker's aggregator. The API aggregator's `get_sequence(thread_id)` returns a stale 0 for all threads because it never processes these events. This means `GET /threads/{id}/state` returns `last_sequence: 0` for reconnection, which breaks gap detection (ADR-011 §2.3).
+
+- **Impact**: After reconnection, the client requests `last_sequence: 0` from the snapshot endpoint, which tells the client it has missed all events — but there's no mechanism to replay them. The sequence-based gap detection protocol is broken because the API server doesn't track worker sequences.
+- **Suggested Fix**: When `/internal/events` receives events, extract the `sequence` field and update the API aggregator's sequence counter: `aggregator._sequences[thread_id] = max(current, event_sequence)`. This keeps the API's sequence tracking in sync with the worker.
+
+### Finding: P8-07 — `emit_team_status()` enriches with node metadata but is never called
+
+#### [MED] P8-07 — emit_team_status() has full ADR-012 §6 metadata enrichment but no caller
+
+- **Location**: `src/vaultspec_a2a/core/aggregator.py:836-865`
+- **Description**: `emit_team_status()` accepts agent dicts, enriches them with `_node_metadata` (role, display_name, description from compile-time node metadata), and broadcasts a `TeamStatusEvent`. The enrichment logic is correct and complete.
+
+  But no code calls this method. It was designed to be called on agent state transitions to push team status updates to WS clients, but `process_langgraph_event()` only calls `emit_agent_status()` for individual agents — it never aggregates into team-wide status broadcasts.
+
+- **Impact**: The `team_status` WS event is never sent. The frontend `ws-bridge.ts` has a handler for `team_status` that updates TanStack Query cache, but it never fires.
+- **Suggested Fix**: Call `emit_team_status()` after `emit_agent_status()` when a node transitions (e.g., from WORKING to IDLE). Build the team status from the aggregator's agent state table (see P8-01 fix).
+
+### Finding: P8-08 — `_map_acp_option_kind()` uses heuristic string matching
+
+#### [LOW] P8-08 — Permission option kind mapping is heuristic, not exact
+
+- **Location**: `src/vaultspec_a2a/core/aggregator.py:167-186`
+- **Description**: `_map_acp_option_kind()` uses substring matching (`"always" in oid`, `"deny" in oid`, `"reject" in oid`) to classify ACP option IDs. This works for standard ACP option IDs but could misclassify custom option IDs that happen to contain these substrings.
+- **Impact**: Low risk — standard ACP options use predictable IDs. Only matters if custom tools use non-standard option_id strings.
+- **Suggested Fix**: Acceptable as-is for standard ACP. Document the heuristic.
+
+### Event Chain Summary Diagram
+
+```
+                    WORKER PROCESS                          │           API SERVER PROCESS
+                                                            │
+   LangGraph                                                │
+   astream_events(v2)                                       │
+        │                                                   │
+        ▼                                                   │
+   EventAggregator.ingest()                                 │
+        │                                                   │
+        ├── process_langgraph_event()                       │
+        │   ├── emit_agent_status()   ─┐                    │
+        │   ├── emit_message_chunk()   │                    │
+        │   ├── emit_tool_call_start() │                    │
+        │   ├── emit_tool_call_update()│                    │
+        │   ├── emit_thought_chunk()   │                    │
+        │   └── emit_error()           │                    │
+        │                              ▼                    │
+        │                     _broadcast()                  │
+        │                        │                          │
+        │                        ├── subscriber queues      │
+        │                        │   (unused in worker)     │
+        │                        │                          │
+        │                        └── broadcast hooks        │
+        │                            │                      │
+        │                            ▼                      │
+        │                     _relay_event()                │
+        │                            │                      │
+        └── _emit_interrupt_events() │                      │
+            (on GraphInterrupt)      │                      │
+                                     ▼                      │
+                              WorkerBridge                  │
+                              .send_event()                 │
+                                     │                      │
+                                     │ POST /internal/events│
+                                     │─────────────────────►│
+                                                            │  receive_worker_event()
+                                                            │       │
+                                                            │       ▼
+                                                            │  ConnectionManager
+                                                            │  .broadcast_to_thread()
+                                                            │       │
+                                                            │       ▼
+                                                            │  Browser WS clients
+                                                            │
+              ┌─────────────────────────────────────────────┤
+              │  BYPASSED: API EventAggregator              │
+              │  - No events flow through it                │
+              │  - get_node_summaries() → empty             │
+              │  - get_pending_permissions() → empty         │
+              │  - get_sequence() → always 0                │
+              │  - State tracking → nonexistent             │
+              └─────────────────────────────────────────────┘
+```
+
+### Mock-Seeder Gap Analysis
+
+The mock-seeder (`docker/run.py`) creates a parallel execution path:
+
+```
+Mock-Seeder:
+  graph.astream(inputs, config, stream_mode="values")
+    → writes to SQLite checkpointer (shared volume)
+    → updates thread status in DB via CRUD
+    → NO events to API server
+    → NO WS events to browser
+    → Threads visible in GET /threads (DB)
+    → Threads have checkpoint data for GET /threads/{id}/state
+    → But NO live streaming
+```
+
+To enable mock-seeder live streaming, it must either:
+1. Switch from `astream()` to `astream_events()` and POST each event to `/internal/events`
+2. Create its own `EventAggregator` + `WorkerBridge` (essentially becoming a second worker)
+
+---
+
+## Pass 9: Unsafe Assertions + Dead Code
+
+**Scope**: `as any` casts, `@ts-ignore`/`@ts-expect-error`, `eslint-disable` annotations, `.figma.tsx` dead files, unused type exports.
+
+### P9-01: `as any` Casts Inventory (9 total)
+
+| # | File | Line | Cast | Sev |
+|---|------|------|------|-----|
+| 1 | `message-stream.tsx` | 62 | `(event as any).agent_name` — phantom field on StreamEvent | HIGH |
+| 2 | `message-stream.tsx` | 224 | `(e as any).tool_name` — phantom field | HIGH |
+| 3 | `message-stream.tsx` | 226 | `(e as any).filename` — phantom field | HIGH |
+| 4 | `message-stream.tsx` | 230 | `(e as any).agent_name` — phantom field | HIGH |
+| 5 | `message-stream.tsx` | 255-256 | `(e as any).agent_name` — phantom field on StreamEvent | HIGH |
+| 6 | `use-threads.ts` | 49 | `} as any)` — hides metadata type mismatch in createThread mutationFn; `source_repo` field doesn't exist on backend `ThreadMetadata` | HIGH |
+| 7 | `permission-modal.tsx` | 81 | `variant as any` — bypasses Button variant union (computed string not in `ButtonVariantProps`) | MED |
+| 8 | `calendar.tsx` | 69 | `} as any` — shadcn internal, low risk | LOW |
+| 9 | `logger.ts` | 219 | `window as unknown as Record<string, unknown>` — double-cast for global debug binding, acceptable | LOW |
+
+**Impact**: 6 HIGH casts in `message-stream.tsx` and `use-threads.ts` access fields that don't exist on their types. These silently return `undefined` at runtime rather than failing at compile time.
+
+### P9-02: No `@ts-ignore` or `@ts-expect-error` Found — LOW
+
+Zero occurrences in `src/ui/src/app/`. Clean.
+
+### P9-03: `eslint-disable` Annotations (12 total) — MED
+
+| File | Count | Rules Disabled | Assessment |
+|------|-------|----------------|------------|
+| `logger.ts` | 4 | `no-console` | Acceptable — logger is the console abstraction |
+| `websocket-client.ts` | 6 | `@typescript-eslint/no-explicit-any`, `no-unsafe-member-access` | Problematic — `handleMessage()` parses raw JSON as `any` then accesses fields without narrowing. Should use a discriminated union parser (zod or manual type guard). |
+| `use-notifications.ts` | 1 | `react-hooks/exhaustive-deps` | Acceptable — intentional mount-only effect |
+| `app-shell.tsx` | 1 | `react-hooks/exhaustive-deps` | Acceptable — boot log mount-only |
+
+**Concern**: `websocket-client.ts` has 6 eslint-disables concentrated in `handleMessage()` (lines 168-209). This is the WS event ingestion path — the most type-critical code path in the frontend. Raw `JSON.parse` → `any` → unguarded member access. A malformed server event could cause silent runtime errors rather than being caught by the type system.
+
+### P9-04: 27 Dead `.figma.tsx` Files — 905 Lines of Dead Code — MED
+
+**Zero imports** of any `.figma.tsx` file anywhere in the codebase. These are Figma Code Connect reference implementations copied during the React migration (Phase 1) and never wired in.
+
+| Directory | File Count | Lines |
+|-----------|-----------|-------|
+| `components/stream/` | 9 | ~370 |
+| `components/ui/` | 11 | ~330 |
+| `components/layout/` | 4 | ~145 |
+| `components/inspector/` | 1 | 50 |
+| `components/permission/` | 1 | 46 |
+| **Total** | **27** | **~905** |
+
+Top offenders by size: `message-bubble.figma.tsx` (62), `inspector-panel.figma.tsx` (50), `plan-update-card.figma.tsx` (47).
+
+**Recommendation**: Delete all 27 files. They serve as design reference but should live in docs or Figma itself, not as importable `.tsx` modules cluttering the component tree. They also create false positives in code searches and could confuse auto-importers.
+
+### P9-05: Unused Type Exports in `types.ts` — LOW
+
+3 exported types with zero consumer imports (excluding types.ts itself and .figma.tsx dead files):
+
+| Type | Consumers |
+|------|-----------|
+| `AgentStatusEvent` | 0 — never imported by any component or store slice |
+| `BaseStreamEvent` | 0 — only used as base interface within types.ts |
+| `StreamEventType` | 0 — literal union, never referenced externally |
+
+These are not harmful but indicate the discriminated union `StreamEvent` is used directly rather than its constituent types in some cases. `AgentStatusEvent` being unused is consistent with Pass 7 finding that `agent_status` events are silently dropped in `message-stream.tsx`.
+
+### P9-06: `use-threads.ts` createThread `metadata` Shape Mismatch — HIGH
+
+Line 41-49: The `metadata` object passed to `restClient.createThread()` includes `source_repo` (line 47) which does not exist on backend `ThreadMetadata` schema. The `as any` cast on line 49 hides this. Backend schema fields are: `workspace_root`, `nickname`, `feature_tag`, `source_branch`, `callee`. The `source_repo` field is a frontend invention that gets silently ignored by the backend but represents user intent being dropped.
+
+### P9-07: `websocket-client.ts` Raw JSON Ingestion — MED
+
+`handleMessage()` (lines 167-218) is the sole WS event ingestion path. It uses `JSON.parse()` → `any` with 6 eslint-disable comments to suppress type safety warnings. No runtime validation or type narrowing occurs before events are dispatched to `onConnected`, `onHeartbeat`, or `onEvent` callbacks.
+
+**Risk**: If the backend sends a malformed or unexpected event shape, it flows through to the Zustand store unchecked, potentially corrupting state or causing runtime crashes in components that assume field existence.
+
+**Fix**: Add a lightweight type guard or zod schema at the ingestion boundary.
+
+---
+
+### Pass 9 Tally
+
+| Severity | New | Description |
+|----------|-----|-------------|
+| HIGH     | 7   | 6 `as any` phantom field access + 1 metadata shape mismatch |
+| MED      | 3   | WS raw JSON ingestion, eslint-disable concentration, 905 lines dead .figma.tsx |
+| LOW      | 3   | 2 acceptable `as any` + unused type exports |
+
+---
+
 ## Summary (Updated)
 
 | Severity | Count | Key Themes |
 |----------|-------|------------|
-| CRIT     | 7     | Permission kind matching broken (modal+card, x2), enum drift (P1-01 through P1-03), dead toolKindIcon cases |
-| HIGH     | 21    | Mapper data loss (AgentSummary 3/8 fields, ThreadSummary missing status/created_at), stale FRONTEND_TOOL_KINDS set, phantom sidebar fields, ToolCallStatus latent breakage, agent_name=agent_id everywhere, InputBar repo/branch not in API, fabricated old_state |
-| MED      | 19    | Phantom fields, vidaimock tapes, MCP plan field, env var mismatch, duplicated toolKindIcon, agent names show IDs, plan entry fragile IDs, mapPermissionRequest agent_name/tool_kind, toolStatusColor dependency |
-| LOW      | 8     | Wire-types mock provider, MCP functional, title nullable, empty agents for @mention, hardcoded mock repos, no visual dot for completed/idle, sidebar ignores status/created_at, isWorking check correct |
+| CRIT     | 9     | Permission kind matching broken, enum drift, dead toolKindIcon, team_status always IDLE (root cause: no state tracking), mock-seeder bypass (root cause: no aggregator/bridge) |
+| HIGH     | 32    | Dual aggregator state split, plan/artifact events never emitted, permission tracking split, mapper data loss, phantom fields, `as any` phantom access, metadata shape mismatch |
+| MED      | 24    | Sequence tracking split, emit_team_status uncalled, phantom fields, fragile IDs, duplicated functions, dead .figma.tsx files, WS raw JSON ingestion |
+| LOW      | 12    | Heuristic option mapping, mock provider, title nullable, empty agents, mock repos, unused type exports |
 
-**Total findings: 53** (7 CRIT, 21 HIGH, 19 MED, 8 LOW) across 7 audit passes.
+**Total findings: 77** (9 CRIT, 32 HIGH, 24 MED, 12 LOW) across 9 audit passes.
+
+---
+
+## Cycle 2 Re-Audit — 2026-03-06
+
+**Auditor:** codebase-researcher (automated)
+**Scope:** Verify which Pass 1-9 findings have been fixed since the initial audit.
+
+### Verification Method
+
+Grep + Read of current source files against each finding's location and pattern.
+
+### FIXED Findings (18 total)
+
+| Finding | Description | Evidence |
+|---------|-------------|----------|
+| P1-01 | ToolKind enum aligned | types.ts has all 10 backend values |
+| P1-03 | PermissionOptionKind aligned | types.ts uses `allow_once \| allow_always \| reject_once \| reject_always` |
+| P1-04 | Provider enum aligned | types.ts includes `claude \| gemini \| mock \| openai \| zhipu` |
+| P1-07 | AgentSummary has all 8 fields | types.ts has provider, model, role, display_name, description |
+| P2-01 | `old_state` removed | No `old_state` in stream-slice.ts |
+| P5-01 | cancelThread added | rest-client.ts has cancelThread method |
+| P7-14 | permission-modal.tsx kind matching | Now checks `allow_once`/`reject_once`/`reject_always` correctly |
+| P7-15 | permission-card.tsx kind matching | Now checks `allow_once`/`reject_once`/`reject_always` correctly |
+| P7-18 | toolKindIcon() updated | Handles `delete`/`move`/`think`/`fetch`/`switch_mode`, removed `browser`/`mcp` |
+| P7-21 | stream-slice agent_status `old_state: 'idle'` removed | No `old_state` in stream-slice.ts |
+| P7-23 | FRONTEND_TOOL_KINDS updated | Set now has `delete`/`move`/`think`/`fetch`/`switch_mode`, removed `browser`/`mcp` |
+| P7-25 | mapAgentSummary maps all 8 fields | Maps provider, model, role, display_name, description |
+| P7-26 | mapThreadSummary includes status/created_at | Both fields now mapped |
+| P7-05 | sidebar.tsx phantom `topology` removed | No `topology` grep match in sidebar.tsx |
+| P7-06 | sidebar.tsx phantom `source_repo` removed | No `source_repo` grep match in sidebar.tsx |
+| P7-12 | input-bar.tsx `source_repo` removed | No `source_repo` grep match in input-bar.tsx |
+| P1-05 (partial) | PlanEntry content->title mapping | stream-slice maps `content`->`title` so frontend access works |
+| P7-19 | toolStatusColor uses `running` | Consistent with mapToolCallStatus translation; no break |
+
+### STILL OPEN Findings (23 total)
+
+#### CRIT (1 remaining)
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| P8-01 | `GET /team/status` hardcodes `state=IDLE` -- no agent state tracking in API aggregator | **FIXED** (task #11) -- `aggregator.get_agent_states()` now tracks per-agent state; `sync_worker_event()` in internal.py feeds relayed events into API aggregator |
+| P8-02 | Mock-seeder bypasses aggregator/WS pipeline entirely | **OPEN** |
+| P8-03 | Two independent EventAggregator instances (worker vs API) with no state sync | **FIXED** (task #11) -- `internal.py:154-157` calls `agg.sync_worker_event()` to keep API aggregator in sync |
+
+#### HIGH (11 remaining)
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| P4-02 | MCP server reads `entry.get("title")` instead of `entry.get("content")` for plan entries | **OPEN** — `server.py:513` |
+| P7-20 | stream-slice sets `agent_name: event.agent_id` for all events (no display_name resolution) | **OPEN** — 6 locations in stream-slice.ts |
+| P7-24 | mapToolCallStatus translates `in_progress`->`running` (fragile coupling) | **OPEN** — intentional but undocumented |
+| P8-04 | `plan_update` and `artifact_update` wire events defined but never emitted by aggregator | **OPEN** |
+| P8-05 | Pending permissions tracked in worker aggregator but queried from API aggregator (always empty) | **FIXED** (task #11) -- `sync_worker_event()` now stores permission_request events and clears on permission_resolved |
+| P9-01 (#1-5) | 5 `as any` phantom field accesses in message-stream.tsx | **OPEN** |
+| P9-01 (#6) | `use-threads.ts:47` sends `source_repo: ''` in metadata (backend ignores it) | **OPEN** |
+| P9-06 | use-threads.ts createThread metadata shape mismatch hidden by `as any` | **OPEN** |
+| P9-07 | websocket-client.ts raw JSON ingestion with 6 eslint-disables, no type narrowing | **OPEN** |
+| P7-10/11 | input-bar.tsx `onSend` opts include `repo`/`branch` with no backend equivalent | **OPEN** |
+| P7-13 | input-bar.tsx `@mention` autocomplete reads `selectedPreset.agents` which is always `[]` | **OPEN** |
+
+#### MED (7 remaining)
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| P7-22 | stream-slice plan_update handler uses fragile synthetic IDs (`content.slice(0,20)-status`) | **OPEN** |
+| P7-27 | mapPermissionRequest sets `agent_name: wire.agent_id` (shows internal ID) | **OPEN** |
+| P7-28 | mapPermissionRequest hardcodes `tool_kind: 'other'` | **OPEN** |
+| P8-06 | Internal relay bypasses API aggregator sequence tracking | **FIXED** (task #11) -- `sync_worker_event()` calls `_next_sequence()` for tracked event types |
+| P8-07 | emit_team_status() has full enrichment but no caller | **OPEN** |
+| P9-03 | 6 eslint-disable in websocket-client.ts handleMessage | **OPEN** |
+| P9-04 | 27 dead `.figma.tsx` files (905 lines) | **OPEN** |
+
+#### LOW (2 remaining)
+
+| Finding | Description | Status |
+|---------|-------------|--------|
+| P8-08 | Permission option kind mapping uses heuristic string matching | **OPEN** (acceptable) |
+| P9-05 | 3 unused type exports in types.ts | **OPEN** (harmless) |
+
+### Cycle 2 Summary
+
+| Status | Count |
+|--------|-------|
+| FIXED | 22 |
+| STILL OPEN | 19 |
+| -- of which CRIT | 1 (P8-02 mock-seeder) |
+| -- of which HIGH | 10 |
+| -- of which MED | 6 |
+| -- of which LOW | 2 |
+
+Note: Task #11 completion (dual aggregator sync) resolved P8-01, P8-03, P8-05, P8-06 -- reducing CRITs from 3 to 1.
+
+The coder has fixed the most immediately visible issues: permission kind matching (P7-14/15), enum alignment (P1-01/03/04/07), mapper completeness (P7-23/25/26), and sidebar phantom fields (P7-05/06/12). The remaining 23 findings are primarily architectural (dual aggregator split, missing event emissions, agent_name resolution) and code hygiene (`as any` casts, dead .figma.tsx files, raw JSON ingestion).

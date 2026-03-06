@@ -6,7 +6,7 @@ for full type-safety.
 
 References:
     - ADR-007: SQLite WAL mode, aiosqlite
-    - ADR-009: Module hierarchy (``lib/database/``)
+    - ADR-009: Module hierarchy (``src/vaultspec_a2a/database/``)
     - ADR-011: Wire contract (data model context)
 """
 

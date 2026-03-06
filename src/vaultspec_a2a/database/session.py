@@ -15,7 +15,6 @@ from collections.abc import AsyncGenerator
 from pathlib import Path
 
 from sqlalchemy import event, text
-from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -164,7 +163,12 @@ async def init_db(
     *,
     echo: bool = False,
 ) -> AsyncEngine:
-    """Initialise the database: create engine, session factory, and all tables.
+    """Initialise the database engine, session factory, and schema.
+
+    For file-based databases, schema management is routed through Alembic
+    migrations (ADR-029).  For in-memory databases (test use only),
+    ``Base.metadata.create_all`` is used directly since Alembic cannot
+    target ``:memory:``.
 
     Args:
         db_path: Path to the SQLite database file.
@@ -172,30 +176,21 @@ async def init_db(
 
     Returns:
         The initialised ``AsyncEngine``.
-
-    DB-L3 NOTE: SQLite version compatibility is not validated here.
-    WAL mode (used by this module) requires SQLite >= 3.7.0 (released 2010).
-    aiosqlite ships its own SQLite on most platforms, so the minimum version
-    is effectively guaranteed.  If deploying on a system with a system-provided
-    SQLite, consider adding a check via ``SELECT sqlite_version()``.
     """
     if db_path is None:
         db_path = settings.database_path
     engine = get_engine(db_path, echo=echo)
     get_session_factory(engine)
 
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
-        # Idempotent migration: add team_preset column to existing DBs that
-        # pre-date this schema change.  create_all is a no-op on existing tables,
-        # so we must ALTER TABLE explicitly.  The OperationalError guard makes
-        # this safe to run on fresh databases where create_all already added it.
-        try:
-            await conn.execute(
-                text("ALTER TABLE threads ADD COLUMN team_preset TEXT")
-            )
-        except OperationalError:
-            pass  # Column already exists — nothing to do
+    str_path = str(db_path)
+    if str_path in (":memory:", ""):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.create_all)
+    else:
+        from .migrate import run_migrations  # noqa: PLC0415
+
+        url = f"sqlite+aiosqlite:///{str_path}"
+        await run_migrations(url)
 
     return engine
 

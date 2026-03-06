@@ -1,17 +1,19 @@
 """Persistence layer for the orchestrator.
 
-Facade re-exporting all public types from the ``lib.database`` subpackage.
+Facade re-exporting all public types from the ``vaultspec_a2a.database`` subpackage.
 Consumers should import from this module rather than reaching into
 sub-modules directly::
 
     from vaultspec_a2a.database import init_db, create_thread, ThreadModel
 """
 
+from .crud import InvalidTransitionError as InvalidTransitionError
 from .crud import ThreadStatus as ThreadStatus
 from .crud import append_cost_record as append_cost_record
 from .crud import append_permission_log as append_permission_log
 from .crud import create_artifact as create_artifact
 from .crud import create_thread as create_thread
+from .crud import delete_thread as delete_thread
 from .crud import get_artifact as get_artifact
 from .crud import get_artifacts_by_thread as get_artifacts_by_thread
 from .crud import get_permission_logs_by_thread as get_permission_logs_by_thread
@@ -39,6 +41,7 @@ from .migrate import run_migrations as run_migrations
 __all__ = [
     "ArtifactModel",
     "Base",
+    "InvalidTransitionError",
     "CostTrackingModel",
     "PermissionLogModel",
     "ThreadModel",
@@ -48,6 +51,7 @@ __all__ = [
     "close_db",
     "create_artifact",
     "create_thread",
+    "delete_thread",
     "get_artifact",
     "get_artifacts_by_thread",
     "get_db",

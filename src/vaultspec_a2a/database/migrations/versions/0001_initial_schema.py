@@ -1,7 +1,7 @@
 """initial_schema
 
 Baseline migration capturing the 4 app-owned tables as declared in
-``lib/database/models.py``.  LangGraph checkpoint tables (``checkpoints``,
+``src/vaultspec_a2a/database/models.py``.  LangGraph checkpoint tables (``checkpoints``,
 ``writes``) are excluded — they are managed by ``AsyncSqliteSaver.setup()``.
 
 Revision ID: 0001

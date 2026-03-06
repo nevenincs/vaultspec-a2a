@@ -26,9 +26,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # M19/DB-M1: database → core is the normal dependency direction (not circular).
 # NicknameConflictError is a domain exception that belongs in core; database
 # raises it when detecting UNIQUE constraint violations on nickname.
-# NOTE (DB-M1): This cross-module import (lib/database → lib/core) is intentional
+# NOTE (DB-M1): This cross-module import (vaultspec_a2a/database → vaultspec_a2a/core) is intentional
 # and follows the layered dependency direction prescribed by ADR-009. Moving this
-# exception into lib/database would create an orphan with no semantic home.
+# exception into vaultspec_a2a/database would create an orphan with no semantic home.
 from ..core.exceptions import NicknameConflictError
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
 
@@ -42,14 +42,17 @@ class ThreadStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
+    ARCHIVED = "archived"
 
 
 __all__ = [
+    "InvalidTransitionError",
     "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
     "create_artifact",
     "create_thread",
+    "delete_thread",
     "get_artifact",
     "get_artifacts_by_thread",
     "get_permission_logs_by_thread",
@@ -180,18 +183,22 @@ async def list_threads(
     *,
     offset: int = 0,
     limit: int = 50,
+    status: ThreadStatus | None = None,
 ) -> tuple[Sequence[ThreadModel], int]:
-    """List threads with pagination.
+    """List threads with pagination and optional status filter.
 
     Args:
         session: Active async session.
         offset: Number of rows to skip.
         limit: Maximum number of rows to return.
+        status: Optional status filter.
 
     Returns:
         A tuple of ``(threads, total_count)``.
     """
     count_stmt = select(func.count()).select_from(ThreadModel)
+    if status is not None:
+        count_stmt = count_stmt.where(ThreadModel.status == status.value)
     total = (await session.execute(count_stmt)).scalar_one()
 
     stmt = (
@@ -200,8 +207,60 @@ async def list_threads(
         .offset(offset)
         .limit(limit)
     )
+    if status is not None:
+        stmt = stmt.where(ThreadModel.status == status.value)
     result = await session.execute(stmt)
     return result.scalars().all(), total
+
+
+async def delete_thread(
+    session: AsyncSession,
+    thread_id: str,
+) -> bool:
+    """Hard-delete a thread and all cascading artifacts.
+
+    Args:
+        session: Active async session.
+        thread_id: The thread's primary key.
+
+    Returns:
+        True if the thread was found and deleted, False otherwise.
+    """
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return False
+    await session.delete(thread)
+    await session.flush()
+    return True
+
+
+class InvalidTransitionError(ValueError):
+    """Raised when a thread status transition is not allowed."""
+
+
+# Terminal states — once a thread reaches one of these, it cannot regress
+# to a non-terminal state.
+_TERMINAL_STATES: frozenset[ThreadStatus] = frozenset(
+    {ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED, ThreadStatus.ARCHIVED}
+)
+
+# Valid transitions: current_status → set of allowed next statuses.
+# Any transition not listed here is rejected.
+_VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
+    ThreadStatus.SUBMITTED: frozenset(
+        {ThreadStatus.CREATED, ThreadStatus.RUNNING, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+    ),
+    ThreadStatus.CREATED: frozenset(
+        {ThreadStatus.RUNNING, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+    ),
+    ThreadStatus.RUNNING: frozenset(
+        {ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+    ),
+    ThreadStatus.COMPLETED: frozenset({ThreadStatus.ARCHIVED}),
+    ThreadStatus.FAILED: frozenset({ThreadStatus.ARCHIVED}),
+    ThreadStatus.CANCELLED: frozenset({ThreadStatus.ARCHIVED}),
+    ThreadStatus.ARCHIVED: frozenset(),  # truly terminal
+}
 
 
 async def update_thread_status(
@@ -209,7 +268,7 @@ async def update_thread_status(
     thread_id: str,
     status: ThreadStatus | str,
 ) -> ThreadModel | None:
-    """Update a thread's status.
+    """Update a thread's status with transition validation.
 
     Args:
         session: Active async session.
@@ -222,11 +281,23 @@ async def update_thread_status(
 
     Raises:
         ValueError: If *status* is not a valid ``ThreadStatus`` value.
+        InvalidTransitionError: If the transition from current to new status
+            is not allowed (BE-37).
     """
     coerced_status = _coerce_status(status)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
+
+    # BE-37: validate transition
+    current = _coerce_status(thread.status)
+    allowed = _VALID_TRANSITIONS.get(current, frozenset())
+    if coerced_status not in allowed:
+        raise InvalidTransitionError(
+            f"Cannot transition thread {thread_id} from "
+            f"{current.value!r} to {coerced_status.value!r}"
+        )
+
     thread.status = coerced_status
     # DB-H2: onupdate=_utcnow only fires at the DB level; the in-memory object
     # has a stale updated_at after flush when expire_on_commit=False.  Set it

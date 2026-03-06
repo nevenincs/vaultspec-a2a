@@ -23,15 +23,15 @@ Requirements
 
 Run all live tests::
 
-    pytest lib/core/tests/test_e2e_live.py -m live -v
+    pytest src/vaultspec_a2a/core/tests/test_e2e_live.py -m live -v
 
 Run only OpenAI::
 
-    pytest lib/core/tests/test_e2e_live.py -m live -k openai -v
+    pytest src/vaultspec_a2a/core/tests/test_e2e_live.py -m live -k openai -v
 
 Run only Gemini::
 
-    pytest lib/core/tests/test_e2e_live.py -m live -k gemini -v
+    pytest src/vaultspec_a2a/core/tests/test_e2e_live.py -m live -k gemini -v
 """
 
 from __future__ import annotations

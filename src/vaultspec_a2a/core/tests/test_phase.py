@@ -1,4 +1,4 @@
-"""Tests for lib/core/phase.py — infer_phase_from_vault_index."""
+"""Tests for src/vaultspec_a2a/core/phase.py — infer_phase_from_vault_index."""
 
 import pytest
 

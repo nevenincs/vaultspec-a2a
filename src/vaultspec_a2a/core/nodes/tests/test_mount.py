@@ -1,4 +1,4 @@
-"""Tests for lib/core/nodes/mount.py — create_mount_node."""
+"""Tests for src/vaultspec_a2a/core/nodes/mount.py — create_mount_node."""
 
 from __future__ import annotations
 

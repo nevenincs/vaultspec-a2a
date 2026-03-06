@@ -1,6 +1,6 @@
 """Tests for agent and team TOML config loading and validation (ADR-012, ADR-013).
 
-All tests load real TOML files from lib/core/presets/ — no mocks or stubs.
+All tests load real TOML files from src/vaultspec_a2a/core/presets/ — no mocks or stubs.
 """
 
 import tomllib

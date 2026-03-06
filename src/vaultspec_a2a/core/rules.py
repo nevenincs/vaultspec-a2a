@@ -34,6 +34,12 @@ class RuleManager:
         self._workspace_root = workspace_root.resolve()
         self._include_builtin = include_builtin
 
+        # mtime-based compile cache (HIGH-01)
+        self._cached_result: str | None = None
+        self._cache_valid: bool = False
+        self._cached_dir_mtime: float = 0.0
+        self._cached_file_mtimes: dict[Path, float] = {}
+
     # ------------------------------------------------------------------
     # Public API
     # ------------------------------------------------------------------
@@ -64,6 +70,11 @@ class RuleManager:
     def compile(self) -> str | None:
         """Compile all discovered rule files into a single string.
 
+        Uses a two-tier mtime cache (HIGH-01):
+        1. Directory mtime check (single stat) to detect added/removed files
+        2. Per-file mtime check to detect content edits
+        Returns cached result if nothing changed.
+
         Processes each file in :meth:`discover` order:
 
         * Strips YAML frontmatter (``---`` block at file start)
@@ -74,8 +85,14 @@ class RuleManager:
             Combined rule text, or ``None`` if no rules exist or all
             content is empty after processing.
         """
+        if self._cache_valid and not self._has_changes():
+            return self._cached_result
+
         paths = self.discover()
         if not paths:
+            self._cached_result = None
+            self._cache_valid = True
+            self._cached_file_mtimes = {}
             return None
 
         seen: set[Path] = set()
@@ -87,14 +104,60 @@ class RuleManager:
             if stripped:
                 parts.append(stripped)
 
-        if not parts:
-            return None
+        result = "\n\n".join(parts) if parts else None
 
-        return "\n\n".join(parts)
+        # Update cache state
+        self._cached_result = result
+        self._cache_valid = True
+        rules_dir = self._workspace_root / _RULES_SUBDIR
+        try:
+            self._cached_dir_mtime = rules_dir.stat().st_mtime
+        except OSError:
+            self._cached_dir_mtime = 0.0
+        self._cached_file_mtimes = {}
+        for p in paths:
+            try:
+                self._cached_file_mtimes[p] = p.stat().st_mtime
+            except OSError:
+                pass
+
+        return result
+
+    def invalidate(self) -> None:
+        """Clear the compile cache, forcing a full recompile on next call."""
+        self._cache_valid = False
+        self._cached_result = None
+        self._cached_dir_mtime = 0.0
+        self._cached_file_mtimes = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _has_changes(self) -> bool:
+        """Check if the rules directory or any cached file has changed.
+
+        Tier 1: single stat on the rules directory detects added/removed files.
+        Tier 2: per-file mtime check detects content edits.
+        """
+        rules_dir = self._workspace_root / _RULES_SUBDIR
+        try:
+            dir_mtime = rules_dir.stat().st_mtime
+        except OSError:
+            # Directory gone — if we had cached files, that's a change
+            return bool(self._cached_file_mtimes)
+
+        if dir_mtime != self._cached_dir_mtime:
+            return True
+
+        for path, cached_mtime in self._cached_file_mtimes.items():
+            try:
+                if path.stat().st_mtime != cached_mtime:
+                    return True
+            except OSError:
+                return True  # file removed
+
+        return False
 
     def _process_file(self, path: Path, seen: set[Path]) -> str:
         """Read, strip frontmatter, and resolve @includes for one file."""

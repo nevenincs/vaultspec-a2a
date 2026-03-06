@@ -7,12 +7,12 @@ compiled.
 
 Discovery order for agent configs:
     1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (workspace override)
-    2. lib/core/presets/agents/{agent_id}.toml              (bundled default)
+    2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml  (bundled default)
     3. Raise AgentConfigNotFoundError
 
 Discovery order for team configs:
     1. {workspace_root}/.vaultspec/teams/{team_id}.toml     (workspace override)
-    2. lib/core/presets/teams/{team_id}.toml                (bundled default)
+    2. src/vaultspec_a2a/core/presets/teams/{team_id}.toml  (bundled default)
     3. Raise TeamConfigNotFoundError
 """
 
@@ -79,7 +79,7 @@ _PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
 def discover_team_preset_ids() -> frozenset[str]:
     """Discover available team preset IDs by globbing the bundled TOML directory.
 
-    Returns a frozenset of TOML file stems from ``lib/core/presets/teams/*.toml``.
+    Returns a frozenset of TOML file stems from ``src/vaultspec_a2a/core/presets/teams/*.toml``.
     If the directory does not exist or is empty, returns an empty frozenset.
     """
     if _PRESET_TEAMS_DIR.is_dir():
@@ -114,7 +114,7 @@ class AgentPermissionsConfig(BaseModel):
     Note: ``interrupt_before`` is no longer used. The graph always compiles
     with ``interrupt_before=[]``; approval gating is handled by the
     ``permission_callback`` closure wired into each worker node at compile
-    time (see ``lib/core/graph.py``).
+    time (see ``src/vaultspec_a2a/core/graph.py``).
     """
 
     require_approval_for: list[str] = Field(default_factory=list)

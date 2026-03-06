@@ -1,7 +1,10 @@
-"""Tests for lib/core/rules.py — RuleManager (ADR-028).
+"""Tests for core/rules.py — RuleManager (ADR-028).
 
 All tests use real temp directories (tmp_path). No mocks, no monkeypatching.
 """
+
+import shutil
+import time
 
 from pathlib import Path
 
@@ -202,3 +205,109 @@ class TestCompile:
 
         assert result is not None
         assert "helper content" in result
+
+
+class TestCompileCache:
+    """Tests for the mtime-based compile cache (HIGH-01)."""
+
+    def test_second_call_returns_cached_result(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "rule.md").write_text("original content")
+
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+        second = mgr.compile()
+
+        assert first == second
+        assert mgr._cache_valid is True
+
+    def test_cache_detects_file_content_change(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        rule_file = d / "rule.md"
+        rule_file.write_text("original content")
+
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+
+        # Bump mtime by writing new content with a future timestamp
+        time.sleep(0.05)
+        rule_file.write_text("updated content")
+
+        second = mgr.compile()
+
+        assert second is not None
+        assert "updated content" in second
+        assert first != second
+
+    def test_cache_detects_new_file_added(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "aaa.md").write_text("first rule")
+
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+
+        time.sleep(0.05)
+        (d / "bbb.md").write_text("second rule")
+
+        second = mgr.compile()
+
+        assert second is not None
+        assert "second rule" in second
+        assert first != second
+
+    def test_cache_detects_file_removed(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "aaa.md").write_text("first rule")
+        extra = d / "bbb.md"
+        extra.write_text("second rule")
+
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+        assert "second rule" in (first or "")
+
+        time.sleep(0.05)
+        extra.unlink()
+
+        second = mgr.compile()
+
+        assert second is not None
+        assert "second rule" not in second
+
+    def test_invalidate_forces_recompile(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "rule.md").write_text("original")
+
+        mgr = RuleManager(tmp_path)
+        mgr.compile()
+        assert mgr._cache_valid is True
+
+        mgr.invalidate()
+        assert mgr._cache_valid is False
+
+        result = mgr.compile()
+        assert result is not None
+        assert "original" in result
+        assert mgr._cache_valid is True
+
+    def test_cache_handles_rules_dir_disappearing(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "rule.md").write_text("content")
+
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+        assert first is not None
+
+        # Remove rules dir entirely
+        shutil.rmtree(d)
+
+        second = mgr.compile()
+        assert second is None
+
+    def test_cache_no_rules_stays_cached(self, tmp_path: Path) -> None:
+        mgr = RuleManager(tmp_path)
+        first = mgr.compile()
+        assert first is None
+        assert mgr._cache_valid is True
+
+        second = mgr.compile()
+        assert second is None

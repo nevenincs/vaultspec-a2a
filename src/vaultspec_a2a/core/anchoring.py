@@ -61,26 +61,4 @@ def build_anchoring_context(state: TeamState) -> str | None:
         for err in errors:
             lines.append(f"  - {err}")
 
-    # ADR-028: Universal Rule Propagation
-    # Inject project-level mandates (e.g. .vaultspec/rules/rules/*.md)
-    from .config import settings
-    from .rules import RuleManager
-
-    # Note: Using root from settings. In Docker this is usually /app.
-    # ADR-028: Universal Rule Propagation
-    from .config import settings
-    from .rules import RuleManager
-
-    rule_manager = RuleManager(settings.workspace_root)
-    compiled_rules = rule_manager.compile()
-    if compiled_rules:
-        from logging import getLogger
-        getLogger("vaultspec_a2a.core.anchoring").info("Injecting %d chars of project rules", len(compiled_rules))
-        lines.append("\n## Project Coding Rules & Guidelines")
-        lines.append(
-            "The following mandates are ABSOLUTE and must be followed "
-            "strictly across all generated code and configurations."
-        )
-        lines.append(compiled_rules)
-
     return "\n".join(lines)

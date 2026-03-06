@@ -82,6 +82,7 @@ def create_supervisor_node(
     workers: list[str],
     worker_phase_map: dict[str, str] | None = None,
     autonomous: bool = False,
+    workspace_root: Path | None = None,
 ) -> SupervisorNode:
     """Create a LangGraph supervisor node for routing.
 
@@ -120,7 +121,7 @@ def create_supervisor_node(
         )
         anchoring = build_anchoring_context(state)
         messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
-        _ws_root = state.get("workspace_root")
+        _ws_root = workspace_root
         if _ws_root:
             _rules = RuleManager(Path(_ws_root)).compile()
             if _rules:
@@ -252,7 +253,7 @@ def create_supervisor_node(
                 state.get("active_feature"),
                 next_route,
             )
-            resume_value: dict[str, Any] = interrupt(
+            resume_value = interrupt(
                 {
                     "type": "plan_approval_request",
                     "feature": state.get("active_feature"),
@@ -260,7 +261,14 @@ def create_supervisor_node(
                     "exec_worker": next_route,
                 }
             )
-            if resume_value.get("approved"):
+            # BE-19: resume_value may be a dict (from test preps) or a bare
+            # string like "approve" (from the real permission endpoint).
+            approved = (
+                resume_value.get("approved")
+                if isinstance(resume_value, dict)
+                else resume_value == "approve"
+            )
+            if approved:
                 _logger.info(
                     "plan approved by user — routing to exec_worker=%r", next_route
                 )
@@ -281,7 +289,17 @@ def create_supervisor_node(
             }
 
         _logger.debug("supervisor routed to %r (raw=%r)", next_route, text[:80])
-        return {"next": next_route, "pipeline_phase": inferred_phase}
+        # BE-28: write current_plan so the aggregator can emit PlanUpdateEvent.
+        # Each supervisor cycle produces a plan entry for the routing decision.
+        plan_entry: dict[str, str] = {
+            "content": f"Route to {next_route}" if next_route != "FINISH" else "Complete task",
+            "status": "in_progress" if next_route != "FINISH" else "completed",
+        }
+        return {
+            "next": next_route,
+            "pipeline_phase": inferred_phase,
+            "current_plan": [plan_entry],
+        }
 
     # Ensure __name__ is available for type checkers
     supervisor_node.__name__ = "supervisor_node"

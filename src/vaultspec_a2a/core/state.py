@@ -154,5 +154,10 @@ class TeamState(TypedDict):
     # --- routing / identification ---
     thread_id: str
 
+    # --- workspace root path (ADR-014) ---
+    # Threaded from API endpoint through graph compilation into graph_input.
+    # Used by supervisor_node and worker_node for RuleManager scoping.
+    workspace_root: NotRequired[str | None]
+
     # --- token accounting: additive merge per agent ---
     token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]

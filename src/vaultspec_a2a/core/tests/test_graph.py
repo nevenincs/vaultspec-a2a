@@ -172,9 +172,11 @@ async def test_compile_interrupt_before_always_empty(
     )
 
     assert list(graph.interrupt_before_nodes) == []
-    # Nodes still present regardless of mode
+    # Nodes still present regardless of mode (mount nodes for ADR-020)
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
-    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"} == node_keys
+    worker_ids = {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}
+    mount_ids = {f"mount_{wid}" for wid in worker_ids}
+    assert worker_ids | mount_ids == node_keys
 
 
 # ---------------------------------------------------------------------------

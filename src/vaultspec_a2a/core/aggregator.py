@@ -1,7 +1,7 @@
 """Central Event Aggregator for LangGraph stream broadcasting.
 
 Ingests LangGraph ``astream_events`` callbacks, transforms them into
-wire-protocol event models (``lib.api.schemas.events``), assigns
+wire-protocol event models (``vaultspec_a2a.api.schemas.events``), assigns
 per-thread monotonic sequence numbers, applies debouncing rules, and
 fans out to connected WebSocket clients.
 
@@ -31,13 +31,17 @@ from ..api.schemas.enums import (
 from ..api.schemas.events import (
     AgentStatusEvent,
     AgentSummary,
+    ArtifactUpdateEvent,
     ErrorEvent,
     MessageChunkEvent,
     PermissionOption,
     PermissionRequestEvent,
+    PlanEntry,
+    PlanUpdateEvent,
     ServerEvent,
     TeamStatusEvent,
     ThoughtChunkEvent,
+    ToolCallContentText,
     ToolCallStartEvent,
     ToolCallUpdateEvent,
 )
@@ -130,6 +134,7 @@ _AGET_STATE_TIMEOUT = 10.0
 _PASSTHROUGH_EVENTS = frozenset(
     {
         "on_chat_model_stream",
+        "on_chat_model_end",
         "on_tool_start",
         "on_tool_end",
         "on_tool_error",
@@ -184,6 +189,101 @@ def _map_acp_option_kind(option_id: str) -> PermissionOptionKind:
     if "deny" in oid or "reject" in oid:
         return PermissionOptionKind.REJECT_ONCE
     return PermissionOptionKind.ALLOW_ONCE
+
+
+# ---------------------------------------------------------------------------
+# Tool name → ToolKind classification (BE-04, BE-30)
+# ---------------------------------------------------------------------------
+_TOOL_KIND_MAP: dict[str, ToolKind] = {
+    # Read / inspect
+    "read": ToolKind.READ,
+    "read_file": ToolKind.READ,
+    "cat": ToolKind.READ,
+    "view": ToolKind.READ,
+    "head": ToolKind.READ,
+    "tail": ToolKind.READ,
+    # Edit / write
+    "edit": ToolKind.EDIT,
+    "edit_file": ToolKind.EDIT,
+    "write": ToolKind.EDIT,
+    "write_file": ToolKind.EDIT,
+    "create": ToolKind.EDIT,
+    "insert": ToolKind.EDIT,
+    "replace": ToolKind.EDIT,
+    "patch": ToolKind.EDIT,
+    "save": ToolKind.EDIT,
+    # Delete
+    "delete": ToolKind.DELETE,
+    "remove": ToolKind.DELETE,
+    "rm": ToolKind.DELETE,
+    # Move / rename
+    "move": ToolKind.MOVE,
+    "rename": ToolKind.MOVE,
+    "mv": ToolKind.MOVE,
+    # Search
+    "search": ToolKind.SEARCH,
+    "grep": ToolKind.SEARCH,
+    "find": ToolKind.SEARCH,
+    "glob": ToolKind.SEARCH,
+    "rg": ToolKind.SEARCH,
+    "ripgrep": ToolKind.SEARCH,
+    # Execute / shell
+    "execute": ToolKind.EXECUTE,
+    "bash": ToolKind.EXECUTE,
+    "shell": ToolKind.EXECUTE,
+    "run": ToolKind.EXECUTE,
+    "terminal": ToolKind.EXECUTE,
+    "exec": ToolKind.EXECUTE,
+    # Think
+    "think": ToolKind.THINK,
+    # Fetch / network
+    "fetch": ToolKind.FETCH,
+    "curl": ToolKind.FETCH,
+    "http": ToolKind.FETCH,
+    "download": ToolKind.FETCH,
+    "web": ToolKind.FETCH,
+    # Mode switching
+    "switch_mode": ToolKind.SWITCH_MODE,
+}
+
+# Substring fallbacks for tool names that don't match exactly
+_TOOL_KIND_SUBSTRING_RULES: list[tuple[str, ToolKind]] = [
+    ("read", ToolKind.READ),
+    ("edit", ToolKind.EDIT),
+    ("write", ToolKind.EDIT),
+    ("delete", ToolKind.DELETE),
+    ("remove", ToolKind.DELETE),
+    ("move", ToolKind.MOVE),
+    ("rename", ToolKind.MOVE),
+    ("search", ToolKind.SEARCH),
+    ("grep", ToolKind.SEARCH),
+    ("glob", ToolKind.SEARCH),
+    ("exec", ToolKind.EXECUTE),
+    ("bash", ToolKind.EXECUTE),
+    ("shell", ToolKind.EXECUTE),
+    ("terminal", ToolKind.EXECUTE),
+    ("think", ToolKind.THINK),
+    ("fetch", ToolKind.FETCH),
+    ("curl", ToolKind.FETCH),
+]
+
+
+def _classify_tool_kind(tool_name: str) -> ToolKind:
+    """Classify a tool name into a ``ToolKind`` category.
+
+    Two-pass: exact match on lowered name, then substring scan.
+    Defaults to ``ToolKind.OTHER``.
+    """
+    lower = tool_name.lower()
+    # Exact match
+    kind = _TOOL_KIND_MAP.get(lower)
+    if kind is not None:
+        return kind
+    # Substring fallback
+    for keyword, kind in _TOOL_KIND_SUBSTRING_RULES:
+        if keyword in lower:
+            return kind
+    return ToolKind.OTHER
 
 
 class EventAggregator:
@@ -251,6 +351,11 @@ class EventAggregator:
         # Maps request_id -> PermissionRequestEvent for active requests.
         # Cleared when a permission response is received.
         self._pending_permissions: dict[str, PermissionRequestEvent] = {}
+
+        # P8-02: track agent lifecycle states for team status endpoint.
+        # Maps agent_id -> AgentLifecycleState. Updated by emit_agent_status()
+        # and sync_worker_event().
+        self._agent_states: dict[str, AgentLifecycleState] = {}
 
         self._lock = asyncio.Lock()
 
@@ -650,6 +755,7 @@ class EventAggregator:
         detail: str | None = None,
     ) -> None:
         """Emit an agent lifecycle state transition event."""
+        self._agent_states[agent_id] = state
         event = AgentStatusEvent(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -660,6 +766,9 @@ class EventAggregator:
             sequence=self._next_sequence(thread_id),
         )
         await self._broadcast(event)
+        # BE-03: push team_status on every agent transition so browsers
+        # see the full agent table update in real time.
+        await self._emit_team_status_from_agent_states(thread_id)
 
     async def emit_message_chunk(
         self,
@@ -706,8 +815,21 @@ class EventAggregator:
         tool_call_id: str,
         title: str,
         kind: ToolKind = ToolKind.OTHER,
+        input_args: dict[str, Any] | None = None,
     ) -> None:
         """Emit a tool invocation start event."""
+        content: list[ToolCallContentText] = []
+        if input_args:
+            # Summarise input args as a text content block (truncate large values)
+            import json
+
+            try:
+                args_str = json.dumps(input_args, default=str, ensure_ascii=False)
+            except (TypeError, ValueError):
+                args_str = str(input_args)
+            if len(args_str) > 1000:
+                args_str = args_str[:1000] + "..."
+            content.append(ToolCallContentText(text=args_str))
         event = ToolCallStartEvent(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -715,6 +837,7 @@ class EventAggregator:
             title=title,
             kind=kind,
             status=ToolCallStatus.PENDING,
+            content=content,
             timestamp=datetime.now(UTC),
             sequence=self._next_sequence(thread_id),
         )
@@ -727,6 +850,7 @@ class EventAggregator:
         tool_call_id: str,
         status: ToolCallStatus | None = None,
         title: str | None = None,
+        content: list[ToolCallContentText] | None = None,
     ) -> None:
         """Emit a tool call update event (debounced per ADR-011 §5).
 
@@ -740,6 +864,7 @@ class EventAggregator:
             tool_call_id=tool_call_id,
             status=status,
             title=title,
+            content=content,
             timestamp=datetime.now(UTC),
             sequence=self._next_sequence(thread_id),
         )
@@ -768,6 +893,7 @@ class EventAggregator:
         description: str,
         options: list[dict[str, str]],
         tool_call: str | None = None,
+        tool_kind: ToolKind | None = None,
     ) -> None:
         """Emit a permission request event (LangGraph interrupt)."""
         parsed_options = [
@@ -781,6 +907,11 @@ class EventAggregator:
             for opt in options
         ]
 
+        # Derive tool_kind from tool_call name if not explicitly provided
+        resolved_kind = tool_kind
+        if resolved_kind is None and tool_call:
+            resolved_kind = _classify_tool_kind(tool_call)
+
         event = PermissionRequestEvent(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -788,6 +919,7 @@ class EventAggregator:
             description=description,
             options=parsed_options,
             tool_call=tool_call,
+            tool_kind=resolved_kind,
             timestamp=datetime.now(UTC),
             sequence=self._next_sequence(thread_id),
         )
@@ -813,6 +945,163 @@ class EventAggregator:
             ev for ev in self._pending_permissions.values() if ev.thread_id == thread_id
         ]
 
+    def get_agent_states(self) -> dict[str, AgentLifecycleState]:
+        """Return a snapshot of current agent lifecycle states (P8-02)."""
+        return dict(self._agent_states)
+
+    def sync_worker_event(
+        self,
+        thread_id: str,
+        payload: dict[str, Any],
+    ) -> None:
+        """Sync a relayed worker event into aggregator state (P8-01).
+
+        Called by internal.py after broadcasting the raw event to WS
+        clients.  Updates agent states and pending permissions so the
+        REST endpoints reflect the real worker state.
+        """
+        event_type = payload.get("type", "")
+
+        if event_type == "agent_status":
+            agent_id = payload.get("agent_id", "")
+            raw_state = payload.get("state", "")
+            if agent_id and raw_state:
+                try:
+                    lifecycle = AgentLifecycleState(raw_state)
+                except ValueError:
+                    logger.warning(
+                        "Unknown agent state %r in relayed event",
+                        raw_state,
+                    )
+                    return
+                self._agent_states[agent_id] = lifecycle
+            self._next_sequence(thread_id)
+
+        elif event_type == "permission_request":
+            request_id = payload.get("request_id", "")
+            if request_id:
+                description = payload.get("description", "")
+                options = payload.get("options", [])
+                perm_options = []
+                for opt in options:
+                    perm_options.append(
+                        PermissionOption(
+                            option_id=opt.get("option_id", ""),
+                            name=opt.get("name", ""),
+                            kind=_map_acp_option_kind(
+                                opt.get("option_id", "")
+                            ),
+                        )
+                    )
+                self._pending_permissions[request_id] = (
+                    PermissionRequestEvent(
+                        thread_id=thread_id,
+                        agent_id=payload.get("agent_id", ""),
+                        request_id=request_id,
+                        description=description,
+                        options=perm_options,
+                        timestamp=datetime.now(UTC),
+                        sequence=self._next_sequence(thread_id),
+                    )
+                )
+
+        elif event_type == "permission_resolved":
+            request_id = payload.get("request_id", "")
+            if request_id:
+                self._pending_permissions.pop(request_id, None)
+            self._next_sequence(thread_id)
+
+        elif event_type == "graph_registered":
+            # BE-12: sync node metadata from worker after graph compilation.
+            # Payload: {"type": "graph_registered", "nodes": {"name": {role, display_name, description}, ...}}
+            nodes = payload.get("nodes", {})
+            if isinstance(nodes, dict):
+                self._node_metadata = {
+                    name: {
+                        "role": str(meta.get("role", "")),
+                        "display_name": str(meta.get("display_name", "")),
+                        "description": str(meta.get("description", "")),
+                    }
+                    for name, meta in nodes.items()
+                    if isinstance(meta, dict)
+                }
+                logger.debug(
+                    "sync_worker_event: cached metadata for %d nodes",
+                    len(self._node_metadata),
+                )
+
+        elif event_type == "plan_update":
+            # BE-28: plan updates relayed from worker.  The WS relay in
+            # internal.py already broadcasts the raw event to connected
+            # clients, so sync_worker_event only needs to bump the sequence
+            # counter for ordering consistency.
+            self._next_sequence(thread_id)
+
+        elif event_type == "artifact_update":
+            # BE-29: relay artifact updates from worker to API aggregator.
+            artifact_id = payload.get("artifact_id", "")
+            filename = payload.get("filename", "")
+            if artifact_id and filename:
+                self._next_sequence(thread_id)
+
+        # API CRIT-01 / HIGH-07: advance sequence for ALL event types that
+        # carry a thread_id so last_sequence is reliable for reconnection
+        # gap detection.  The handlers above already call _next_sequence
+        # for their specific types; this catch-all covers message_chunk,
+        # tool_call_start, tool_call_update, artifact_update, error, etc.
+        elif thread_id and event_type:
+            self._next_sequence(thread_id)
+
+    async def emit_artifact_update(
+        self,
+        thread_id: str,
+        artifact_id: str,
+        filename: str,
+        content: str,
+        append: bool = False,
+        last_chunk: bool = True,
+    ) -> None:
+        """Emit an artifact update event (BE-29)."""
+        event = ArtifactUpdateEvent(
+            thread_id=thread_id,
+            artifact_id=artifact_id,
+            filename=filename,
+            content=content,
+            append=append,
+            last_chunk=last_chunk,
+            timestamp=datetime.now(UTC),
+            sequence=self._next_sequence(thread_id),
+        )
+        await self._broadcast(event)
+
+    async def emit_plan_update(
+        self,
+        thread_id: str,
+        entries: list[PlanEntry],
+    ) -> None:
+        """Emit a plan update event (debounced, BE-28).
+
+        Uses the existing ``_plan_update_pending`` / ``_plan_update_last_emit``
+        debounce infrastructure to coalesce rapid plan changes.
+        """
+        event = PlanUpdateEvent(
+            thread_id=thread_id,
+            entries=entries,
+            timestamp=datetime.now(UTC),
+            sequence=self._next_sequence(thread_id),
+        )
+        now = time.monotonic()
+        last = self._plan_update_last_emit.get(thread_id, 0.0)
+        if now - last >= _PLAN_UPDATE_DEBOUNCE:
+            self._plan_update_last_emit[thread_id] = now
+            await self._broadcast(event)
+        else:
+            async with self._lock:
+                self._plan_update_pending[thread_id] = event
+            self._schedule_debounce(
+                self._broadcast_debounced_plan_update(thread_id)
+            )
+
     async def emit_error(
         self,
         thread_id: str,
@@ -832,6 +1121,24 @@ class EventAggregator:
             sequence=self._next_sequence(thread_id),
         )
         await self._broadcast(event)
+
+    async def _emit_team_status_from_agent_states(
+        self,
+        thread_id: str,
+    ) -> None:
+        """Build agents list from ``_agent_states`` and emit ``team_status``.
+
+        Called automatically after every ``emit_agent_status()`` so browsers
+        receive the full agent table on each transition (BE-03).
+        """
+        agents: list[dict[str, Any]] = []
+        for agent_id, lifecycle in self._agent_states.items():
+            agents.append({
+                "agent_id": agent_id,
+                "node_name": agent_id,
+                "state": lifecycle.value,
+            })
+        await self.emit_team_status(thread_id, agents)
 
     async def emit_team_status(
         self,
@@ -909,34 +1216,135 @@ class EventAggregator:
             chunk = event_data.get("data", {}).get("chunk")
             if chunk is not None:
                 content = getattr(chunk, "content", "")
-                if isinstance(content, str) and content:
+                # BE-26: content may be a list of structured blocks (Anthropic format).
+                # Extract text blocks for message content and reasoning blocks for thoughts.
+                if isinstance(content, list):
+                    for block in content:
+                        if isinstance(block, dict):
+                            if block.get("type") == "reasoning":
+                                reasoning_text = block.get("content", "") or block.get("text", "")
+                                if reasoning_text:
+                                    await self.emit_thought_chunk(
+                                        thread_id=thread_id,
+                                        agent_id=effective_agent_id,
+                                        content=reasoning_text,
+                                        message_id=run_id,
+                                    )
+                            elif block.get("type") in ("text", "text_delta"):
+                                text = block.get("text", "") or block.get("content", "")
+                                if text:
+                                    await self._buffer_message_chunk(
+                                        thread_id=thread_id,
+                                        agent_id=effective_agent_id,
+                                        content=text,
+                                        message_id=run_id,
+                                    )
+                elif isinstance(content, str) and content:
                     await self._buffer_message_chunk(
                         thread_id=thread_id,
                         agent_id=effective_agent_id,
                         content=content,
                         message_id=run_id,
                     )
+                # BE-26: extract reasoning from additional_kwargs (OpenAI/DeepSeek format).
+                # Only check when content is NOT a list — Anthropic-style structured
+                # blocks already emit reasoning above, so this avoids duplicates.
+                if not isinstance(content, list):
+                    additional_kwargs = getattr(chunk, "additional_kwargs", {}) or {}
+                    reasoning = additional_kwargs.get("reasoning") or additional_kwargs.get("reasoning_content") or ""
+                    if reasoning:
+                        await self.emit_thought_chunk(
+                            thread_id=thread_id,
+                            agent_id=effective_agent_id,
+                            content=reasoning,
+                            message_id=run_id,
+                        )
+            return
+
+        # BE-27: flush chunk buffer and emit finish_reason when LLM call ends.
+        if event_kind == "on_chat_model_end":
+            await self._flush_chunk_buffer(thread_id)
+            output = event_data.get("data", {}).get("output")
+            finish_reason: str | None = None
+            if output is not None:
+                resp_meta = getattr(output, "response_metadata", None) or {}
+                finish_reason = resp_meta.get("finish_reason") or resp_meta.get("stop_reason")
+            if finish_reason:
+                await self.emit_message_chunk(
+                    thread_id=thread_id,
+                    agent_id=effective_agent_id,
+                    content="",
+                    message_id=run_id,
+                    finish_reason=finish_reason,
+                )
             return
 
         if event_kind == "on_tool_start":
             if node:  # Only emit for graph-level tool calls
                 tool_name = event_data.get("name", "unknown_tool")
+                tool_input = event_data.get("data", {}).get("input")
+                input_args = tool_input if isinstance(tool_input, dict) else None
                 await self.emit_tool_call_start(
                     thread_id=thread_id,
                     agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     title=tool_name,
+                    kind=_classify_tool_kind(tool_name),
+                    input_args=input_args,
                 )
             return
 
         if event_kind == "on_tool_end":
             if node:  # Only emit for graph-level tool calls
+                # BE-30: extract tool output for content enrichment
+                tool_name = event_data.get("name", "")
+                output = event_data.get("data", {}).get("output")
+                output_content: list[ToolCallContentText] | None = None
+                if output is not None:
+                    output_str = ""
+                    if hasattr(output, "content"):
+                        output_str = str(output.content)
+                    elif isinstance(output, str):
+                        output_str = output
+                    else:
+                        output_str = str(output)
+                    if output_str:
+                        if len(output_str) > 1000:
+                            output_str = output_str[:1000] + "..."
+                        output_content = [ToolCallContentText(text=output_str)]
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
                     agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     status=ToolCallStatus.COMPLETED,
+                    content=output_content,
                 )
+                # BE-29: inspect tool output for file artifacts.
+                _file_tool_keywords = {"write", "edit", "create", "save", "move", "rename", "delete"}
+                if any(kw in tool_name.lower() for kw in _file_tool_keywords):
+                    # Extract file path from tool output or input
+                    output_str = ""
+                    file_path = ""
+                    if hasattr(output, "content"):
+                        output_str = str(output.content)
+                    elif isinstance(output, str):
+                        output_str = output
+                    # Try to extract file_path from tool input
+                    tool_input = event_data.get("data", {}).get("input", {})
+                    if isinstance(tool_input, dict):
+                        file_path = (
+                            tool_input.get("file_path", "")
+                            or tool_input.get("path", "")
+                            or tool_input.get("filename", "")
+                        )
+                    if file_path:
+                        filename = file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
+                        await self.emit_artifact_update(
+                            thread_id=thread_id,
+                            artifact_id=f"{run_id}:{file_path}",
+                            filename=filename,
+                            content=output_str[:500] if output_str else f"[{tool_name}] {file_path}",
+                        )
             return
 
         if event_kind == "on_tool_error":
@@ -949,11 +1357,13 @@ class EventAggregator:
                     node,
                     error_msg,
                 )
+                error_content = [ToolCallContentText(text=error_msg)] if error_msg else None
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
                     agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     status=ToolCallStatus.FAILED,
+                    content=error_content,
                 )
             return
 
@@ -986,6 +1396,33 @@ class EventAggregator:
                     node_name=node,
                     state=AgentLifecycleState.IDLE,
                 )
+                # BE-28: detect current_plan in node output and emit PlanUpdateEvent.
+                output = event_data.get("data", {}).get("output")
+                if isinstance(output, dict):
+                    raw_plan = output.get("current_plan")
+                    if raw_plan and isinstance(raw_plan, list):
+                        entries = [
+                            PlanEntry(
+                                content=str(entry.get("content", "")),
+                                status=entry.get("status", "pending"),
+                                priority=entry.get("priority", "medium"),
+                            )
+                            for entry in raw_plan
+                            if isinstance(entry, dict) and entry.get("content")
+                        ]
+                        if entries:
+                            await self.emit_plan_update(thread_id, entries)
+                    # BE-29: detect artifacts in node output.
+                    raw_artifacts = output.get("artifacts")
+                    if raw_artifacts and isinstance(raw_artifacts, list):
+                        for artifact in raw_artifacts:
+                            if isinstance(artifact, dict) and artifact.get("id"):
+                                await self.emit_artifact_update(
+                                    thread_id=thread_id,
+                                    artifact_id=str(artifact["id"]),
+                                    filename=str(artifact.get("filename", artifact.get("path", ""))),
+                                    content=str(artifact.get("content", "")),
+                                )
             elif event_kind == "on_chain_error":
                 error_data = event_data.get("data", {})
                 error_msg = str(error_data.get("error", "Node execution failed"))
@@ -1180,8 +1617,12 @@ class EventAggregator:
         graph: StreamableGraph,
         graph_input: dict[str, Any] | Command | None,
         config: dict[str, Any],
-    ) -> None:
+    ) -> str:
         """Start consuming ``astream_events`` from a compiled graph.
+
+        Returns one of ``"completed"``, ``"interrupted"``, or ``"failed"``
+        so callers (e.g. the worker executor) can translate the outcome
+        into a thread-level status update.
 
         Creates a bounded ingest queue (``maxsize=512``) for backpressure
         and processes events through ``process_langgraph_event``.
@@ -1199,6 +1640,7 @@ class EventAggregator:
         # H4: track whether an interrupt occurred so _emit_interrupt_events is
         # only called when needed (avoids aget_state I/O on normal completion).
         _is_interrupt = False
+        _outcome = "completed"
         with _tracer.start_as_current_span(
             "aggregator.ingest",
             attributes={"thread_id": thread_id, "agent_id": agent_id},
@@ -1211,6 +1653,7 @@ class EventAggregator:
                 ):
                     if cancel_event.is_set():
                         logger.info("Ingest cancelled for thread %s", thread_id)
+                        _outcome = "cancelled"
                         span.set_attribute("cancelled", True)
                         await self.emit_agent_status(
                             thread_id=thread_id,
@@ -1241,12 +1684,14 @@ class EventAggregator:
                 ) or exc.__class__.__name__ == "GraphRecursionError"
                 _is_step_timeout = isinstance(exc, TimeoutError)
                 if _is_interrupt:
+                    _outcome = "interrupted"
                     logger.info(
                         "Graph interrupted for thread %s (awaiting approval)",
                         thread_id,
                     )
                     span.set_attribute("interrupted", True)
                 elif _is_recursion_limit:
+                    _outcome = "failed"
                     logger.warning(
                         "Graph recursion limit reached for thread %s", thread_id
                     )
@@ -1262,6 +1707,7 @@ class EventAggregator:
                         recoverable=False,
                     )
                 elif _is_step_timeout:
+                    _outcome = "failed"
                     logger.warning("Graph step_timeout fired for thread %s", thread_id)
                     span.set_attribute("error.type", "step_timeout")
                     await self.emit_error(
@@ -1275,6 +1721,7 @@ class EventAggregator:
                         recoverable=True,
                     )
                 else:
+                    _outcome = "failed"
                     logger.exception(
                         "Error during graph ingest for thread %s", thread_id
                     )
@@ -1308,6 +1755,7 @@ class EventAggregator:
                     time.monotonic() - start,
                     {"thread_id": thread_id},
                 )
+        return _outcome
 
     # ------------------------------------------------------------------
     # Cleanup

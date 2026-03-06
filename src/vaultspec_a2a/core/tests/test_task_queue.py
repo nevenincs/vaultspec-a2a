@@ -1,4 +1,4 @@
-"""Tests for lib/core/task_queue.py — create_mark_task_complete_tool and _filter_queue_content."""
+"""Tests for src/vaultspec_a2a/core/task_queue.py — create_mark_task_complete_tool and _filter_queue_content."""
 
 from __future__ import annotations
 

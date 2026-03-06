@@ -37,7 +37,7 @@ from .team_config import AgentConfig, TeamConfig, TopologyType, WorkerRef
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["compile_team_graph"]
+__all__ = ["build_initial_vault_index", "compile_team_graph"]
 
 _VAULT_STAGE_PATTERNS: dict[str, str] = {
     "research": ".vault/research/*{tag}*.md",
@@ -187,7 +187,7 @@ def _resolve_supervisor_model(
     )
 
 
-def _build_initial_vault_index(
+def build_initial_vault_index(
     workspace_root: Path | None,
     feature_tag: str,
 ) -> dict[str, list[str]]:
@@ -305,7 +305,12 @@ def compile_team_graph(
         )
     elif topology.type == TopologyType.PIPELINE:
         _compile_pipeline(
-            builder, team_config, agent_configs, workspace_root, autonomous=autonomous
+            builder,
+            team_config,
+            agent_configs,
+            workspace_root,
+            autonomous=autonomous,
+            feature_tag=feature_tag,
         )
     elif topology.type == TopologyType.PIPELINE_LOOP:
         _compile_pipeline_loop(
@@ -315,6 +320,7 @@ def compile_team_graph(
             supervisor_agent_config,
             workspace_root,
             autonomous=autonomous,
+            feature_tag=feature_tag,
         )
     else:
         raise ValueError(
@@ -489,6 +495,7 @@ def _compile_pipeline(
     agent_configs: dict[str, AgentConfig],
     workspace_root: Path | None = None,
     autonomous: bool = False,
+    feature_tag: str | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -519,6 +526,7 @@ def _compile_pipeline(
         )
 
     node_names: list[str] = []
+    mount_names: list[str] = []
 
     for agent_id in order:
         # C2: descriptive error when agent_id is missing from agent_configs.
@@ -549,7 +557,13 @@ def _compile_pipeline(
             agent_cfg.persona.system_prompt,
             name=agent_cfg.id,
             autonomous=autonomous,
+            workspace_root=workspace_root,
+            feature_tag=feature_tag,
         )
+        # ADR-020: insert mount node between pipeline stages.
+        mount_fn = create_mount_node(workspace_root)
+        mount_id = f"mount_{agent_cfg.id}"
+        builder.add_node(mount_id, mount_fn)
         builder.add_node(
             agent_cfg.id,
             worker_node,
@@ -560,11 +574,14 @@ def _compile_pipeline(
             },
             retry_policy=_NODE_RETRY_POLICY,
         )
+        builder.add_edge(mount_id, agent_cfg.id)
         node_names.append(agent_cfg.id)
+        mount_names.append(mount_id)
 
-    builder.add_edge(START, node_names[0])
+    # Wire: START -> mount_0 -> node_0 -> mount_1 -> node_1 -> ... -> END
+    builder.add_edge(START, mount_names[0])
     for i in range(len(node_names) - 1):
-        builder.add_edge(node_names[i], node_names[i + 1])
+        builder.add_edge(node_names[i], mount_names[i + 1])
     builder.add_edge(node_names[-1], END)
 
 
@@ -648,6 +665,7 @@ def _compile_pipeline_loop(
     supervisor_agent_config: AgentConfig | None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
+    feature_tag: str | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -658,6 +676,7 @@ def _compile_pipeline_loop(
     """
     loop_node_id, pre_loop = _validate_pipeline_loop_config(team_config, agent_configs)
     order = team_config.topology.order
+    mount_map: dict[str, str] = {}
 
     for agent_id in order:
         if agent_id not in agent_configs:
@@ -686,10 +705,16 @@ def _compile_pipeline_loop(
             agent_cfg.persona.system_prompt,
             name=agent_cfg.id,
             autonomous=autonomous,
+            workspace_root=workspace_root,
+            feature_tag=feature_tag,
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
 
+        # ADR-020: insert mount node before each worker.
+        mount_id = f"mount_{agent_cfg.id}"
+        mount_fn = create_mount_node(workspace_root)
+        builder.add_node(mount_id, mount_fn)
         builder.add_node(
             agent_cfg.id,
             worker_node,
@@ -700,13 +725,20 @@ def _compile_pipeline_loop(
             },
             retry_policy=_NODE_RETRY_POLICY,
         )
+        builder.add_edge(mount_id, agent_cfg.id)
+        mount_map[agent_id] = mount_id
 
+    # Wire: START -> mount_0 -> node_0 -> mount_1 -> node_1 -> ... -> loop_node
     all_sequential: list[str] = [*pre_loop, loop_node_id]
-    builder.add_edge(START, all_sequential[0])
+    first_mount = mount_map[all_sequential[0]]
+    builder.add_edge(START, first_mount)
     for i in range(len(all_sequential) - 1):
-        builder.add_edge(all_sequential[i], all_sequential[i + 1])
+        next_mount = mount_map[all_sequential[i + 1]]
+        builder.add_edge(all_sequential[i], next_mount)
 
-    loop_target: str = pre_loop[-1] if pre_loop else all_sequential[0]
+    # Loop-back target is the mount node before the loop target worker.
+    loop_target_worker: str = pre_loop[-1] if pre_loop else all_sequential[0]
+    loop_target_mount: str = mount_map[loop_target_worker]
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
@@ -719,5 +751,5 @@ def _compile_pipeline_loop(
     builder.add_conditional_edges(
         loop_node_id,
         _loop_router,
-        {"revise": loop_target, "FINISH": END},
+        {"revise": loop_target_mount, "FINISH": END},
     )

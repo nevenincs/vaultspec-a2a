@@ -111,6 +111,9 @@ from .team_config import (
     WorkerRef as WorkerRef,
 )
 from .team_config import (
+    discover_team_preset_ids as discover_team_preset_ids,
+)
+from .team_config import (
     load_agent_config as load_agent_config,
 )
 from .team_config import (
@@ -124,6 +127,8 @@ from .team_config import (
 # -> core.__init__
 _LAZY_IMPORTS = {
     "EventAggregator": ".aggregator",
+    "StreamableGraph": ".aggregator",
+    "build_initial_vault_index": ".graph",
     "compile_team_graph": ".graph",
 }
 
@@ -162,6 +167,7 @@ __all__ = [
     "ProtocolError",
     "RecoveryAction",
     "Settings",
+    "StreamableGraph",
     "SupervisorConfig",
     "TeamConfig",
     "TeamConfigNotFoundError",
@@ -182,12 +188,14 @@ __all__ = [
     "WorkspaceError",
     "build_anchoring_context",
     "build_context_preamble",
+    "build_initial_vault_index",
     "compact_context",
     "compile_team_graph",
     "create_mark_task_complete_tool",
     "create_supervisor_node",
     "create_worker_node",
     "discover_context_refs",
+    "discover_team_preset_ids",
     "estimate_tokens",
     "generate_nickname",
     "infer_phase_from_vault_index",

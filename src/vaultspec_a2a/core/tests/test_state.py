@@ -205,6 +205,8 @@ class TestTeamStateStructure:
             "current_task_id",
             # ADR-024: plan approval gate
             "plan_approved",
+            # ADR-014: workspace root path
+            "workspace_root",
         }
         actual = set(TeamState.__annotations__)
         assert expected == actual

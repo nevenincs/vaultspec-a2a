@@ -1,36 +1,9 @@
-import {
-  ShieldAlert,
-  Terminal,
-  FileEdit,
-  Search,
-  Globe,
-  Plug,
-  Wrench,
-  FileText,
-} from 'lucide-react';
+import { ShieldAlert } from 'lucide-react';
 import { Button } from '../ui/button';
+import { toolKindIcon } from '../layout/state-indicators';
 import { getAgentColor } from '../../utils/agent-colors';
 import { log } from '../../utils/logger';
-import type { PermissionRequest, ToolKind } from '../../data/types';
-
-function toolKindIcon(kind: ToolKind, className = 'w-3.5 h-3.5') {
-  switch (kind) {
-    case 'read':
-      return <FileText className={className} />;
-    case 'edit':
-      return <FileEdit className={className} />;
-    case 'search':
-      return <Search className={className} />;
-    case 'execute':
-      return <Terminal className={className} />;
-    case 'browser':
-      return <Globe className={className} />;
-    case 'mcp':
-      return <Plug className={className} />;
-    case 'other':
-      return <Wrench className={className} />;
-  }
-}
+import type { PermissionRequest } from '../../data/types';
 
 interface PermissionCardProps {
   request: PermissionRequest;
@@ -88,8 +61,8 @@ export function PermissionCard({
           {/* Action buttons */}
           <div className="flex items-center gap-2 pt-0.5">
             {request.options.map((option) => {
-              const isAllow = option.kind === 'allow';
-              const isDeny = option.kind === 'deny';
+              const isAllow = option.kind === 'allow_once';
+              const isDeny = option.kind === 'reject_once' || option.kind === 'reject_always';
               const isAlwaysAllow = option.kind === 'allow_always';
 
               let variant: 'default' | 'outline' | 'secondary' | 'ghost' = 'ghost';

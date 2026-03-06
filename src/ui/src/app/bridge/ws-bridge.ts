@@ -15,7 +15,7 @@ import { appStore } from '../store/app-store';
 import { queryClient } from '../queries/query-client';
 import { queryKeys } from '../queries/query-keys';
 import type { ConnectionState as FrontendConnectionState } from '../data/types';
-import type { AgentSummary } from '../data/types';
+import type { AgentSummary, ThreadSummary } from '../data/types';
 
 function toFrontendConnectionState(ws: WsConnectionState): FrontendConnectionState {
   if (ws === 'connecting') return 'reconnecting';
@@ -54,7 +54,7 @@ export function initWsBridge(): () => void {
       }
 
       case 'agent_status': {
-        // Dual dispatch: stream timeline + TQ agent cache update
+        // Triple dispatch: stream timeline + TQ agent cache + TQ thread list cache
         appStore.getState().handleWireEvent(threadId, event);
         queryClient.setQueryData<AgentSummary[]>(
           queryKeys.team.status(),
@@ -68,6 +68,14 @@ export function initWsBridge(): () => void {
             return prev;
           },
         );
+        // Update thread's agent_state in the threads list cache
+        queryClient.setQueryData<ThreadSummary[]>(
+          queryKeys.threads.list(),
+          (prev = []) =>
+            prev.map((t) =>
+              t.thread_id === threadId ? { ...t, agent_state: event.state } : t,
+            ),
+        );
         break;
       }
 
@@ -77,6 +85,8 @@ export function initWsBridge(): () => void {
           queryKeys.team.status(),
           event.agents.map(mapAgentSummary),
         );
+        // Populate agent_id → display_name map for stream event resolution
+        appStore.getState().updateAgentDisplayNames(event.agents);
         break;
       }
 

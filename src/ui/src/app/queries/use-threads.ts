@@ -39,14 +39,14 @@ export function useCreateThread() {
         title: message.slice(0, 40) + (message.length > 40 ? '...' : ''),
         team_preset: preset?.id,
         metadata: repo
-          ? ({
+          ? {
               workspace_root: repo,
               feature_tag: featureTag ?? '',
               source_branch: branch ?? '',
               nickname: '',
-              source_repo: repo,
+              source_repo: '',
               callee: '',
-            } as any)
+            }
           : undefined,
       });
     },

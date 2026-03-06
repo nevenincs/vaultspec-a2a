@@ -186,10 +186,10 @@ export function InputBar({
 
   const mentionPopupRef = useRef<HTMLDivElement>(null);
 
-  const availableAgents = useMemo(() => {
-    if (!selectedPreset) return [];
-    return selectedPreset.agents;
-  }, [selectedPreset]);
+  const availableAgents = useMemo((): string[] => {
+    // Agent names come from team status queries, not preset config
+    return [];
+  }, []);
 
   const filteredAgents = useMemo(() => {
     if (!mentionState.active) return [];
@@ -418,7 +418,7 @@ export function InputBar({
           ? `Message ${selectedPreset.name}...`
           : 'Message team...';
 
-  const displayRepo = isCreateMode ? createRepo : activeThread?.source_repo;
+  const displayRepo = isCreateMode ? createRepo : undefined;
   const displayBranch = isCreateMode ? createBranch : activeThread?.source_branch;
   const displayFeature = isCreateMode ? createFeatureTag : activeThread?.feature_tag;
 
@@ -450,22 +450,11 @@ export function InputBar({
                   label: p.name,
                   description: p.description,
                   isSelected: selectedPreset?.id === p.id,
-                  extra: (
-                    <div className="mt-1 flex flex-wrap gap-1">
-                      {p.agents.map((a) => {
-                        const c = getAgentColor(a);
-                        return (
-                          <span
-                            key={a}
-                            className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 font-mono text-[0.5625rem] ${c.badge}`}
-                          >
-                            <span className={`h-1 w-1 rounded-full ${c.dot}`} />
-                            {a}
-                          </span>
-                        );
-                      })}
+                  extra: p.worker_count ? (
+                    <div className="mt-1 text-muted-foreground text-[0.5625rem]">
+                      {p.worker_count} worker{p.worker_count !== 1 ? 's' : ''}
                     </div>
-                  ),
+                  ) : undefined,
                 }))}
                 onSelect={(id) => {
                   const preset = teamPresets.find((p) => p.id === id);

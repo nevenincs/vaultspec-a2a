@@ -17,6 +17,8 @@ import {
   useThreadsQuery,
   useRespondToPermission,
   useCreateThread,
+  useSendMessage,
+  useCancelThread,
 } from '../../queries';
 import { useTeamPresetsQuery, useTeamStatusQuery } from '../../queries/use-team';
 import { useThreadStateQuery } from '../../queries/use-thread-state';
@@ -75,6 +77,8 @@ export function AppShell() {
   const { data: teamPresets = [] } = useTeamPresetsQuery();
   const respondToPermissionMutation = useRespondToPermission();
   const createThreadMutation = useCreateThread();
+  const sendMessageMutation = useSendMessage();
+  const cancelThreadMutation = useCancelThread();
 
   // Snapshot hydration for active tab
   useThreadStateQuery(activeTabId);
@@ -197,7 +201,14 @@ export function AppShell() {
         featureTag?: string;
       },
     ) => {
-      if (!activeThread) {
+      if (activeThread) {
+        // Follow-up message into existing thread
+        sendMessageMutation.mutate({
+          threadId: activeThread.thread_id,
+          content: message,
+        });
+      } else {
+        // Create new thread
         createThreadMutation.mutate({
           message,
           preset: opts?.preset || selectedPreset || undefined,
@@ -207,7 +218,7 @@ export function AppShell() {
         });
       }
     },
-    [activeThread, createThreadMutation, selectedPreset],
+    [activeThread, createThreadMutation, sendMessageMutation, selectedPreset],
   );
 
   const isEmptyThread = activeThread && activeEvents.length === 0;
@@ -314,7 +325,11 @@ export function AppShell() {
                   <InputBar
                     agentState={activeThread.agent_state}
                     onSend={handleSend}
-                    onStop={() => {}}
+                    onStop={() => {
+                      if (activeThread) {
+                        cancelThreadMutation.mutate(activeThread.thread_id);
+                      }
+                    }}
                     teamPresets={teamPresets}
                     selectedPreset={activeTeam || selectedPreset}
                     onSelectPreset={setSelectedPreset}

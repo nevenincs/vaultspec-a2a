@@ -5,9 +5,12 @@ import {
   FileEdit,
   Search,
   Terminal,
-  Globe,
-  Plug,
   Wrench,
+  Trash2,
+  ArrowRightLeft,
+  Brain,
+  Download,
+  ToggleLeft,
 } from 'lucide-react';
 
 export function agentStateColor(state: AgentLifecycleState): string {
@@ -92,10 +95,16 @@ export function toolKindIcon(kind: ToolKind, className = 'w-4 h-4') {
       return <Search className={className} />;
     case 'execute':
       return <Terminal className={className} />;
-    case 'browser':
-      return <Globe className={className} />;
-    case 'mcp':
-      return <Plug className={className} />;
+    case 'delete':
+      return <Trash2 className={className} />;
+    case 'move':
+      return <ArrowRightLeft className={className} />;
+    case 'think':
+      return <Brain className={className} />;
+    case 'fetch':
+      return <Download className={className} />;
+    case 'switch_mode':
+      return <ToggleLeft className={className} />;
     case 'other':
       return <Wrench className={className} />;
   }

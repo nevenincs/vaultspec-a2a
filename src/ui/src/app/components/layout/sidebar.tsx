@@ -27,7 +27,7 @@ import {
 import { agentStateDot } from './state-indicators';
 import { ShaderBackground } from '../ui/shader-background';
 import { appStore } from '../../store/app-store';
-import type { ThreadSummary, TeamTopology, AgentSummary } from '../../data/types';
+import type { ThreadSummary, AgentSummary } from '../../data/types';
 
 interface SidebarProps {
   threads: ThreadSummary[];
@@ -43,19 +43,6 @@ interface SidebarProps {
   onFocusSearchRef?: MutableRefObject<(() => void) | null>;
 }
 
-/** Human-readable topology label */
-function topologyLabel(topology?: TeamTopology): string {
-  switch (topology) {
-    case 'star':
-      return 'Star';
-    case 'pipeline':
-      return 'Pipeline';
-    case 'pipeline_loop':
-      return 'Loop';
-    default:
-      return '';
-  }
-}
 
 /** Relative time label */
 function timeAgo(iso: string): string {
@@ -132,7 +119,6 @@ export function Sidebar({
         t.title,
         t.feature_tag,
         t.source_branch,
-        t.source_repo,
       ]
         .filter(Boolean)
         .join(' ')
@@ -422,12 +408,7 @@ function TaskItem({
     thread.agent_state === 'auth_required' ||
     hasPermissionPending;
   const displayName = thread.nickname || thread.title;
-  const topoLabel = topologyLabel(thread.topology);
   const teamComposition = agents.map((a) => a.node_name).join(' · ');
-  const diskPath =
-    thread.source_repo && thread.source_branch
-      ? `~/${thread.source_repo}/.git/refs/heads/${thread.source_branch}`
-      : null;
 
   return (
     <TooltipProvider delayDuration={500}>
@@ -535,16 +516,13 @@ function TaskItem({
                 </p>
               )}
             </div>
-            {(thread.team_preset || topoLabel) && (
+            {thread.team_preset && (
               <div>
                 <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
                   Team
                 </span>
                 <p className="text-foreground mt-0.5 text-[0.6875rem]">
-                  {thread.team_preset || '—'}
-                  {topoLabel && (
-                    <span className="text-oxide-metadata ml-1.5">({topoLabel})</span>
-                  )}
+                  {thread.team_preset}
                 </p>
               </div>
             )}
@@ -575,16 +553,6 @@ function TaskItem({
                 </span>
                 <p className="text-foreground mt-0.5 font-mono text-[0.6875rem]">
                   {thread.source_branch}
-                </p>
-              </div>
-            )}
-            {diskPath && (
-              <div>
-                <span className="text-oxide-metadata text-[0.625rem] tracking-widest uppercase">
-                  Path
-                </span>
-                <p className="text-foreground mt-0.5 font-mono text-[0.625rem] break-all opacity-80">
-                  {diskPath}
                 </p>
               </div>
             )}

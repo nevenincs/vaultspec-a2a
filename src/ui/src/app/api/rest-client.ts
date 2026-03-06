@@ -18,6 +18,7 @@ type TeamStatusResponse = components['schemas']['TeamStatusResponse'];
 type TeamPresetsResponse = components['schemas']['TeamPresetsResponse'];
 type PermissionResponseRequest = components['schemas']['PermissionResponseRequest'];
 type PermissionResponseResult = components['schemas']['PermissionResponseResult'];
+type CancelThreadResponse = components['schemas']['CancelThreadResponse'];
 
 class RestClientError extends Error {
   constructor(
@@ -72,6 +73,13 @@ export class RestClient {
     return this.post<SendMessageResponse>(
       `/api/threads/${encodeURIComponent(threadId)}/messages`,
       req,
+    );
+  }
+
+  async cancelThread(threadId: string): Promise<CancelThreadResponse> {
+    return this.post<CancelThreadResponse>(
+      `/api/threads/${encodeURIComponent(threadId)}/cancel`,
+      {},
     );
   }
 

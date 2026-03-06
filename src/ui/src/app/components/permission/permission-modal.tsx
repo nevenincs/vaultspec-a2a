@@ -64,15 +64,15 @@ export function PermissionModal({
         <AlertDialogFooter className="mt-2 flex-row gap-2">
           {request.options.map((option) => {
             const variant =
-              option.kind === 'allow'
+              option.kind === 'allow_once'
                 ? 'default'
-                : option.kind === 'deny'
+                : option.kind === 'reject_once'
                   ? 'outline'
                   : option.kind === 'allow_always'
                     ? 'secondary'
                     : 'ghost';
             const extraClass =
-              option.kind === 'deny'
+              option.kind === 'reject_once' || option.kind === 'reject_always'
                 ? 'text-status-error border-status-error/30 hover:bg-status-error/10 hover:text-status-error'
                 : '';
             return (

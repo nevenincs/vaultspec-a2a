@@ -13,8 +13,11 @@ export interface StreamSlice {
   streamEvents: Record<string, StreamEvent[]>;
   /** Internal chunk index — not for external consumers */
   _chunkIndex: ChunkIndex;
+  /** agent_id → display_name, populated by team_status events */
+  _agentDisplayNames: Record<string, string>;
 
   handleWireEvent: (threadId: string, event: ServerEvent) => void;
+  updateAgentDisplayNames: (agents: Array<{ agent_id: string; display_name: string }>) => void;
   hydrateThreadEvents: (
     threadId: string,
     events: StreamEvent[],
@@ -31,8 +34,13 @@ export const createStreamSlice: StateCreator<
 > = (set, get) => ({
   streamEvents: {},
   _chunkIndex: new Map(),
+  _agentDisplayNames: {},
 
   handleWireEvent: (threadId, event) => {
+    const resolveAgentName = (agentId: string | null): string => {
+      const id = agentId ?? '';
+      return get()._agentDisplayNames[id] || id;
+    };
     switch (event.type) {
       case 'message_chunk': {
         const key = event.message_id;
@@ -67,7 +75,7 @@ export const createStreamSlice: StateCreator<
                 timestamp: event.timestamp,
                 thread_id: threadId,
                 agent_id: event.agent_id ?? '',
-                agent_name: event.agent_id ?? '',
+                agent_name: resolveAgentName(event.agent_id),
                 content: event.content,
                 streaming: !event.finish_reason,
               });
@@ -110,7 +118,7 @@ export const createStreamSlice: StateCreator<
                 timestamp: event.timestamp,
                 thread_id: threadId,
                 agent_id: event.agent_id ?? '',
-                agent_name: event.agent_id ?? '',
+                agent_name: resolveAgentName(event.agent_id),
                 content: event.content,
               });
             },
@@ -139,7 +147,7 @@ export const createStreamSlice: StateCreator<
               timestamp: event.timestamp,
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
-              agent_name: event.agent_id ?? '',
+              agent_name: resolveAgentName(event.agent_id),
               tool_call_id: event.tool_call_id,
               tool_name: event.title,
               tool_kind: mapToolKind(event.kind),
@@ -215,7 +223,7 @@ export const createStreamSlice: StateCreator<
                 timestamp: event.timestamp,
                 thread_id: threadId,
                 agent_id: event.agent_id ?? '',
-                agent_name: event.agent_id ?? '',
+                agent_name: resolveAgentName(event.agent_id),
                 artifact_id: event.artifact_id,
                 filename: event.filename,
                 content: event.content,
@@ -241,7 +249,7 @@ export const createStreamSlice: StateCreator<
               timestamp: event.timestamp,
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
-              agent_name: event.agent_id ?? '',
+              agent_name: resolveAgentName(event.agent_id),
               entries: event.entries.map((e) => ({
                 id: `${e.content.slice(0, 20)}-${e.status}`,
                 title: e.content,
@@ -268,7 +276,7 @@ export const createStreamSlice: StateCreator<
               timestamp: event.timestamp,
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
-              agent_name: event.node_name,
+              agent_name: resolveAgentName(event.agent_id) || event.node_name,
               state: event.state,
             });
           },
@@ -304,6 +312,20 @@ export const createStreamSlice: StateCreator<
       default:
         break;
     }
+  },
+
+  updateAgentDisplayNames: (agents) => {
+    set(
+      (draft) => {
+        for (const agent of agents) {
+          if (agent.display_name) {
+            draft._agentDisplayNames[agent.agent_id] = agent.display_name;
+          }
+        }
+      },
+      false,
+      'stream/updateAgentDisplayNames',
+    );
   },
 
   hydrateThreadEvents: (threadId, events, lastSequence) => {

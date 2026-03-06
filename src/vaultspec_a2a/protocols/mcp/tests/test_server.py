@@ -219,16 +219,16 @@ class TestCreateThreadViaApp:
         assert data["thread_id"] == thread_id
 
     def test_post_threads_with_workspace_root_returns_201(
-        self, session_factory
+        self, session_factory, tmp_path
     ) -> None:
-        """POST /api/threads with workspace_root passes through to 201."""
+        """POST /api/threads with workspace_root in metadata passes through to 201."""
         with _make_test_client(session_factory) as client:
             resp = client.post(
                 "/api/threads",
                 json={
                     "initial_message": "Hello workspace",
                     "autonomous": True,
-                    "workspace_root": "C:/projects/myapp",
+                    "metadata": {"workspace_root": str(tmp_path)},
                 },
             )
         assert resp.status_code == 201

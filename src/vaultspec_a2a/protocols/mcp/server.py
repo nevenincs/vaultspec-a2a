@@ -70,9 +70,9 @@ def _reset_client() -> None:
     """Close and discard the shared client.  Used by test fixtures."""
     global _shared_client  # noqa: PLW0603
     if _shared_client is not None and not _shared_client.is_closed:
-        # Synchronous close is fine in test teardown; the transport is idle.
+        # LG-030: use close() instead of __del__() for proper cleanup.
         try:
-            _shared_client._transport.__del__()  # type: ignore[union-attr]
+            _shared_client._transport.close()  # type: ignore[union-attr]
         except Exception:
             pass
     _shared_client = None
@@ -216,7 +216,7 @@ async def start_thread(
             "autonomous": autonomous,
         }
         if workspace_root is not None:
-            payload["workspace_root"] = workspace_root
+            payload["metadata"] = {"workspace_root": workspace_root}
         client = _get_client()
         resp = await client.post(
             f"{settings.mcp_api_base_url}/api/threads",
@@ -510,7 +510,7 @@ async def get_thread_status(
             lines.append(f"Plan: {len(plan)} entries")
             for entry in plan:
                 entry_status = entry.get("status", "?")
-                title = entry.get("title", "untitled")
+                title = entry.get("content", "untitled")
                 lines.append(f"  - [{entry_status}] {title}")
 
         # Pending permissions

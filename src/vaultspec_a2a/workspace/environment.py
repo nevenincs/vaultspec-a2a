@@ -80,6 +80,7 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
             # WS-H1: additional API key providers
             "ZHIPU_API_KEY",
             "LANGCHAIN_API_KEY",
+            "LANGSMITH_API_KEY",
             "LANGCHAIN_TRACING_V2",
             # ACP-ENV-005: ANTHROPIC_LOG=debug causes the Anthropic SDK to emit
             # debug text to stdout, corrupting the ACP JSON-RPC stream and

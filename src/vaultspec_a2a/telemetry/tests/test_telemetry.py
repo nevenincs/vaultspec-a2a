@@ -1,4 +1,4 @@
-"""Tests for lib/telemetry/ — no mocks, real OTel API calls only.
+"""Tests for src/vaultspec_a2a/telemetry/ — no mocks, real OTel API calls only.
 
 These tests exercise the actual opentelemetry-api (always installed) and
 verify graceful no-op behaviour when the SDK is absent. They do NOT assert

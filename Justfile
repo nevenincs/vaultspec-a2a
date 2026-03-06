@@ -17,7 +17,7 @@ dev:
 
 # Start just the worker process (for split-terminal development)
 worker:
-    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+    uv run vaultspec service start worker
 
 # Docker: start dev environment (vite + mocks + Jaeger)
 up:
@@ -100,19 +100,35 @@ docker-build:
 
 # Run a preps scenario (solo_coder | pipeline_team | plan_approval | autonomous)
 preps SCENARIO:
-    uv run python -m vaultspec_a2a.tests.preps.{{SCENARIO}}
+    uv run vaultspec run mock {{SCENARIO}}
 
 # List available preps scenarios
 preps-list:
-    uv run python -m vaultspec_a2a.tests.preps
+    uv run vaultspec run mock
 
 # Run smoke evaluation suite (routing + gate compliance)
 eval-smoke:
-    uv run python -m vaultspec_a2a.tests.evals.suites.smoke
+    uv run vaultspec test benchmark smoke
 
 # Run nightly evaluation suite (all 6 dimensions, requires LANGSMITH_API_KEY)
 eval-nightly:
-    uv run python -m vaultspec_a2a.tests.evals.suites.nightly
+    uv run vaultspec test benchmark nightly
+
+# Run a provider connectivity probe (claude | gemini | openai | zhipu)
+probe PROVIDER:
+    uv run vaultspec run probe {{PROVIDER}}
+
+# List teams (optional status filter)
+teams *STATUS:
+    uv run vaultspec team list {{STATUS}}
+
+# Check service health
+service-status:
+    uv run vaultspec service status
+
+# Stop running services
+service-stop:
+    uv run vaultspec service stop
 
 # ── Internal recipes ─────────────────────────────────────────────────────────
 

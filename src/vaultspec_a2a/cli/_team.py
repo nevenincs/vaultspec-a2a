@@ -54,15 +54,15 @@ def status(thread_id: str) -> None:
 
 @team.command()
 @click.option("--id", "thread_id", required=True, help="Thread ID.")
-@click.option("--message", required=True, help="Message to send.")
-def resume(thread_id: str, message: str) -> None:
+@click.option("--message", default=None, help="New input message (omit for contentless resume).")
+def resume(thread_id: str, message: str | None) -> None:
     """Send a message into a thread to resume work."""
     from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.post(
             f"/threads/{thread_id}/messages",
-            json={"content": message},
+            json={"content": message or ""},
         )
         _handle_response(resp)
         click.echo(f"Thread {thread_id} resumed.")

@@ -16,17 +16,20 @@ def run() -> None:
 
 
 @run.command()
-@click.argument("scenario", required=False, default=None)
+@click.argument(
+    "scenario",
+    required=False,
+    default=None,
+    type=click.Choice(
+        ["solo_coder", "pipeline_team", "plan_approval", "autonomous"],
+        case_sensitive=False,
+    ),
+)
 def mock(scenario: str | None) -> None:
     """Run a mock scenario (or list available scenarios)."""
-    import re
-
     if scenario is None:
         cmd = [sys.executable, "-m", "vaultspec_a2a.tests.preps"]
     else:
-        if not re.fullmatch(r"[a-zA-Z0-9_]+", scenario):
-            click.echo(f"Invalid scenario name: {scenario!r}", err=True)
-            raise SystemExit(1)
         cmd = [
             sys.executable,
             "-m",

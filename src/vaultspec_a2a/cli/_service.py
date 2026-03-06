@@ -1,4 +1,4 @@
-"""service group: start, stop, status."""
+"""service group: start, stop, kill, status."""
 
 from __future__ import annotations
 
@@ -81,6 +81,31 @@ def stop(target: str | None) -> None:
             click.echo(f"{name.capitalize()} not running (port {port}).")
         except httpx.HTTPError as exc:
             click.echo(f"{name.capitalize()} shutdown failed: {exc}", err=True)
+
+
+@service.command()
+@click.argument("target", type=click.Choice(["backend", "worker"], case_sensitive=False))
+def kill(target: str) -> None:
+    """Force-kill a process by port."""
+    import subprocess
+
+    from ..core.config import settings
+
+    port = settings.port if target == "backend" else settings.worker_port
+    result = subprocess.run(
+        [
+            "powershell", "-Command",
+            f"(Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue).OwningProcess",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    pids = set(result.stdout.strip().split("\n")) - {"", "0"}
+    if not pids:
+        click.echo(f"No process found on port {port}.")
+        return
+    for pid in pids:
+        subprocess.run(["taskkill", "/F", "/PID", pid.strip()], check=False)
+    click.echo(f"{target.capitalize()} killed (port {port}).")
 
 
 @service.command()

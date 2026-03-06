@@ -33,9 +33,10 @@ def list_cmd() -> None:
 
 
 @agent.command()
+@click.option("--agent", "agent_name", default="vaultspec-coder", help="Agent preset name (display only for v1).")
 @click.option("--message", required=True, help="Message to send.")
-def ask(message: str) -> None:
-    """Send a question to the solo-coder agent preset."""
+def ask(agent_name: str, message: str) -> None:
+    """Send a question to an agent preset (solo-coder by default)."""
     from ._util import _api_client, _handle_response
 
     with _api_client() as client:
@@ -48,4 +49,4 @@ def ask(message: str) -> None:
         )
         _handle_response(resp)
         data = resp.json()
-        click.echo(f"Thread {data['thread_id']} created.")
+        click.echo(f"Thread {data['thread_id']} created (agent: {agent_name}).")

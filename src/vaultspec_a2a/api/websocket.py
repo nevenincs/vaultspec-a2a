@@ -142,10 +142,21 @@ class ConnectionManager:
             queue = self._aggregator.add_subscriber(client_id)
 
             # Send ConnectedEvent
+            # BE-35: source active threads from worker heartbeat data, not
+            # WS subscriber list (which is empty on reconnect).  Fall back
+            # to aggregator subscriber list if heartbeat hasn't arrived yet.
+            worker_threads: list[str] = getattr(
+                websocket.app.state, "worker_active_threads", []
+            )
+            active = (
+                sorted(set(worker_threads))
+                if worker_threads
+                else self._aggregator.get_active_thread_ids()
+            )
             connected = ConnectedEvent(
                 client_id=client_id,
                 server_version=_SERVER_VERSION,
-                active_threads=self._aggregator.get_active_thread_ids(),
+                active_threads=active,
             )
             await websocket.send_json(connected.model_dump(mode="json"))
 
@@ -508,7 +519,7 @@ class ConnectionManager:
     ) -> None:
         """Send a pre-serialised event dict to all clients subscribed to *thread_id*.
 
-        Used by the internal WebSocket relay (``lib.api.internal``) to forward
+        Used by the internal WebSocket relay (``vaultspec_a2a.api.internal``) to forward
         worker events to browser clients without round-tripping through the
         ``EventAggregator`` queue machinery.  The payload is a plain ``dict``
         (already JSON-serialisable) produced by the worker's event pipeline.

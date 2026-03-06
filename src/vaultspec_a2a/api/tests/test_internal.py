@@ -1,4 +1,4 @@
-"""Tests for lib/api/internal.py -- internal IPC router endpoints (ADR-019).
+"""Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints (ADR-019).
 
 Validates the /internal/health, /internal/events, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.

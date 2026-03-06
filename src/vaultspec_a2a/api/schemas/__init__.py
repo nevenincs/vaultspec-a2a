@@ -1,6 +1,6 @@
 """Frontend-backend wire contract schema models.
 
-Facade re-exporting all public types from the ``lib.api.schemas`` subpackage.
+Facade re-exporting all public types from the ``vaultspec_a2a.api.schemas`` subpackage.
 Consumers should import from this module rather than reaching into
 sub-modules directly::
 

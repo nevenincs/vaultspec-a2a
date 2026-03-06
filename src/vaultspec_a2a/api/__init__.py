@@ -2,8 +2,8 @@
 
 Note: ``create_app``, ``router``, ``get_aggregator``, and
 ``ConnectionManager`` are intentionally NOT re-exported from this facade.
-They depend on ``lib.core.aggregator``, which in turn imports from
-``lib.api.schemas``, creating a circular import if exposed here.
+They depend on ``vaultspec_a2a.core.aggregator``, which in turn imports from
+``vaultspec_a2a.api.schemas``, creating a circular import if exposed here.
 
 Import them directly instead::
 

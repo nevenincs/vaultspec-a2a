@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.aggregator import EventAggregator
 from ..core.exceptions import ConfigError, NicknameConflictError
-from ..core.graph import _build_initial_vault_index
+from ..core import build_initial_vault_index
 from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..core.preamble import build_context_preamble
 from ..core.team_config import (
@@ -49,6 +49,7 @@ from ..core.team_config import (
 from ..database.crud import (
     ThreadStatus,
     create_thread,
+    delete_thread,
     get_thread,
     get_thread_metadata,
     list_threads,
@@ -73,7 +74,16 @@ from .schemas.rest import (
     ThreadListResponse,
     ThreadSummary,
 )
-from .schemas.snapshots import MessageSnapshot, ThreadStateSnapshot
+from .schemas.snapshots import (
+    ArtifactSnapshot,
+    MessageSnapshot,
+    ThreadStateSnapshot,
+    ToolCallSnapshot,
+    _AgentSnapshot,
+    _PermissionOptionSnapshot,
+    _PermissionSnapshot,
+)
+from .schemas.events import PlanEntry
 
 
 __all__ = [
@@ -273,7 +283,7 @@ async def create_thread_endpoint(
         metadata = body.metadata
         feature_tag = metadata.feature_tag if metadata else None
         vault_index = (
-            _build_initial_vault_index(ws_root, metadata.feature_tag)
+            build_initial_vault_index(ws_root, metadata.feature_tag)
             if (metadata and metadata.feature_tag)
             else {}
         )
@@ -328,14 +338,24 @@ async def create_thread_endpoint(
 async def list_threads_endpoint(
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
+    status: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ThreadListResponse:
-    """List orchestration threads with pagination.
+    """List orchestration threads with pagination and optional status filter.
 
     Enriches each thread summary with metadata fields (ADR-014) when
     available. Legacy threads without metadata gracefully omit these fields.
     """
-    threads, total = await list_threads(db, offset=offset, limit=limit)
+    status_filter: ThreadStatus | None = None
+    if status is not None:
+        try:
+            status_filter = ThreadStatus(status)
+        except ValueError:
+            raise HTTPException(
+                status_code=422,
+                detail=f"Invalid status filter: {status!r}",
+            ) from None
+    threads, total = await list_threads(db, offset=offset, limit=limit, status=status_filter)
     summaries: list[ThreadSummary] = []
     for t in threads:
         # Parse metadata JSON for summary fields (graceful fallback for legacy threads)
@@ -398,11 +418,13 @@ async def get_thread_metadata_endpoint(
 def _enrich_snapshot_from_state(
     snapshot: ThreadStateSnapshot,
     state: StateSnapshot,
+    aggregator: EventAggregator | None = None,
 ) -> ThreadStateSnapshot:
     """Populate snapshot fields from LangGraph checkpointer state.
 
     Maps LangChain ``BaseMessage`` objects to ``MessageSnapshot`` and
-    extracts ``checkpoint_id`` from the state config.
+    extracts ``checkpoint_id``, plan, artifacts from the state config.
+    Populates agents and pending permissions from the aggregator.
     """
     msgs: list[MessageSnapshot] = []
     for m in state.values.get("messages", []):
@@ -459,10 +481,84 @@ def _enrich_snapshot_from_state(
     if hasattr(state, "config") and state.config:
         checkpoint_id = state.config.get("configurable", {}).get("checkpoint_id")
 
+    # Extract plan entries from checkpoint channel_values
+    plan_raw = state.values.get("current_plan", [])
+    plan_entries: list[PlanEntry] = []
+    for entry in plan_raw:
+        if isinstance(entry, dict):
+            plan_entries.append(
+                PlanEntry(
+                    content=entry.get("content", ""),
+                    status=entry.get("status", "pending"),
+                    priority=entry.get("priority", "medium"),
+                )
+            )
+        elif isinstance(entry, PlanEntry):
+            plan_entries.append(entry)
+
+    # Extract artifacts from checkpoint channel_values
+    artifacts_raw = state.values.get("artifacts", [])
+    artifact_snapshots: list[ArtifactSnapshot] = []
+    for art in artifacts_raw:
+        if isinstance(art, dict):
+            artifact_snapshots.append(
+                ArtifactSnapshot(
+                    artifact_id=art.get("artifact_id", ""),
+                    filename=art.get("filename", ""),
+                    content=art.get("content", ""),
+                    complete=art.get("complete", True),
+                )
+            )
+
+    # Populate agents from aggregator node summaries + agent states
+    agent_snapshots: list[_AgentSnapshot] = []
+    if aggregator is not None:
+        node_summaries = aggregator.get_node_summaries()
+        agent_states = aggregator.get_agent_states()
+        for node in node_summaries:
+            agent_id = node.get("agent_id", node.get("node_name", ""))
+            agent_snapshots.append(
+                _AgentSnapshot(
+                    agent_id=agent_id,
+                    node_name=node.get("node_name", ""),
+                    state=agent_states.get(
+                        agent_id, AgentLifecycleState.IDLE
+                    ),
+                    role=node.get("role", ""),
+                    display_name=node.get("display_name", ""),
+                    description=node.get("description", ""),
+                )
+            )
+
+    # Populate pending permissions from aggregator
+    perm_snapshots: list[_PermissionSnapshot] = []
+    if aggregator is not None:
+        thread_id = snapshot.thread_id
+        for perm in aggregator.get_pending_permissions(thread_id):
+            perm_snapshots.append(
+                _PermissionSnapshot(
+                    request_id=perm.request_id,
+                    description=perm.description,
+                    tool_call=perm.tool_call,
+                    options=[
+                        _PermissionOptionSnapshot(
+                            option_id=opt.option_id,
+                            name=opt.name,
+                            kind=opt.kind,
+                        )
+                        for opt in perm.options
+                    ],
+                )
+            )
+
     return snapshot.model_copy(
         update={
             "messages": msgs,
             "checkpoint_id": checkpoint_id,
+            "plan": plan_entries,
+            "artifacts": artifact_snapshots,
+            "agents": agent_snapshots,
+            "pending_permissions": perm_snapshots,
         }
     )
 
@@ -498,43 +594,46 @@ async def get_thread_state_endpoint(
     )
 
     # ADR-019: Try to enrich from checkpointer directly.
-    # The checkpointer.aget_tuple() returns raw checkpoint data.  We use
-    # checkpointer.aget() which returns a Checkpoint dict with channel_values
-    # containing the messages list.
+    # aget_tuple() returns a CheckpointTuple with the checkpoint dict
+    # containing channel_values (messages, plan, artifacts, etc.).
     try:
-        checkpoint = await asyncio.wait_for(
-            checkpointer.aget({"configurable": {"thread_id": thread_id}}),
+        config = {"configurable": {"thread_id": thread_id}}
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config),
             timeout=10.0,
         )
-        if checkpoint is not None:
-            # Extract messages from checkpoint channel_values
+        if checkpoint_tuple is not None:
+            checkpoint = checkpoint_tuple.checkpoint
             channel_values = checkpoint.get("channel_values", {})
-            messages_raw = channel_values.get("messages", [])
-            if messages_raw:
-                # Build a minimal StateSnapshot-like object for reuse of
-                # _enrich_snapshot_from_state
-                class _MinimalState:
-                    """Minimal adapter for _enrich_snapshot_from_state."""
 
-                    def __init__(
-                        self, values: dict, config: dict | None = None
-                    ) -> None:
-                        self.values = values
-                        self.config = config
+            # Build a minimal StateSnapshot-like object for reuse of
+            # _enrich_snapshot_from_state
+            class _MinimalState:
+                """Minimal adapter for _enrich_snapshot_from_state."""
 
-                config_dict = {"configurable": {"thread_id": thread_id}}
-                # checkpoint_id may be in the checkpoint metadata
-                if "id" in checkpoint:
-                    config_dict["configurable"]["checkpoint_id"] = checkpoint["id"]
+                def __init__(
+                    self, values: dict, cfg: dict | None = None
+                ) -> None:
+                    self.values = values
+                    self.config = cfg
 
-                minimal_state = _MinimalState(
-                    values=channel_values,
-                    config=config_dict,
-                )
-                snapshot = _enrich_snapshot_from_state(
-                    snapshot,
-                    minimal_state,  # type: ignore[arg-type]
-                )
+            config_dict = {"configurable": {"thread_id": thread_id}}
+            if checkpoint_tuple.config:
+                cp_id = checkpoint_tuple.config.get(
+                    "configurable", {}
+                ).get("checkpoint_id")
+                if cp_id:
+                    config_dict["configurable"]["checkpoint_id"] = cp_id
+
+            minimal_state = _MinimalState(
+                values=channel_values,
+                cfg=config_dict,
+            )
+            snapshot = _enrich_snapshot_from_state(
+                snapshot,
+                minimal_state,  # type: ignore[arg-type]
+                aggregator=aggregator,
+            )
     except TimeoutError:
         logger.warning(
             "Timed out loading checkpoint for thread %s after 10s; "
@@ -576,6 +675,9 @@ async def send_message_endpoint(
     thread = await get_thread(db, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
+
+    if thread.status == ThreadStatus.ARCHIVED:
+        raise HTTPException(status_code=409, detail="Cannot send messages to archived thread")
 
     logger.info(
         "Message received for thread %s: %d chars",
@@ -653,12 +755,15 @@ async def get_team_status_endpoint(
     """
     active_threads = aggregator.get_active_thread_ids()
     node_summaries = aggregator.get_node_summaries()
+    agent_states = aggregator.get_agent_states()
 
     agents = [
         AgentStatusEntry(
             agent_id=s["agent_id"],
             node_name=s["node_name"],
-            state=AgentLifecycleState.IDLE,
+            state=agent_states.get(
+                s["agent_id"], AgentLifecycleState.IDLE
+            ),
             role=s.get("role", ""),
             display_name=s.get("display_name", ""),
             description=s.get("description", ""),
@@ -691,7 +796,7 @@ async def get_team_status_endpoint(
 async def list_team_presets_endpoint() -> TeamPresetsResponse:
     """Return all available team presets for the team picker UI.
 
-    Dynamically discovers presets by globbing ``lib/core/presets/teams/*.toml``.
+    Dynamically discovers presets by globbing ``src/vaultspec_a2a/core/presets/teams/*.toml``.
     Workspace-local overrides are not included in this listing (they
     shadow individual presets but are not auto-discovered in v1).
     """
@@ -772,10 +877,19 @@ async def respond_to_permission_endpoint(
             except (json.JSONDecodeError, AttributeError):
                 pass
 
+        # BE-19: plan approval interrupt expects a dict, not a bare string.
+        # The supervisor node calls `resume_value.get("approved")`, so we
+        # translate "approve"/"reject" into {"approved": True/False}.
+        # Tool permission resumes pass the option_id string through unchanged.
+        resume_value: str | dict[str, bool] = body.option_id
+        perm_event = aggregator._pending_permissions.get(request_id)
+        if perm_event and perm_event.tool_call == "plan_approval":
+            resume_value = {"approved": body.option_id == "approve"}
+
         dispatch = DispatchRequest(
             action="resume",
             thread_id=thread_id,
-            option_id=body.option_id,
+            option_id=resume_value,
             team_preset=team_preset,
             workspace_root=workspace_root,
         )
@@ -837,6 +951,7 @@ async def cancel_thread_endpoint(
         ThreadStatus.COMPLETED,
         ThreadStatus.FAILED,
         ThreadStatus.CANCELLED,
+        ThreadStatus.ARCHIVED,
     ):
         return CancelThreadResponse(
             thread_id=thread_id,
@@ -869,3 +984,61 @@ async def cancel_thread_endpoint(
         status=ThreadStatus.CANCELLED,
         cancelled=True,
     )
+
+
+# ---------------------------------------------------------------------------
+# DELETE /threads/{thread_id} -- Hard-delete a thread (BE-D)
+# ---------------------------------------------------------------------------
+
+
+@router.delete("/threads/{thread_id}", status_code=204)
+async def delete_thread_endpoint(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Hard-delete a thread and all cascading artifacts."""
+    deleted = await delete_thread(db, thread_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    await db.commit()
+
+
+# ---------------------------------------------------------------------------
+# POST /threads/{thread_id}/archive -- Archive a thread (BE-E)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/threads/{thread_id}/archive", status_code=200)
+async def archive_thread_endpoint(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    """Transition a thread to ARCHIVED status."""
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+
+    if thread.status not in (ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED):
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot archive thread in {thread.status!r} state",
+        )
+
+    await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
+    await db.commit()
+    return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
+
+
+# ---------------------------------------------------------------------------
+# POST /admin/shutdown -- Graceful shutdown (BE-G)
+# ---------------------------------------------------------------------------
+
+
+@router.post("/admin/shutdown", status_code=202)
+async def shutdown_endpoint() -> dict[str, str]:
+    """Initiate graceful server shutdown."""
+    import os
+    import signal
+
+    os.kill(os.getpid(), signal.SIGTERM)
+    return {"status": "shutting_down"}

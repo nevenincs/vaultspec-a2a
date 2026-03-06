@@ -189,6 +189,7 @@ class PermissionRequestEvent(EventEnvelope):
     description: str
     options: list[PermissionOption]
     tool_call: str | None = None
+    tool_kind: ToolKind | None = None
 
 
 class ArtifactUpdateEvent(EventEnvelope):

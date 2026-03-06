@@ -1,4 +1,4 @@
-"""Tests for lib/api/supervisor.py -- WorkerSupervisor lifecycle (ADR-019).
+"""Tests for src/vaultspec_a2a/api/supervisor.py -- WorkerSupervisor lifecycle (ADR-019).
 
 Validates the supervisor's initial state and process lifecycle (start/stop)
 using real subprocesses.  For lifecycle tests we use a simple ``python -c
@@ -52,7 +52,7 @@ class TestProcessLifecycle:
     """Test start/stop using a lightweight sleep subprocess.
 
     We assign a real ``subprocess.Popen`` to ``_process`` because calling
-    ``start()`` would invoke ``python -m lib.worker`` (binds ports, needs
+    ``start()`` would invoke ``python -m vaultspec_a2a.worker`` (binds ports, needs
     control surface up).  These tests verify that ``is_alive()``, ``pid``,
     and ``stop()`` correctly interrogate and manage a real OS process.
     """

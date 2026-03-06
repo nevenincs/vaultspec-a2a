@@ -6,7 +6,7 @@ The worker process communicates with the control surface via two channels:
    pushes ``WorkerEventEnvelope`` and ``HeartbeatMessage`` JSON frames.
 2. **HTTP POST** (``/internal/events``, ``/internal/heartbeat``) -- preferred
    path that avoids the need for a WebSocket client library in the worker.
-   The ``WorkerBridge`` in ``lib.worker.ipc`` uses this approach.
+   The ``WorkerBridge`` in ``vaultspec_a2a.worker.ipc`` uses this approach.
 
 The control surface exposes ``/internal/health`` for readiness probes.
 """
@@ -19,12 +19,71 @@ import time
 
 from typing import Any
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Header,
+    Request,
+    WebSocket,
+    WebSocketDisconnect,
+)
 
 
 __all__ = ["internal_router"]
 
 logger = logging.getLogger(__name__)
+
+# DB-CRIT-01: map aggregator outcome strings to ThreadStatus enum values.
+_TERMINAL_STATUS_MAP: dict[str, str] = {
+    "completed": "completed",
+    "failed": "failed",
+    "cancelled": "cancelled",
+}
+
+
+async def _handle_terminal_event(
+    thread_id: str, payload: dict[str, Any]
+) -> None:
+    """Update thread DB status when a ``thread_terminal`` event arrives.
+
+    Called from both the WS and HTTP POST relay paths.  Imports are kept
+    local to avoid circular dependencies at module level.
+    """
+    if payload.get("event_type") != "thread_terminal":
+        return
+    status_str = _TERMINAL_STATUS_MAP.get(payload.get("status", ""))
+    if not status_str:
+        return
+    try:
+        from ..database.crud import (  # noqa: PLC0415
+            InvalidTransitionError,
+            ThreadStatus,
+            update_thread_status,
+        )
+        from ..database.session import get_session_factory  # noqa: PLC0415
+
+        factory = get_session_factory()
+        async with factory() as db:
+            await update_thread_status(db, thread_id, ThreadStatus(status_str))
+            await db.commit()
+        logger.info(
+            "Thread %s status updated to %s", thread_id, status_str
+        )
+    except InvalidTransitionError:
+        # BE-37: race condition — cancel endpoint already set terminal status.
+        # This is expected and not an error.
+        logger.info(
+            "Thread %s transition to %s skipped (already terminal)",
+            thread_id,
+            status_str,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to update thread %s status to %s",
+            thread_id,
+            status_str,
+        )
 
 # Shared size limit for internal IPC payloads (1 MB).
 _MAX_WS_FRAME_BYTES = 1_048_576
@@ -37,7 +96,9 @@ async def _verify_internal_token(
 
     Skipped when settings.internal_token is None (dev mode).
     """
-    from ..core.config import settings  # local import avoids circular dep at module level
+    from ..core.config import (
+        settings,  # local import avoids circular dep at module level
+    )
 
     token = settings.internal_token
     if token is None:
@@ -99,6 +160,12 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
                                 " -- dropping event for %s",
                                 thread_id,
                             )
+                        # P8-01: sync into API aggregator state.
+                        agg = getattr(websocket.app.state, "aggregator", None)
+                        if agg is not None:
+                            agg.sync_worker_event(thread_id, payload)
+                        # DB-CRIT-01: terminal status update.
+                        await _handle_terminal_event(thread_id, payload)
                     else:
                         logger.warning("Malformed worker event envelope: %s", raw[:200])
 
@@ -147,8 +214,53 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
 
     if thread_id and payload:
         await cm.broadcast_to_thread(thread_id, payload)
+        # P8-01: sync into API aggregator state.
+        agg = getattr(request.app.state, "aggregator", None)
+        if agg is not None:
+            agg.sync_worker_event(thread_id, payload)
+        # DB-CRIT-01: translate thread_terminal events into DB status updates.
+        await _handle_terminal_event(thread_id, payload)
     else:
         logger.warning("Malformed worker event POST: missing thread_id or payload")
+
+    return {"status": "ok"}
+
+
+@internal_router.post("/events/batch")
+async def receive_worker_event_batch(request: Request) -> dict[str, str]:
+    """Receive a batch of events from the worker (CRIT-02).
+
+    The ``WorkerBridge`` accumulates events for a short interval then
+    POSTs them as a single ``{"events": [...]}`` payload.  Each entry
+    has the same shape as a single-event envelope (``thread_id`` +
+    ``payload``).
+    """
+    content_length = request.headers.get("content-length")
+    # Allow larger batches: 4 MB limit for batch payloads.
+    if content_length is not None and int(content_length) > _MAX_HTTP_BODY_BYTES * 4:
+        raise HTTPException(status_code=413, detail="Payload too large (max 4 MB)")
+
+    body: dict[str, Any] = await request.json()
+    events: list[dict[str, Any]] = body.get("events", [])
+
+    cm = getattr(request.app.state, "connection_manager", None)
+    if cm is None:
+        raise HTTPException(
+            status_code=503,
+            detail="ConnectionManager not available -- control surface not ready",
+        )
+
+    agg = getattr(request.app.state, "aggregator", None)
+
+    for evt in events:
+        thread_id = evt.get("thread_id", "")
+        payload = evt.get("payload", {})
+        if not thread_id or not payload:
+            continue
+        await cm.broadcast_to_thread(thread_id, payload)
+        if agg is not None:
+            agg.sync_worker_event(thread_id, payload)
+        await _handle_terminal_event(thread_id, payload)
 
     return {"status": "ok"}
 

@@ -1,4 +1,4 @@
-"""Shared fixtures for lib/api/tests/.
+"""Shared fixtures for src/vaultspec_a2a/api/tests/.
 
 Centralises engine, session_factory, session, and make_app so that all test
 modules use the same in-memory SQLite setup and dependency overrides.

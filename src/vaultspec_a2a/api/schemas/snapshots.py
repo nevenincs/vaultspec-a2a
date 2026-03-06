@@ -82,6 +82,9 @@ class _AgentSnapshot(BaseModel):
     state: AgentLifecycleState
     provider: Provider | None = None
     model: Model | None = None
+    role: str = ""
+    display_name: str = ""
+    description: str = ""
 
 
 class ThreadStateSnapshot(BaseModel):

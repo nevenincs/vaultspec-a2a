@@ -4,7 +4,7 @@ These enums define the discriminators and status types used in WebSocket
 messages and REST payloads between the backend orchestrator and the
 React control surface.
 
-Note: ``Provider`` and ``Model`` live in ``lib.utils.enums`` and are
+Note: ``Provider`` and ``Model`` live in ``vaultspec_a2a.utils.enums`` and are
 imported (not duplicated) where needed.
 """
 
@@ -55,7 +55,7 @@ class ClientCommandType(StrEnum):
 class AgentLifecycleState(StrEnum):
     """Observable agent states exposed to the frontend.
 
-    Maps to ADR-003 MCP states. Distinct from ``lib.utils.enums.AgentState``
+    Maps to ADR-003 MCP states. Distinct from ``vaultspec_a2a.utils.enums.AgentState``
     which tracks internal process lifecycle (init/ready/running/error/done).
     """
 

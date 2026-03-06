@@ -401,5 +401,5 @@ class TestExports:
         assert "ConnectionManager" in websocket_module.__all__
 
     def test_facade_reexports(self) -> None:
-        """lib.api re-exports ConnectionManager and it is the same class."""
+        """vaultspec_a2a.api re-exports ConnectionManager and it is the same class."""
         assert ConnectionManager is WebSocketConnectionManager

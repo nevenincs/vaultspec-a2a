@@ -1,4 +1,4 @@
-"""Tests for lib/api/auth.py.
+"""Tests for src/vaultspec_a2a/api/auth.py.
 
 Verifies that authenticate_request is callable and async.
 The function is intentionally a no-op per ADR-009 §2.2 — "stub until auth

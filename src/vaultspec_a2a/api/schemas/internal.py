@@ -21,8 +21,8 @@ class DispatchRequest(BaseModel):
     agent_id: str = "vaultspec-supervisor"
     # For ingest: user message content
     content: str | None = None
-    # For resume: permission response option
-    option_id: str | None = None
+    # For resume: permission response option (str for tool perms, dict for plan approval)
+    option_id: str | dict | None = None
     # For initial thread creation
     team_preset: str | None = None
     workspace_root: str | None = None

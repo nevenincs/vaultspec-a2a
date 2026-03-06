@@ -18,6 +18,7 @@ See: ADR-007 (FastAPI serving, SPA)
      ADR-019 (Service Separation)
 """
 
+import json
 import logging
 import re
 
@@ -49,6 +50,7 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from .endpoints import router
 from .internal import internal_router
 from .schemas.enums import AgentControlAction
+from .schemas.internal import DispatchRequest
 from .supervisor import WorkerSupervisor
 from .websocket import ConnectionManager
 
@@ -120,10 +122,8 @@ def _create_dispatch_message_handler(
                 if thread is not None:
                     team_preset = thread.team_preset
                     if thread.thread_metadata:
-                        import json as _json  # noqa: PLC0415
-
                         try:
-                            meta = _json.loads(thread.thread_metadata)
+                            meta = json.loads(thread.thread_metadata)
                             workspace_root = meta.get("workspace_root")
                         except (ValueError, AttributeError):
                             pass
@@ -135,17 +135,19 @@ def _create_dispatch_message_handler(
                 exc_info=True,
             )
 
+        dispatch = DispatchRequest(
+            action="ingest",
+            thread_id=thread_id,
+            agent_id=agent_id or "vaultspec-supervisor",
+            content=content,
+            team_preset=team_preset,
+            workspace_root=workspace_root,
+        )
+
         try:
             await worker_client.post(
                 "/dispatch",
-                json={
-                    "action": "ingest",
-                    "thread_id": thread_id,
-                    "agent_id": agent_id or "vaultspec-supervisor",
-                    "content": content,
-                    "team_preset": team_preset,
-                    "workspace_root": workspace_root,
-                },
+                json=dispatch.model_dump(),
             )
         except httpx.HTTPError:
             logger.warning(
@@ -232,9 +234,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     db_path = settings.database_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Database (SQLAlchemy)
+    # Database engine + session factory + Alembic migrations (ADR-029).
+    # init_db routes file-based DBs through run_migrations(); no create_all.
     engine = await init_db(db_path)
-    logger.info("Database initialised (WAL mode) at %s", db_path)
+    logger.info("Database initialised (WAL mode + migrations) at %s", db_path)
 
     # Backfill new state fields into existing checkpoint rows (additive,
     # idempotent — fills missing keys with zero values, touches nothing else).

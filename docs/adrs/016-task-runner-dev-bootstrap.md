@@ -156,7 +156,7 @@ docker-dev:
 
 # Clean build artifacts
 clean:
-    rm -rf dist/ build/ lib/api/static/ src/ui/build/
+    rm -rf dist/ build/ src/vaultspec_a2a/api/static/ src/ui/build/
 
 # --- Prerequisites ---
 

@@ -24,7 +24,7 @@ phase artifact gate.
 
 ### 1.1 How `interrupt()` Works in This Codebase
 
-The existing interrupt mechanism is implemented in `lib/core/nodes/worker.py` via
+The existing interrupt mechanism is implemented in `src/vaultspec_a2a/core/nodes/worker.py` via
 `_interrupt_permission_callback`:
 
 ```python
@@ -287,9 +287,9 @@ on first exec routing attempt.
 
 - [docs/audits/2026-03-03-vaultspec-rule-drift.md](../audits/2026-03-03-vaultspec-rule-drift.md) — D-02
 - `Y:/code/vaultspec-worktrees/main/.vaultspec/rules/system/framework.md` — "The user must approve plans before execution proceeds"
-- `lib/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
-- `lib/core/aggregator.py:1023` — `_emit_interrupt_events`, interrupt payload detection
-- `lib/api/endpoints.py:722` — `respond_to_permission_endpoint`, resume via REST
+- `src/vaultspec_a2a/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
+- `src/vaultspec_a2a/core/aggregator.py:1023` — `_emit_interrupt_events`, interrupt payload detection
+- `src/vaultspec_a2a/api/endpoints.py:722` — `respond_to_permission_endpoint`, resume via REST
 - [ADR-023](../adrs/023-phase-artifact-gates.md) — prerequisite gate at plan→exec boundary
 - [ADR-022](../adrs/022-contextual-anchoring-graph-lifecycle.md) — validation_errors gate (ordering reference)
 - [ADR-025](../adrs/025-mandatory-review-gate.md) — review artifact gate (ordering reference)

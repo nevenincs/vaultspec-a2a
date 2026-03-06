@@ -24,7 +24,7 @@ The backend (LangGraph orchestrator) and frontend (React control surface)
 have no formal wire contract. ADR-004, ADR-005, and ADR-009 describe the
 architectural intent---multiplexed WebSocket, REST state replay, structured
 events---but no concrete Pydantic models or endpoint signatures exist.
-`lib/api/schemas.py` was an empty placeholder with stub classes.
+`src/vaultspec_a2a/api/schemas.py` was an empty placeholder with stub classes.
 
 Without a machine-readable contract:
 
@@ -36,7 +36,7 @@ Without a machine-readable contract:
 ## 2. Decision
 
 We define a complete wire contract as a Pydantic subpackage at
-`lib/api/schemas/` with the following protocol surfaces.
+`src/vaultspec_a2a/api/schemas/` with the following protocol surfaces.
 
 ### 2.1 WebSocket Message Envelope
 
@@ -114,7 +114,7 @@ delivery and idempotent semantics.
    `oneOf` with `propertyName` discriminators.
 3. `openapi-typescript` consumes the OpenAPI spec and generates
    `src/ui/src/app/data/wire-types.ts`. _(Amended by ADR-018: path
-   changed from `src/lib/api/` to `src/app/data/`.)_
+   changed from `src/src/vaultspec_a2a/api/` to `src/app/data/`.)_
 4. The generated types are committed to the repository (not generated at
    build time) to enable frontend work without a running backend.
 5. CI validates that generated types match the current OpenAPI spec.
@@ -131,7 +131,7 @@ Frontend development proceeds before the backend is fully wired:
 
 1. **Schema fixtures**: Each Pydantic model provides `.model_json_schema()`
    for JSON Schema validation in frontend tests.
-2. **Factory functions**: A `lib/api/schemas/tests/` module contains
+2. **Factory functions**: A `src/vaultspec_a2a/api/schemas/tests/` module contains
    builder functions that produce valid model instances for each event type.
 3. **Recorded sessions**: Integration tests record real WebSocket sessions
    to JSON files in `src/ui/tests/fixtures/` for Playwright replay.
@@ -252,7 +252,7 @@ without benefit over a plain WebSocket with typed JSON messages.
 ## 6. Schema Module Structure
 
 ```text
-lib/api/schemas/
+src/vaultspec_a2a/api/schemas/
     __init__.py       # Facade: re-exports all public types
     enums.py          # ServerEventType, ClientCommandType, etc.
     base.py           # EventEnvelope, ClientCommand
@@ -279,5 +279,5 @@ lib/api/schemas/
   (facade pattern, `__all__`)
 - Toad `protocol.py`: ACP type definitions (ToolCall, ToolCallUpdate,
   PermissionOption, PlanEntry)
-- `lib/providers/acp_chat_model.py`: Reference implementation for ACP
+- `src/vaultspec_a2a/providers/acp_chat_model.py`: Reference implementation for ACP
   session update handling

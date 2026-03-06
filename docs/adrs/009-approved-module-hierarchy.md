@@ -142,8 +142,8 @@ ui/src/lib/
 Unit tests are co-located per domain (Rust-style, per GEMINI.md):
 
 ```text
-lib/core/tests/test_graph.py
-lib/core/nodes/tests/test_tools.py
+src/vaultspec_a2a/core/tests/test_graph.py
+src/vaultspec_a2a/core/nodes/tests/test_tools.py
 ...
 ```
 

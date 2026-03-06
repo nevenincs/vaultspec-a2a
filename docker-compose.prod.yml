@@ -7,7 +7,7 @@ services:
   api:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/prod.Dockerfile
       target: api
     ports:
       - '8000:8000'
@@ -39,13 +39,13 @@ services:
   worker:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: docker/prod.Dockerfile
       target: worker
     volumes:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_API_BASE_URL: 'http://api:8000'
+      VAULTSPEC_MCP_API_BASE_URL: 'http://api:8000'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
     env_file: .env

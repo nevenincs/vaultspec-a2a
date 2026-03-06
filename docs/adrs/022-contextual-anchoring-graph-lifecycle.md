@@ -79,7 +79,7 @@ rebuilt on every node call.
 
 ### 2.1 `{{FEATURE_CONTEXT}}` Placeholder in `_build_supervisor_prompt()`
 
-`_build_supervisor_prompt()` (`lib/core/graph.py:169`) is extended to accept an
+`_build_supervisor_prompt()` (`src/vaultspec_a2a/core/graph.py:169`) is extended to accept an
 optional `feature_context: str | None = None` parameter. When provided, it
 replaces a `{{FEATURE_CONTEXT}}` placeholder in the base prompt (analogous to
 the existing `{{AGENT_ROSTER}}` mechanism):
@@ -106,8 +106,8 @@ vault paths, validation errors) is handled by `build_anchoring_context()` (S2.2)
 
 ### 2.2 `build_anchoring_context()` --- Per-Invocation Anchoring Summary
 
-A new function in `lib/core/nodes/supervisor.py` and `lib/core/nodes/worker.py`
-(or a shared utility in `lib/core/anchoring.py`):
+A new function in `src/vaultspec_a2a/core/nodes/supervisor.py` and `src/vaultspec_a2a/core/nodes/worker.py`
+(or a shared utility in `src/vaultspec_a2a/core/anchoring.py`):
 
 ```python
 _ANCHOR_PATH_CAP = 10  # max vault paths per doc-type in the summary
@@ -171,7 +171,7 @@ five vault paths across three doc-types, and zero errors produces approximately
 
 ### 2.3 Supervisor Node: Anchoring Integration
 
-`create_supervisor_node()` (`lib/core/nodes/supervisor.py:29`) is amended to
+`create_supervisor_node()` (`src/vaultspec_a2a/core/nodes/supervisor.py:29`) is amended to
 inject the anchoring summary as an additional `SystemMessage` immediately before
 the routing call:
 
@@ -239,7 +239,7 @@ routing error is recorded in state for observability.
 
 ### 2.5 Worker Node: Anchoring Integration
 
-`create_worker_node()` (`lib/core/nodes/worker.py:92`) is amended to prepend the
+`create_worker_node()` (`src/vaultspec_a2a/core/nodes/worker.py:92`) is amended to prepend the
 anchoring summary between the persona prompt and the conversation history:
 
 ```python
@@ -342,7 +342,7 @@ implemented.
 
 ## 5. Implementation Constraints
 
-- `build_anchoring_context()` (in `lib/core/anchoring.py`) returns `None` when
+- `build_anchoring_context()` (in `src/vaultspec_a2a/core/anchoring.py`) returns `None` when
   `state.get("active_feature")` is falsy (no feature bound). Uses `.get()` for
   all SDD fields to tolerate legacy checkpoints (ADR-019 §5 carve-out).
   Calling nodes check `if anchoring:` to skip injection when no feature is set.
@@ -363,7 +363,7 @@ implemented.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
   state.py            UNCHANGED (fields added by ADR-019)
   anchoring.py        NEW: build_anchoring_context() — the core function
                       introduced by this ADR; per-invocation anchoring summary
@@ -384,10 +384,10 @@ lib/core/
 
 ## 7. References
 
-- `lib/core/anchoring.py` --- `build_anchoring_context()` shared utility (NEW)
-- `lib/core/nodes/supervisor.py` --- `create_supervisor_node()` (amended: anchoring + gates)
-- `lib/core/nodes/worker.py` --- `create_worker_node()` (amended: anchoring injection)
-- `lib/core/graph.py` --- `_build_supervisor_prompt()` (amended: feature_context param)
+- `src/vaultspec_a2a/core/anchoring.py` --- `build_anchoring_context()` shared utility (NEW)
+- `src/vaultspec_a2a/core/nodes/supervisor.py` --- `create_supervisor_node()` (amended: anchoring + gates)
+- `src/vaultspec_a2a/core/nodes/worker.py` --- `create_worker_node()` (amended: anchoring injection)
+- `src/vaultspec_a2a/core/graph.py` --- `_build_supervisor_prompt()` (amended: feature_context param)
 - [ADR-013](013-team-composition-topology.md) --- Team Composition (supervisor routing, `state["next"]`)
 - [ADR-014](014-thread-metadata-context-injection.md) --- Thread Metadata (context preamble, message ordering)
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) --- TeamState enrichment (active_feature, vault_index, validation_errors)

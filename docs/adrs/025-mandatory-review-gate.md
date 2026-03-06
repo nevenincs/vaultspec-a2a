@@ -58,7 +58,7 @@ and route to the appropriate reviewer agent.
 ### 2.2 Implementation Location
 
 The gate extends the existing `if next_route == "FINISH"` block in
-`supervisor_node` (`lib/core/nodes/supervisor.py`), following the same pattern
+`supervisor_node` (`src/vaultspec_a2a/core/nodes/supervisor.py`), following the same pattern
 as the ADR-022 `validation_errors` gate. It fires **after** the
 `validation_errors` check:
 
@@ -195,7 +195,7 @@ condition. Any audit artifact is sufficient evidence of review in v1.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
   nodes/supervisor.py   AMENDED: second FINISH gate in supervisor_node,
                         after the validation_errors check (ADR-022 §2.4)
 
@@ -217,4 +217,4 @@ lib/core/
   return dict
 - [docs/research/2026-03-03-mandatory-review-gate-research.md](../research/2026-03-03-mandatory-review-gate-research.md) — prior art analysis, gate mechanism recommendation, edge case table
 - MetaGPT arXiv 2308.00352 — mandatory QA role in fixed pipeline
-- `lib/core/nodes/supervisor.py` — existing FINISH gate implementation
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — existing FINISH gate implementation

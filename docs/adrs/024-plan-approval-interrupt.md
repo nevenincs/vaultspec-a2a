@@ -78,7 +78,7 @@ node when the approval gate conditions are met. Once entered, the node calls
 This matches the documented LangGraph pattern for human-in-the-loop approval:
 
 ```python
-# lib/core/nodes/supervisor.py (or a new lib/core/nodes/plan_approval.py)
+# src/vaultspec_a2a/core/nodes/supervisor.py (or a new src/vaultspec_a2a/core/nodes/plan_approval.py)
 from langgraph.types import interrupt, Command
 from typing import Literal
 
@@ -140,7 +140,7 @@ intercepts the route and redirects to `plan_approval_node` when the gate
 conditions are met:
 
 ```python
-# lib/core/graph.py — supervisor conditional edge router
+# src/vaultspec_a2a/core/graph.py — supervisor conditional edge router
 
 def _make_supervisor_router(
     workers: list[str],
@@ -374,7 +374,7 @@ structurally enforced. Per-session once-only semantics are sufficient for v1.
 
 ## 5. Implementation Constraints
 
-- `plan_approved: NotRequired[bool]` added to `TeamState` (`lib/core/state.py`).
+- `plan_approved: NotRequired[bool]` added to `TeamState` (`src/vaultspec_a2a/core/state.py`).
   Last-write-wins, no reducer. Consuming code uses `.get("plan_approved")` to
   handle absent field on legacy threads.
 - `interrupt()` fires inside `plan_approval_node`, never inside
@@ -387,7 +387,7 @@ structurally enforced. Per-session once-only semantics are sufficient for v1.
 - `autonomous=True` → `plan_approval_node` returns passthrough `Command`
   without calling `interrupt()`. Additionally, the router condition includes
   `not autonomous` preventing the node from being entered at all.
-- `_emit_interrupt_events` (`lib/core/aggregator.py`) extended to handle
+- `_emit_interrupt_events` (`src/vaultspec_a2a/core/aggregator.py`) extended to handle
   `type == "plan_approval_request"` payloads, emitting `PermissionRequestEvent`
   with approve (`ALLOW_ONCE`) and reject (`DENY_ONCE`) options.
 - Resume payload is `{"approved": True}` or `{"approved": False}` — the
@@ -396,7 +396,7 @@ structurally enforced. Per-session once-only semantics are sufficient for v1.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
   state.py              AMENDED: plan_approved: NotRequired[bool] added to TeamState
 
   nodes/supervisor.py   AMENDED: plan approval interrupt REMOVED from supervisor_node;
@@ -425,7 +425,7 @@ lib/core/
                         gate skipped when active_feature is None,
                         gate not re-triggered when plan_approved is True
 
-lib/api/
+src/vaultspec_a2a/api/
   schemas/rest.py       AMENDED (if needed): PermissionRequestEvent options
                         for plan approval (approve/reject option_id values)
 ```
@@ -441,6 +441,6 @@ lib/api/
 - [ADR-023](023-phase-artifact-gates.md) — phase prerequisite gate at plan→exec boundary (complementary)
 - [ADR-025](025-mandatory-review-gate.md) — review artifact FINISH gate; gate ordering reference
 - [docs/research/2026-03-03-plan-approval-interrupt-research.md](../research/2026-03-03-plan-approval-interrupt-research.md) — interrupt mechanism analysis, option comparison, resume flow, autonomous interaction
-- `lib/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
-- `lib/core/aggregator.py` — `_emit_interrupt_events`, interrupt payload detection
-- `lib/api/endpoints.py` — `respond_to_permission_endpoint`, resume via REST
+- `src/vaultspec_a2a/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
+- `src/vaultspec_a2a/core/aggregator.py` — `_emit_interrupt_events`, interrupt payload detection
+- `src/vaultspec_a2a/api/endpoints.py` — `respond_to_permission_endpoint`, resume via REST

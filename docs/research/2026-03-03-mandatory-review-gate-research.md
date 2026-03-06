@@ -165,4 +165,4 @@ Both gates must pass for FINISH to proceed. The validation_errors gate fires fir
 - [ADR-026](../adrs/026-pipeline-phase-population.md) — inferred_phase in supervisor return dict
 - MetaGPT arXiv 2308.00352 — mandatory QA role in fixed pipeline
 - CrewAI task dependency model — structural task ordering
-- `lib/core/nodes/supervisor.py` — existing FINISH gate implementation
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — existing FINISH gate implementation

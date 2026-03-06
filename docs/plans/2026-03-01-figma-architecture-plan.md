@@ -150,7 +150,7 @@ src/ui/components/ui/button/button.figma.js    ← new
 // @component Button
 
 export default {
-  imports: ['import { Button } from "$lib/components/ui/button"'],
+  imports: ['import { Button } from "$src/vaultspec_a2a/components/ui/button"'],
   example: (figma) => {
     const variant = figma.selectedInstance.getEnum('Variant', {
       Default: 'default',
@@ -263,7 +263,7 @@ Run a test UI task through the complete pipeline:
    are present and contain real React import statements
 4. Ask the agent to implement the frame
 5. Verify the generated code:
-   - Uses`import { Button } from "$lib/components/ui/button"`(not invented
+   - Uses`import { Button } from "$src/vaultspec_a2a/components/ui/button"`(not invented
      components)
    - Uses`text-primary-500`or`var(--color-primary-500)`(not`color: #0066CC`)
    - Renders correctly in the browser (Playwright screenshot matches Figma

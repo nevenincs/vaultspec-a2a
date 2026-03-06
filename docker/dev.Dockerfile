@@ -1,7 +1,7 @@
-# Lightweight dev images for docker compose dev workflow.
-# Two independent targets: python-base (fixture/real backend) and node-base (vite dev).
+# Lightweight dev images for the docker compose dev workflow.
+# Two independent targets: python-base (backend dev) and node-base (vite dev).
 
-# ── Python base: fixture server or real backend with hot-reload ──────────────
+# ── Python base: backend dev with hot-reload ─────────────────────────────────
 FROM python:3.13-slim-bookworm AS python-base
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /bin/
 
@@ -16,8 +16,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --locked
 
-COPY lib/ ./lib/
-COPY src/ui/dev/ ./src/ui/dev/
+COPY src/vaultspec_a2a/ ./src/vaultspec_a2a/
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable
 
@@ -35,7 +34,7 @@ EXPOSE 5173
 # ── Mock Seeder base: continuous DB population daemon ──────────────────────────
 FROM python-base AS mock-seeder
 
-# This container's sole purpose is to loop through mock team presets 
+# This container's sole purpose is to loop through mock team presets
 # and stream trace data directly using the local AsyncSqliteSaver.
 
 CMD ["uv", "run", "python", "docker/run.py"]

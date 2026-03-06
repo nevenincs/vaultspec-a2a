@@ -308,7 +308,7 @@ implemented but never invoked (ADR-012 §2.8, ADR-013 §2.8):
 
 ```text
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (now reachable)
-2. lib/core/presets/agents/{agent_id}.toml               (bundled fallback)
+2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml               (bundled fallback)
 ```
 
 ### 2.7 ACP Session Workspace Binding
@@ -546,12 +546,12 @@ can be a fallback when `callee` is empty.
 ## 6. Module Hierarchy Impact (ADR-009 Amendment)
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
 ├── team_config.py       # GAINS: ThreadMetadata, ContextRef models +
 │                        #        discover_context_refs() function
 ├── ...
 
-lib/api/
+src/vaultspec_a2a/api/
 ├── schemas/
 │   ├── rest.py          # AMENDED: CreateThreadRequest gains metadata field
 │   │                    #          ThreadSummary gains nickname, feature_tag, etc.
@@ -560,13 +560,13 @@ lib/api/
 │                        #          builds context preamble, auto-discovers docs
 └── ...
 
-lib/database/
+src/vaultspec_a2a/database/
 ├── models.py            # AMENDED: ThreadModel.agent_config → metadata
 ├── crud.py              # AMENDED: create_thread() accepts metadata param,
 │                        #          nickname uniqueness check
 └── ...
 
-lib/providers/
+src/vaultspec_a2a/providers/
 ├── acp_chat_model.py    # AMENDED: AcpChatModel gains workspace_root field,
 │                        #          _start_process() uses it for CWD
 ├── factory.py           # AMENDED: ProviderFactory.create() accepts workspace_root
@@ -575,28 +575,28 @@ lib/providers/
 
 ## 7. References
 
-- `lib/api/endpoints.py:180` — `create_thread_endpoint()` (to be amended)
-- `lib/core/team_config.py` — `load_team_config()`, `load_agent_config()`
+- `src/vaultspec_a2a/api/endpoints.py:180` — `create_thread_endpoint()` (to be amended)
+- `src/vaultspec_a2a/core/team_config.py` — `load_team_config()`, `load_agent_config()`
   (workspace_root param already exists, never invoked)
-- `lib/core/state.py` — `TeamState` (unchanged — metadata stays in DB)
-- `lib/core/context.py:56` — `compact_context()` (preserves leading
+- `src/vaultspec_a2a/core/state.py` — `TeamState` (unchanged — metadata stays in DB)
+- `src/vaultspec_a2a/core/context.py:56` — `compact_context()` (preserves leading
   SystemMessages — regression test needed)
-- `lib/core/nodes/worker.py:92` — `worker_node()` (unchanged — preamble
+- `src/vaultspec_a2a/core/nodes/worker.py:92` — `worker_node()` (unchanged — preamble
   arrives via `state["messages"]`)
-- `lib/core/nodes/supervisor.py:40` — `supervisor_node()` (unchanged)
-- `lib/database/models.py:37` — `ThreadModel` (agent_config → metadata)
-- `lib/database/crud.py` — `create_thread()` (gains metadata + nickname
+- `src/vaultspec_a2a/core/nodes/supervisor.py:40` — `supervisor_node()` (unchanged)
+- `src/vaultspec_a2a/database/models.py:37` — `ThreadModel` (agent_config → metadata)
+- `src/vaultspec_a2a/database/crud.py` — `create_thread()` (gains metadata + nickname
   check)
-- `lib/providers/acp_chat_model.py` — `_start_process()` (CWD binding)
-- `lib/providers/factory.py` — `ProviderFactory.create()` (workspace_root
+- `src/vaultspec_a2a/providers/acp_chat_model.py` — `_start_process()` (CWD binding)
+- `src/vaultspec_a2a/providers/factory.py` — `ProviderFactory.create()` (workspace_root
   forwarding)
-- `lib/core/presets/agents/supervisor.toml:23` — references
+- `src/vaultspec_a2a/core/presets/agents/supervisor.toml:23` — references
   `.vault/research/`, `.vault/plan/`, `.vault/exec/`
-- `lib/core/presets/agents/coder.toml:49` — references
+- `src/vaultspec_a2a/core/presets/agents/coder.toml:49` — references
   `.vault/exec/yyyy-mm-dd-<feature>/`
-- `lib/core/presets/agents/planner.toml:43` — references
+- `src/vaultspec_a2a/core/presets/agents/planner.toml:43` — references
   `.vault/plan/yyyy-mm-dd-<feature>-<phase>-plan.md`
-- `lib/core/presets/agents/reviewer.toml:102` — references
+- `src/vaultspec_a2a/core/presets/agents/reviewer.toml:102` — references
   `.vault/exec/yyyy-mm-dd-<feature>/yyyy-mm-dd-<feature>-review.md`
 - [ADR-008](008-orchestration-topology-pipeline.md) — Orchestration
   Topology (native LangGraph execution)

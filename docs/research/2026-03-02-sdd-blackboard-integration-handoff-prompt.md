@@ -6,7 +6,7 @@
 
 ## Objective
 
-Develop a comprehensive technical implementation plan to bridge the gap between our current A2A LangGraph orchestration engine (`lib/core/graph.py`, `lib/core/state.py`) and the `.vaultspec` file-system-as-a-blackboard mandates.
+Develop a comprehensive technical implementation plan to bridge the gap between our current A2A LangGraph orchestration engine (`src/vaultspec_a2a/core/graph.py`, `src/vaultspec_a2a/core/state.py`) and the `.vaultspec` file-system-as-a-blackboard mandates.
 
 ## The Problem
 
@@ -21,8 +21,8 @@ Our current A2A implementation operates as a "chat router" rather than a "State 
 
 Review the referenced research document and draft a detailed execution plan following the standard `.vault/plan/yyyy-mm-dd-{feature}-{phase}-plan.md` template. Your plan must outline the technical implementation for the following areas:
 
-1. **TeamState Enrichment:** Define how `lib/core/state.py` will be expanded to track the `active_feature` tag, `pipeline_phase`, and a `vault_index` (mapping wikilinks to physical file paths).
-2. **Blackboard Context Mounting:** Specify the logic for `lib/core/nodes/worker.py` to automatically resolve the `active_feature`, scan `.vault/` for relevant grounding documents (Research, ADRs, Plans), and inject them as high-priority, read-only System Messages while aggressively compacting the raw chat history.
+1. **TeamState Enrichment:** Define how `src/vaultspec_a2a/core/state.py` will be expanded to track the `active_feature` tag, `pipeline_phase`, and a `vault_index` (mapping wikilinks to physical file paths).
+2. **Blackboard Context Mounting:** Specify the logic for `src/vaultspec_a2a/core/nodes/worker.py` to automatically resolve the `active_feature`, scan `.vault/` for relevant grounding documents (Research, ADRs, Plans), and inject them as high-priority, read-only System Messages while aggressively compacting the raw chat history.
 3. **Persistent Task Queue Schema:** Propose a concrete tracking mechanism using feature-derived sequential task tags (e.g., `SBI-001`, `SBI-002`) and define how this queue will be persisted to disk so the orchestrator can reliably track state across session restarts.
 4. **Contextual Anchoring:** Outline how the engine will ensure that every agent invocation is explicitly anchored to the established architectural truth of the feature.
 

@@ -50,7 +50,7 @@ orchestrate outputs as follows:
   - Use the`JSONFormatter`(previously implemented) across the root logger so
     machine-readable diagnostics are emitted sequentially without visual noise.
 
-## Proposed Component:`lib/utils/printer.py`
+## Proposed Component:`src/vaultspec_a2a/utils/printer.py`
 
 A centralized `Printer`singleton acting as a facade for the`rich.Console`will
 ensure uniform output styling across the entire`lib/` tree without duplicating
@@ -67,7 +67,7 @@ class Printer:
 
 ## Conclusion
 
-To integrate this properly, `lib/utils/logging.py`should be retrofitted to
+To integrate this properly, `src/vaultspec_a2a/utils/logging.py`should be retrofitted to
 detect`sys.stdout.isatty()`. It would instantiate either the structured
 `JSONFormatter`or the`RichHandler`dynamically based on the execution context.
 Concurrently, a new`printer.py` should be introduced to handle semantic,

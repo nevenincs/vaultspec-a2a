@@ -24,7 +24,7 @@ feature: mcp-surface-alignment
 
 ## 1. Current MCP Tool Surface
 
-The MCP server (`lib/protocols/mcp/server.py`) exposes exactly **3 tools**:
+The MCP server (`src/vaultspec_a2a/protocols/mcp/server.py`) exposes exactly **3 tools**:
 
 | Tool                | REST Proxy                        | Purpose                            |
 | ------------------- | --------------------------------- | ---------------------------------- |

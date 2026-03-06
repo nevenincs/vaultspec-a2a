@@ -66,7 +66,7 @@ entire shared state.
 
 ### 2.1 `mounted_context` State Field
 
-A new transient field is added to `TeamState` (`lib/core/state.py`):
+A new transient field is added to `TeamState` (`src/vaultspec_a2a/core/state.py`):
 
 ```python
 class TeamState(TypedDict):
@@ -86,7 +86,7 @@ clears it`.
 
 ### 2.2 `mount_node` Implementation
 
-A new module `lib/core/nodes/mount.py` exposes a factory function
+A new module `src/vaultspec_a2a/core/nodes/mount.py` exposes a factory function
 `create_mount_node(workspace_root)` that returns a closure-scoped `mount_node`.
 The cache is private to each factory call, ensuring it is scoped to the lifetime
 of the compiled graph — not shared across threads or sessions:
@@ -207,7 +207,7 @@ def create_mount_node(workspace_root: Path) -> Callable:
 
 ### 2.3 Graph Wiring
 
-`compile_team_graph()` (`lib/core/graph.py`) is amended to insert a mount node
+`compile_team_graph()` (`src/vaultspec_a2a/core/graph.py`) is amended to insert a mount node
 between the supervisor routing edge and each worker node. The factory is called
 once per worker at compilation time:
 
@@ -236,7 +236,7 @@ lifetime — cleared when the graph is discarded.
 
 ### 2.4 Worker Integration
 
-`create_worker_node()` (`lib/core/nodes/worker.py`) is amended to read
+`create_worker_node()` (`src/vaultspec_a2a/core/nodes/worker.py`) is amended to read
 `mounted_context` from state and inject it at message position [3]:
 
 ```python
@@ -398,13 +398,13 @@ async LangGraph nodes. Rejected.
 - `mount_node` returns `{"mounted_context": None}` (not omitting the key) in all
   early-return paths so the field is always explicitly set after the node runs.
 - `workspace_root` is bound at factory call time via `create_mount_node(workspace_root)`.
-- `lib/core/nodes/mount.py` must declare `__all__ = ["create_mount_node"]`. Only
+- `src/vaultspec_a2a/core/nodes/mount.py` must declare `__all__ = ["create_mount_node"]`. Only
   the factory is public; helpers and constants are private.
 
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
 ├── state.py            AMENDED: mounted_context: NotRequired[str | None] added
 ├── graph.py            AMENDED: create_mount_node() called per worker;
 │                       add_conditional_edges routes supervisor → mount_{name}
@@ -422,10 +422,10 @@ lib/core/
 
 ## 7. References
 
-- `lib/core/state.py` — `TeamState` (mounted_context field added)
-- `lib/core/nodes/mount.py` — NEW (create_mount_node factory)
-- `lib/core/nodes/worker.py` — worker_node message construction (position [3])
-- `lib/core/graph.py` — compile_team_graph() mount node wiring
+- `src/vaultspec_a2a/core/state.py` — `TeamState` (mounted_context field added)
+- `src/vaultspec_a2a/core/nodes/mount.py` — NEW (create_mount_node factory)
+- `src/vaultspec_a2a/core/nodes/worker.py` — worker_node message construction (position [3])
+- `src/vaultspec_a2a/core/graph.py` — compile_team_graph() mount node wiring
 - [ADR-014](014-thread-metadata-context-injection.md) — workspace_root threading pattern
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — vault_index, reference-in-state principle
 - [ADR-022](022-contextual-anchoring-graph-lifecycle.md) — anchoring summary, message positions [1][2]

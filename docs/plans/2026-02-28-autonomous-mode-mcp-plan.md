@@ -50,17 +50,17 @@ Three compounding problems identified through audit:
 
 | File                                     | Change                                                                                     |
 | ---------------------------------------- | ------------------------------------------------------------------------------------------ |
-| `lib/core/config.py`                     | Add`api_base_url: str`setting                                                              |
-| `lib/core/graph.py`                      | `interrupt_nodes = []`always; add`autonomous: bool = False`; thread to `_compile_*`helpers |
-| `lib/core/nodes/worker.py`               | Add`autonomous: bool = False`; skip `permission_callback`wiring when True                  |
-| `lib/core/aggregator.py`                 | Extend`_StreamableGraph`protocol with`aget_state`; add interrupt detection in `ingest()`   |
-| `lib/api/schemas/rest.py`                | Add`autonomous: bool = False`to`CreateThreadRequest`                                       |
-| `lib/api/endpoints.py`                   | Thread`body.autonomous`through`compile_team_graph`                                         |
-| `lib/protocols/mcp/server.py`            | Implement all three tools with real`async def`+`httpx.AsyncClient`                         |
-| `lib/core/tests/test_graph.py`           | Tests for autonomous/supervised compile paths                                              |
-| `lib/core/tests/test_aggregator.py`      | Tests for interrupt detection in`ingest()`                                                 |
-| `lib/api/tests/test_endpoints.py`        | Tests for`autonomous`field                                                                 |
-| `lib/protocols/mcp/tests/test_server.py` | New file — MCP tool tests with httpx mock                                                  |
+| `src/vaultspec_a2a/core/config.py`                     | Add`api_base_url: str`setting                                                              |
+| `src/vaultspec_a2a/core/graph.py`                      | `interrupt_nodes = []`always; add`autonomous: bool = False`; thread to `_compile_*`helpers |
+| `src/vaultspec_a2a/core/nodes/worker.py`               | Add`autonomous: bool = False`; skip `permission_callback`wiring when True                  |
+| `src/vaultspec_a2a/core/aggregator.py`                 | Extend`_StreamableGraph`protocol with`aget_state`; add interrupt detection in `ingest()`   |
+| `src/vaultspec_a2a/api/schemas/rest.py`                | Add`autonomous: bool = False`to`CreateThreadRequest`                                       |
+| `src/vaultspec_a2a/api/endpoints.py`                   | Thread`body.autonomous`through`compile_team_graph`                                         |
+| `src/vaultspec_a2a/protocols/mcp/server.py`            | Implement all three tools with real`async def`+`httpx.AsyncClient`                         |
+| `src/vaultspec_a2a/core/tests/test_graph.py`           | Tests for autonomous/supervised compile paths                                              |
+| `src/vaultspec_a2a/core/tests/test_aggregator.py`      | Tests for interrupt detection in`ingest()`                                                 |
+| `src/vaultspec_a2a/api/tests/test_endpoints.py`        | Tests for`autonomous`field                                                                 |
+| `src/vaultspec_a2a/protocols/mcp/tests/test_server.py` | New file — MCP tool tests with httpx mock                                                  |
 
 ---
 
@@ -68,7 +68,7 @@ Three compounding problems identified through audit:
 
 ### Step 1 — Settings:`api_base_url`
 
-`lib/core/config.py`:
+`src/vaultspec_a2a/core/config.py`:
 
 ```python
 api_base_url: str = Field(
@@ -81,7 +81,7 @@ api_base_url: str = Field(
 
 ### Step 2 — `compile_team_graph`: eliminate `interrupt_before`, add `autonomous`
 
-`lib/core/graph.py`:
+`src/vaultspec_a2a/core/graph.py`:
 
 ```python
 def compile_team_graph(
@@ -120,7 +120,7 @@ every`create_worker_node`call.
 
 ### Step 3 —`create_worker_node`: skip callback in autonomous mode
 
-`lib/core/nodes/worker.py`:
+`src/vaultspec_a2a/core/nodes/worker.py`:
 
 ```python
 def create_worker_node(
@@ -144,7 +144,7 @@ def create_worker_node(
 
 ### Step 4 — Aggregator: extend protocol + interrupt detection
 
-`lib/core/aggregator.py`:
+`src/vaultspec_a2a/core/aggregator.py`:
 
 ### 4a. Extend `_StreamableGraph` protocol
 
@@ -262,7 +262,7 @@ be empty and it returns immediately.
 
 ### Step 5 — REST:`autonomous` field
 
-`lib/api/schemas/rest.py`:
+`src/vaultspec_a2a/api/schemas/rest.py`:
 
 ```python
 class CreateThreadRequest(BaseModel):
@@ -275,7 +275,7 @@ class CreateThreadRequest(BaseModel):
     model: Model | None = None
 ```
 
-`lib/api/endpoints.py`— thread into`compile_team_graph`:
+`src/vaultspec_a2a/api/endpoints.py`— thread into`compile_team_graph`:
 
 ```python
 graph = compile_team_graph(
@@ -292,7 +292,7 @@ graph = compile_team_graph(
 
 ### Step 6 — MCP server: async real implementation
 
-`lib/protocols/mcp/server.py` — replace all three stubs with async tools:
+`src/vaultspec_a2a/protocols/mcp/server.py` — replace all three stubs with async tools:
 
 ```python
 import httpx
@@ -381,7 +381,7 @@ async def send_message(thread_id: str, message: str) -> str:
 
 ### Step 7 — Tests
 
-**`lib/core/tests/test_graph.py`**:
+**`src/vaultspec_a2a/core/tests/test_graph.py`**:
 
 - `test_compile_supervised_no_interrupt_before`: verify
   `interrupt_before=[]`even with coder in supervised mode (nodes run, permission
@@ -389,7 +389,7 @@ async def send_message(thread_id: str, message: str) -> str:
   `autonomous=True`, confirm worker model has no `permission_callback`wired
   after`worker_node(...)` is invoked once
 
-**`lib/core/tests/test_aggregator.py`**:
+**`src/vaultspec_a2a/core/tests/test_aggregator.py`**:
 
 - `test_ingest_emits_permission_on_tool_interrupt`: real graph —
   `astream_events`yields nothing,`aget_state`returns a task with
@@ -400,13 +400,13 @@ async def send_message(thread_id: str, message: str) -> str:
 - `test_ingest_no_permission_on_empty_interrupt_tasks`: `aget_state`returns task
   with`interrupts=()`. Assert no event (guard case).
 
-**`lib/api/tests/test_endpoints.py`**:
+**`src/vaultspec_a2a/api/tests/test_endpoints.py`**:
 
 - `test_create_thread_autonomous_defaults_to_false`: no `autonomous`field →
   behaves as supervised -`test_create_thread_autonomous_true_accepted`: `autonomous=True` → 201
   response, graph compiled
 
-**`lib/protocols/mcp/tests/test_server.py`** (new):
+**`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`** (new):
 
 - `test_start_thread_calls_api`: real httpx call with respx/responder, verify
   URL + body (including `autonomous=True`)

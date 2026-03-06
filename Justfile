@@ -8,24 +8,20 @@ setup: _check-uv _check-node
     cd src/ui && npm install
     @echo "Setup complete. Run 'just dev' to start."
 
-# Development: fixture server + vite frontend (local, no Docker)
+# Development: API + worker + vite frontend (local, no Docker)
+# NOTE: Uses & for backgrounding — requires bash, not PowerShell.
 dev:
-    just _dev-fixture &
-    cd src/ui && npm run dev
-
-# Development with real backend (API + worker + frontend, requires .env)
-dev-real:
     just _dev-worker &
-    uv run uvicorn lib.api.app:create_app --factory --reload --port 8000 &
+    uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --port 8000 &
     cd src/ui && npm run dev
 
 # Start just the worker process (for split-terminal development)
 worker:
-    uv run uvicorn lib.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
 
-# Docker: start dev environment (fixture server + vite + Jaeger)
+# Docker: start dev environment (vite + mocks + Jaeger)
 up:
-    docker compose up --build
+    docker compose -f docker-compose.dev.yml up --build
 
 # Docker: start production environment (API + worker + Jaeger)
 up-prod:
@@ -33,7 +29,7 @@ up-prod:
 
 # Docker: stop dev environment
 down:
-    docker compose down
+    docker compose -f docker-compose.dev.yml down
 
 # Docker: stop production environment
 down-prod:
@@ -42,6 +38,29 @@ down-prod:
 # Run test suite
 test *ARGS:
     uv run pytest {{ARGS}}
+
+# Run unit tests only (excludes live tests, same as CI)
+test-unit *ARGS:
+    uv run pytest -m "not live" {{ARGS}}
+
+# Run live tests only (requires live ACP backend)
+test-live *ARGS:
+    uv run pytest -m live {{ARGS}}
+
+# Run tests with coverage report
+test-cov *ARGS:
+    uv run pytest --cov=src/vaultspec_a2a --cov-report=term-missing {{ARGS}}
+
+# Quick pre-push check: lint + typecheck
+check:
+    just lint
+    just typecheck
+
+# Full CI pipeline: lint + typecheck + unit tests
+ci:
+    just lint
+    just typecheck
+    just test-unit
 
 # Lint check
 lint:
@@ -61,18 +80,44 @@ typecheck:
 check-ui:
     cd src/ui && npm run check
 
+# Dependency audit
+audit:
+    uv run deptry src/
+
+# Build distribution package
+build:
+    uv build
+
+# Remove build artifacts and caches
+clean:
+    rm -rf dist/ *.egg-info
+    fd -t d __pycache__ --exclude .venv -x rm -rf {}
+
 # Build production Docker images
 docker-build:
-    docker build -t vaultspec-a2a-api --target api .
-    docker build -t vaultspec-a2a-worker --target worker .
+    docker build -t vaultspec-a2a-api -f docker/prod.Dockerfile --target api .
+    docker build -t vaultspec-a2a-worker -f docker/prod.Dockerfile --target worker .
+
+# Run a preps scenario (solo_coder | pipeline_team | plan_approval | autonomous)
+preps SCENARIO:
+    uv run python -m vaultspec_a2a.tests.preps.{{SCENARIO}}
+
+# List available preps scenarios
+preps-list:
+    uv run python -m vaultspec_a2a.tests.preps
+
+# Run smoke evaluation suite (routing + gate compliance)
+eval-smoke:
+    uv run python -m vaultspec_a2a.tests.evals.suites.smoke
+
+# Run nightly evaluation suite (all 6 dimensions, requires LANGSMITH_API_KEY)
+eval-nightly:
+    uv run python -m vaultspec_a2a.tests.evals.suites.nightly
 
 # ── Internal recipes ─────────────────────────────────────────────────────────
 
-_dev-fixture:
-    cd src/ui/dev && uv run python fixture_server.py
-
 _dev-worker:
-    uv run uvicorn lib.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
 
 _check-uv:
     @uv --version || (echo "Install uv: https://docs.astral.sh/uv/" && exit 1)

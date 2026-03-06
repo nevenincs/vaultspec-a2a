@@ -104,7 +104,7 @@ final = compiled.invoke(Command(resume="approved_option_id"), config)
 assert final["status"] == "completed"
 ```
 
-This is the pattern established in `lib/core/tests/test_supervisor.py` lines 663-688.
+This is the pattern established in `src/vaultspec_a2a/core/tests/test_supervisor.py` lines 663-688.
 The `Command` type is imported from `langgraph.types`.
 
 ### 1.5 What NOT to Test in Layer 1
@@ -230,7 +230,7 @@ For the Layer 2 direct scripts, use a distinct project name per run type
 Source: https://langchain-ai.github.io/langgraph/concepts/streaming/
 
 LangGraph's `astream()` supports four stream modes. They can be combined by passing
-a list. This is the API used in `lib/core/aggregator.py` (post-LG-018 fix).
+a list. This is the API used in `src/vaultspec_a2a/core/aggregator.py` (post-LG-018 fix).
 
 ### 3.1 `"updates"` — State Delta Per Node (Recommended)
 
@@ -300,7 +300,7 @@ async for chunk in graph.astream(
 ```
 
 When multiple modes are combined, each chunk is a `(mode_name, payload)` tuple.
-This is the pattern used in `lib/core/aggregator.py` post-LG-018.
+This is the pattern used in `src/vaultspec_a2a/core/aggregator.py` post-LG-018.
 
 ### 3.6 LangSmith Trace Relationship
 

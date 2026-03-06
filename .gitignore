@@ -48,9 +48,12 @@ tmp/
 out.txt
 
 # Database artifacts
-vaultspec.db
-vaultspec.db-shm
-vaultspec.db-wal
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 build/
 data/

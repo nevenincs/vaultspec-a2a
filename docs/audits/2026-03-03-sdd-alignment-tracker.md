@@ -61,7 +61,7 @@
 
 ## Continuous Audit Scope
 
-### 1. Agent Definitions (`lib/core/presets/teams/*.toml`)
+### 1. Agent Definitions (`src/vaultspec_a2a/core/presets/teams/*.toml`)
 
 Check each TOML agent preset for:
 
@@ -77,7 +77,7 @@ Check team graph compilation for:
 - [ ] All 4 SDD fields set in `graph_input` at thread creation
 - [ ] `_build_initial_vault_index` called when `feature_tag` present
 
-### 3. Core Codebase (`lib/core/`)
+### 3. Core Codebase (`src/vaultspec_a2a/core/`)
 
 - [ ] `discover_context_refs` covers all 6 `.vault/` stages (✅ fixed 2026-03-03)
 - [ ] `build_anchoring_context` uses imperative language (✅ fixed 2026-03-03)

@@ -47,7 +47,7 @@ protocol:
      LangGraph workflows as if they were simple tools.
 3. **Hybrid ACP-LangGraph Bridging (`AcpChatModel`):** Rather than abandoning
    the CLIs entirely (which violates the flat-rate consumer OAuth constraints
-   established in ADR-002), we build `AcpChatModel` (`lib/providers/acp_chat_model.py`)
+   established in ADR-002), we build `AcpChatModel` (`src/vaultspec_a2a/providers/acp_chat_model.py`)
    — a custom `BaseChatModel` that spawns provider CLIs as managed stdio
    subprocesses and translates their JSON-RPC streams into native LangChain
    `AIMessageChunk`s and `ToolCallChunk`s. This preserves the LangChain

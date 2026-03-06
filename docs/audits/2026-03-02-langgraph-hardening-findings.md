@@ -14,7 +14,7 @@ CRITICAL → HIGH → MEDIUM → LOW → INFO.
 ## [CRITICAL] [Cycle 1] — state["next"] KeyError in star topology conditional edge
 
 **Reported:** Cycle 1
-**File:** `lib/core/graph.py:331`
+**File:** `src/vaultspec_a2a/core/graph.py:331`
 **Issue:** `lambda state: state["next"]` raises `KeyError` on the first star-topology
 invocation because the initial state supplied by the API client contains only
 `messages` — `next` is not set. Combined with `next: str` (no `NotRequired`, no
@@ -29,7 +29,7 @@ default) in `TeamState`, this crashes the graph before any node runs.
 ## [HIGH] [Cycle 1] — next: str declared required with no default in TeamState
 
 **Reported:** Cycle 1
-**File:** `lib/core/state.py:102`
+**File:** `src/vaultspec_a2a/core/state.py:102`
 **Issue:** `next: str` (no `NotRequired`) means the TypedDict technically requires
 `next` on construction. The API's initial state never sets it, making the first
 star-topology invocation fragile (see C3 above).
@@ -42,7 +42,7 @@ star-topology invocation fragile (see C3 above).
 ## [CRITICAL] [Cycle 1] — Supervisor routing failure silent (no routing_error in state)
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/supervisor.py:84-94`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:84-94`
 **Issue:** When the supervisor cannot parse a valid worker name from the LLM
 response, it silently returns `{"next": "FINISH"}`. No state field records why
 the graph ended; the client sees a normal completion with no indication of the
@@ -59,7 +59,7 @@ and negative test `test_supervisor_no_routing_error_on_clean_finish`.
 ## [CRITICAL] [Cycle 1] — Supervisor uses insertion-order substring scan (routing collision)
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/supervisor.py:79-82`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:79-82`
 **Issue:** `for option in options` iterates in insertion order. When workers include
 `"code"` and `"coder"`, the response `"the coder should handle this"` matches
 `"code"` first (wrong). Order of names in the team config determines correctness.
@@ -74,8 +74,8 @@ and negative test `test_supervisor_no_routing_error_on_clean_finish`.
 ## [HIGH] [Cycle 1] — No RetryPolicy on any add_node() call
 
 **Reported:** Cycle 1
-**File:** `lib/core/graph.py:274`, `lib/core/graph.py:307`, `lib/core/graph.py:409`,
-`lib/core/graph.py:554`
+**File:** `src/vaultspec_a2a/core/graph.py:274`, `src/vaultspec_a2a/core/graph.py:307`, `src/vaultspec_a2a/core/graph.py:409`,
+`src/vaultspec_a2a/core/graph.py:554`
 **Issue:** All `builder.add_node()` calls across all three topology compilers lack
 a `retry=` argument. Every transient LLM failure (rate limit, 429, connection
 reset, 5xx) immediately fails the entire multi-agent run.
@@ -91,7 +91,7 @@ Import `RetryPolicy` from `langgraph.types`.
 ## [MEDIUM] [Cycle 3] — T05 imports default_retry_on from private \_internal module
 
 **Reported:** Cycle 3 (T05 working tree review)
-**File:** `lib/core/graph.py:20`
+**File:** `src/vaultspec_a2a/core/graph.py:20`
 **Issue:** `from langgraph._internal._retry import default_retry_on` accesses a
 private module. The `_internal` prefix signals an unstable API that could break
 on any minor LangGraph version bump without deprecation warning.
@@ -107,7 +107,7 @@ simpler predicate. Option (a) is more robust.
 ## [HIGH] [Cycle 1] — Worker exceptions lack agent identity context (bare re-raise)
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/worker.py:168-176`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:168-176`
 **Issue:** The `try/except` logs the agent name but re-raises the raw provider
 exception (`BadRequestError`, etc.). The caller has no indication of which agent
 failed, what model was in use, or how many messages were in context when
@@ -124,7 +124,7 @@ failed, what model was in use, or how many messages were in context when
 ## [HIGH] [Cycle 1] — Supervisor node has no context compaction guard
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/supervisor.py:54`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:54`
 **Issue:** Worker nodes call `compact_context()` when approaching `_CONTEXT_LIMIT`
 (120k tokens). The supervisor passes the raw `state["messages"]` list directly.
 On long sessions, the supervisor will hit provider context limits while workers
@@ -140,7 +140,7 @@ Add `test_supervisor_compacts_on_large_state`.
 ## [HIGH] [Cycle 1] — Loop count not logged; loop termination invisible in traces
 
 **Reported:** Cycle 1
-**File:** `lib/core/graph.py:479-496` (`_wrap_loop_node`)
+**File:** `src/vaultspec_a2a/core/graph.py:479-496` (`_wrap_loop_node`)
 **Issue:** `_wrap_loop_node` increments `loop_count` silently. No log entry when a
 loop iteration begins, completes, or when `max_loops` is hit. Diagnosing runaway
 `pipeline_loop` runs requires querying the checkpointer directly.
@@ -154,7 +154,7 @@ Log at DEBUG on each iteration, WARNING when `max_loops` is hit.
 ## [MEDIUM] [Cycle 1] — Supervisor routing tokens stream to client (no TAG_NOSTREAM)
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/supervisor.py:63`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:63`
 **Issue:** Supervisor routing is an internal control-flow decision. Its tokens
 stream to the client as visible `on_chat_model_stream` events, polluting the UI
 with internal "coder | reviewer | FINISH" tokens.
@@ -168,7 +168,7 @@ use `routing_model` for `ainvoke`. Import `TAG_NOSTREAM` from `langgraph.constan
 ## [MEDIUM] [Cycle 1] — supervisor_node uses state["messages"] subscript (KeyError risk)
 
 **Reported:** Cycle 1
-**File:** `lib/core/nodes/supervisor.py:54`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:54`
 **Issue:** `messages = [SystemMessage(content=full_prompt), *state["messages"]]`
 uses dict-subscript. If `messages` is absent from state on first invocation (edge
 case where graph_input is `{}`), this raises `KeyError`. Worker node accesses
@@ -183,7 +183,7 @@ worker.py pattern. Bundled into T03 per orchestrator instruction.
 ## [LOW] [Cycle 1] — \_MinimalState recreated inline on every request in endpoints.py
 
 **Reported:** Cycle 1
-**File:** `lib/api/endpoints.py:487-502`
+**File:** `src/vaultspec_a2a/api/endpoints.py:487-502`
 **Issue:** `_MinimalState` TypedDict is defined as an inline class inside a
 function, recreated on every request. Should be a module-level definition.
 **Fix direction:** Hoist `_MinimalState` to module level.
@@ -195,7 +195,7 @@ function, recreated on every request. Should be a module-level definition.
 ## [MEDIUM] [Cycle 1] — websocket.py accesses private aggregator attribute
 
 **Reported:** Cycle 1
-**File:** `lib/api/websocket.py:519`
+**File:** `src/vaultspec_a2a/api/websocket.py:519`
 **Issue:** `self._aggregator._subscriptions.get(client_id, set())` accesses a
 private attribute of `EventAggregator`. If `_subscriptions` is refactored, this
 will silently break.
@@ -209,7 +209,7 @@ will silently break.
 ## [LOW] [Cycle 1] — Missing test: star topology KeyError on missing next field
 
 **Reported:** Cycle 1
-**File:** `lib/core/tests/test_graph.py`
+**File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 **Issue:** No test exercises star-topology invocation with initial state omitting
 `next`. This was the exact condition causing C3.
 **Fix direction:** Add `test_star_missing_next_field`.
@@ -221,7 +221,7 @@ will silently break.
 ## [LOW] [Cycle 1] — Missing test: supervisor routing substring collision
 
 **Reported:** Cycle 1
-**File:** `lib/core/tests/test_graph.py`
+**File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 **Issue:** No test creates a supervisor with workers `"code"` and `"coder"` and
 verifies the correct one is selected.
 **Fix direction:** Add `test_supervisor_routing_substring_collision` to `test_supervisor.py`.
@@ -233,7 +233,7 @@ verifies the correct one is selected.
 ## [MEDIUM] [Cycle 2] — compact_context summary inserted as SystemMessage (nested compaction bug)
 
 **Reported:** Cycle 2
-**File:** `lib/core/context.py:108-114`
+**File:** `src/vaultspec_a2a/core/context.py:108-114`
 **Issue:** The compaction summary note is inserted as `SystemMessage`. The
 separator logic at `context.py:79-83` classifies any `SystemMessage` at the head
 of the message list as a system prefix. On a second compaction pass, this summary
@@ -249,7 +249,7 @@ summary so it stays in the conversation body on subsequent compaction passes.
 ## [MEDIUM] [Cycle 2] — GraphRecursionError not detected as distinct error class
 
 **Reported:** Cycle 2
-**File:** `lib/core/aggregator.py:1117-1144`
+**File:** `src/vaultspec_a2a/core/aggregator.py:1117-1144`
 **Issue:** `GraphRecursionError` (raised when `recursion_limit` is exceeded) falls
 into the generic `else` branch and is emitted as a generic `INGEST_ERROR` with
 `recoverable=False`. It should be detected separately and emitted with a distinct
@@ -267,7 +267,7 @@ Emit with distinct code and `recoverable=True`.
 ## [MEDIUM] [Cycle 2] — step_timeout not configured on compiled graph
 
 **Reported:** Cycle 2
-**File:** `lib/core/graph.py` (builder.compile call)
+**File:** `src/vaultspec_a2a/core/graph.py` (builder.compile call)
 **Issue:** No `step_timeout` argument is passed to `builder.compile()`. In
 production, a hung LLM call (network stall, streaming timeout) will block a
 graph superstep indefinitely with no timeout protection.
@@ -281,7 +281,7 @@ from docs: 300s (5 min) for LLM-backed nodes. Make it configurable via settings.
 ## [HIGH] [Cycle 2] — graph_input initializes only messages; required TeamState fields absent
 
 **Reported:** Cycle 2
-**File:** `lib/worker/executor.py:176`
+**File:** `src/vaultspec_a2a/worker/executor.py:176`
 **Issue:** `graph_input: dict[str, Any] = {"messages": messages} if messages else {}`
 Only `messages` is set. Required fields `active_agent`, `thread_id`, `artifacts`,
 `current_plan`, `token_usage` have no defaults in `TeamState` and no `NotRequired`
@@ -298,7 +298,7 @@ to `astream_events`. At minimum: `thread_id`, `active_agent`, `artifacts`,
 ## [MEDIUM] [Cycle 2] — \_replace_plan reducer silently discards intentional empty plan
 
 **Reported:** Cycle 2
-**File:** `lib/core/state.py:64`
+**File:** `src/vaultspec_a2a/core/state.py:64`
 **Issue:** `return new if new else existing` means a node that intentionally clears
 the plan by returning `[]` has no effect — the old plan is preserved. There is no
 way to explicitly reset the plan to empty.
@@ -312,7 +312,7 @@ way to explicitly reset the plan to empty.
 ## [LOW] [Cycle 2] — test_state.py:100 validates broken \_replace_plan behavior
 
 **Reported:** Cycle 2
-**File:** `lib/core/tests/test_state.py:100`
+**File:** `src/vaultspec_a2a/core/tests/test_state.py:100`
 **Issue:** `test_keeps_existing_when_new_is_empty` asserts `result == old` when
 `_replace_plan(old, [])` is called. This validates the broken T12 behavior. When
 T12 is fixed, this test must be updated: the correct assertion becomes
@@ -327,7 +327,7 @@ T12 is fixed, this test must be updated: the correct assertion becomes
 ## [LOW] [Cycle 2] — test_exceptions.py hardcodes **all** without WorkerExecutionError
 
 **Reported:** Cycle 2
-**File:** `lib/core/tests/test_exceptions.py:299-320`
+**File:** `src/vaultspec_a2a/core/tests/test_exceptions.py:299-320`
 **Issue:** `test_all_contains_every_public_name` hardcodes the `__all__` expected
 set without `WorkerExecutionError`. When T04 adds it to `__all__`, this test
 fails with a set mismatch.
@@ -342,7 +342,7 @@ fails with a set mismatch.
 ## [LOW] [Cycle 2] — StreamableGraph/ingest type signatures do not accept Command input
 
 **Reported:** Cycle 2
-**File:** `lib/core/aggregator.py` (StreamableGraph protocol), `lib/worker/executor.py`
+**File:** `src/vaultspec_a2a/core/aggregator.py` (StreamableGraph protocol), `src/vaultspec_a2a/worker/executor.py`
 **Issue:** The `StreamableGraph` protocol and `ingest()` signature type `graph_input`
 as `dict[str, Any]`, but `executor.py` passes `Command(resume=...)` on resume —
 which is not a dict. The `cast()` call suppresses the type error but the protocol
@@ -357,7 +357,7 @@ to accept `dict[str, Any] | Command`.
 ## [MEDIUM] [Cycle 2] — No lazy graph recompilation on resume after worker restart
 
 **Reported:** Cycle 2
-**File:** `lib/worker/executor.py:207-210`
+**File:** `src/vaultspec_a2a/worker/executor.py:207-210`
 **Issue:** `_handle_resume` checks `self._graphs.get(req.thread_id)` — if the
 worker process was restarted, `_graphs` is empty even though the checkpointer
 has persisted state. Resume will fail with "No graph for thread" instead of
@@ -372,7 +372,7 @@ recompiling from the team preset.
 ## [LOW] [Cycle 3] — T03 test_supervisor.py missing routing_error assertion (pre-commit)
 
 **Reported:** Cycle 3 (working tree check before commit)
-**File:** `lib/core/tests/test_supervisor.py`
+**File:** `src/vaultspec_a2a/core/tests/test_supervisor.py`
 **Issue:** `test_supervisor_routing_unparseable_defaults_to_finish` only asserted
 `result["next"] == "FINISH"` — no assertion on `routing_error` key presence.
 **Fix direction:** Add `test_supervisor_sets_routing_error_on_parse_failure` (positive)
@@ -385,7 +385,7 @@ and `test_supervisor_no_routing_error_on_clean_finish` (negative) tests.
 ## [HIGH] [Cycle 3] — test_state.py:179 key set missing routing_error (pre-commit)
 
 **Reported:** Cycle 3 (working tree check before commit)
-**File:** `lib/core/tests/test_state.py:179-192`
+**File:** `src/vaultspec_a2a/core/tests/test_state.py:179-192`
 **Issue:** `test_has_required_keys` expected set hardcoded without `routing_error`.
 Would fail immediately on CI once T03 committed.
 **Fix direction:** Add `"routing_error"` to expected set.
@@ -397,7 +397,7 @@ Would fail immediately on CI once T03 committed.
 ## [CRITICAL] [Cycle 3] — worker.py bare re-raise did not use WorkerExecutionError (pre-commit)
 
 **Reported:** Cycle 3 (working tree check mid-T04)
-**File:** `lib/core/nodes/worker.py:171-177`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:171-177`
 **Issue:** `WorkerExecutionError` was imported and class defined, but the except
 block still had bare `raise` — the wrapping was not applied.
 **Fix direction:** Replace `raise` with `raise WorkerExecutionError(...) from exc`
@@ -410,7 +410,7 @@ using `agent_id=name, model_type=model_type` kwargs.
 ## [HIGH] [Cycle 3] — test_exceptions.py **all** set missing WorkerExecutionError (pre-commit)
 
 **Reported:** Cycle 3 (working tree check mid-T04)
-**File:** `lib/core/tests/test_exceptions.py:301-320`
+**File:** `src/vaultspec_a2a/core/tests/test_exceptions.py:301-320`
 **Issue:** `test_all_contains_every_public_name` expected set did not include
 `"WorkerExecutionError"` — would fail on CI once T04 committed.
 **Fix direction:** Add `"WorkerExecutionError"` to expected set.
@@ -422,10 +422,10 @@ using `agent_id=name, model_type=model_type` kwargs.
 ## [MEDIUM] [Cycle 3] — test_facade_reexports missing WorkerExecutionError identity check
 
 **Reported:** Cycle 3
-**File:** `lib/core/tests/test_exceptions.py:323-337`
+**File:** `src/vaultspec_a2a/core/tests/test_exceptions.py:323-337`
 **Issue:** `test_facade_reexports_are_same_objects` does not include
 `WorkerExecutionError is _exceptions_module.WorkerExecutionError`, even though
-the core facade (`lib/core/__init__.py:35`) re-exports it.
+the core facade (`src/vaultspec_a2a/core/__init__.py:35`) re-exports it.
 **Fix direction:** The identity check is covered by `test_worker.py` facade test.
 Acceptable as-is — no separate action required.
 **Task:** INFO — no task (covered by test_worker.py)
@@ -436,7 +436,7 @@ Acceptable as-is — no separate action required.
 ## [MEDIUM] [Cycle 3] — WorkerExecutionError inherits VaultspecError not RuntimeError (severity inconsistency)
 
 **Reported:** Cycle 3 (post-T04 class review)
-**File:** `lib/core/exceptions.py:103-116`
+**File:** `src/vaultspec_a2a/core/exceptions.py:103-116`
 **Issue:** `WorkerExecutionError` now inherits `VaultspecError(Exception)` with
 `severity = ErrorSeverity.TRANSIENT` but `recovery_action = RecoveryAction.ESCALATE_TO_USER`.
 TRANSIENT + ESCALATE_TO_USER is semantically inconsistent — TRANSIENT implies
@@ -457,7 +457,7 @@ priority — does not affect runtime behavior.
 ## ~~[HIGH] [Cycle 3] — T04 regression: except Exception catches GraphBubbleUp (breaks interrupt flow)~~
 
 **Reported:** Cycle 3 (post-T04 analysis)
-**File:** `lib/core/nodes/worker.py:170-181`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:170-181`
 **Issue:** ~~Originally filed as a regression risk: `GraphBubbleUp` inheriting from `Exception`
 would be caught by the `except Exception` block before Pregel could handle it.~~
 
@@ -476,7 +476,7 @@ superfluous). T04 and T18 are both closed and must not be re-raised.
 ## [INFO] [Cycle 4 / docs-researcher] — T05 fix direction uses deprecated retry= param name
 
 **Reported:** Cycle 4 (docs-researcher LangGraph source cross-reference)
-**File:** `lib/core/graph.py` (not yet modified — T05 pending)
+**File:** `src/vaultspec_a2a/core/graph.py` (not yet modified — T05 pending)
 **Issue:** The T05 fix direction recorded above uses `retry=_WORKER_RETRY` in
 the `add_node()` call. LangGraph's `StateGraph.add_node()` signature (confirmed
 in `knowledge/repositories/langgraph/…/graph/state.py:647-653`) accepts
@@ -493,7 +493,7 @@ use `retry_policy=` to avoid deprecation noise in production logs.
 ## [INFO] [Cycle 4 / docs-researcher] — T11 step_timeout is a post-compile attribute, not a compile() param
 
 **Reported:** Cycle 4 (docs-researcher LangGraph source cross-reference)
-**File:** `lib/core/graph.py` (not yet modified — T11 pending)
+**File:** `src/vaultspec_a2a/core/graph.py` (not yet modified — T11 pending)
 **Issue:** The T11 fix direction says "Pass `step_timeout=` to
 `builder.compile()`". LangGraph's `StateGraph.compile()` does not accept a
 `step_timeout` parameter. `step_timeout` is an attribute on the `Pregel` class
@@ -511,7 +511,7 @@ and the caller (executor) should pass `settings.graph_node_timeout_seconds`.
 ## [INFO] [Cycle 4 / docs-researcher] — WorkerExecutionError constructor uses worker/model/message_count (not agent_id/model_type)
 
 **Reported:** Cycle 4 (docs-researcher confirmed from exceptions.py:109)
-**File:** `lib/core/exceptions.py:109-115`
+**File:** `src/vaultspec_a2a/core/exceptions.py:109-115`
 **Issue:** Several findings above reference `WorkerExecutionError(agent_id=...,
 model_type=...)` kwargs. The actual implemented constructor (confirmed in
 `exceptions.py:109`) signature is `__init__(self, worker: str, model: str,
@@ -530,7 +530,7 @@ message_count=len(messages))` when fixing T04b/T18. Ensure tests in
 ## [RESOLVED] [Cycle 5 / docs-researcher] — T05 applied to all 4 add_node() call sites
 
 **Reported:** Cycle 5 (verification read)
-**File:** `lib/core/graph.py:312, 353, 456, 602`
+**File:** `src/vaultspec_a2a/core/graph.py:312, 353, 456, 602`
 **Issue:** Status update — all four `add_node()` calls now carry
 `retry_policy=_WORKER_RETRY` (not the deprecated `retry=` alias). The
 `_worker_retry_on` callable and `_WORKER_RETRY = RetryPolicy(...)` are
@@ -545,7 +545,7 @@ excluded; `TimeoutError` explicitly included (Python 3.11+ OSError subclass).
 ## ~~[RESOLVED] [Cycle 5 / docs-researcher] — T18/T04b GraphBubbleUp guard applied~~
 
 **Reported:** Cycle 5 (verification read) — RETRACTED Cycle 10
-**File:** `lib/core/nodes/worker.py:8, 172-173`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:8, 172-173`
 **Issue:** ~~Previously marked resolved based on observing the guard in code.~~
 **RETRACTED:** The guard is superfluous — Pregel intercepts `GraphBubbleUp` at the task
 runner level before the node's local `except Exception` block ever executes. The guard
@@ -558,7 +558,7 @@ does no harm but was unnecessary. T18 is closed as a retracted finding.
 ## [MEDIUM] [Cycle 5 / docs-researcher] — default_retry_on lazily imports requests (not in dependencies)
 
 **Reported:** Cycle 5
-**File:** `lib/core/graph.py:20` + `knowledge/repositories/langgraph/…/_internal/_retry.py:3`
+**File:** `src/vaultspec_a2a/core/graph.py:20` + `knowledge/repositories/langgraph/…/_internal/_retry.py:3`
 **Issue:** `from langgraph._internal._retry import default_retry_on` is called
 in `_worker_retry_on` via the `default_retry_on(exc)` fallback at line 64.
 Inside `default_retry_on`, `import requests` and `import httpx` are executed
@@ -597,7 +597,7 @@ This also removes the `_internal` private import entirely.
 ## [LOW] [Cycle 5 / docs-researcher] — WorkerSupervisor.monitor uses deprecated asyncio.get_event_loop()
 
 **Reported:** Cycle 5
-**File:** `lib/api/supervisor.py:100, 101, 104`
+**File:** `src/vaultspec_a2a/api/supervisor.py:100, 101, 104`
 **Issue:** `asyncio.get_event_loop().time()` is deprecated in Python 3.10+ and
 emits a `DeprecationWarning` when called without a running event loop. In
 Python 3.12+ it raises `RuntimeError` when called from a thread without a
@@ -615,7 +615,7 @@ with `asyncio.get_running_loop()` in `supervisor.py`.
 ## [MEDIUM] [Cycle 5 / docs-researcher] — /internal/events and /internal/heartbeat have no authentication
 
 **Reported:** Cycle 5
-**File:** `lib/api/internal.py:94-135`
+**File:** `src/vaultspec_a2a/api/internal.py:94-135`
 **Issue:** The `/internal/events` and `/internal/heartbeat` HTTP POST endpoints
 accept any unauthenticated request. Any process with network access to the
 control surface can:
@@ -649,7 +649,7 @@ Option 2 is recommended — it is low-overhead and consistent with the existing
 ## [RESOLVED] [Cycle 6 / docs-researcher] — T07 TAG_NOSTREAM applied
 
 **Reported:** Cycle 6 (verification)
-**File:** `lib/core/nodes/supervisor.py:8, 69, 71`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:8, 69, 71`
 **Issue:** Status update — `from langgraph.constants import TAG_NOSTREAM` at
 line 8; `routing_model = model.with_config({"tags": [TAG_NOSTREAM]})` at
 line 69; `await routing_model.ainvoke(messages)` at line 71. T07 fully resolved.
@@ -661,7 +661,7 @@ line 69; `await routing_model.ainvoke(messages)` at line 71. T07 fully resolved.
 ## [RESOLVED] [Cycle 6 / docs-researcher] — T06 supervisor_node state["messages"] subscript also fixed
 
 **Reported:** Cycle 6 (verification)
-**File:** `lib/core/nodes/supervisor.py:60`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:60`
 **Issue:** The INFO-level finding about `state["messages"]` dict-subscript
 KeyError risk is also resolved as part of T06. Line 60 now reads
 `*working_state.get("messages", [])` via the `working_state` compaction path.
@@ -673,7 +673,7 @@ KeyError risk is also resolved as part of T06. Line 60 now reads
 ## [LOW] [Cycle 6 / docs-researcher] — Worker /dispatch endpoint has no authentication
 
 **Reported:** Cycle 6
-**File:** `lib/worker/app.py:106-123`
+**File:** `src/vaultspec_a2a/worker/app.py:106-123`
 **Issue:** The `/dispatch` HTTP POST endpoint on the worker process accepts any
 `DispatchRequest` with no authentication. The worker binds to `127.0.0.1:8001`
 (loopback only, so not remotely reachable), but any process on the same host
@@ -693,14 +693,14 @@ dependency on `/dispatch`.
 ## [LOW] [Cycle 6 / docs-researcher] — worker/health.py HealthCheck class is an empty stub
 
 **Reported:** Cycle 6
-**File:** `lib/worker/health.py:6-7`
+**File:** `src/vaultspec_a2a/worker/health.py:6-7`
 **Issue:** `class HealthCheck` has no methods or attributes — it is a stub.
 `worker/app.py` defines its own inline `/health` handler and does not use
 `HealthCheck` at all. The class is exported in `__all__` of `health.py` but
 serves no purpose.
 **Fix direction:** Either implement the intended `HealthCheck` functionality
 (periodic self-check logic, readiness tracking) or delete the file and remove
-its export from `lib/worker/__init__.py`.
+its export from `src/vaultspec_a2a/worker/__init__.py`.
 **Task:** INFO — no task (dead code)
 **Status:** open
 
@@ -709,7 +709,7 @@ its export from `lib/worker/__init__.py`.
 ## [LOW] [Cycle 6 / docs-researcher] — Worker lifespan shutdown order: bridge closed before heartbeat cancelled
 
 **Reported:** Cycle 6
-**File:** `lib/worker/app.py:87-91`
+**File:** `src/vaultspec_a2a/worker/app.py:87-91`
 **Issue:** The shutdown sequence is: (1) `executor.shutdown()`, (2)
 `bridge.close()` — closes the httpx client, (3) `tg.cancel_scope.cancel()` —
 stops the heartbeat task. The heartbeat loop is still running when
@@ -727,7 +727,7 @@ then await executor and bridge cleanup. Or add a `_closed` flag to
 ## [MEDIUM] [Cycle 7 / docs-researcher] — AcpSessionError not excluded from \_worker_retry_on
 
 **Reported:** Cycle 7
-**File:** `lib/core/graph.py:47-64` (exclusion list) + `lib/providers/acp_chat_model.py:1161,1191`
+**File:** `src/vaultspec_a2a/core/graph.py:47-64` (exclusion list) + `src/vaultspec_a2a/providers/acp_chat_model.py:1161,1191`
 **Issue:** `_worker_retry_on` excludes `AcpAuthError`, `AcpPromptError`, `AcpProtocolError`, and
 `GraphRecursionError` from retry. However `AcpSessionError` — which IS raised by
 `acp_chat_model.py` at lines 1161 and 1191 (initialize and session-new failures) — is NOT
@@ -746,7 +746,7 @@ raises).
 ## [HIGH] [Cycle 7 / docs-researcher] — T17 scope expansion: ThreadModel missing team_preset column
 
 **Reported:** Cycle 7
-**File:** `lib/database/models.py` + `lib/database/crud.py:101`
+**File:** `src/vaultspec_a2a/database/models.py` + `src/vaultspec_a2a/database/crud.py:101`
 **Issue:** T17 was originally scoped to `endpoints.py` resume path and `executor.py` lazy
 recompile. Full DB layer investigation reveals the scope is larger:
 
@@ -772,7 +772,7 @@ recompile. Full DB layer investigation reveals the scope is larger:
 
 ### T08 — Loop iteration logging: RESOLVED (confirmed)
 
-Call site at `lib/core/graph.py:615-618` correctly reads:
+Call site at `src/vaultspec_a2a/core/graph.py:615-618` correctly reads:
 
 ```python
 if agent_id == loop_node_id:
@@ -787,47 +787,47 @@ Both keyword args are passed. Pre-summary analysis of a stale snapshot was incor
 
 ### T05 — RetryPolicy private import: still open
 
-`lib/core/graph.py:20`: `from langgraph._internal._retry import default_retry_on` still present.
-`lib/core/graph.py:66`: `return default_retry_on(cause)` fallback still calls it.
+`src/vaultspec_a2a/core/graph.py:20`: `from langgraph._internal._retry import default_retry_on` still present.
+`src/vaultspec_a2a/core/graph.py:66`: `return default_retry_on(cause)` fallback still calls it.
 The `requests` dependency risk (Cycle 5 docs-researcher finding) is NOT yet fixed.
 TaskList shows T05 still `in_progress` with coder assigned.
 
 ### T11 — step_timeout: confirmed open
 
-`lib/core/graph.py:253`: `builder.compile(checkpointer=checkpointer, interrupt_before=interrupt_nodes)` — no `step_timeout` post-compile assignment. TaskList: pending.
+`src/vaultspec_a2a/core/graph.py:253`: `builder.compile(checkpointer=checkpointer, interrupt_before=interrupt_nodes)` — no `step_timeout` post-compile assignment. TaskList: pending.
 
 ### T12 — \_replace_plan empty discard: confirmed open
 
-`lib/core/state.py:64`: `return new if new else existing` — broken behavior still present. TaskList: pending.
+`src/vaultspec_a2a/core/state.py:64`: `return new if new else existing` — broken behavior still present. TaskList: pending.
 
 ### T13 — graph_input missing required fields: confirmed open (in_progress)
 
-`lib/worker/executor.py:176`: `graph_input: dict[str, Any] = {"messages": messages} if messages else {}` — only `messages` initialized. `active_agent`, `thread_id`, `artifacts`, `current_plan`, `token_usage` absent. TaskList: `in_progress`.
+`src/vaultspec_a2a/worker/executor.py:176`: `graph_input: dict[str, Any] = {"messages": messages} if messages else {}` — only `messages` initialized. `active_agent`, `thread_id`, `artifacts`, `current_plan`, `token_usage` absent. TaskList: `in_progress`.
 
 ### T14 — compact_context summary as SystemMessage: confirmed open
 
-`lib/core/context.py:114`: `summary = SystemMessage(content=...)` — nested compaction bug still present. TaskList: pending.
+`src/vaultspec_a2a/core/context.py:114`: `summary = SystemMessage(content=...)` — nested compaction bug still present. TaskList: pending.
 
 ### T15 — GraphRecursionError in aggregator: confirmed open
 
-`lib/core/aggregator.py:1117-1144`: `except BaseException` has only `_is_interrupt` branch. No `isinstance(exc, GraphRecursionError)` check. Falls to generic `INGEST_ERROR` with `recoverable=False`. TaskList: pending.
+`src/vaultspec_a2a/core/aggregator.py:1117-1144`: `except BaseException` has only `_is_interrupt` branch. No `isinstance(exc, GraphRecursionError)` check. Falls to generic `INGEST_ERROR` with `recoverable=False`. TaskList: pending.
 
 ### T16 — StreamableGraph/ingest Command type: confirmed open
 
-`lib/core/aggregator.py:132`: `astream_events(graph_input: dict[str, Any] | None, ...)` — no `Command` in union.
-`lib/core/aggregator.py:1070`: `ingest(..., graph_input: dict[str, Any] | None, ...)` — no `Command` in union.
+`src/vaultspec_a2a/core/aggregator.py:132`: `astream_events(graph_input: dict[str, Any] | None, ...)` — no `Command` in union.
+`src/vaultspec_a2a/core/aggregator.py:1070`: `ingest(..., graph_input: dict[str, Any] | None, ...)` — no `Command` in union.
 Executor passes `Command(resume=req.option_id)` at line 232 — type mismatch suppressed by `cast()`. TaskList: pending.
 
 ### T17 — Lazy graph recompilation on resume: confirmed open
 
-`lib/worker/executor.py:207-209`: `graph = self._graphs.get(req.thread_id)` returns `None` on restart; early-return with warning instead of recompiling. TaskList: pending.
+`src/vaultspec_a2a/worker/executor.py:207-209`: `graph = self._graphs.get(req.thread_id)` returns `None` on restart; early-return with warning instead of recompiling. TaskList: pending.
 
 ---
 
 ## [HIGH] [Cycle 8 / docs-researcher] — T05 partial fix: `import requests` retained in inlined \_worker_retry_on
 
 **Reported:** Cycle 8
-**File:** `lib/core/graph.py:68-76`
+**File:** `src/vaultspec_a2a/core/graph.py:68-76`
 **Issue:** T05 removed the `langgraph._internal._retry` private import and inlined the logic —
 that part is correct. However, the inline still contains `import requests` at line 69 and uses
 `requests.HTTPError` at line 75. The `requests` library is NOT in `pyproject.toml` as a
@@ -853,7 +853,7 @@ Also remove `import requests` at line 69.
 ## [MEDIUM] [Cycle 8 / docs-researcher] — T05 still needs AcpSessionError exclusion
 
 **Reported:** Cycle 8
-**File:** `lib/core/graph.py:46-95`
+**File:** `src/vaultspec_a2a/core/graph.py:46-95`
 **Issue:** The T05 task is completed (RetryPolicy added, private import removed) but neither
 `AcpSessionError` nor the `AcpProtocolError`-never-raised issue was addressed. The inlined
 `_worker_retry_on` has no `AcpSessionError` exclusion. The `WorkerExecutionError` unwrapping
@@ -895,7 +895,7 @@ but harmless. T18 closed as a retracted finding — do not re-raise.
 ## [INFO] [Cycle 9 / docs-researcher] — T12 design clarification: test validates current behavior as intentional
 
 **Reported:** Cycle 9
-**File:** `lib/core/tests/test_state.py:100-104` + `lib/core/state.py:64`
+**File:** `src/vaultspec_a2a/core/tests/test_state.py:100-104` + `src/vaultspec_a2a/core/state.py:64`
 **Issue:** T12 was filed as a bug: "silently discard empty plan" via `return new if new else existing`.
 However, `test_state.py:100-104` (`test_keeps_existing_when_new_is_empty`) explicitly asserts
 that returning an empty list leaves the existing plan unchanged — i.e., the test validates the
@@ -922,7 +922,7 @@ before committing.
 
 ### T13 — graph_input missing required fields: RESOLVED
 
-`lib/worker/executor.py:176-183` now initialises all required `TeamState` fields:
+`src/vaultspec_a2a/worker/executor.py:176-183` now initialises all required `TeamState` fields:
 
 ```python
 graph_input: dict[str, Any] = {
@@ -940,19 +940,19 @@ Task list confirms completed. Fix is clean — empty `messages: []` is safe with
 
 ### T12 — \_replace_plan empty discard: still open
 
-`lib/core/state.py:64`: `return new if new else existing` — unchanged. Coder has task
+`src/vaultspec_a2a/core/state.py:64`: `return new if new else existing` — unchanged. Coder has task
 in_progress. See Cycle 9 design clarification note: the existing test
 (`test_keeps_existing_when_new_is_empty`) validates this behavior as intentional — the
 fix requires a clear decision on whether the test must also change.
 
 ### T14 — compact_context summary as SystemMessage: still open
 
-`lib/core/context.py:114`: `summary = SystemMessage(content=...)` — unchanged. Coder has
+`src/vaultspec_a2a/core/context.py:114`: `summary = SystemMessage(content=...)` — unchanged. Coder has
 task in_progress.
 
 ### T17 — Lazy graph recompilation on resume: still open
 
-`lib/worker/executor.py:214-217`: `_handle_resume` still early-returns on missing graph.
+`src/vaultspec_a2a/worker/executor.py:214-217`: `_handle_resume` still early-returns on missing graph.
 No lazy recompile logic present. T17 DB scope (missing `team_preset` column in
 `ThreadModel`) also unaddressed.
 
@@ -1089,7 +1089,7 @@ anything.
 
 Three changes needed:
 
-1. **`lib/core/config.py`** — add field:
+1. **`src/vaultspec_a2a/core/config.py`** — add field:
 
    ```python
    graph_node_timeout_seconds: int = Field(
@@ -1098,7 +1098,7 @@ Three changes needed:
    )
    ```
 
-2. **`lib/core/graph.py`** — add `step_timeout` param to `compile_team_graph()` and set
+2. **`src/vaultspec_a2a/core/graph.py`** — add `step_timeout` param to `compile_team_graph()` and set
    post-compile:
 
    ```python
@@ -1116,7 +1116,7 @@ Three changes needed:
        return compiled
    ```
 
-3. **`lib/worker/executor.py`** — pass `settings.graph_node_timeout_seconds` when calling
+3. **`src/vaultspec_a2a/worker/executor.py`** — pass `settings.graph_node_timeout_seconds` when calling
    `compile_team_graph()`:
    ```python
    graph = compile_team_graph(
@@ -1154,7 +1154,7 @@ interaction concern.
 
 ### Schema migration: no Alembic, create_all only
 
-`lib/database/session.py:184`: `await conn.run_sync(Base.metadata.create_all)` — this is
+`src/vaultspec_a2a/database/session.py:184`: `await conn.run_sync(Base.metadata.create_all)` — this is
 the only schema initialisation. `create_all` creates missing tables but **does NOT add
 columns to existing tables**. There is no Alembic, no `alembic.ini`, no `versions/`
 directory in the project.
@@ -1188,13 +1188,13 @@ Run this BEFORE `create_all` so fresh and existing DBs both end up with the colu
 
 ### Full T17 wiring — four files
 
-**1. `lib/database/models.py`** — add column:
+**1. `src/vaultspec_a2a/database/models.py`** — add column:
 
 ```python
 team_preset: Mapped[str | None] = mapped_column(default=None)
 ```
 
-**2. `lib/database/session.py`** — add migration guard in `init_db()` before `create_all`:
+**2. `src/vaultspec_a2a/database/session.py`** — add migration guard in `init_db()` before `create_all`:
 
 ```python
 async with engine.begin() as conn:
@@ -1205,7 +1205,7 @@ async with engine.begin() as conn:
     await conn.run_sync(Base.metadata.create_all)
 ```
 
-**3. `lib/database/crud.py`** — add `team_preset` param to `create_thread()`:
+**3. `src/vaultspec_a2a/database/crud.py`** — add `team_preset` param to `create_thread()`:
 
 ```python
 async def create_thread(
@@ -1229,7 +1229,7 @@ async def create_thread(
     )
 ```
 
-**4. `lib/api/endpoints.py`** — two changes:
+**4. `src/vaultspec_a2a/api/endpoints.py`** — two changes:
 
 a) Pass `team_preset` to `create_thread()` at the create-thread endpoint (`~line 223`):
 
@@ -1256,7 +1256,7 @@ dispatch = DispatchRequest(
 )
 ```
 
-**5. `lib/worker/executor.py`** — implement lazy recompile in `_handle_resume()`:
+**5. `src/vaultspec_a2a/worker/executor.py`** — implement lazy recompile in `_handle_resume()`:
 
 ```python
 async def _handle_resume(self, req: DispatchRequest) -> None:
@@ -1313,16 +1313,16 @@ workspace_root = meta.get("workspace_root")
 
 ### T11 — step_timeout: RESOLVED
 
-`lib/core/graph.py:212` — `step_timeout: float | None = None` param added.
-`lib/core/graph.py:290-291` — post-compile assignment `graph.step_timeout = step_timeout`.
-`lib/core/config.py:30-32` — `graph_node_timeout_seconds: int = Field(default=300)`.
-`lib/worker/executor.py:292` — `step_timeout=float(settings.graph_node_timeout_seconds)`.
+`src/vaultspec_a2a/core/graph.py:212` — `step_timeout: float | None = None` param added.
+`src/vaultspec_a2a/core/graph.py:290-291` — post-compile assignment `graph.step_timeout = step_timeout`.
+`src/vaultspec_a2a/core/config.py:30-32` — `graph_node_timeout_seconds: int = Field(default=300)`.
+`src/vaultspec_a2a/worker/executor.py:292` — `step_timeout=float(settings.graph_node_timeout_seconds)`.
 All four wiring points confirmed correct. Implementation matches Cycle 12 research exactly.
 
 ### T15 — GraphRecursionError in aggregator: RESOLVED
 
-`lib/core/aggregator.py:54-57` — guarded `_GraphRecursionError` import (correct pattern).
-`lib/core/aggregator.py:1134-1158` — `_is_recursion_limit` check + `elif` branch emitting
+`src/vaultspec_a2a/core/aggregator.py:54-57` — guarded `_GraphRecursionError` import (correct pattern).
+`src/vaultspec_a2a/core/aggregator.py:1134-1158` — `_is_recursion_limit` check + `elif` branch emitting
 `code="RECURSION_LIMIT_EXCEEDED"`.
 **One observation:** coder chose `recoverable=False` (line 1157). The Cycle 11 research
 suggested `recoverable=True`, but `False` is defensible — hitting the recursion limit
@@ -1331,9 +1331,9 @@ intentional design choice, not a bug.
 
 ### T16 — StreamableGraph/ingest Command type: RESOLVED
 
-`lib/core/aggregator.py:42` — `from langgraph.types import Command` imported.
-`lib/core/aggregator.py:139` — `graph_input: dict[str, Any] | Command | None`.
-`lib/core/aggregator.py:1077` — `graph_input: dict[str, Any] | Command | None`.
+`src/vaultspec_a2a/core/aggregator.py:42` — `from langgraph.types import Command` imported.
+`src/vaultspec_a2a/core/aggregator.py:139` — `graph_input: dict[str, Any] | Command | None`.
+`src/vaultspec_a2a/core/aggregator.py:1077` — `graph_input: dict[str, Any] | Command | None`.
 Both annotation sites updated. `cast()` workaround in executor can now be removed
 (still present — low priority cleanup).
 
@@ -1348,16 +1348,16 @@ Stale docstring at `graph.py:57` still references T04/T18 rationale (now retract
 ### New findings (Cycle 14)
 
 **[LOW] Stale docstring in `_worker_retry_on` references retracted T04/T18 rationale**
-`lib/core/graph.py:57`: "GraphRecursionError is excluded by the GraphBubbleUp guard in
+`src/vaultspec_a2a/core/graph.py:57`: "GraphRecursionError is excluded by the GraphBubbleUp guard in
 worker.py" — this was the retracted T04/T18 reasoning. The actual exclusion is now at
 line 66-67 in the same function. The docstring should read: "GraphRecursionError is
 explicitly excluded at line 66 of this function — retrying would immediately hit the
 limit again."
 
 **[LOW] No test coverage for T11/T15 new branches**
-`lib/core/tests/test_aggregator.py` — no tests for `_is_recursion_limit` path or
+`src/vaultspec_a2a/core/tests/test_aggregator.py` — no tests for `_is_recursion_limit` path or
 `RECURSION_LIMIT_EXCEEDED` emission.
-`lib/core/tests/test_graph.py` — no tests for `step_timeout` post-compile assignment or
+`src/vaultspec_a2a/core/tests/test_graph.py` — no tests for `step_timeout` post-compile assignment or
 that `compile_team_graph(step_timeout=N)` sets `graph.step_timeout`.
 These are new code paths exercised only at runtime.
 
@@ -1373,34 +1373,34 @@ These are new code paths exercised only at runtime.
 
 ### T12 — \_replace_plan None sentinel: CONFIRMED RESOLVED
 
-`lib/core/state.py:64`: `return new if new is not None else existing` — correct. Uses `None`
+`src/vaultspec_a2a/core/state.py:64`: `return new if new is not None else existing` — correct. Uses `None`
 sentinel per orchestrator decision, not falsiness. Allows `[]` to overwrite as a valid plan.
 
 ### T14 — compact_context HumanMessage: CONFIRMED RESOLVED
 
-`lib/core/context.py:114`: `summary = HumanMessage(content=...)` — correct.
+`src/vaultspec_a2a/core/context.py:114`: `summary = HumanMessage(content=...)` — correct.
 
 ### T17 — Lazy recompile: still in_progress, not yet landed
 
-`lib/worker/executor.py:216-218`: `_handle_resume` still early-returns on missing graph.
-`lib/database/models.py`: `ThreadModel` still has no `team_preset` column.
+`src/vaultspec_a2a/worker/executor.py:216-218`: `_handle_resume` still early-returns on missing graph.
+`src/vaultspec_a2a/database/models.py`: `ThreadModel` still has no `team_preset` column.
 Coder has task in_progress but changes not yet visible in working tree.
 
 ### T05 residual — AcpSessionError exclusion: still open
 
-`lib/core/graph.py:46-98`: `_worker_retry_on` has no `AcpSessionError` check. Falls through
+`src/vaultspec_a2a/core/graph.py:46-98`: `_worker_retry_on` has no `AcpSessionError` check. Falls through
 to `return True`.
 
 ### asyncio.get_event_loop() deprecation: still open (Cycle 5 finding)
 
-`lib/api/supervisor.py:100,101,104`: three calls to `asyncio.get_event_loop()` inside
+`src/vaultspec_a2a/api/supervisor.py:100,101,104`: three calls to `asyncio.get_event_loop()` inside
 `async def monitor()`. In Python 3.10+ this emits `DeprecationWarning` when called from a
 running event loop; in 3.12+ it may raise. The correct call in async context is
 `asyncio.get_running_loop()`. Finding was first reported Cycle 5 — not yet addressed.
 
 ### Worker node test coverage: no WorkerExecutionError path
 
-`lib/core/nodes/tests/test_worker.py`: no test exercises the `except Exception →
+`src/vaultspec_a2a/core/nodes/tests/test_worker.py`: no test exercises the `except Exception →
 WorkerExecutionError` wrapping path. Model-raises-exception scenario is not covered.
 The T04 retraction does not affect this — the wrapping is still the correct behaviour for
 non-`GraphBubbleUp` exceptions. Minor gap, covered elsewhere indirectly via exception tests.
@@ -1419,8 +1419,8 @@ are clean beyond the known open items above.
 
 ### T17 — still not landed
 
-`lib/worker/executor.py:216-218`: `_handle_resume` still early-returns on missing graph.
-`lib/database/models.py`: `ThreadModel` still has no `team_preset` column.
+`src/vaultspec_a2a/worker/executor.py:216-218`: `_handle_resume` still early-returns on missing graph.
+`src/vaultspec_a2a/database/models.py`: `ThreadModel` still has no `team_preset` column.
 Coder task remains in_progress — changes not yet in working tree.
 
 ### Pipeline / pipeline_loop compilation: clean
@@ -1457,7 +1457,7 @@ the lambda when the supervisor node routes, and `START → supervisor` is a dire
 that always runs first. Supervisor always sets `next` before the conditional fires.
 No runtime risk — confirmed safe.
 
-### lib/providers/probes/\_protocol.py: clean
+### src/vaultspec_a2a/providers/probes/\_protocol.py: clean
 
 Standalone probe module, no LangGraph interactions. Not a retry/graph concern.
 
@@ -1468,7 +1468,7 @@ Standalone probe module, no LangGraph interactions. Not a retry/graph concern.
 ### [MEDIUM] AcpSessionError not excluded from \_worker_retry_on — session failures incorrectly retried
 
 **Reported:** Cycle 17
-**File:** `lib/core/graph.py:46-98`
+**File:** `src/vaultspec_a2a/core/graph.py:46-98`
 **Issue:** `_worker_retry_on` falls through to `return True` for any exception not
 matched by the explicit checks. `AcpSessionError(AcpError(Exception))` matches none
 of the listed types (`ConnectionError`, `httpx.HTTPStatusError`, `ValueError`,
@@ -1478,7 +1478,7 @@ of the listed types (`ConnectionError`, `httpx.HTTPStatusError`, `ValueError`,
 failures (non-transient: process startup failure, protocol handshake failure) are
 retried 3× unnecessarily.
 
-`AcpSessionError` is defined in `lib/providers/acp_exceptions.py:70` as
+`AcpSessionError` is defined in `src/vaultspec_a2a/providers/acp_exceptions.py:70` as
 `class AcpSessionError(AcpError)` where `AcpError(Exception)`. These errors
 represent non-transient subprocess lifecycle failures; retrying them delays
 surfacing the real error and wastes 3× the latency budget (3 attempts × backoff).
@@ -1503,7 +1503,7 @@ except ImportError:
 ### [LOW] asyncio.get_event_loop() deprecated in async context — supervisor.py
 
 **Reported:** Cycle 17
-**File:** `lib/api/supervisor.py:100,101,104`
+**File:** `src/vaultspec_a2a/api/supervisor.py:100,101,104`
 **Issue:** Three calls to `asyncio.get_event_loop().time()` inside `async def monitor()`
 (an async coroutine). In Python 3.10+, `asyncio.get_event_loop()` in a running async
 context emits a `DeprecationWarning` and in Python 3.12+ will raise `RuntimeError` if
@@ -1532,27 +1532,27 @@ All three occurrences at lines 100, 101, and 104 should be updated.
 
 ### Test coverage inventory
 
-**WorkerExecutionError wrapping** — `lib/core/tests/test_worker.py:79-131`:
+**WorkerExecutionError wrapping** — `src/vaultspec_a2a/core/tests/test_worker.py:79-131`:
 Covered. Tests at lines 79, 100, 118 verify: (a) ainvoke exception → WorkerExecutionError,
 (b) original exception chained as `__cause__`, (c) GraphBubbleUp passes through unwrapped.
-Previously noted gap in `lib/core/nodes/tests/test_worker.py` — that file focuses on
-node protocol and does not duplicate coverage. The co-located `lib/core/tests/test_worker.py`
+Previously noted gap in `src/vaultspec_a2a/core/nodes/tests/test_worker.py` — that file focuses on
+node protocol and does not duplicate coverage. The co-located `src/vaultspec_a2a/core/tests/test_worker.py`
 is the authoritative location per Rust-style co-location. No gap.
 
-**`compile_team_graph(step_timeout=N)` sets `graph.step_timeout`** — `lib/core/tests/test_graph.py:418-457`:
+**`compile_team_graph(step_timeout=N)` sets `graph.step_timeout`** — `src/vaultspec_a2a/core/tests/test_graph.py:418-457`:
 Covered. Two tests: `test_compile_team_graph_step_timeout_set` (asserts `graph.step_timeout == 42.0`)
 and `test_compile_team_graph_step_timeout_none_not_set` (asserts remains `None`). No gap.
 
-**`GraphRecursionError` excluded from retry predicate** — `lib/core/tests/test_graph.py:465-480`:
+**`GraphRecursionError` excluded from retry predicate** — `src/vaultspec_a2a/core/tests/test_graph.py:465-480`:
 Covered. T15 test verifies retry predicate returns `False` for `GraphRecursionError`. No gap.
 
 ### [LOW] Aggregator RECURSION_LIMIT_EXCEEDED event branch has no test
 
 **Reported:** Cycle 18
-**File:** `lib/core/aggregator.py:1134-1144` (T15 aggregator branch)
+**File:** `src/vaultspec_a2a/core/aggregator.py:1134-1144` (T15 aggregator branch)
 **Issue:** The `_is_recursion_limit` check and `RECURSION_LIMIT_EXCEEDED` event emission
 added as part of T15 in the aggregator's `ingest()` `except BaseException` handler has
-zero test coverage. `lib/core/tests/test_aggregator.py` has no test that injects a
+zero test coverage. `src/vaultspec_a2a/core/tests/test_aggregator.py` has no test that injects a
 `GraphRecursionError` into a mock graph's `astream_events` and verifies:
 
 - `ErrorEvent(code="RECURSION_LIMIT_EXCEEDED")` is emitted
@@ -1580,7 +1580,7 @@ async def test_ingest_recursion_limit_emits_correct_event(fake_graph, ...):
 ### [HIGH] `_is_step_timeout` computed but never used — step timeouts mislabelled as INGEST_ERROR
 
 **Reported:** Cycle 19
-**File:** `lib/core/aggregator.py:1138-1170`
+**File:** `src/vaultspec_a2a/core/aggregator.py:1138-1170`
 **Issue:** Line 1138 computes `_is_step_timeout = isinstance(exc, TimeoutError)` but the
 variable is NEVER referenced in the subsequent `if / elif / else` chain. Step timeout
 exceptions (raised by Pregel's `_runner.py:530` as `asyncio.TimeoutError("Timed out")`)
@@ -1637,7 +1637,7 @@ HTTPError`). Heartbeat loop is correctly supervised by anyio task group. Clean.
 ### [MEDIUM] `/internal/events` returns HTTP 200 even when event is silently dropped
 
 **Reported:** Cycle 20
-**File:** `lib/api/internal.py:94-118`
+**File:** `src/vaultspec_a2a/api/internal.py:94-118`
 **Issue:** `receive_worker_event` always returns `{"status": "ok"}` (HTTP 200) regardless
 of whether the event was actually delivered to browser clients. When
 `connection_manager` is None (e.g. during startup or after a restart race), the event
@@ -1663,7 +1663,7 @@ if cm is None:
 ### [INFO] `/internal/*` endpoints have no authentication — event injection possible from loopback
 
 **Reported:** Cycle 20
-**File:** `lib/api/internal.py:94,121`
+**File:** `src/vaultspec_a2a/api/internal.py:94,121`
 **Issue:** Both `/internal/events` and `/internal/heartbeat` POST endpoints accept
 requests from any caller that can reach the control surface port. Since the control
 surface also accepts external browser WS connections, a process on the same machine
@@ -1688,17 +1688,17 @@ startup handshake.
 
 ### T17 executor and DB: fully landed
 
-`lib/worker/executor.py:_handle_resume` (lines 217-257): lazy recompile path is correctly
+`src/vaultspec_a2a/worker/executor.py:_handle_resume` (lines 217-257): lazy recompile path is correctly
 implemented. Falls back to `_graph_presets` cache, then `req.team_preset`, with proper
 exception handling and `_aggregator.register_graph()` wiring. Clean.
 
-`lib/database/models.py:51`: `team_preset: Mapped[str | None] = mapped_column(default=None)` — landed.
-`lib/database/crud.py:109,147`: `team_preset` param wired into `create_thread()`. — landed.
+`src/vaultspec_a2a/database/models.py:51`: `team_preset: Mapped[str | None] = mapped_column(default=None)` — landed.
+`src/vaultspec_a2a/database/crud.py:109,147`: `team_preset` param wired into `create_thread()`. — landed.
 
 ### [HIGH] Resume endpoint does not supply team_preset to DispatchRequest — cold-restart resume broken
 
 **Reported:** Cycle 21
-**File:** `lib/api/endpoints.py:712-717`
+**File:** `src/vaultspec_a2a/api/endpoints.py:712-717`
 **Issue:** `respond_to_permission_endpoint` builds a `DispatchRequest(action="resume", ...)`
 without `team_preset` or `workspace_root`. On a cold-restart scenario:
 
@@ -1707,7 +1707,7 @@ without `team_preset` or `workspace_root`. On a cold-restart scenario:
 - `_handle_resume` hits `logger.warning("No graph for thread %s -- cannot resume")` and returns
 
 The `DispatchRequest` schema already supports `team_preset` and `workspace_root` fields
-(defined in `lib/api/schemas/internal.py:26-27`) and `ThreadModel` now stores `team_preset`
+(defined in `src/vaultspec_a2a/api/schemas/internal.py:26-27`) and `ThreadModel` now stores `team_preset`
 (T17 DB migration). The endpoint simply needs to look up the thread from DB and include
 both fields.
 
@@ -1756,7 +1756,7 @@ dispatch = DispatchRequest(
 ### [INFO] broadcast_to_thread accesses private aggregator attribute directly
 
 **Reported:** Cycle 22
-**File:** `lib/api/websocket.py:519`
+**File:** `src/vaultspec_a2a/api/websocket.py:519`
 **Issue:** `broadcast_to_thread` accesses `self._aggregator._subscriptions` directly
 (a private `dict[str, set[str]]`). This is a mild encapsulation violation — changes
 to the aggregator's internal subscription data structure would silently break this
@@ -1790,13 +1790,13 @@ if not self._aggregator.is_subscribed(client_id, thread_id):
 
 ### T18 (AcpSessionError exclusion): confirmed landed
 
-`lib/core/graph.py:63-70`: guarded import + `isinstance(exc, AcpSessionError)` check
+`src/vaultspec_a2a/core/graph.py:63-70`: guarded import + `isinstance(exc, AcpSessionError)` check
 before the fallthrough `return True`. Correct placement and correct check on both
 `exc` and `cause` (covers wrapped `WorkerExecutionError` case). Clean.
 
 ### T19 (asyncio.get_running_loop): confirmed landed + codebase-wide clean
 
-`lib/api/supervisor.py:100,101,104`: all three `asyncio.get_event_loop().time()` calls
+`src/vaultspec_a2a/api/supervisor.py:100,101,104`: all three `asyncio.get_event_loop().time()` calls
 replaced with `asyncio.get_running_loop().time()`. Codebase-wide grep confirms zero
 remaining `get_event_loop()` calls anywhere in `lib/`. Clean.
 
@@ -1990,14 +1990,14 @@ is feasible but requires explicit plumbing.
 
 ### supervisor.py: T09 NOT YET implemented — text-based routing is safe
 
-`lib/core/nodes/supervisor.py` uses plain `ainvoke` + text parsing. No `with_structured_output`.
+`src/vaultspec_a2a/core/nodes/supervisor.py` uses plain `ainvoke` + text parsing. No `with_structured_output`.
 The full pipeline: exact match → longest-substring fallback (T02) → unparseable guard
 with `routing_error` + FINISH default (T03). No parse exceptions propagate. Confirmed clean.
 
 ### [INFO] OutputParserException exclusion: future-only scope (T23 blocked on T09)
 
 **Reported:** Cycle 24
-**File:** `lib/core/graph.py:46-98` (applies only after T09 lands)
+**File:** `src/vaultspec_a2a/core/graph.py:46-98` (applies only after T09 lands)
 **Issue:** Once T09 migrates supervisor to `with_structured_output(include_raw=False)`,
 parse failures raise `OutputParserException` which falls through `_worker_retry_on` to
 `return True` — 3× unnecessary retries.
@@ -2017,15 +2017,15 @@ fall back to `result["raw"].content` for text-based routing on failure.
 
 ### \_is_step_timeout HIGH finding: RESOLVED
 
-`lib/core/aggregator.py:1160-1174`: `elif _is_step_timeout:` branch fully wired.
+`src/vaultspec_a2a/core/aggregator.py:1160-1174`: `elif _is_step_timeout:` branch fully wired.
 `code="STEP_TIMEOUT"`, `recoverable=True`, `span.set_attribute("error.type", "step_timeout")`.
 The Cycle 19 HIGH finding is resolved.
 
 ### T17 DB migration: confirmed complete
 
-`lib/database/session.py:186-192`: idempotent `ALTER TABLE threads ADD COLUMN team_preset TEXT`.
-`lib/database/crud.py:109,147`: `team_preset` param in `create_thread`.
-`lib/database/models.py:51`: `team_preset: Mapped[str | None]` column. Full T17 complete.
+`src/vaultspec_a2a/database/session.py:186-192`: idempotent `ALTER TABLE threads ADD COLUMN team_preset TEXT`.
+`src/vaultspec_a2a/database/crud.py:109,147`: `team_preset` param in `create_thread`.
+`src/vaultspec_a2a/database/models.py:51`: `team_preset: Mapped[str | None]` column. Full T17 complete.
 
 ### Full open item status after Cycle 25
 
@@ -2129,8 +2129,8 @@ spurious aget_state I/O on non-interrupt exits.
 ### active_agent field — never updated by any node (LOW)
 
 Initially flagged as potential KeyError risk (required field not in graph_input).
-Cross-checked `lib/worker/executor.py:187` — `"active_agent": ""` is always supplied
-in the graph_input dict. `lib/core/context.py:147` also sets it on compaction.
+Cross-checked `src/vaultspec_a2a/worker/executor.py:187` — `"active_agent": ""` is always supplied
+in the graph_input dict. `src/vaultspec_a2a/core/context.py:147` also sets it on compaction.
 KeyError risk retracted.
 
 NEW LOW FINDING: Neither `worker.py` nor `supervisor.py` ever writes `active_agent`
@@ -2142,8 +2142,8 @@ need to include `"active_agent": name` in their return dict. As-is the field is 
 `""` in production and should be either removed or populated.
 
 - Severity: LOW
-- File: lib/core/state.py:81, lib/core/nodes/worker.py:185 (return dict omits active_agent),
-  lib/core/nodes/supervisor.py:106 (return dict omits active_agent)
+- File: src/vaultspec_a2a/core/state.py:81, src/vaultspec_a2a/core/nodes/worker.py:185 (return dict omits active_agent),
+  src/vaultspec_a2a/core/nodes/supervisor.py:106 (return dict omits active_agent)
 - Fix direction: Either mark `active_agent: NotRequired[str]` and remove from required
   graph_input, OR have worker_node set `"active_agent": name` in its return dict.
   The supervisor emits the routing decision via `next`, not active_agent.
@@ -2431,7 +2431,7 @@ outcome, but the comment "Normal completion — no pending interrupts" at line 1
 since `tasks` is NOT empty on normal completion.
 
 - Severity: LOW (code comment accuracy / potential future confusion)
-- File: `lib/core/aggregator.py:1006-1007`
+- File: `src/vaultspec_a2a/core/aggregator.py:1006-1007`
 - Issue: `if not state or not tasks` guard will NOT short-circuit on normal completion because
   `tasks` is a non-empty tuple of the previously-executed tasks. The loop still runs correctly
   (all `task.interrupts` are empty) but the guard condition is misleading.
@@ -2480,7 +2480,7 @@ contains no content from the dropped messages. The docstring overstates it as a 
 By ADR-002 design (structural state over history), this is architecturally intentional.
 
 - Severity: LOW / by-design
-- File: `lib/core/context.py:114-121`
+- File: `src/vaultspec_a2a/core/context.py:114-121`
 - Note: Not actionable without ADR update. If richer handoff context is needed, an
   LLM-based summarisation step over dropped messages could be introduced.
 
@@ -2496,11 +2496,11 @@ By ADR-002 design (structural state over history), this is architecturally inten
 
 ## Cycle 32 — endpoints.py full audit + send_message ingest gaps
 
-**Files read:** `lib/api/endpoints.py` (full), `lib/api/schemas/internal.py`, `lib/worker/executor.py:100-320`, `lib/core/state.py`
+**Files read:** `src/vaultspec_a2a/api/endpoints.py` (full), `src/vaultspec_a2a/api/schemas/internal.py`, `src/vaultspec_a2a/worker/executor.py:100-320`, `src/vaultspec_a2a/core/state.py`
 
 ### Finding 1: [MEDIUM] send_message_endpoint omits team_preset/workspace_root from ingest dispatch
 
-**File:** `lib/api/endpoints.py:562-566`, compare with `lib/api/endpoints.py:731-737`
+**File:** `src/vaultspec_a2a/api/endpoints.py:562-566`, compare with `src/vaultspec_a2a/api/endpoints.py:731-737`
 **Issue:** `send_message_endpoint` dispatches `DispatchRequest(action="ingest", thread_id=..., agent_id=..., content=...)` without `team_preset` or `workspace_root`. In `_handle_ingest` (worker line 147): `if req.thread_id not in self._graphs and req.team_preset:` — if the worker process restarted or evicted the graph (memory pressure), the ingest falls through to `graph = None` → `logger.warning("No graph for thread %s -- cannot ingest")` → **user message silently dropped**.
 
 Compare: `respond_to_permission_endpoint` was already fixed (T22) to look up `team_preset` and `workspace_root` from the DB and pass them in the resume `DispatchRequest`. The same fix is needed for `send_message_endpoint`.
@@ -2535,7 +2535,7 @@ dispatch = DispatchRequest(
 
 ### Finding 2: [HIGH] send_message ingest wipes current_plan via \_replace_plan reducer
 
-**File:** `lib/worker/executor.py:185-192`, `lib/core/state.py:56-64`
+**File:** `src/vaultspec_a2a/worker/executor.py:185-192`, `src/vaultspec_a2a/core/state.py:56-64`
 **Issue:** `_handle_ingest` always supplies `"current_plan": []` in `graph_input`. The `_replace_plan` reducer is: `return new if new is not None else existing`. Since `[]` is not `None`, it always returns `[]`. **Every user follow-up message (send_message) unconditionally wipes the current plan from the checkpoint**.
 
 This is a correctness bug: the supervisor's plan built during the first turn is erased when the user sends any subsequent message. On the next graph run, the supervisor starts from an empty plan with no context of what was already decided.
@@ -2562,27 +2562,27 @@ The T22 fix at lines 718-729 correctly:
 
 ### Finding 4: [INFO] \_enrich_snapshot_from_state: \_MinimalState inner class defined per request
 
-**File:** `lib/api/endpoints.py:488-492`
+**File:** `src/vaultspec_a2a/api/endpoints.py:488-492`
 **Issue:** A `_MinimalState` class is defined inside `get_thread_state_endpoint` on every HTTP request that has checkpoint data. In CPython, `class` bodies are executed at call time, so this creates a fresh class object per request. Harmless for correctness, minor allocation overhead. Could be lifted to module level.
 
 - Severity: INFO — cosmetic/micro-perf only.
 
 ### Finding 5: [INFO] aget() used instead of aget_tuple() in snapshot endpoint
 
-**File:** `lib/api/endpoints.py:477-478`
+**File:** `src/vaultspec_a2a/api/endpoints.py:477-478`
 **Issue:** `checkpointer.aget(config)` returns raw checkpoint dict, while `aget_tuple(config)` returns `CheckpointTuple` (which includes the metadata and pending writes). The snapshot endpoint only needs messages, so `aget()` is appropriate. However, `checkpoint["id"]` at line 496 is the checkpoint's UUID — this is populated by the LangGraph internal checkpoint structure and should be present. CLEAN by inspection.
 
 - Severity: INFO — confirmed correct.
 
 ### Finding 6: [CLEAN] PermissionResponseResult.accepted=False when thread_id not parseable
 
-**File:** `lib/api/endpoints.py:751-760`
+**File:** `src/vaultspec_a2a/api/endpoints.py:751-760`
 **Issue:** If `request_id` has no colon (invalid format), `thread_id=""` and the dispatch branch is skipped. `dispatched=False` → `accepted=False`. Response returns 200 with `accepted=False`. This is fail-safe — the client gets a clear signal.
 CLEAN.
 
 ### Finding 7: [MEDIUM] send_message_endpoint: graph_input sets active_agent="" on every follow-up
 
-**File:** `lib/worker/executor.py:187`
+**File:** `src/vaultspec_a2a/worker/executor.py:187`
 **Issue:** `"active_agent": ""` in graph_input is passed to `add_messages`-style... no, `active_agent` is a plain `LastValue` channel (no reducer annotation). So every ingest (including follow-up messages) writes `active_agent=""` to the checkpoint, overwriting whatever the last worker set. When the supervisor reads state on a follow-up run, `state["active_agent"]` will always be `""` rather than the last active agent.
 
 Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only set on initial creation. The supervisor doesn't use `active_agent` for routing (it uses `next`), but it's confusing dead state.
@@ -2605,11 +2605,11 @@ Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only se
 
 ## Cycle 33 — Worker event relay audit: CRITICAL gap found
 
-**Files read:** `lib/worker/app.py`, `lib/worker/ipc.py`, `lib/worker/executor.py:1-100,320-352`, `lib/core/aggregator.py:408-452` (subscriber/broadcast path)
+**Files read:** `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, `src/vaultspec_a2a/worker/executor.py:1-100,320-352`, `src/vaultspec_a2a/core/aggregator.py:408-452` (subscriber/broadcast path)
 
 ### Finding 1: [CRITICAL] Worker EventAggregator never relays events to control surface
 
-**Files:** `lib/worker/executor.py:77`, `lib/core/aggregator.py:408-452`
+**Files:** `src/vaultspec_a2a/worker/executor.py:77`, `src/vaultspec_a2a/core/aggregator.py:408-452`
 
 `Executor.__init__` creates `self._aggregator = EventAggregator()` with an empty `_subscribers` dict. The aggregator's `_broadcast` method iterates `self._subscribers.items()` — which is always empty in the worker process. **No events (message chunks, agent status, tool calls, permissions, errors) ever reach the control surface or browser clients.**
 
@@ -2635,7 +2635,7 @@ The relay task must drain the queue and forward each event's JSON to `bridge.sen
 
 ### Finding 2: [MEDIUM] heartbeat_loop uses asyncio.sleep inside anyio TaskGroup
 
-**File:** `lib/worker/ipc.py:132`
+**File:** `src/vaultspec_a2a/worker/ipc.py:132`
 
 `heartbeat_loop` calls `await asyncio.sleep(interval)` inside an `anyio.create_task_group()` started task. Under the asyncio backend (current default), this works. Under trio (if ever switched), `asyncio.sleep` would not integrate with trio's event loop. Should be `await anyio.sleep(interval)` for backend-agnostic correctness.
 
@@ -2643,7 +2643,7 @@ The relay task must drain the queue and forward each event's JSON to `bridge.sen
 
 ### Finding 3: [INFO] Shutdown order: bridge.close() before tg.cancel_scope.cancel()
 
-**File:** `lib/worker/app.py:87-91`
+**File:** `src/vaultspec_a2a/worker/app.py:87-91`
 
 Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_scope.cancel()`. The heartbeat loop runs in `tg` and calls `bridge.send_heartbeat()` which uses `bridge._client`. If the heartbeat fires between `bridge.close()` and `tg.cancel_scope.cancel()`, it hits a closed httpx client. `send_heartbeat` catches `httpx.HTTPError` at DEBUG level — so it's benign but noisy.
 
@@ -2662,11 +2662,11 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 ## Cycle 34 — supervisor.py + websocket.py + event relay chain verification
 
-**Files read:** `lib/api/supervisor.py` (full), `lib/api/websocket.py` (full)
+**Files read:** `src/vaultspec_a2a/api/supervisor.py` (full), `src/vaultspec_a2a/api/websocket.py` (full)
 
 ### Finding 1: [HIGH] supervisor.stop() calls process.wait(timeout=30) synchronously — blocks event loop
 
-**File:** `lib/api/supervisor.py:70`
+**File:** `src/vaultspec_a2a/api/supervisor.py:70`
 
 `subprocess.Popen.wait(timeout=30)` is a **synchronous** blocking call. It is called from `stop()` which is called from the control surface's async lifespan shutdown handler. If the worker is slow to exit, this blocks the entire asyncio event loop for up to 30 seconds during API shutdown, preventing any other coroutines (including Starlette's WebSocket close handshakes) from running.
 
@@ -2679,7 +2679,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 ### Finding 2: [MEDIUM] supervisor.monitor() uses asyncio.sleep (same pattern as ipc.py)
 
-**File:** `lib/api/supervisor.py:94,106`
+**File:** `src/vaultspec_a2a/api/supervisor.py:94,106`
 
 Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `anyio.create_task_group()` task (from `app.py` lifespan). Should be `anyio.sleep` for backend portability.
 
@@ -2687,7 +2687,7 @@ Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `
 
 ### Finding 3: [MEDIUM] supervisor.start() uses subprocess.Popen (synchronous)
 
-**File:** `lib/api/supervisor.py:44`
+**File:** `src/vaultspec_a2a/api/supervisor.py:44`
 
 `subprocess.Popen(cmd, ...)` is synchronous. On Linux it's fast (fork+exec), but on Windows it can block for tens of milliseconds while the OS creates the process. During the monitor loop this runs in the async event loop. Should use `asyncio.create_subprocess_exec` and store an `asyncio.subprocess.Process`.
 
@@ -2695,7 +2695,7 @@ Two `asyncio.sleep` calls in `monitor()`. The `monitor()` coroutine runs in an `
 
 ### Finding 4: [CLEAN] broadcast_to_thread event relay chain verified
 
-**File:** `lib/api/websocket.py:506-527`, `lib/api/internal.py:94-118`
+**File:** `src/vaultspec_a2a/api/websocket.py:506-527`, `src/vaultspec_a2a/api/internal.py:94-118`
 
 The chain: worker → `bridge.send_event` → `POST /internal/events` → `receive_worker_event` → `cm.broadcast_to_thread` → subscribed WebSocket clients.
 
@@ -2710,7 +2710,7 @@ CLEAN — delivery chain from control surface to browser is correct. The only ga
 
 ### Finding 5: [INFO] broadcast_to_thread accesses aggregator.\_subscriptions private attribute
 
-**File:** `lib/api/websocket.py:519`
+**File:** `src/vaultspec_a2a/api/websocket.py:519`
 
 `self._aggregator._subscriptions.get(client_id, set())` — accesses private attribute. This is the previously-noted INFO finding. Could be exposed via a public method `aggregator.get_subscriptions(client_id)` (which already exists at `aggregator.py:329`!).
 
@@ -2720,13 +2720,13 @@ CLEAN — delivery chain from control surface to browser is correct. The only ga
 
 ### Finding 6: [CLEAN] WebSocket \_writer_loop and \_heartbeat_loop: cross-cancel via done_callback
 
-**File:** `lib/api/websocket.py:163-174`
+**File:** `src/vaultspec_a2a/api/websocket.py:163-174`
 
 H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_callback`. When either crashes, the other is cancelled. CLEAN.
 
 ### Finding 7: [CLEAN] PERMISSION_RESPONSE over WebSocket correctly rejected
 
-**File:** `lib/api/websocket.py:335-373`
+**File:** `src/vaultspec_a2a/api/websocket.py:335-373`
 
 `_handle_permission_response` rejects WS permission responses with an ErrorEvent containing `PERMISSION_RESPONSE_WS_FORBIDDEN` and guides client to REST endpoint. CLEAN.
 
@@ -2745,17 +2745,17 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 
 ## Cycle 35 — app.py lifespan full audit
 
-**Files read:** `lib/api/app.py` (full), `lib/worker/executor.py:260-289`
+**Files read:** `src/vaultspec_a2a/api/app.py` (full), `src/vaultspec_a2a/worker/executor.py:260-289`
 
 ### Finding 1: [MEDIUM] \_dispatch_message (WS SEND_MESSAGE path) also missing team_preset/workspace_root
 
-**File:** `lib/api/app.py:103-125`
+**File:** `src/vaultspec_a2a/api/app.py:103-125`
 
 `_create_dispatch_message_handler` builds the ingest dispatch without `team_preset` or `workspace_root` — same T26 gap as `send_message_endpoint` in `endpoints.py`. T26 scope must be broadened to cover both code paths. After worker restart, both the REST `POST /threads/{id}/messages` and the WS `SEND_MESSAGE` command silently drop messages.
 
 ### Finding 2: [HIGH] AGENT_CONTROL.RESUME dispatches Command(resume=None)
 
-**File:** `lib/api/app.py:147-162`, `lib/worker/executor.py:288`
+**File:** `src/vaultspec_a2a/api/app.py:147-162`, `src/vaultspec_a2a/worker/executor.py:288`
 
 `AgentControlAction.RESUME` dispatches `{"action": "resume", "thread_id": ..., "agent_id": ...}` with no `option_id`. In `_handle_resume`, `Command(resume=req.option_id)` is called where `req.option_id` defaults to `None`. The interrupted worker node returns `None` from `interrupt()` — which cannot match any `PermissionOption`.
 
@@ -2770,7 +2770,7 @@ The correct permission response flow is `POST /permissions/{id}/respond` (REST) 
 
 ### Finding 3: [HIGH] Shutdown race — monitor loop restarts killed worker before task group cancel
 
-**File:** `lib/api/app.py:264-280`
+**File:** `src/vaultspec_a2a/api/app.py:264-280`
 
 Shutdown sequence calls `supervisor.stop()` (line 272) before `tg.cancel_scope.cancel()` (line 280). Between these calls, `supervisor.monitor()` in the task group sees `not self.is_alive()` and calls `self.start()` — spawning a new worker. When `tg.cancel_scope.cancel()` fires, the monitor task is killed but the freshly spawned OS process becomes an orphan.
 
@@ -2800,7 +2800,7 @@ CORS always-on (C1 fix), `settings.cors_allowed_origins` used, checkpointer open
 
 ## Cycle 36 — Database CRUD + session layer full audit
 
-**Files read:** `lib/database/crud.py` (full), `lib/database/session.py` (full)
+**Files read:** `src/vaultspec_a2a/database/crud.py` (full), `src/vaultspec_a2a/database/session.py` (full)
 
 ### Overall: CLEAN — well-implemented layer with prior fixes all confirmed
 
@@ -2816,7 +2816,7 @@ All prior audit fixes verified present:
 
 ### Finding 1: [INFO] list_threads uses two separate queries — COUNT then SELECT
 
-**File:** `lib/database/crud.py:194-204`
+**File:** `src/vaultspec_a2a/database/crud.py:194-204`
 
 Two queries in same session: `SELECT COUNT(*) FROM threads` then `SELECT ... LIMIT/OFFSET`. Under WAL, concurrent inserts between the two could produce a `total` that doesn't match the returned list length. This is a normal pagination consistency tradeoff (acceptable) — just worth documenting.
 
@@ -2824,13 +2824,13 @@ Two queries in same session: `SELECT COUNT(*) FROM threads` then `SELECT ... LIM
 
 ### Finding 2: [INFO] get_engine singleton path comparison against DEFAULT_DB_PATH (not existing engine URL)
 
-**File:** `lib/database/session.py:97-113`
+**File:** `src/vaultspec_a2a/database/session.py:97-113`
 
 H19 warning: the path mismatch check compares `resolved_requested != resolved_default` (line 98) against the module-level `DEFAULT_DB_PATH` constant. However, the code also extracts `existing_path_str` from `_engine.url` and compares against the requested path (lines 101-107). On close reading, the outer `if resolved_requested != resolved_default` guard is a fast-path to skip the extraction for common cases. The full comparison is correct. CLEAN.
 
 ### Finding 3: [LOW] No explicit thread-not-found handling in update_thread_status when called from send_message_endpoint
 
-**File:** `lib/database/crud.py:226-236`, `lib/api/endpoints.py:556`
+**File:** `src/vaultspec_a2a/database/crud.py:226-236`, `src/vaultspec_a2a/api/endpoints.py:556`
 
 `update_thread_status` returns `None` if `thread_id` not found. `send_message_endpoint` calls `update_thread_status` and ignores the return value (line 556). Since `get_thread` is called earlier on line 545 and raises 404 if missing, the thread is guaranteed to exist at this point. CLEAN by ordering — but the return value silently discarded is a minor readability concern.
 
@@ -2849,7 +2849,7 @@ H19 warning: the path mismatch check compares `resolved_requested != resolved_de
 
 ## Cycle 37 — Database models + provider layer quick-scan
 
-**Files read:** `lib/database/models.py` (full), `lib/providers/acp_chat_model.py:1-200` (key sections), targeted grep scans
+**Files read:** `src/vaultspec_a2a/database/models.py` (full), `src/vaultspec_a2a/providers/acp_chat_model.py:1-200` (key sections), targeted grep scans
 
 ### models.py: CLEAN
 
@@ -2861,7 +2861,7 @@ All four models correct:
 
 ### provider layer quick-scan: CLEAN (no new issues)
 
-Targeted scan for known problem patterns across `lib/providers/`:
+Targeted scan for known problem patterns across `src/vaultspec_a2a/providers/`:
 
 - No `asyncio.sleep` calls (anyio portability non-issue here — provider is asyncio-native)
 - No `subprocess.Popen` (uses `asyncio.create_subprocess_exec` / `create_subprocess_shell`) ✓
@@ -2885,14 +2885,14 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ---
 
-## [Cycle 38] — lib/api/ audit (endpoints, websocket, app, supervisor, internal, auth, database/crud)
+## [Cycle 38] — src/vaultspec_a2a/api/ audit (endpoints, websocket, app, supervisor, internal, auth, database/crud)
 
 **Reported:** Cycle 38 (codebase-researcher, post-context-compaction)
-**Files read:** `lib/api/endpoints.py`, `lib/api/websocket.py`, `lib/api/app.py`, `lib/api/supervisor.py`, `lib/api/internal.py`, `lib/api/auth.py`, `lib/database/crud.py`
+**Files read:** `src/vaultspec_a2a/api/endpoints.py`, `src/vaultspec_a2a/api/websocket.py`, `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/supervisor.py`, `src/vaultspec_a2a/api/internal.py`, `src/vaultspec_a2a/api/auth.py`, `src/vaultspec_a2a/database/crud.py`
 
 ### API-01 — MEDIUM: `_dispatch_message` handler in app.py omits `team_preset` and `workspace_root`
 
-**File:** `lib/api/app.py:103-125`
+**File:** `src/vaultspec_a2a/api/app.py:103-125`
 **Issue:** `_create_dispatch_message_handler` builds the dispatch payload with only `action`, `thread_id`, `agent_id`, and `content`. It does NOT look up `team_preset` or `workspace_root` from the DB — unlike `send_message_endpoint` (endpoints.py:563-582) which correctly looks them up for lazy recompilation. WS `SEND_MESSAGE` commands routed through the app-level handler will reach the worker without the context needed for lazy recompile, causing `W-02` (silent continue on AgentConfigNotFoundError) to trigger.
 **Fix direction:** Look up `team_preset` and `workspace_root` from DB inside `_dispatch_message`, same pattern as `send_message_endpoint`. Requires access to a DB session from within the closure — either inject a session factory or call the REST endpoint internally. This is the previously-tracked **T26b** gap.
 **Severity:** MEDIUM (existing task T26b — confirm it covers this specific code path)
@@ -2902,7 +2902,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-02 — MEDIUM: `internal.py` WS path has no size limit on incoming frames
 
-**File:** `lib/api/internal.py:44`
+**File:** `src/vaultspec_a2a/api/internal.py:44`
 **Issue:** `worker_ws_endpoint` calls `await websocket.receive_text()` with no size guard. The `ConnectionManager` client WS path has `_MAX_WS_MESSAGE_BYTES = 1 MiB` enforcement (websocket.py:81, 239-247). The internal WS endpoint (worker→control surface) has no equivalent cap. A misbehaving or compromised worker could push arbitrarily large frames.
 **Fix direction:** Apply same `len(raw.encode()) > MAX_INTERNAL_WS_MESSAGE_BYTES` check before `json.loads(raw)`. A reasonable limit (e.g. 4 MiB) would accommodate large event payloads.
 **Severity:** MEDIUM
@@ -2912,7 +2912,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-03 — MEDIUM: `internal.py` HTTP `/events` path has no size limit or auth
 
-**File:** `lib/api/internal.py:94-118`
+**File:** `src/vaultspec_a2a/api/internal.py:94-118`
 **Issue:** `receive_worker_event` calls `await request.json()` with no body size validation. Any process that can reach the internal port can inject arbitrary events into browser clients. The `/internal` router has no authentication — `auth.py` stub is not wired to any route. In Docker, the worker port is expected to be non-public, but in dev `pip install` mode both API and worker share the same loopback interface.
 **Note:** Auth stub acknowledged in `auth.py` as intentional no-op for v1 local use. Flagging as MEDIUM for completeness — in LAN/cloud deployments this becomes HIGH.
 **Severity:** MEDIUM (LOW for strict local-only use; track separately from main auth debt)
@@ -2922,7 +2922,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-04 — LOW: `supervisor.py` monitor loop uses `asyncio.sleep` not `anyio.sleep`
 
-**File:** `lib/api/supervisor.py:94, 106`
+**File:** `src/vaultspec_a2a/api/supervisor.py:94, 106`
 **Issue:** `WorkerSupervisor.monitor()` uses `await asyncio.sleep(delay)` and `await asyncio.sleep(check_interval)`. The rest of the codebase uses `anyio.sleep` for portability (T28 fixed `ipc.py`). While `monitor()` is only ever called from within an `anyio.create_task_group()` (app.py:258), using `asyncio.sleep` inside an anyio task group is technically compatible but inconsistent with project policy.
 **Fix direction:** Replace both `asyncio.sleep` calls with `anyio.sleep`. Import anyio at top of file. Trivial two-line change.
 **Severity:** LOW (style/consistency)
@@ -2932,7 +2932,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-05 — LOW: `supervisor.stop()` blocks the event loop (already tracked as T29)
 
-**File:** `lib/api/supervisor.py:64-75`
+**File:** `src/vaultspec_a2a/api/supervisor.py:64-75`
 **Issue:** `supervisor.stop()` calls `self._process.wait(timeout=30)` and `self._process.wait(timeout=5)` — synchronous blocking calls inside an async shutdown path. Confirmed same as T29. Raising here to confirm T29 covers exactly this method.
 **Severity:** LOW (tracked as T29)
 **Status:** open (pending T29)
@@ -2941,7 +2941,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-06 — LOW: Shutdown sequence in `app.py` cancels task group after cleanup
 
-**File:** `lib/api/app.py:264-280`
+**File:** `src/vaultspec_a2a/api/app.py:264-280`
 **Issue:** The shutdown block (inside `async with anyio.create_task_group()`) calls `worker_client.aclose()`, `supervisor.stop()`, `connection_manager.shutdown()`, `aggregator.shutdown()`, `close_db()` — **then** calls `tg.cancel_scope.cancel()` on the last line. Since the `yield` returns to the lifespan context, the `tg.cancel_scope.cancel()` is called after all cleanup is complete but the task group is still technically live (the `supervisor.monitor` coroutine is running in it). The cancel should be the **first** step of the shutdown path, not the last, otherwise `supervisor.monitor` continues looping (and may restart the worker) during the cleanup window. This is the previously-tracked **T30** gap.
 **Severity:** MEDIUM (tracked as T30)
 **Status:** open (pending T30)
@@ -2950,7 +2950,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-07 — INFO: `create_thread` pre-check + TOCTOU IntegrityError catch is correct
 
-**File:** `lib/database/crud.py:132-159`
+**File:** `src/vaultspec_a2a/database/crud.py:132-159`
 **Issue:** None — confirming the pattern is correct. The pre-check SELECT + IntegrityError safety net for TOCTOU nickname conflicts is the correct pattern. The `"nickname" in str(exc).lower()` substring check is fragile across DB backends but acceptable for SQLite.
 **Status:** CLEAN (verified)
 
@@ -2958,7 +2958,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-08 — INFO: `list_threads` count query is a separate SELECT — potential TOCTOU gap
 
-**File:** `lib/database/crud.py:194-204`
+**File:** `src/vaultspec_a2a/database/crud.py:194-204`
 **Issue:** `list_threads` executes two separate queries: first `SELECT COUNT(*)`, then `SELECT * LIMIT/OFFSET`. Between the two, concurrent inserts may change the total, resulting in a `total` that is stale relative to the returned page. This is a known pagination hazard with no simple fix in SQLite (no FOR UPDATE). Not a correctness bug for the current use case — just worth documenting.
 **Severity:** INFO (known limitation, no fix recommended)
 **Status:** CLEAN (acknowledged)
@@ -2967,9 +2967,9 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-09 — INFO: `_BUNDLED_TEAM_PRESETS` in endpoints.py duplicates MCP `_KNOWN_PRESETS`
 
-**File:** `lib/api/endpoints.py:655-660`, `lib/protocols/mcp/server.py` (MCP-02)
+**File:** `src/vaultspec_a2a/api/endpoints.py:655-660`, `src/vaultspec_a2a/protocols/mcp/server.py` (MCP-02)
 **Issue:** Two separate hardcoded lists of preset IDs. When a new preset is added, both must be updated. Already tracked under MCP-07 (docstring drift) as a pattern. Flagging here for the endpoints.py side.
-**Fix direction:** Extract to a single constant in `lib/core/team_config.py` or a dedicated `lib/core/presets.py` and import everywhere. Not urgent — low risk of divergence given the small preset count.
+**Fix direction:** Extract to a single constant in `src/vaultspec_a2a/core/team_config.py` or a dedicated `src/vaultspec_a2a/core/presets.py` and import everywhere. Not urgent — low risk of divergence given the small preset count.
 **Severity:** LOW
 **Status:** open
 
@@ -2977,7 +2977,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### API-10 — MEDIUM: `AgentControlAction.RESUME` dispatches raw string "resume" not `Command(resume=...)`
 
-**File:** `lib/api/app.py:145-147`
+**File:** `src/vaultspec_a2a/api/app.py:145-147`
 **Issue:** `_dispatch_control` maps `AgentControlAction.RESUME` → `dispatch_action = "resume"` and POSTs `{"action": "resume", "thread_id": ..., "agent_id": ...}` to the worker. The worker's `executor.py` handles action "resume" by calling `graph.ainput(Command(resume=option_id))` — but the `option_id` field is NOT included in the dispatch payload here. For AGENT_CONTROL.RESUME from the WS, there is no `option_id` in the command schema (`AgentControlCommand` has no `option_id` field). This means RESUME dispatched through agent control always resumes with `option_id=None`. This is the previously-tracked **T31** gap.
 **Severity:** MEDIUM (tracked as T31)
 **Status:** open (pending T31)
@@ -3005,10 +3005,10 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 **Files read:**
 
-- `lib/core/preamble.py`
-- `lib/core/metadata.py`
-- `lib/workspace/environment.py`
-- `lib/telemetry/instrumentation.py`
+- `src/vaultspec_a2a/core/preamble.py`
+- `src/vaultspec_a2a/core/metadata.py`
+- `src/vaultspec_a2a/workspace/environment.py`
+- `src/vaultspec_a2a/telemetry/instrumentation.py`
 
 ### preamble.py — CLEAN
 
@@ -3039,7 +3039,7 @@ The `VAULTSPEC_*` prefix scrub provides a generic escape hatch, but Figma and pr
 
 **Recommended fix**: Add `FIGMA_ACCESS_TOKEN` to `scrub_keys`. Consider a comment block listing categories of keys that should be added here when new integrations are introduced. Alternatively, adopt an allowlist approach (only inject known-safe vars) rather than a denylist — more robust to omissions.
 
-**Files:** `lib/workspace/environment.py:72-86`
+**Files:** `src/vaultspec_a2a/workspace/environment.py:72-86`
 
 ### telemetry/instrumentation.py — CLEAN
 
@@ -3064,10 +3064,10 @@ The `VAULTSPEC_*` prefix scrub provides a generic escape hatch, but Figma and pr
 
 **Files read:**
 
-- `lib/worker/health.py`
-- `lib/worker/__main__.py`
-- `lib/api/auth.py`
-- `lib/protocols/mcp/server.py`
+- `src/vaultspec_a2a/worker/health.py`
+- `src/vaultspec_a2a/worker/__main__.py`
+- `src/vaultspec_a2a/api/auth.py`
+- `src/vaultspec_a2a/protocols/mcp/server.py`
 
 ### health.py — CLEAN (stub)
 
@@ -3102,7 +3102,7 @@ After TOML-01 completes, both the fallback set and the docstring must be updated
 
 **Fix**: Update `_HARDCODED_PRESETS` to new IDs after TOML-01. Update `start_thread` docstring examples.
 
-**Files:** `lib/protocols/mcp/server.py:50-52, 113-114`
+**Files:** `src/vaultspec_a2a/protocols/mcp/server.py:50-52, 113-114`
 
 ---
 
@@ -3121,7 +3121,7 @@ Impact is LOW — the server-side endpoint validates against the DB (thread won'
 
 **Fix**: Use `httpx.URL` with path params, or `urllib.parse.quote(thread_id, safe="")` before interpolation. Alternatively, validate `thread_id` against a UUID regex before use.
 
-**Files:** `lib/protocols/mcp/server.py:185, 239`
+**Files:** `src/vaultspec_a2a/protocols/mcp/server.py:185, 239`
 
 ### Summary for Cycle 39
 
@@ -3139,8 +3139,8 @@ Impact is LOW — the server-side endpoint validates against the DB (thread won'
 
 **Files read:**
 
-- `lib/core/nodes/supervisor.py`
-- `lib/core/context.py`
+- `src/vaultspec_a2a/core/nodes/supervisor.py`
+- `src/vaultspec_a2a/core/context.py`
 
 ### nodes/supervisor.py — CLEAN
 
@@ -3171,14 +3171,14 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ---
 
-## [Cycle 40] — lib/core/aggregator.py + lib/database/session.py + lib/workspace/ audit
+## [Cycle 40] — src/vaultspec_a2a/core/aggregator.py + src/vaultspec_a2a/database/session.py + src/vaultspec_a2a/workspace/ audit
 
 **Reported:** Cycle 40 (codebase-researcher, post-context-compaction continuation)
-**Files read:** `lib/core/aggregator.py` (~1247 lines), `lib/database/session.py`, `lib/workspace/environment.py`, `lib/workspace/git_manager.py`
+**Files read:** `src/vaultspec_a2a/core/aggregator.py` (~1247 lines), `src/vaultspec_a2a/database/session.py`, `src/vaultspec_a2a/workspace/environment.py`, `src/vaultspec_a2a/workspace/git_manager.py`
 
 ### AGG-01 — INFO: asyncio.create_task in debounce — documented asyncio-native architecture
 
-**File:** `lib/core/aggregator.py:497, 572`
+**File:** `src/vaultspec_a2a/core/aggregator.py:497, 572`
 **Issue:** `_schedule_debounce` and `_buffer_message_chunk` use `asyncio.create_task`. Fire-and-forget tasks that must outlive the calling coroutine. If run under a trio anyio backend this would fail, but the architecture is explicitly asyncio-only (uvicorn/asyncio). The `_debounce_tasks` set tracks them for cleanup via `add_done_callback(discard)`.
 **Severity:** INFO (asyncio-native, no action needed)
 **Status:** CLEAN
@@ -3187,7 +3187,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### AGG-02 — LOW: `prune_sequences` exists but is never called — unbounded `_sequences` growth
 
-**File:** `lib/core/aggregator.py:314-330`
+**File:** `src/vaultspec_a2a/core/aggregator.py:314-330`
 **Issue:** `prune_sequences` was implemented as M2 fix but has no callers. `_sequences` will accumulate one int entry per thread indefinitely. The dict is small but the cleanup path is wired to nothing.
 **Fix direction:** Call `aggregator.prune_sequences({thread_id})` at end of `ingest()` finally block, or from a periodic maintenance task. Very low urgency.
 **Severity:** LOW
@@ -3197,7 +3197,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### AGG-03 — MEDIUM: `_tool_update_last_emit` and `_plan_update_last_emit` are never pruned
 
-**File:** `lib/core/aggregator.py:217-219`
+**File:** `src/vaultspec_a2a/core/aggregator.py:217-219`
 **Issue:** Debounce timestamp dicts accumulate entries for every `(thread_id, tool_call_id)` pair and every `thread_id` over the lifetime of the process. No cleanup on ingest completion, no entry in `shutdown()`. In high-volume deployments (thousands of tool calls), this is a slow memory leak distinct from `_sequences`.
 **Fix direction:** Add cleanup of stale debounce keys in the `ingest()` finally block for the completed thread_id, or include in `shutdown()`.
 **Severity:** MEDIUM (memory leak, no correctness issue)
@@ -3207,7 +3207,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### AGG-04 — INFO: `emit_error` in `except BaseException` fallthrough uses ingest-level `agent_id`
 
-**File:** `lib/core/aggregator.py:1192-1198`
+**File:** `src/vaultspec_a2a/core/aggregator.py:1192-1198`
 **Issue:** When an unexpected exception falls to the `else` branch, `emit_error` uses the `agent_id` passed to `ingest()`, typically `"supervisor"`. In star/pipeline topologies, the error may have originated in a specific worker node but is attributed to supervisor. Cosmetic — event is still emitted and routed correctly.
 **Severity:** INFO (attribution cosmetic)
 **Status:** INFO
@@ -3216,8 +3216,8 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### DB-01 — LOW: `init_db` inline migration unversioned — no migration registry
 
-**File:** `lib/database/session.py:190-195`
-**Issue:** Single `try: ALTER TABLE threads ADD COLUMN team_preset TEXT; except OperationalError: pass` inline migration. Works for one column but won't scale. `lib/database/migrations/__init__.py` exists but is empty — no Alembic or migration version table.
+**File:** `src/vaultspec_a2a/database/session.py:190-195`
+**Issue:** Single `try: ALTER TABLE threads ADD COLUMN team_preset TEXT; except OperationalError: pass` inline migration. Works for one column but won't scale. `src/vaultspec_a2a/database/migrations/__init__.py` exists but is empty — no Alembic or migration version table.
 **Fix direction:** Not urgent for v1. Document as technical debt. Before adding a second migration, adopt Alembic or a minimal version table.
 **Severity:** LOW (technical debt)
 **Status:** INFO
@@ -3226,7 +3226,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### WS-01 — LOW: `FIGMA_ACCESS_TOKEN` not in `resolve_env_vars` scrub list
 
-**File:** `lib/workspace/environment.py:72-86`
+**File:** `src/vaultspec_a2a/workspace/environment.py:72-86`
 **Issue:** Already caught as WS-L2 in Cycle 38 (preamble audit). Confirming same finding: `FIGMA_ACCESS_TOKEN` (present in live `.env`) is not in `scrub_keys` and would leak to agent subprocess environments. `NANOBANANA_GEMINI_API_KEY` similarly not covered. The `VAULTSPEC_*` prefix check does not help for these keys.
 **Fix direction:** Add `FIGMA_ACCESS_TOKEN` to `scrub_keys`. Consider suffix-based `*_API_KEY`/`*_ACCESS_TOKEN` pattern for future-proofing.
 **Severity:** LOW
@@ -3236,7 +3236,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ### WS-02/WS-03 — CLEAN: git_manager.py validation and mutex
 
-**File:** `lib/workspace/git_manager.py`
+**File:** `src/vaultspec_a2a/workspace/git_manager.py`
 **Verified:**
 
 - `_AGENT_ID_RE` enforced on `create_worktree` ✓
@@ -3267,8 +3267,8 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **Files read:**
 
-- `lib/core/state.py`
-- `lib/core/exceptions.py`
+- `src/vaultspec_a2a/core/state.py`
+- `src/vaultspec_a2a/core/exceptions.py`
 
 ### state.py — CLEAN
 
@@ -3284,7 +3284,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 - Full taxonomy: 14 exception types with `ErrorSeverity` + `RecoveryAction` hints ✓
 - `WorkerExecutionError` carries `worker`, `model`, `message_count` for structured logging ✓
 - `NicknameConflictError` → 409 wired in endpoints ✓
-- `AgentConfigNotFoundError` / `TeamConfigNotFoundError` message strings will become stale after TOML-01 renames preset directory paths — but these are error message strings only, not code paths, so impact is cosmetic. The path strings in the error messages reference `lib/core/presets/teams/{team_id}.toml` which is location (not ID), so they remain valid regardless of ID rename.
+- `AgentConfigNotFoundError` / `TeamConfigNotFoundError` message strings will become stale after TOML-01 renames preset directory paths — but these are error message strings only, not code paths, so impact is cosmetic. The path strings in the error messages reference `src/vaultspec_a2a/core/presets/teams/{team_id}.toml` which is location (not ID), so they remain valid regardless of ID rename.
 - `__all__` placement at bottom (non-standard but valid Python) ✓
 
 ### Summary for Cycle 41
@@ -3302,47 +3302,47 @@ All production modules in `lib/` have been audited across Cycles 1-41:
 
 | Module                             | Status         | Key Findings                    |
 | ---------------------------------- | -------------- | ------------------------------- |
-| `lib/core/graph.py`                | ✓ AUDITED      | T11-T17, T24-T26 fixes verified |
-| `lib/core/state.py`                | ✓ CLEAN        | All reducers correct            |
-| `lib/core/context.py`              | ✓ CLEAN        | T06, T14 fixes verified         |
-| `lib/core/exceptions.py`           | ✓ CLEAN        | Full taxonomy                   |
-| `lib/core/metadata.py`             | ✓ CLEAN        | C3, M1 fixes verified           |
-| `lib/core/preamble.py`             | ✓ CLEAN        | No injection surface            |
-| `lib/core/team_config.py`          | ✓ CLEAN        | Schema correct                  |
-| `lib/core/models.py`               | ✓ CLEAN        | Prior fixes confirmed           |
-| `lib/core/nodes/worker.py`         | ✓ CLEAN        | H4, GraphBubbleUp guard ✓       |
-| `lib/core/nodes/supervisor.py`     | ✓ CLEAN        | T02, T03, T06, T07 ✓            |
-| `lib/api/app.py`                   | T30, T31       | Shutdown race, RESUME None      |
-| `lib/api/endpoints.py`             | T26 fixed      | send_message gap                |
-| `lib/api/websocket.py`             | T26b pending   | WS dispatch gap                 |
-| `lib/api/internal.py`              | ✓ CLEAN        | T21 fix verified                |
-| `lib/api/auth.py`                  | ✓ CLEAN        | Acknowledged stub               |
-| `lib/api/supervisor.py`            | T29            | Blocking stop(), asyncio.sleep  |
-| `lib/api/schemas/`                 | ✓ CLEAN        | All schema types correct        |
-| `lib/worker/app.py`                | ✓ AUDITED      | T25-T27 scope                   |
-| `lib/worker/executor.py`           | ✓ AUDITED      | T25 fixed                       |
-| `lib/worker/ipc.py`                | T27 fixed      | Bridge relay                    |
-| `lib/worker/health.py`             | ✓ CLEAN        | Stub                            |
-| `lib/worker/__main__.py`           | ✓ CLEAN        | Trivial                         |
-| `lib/providers/acp_chat_model.py`  | ✓ CLEAN        | H4 model_copy ✓                 |
-| `lib/providers/factory.py`         | ✓ CLEAN        | Single-pass (TOML-02 scope)     |
-| `lib/providers/gemini_auth.py`     | ✓ CLEAN        | Async httpx ✓                   |
-| `lib/providers/probes/`            | ✓ CLEAN        | All probes correct              |
-| `lib/protocols/mcp/server.py`      | MCP-M3, MCP-L1 | Stale presets, URL encoding     |
-| `lib/database/crud.py`             | ✓ CLEAN        | All DB fixes confirmed          |
-| `lib/database/session.py`          | ✓ CLEAN        | WAL, cleanup correct            |
-| `lib/database/models.py`           | ✓ CLEAN        | Schema correct                  |
-| `lib/workspace/environment.py`     | WS-L2          | FIGMA_ACCESS_TOKEN not scrubbed |
-| `lib/workspace/git_manager.py`     | ✓ AUDITED      | Prior cycles                    |
-| `lib/telemetry/instrumentation.py` | ✓ CLEAN        | No secrets, idempotent          |
-| `lib/utils/`                       | ✓ CLEAN        | All utils correct               |
+| `src/vaultspec_a2a/core/graph.py`                | ✓ AUDITED      | T11-T17, T24-T26 fixes verified |
+| `src/vaultspec_a2a/core/state.py`                | ✓ CLEAN        | All reducers correct            |
+| `src/vaultspec_a2a/core/context.py`              | ✓ CLEAN        | T06, T14 fixes verified         |
+| `src/vaultspec_a2a/core/exceptions.py`           | ✓ CLEAN        | Full taxonomy                   |
+| `src/vaultspec_a2a/core/metadata.py`             | ✓ CLEAN        | C3, M1 fixes verified           |
+| `src/vaultspec_a2a/core/preamble.py`             | ✓ CLEAN        | No injection surface            |
+| `src/vaultspec_a2a/core/team_config.py`          | ✓ CLEAN        | Schema correct                  |
+| `src/vaultspec_a2a/core/models.py`               | ✓ CLEAN        | Prior fixes confirmed           |
+| `src/vaultspec_a2a/core/nodes/worker.py`         | ✓ CLEAN        | H4, GraphBubbleUp guard ✓       |
+| `src/vaultspec_a2a/core/nodes/supervisor.py`     | ✓ CLEAN        | T02, T03, T06, T07 ✓            |
+| `src/vaultspec_a2a/api/app.py`                   | T30, T31       | Shutdown race, RESUME None      |
+| `src/vaultspec_a2a/api/endpoints.py`             | T26 fixed      | send_message gap                |
+| `src/vaultspec_a2a/api/websocket.py`             | T26b pending   | WS dispatch gap                 |
+| `src/vaultspec_a2a/api/internal.py`              | ✓ CLEAN        | T21 fix verified                |
+| `src/vaultspec_a2a/api/auth.py`                  | ✓ CLEAN        | Acknowledged stub               |
+| `src/vaultspec_a2a/api/supervisor.py`            | T29            | Blocking stop(), asyncio.sleep  |
+| `src/vaultspec_a2a/api/schemas/`                 | ✓ CLEAN        | All schema types correct        |
+| `src/vaultspec_a2a/worker/app.py`                | ✓ AUDITED      | T25-T27 scope                   |
+| `src/vaultspec_a2a/worker/executor.py`           | ✓ AUDITED      | T25 fixed                       |
+| `src/vaultspec_a2a/worker/ipc.py`                | T27 fixed      | Bridge relay                    |
+| `src/vaultspec_a2a/worker/health.py`             | ✓ CLEAN        | Stub                            |
+| `src/vaultspec_a2a/worker/__main__.py`           | ✓ CLEAN        | Trivial                         |
+| `src/vaultspec_a2a/providers/acp_chat_model.py`  | ✓ CLEAN        | H4 model_copy ✓                 |
+| `src/vaultspec_a2a/providers/factory.py`         | ✓ CLEAN        | Single-pass (TOML-02 scope)     |
+| `src/vaultspec_a2a/providers/gemini_auth.py`     | ✓ CLEAN        | Async httpx ✓                   |
+| `src/vaultspec_a2a/providers/probes/`            | ✓ CLEAN        | All probes correct              |
+| `src/vaultspec_a2a/protocols/mcp/server.py`      | MCP-M3, MCP-L1 | Stale presets, URL encoding     |
+| `src/vaultspec_a2a/database/crud.py`             | ✓ CLEAN        | All DB fixes confirmed          |
+| `src/vaultspec_a2a/database/session.py`          | ✓ CLEAN        | WAL, cleanup correct            |
+| `src/vaultspec_a2a/database/models.py`           | ✓ CLEAN        | Schema correct                  |
+| `src/vaultspec_a2a/workspace/environment.py`     | WS-L2          | FIGMA_ACCESS_TOKEN not scrubbed |
+| `src/vaultspec_a2a/workspace/git_manager.py`     | ✓ AUDITED      | Prior cycles                    |
+| `src/vaultspec_a2a/telemetry/instrumentation.py` | ✓ CLEAN        | No secrets, idempotent          |
+| `src/vaultspec_a2a/utils/`                       | ✓ CLEAN        | All utils correct               |
 
 ---
 
-## [Cycle 41] — lib/protocols/a2a/ + lib/protocols/adapter/ — CLEAN (stubs)
+## [Cycle 41] — src/vaultspec_a2a/protocols/a2a/ + src/vaultspec_a2a/protocols/adapter/ — CLEAN (stubs)
 
 **Reported:** Cycle 41 (codebase-researcher)
-**Files read:** `lib/protocols/a2a/__init__.py`, `lib/protocols/adapter/__init__.py`
+**Files read:** `src/vaultspec_a2a/protocols/a2a/__init__.py`, `src/vaultspec_a2a/protocols/adapter/__init__.py`
 
 Both files are empty stubs: single docstring + `__all__: list[str] = []`. No logic to audit.
 
@@ -3377,14 +3377,14 @@ All `lib/` modules audited across Cycles 1-41. No remaining unexamined source fi
 
 ---
 
-## [Cycle 42] — lib/providers/acp_chat_model.py deep audit
+## [Cycle 42] — src/vaultspec_a2a/providers/acp_chat_model.py deep audit
 
 **Reported:** Cycle 42 (codebase-researcher)
-**File:** `lib/providers/acp_chat_model.py` (~1350 lines)
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py` (~1350 lines)
 
 ### ACP-01 — LOW: `terminal/wait_for_exit` timeout is uncapped — agent can supply arbitrarily large value
 
-**File:** `lib/providers/acp_chat_model.py:976`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:976`
 **Issue:** `timeout = params.get("timeout") or 60.0` — uses the ACP subprocess-supplied timeout with no upper bound cap. An agent (or a compromised ACP subprocess) can supply `{"timeout": 86400}` to block a background RPC task for 24 hours. The background task holds a slot in `ctx.background_tasks` and will not be cancelled until `_cleanup_session()` runs.
 **Fix direction:** Cap timeout: `timeout = min(params.get("timeout") or 60.0, 300.0)`. 5 minutes is a reasonable maximum for any terminal command.
 **Severity:** LOW
@@ -3394,12 +3394,12 @@ All `lib/` modules audited across Cycles 1-41. No remaining unexamined source fi
 
 ### ACP-02 — MEDIUM: `_astream` uses `os.environ.copy()` — bypasses `resolve_env_vars` scrub
 
-**File:** `lib/providers/acp_chat_model.py:319-331`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:319-331`
 **Issue:** `env = os.environ.copy(); env.update(self.env_vars)` — the ACP subprocess inherits ALL environment variables from the vaultspec server process, including secrets not in the `resolve_env_vars` scrub list. `ProviderFactory` injects only the auth token via `env_vars`, but the base `os.environ` copy already contains `FIGMA_ACCESS_TOKEN`, `ZHIPU_API_KEY`, `NANOBANANA_GEMINI_API_KEY`, and any other secrets in the server's environment.
 
 The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
-**Note:** This is partially intentional — agents need PATH, VIRTUAL_ENV, etc. But the server's secrets should be scrubbed before passing to the subprocess. The `resolve_env_vars()` function in `lib/workspace/environment.py` exists for exactly this purpose but is NOT called here.
+**Note:** This is partially intentional — agents need PATH, VIRTUAL_ENV, etc. But the server's secrets should be scrubbed before passing to the subprocess. The `resolve_env_vars()` function in `src/vaultspec_a2a/workspace/environment.py` exists for exactly this purpose but is NOT called here.
 **Fix direction:** Replace `env = os.environ.copy()` with `env = resolve_env_vars(Path(self.workspace_root or self.cwd or "."))`, then apply `env.update(self.env_vars)` on top. This uses the already-audited scrub logic.
 **Severity:** MEDIUM
 **Status:** open
@@ -3408,7 +3408,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-03 — MEDIUM: `fs/read_text_file` has no size cap — reads entire large files into memory
 
-**File:** `lib/providers/acp_chat_model.py:754-773`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:754-773`
 **Issue:** `_on_fs_read_text_file` calls `fh.read(limit) if limit is not None else fh.read()` inside `asyncio.to_thread`. When the agent does not supply a `limit`, the entire file is read. A large file (log, database dump, or binary) would load completely into memory and then be JSON-serialized into the response frame.
 **Fix direction:** Apply a default cap, e.g. `limit = min(limit, 10 * 1024 * 1024) if limit is not None else 10 * 1024 * 1024` (10 MiB). Return a `"truncated": true` flag in the result when the cap was hit.
 **Severity:** MEDIUM
@@ -3418,7 +3418,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-04 — LOW: `_on_request_permission` deny fallback `options[-1]["optionId"]` may raise KeyError
 
-**File:** `lib/providers/acp_chat_model.py:682-683, 702-704`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:682-683, 702-704`
 **Issue:** The deny fallback `options[-1]["optionId"] if options else "deny"` assumes the last element has an `optionId` key. If the ACP subprocess returns a malformed options list where the last dict lacks `optionId`, this raises `KeyError` inside the permission handler, unhandled (only the outer `except Exception` at line 690 catches it for the callback path, but the `elif options and "optionId" in options[0]` path on line 711 has the same fallback exposed).
 **Fix direction:** Use `.get("optionId", "deny")` on the fallback subscript: `options[-1].get("optionId", "deny") if options else "deny"`.
 **Severity:** LOW
@@ -3428,7 +3428,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-05 — INFO: `model_copy()` correctly isolates `_tool_calls` (PrivateAttr reset on copy)
 
-**File:** `lib/providers/acp_chat_model.py:279-298`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:279-298`
 **Issue:** None — confirming correctness. `_tool_calls` is a `PrivateAttr` initialized in `model_post_init`. `model_copy()` (used for permission_callback isolation in H4 fix) creates a new Pydantic model instance which triggers `model_post_init`, resetting `_tool_calls = {}`. No cross-invocation contamination.
 **Status:** CLEAN
 
@@ -3436,7 +3436,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-06 — INFO: `_sandbox_path` correctly prevents path traversal
 
-**File:** `lib/providers/acp_chat_model.py:736-742`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:736-742`
 **Issue:** None — `(cwd / path).resolve()` + `resolved.is_relative_to(cwd.resolve())` is the correct pattern. Used in `_on_fs_read_text_file` and `_on_fs_write_text_file`. `terminal/create` has its own separate `resolved_cwd.is_relative_to(sandbox_root)` check.
 **Status:** CLEAN
 
@@ -3444,7 +3444,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-07 — INFO: `terminal/create` command allowlist + metachar guard correct
 
-**File:** `lib/providers/acp_chat_model.py:818-833`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:818-833`
 **Issue:** None — `_TERMINAL_COMMAND_ALLOWLIST` frozenset, `Path(command).stem.lower()` normalization, and `_SHELL_METACHAR_RE.search()` over all tokens confirmed present and correct.
 **Status:** CLEAN
 
@@ -3452,7 +3452,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-08 — INFO: `_kill_process_tree` Windows taskkill path correct
 
-**File:** `lib/providers/acp_chat_model.py:168-216`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py:168-216`
 **Issue:** None — `taskkill /T /F /PID` is the correct Windows tree-kill approach. 5-second wait_for. SIGTERM→SIGKILL escalation on Unix with asyncio.shield analogue. Transport close prevents handle leaks.
 **Status:** CLEAN
 
@@ -3460,7 +3460,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ### ACP-09 — INFO: stdin_lock correctly covers all write paths
 
-**File:** `lib/providers/acp_chat_model.py`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py`
 **Verified:** All `ctx.stdin.write()` + `drain()` calls (in `_initialize_session`, `_setup_session`, `_setup_prompt`, `_handle_server_rpc`, `_send_notification`, `_cleanup_session`, `fork_session`, `list_sessions`, `set_mode`, `set_model`, `set_config_option`, `authenticate`) use `async with ctx.stdin_lock` or `async with self._stdin_lock`. No bare write paths found.
 **Status:** CLEAN
 
@@ -3492,10 +3492,10 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 **Files read:**
 
-- `lib/core/team_config.py` — full
-- `lib/core/presets/teams/vaultspec-adaptive-coder.toml` — representative sample
-- `lib/api/endpoints.py` — grep for auto_approve/autonomous
-- `lib/core/graph.py` — grep for persona/graph config consumption
+- `src/vaultspec_a2a/core/team_config.py` — full
+- `src/vaultspec_a2a/core/presets/teams/vaultspec-adaptive-coder.toml` — representative sample
+- `src/vaultspec_a2a/api/endpoints.py` — grep for auto_approve/autonomous
+- `src/vaultspec_a2a/core/graph.py` — grep for persona/graph config consumption
 
 ### Findings
 
@@ -3531,9 +3531,9 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ---
 
-## Cycle 44 — lib/api/schemas/ full audit
+## Cycle 44 — src/vaultspec_a2a/api/schemas/ full audit
 
-**Scope:** `lib/api/schemas/` — all 7 source files: `__init__.py`, `base.py`, `enums.py`, `commands.py`, `events.py`, `rest.py`, `snapshots.py`, `internal.py`, plus `tests/test_schemas.py`.
+**Scope:** `src/vaultspec_a2a/api/schemas/` — all 7 source files: `__init__.py`, `base.py`, `enums.py`, `commands.py`, `events.py`, `rest.py`, `snapshots.py`, `internal.py`, plus `tests/test_schemas.py`.
 
 **Files read:** All of the above in full.
 
@@ -3541,7 +3541,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-01 — INFO: Facade **init**.py correctly re-exports all public types
 
-**File:** `lib/api/schemas/__init__.py`
+**File:** `src/vaultspec_a2a/api/schemas/__init__.py`
 **Issue:** None. All 65 public symbols from the 6 sub-modules are explicitly re-exported via `X as X` pattern (triggers `py.typed` re-export semantics) and listed in `__all__`. No deep-import leakage required from consumers.
 **Status:** CLEAN
 
@@ -3549,7 +3549,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-02 — INFO: Discriminated unions use correct Annotated + Field(discriminator=...) pattern
 
-**File:** `lib/api/schemas/events.py:257-271`, `commands.py:82-90`
+**File:** `src/vaultspec_a2a/api/schemas/events.py:257-271`, `commands.py:82-90`
 **Issue:** None. Both `ServerEvent` and `ClientMessage` unions use `Annotated[..., Field(discriminator="type")]`. The `Literal` type on each member's `type` field enables O(1) dispatch without isinstance chains.
 **Status:** CLEAN
 
@@ -3557,7 +3557,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-03 — LOW: `AgentControlCommand` missing `option_id` field — schema-level T31 gap
 
-**File:** `lib/api/schemas/commands.py:57-63`
+**File:** `src/vaultspec_a2a/api/schemas/commands.py:57-63`
 **Issue:** `AgentControlCommand` carries `thread_id`, `agent_id`, and `action` but no `option_id` field. The RESUME action (T31) needs an `option_id` to select which permission option to resume with. Even when the endpoint handler is fixed (T31), the client cannot transmit the option via WS because the schema rejects it. Both layers must be fixed together.
 **Severity:** LOW (T31 already tracked; this is a confirming schema-layer detail)
 **Fix:** Add `option_id: str | None = None` to `AgentControlCommand`.
@@ -3575,7 +3575,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-05 — LOW: `DispatchRequest.action` is an unconstrained `str` — no enum validation
 
-**File:** `lib/api/schemas/internal.py:18`
+**File:** `src/vaultspec_a2a/api/schemas/internal.py:18`
 **Issue:** `action: str = Field(description="'ingest' | 'resume' | 'cancel'")` — valid values are documented but not type-enforced. A malformed value (e.g. `"restart"`) passes Pydantic validation silently. The worker executor handles unknown actions via `else: logger.warning(...)` — no exception, silent no-op dispatch.
 **Severity:** LOW — internal IPC (not user-facing), but worth hardening.
 **Fix:** `action: Literal["ingest", "resume", "cancel"]` or a `DispatchAction(StrEnum)`.
@@ -3585,7 +3585,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-06 — INFO: `WorkerEventEnvelope.payload: dict` (bare) — acceptable
 
-**File:** `lib/api/schemas/internal.py:54`
+**File:** `src/vaultspec_a2a/api/schemas/internal.py:54`
 **Issue:** Bare `dict` is equivalent to `dict[Any, Any]` in Pydantic v2. Intentional — payload carries heterogeneous `ServerEvent` variants. A more precise type would be `dict[str, Any]` for mypy narrowing, but this is not a correctness bug.
 **Status:** CLEAN (acceptable)
 
@@ -3593,7 +3593,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-07 — INFO: Private snapshot models correctly unexported
 
-**File:** `lib/api/schemas/snapshots.py:60-74`
+**File:** `src/vaultspec_a2a/api/schemas/snapshots.py:60-74`
 **Issue:** None. `_PermissionSnapshot` and `_PermissionOptionSnapshot` are implementation details of `ThreadStateSnapshot`, not exported. Correct use of leading underscore convention.
 **Status:** CLEAN
 
@@ -3601,7 +3601,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-08 — LOW: `PermissionResponseRequest.kind` documented as inert — incomplete feature silently no-ops
 
-**File:** `lib/api/schemas/rest.py:141`
+**File:** `src/vaultspec_a2a/api/schemas/rest.py:141`
 **Issue:** `kind: PermissionOptionKind | None = None` is documented as "accepted but not yet acted upon by the endpoint handler" — present for "forward-compatibility." The endpoint reads only `request.option_id`. The `ALLOW_ALWAYS` / `REJECT_ALWAYS` semantics are on the public API surface but silently do nothing. API consumers relying on these values get no feedback and no error.
 **Severity:** LOW — documentation debt / incomplete feature.
 **Fix:** Either implement `kind`-based routing or remove the field until it's implemented and document its absence.
@@ -3611,7 +3611,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-09 — INFO: `ConnectedEvent.metadata` and `HeartbeatEvent.metadata` typed correctly
 
-**File:** `lib/api/schemas/events.py:241, 250`
+**File:** `src/vaultspec_a2a/api/schemas/events.py:241, 250`
 **Issue:** None. `dict[str, Any] | None` is the correct open-ended extension point for these connection-scoped events.
 **Status:** CLEAN
 
@@ -3619,7 +3619,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-10 — INFO: `EventEnvelope.agent_id` optional — correct for team-level events
 
-**File:** `lib/api/schemas/base.py:30`
+**File:** `src/vaultspec_a2a/api/schemas/base.py:30`
 **Issue:** None. `agent_id: str | None = None` is correct — `TeamStatusEvent` and `ErrorEvent` have no specific agent context.
 **Status:** CLEAN
 
@@ -3627,14 +3627,14 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### SCH-11 — LOW: Internal IPC models (`DispatchRequest` etc.) have no schema round-trip tests
 
-**File:** `lib/api/schemas/tests/test_schemas.py`
+**File:** `src/vaultspec_a2a/api/schemas/tests/test_schemas.py`
 **Issue:** The test file covers `ServerEvent` / `ClientMessage` round-trips and REST models. `DispatchRequest`, `DispatchResponse`, `HeartbeatMessage`, `WorkerEventEnvelope` from `internal.py` are not imported or tested. Given that `DispatchRequest.action` is an unconstrained str (SCH-05) and `option_id` / `metadata_json` / `context_preamble` fields are load-bearing for the worker dispatch path, this test gap means malformed internal payloads are not caught in CI.
 **Severity:** LOW — test gap, not a runtime bug.
 **Status:** OPEN
 
 ---
 
-### Summary for Cycle 44 — lib/api/schemas/
+### Summary for Cycle 44 — src/vaultspec_a2a/api/schemas/
 
 | ID     | Severity | File                          | Issue                                                        | Status |
 | ------ | -------- | ----------------------------- | ------------------------------------------------------------ | ------ |
@@ -3654,9 +3654,9 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ---
 
-## Cycle 45 — lib/worker/ formal audit
+## Cycle 45 — src/vaultspec_a2a/worker/ formal audit
 
-**Scope:** All 6 files in `lib/worker/`: `__init__.py`, `__main__.py`, `health.py`, `ipc.py`, `app.py`, `executor.py`.
+**Scope:** All 6 files in `src/vaultspec_a2a/worker/`: `__init__.py`, `__main__.py`, `health.py`, `ipc.py`, `app.py`, `executor.py`.
 
 **Files read:** All in full.
 
@@ -3664,15 +3664,15 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 ### WRK-01 — INFO: `health.py` is an empty stub — no implementation
 
-**File:** `lib/worker/health.py`
-**Issue:** `HealthCheck` class contains only a docstring. The actual heartbeat runs in `ipc.py:heartbeat_loop`; the `/health` endpoint in `app.py:125` is a bare async function that does not use `HealthCheck`. The class is dead code — not re-exported from `lib/worker/__init__.py`.
+**File:** `src/vaultspec_a2a/worker/health.py`
+**Issue:** `HealthCheck` class contains only a docstring. The actual heartbeat runs in `ipc.py:heartbeat_loop`; the `/health` endpoint in `app.py:125` is a bare async function that does not use `HealthCheck`. The class is dead code — not re-exported from `src/vaultspec_a2a/worker/__init__.py`.
 **Status:** CLEAN (stub, noting for completeness)
 
 ---
 
 ### WRK-02 — MEDIUM: `_compile_graph` ignores `team_config.graph.step_timeout_seconds` — always uses global setting
 
-**File:** `lib/worker/executor.py:352`
+**File:** `src/vaultspec_a2a/worker/executor.py:352`
 **Issue:** `compile_team_graph(..., step_timeout=float(settings.graph_node_timeout_seconds))` always uses the global config value. The `team_config.graph.step_timeout_seconds` field (added in TOML-02) is available on the loaded `team_config` object but is never consulted here. Per-team timeout overrides have no effect in the worker path.
 
 Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_timeout_seconds` into `compile_team_graph`'s signature, the call site here still overrides it unconditionally. Needs verification against the TOML-05 implementation.
@@ -3684,7 +3684,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-03 — LOW: `_handle_resume` hardcodes `_GRAPH_RECURSION_LIMIT` — ignores `req.recursion_limit`
 
-**File:** `lib/worker/executor.py:289`
+**File:** `src/vaultspec_a2a/worker/executor.py:289`
 **Issue:** `_handle_ingest` at line 216 correctly uses `req.recursion_limit or _GRAPH_RECURSION_LIMIT`. `_handle_resume` at line 289 hardcodes `_GRAPH_RECURSION_LIMIT` unconditionally. If a team's `TeamGraphConfig.recursion_limit` flows through `DispatchRequest.recursion_limit`, resume runs will silently ignore it.
 **Severity:** LOW — resume runs are short (single interrupt resolution), unlikely to hit limit. But the inconsistency is a correctness gap.
 **Fix:** `"recursion_limit": req.recursion_limit or _GRAPH_RECURSION_LIMIT` at line 289.
@@ -3694,7 +3694,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-04 — LOW: `_graphs` dict grows unbounded — no eviction, no size cap
 
-**File:** `lib/worker/executor.py:73, 163, 262`
+**File:** `src/vaultspec_a2a/worker/executor.py:73, 163, 262`
 **Issue:** `self._graphs: dict[str, CompiledStateGraph]` accumulates one entry per thread_id and is only cleared on `shutdown()`. Comments mention "eviction" as rationale for `_graph_presets`, but no eviction is implemented. A long-running worker handling many threads holds compiled `StateGraph` closures in memory indefinitely.
 **Severity:** LOW — memory leak in long-running deployments.
 **Fix:** LRU eviction with configurable capacity (e.g. via `collections.OrderedDict` with a `maxsize` cap). Evict from `_graphs` only; keep `_graph_presets` for lazy recompile.
@@ -3704,7 +3704,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-05 — LOW: `asyncio.Lock` for `_ingest_lock` inconsistent with anyio project convention
 
-**File:** `lib/worker/executor.py:91`
+**File:** `src/vaultspec_a2a/worker/executor.py:91`
 **Issue:** `self._ingest_lock = asyncio.Lock()` uses stdlib asyncio. The project convention (enforced through T19/T29 fixes) is `anyio` primitives for all concurrency. Works correctly on Python 3.13 single event loop, but inconsistent.
 **Severity:** LOW — convention, not a functional bug.
 **Status:** OPEN
@@ -3713,7 +3713,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-06 — INFO: `app.py` correctly binds `main()` to loopback `127.0.0.1`
 
-**File:** `lib/worker/app.py:138`
+**File:** `src/vaultspec_a2a/worker/app.py:138`
 **Issue:** None. Loopback-only binding makes unauthenticated `/dispatch` acceptable per ADR-019 internal-only design.
 **Status:** CLEAN
 
@@ -3721,7 +3721,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-07 — INFO: Worker lifespan shutdown order correct
 
-**File:** `lib/worker/app.py:87-91`
+**File:** `src/vaultspec_a2a/worker/app.py:87-91`
 **Issue:** None. `executor.shutdown()` → `bridge.close()` → `tg.cancel_scope.cancel()` — drains aggregator before closing HTTP client, cancels heartbeat last. Contrast with API-06 (control surface app.py where cancel order was inverted) — worker gets this right.
 **Status:** CLEAN
 
@@ -3729,7 +3729,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-08 — INFO: `_mark_ingest_active` / `_mark_ingest_done` lock pattern correct
 
-**File:** `lib/worker/executor.py:111-127`
+**File:** `src/vaultspec_a2a/worker/executor.py:111-127`
 **Issue:** None. Check-then-add inside `async with self._ingest_lock` is atomic. `discard` in `_mark_ingest_done` is safe against double-call. `bridge.untrack_thread` called outside the lock is safe — `WorkerBridge._active_threads` has single-writer access from the executor task group.
 **Status:** CLEAN
 
@@ -3737,7 +3737,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 
 ### WRK-09 — MEDIUM: W-02 confirmed — `AgentConfigNotFoundError` silently skips agent, produces broken graph
 
-**File:** `lib/worker/executor.py:333-334`
+**File:** `src/vaultspec_a2a/worker/executor.py:333-334`
 **Issue:** (Confirms prior W-02 finding.)
 
 ```python
@@ -3754,7 +3754,7 @@ except AgentConfigNotFoundError:
 
 ### WRK-10 — INFO: `ipc.py` `send_event` failure handling correct — never raises
 
-**File:** `lib/worker/ipc.py:81-101`
+**File:** `src/vaultspec_a2a/worker/ipc.py:81-101`
 **Issue:** None. `httpx.HTTPError` caught, logged at WARNING, never re-raised. 10s/5s timeout prevents relay failures from hanging graph execution. Correct fire-and-forget pattern.
 **Status:** CLEAN
 
@@ -3762,7 +3762,7 @@ except AgentConfigNotFoundError:
 
 ### WRK-11 — LOW: Non-200 event relay responses silently dropped with no retry
 
-**File:** `lib/worker/ipc.py:90-95`
+**File:** `src/vaultspec_a2a/worker/ipc.py:90-95`
 **Issue:** `if resp.status_code != 200: logger.warning(...)` — the event is permanently lost on 503/429/etc. In deployments where the control surface restarts briefly, events generated during the gap are unrecoverable. Retrying risks ordering issues given the sequence numbering in `EventEnvelope`.
 **Severity:** LOW — known architectural trade-off for fire-and-forget relay. Acceptable but worth noting.
 **Status:** OPEN (known limitation)
@@ -3771,13 +3771,13 @@ except AgentConfigNotFoundError:
 
 ### WRK-12 — INFO: `_compile_graph` workspace_root `Path.resolve()` — TC-01 covers further validation
 
-**File:** `lib/worker/executor.py:318`
+**File:** `src/vaultspec_a2a/worker/executor.py:318`
 **Issue:** None. `Path(req.workspace_root).resolve()` normalizes the path. Further safe-path validation is covered by TC-01.
 **Status:** CLEAN (deferring to TC-01)
 
 ---
 
-### Summary for Cycle 45 — lib/worker/
+### Summary for Cycle 45 — src/vaultspec_a2a/worker/
 
 | ID     | Severity | File                | Issue                                                        | Status      |
 | ------ | -------- | ------------------- | ------------------------------------------------------------ | ----------- |
@@ -3806,7 +3806,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### TC-02 — HIGH: AgentConfig.from_toml bare KeyError on missing [agent] section
 
-**File:** `lib/core/team_config.py:172`
+**File:** `src/vaultspec_a2a/core/team_config.py:172`
 **Issue:** `cls.model_validate(data["agent"])` raises a bare `KeyError` if the TOML file lacks an `[agent]` section. Should catch `KeyError` and raise `ConfigError` with a descriptive message. Same issue exists in `TeamConfig.from_toml` at line 318 with `data["team"]`.
 **Severity:** HIGH — poor error UX on malformed config files.
 **Status:** OPEN — untasked
@@ -3815,7 +3815,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### W-02 — HIGH: Silent AgentConfigNotFoundError continue in executor
 
-**File:** `lib/worker/executor.py`
+**File:** `src/vaultspec_a2a/worker/executor.py`
 **Issue:** When building agent_configs dict for `compile_team_graph`, if `load_agent_config()` raises `AgentConfigNotFoundError`, the code catches it with a `logger.warning` and `continue`. This means a broken/missing agent config silently produces a graph with fewer workers than expected. The broken graph is stored and used for the thread's lifetime.
 **Severity:** HIGH — silent data loss, hard to debug.
 **Status:** OPEN — untasked
@@ -3824,7 +3824,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### PROV-02 — HIGH: \_CLAUDE_ACP_JS path duplicated + no exists() guard
 
-**File:** `lib/providers/acp_chat_model.py`
+**File:** `src/vaultspec_a2a/providers/acp_chat_model.py`
 **Issue:** The path to the Claude ACP JavaScript entrypoint is hardcoded in two places (the constant and a fallback). Neither location calls `Path.exists()` before attempting to spawn the subprocess. If the JS file is missing, the error surfaces as a cryptic subprocess failure rather than a clear config error.
 **Severity:** HIGH — poor error UX, duplicated magic path.
 **Status:** OPEN — untasked
@@ -3833,7 +3833,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### G-01 — MEDIUM: \_compile_star supervisor prompt fallback duplicates roster logic
 
-**File:** `lib/core/graph.py:224-234`
+**File:** `src/vaultspec_a2a/core/graph.py:224-234`
 **Issue:** When `supervisor_agent_config is None`, the fallback supervisor prompt construction duplicates the roster-building logic that already exists in `_build_supervisor_prompt()`. Should call `_build_supervisor_prompt()` with a default base prompt instead.
 **Severity:** MEDIUM — code duplication, maintenance risk.
 **Status:** OPEN — untasked
@@ -3842,7 +3842,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### G-02 — MEDIUM: create_worker_node permission_callback closure captures mutable state
 
-**File:** `lib/core/graph.py`
+**File:** `src/vaultspec_a2a/core/graph.py`
 **Issue:** The `permission_callback` closure in `create_worker_node` captures variables from the enclosing scope. If the closure is invoked after the enclosing scope has mutated (e.g., during concurrent worker execution), it may reference stale state. Mitigated by `model_copy()` (H4 fix) but the closure architecture is fragile.
 **Severity:** MEDIUM — latent concurrency risk.
 **Status:** OPEN — untasked
@@ -3851,7 +3851,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### CTX-01 — MEDIUM: context_injection glob patterns not sanitized
 
-**File:** `lib/core/context_injection.py`
+**File:** `src/vaultspec_a2a/core/context_injection.py`
 **Issue:** User-supplied glob patterns from `ContextRef` are passed directly to `Path.glob()` without sanitization. While path traversal is mitigated by the workspace_root prefix, specially crafted glob patterns could cause excessive filesystem traversal (DoS via `**/**/**` patterns).
 **Severity:** MEDIUM — potential DoS vector.
 **Status:** OPEN — untasked
@@ -3860,7 +3860,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### CTX-02 — MEDIUM: 50-doc cap applied after glob expansion, not during
 
-**File:** `lib/core/context_injection.py`
+**File:** `src/vaultspec_a2a/core/context_injection.py`
 **Issue:** The 50-document cap is checked after all glob results are collected into a list. For workspaces with thousands of files matching a broad pattern (e.g. `**/*.py`), the entire list is expanded in memory before being truncated.
 **Severity:** MEDIUM — memory spike on broad patterns.
 **Status:** OPEN — untasked
@@ -3869,7 +3869,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### EXC-01 — MEDIUM: ConfigError and domain exceptions missing **slots**
 
-**File:** `lib/core/exceptions.py`
+**File:** `src/vaultspec_a2a/core/exceptions.py`
 **Issue:** Custom exception classes don't define `__slots__`, which means each instance carries a `__dict__`. For exceptions that may be created frequently (e.g., in retry loops), this adds unnecessary memory overhead.
 **Severity:** MEDIUM — minor perf, but easy fix.
 **Status:** OPEN — untasked (LOW priority despite MEDIUM severity)
@@ -3878,7 +3878,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### LOG-01 — MEDIUM: JSON formatter not applied to all handlers
 
-**File:** `lib/utils/logging.py`
+**File:** `src/vaultspec_a2a/utils/logging.py`
 **Issue:** The `JSONFormatter` is defined but only attached to the root logger's StreamHandler. If other handlers are added (e.g., file handlers, OTel exporters), they won't use the JSON format, leading to inconsistent log output.
 **Severity:** MEDIUM — observability gap.
 **Status:** OPEN — untasked
@@ -3887,7 +3887,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### PROV-01 — MEDIUM: ProviderFactory.create() has no caching/dedup
 
-**File:** `lib/providers/factory.py`
+**File:** `src/vaultspec_a2a/providers/factory.py`
 **Issue:** Every call to `ProviderFactory.create()` instantiates a new model client. For star topologies where the supervisor invokes workers repeatedly, this means repeated client construction. Not a correctness bug but wasteful.
 **Severity:** MEDIUM — performance.
 **Status:** OPEN — untasked
@@ -3896,7 +3896,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### PROV-03 — MEDIUM: Gemini probe doesn't verify model availability
 
-**File:** `lib/providers/probes/gemini.py`
+**File:** `src/vaultspec_a2a/providers/probes/gemini.py`
 **Issue:** The Gemini probe checks for the API key env var but doesn't attempt a lightweight API call to verify the key is valid or the model is accessible.
 **Severity:** MEDIUM — probe gives false positive on invalid keys.
 **Status:** OPEN — untasked
@@ -3905,7 +3905,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ### PROV-04 — MEDIUM: OpenAI provider doesn't set request timeout
 
-**File:** `lib/providers/factory.py`
+**File:** `src/vaultspec_a2a/providers/factory.py`
 **Issue:** `ChatOpenAI()` instantiation doesn't pass `request_timeout`. Long-running or hung API calls will block the worker indefinitely (mitigated by graph-level step_timeout but not at the HTTP client level).
 **Severity:** MEDIUM — latent hang risk.
 **Status:** OPEN — untasked
@@ -3933,7 +3933,7 @@ These findings were triaged verbally during the earlier session and are now docu
 
 ## Cycle 46 — MCP Tool Description Audit (2026-03-02)
 
-**File audited**: `lib/protocols/mcp/server.py` (523 lines, 7 tools)
+**File audited**: `src/vaultspec_a2a/protocols/mcp/server.py` (523 lines, 7 tools)
 
 **Tool count**: 7 — start_thread, list_threads, respond_to_permission,
 get_thread_status, send_message, get_team_status, get_pending_permissions.
@@ -3980,10 +3980,10 @@ tools with their roles).
 
 **Files audited**:
 
-- `lib/protocols/mcp/server.py` (783 lines, 9 tools — fresh read)
-- `lib/protocols/mcp/tests/test_server.py` (633 lines — fresh read)
-- `lib/api/endpoints.py` cancel + permission endpoints
-- `lib/api/schemas/rest.py` CancelThreadResponse
+- `src/vaultspec_a2a/protocols/mcp/server.py` (783 lines, 9 tools — fresh read)
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py` (633 lines — fresh read)
+- `src/vaultspec_a2a/api/endpoints.py` cancel + permission endpoints
+- `src/vaultspec_a2a/api/schemas/rest.py` CancelThreadResponse
 
 ### CRITICAL: IndentationError in two new tools — module will not import
 

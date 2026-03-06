@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: audit
 feature: frontend-contract-protocol
-description: 'Protocol audit comparing the frontend-backend wire contract in lib/api/schemas/ against A2A proto, A2A Python SDK, ACP schema, and Toad reference, confirming intentional divergence per ADR-006.'
+description: 'Protocol audit comparing the frontend-backend wire contract in src/vaultspec_a2a/api/schemas/ against A2A proto, A2A Python SDK, ACP schema, and Toad reference, confirming intentional divergence per ADR-006.'
 related:
   - docs/adrs/2026-02-26-006-protocol-ecosystem-bridge-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -12,7 +12,7 @@ related:
 # Protocol Audit: Frontend-Backend Wire Contract vs A2A/ACP Source SDKs
 
 **Date:** 2026-02-26
-**Scope:** `lib/api/schemas/`(ADR-011 wire contract) audited against:
+**Scope:** `src/vaultspec_a2a/api/schemas/`(ADR-011 wire contract) audited against:
 
 -`knowledge/repositories/A2A/specification/a2a.proto`(808 lines, canonical
 protobuf) -`knowledge/repositories/a2a-python/src/a2a/types.py`(2041 lines, SDK

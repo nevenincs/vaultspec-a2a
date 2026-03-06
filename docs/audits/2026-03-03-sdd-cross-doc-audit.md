@@ -72,7 +72,7 @@
 
 ### I-02 — INCONSISTENCY — `_infer_phase_from_vault_index` private in research vs public in ADR-026
 - **Doc A:** `2026-03-03-pipeline-phase-population-research.md` §2 — `_infer_phase_from_vault_index` (private)
-- **Doc B:** ADR-026 §2.2 + `lib/core/phase.py` — `infer_phase_from_vault_index` (public, exported)
+- **Doc B:** ADR-026 §2.2 + `src/vaultspec_a2a/core/phase.py` — `infer_phase_from_vault_index` (public, exported)
 - **Status:** Open — research doc update
 - **Fix:** Add note to research doc §2 that function was made public in final ADR.
 

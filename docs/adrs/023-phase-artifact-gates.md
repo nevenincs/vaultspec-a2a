@@ -77,7 +77,7 @@ pipeline and can be called at any phase to audit external codebases.
 
 ### 2.2 Gate Mechanism
 
-The gate extends `supervisor_node` (`lib/core/nodes/supervisor.py`), firing
+The gate extends `supervisor_node` (`src/vaultspec_a2a/core/nodes/supervisor.py`), firing
 after all FINISH gates (ADR-022, ADR-025) and before the final routing
 decision is returned. A `worker_phase_map: dict[str, str]` (worker id →
 pipeline phase) is provided at `create_supervisor_node()` compilation time:
@@ -130,7 +130,7 @@ without an explicit phase mapping are exempt from phase gating — the gate
 defaults to no-op for unmapped workers (conservative: do not block routing
 decisions the gate does not understand).
 
-`compile_team_graph()` (`lib/core/graph.py`) builds the map from preset
+`compile_team_graph()` (`src/vaultspec_a2a/core/graph.py`) builds the map from preset
 metadata and passes it to `create_supervisor_node()` alongside the existing
 `workers: list[str]` parameter.
 
@@ -244,7 +244,7 @@ list[str]` parameter.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
   nodes/supervisor.py   AMENDED: phase prerequisite gate after FINISH gates;
                         new _check_phase_prerequisites() private function;
                         create_supervisor_node() gains worker_phase_map param
@@ -268,4 +268,4 @@ lib/core/
 - [ADR-025](025-mandatory-review-gate.md) — review artifact FINISH gate (same pattern extended here)
 - [ADR-026](026-pipeline-phase-population.md) — `pipeline_phase` inference (complementary, not conflicting)
 - [docs/research/2026-03-03-phase-artifact-gates-research.md](../research/2026-03-03-phase-artifact-gates-research.md) — gate table derivation, mechanism options, edge case analysis
-- `lib/core/nodes/supervisor.py` — existing FINISH gate implementation reference
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — existing FINISH gate implementation reference

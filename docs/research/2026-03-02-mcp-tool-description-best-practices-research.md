@@ -12,7 +12,7 @@ feature: mcp-tool-descriptions
 **Date**: 2026-03-02
 **Status**: Complete
 **Requested by**: team-lead
-**Purpose**: Inform audit and rewrite of `lib/protocols/mcp/server.py` tool docstrings
+**Purpose**: Inform audit and rewrite of `src/vaultspec_a2a/protocols/mcp/server.py` tool docstrings
 
 ---
 
@@ -296,7 +296,7 @@ pass to cancel), structured returns would improve reliability.
 
 ## 7. Audit Checklist for Vaultspec MCP Tools
 
-Apply this checklist when reviewing each tool in `lib/protocols/mcp/server.py`:
+Apply this checklist when reviewing each tool in `src/vaultspec_a2a/protocols/mcp/server.py`:
 
 - [ ] **Name**: snake_case, verb-noun, specific, under 40 chars
 - [ ] **Description line 1**: Clear purpose statement (what it does)

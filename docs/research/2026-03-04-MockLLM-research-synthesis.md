@@ -3,7 +3,7 @@
 **Context:** Vaultspec-A2A UI testing decoupling
 
 ## Objective
-To determine the best approach for implementing a `MockLLM` that can simulate full LangGraph team behaviors, error states, tool calls, and permission handling natively, replacing the obsolete Fixture Server.
+To determine the best approach for implementing a `MockLLM` that can simulate full LangGraph team behaviors, error states, tool calls, and permission handling natively.
 
 ## 1. Native SDK Framework Support
 LangChain explicitly provides mocking facilities through:
@@ -26,7 +26,7 @@ LangChain explicitly provides mocking facilities through:
 - Zero extra infra overhead.
 - Total deterministic control over token generation speeds and outputs.
 
-**Recommendation:** Go with the Native SDK Implementation. Implement `MockChatModel` in `lib/providers/mock_chat_model.py`.
+**Recommendation:** Go with the Native SDK Implementation. Implement `MockChatModel` in `src/vaultspec_a2a/providers/mock_chat_model.py`.
 
 ## 3. LangGraph Failure States & Error Mapping
 Our mock implementation must simulate real failures observed in the LangGraph application. Here is the mapping of LangGraph exceptions to our mock scenarios:
@@ -50,6 +50,6 @@ Based on the required UI states, we will structure the `.vaultspec/teams/mock-*.
 6. **`mock-human-in-loop.toml`**: Model invokes `session/request_permission`, raising a `GraphBubbleUp` interrupt to the UI.
 
 ## Conclusion
-The Native SDK implementation allows robust testing of the front-end stream without the maintainability overhead of a separate Fixture Server.
+The Native SDK implementation allows robust testing of the front-end stream without additional mock server infrastructure.
 
 By combining `MockChatModel` with custom TOML definitions, developers can launch the primary VaultSpec server with `LANGSMITH_PROJECT=mock-tests` and saturate the UI via the standard WebSocket stream.

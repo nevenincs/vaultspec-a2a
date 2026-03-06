@@ -11,7 +11,7 @@ The Vaultspec LangGraph backend requires the ability to decouple from live LLM p
 
 We will implement a true **Decoupled Architecture**, splitting the implementation into two components: 
 
-1. **The Mock LLM Wrapper (`lib/providers/mock_chat_model.py`)**: A lightweight LangChain-compatible wrapper that acts exactly like `ChatOpenAI`. It intercepts calls from the LangGraph graph, adds any necessary internal routing state (such as the active agent ID), and proxies the request to the decoupled backend via a standard HTTP call. It handles the Langchain abstractions, capabilities, and scheduling natively within our app.
+1. **The Mock LLM Wrapper (`src/vaultspec_a2a/providers/mock_chat_model.py`)**: A lightweight LangChain-compatible wrapper that acts exactly like `ChatOpenAI`. It intercepts calls from the LangGraph graph, adds any necessary internal routing state (such as the active agent ID), and proxies the request to the decoupled backend via a standard HTTP call. It handles the Langchain abstractions, capabilities, and scheduling natively within our app.
 2. **The Decoupled MockLLMBackend (VidaiMock)**: An external, off-the-shelf open-source server designed specifically for simulating OpenAI-compatible streaming endpoints via a Rust static binary.
 
 ### 2.1 The Open-Source Backend: VidaiMock
@@ -21,7 +21,7 @@ Instead of writing a complex `asyncio` loop and VCR parser from scratch, we will
 - It will be containerized via a `docker/vidaimock.Dockerfile` and run as a service within our `docker-compose` pipeline, exposing `http://localhost:8100/v1/chat/completions`.
 
 ### 2.2 The "Tapes" (Streaming Response Definitions)
-VidaiMock relies on YAML fixture mappings. We will define a set of static "tapes" representing our 7 scenarios (`mock-planner`, `mock-coder-human`, `mock-coder-loop`, etc.) and store them in `lib/core/presets/mock/tapes/`.
+VidaiMock relies on YAML fixture mappings. We will define a set of static "tapes" representing our 7 scenarios (`mock-planner`, `mock-reviewer`, `mock-coder-success`, `mock-coder-fail-tool`, `mock-coder-human`, `mock-coder-invalid`, `mock-coder-loop`) and store them in `src/vaultspec_a2a/core/presets/mock/tapes/`.
 - This tape directory is mounted as an external volume into the VidaiMock Docker container.
 - When `mock-coder-human` is the active agent in LangGraph, the Mock Wrapper sends an HTTP request to the Backend.
 - The Backend parses its mounted tape directory and streams back the exact OpenAI-formatted tool call chunk `{"name": "session_request_permission"...}` over Server-Sent Events (SSE).

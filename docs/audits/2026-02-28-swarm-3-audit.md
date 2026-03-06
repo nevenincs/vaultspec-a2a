@@ -37,22 +37,22 @@ resolved),`2026-28-02-swarm-audit-2.md`
 
 | Agent                | Module(s)                                        | C   | H   | M   | L   | Total |
 | -------------------- | ------------------------------------------------ | --- | --- | --- | --- | ----- |
-| core-auditor         | `lib/core/`                                      | 3   | 6   | 9   | 6   | 24    |
-| api-auditor          | `lib/api/`                                       | 2   | 5   | 8   | 4   | 19    |
-| providers-auditor    | `lib/providers/`                                 | 2   | 5   | 6   | 4   | 17    |
-| db-protocol-auditor  | `lib/database/`, `lib/protocols/`                | 2   | 5   | 5   | 4   | 18    |
-| utils-auditor        | `lib/utils/`, `lib/telemetry/`, `lib/workspace/` | 3   | 7   | 6   | 4   | 20    |
+| core-auditor         | `src/vaultspec_a2a/core/`                                      | 3   | 6   | 9   | 6   | 24    |
+| api-auditor          | `src/vaultspec_a2a/api/`                                       | 2   | 5   | 8   | 4   | 19    |
+| providers-auditor    | `src/vaultspec_a2a/providers/`                                 | 2   | 5   | 6   | 4   | 17    |
+| db-protocol-auditor  | `src/vaultspec_a2a/database/`, `src/vaultspec_a2a/protocols/`                | 2   | 5   | 5   | 4   | 18    |
+| utils-auditor        | `src/vaultspec_a2a/utils/`, `src/vaultspec_a2a/telemetry/`, `src/vaultspec_a2a/workspace/` | 3   | 7   | 6   | 4   | 20    |
 | test-quality-auditor | Cross-cutting test quality                       | 2   | 7   | 11  | 6   | 26    |
 
 ---
 
-## 1.`lib/core/`— Core Module Audit
+## 1.`src/vaultspec_a2a/core/`— Core Module Audit
 
 ### CRITICAL
 
 ### CORE-C1: Pipeline loop worker early-exit is dead code
 
-- File:`lib/core/graph.py` (`_loop_router`)
+- File:`src/vaultspec_a2a/core/graph.py` (`_loop_router`)
 - The `_loop_router`checks for`state.get("next") == "FINISH"`to exit the
   pipeline loop, but`worker_node`never sets`"next"`in its return dict. The
   early-exit branch is unreachable dead code — the only way to exit the loop is
@@ -60,14 +60,14 @@ resolved),`2026-28-02-swarm-audit-2.md`
 
 ### CORE-C2: Unguarded `KeyError`in`_compile_pipeline`
 
-- File: `lib/core/graph.py`, lines ~303, ~390
+- File: `src/vaultspec_a2a/core/graph.py`, lines ~303, ~390
 - `agent_configs[agent_id]`bare dict lookup with no error context. A typo in a
   TOML config file produces an opaque`KeyError`instead of a
   descriptive`ConfigurationError`.
 
 ### CORE-C3: `feature_tag`glob pattern injection
 
-- File:`lib/core/metadata.py`, lines ~105–117
+- File:`src/vaultspec_a2a/core/metadata.py`, lines ~105–117
 - `feature_tag`is injected into glob patterns without sanitization.
   A`feature_tag`containing`*`, `?`, `[`, or `..`could traverse or match
   unintended paths during`.vault/`auto-discovery.
@@ -76,37 +76,37 @@ resolved),`2026-28-02-swarm-audit-2.md`
 
 ### CORE-H1:`worker_node`missing explicit`__name__`assignment
 
-- File:`lib/core/nodes/worker.py`
+- File:`src/vaultspec_a2a/core/nodes/worker.py`
 - `_loop_node_with_counter`wrapper overwrites the function name, breaking
   LangGraph node identification.
 
 ### CORE-H2:`put_nowait`at line ~425 unguarded against`asyncio.QueueFull`
 
-- File: `lib/core/aggregator.py`
+- File: `src/vaultspec_a2a/core/aggregator.py`
 - If the event queue is full, `put_nowait`raises`QueueFull`which propagates
   uncaught, crashing the aggregator loop.
 
 ### CORE-H3: Degenerate single-node`pipeline_loop`compiles as infinite self-loop
 
-- File:`lib/core/graph.py`
+- File:`src/vaultspec_a2a/core/graph.py`
 - A pipeline_loop with one agent produces a graph where the single node loops to
   itself indefinitely (up to `max_loops`), consuming resources without
   meaningful work.
 
 ### CORE-H4: `_emit_interrupt_events`always called in`finally`block
 
-- File:`lib/core/aggregator.py`
+- File:`src/vaultspec_a2a/core/aggregator.py`
 - `_emit_interrupt_events`performs`aget_state`I/O on every normal completion,
   not just on interrupt. Unnecessary I/O on the happy path.
 
 ### CORE-H5:`agent_id`in`load_agent_config`not validated before path construction
 
-- File:`lib/core/team_config.py`
+- File:`src/vaultspec_a2a/core/team_config.py`
 - Path traversal possible via crafted `agent_id`values in config references.
 
-### CORE-H6:`TopologyType`not exported from`lib/core/__init__.py` `__all__`
+### CORE-H6:`TopologyType`not exported from`src/vaultspec_a2a/core/__init__.py` `__all__`
 
-- File: `lib/core/__init__.py`
+- File: `src/vaultspec_a2a/core/__init__.py`
 - ADR-009 facade violation — `TopologyType`is used externally but not
   re-exported.
 
@@ -144,13 +144,13 @@ could be reduced.
 
 ---
 
-## 2.`lib/api/`— API Module Audit
+## 2.`src/vaultspec_a2a/api/`— API Module Audit
 
 ### CRITICAL (2)
 
 ### API-C1: Test infrastructure — split database states undermine test validity
 
-- File:`lib/api/tests/test_endpoints.py`, lines 49–70; `lib/api/app.py`, lines
+- File:`src/vaultspec_a2a/api/tests/test_endpoints.py`, lines 49–70; `src/vaultspec_a2a/api/app.py`, lines
   186–249
 - `_make_app()`overrides`get_db`, `get_aggregator`, `get_graph_registry`via
   FastAPI DI but does NOT override`get_checkpointer`or`get_task_group`. The real
@@ -161,7 +161,7 @@ could be reduced.
 
 ### API-C2:`mark_ingest_active()`return value not checked at thread creation
 
-- File:`lib/api/endpoints.py`, line 369
+- File:`src/vaultspec_a2a/api/endpoints.py`, line 369
 - `registry.mark_ingest_active(thread.id)`return value silently discarded. Every
   other call site checks the return. If a previous failed cleanup left the
   thread ID in`_active_ingests`, a second concurrent graph execution could
@@ -172,13 +172,13 @@ could be reduced.
 
 ### API-H1: `schemas/__init__.py`facade missing three public types
 
-- File:`lib/api/schemas/__init__.py`
+- File:`src/vaultspec_a2a/api/schemas/__init__.py`
 - `SendMessageResponse`, `AgentStatusEntry`, `PendingPermission`are
   in`rest.py.__all__`but not re-exported from the facade. Violates ADR-009 §5.
 
 ### API-H2:`ErrorEvent`emitted with`sequence=0`
 
-- File: `lib/api/websocket.py`, line 346
+- File: `src/vaultspec_a2a/api/websocket.py`, line 346
 - Violates ADR-011 §5 monotonic sequence mandate (sequences start at 1). Breaks
   frontend gap detection logic.
 
@@ -186,21 +186,21 @@ could be reduced.
 
 no default
 
-- File:`lib/api/schemas/snapshots.py`, lines 77–84
+- File:`src/vaultspec_a2a/api/schemas/snapshots.py`, lines 77–84
   | - Unlike `AgentStatusEntry`and`AgentSummary`which correctly use`Provider |
 None = None`, `_AgentSnapshot`requires these fields — making the`agents`list in
   reconnection snapshots unusable when provider/model are unknown. |
 
 ### API-H4:`auth.py`module mandated by ADR-009 is missing
 
-- File:`lib/api/`(absent)
-- ADR-009 §2.2 lists`lib/api/auth.py`as required. The API has zero
+- File:`src/vaultspec_a2a/api/`(absent)
+- ADR-009 §2.2 lists`src/vaultspec_a2a/api/auth.py`as required. The API has zero
   authentication. Combined with default`0.0.0.0`binding (API-L3), the
   unauthenticated API is exposed to the local network.
 
 ### API-H5: WebSocket`SEND_MESSAGE`and REST content fields have no length validation
 
-- File:`lib/api/schemas/commands.py`, lines 47–53
+- File:`src/vaultspec_a2a/api/schemas/commands.py`, lines 47–53
 - `content: str`has no`max_length`. A 1 MiB message body flows directly into the
   LLM context window, causing excessive token consumption or LLM API errors.
 
@@ -225,21 +225,21 @@ empty`pending_permissions`always.
 
 **API-L1:** TypeScript types are hand-written, not generated from OpenAPI
 (ADR-011 §2.4).
-**API-L2:** Circular import between`lib/api/`and`lib/core/aggregator`violates
+**API-L2:** Circular import between`src/vaultspec_a2a/api/`and`src/vaultspec_a2a/core/aggregator`violates
 ADR-009 independence.
 **API-L3:**`main()`binds to`0.0.0.0`by default — exposes unauthenticated API to
 local network.
-**API-L4:** No`conftest.py`in`lib/api/tests/`.
+**API-L4:** No`conftest.py`in`src/vaultspec_a2a/api/tests/`.
 
 ---
 
-## 3. `lib/providers/`— Providers Module Audit
+## 3. `src/vaultspec_a2a/providers/`— Providers Module Audit
 
 ### CRITICAL (3)
 
 ### PROV-C1: Background RPC tasks never cancelled on session cleanup
 
-- File:`lib/providers/acp_chat_model.py`, lines 530–536 (spawn), 405–444
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, lines 530–536 (spawn), 405–444
   (cleanup)
 - `_dispatch_packet()`creates`asyncio.Task`for every server RPC, stored
   in`ctx.background_tasks`. `_cleanup_session()`cancels
@@ -251,7 +251,7 @@ local network.
 
 ### PROV-C2: `_process_stdout_loop`blocks on`chunk_queue.put()`— potential deadlock
 
-- File:`lib/providers/acp_chat_model.py`, lines 960–965
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, lines 960–965
 - `_handle_session_update()`is awaited directly in the stdout loop with`await
 ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
   (`_yield_chunks`) is slow, the queue fills, blocking the stdout loop. If the
@@ -262,7 +262,7 @@ ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
 
 ### PROV-H1: `prompt_error_ref`is dead code
 
-- File:`lib/providers/acp_chat_model.py`, line 562 (write), 224 (field), 337
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, line 562 (write), 224 (field), 337
   (init)
 - `ctx.prompt_error_ref`is written to but never read. The real error path flows
   through`prompt_future.result()["error"]`. Dead secondary error accumulator
@@ -270,7 +270,7 @@ ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
 
 ### PROV-H2: `assert`used for runtime stream validation — stripped under`-O`flag
 
-- File:`lib/providers/acp_chat_model.py`, lines 327–328, 487, 1175–1270
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, lines 327–328, 487, 1175–1270
 - `assert process.stdin is not None`is not a runtime guard — stripped by Python
   optimizer. Should be explicit`if ... is None: raise RuntimeError(...)`.
 
@@ -278,7 +278,7 @@ ctx.chunk_queue.put(...)` on a bounded queue (maxsize=1024). If the consumer
 
 of`_kill_process_tree`on Windows
 
-- File:`lib/providers/acp_chat_model.py`, lines 868–871, 949–951, 413–416
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, lines 868–871, 949–951, 413–416
 - `terminal/kill`, `terminal/release`, and session cleanup all use
   `process.kill()`for terminal subprocesses. On Windows, grandchild processes
   (from`python`, `node`, `npm`, `pytest`in the allowlist) survive as orphans.
@@ -286,14 +286,14 @@ of`_kill_process_tree`on Windows
 
 ### PROV-H4: Gemini provider detection fails for full-path commands
 
-- File:`lib/providers/acp_chat_model.py`, line 318
+- File:`src/vaultspec_a2a/providers/acp_chat_model.py`, line 318
 - `"gemini" in self.command`is list membership (not substring). A command
   like`["/usr/local/bin/gemini", ...]`doesn't match — token refresh is skipped,
   causing the silent hang from gemini-cli issue #13853.
 
 ### PROV-H5: ADR-002 vs. ADR-006 contradiction on Claude command invocation is unresolved
 
-- File:`lib/providers/factory.py`, line 88; ADR-002 §2; ADR-006 §5.1
+- File:`src/vaultspec_a2a/providers/factory.py`, line 88; ADR-002 §2; ADR-006 §5.1
 - ADR-002 mandates `node.exe dist/index.js`direct invocation. ADR-006
   mandates`create_subprocess_shell("claude-agent-acp")`. Implementation follows
   ADR-006 but ADR-002 is not marked as superseded.
@@ -325,13 +325,13 @@ without`to_thread`.
 
 ---
 
-## 4. `lib/database/`+`lib/protocols/`— DB & Protocol Audit
+## 4. `src/vaultspec_a2a/database/`+`src/vaultspec_a2a/protocols/`— DB & Protocol Audit
 
 ### CRITICAL (4)
 
 ### DB-C1:`"active"`status string not in`ThreadStatus`enum
 
-- File:`lib/api/endpoints.py`, line 628
+- File:`src/vaultspec_a2a/api/endpoints.py`, line 628
 - `update_thread_status(db, thread_id, "active")`—`"active"`is not a
   valid`ThreadStatus`value. Should be`"running"`.
 
@@ -376,24 +376,24 @@ consistently.
 
 ---
 
-## 5. `lib/utils/`+`lib/telemetry/`+`lib/workspace/`— Utilities Audit
+## 5. `src/vaultspec_a2a/utils/`+`src/vaultspec_a2a/telemetry/`+`src/vaultspec_a2a/workspace/`— Utilities Audit
 
 ### CRITICAL (5)
 
 ### UTIL-C1:`enums.py`missing`__all__`declaration
 
-- File:`lib/utils/enums.py`
+- File:`src/vaultspec_a2a/utils/enums.py`
 - Violates ADR-009 §5.3. Every sub-sub-module must declare `__all__`.
 
 ### TEL-C2: OTel SDK optional-import guards violate ADR-015
 
-- File: `lib/telemetry/instrumentation.py`
+- File: `src/vaultspec_a2a/telemetry/instrumentation.py`
 - `try/except ImportError`guards for OTel SDK still present. ADR-015 makes the
   SDK a mandatory dependency — these guards should be removed.
 
 ### WS-C3:`merge_worktree()`and`has_conflicts()`accept unvalidated`target_branch`
 
-- File: `lib/workspace/git_manager.py`
+- File: `src/vaultspec_a2a/workspace/git_manager.py`
 - `target_branch`parameter not validated against`_BRANCH_NAME_RE`. Git flag
   injection possible via `--flag`values.
 
@@ -425,7 +425,7 @@ no`.venv`found.
 from`logger.info("msg", extra={...})`.
 **TEL-M5:** Module-level `_SDK_DISABLED`constant evaluated at import time —
 cannot be overridden in tests.
-**UTIL-M6:**`__init__.py`in`lib/utils/`missing re-exports for`enums`module.
+**UTIL-M6:**`__init__.py`in`src/vaultspec_a2a/utils/`missing re-exports for`enums`module.
 
 ### LOW (5)
 
@@ -446,14 +446,14 @@ configurable.
 
 ### TEST-C1: Fake/stub LangGraph objects in aggregator tests
 
-- File:`lib/core/tests/test_aggregator.py`
+- File:`src/vaultspec_a2a/core/tests/test_aggregator.py`
 - 6 fake/stub classes (`_FakeNode`, `_FakeGraph`, `FakeChunk`, `BigChunk`,
   `_FakeInterrupt`, `_FakeTask`, `_FakeState`) violate the no-mocks mandate.
   Tests exercise stubs instead of real LangGraph primitives.
 
 ### TEST-C2: `_FakeWriter`stubs bypass real asyncio I/O in protocol tests
 
-- File:`lib/providers/probes/tests/test_protocol.py`
+- File:`src/vaultspec_a2a/providers/probes/tests/test_protocol.py`
 - `_FakeWriter`defined 5 times inline. Replaces
   real`asyncio.StreamWriter`behavior (buffer management,
   backpressure,`drain()`side effects).

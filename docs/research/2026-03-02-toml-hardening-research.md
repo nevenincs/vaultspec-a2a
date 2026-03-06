@@ -102,7 +102,7 @@ Option 2 is lower risk: keep the old `.toml` files as symlinks or thin wrappers 
 
 ### Current State
 
-**`lib/core/team_config.py`** — `TeamDefaultsConfig`:
+**`src/vaultspec_a2a/core/team_config.py`** — `TeamDefaultsConfig`:
 
 ```python
 class TeamDefaultsConfig(BaseModel):
@@ -112,7 +112,7 @@ class TeamDefaultsConfig(BaseModel):
 
 No `provider_fallback` list. The `ModelConfig` used in `WorkerRef` and `AgentConfig` similarly has no fallback list.
 
-**`lib/core/graph.py`** — `_resolve_model_for_worker()` (single-pass):
+**`src/vaultspec_a2a/core/graph.py`** — `_resolve_model_for_worker()` (single-pass):
 
 ```python
 provider = (
@@ -124,7 +124,7 @@ provider = (
 # ... single ProviderFactory.create(provider, ...) call — raises ValueError on failure
 ```
 
-**`lib/providers/factory.py`** — `ProviderFactory.create()`:
+**`src/vaultspec_a2a/providers/factory.py`** — `ProviderFactory.create()`:
 
 ```python
 def create(self, provider: Provider, ...) -> BaseChatModel:
@@ -166,7 +166,7 @@ agent = "coder"
 
 ### Pydantic Schema Changes
 
-**`lib/core/team_config.py`**:
+**`src/vaultspec_a2a/core/team_config.py`**:
 
 ```python
 class TeamDefaultsConfig(BaseModel):
@@ -247,7 +247,7 @@ CreateThreadRequest.autonomous: bool = False
 
 `interrupt_before=[]` always — the interrupt mechanism is the `interrupt()` call inside `worker_node`, not pre-node graph pauses.
 
-**`AgentPermissionsConfig`** (ADR-012 §6, `lib/core/team_config.py`):
+**`AgentPermissionsConfig`** (ADR-012 §6, `src/vaultspec_a2a/core/team_config.py`):
 
 ```python
 class AgentPermissionsConfig(BaseModel):
@@ -277,7 +277,7 @@ auto_approve = true           # NEW: team defaults to autonomous mode
 
 ### Pydantic Schema Changes
 
-**New `TeamPermissionsConfig`** in `lib/core/team_config.py`:
+**New `TeamPermissionsConfig`** in `src/vaultspec_a2a/core/team_config.py`:
 
 ```python
 class TeamPermissionsConfig(BaseModel):
@@ -295,7 +295,7 @@ class TeamConfig(BaseModel):
 
 ### Endpoint Integration
 
-In `POST /threads` endpoint (`lib/api/endpoints.py`), after loading `TeamConfig`:
+In `POST /threads` endpoint (`src/vaultspec_a2a/api/endpoints.py`), after loading `TeamConfig`:
 
 ```python
 team_config = load_team_config(req.team_preset)
@@ -336,7 +336,7 @@ auto_approve = true    # solo-coder is headless by default
 
 ### Current State
 
-**`lib/core/presets/agents/supervisor.toml`**:
+**`src/vaultspec_a2a/core/presets/agents/supervisor.toml`**:
 
 ```toml
 [agent]
@@ -353,7 +353,7 @@ You are Grand Architect, an expert software engineering team supervisor...
 """
 ```
 
-**`lib/core/graph.py`** — `_build_supervisor_prompt()`:
+**`src/vaultspec_a2a/core/graph.py`** — `_build_supervisor_prompt()`:
 
 ```python
 def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig) -> str:
@@ -398,7 +398,7 @@ directive = "..."
 
 ### Pydantic Schema Changes
 
-**New `TeamPersonaConfig`** in `lib/core/team_config.py`:
+**New `TeamPersonaConfig`** in `src/vaultspec_a2a/core/team_config.py`:
 
 ```python
 class TeamPersonaConfig(BaseModel):
@@ -496,7 +496,7 @@ From ADR-013 and the existing preset files:
 
 **Current**: `settings.graph_node_timeout_seconds = 300` (global, from env var only).
 
-**Graph wiring** (`lib/core/graph.py`):
+**Graph wiring** (`src/vaultspec_a2a/core/graph.py`):
 
 ```python
 compiled = graph.compile(
@@ -542,7 +542,7 @@ max_attempts = 3                # RetryPolicy(max_attempts=3)
 retry_on_timeout = true         # retry on asyncio.TimeoutError
 ```
 
-**Implementation** (`lib/core/graph.py`):
+**Implementation** (`src/vaultspec_a2a/core/graph.py`):
 
 ```python
 from langgraph.pregel import RetryPolicy
@@ -595,7 +595,7 @@ max_attempts = 3               # RetryPolicy max_attempts (only if retry_on_exce
 
 ### Pydantic Schema Changes
 
-**New `TeamGraphConfig`** in `lib/core/team_config.py`:
+**New `TeamGraphConfig`** in `src/vaultspec_a2a/core/team_config.py`:
 
 ```python
 class TeamGraphConfig(BaseModel):
@@ -636,22 +636,22 @@ class TeamConfig(BaseModel):
 
 ### TOML Presets
 
-- `lib/core/presets/teams/coding-star.toml` → rename + add `[team.permissions]`, `[team.persona]`, `[team.graph]`
-- `lib/core/presets/teams/coding-pipeline.toml` → same
-- `lib/core/presets/teams/coding-loop.toml` → same (+ `auto_approve = false`, directive for loop guidance)
-- `lib/core/presets/teams/solo-coder.toml` → same (+ `auto_approve = true`)
+- `src/vaultspec_a2a/core/presets/teams/coding-star.toml` → rename + add `[team.permissions]`, `[team.persona]`, `[team.graph]`
+- `src/vaultspec_a2a/core/presets/teams/coding-pipeline.toml` → same
+- `src/vaultspec_a2a/core/presets/teams/coding-loop.toml` → same (+ `auto_approve = false`, directive for loop guidance)
+- `src/vaultspec_a2a/core/presets/teams/solo-coder.toml` → same (+ `auto_approve = true`)
 
 ### Python Schema
 
-- `lib/core/team_config.py` — add `TeamPermissionsConfig`, `TeamPersonaConfig`, `TeamGraphConfig`; update `TeamConfig`
+- `src/vaultspec_a2a/core/team_config.py` — add `TeamPermissionsConfig`, `TeamPersonaConfig`, `TeamGraphConfig`; update `TeamConfig`
 
 ### Core Graph
 
-- `lib/core/graph.py` — `_build_supervisor_prompt()` (persona directive injection), `_resolve_model_for_worker()` (fallback chain), `compile_team_graph()` (step_timeout, recursion_limit from team config)
+- `src/vaultspec_a2a/core/graph.py` — `_build_supervisor_prompt()` (persona directive injection), `_resolve_model_for_worker()` (fallback chain), `compile_team_graph()` (step_timeout, recursion_limit from team config)
 
 ### API Endpoint
 
-- `lib/api/endpoints.py` — `CreateThreadRequest.autonomous: bool | None = None`, team default resolution
+- `src/vaultspec_a2a/api/endpoints.py` — `CreateThreadRequest.autonomous: bool | None = None`, team default resolution
 
 ### ADRs
 
@@ -662,10 +662,10 @@ class TeamConfig(BaseModel):
 
 ## References
 
-- `lib/core/team_config.py` — Pydantic models for all TOML config
-- `lib/core/presets/teams/*.toml` — all 4 built-in preset files
-- `lib/core/presets/agents/supervisor.toml` — supervisor persona template
-- `lib/core/graph.py` — `_resolve_model_for_worker()`, `_build_supervisor_prompt()`, `compile_team_graph()`
-- `lib/providers/factory.py` — `ProviderFactory.create()` (raises on failure)
+- `src/vaultspec_a2a/core/team_config.py` — Pydantic models for all TOML config
+- `src/vaultspec_a2a/core/presets/teams/*.toml` — all 4 built-in preset files
+- `src/vaultspec_a2a/core/presets/agents/supervisor.toml` — supervisor persona template
+- `src/vaultspec_a2a/core/graph.py` — `_resolve_model_for_worker()`, `_build_supervisor_prompt()`, `compile_team_graph()`
+- `src/vaultspec_a2a/providers/factory.py` — `ProviderFactory.create()` (raises on failure)
 - `docs/adrs/012-agent-definition-schema.md` — agent TOML schema
 - `docs/adrs/013-team-composition-topology.md` — team TOML schema, §2.3 model resolution, §2.7 interrupt_before, §2.9 preset list

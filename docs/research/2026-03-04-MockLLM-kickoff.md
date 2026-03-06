@@ -44,7 +44,3 @@ The mock infrastructure must be full featured so the ui can receive full trace o
 ## Context (not much)
 
 The docs/audits folder contains traces and findings, as well as the docs/plans folders. If you find the relevant docs you can see exactly the work that was done.
-
-## Obsolete code to retire
-
-Fixture server's is very likely obsolete after this. We do not want to reinvent the wheel but instead utilise the current pipeline with a full feature mock LLM.

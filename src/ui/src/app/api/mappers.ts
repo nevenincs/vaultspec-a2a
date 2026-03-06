@@ -28,7 +28,10 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
   return {
     thread_id: wire.thread_id,
     title: wire.title ?? 'Untitled',
+    status: wire.status,
     agent_state: wire.agent_state ?? 'submitted',
+    team_preset: wire.team_preset ?? undefined,
+    created_at: wire.created_at,
     updated_at: wire.updated_at,
     nickname: wire.nickname ?? undefined,
     feature_tag: wire.feature_tag ?? undefined,
@@ -44,6 +47,11 @@ export function mapAgentSummary(
     agent_id: wire.agent_id,
     node_name: wire.node_name,
     state: wire.state,
+    provider: wire.provider ?? null,
+    model: wire.model ?? null,
+    role: wire.role ?? '',
+    display_name: wire.display_name ?? '',
+    description: wire.description ?? '',
   };
 }
 
@@ -52,8 +60,8 @@ export function mapTeamPreset(wire: TeamPresetSummary): TeamPreset {
     id: wire.id,
     name: wire.display_name,
     topology: wire.topology as TeamPreset['topology'],
-    agents: [],
     description: wire.description,
+    worker_count: wire.worker_count,
   };
 }
 
@@ -68,7 +76,7 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
     message: wire.description,
     options: wire.options.map((o) => ({
       id: o.option_id,
-      kind: o.kind as PermissionRequest['options'][0]['kind'],
+      kind: o.kind,
       label: o.name,
     })),
   };
@@ -77,10 +85,13 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
 const FRONTEND_TOOL_KINDS = new Set<string>([
   'read',
   'edit',
+  'delete',
+  'move',
   'search',
   'execute',
-  'browser',
-  'mcp',
+  'think',
+  'fetch',
+  'switch_mode',
   'other',
 ]);
 

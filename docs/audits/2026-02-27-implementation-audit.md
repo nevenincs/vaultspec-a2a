@@ -18,7 +18,7 @@ related:
 
 ---
 
-## Module: lib/core/team_config.py (NEW — Task #2)
+## Module: src/vaultspec_a2a/core/team_config.py (NEW — Task #2)
 
 | Check                                             | ADR                         | Result |
 | ------------------------------------------------- | --------------------------- | ------ |
@@ -35,7 +35,7 @@ related:
 
 ---
 
-## Module: lib/core/presets/agents/\*.toml (NEW — Task #3)
+## Module: src/vaultspec_a2a/core/presets/agents/\*.toml (NEW — Task #3)
 
 | Check                                                                                    | ADR          | Result |
 | ---------------------------------------------------------------------------------------- | ------------ | ------ |
@@ -50,7 +50,7 @@ related:
 
 ---
 
-## Module: lib/core/presets/teams/\*.toml (NEW — Task #3)
+## Module: src/vaultspec_a2a/core/presets/teams/\*.toml (NEW — Task #3)
 
 | Check                                                                             | ADR          | Result |
 | --------------------------------------------------------------------------------- | ------------ | ------ |
@@ -64,7 +64,7 @@ related:
 
 ---
 
-## Module: lib/core/graph.py (REFACTORED — Task #4)
+## Module: src/vaultspec_a2a/core/graph.py (REFACTORED — Task #4)
 
 | Check                                                                        | ADR          | Result |
 | ---------------------------------------------------------------------------- | ------------ | ------ |
@@ -88,7 +88,7 @@ related:
 
 ---
 
-## Module: lib/core/state.py (MODIFIED — Task #5)
+## Module: src/vaultspec_a2a/core/state.py (MODIFIED — Task #5)
 
 | Check                                         | ADR              | Result |
 | --------------------------------------------- | ---------------- | ------ |
@@ -100,7 +100,7 @@ related:
 
 ---
 
-## Module: lib/providers/acp_chat_model.py (MODIFIED — Task #5)
+## Module: src/vaultspec_a2a/providers/acp_chat_model.py (MODIFIED — Task #5)
 
 | Check                                                                      | ADR                         | Result                  |
 | -------------------------------------------------------------------------- | --------------------------- | ----------------------- |
@@ -123,7 +123,7 @@ related:
 
 ---
 
-## Module: lib/providers/factory.py (MODIFIED — Task #5)
+## Module: src/vaultspec_a2a/providers/factory.py (MODIFIED — Task #5)
 
 | Check                                                                    | ADR              | Result |
 | ------------------------------------------------------------------------ | ---------------- | ------ |
@@ -137,7 +137,7 @@ related:
 
 ---
 
-## Module: lib/core/**init**.py (MODIFIED — Tasks #2, #5)
+## Module: src/vaultspec_a2a/core/**init**.py (MODIFIED — Tasks #2, #5)
 
 | Check                                                      | ADR     | Result |
 | ---------------------------------------------------------- | ------- | ------ |
@@ -148,7 +148,7 @@ related:
 
 ---
 
-## Module: lib/api/schemas/rest.py (MODIFIED — Task #6)
+## Module: src/vaultspec_a2a/api/schemas/rest.py (MODIFIED — Task #6)
 
 | Check                                                                                  | ADR          | Result                  |
 | -------------------------------------------------------------------------------------- | ------------ | ----------------------- |
@@ -162,7 +162,7 @@ related:
 
 ---
 
-## Module: lib/api/endpoints.py (MODIFIED — Task #6)
+## Module: src/vaultspec_a2a/api/endpoints.py (MODIFIED — Task #6)
 
 | Check                                             | ADR          | Result |
 | ------------------------------------------------- | ------------ | ------ |
@@ -174,7 +174,7 @@ related:
 
 ---
 
-## Module: lib/protocols/mcp/server.py (NEW — Task #7)
+## Module: src/vaultspec_a2a/protocols/mcp/server.py (NEW — Task #7)
 
 | Check                                           | ADR                 | Result |
 | ----------------------------------------------- | ------------------- | ------ |
@@ -187,7 +187,7 @@ related:
 
 ---
 
-## Module: lib/protocols/mcp/**init**.py (NEW — Task #7)
+## Module: src/vaultspec_a2a/protocols/mcp/**init**.py (NEW — Task #7)
 
 | Check                                             | ADR     | Result |
 | ------------------------------------------------- | ------- | ------ |
@@ -196,7 +196,7 @@ related:
 
 ---
 
-## Module: lib/protocols/**init**.py (MODIFIED — Task #7)
+## Module: src/vaultspec_a2a/protocols/**init**.py (MODIFIED — Task #7)
 
 | Check                                          | ADR     | Result |
 | ---------------------------------------------- | ------- | ------ |
@@ -206,7 +206,7 @@ related:
 
 ---
 
-## Module: lib/api/app.py (MODIFIED — Task #7)
+## Module: src/vaultspec_a2a/api/app.py (MODIFIED — Task #7)
 
 | Check                                                | ADR     | Result |
 | ---------------------------------------------------- | ------- | ------ |
@@ -222,7 +222,7 @@ related:
 
 ---
 
-## Module: lib/core/exceptions.py (MODIFIED — Tasks #2, #7)
+## Module: src/vaultspec_a2a/core/exceptions.py (MODIFIED — Tasks #2, #7)
 
 | Check                                        | ADR          | Result |
 | -------------------------------------------- | ------------ | ------ |
@@ -232,7 +232,7 @@ related:
 
 ---
 
-## Module: lib/core/tests/test_exceptions.py (MODIFIED — Task #7)
+## Module: src/vaultspec_a2a/core/tests/test_exceptions.py (MODIFIED — Task #7)
 
 | Check                                             | ADR       | Result |
 | ------------------------------------------------- | --------- | ------ |
@@ -243,7 +243,7 @@ related:
 
 ---
 
-## Module: lib/core/tests/test_graph.py (MODIFIED — Task #4)
+## Module: src/vaultspec_a2a/core/tests/test_graph.py (MODIFIED — Task #4)
 
 | Check                                                                           | ADR          | Result |
 | ------------------------------------------------------------------------------- | ------------ | ------ |
@@ -256,7 +256,7 @@ related:
 
 ---
 
-## Module: lib/api/schemas/**init**.py (EXISTING — verified)
+## Module: src/vaultspec_a2a/api/schemas/**init**.py (EXISTING — verified)
 
 | Check                                                  | ADR        | Result |
 | ------------------------------------------------------ | ---------- | ------ |
@@ -266,7 +266,7 @@ related:
 
 ---
 
-## Module: lib/core/aggregator.py (EXISTING — verified)
+## Module: src/vaultspec_a2a/core/aggregator.py (EXISTING — verified)
 
 | Check                                  | ADR        | Result |
 | -------------------------------------- | ---------- | ------ |
@@ -280,7 +280,7 @@ related:
 
 ---
 
-## Module: lib/api/websocket.py (EXISTING — verified)
+## Module: src/vaultspec_a2a/api/websocket.py (EXISTING — verified)
 
 | Check                                           | ADR          | Result |
 | ----------------------------------------------- | ------------ | ------ |
@@ -311,7 +311,7 @@ related:
 
 ### FINDING-1:`session/cancel`as notification (MEDIUM)
 
-- **File:**`lib/providers/acp_chat_model.py:254-258`
+- **File:**`src/vaultspec_a2a/providers/acp_chat_model.py:254-258`
 - **ADR:** ADR-006 §5.1 point 6
 - **Issue:** `_cleanup_session`calls`_send_notification("session/cancel",
 ...)`which sends without a JSON-RPC`id` field (making it a notification) and
@@ -322,22 +322,22 @@ related:
 
 ### FINDING-2:`_AgentStatusEntry`missing ADR-012 §6 fields (MEDIUM)
 
-- **File:**`lib/api/schemas/rest.py:74-81`
+- **File:**`src/vaultspec_a2a/api/schemas/rest.py:74-81`
 - **ADR:** ADR-012 §6
 - **Issue:** `_AgentStatusEntry`only has`agent_id`, `node_name`, `state`,
   `provider`, `model`. Missing `role`, `display_name`, `description`fields per
   ADR-012 §6 wire contract amendment.
 - **Action:** Track as separate enhancement task.
 
-### FINDING-3:`lib/providers/__init__.py`is empty (LOW)
+### FINDING-3:`src/vaultspec_a2a/providers/__init__.py`is empty (LOW)
 
-- **File:**`lib/providers/__init__.py`
+- **File:**`src/vaultspec_a2a/providers/__init__.py`
 - **ADR:** ADR-009 §5.2
 - **Issue:** The providers facade `__init__.py`does not
   re-export`AcpChatModel`or`ProviderFactory`. Consumers must deep-import from
   sub-modules.
 - **Note:** This may be intentional to avoid circular imports (similar to
-  `lib/api/__init__.py`). If so, should be documented with a comment explaining
+  `src/vaultspec_a2a/api/__init__.py`). If so, should be documented with a comment explaining
   why.
 
 ---

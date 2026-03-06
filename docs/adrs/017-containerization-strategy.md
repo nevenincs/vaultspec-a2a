@@ -136,7 +136,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # Phase 2: install project + copy source
 COPY lib/ ./lib/
-COPY --from=frontend-build /app/src/ui/build ./lib/api/static/
+COPY --from=frontend-build /app/src/ui/build ./src/vaultspec_a2a/api/static/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen --no-editable
@@ -159,7 +159,7 @@ CMD ["uv", "run", "vaultspec"]
 - **`UV_PYTHON_DOWNLOADS=never`**: use the image's Python, don't download
 - **Non-root user**: security best practice
 
-### 3.2 docker-compose.yml
+### 3.2 docker-compose.dev.yml
 
 ```yaml
 services:

@@ -31,7 +31,7 @@ scenarios.
 
 ### Finding: Loop Router Always Defaults to FINISH
 
-**Location:** `lib/core/graph.py:325-336` (\_loop_router function)
+**Location:** `src/vaultspec_a2a/core/graph.py:325-336` (\_loop_router function)
 
 ```python
 def _loop_router(state: TeamState) -> str:
@@ -90,7 +90,7 @@ return state.get("next_action", "FINISH")  # with explicit "revise" set
 
 ### Finding: Loop Counter Wrapper Runs AFTER Interrupt
 
-**Location:** `lib/core/graph.py:287-301` (loop_node_with_counter wrapper)
+**Location:** `src/vaultspec_a2a/core/graph.py:287-301` (loop_node_with_counter wrapper)
 
 ```python
 async def _loop_node_with_counter(
@@ -147,7 +147,7 @@ def increment_counter(state: TeamState):
 
 ### Finding: Only 5 Event Types Handled; v2 Emits ~15
 
-**Location:** `lib/core/aggregator.py:696-769`(process_langgraph_event)
+**Location:** `src/vaultspec_a2a/core/aggregator.py:696-769`(process_langgraph_event)
 
 ### Handled Events
 
@@ -187,7 +187,7 @@ if event_kind == "on_tool_error":
 
 ### Finding: Default Recursion Limit May Be Too Low
 
-**Location:** `lib/core/graph.py:141-144` (compile_team_graph)
+**Location:** `src/vaultspec_a2a/core/graph.py:141-144` (compile_team_graph)
 
 ```python
 return builder.compile(
@@ -243,7 +243,7 @@ scenarios.
 
 ### Finding: Possible Checkpointer Issues with Optional State Fields
 
-**Location:** `lib/core/state.py:100`
+**Location:** `src/vaultspec_a2a/core/state.py:100`
 
 ```python
 class TeamState(TypedDict):
@@ -279,7 +279,7 @@ No action needed. This pattern is canonical in LangGraph.
 
 ### Finding: Single Resume Value Per Node Execution
 
-**Location:** `lib/core/nodes/worker.py:47-61` (\_interrupt_permission_callback)
+**Location:** `src/vaultspec_a2a/core/nodes/worker.py:47-61` (\_interrupt_permission_callback)
 
 ```python
 resume_value = interrupt(
@@ -334,7 +334,7 @@ execution must use separate`interrupt()`calls.
 
 ### Finding: Single Agent ID Assigned to Multi-Node Events
 
-**Location:**`lib/core/aggregator.py:775-809` (ingest method)
+**Location:**`src/vaultspec_a2a/core/aggregator.py:775-809` (ingest method)
 
 ```python
 async def ingest(

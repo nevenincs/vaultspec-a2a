@@ -26,31 +26,31 @@ All work is in the single `main`worktree (no git worktrees in use yet).
 
 | Module                             | Files                                                                     | Status   |
 | ---------------------------------- | ------------------------------------------------------------------------- | -------- |
-| `lib/core/exceptions.py`           | 11 exception classes, error taxonomy                                      | COMPLETE |
-| `lib/core/state.py`                | `TeamState`TypedDict, 3 reducers                                          | COMPLETE |
-| `lib/core/context.py`              | `compact_context`, `estimate_tokens`, `prepare_handoff`, `should_compact` | COMPLETE |
-| `lib/core/models.py`               | `ArtifactRef`, `PlanEntry`, `TokenUsageEntry`dataclasses                  | COMPLETE |
-| `lib/core/aggregator.py`           | `EventAggregator`with debounce, chunking, LangGraph ingest                | COMPLETE |
-| `lib/core/registry.py`             | `Registry`class — **stub only (2 lines)**                                 | STUB     |
-| `lib/core/permissions.py`          | `PermissionEngine`class — **stub only (2 lines)**                         | STUB     |
-| `lib/core/graph.py`                | (not audited — pre-existing)                                              | EXISTING |
-| `lib/core/nodes/worker.py`         | (not audited — pre-existing)                                              | EXISTING |
-| `lib/core/nodes/supervisor.py`     | (not audited — pre-existing)                                              | EXISTING |
-| `lib/api/schemas/`                 | 51 Pydantic types, 6 modules + facade                                     | COMPLETE |
-| `lib/api/websocket.py`             | `ConnectionManager`, heartbeat, command dispatch                          | COMPLETE |
-| `lib/api/endpoints.py`             | **Stub only (`router_placeholder`string)**                                | STUB     |
-| `lib/database/models.py`           | 4 SQLAlchemy models: Thread, Artifact, PermissionLog, CostTracking        | COMPLETE |
-| `lib/database/session.py`          | WAL mode, engine factory, session factory,`get_db`DI                      | COMPLETE |
-| `lib/database/crud.py`             | Full CRUD for all 4 models, pagination, aggregation                       | COMPLETE |
-| `lib/database/__init__.py`         | Facade re-exporting all 28 symbols                                        | COMPLETE |
-| `lib/database/migrations/`         | Directory exists,`__init__.py`only — **no migration tooling**             | STUB     |
-| `lib/workspace/git_manager.py`     | `GitManager`, mutex, create/remove/list/merge worktrees                   | COMPLETE |
-| `lib/workspace/environment.py`     | `resolve_venv`, `resolve_env_vars`                                        | COMPLETE |
-| `lib/telemetry/instrumentation.py` | `configure_telemetry`, `get_tracer`, `get_meter`, `TelemetryConfig`       | COMPLETE |
-| `lib/telemetry/middleware.py`      | `TelemetryMiddleware`, `ws_span`, `inject_trace_context`                  | COMPLETE |
-| `lib/providers/acp_chat_model.py`  | `AcpChatModel`BaseChatModel (pre-existing)                                | EXISTING |
-| `lib/providers/factory.py`         | Provider factory (pre-existing)                                           | EXISTING |
-| `lib/providers/probes/`            | Claude/Gemini/OpenAI/Zhipu health probes                                  | EXISTING |
+| `src/vaultspec_a2a/core/exceptions.py`           | 11 exception classes, error taxonomy                                      | COMPLETE |
+| `src/vaultspec_a2a/core/state.py`                | `TeamState`TypedDict, 3 reducers                                          | COMPLETE |
+| `src/vaultspec_a2a/core/context.py`              | `compact_context`, `estimate_tokens`, `prepare_handoff`, `should_compact` | COMPLETE |
+| `src/vaultspec_a2a/core/models.py`               | `ArtifactRef`, `PlanEntry`, `TokenUsageEntry`dataclasses                  | COMPLETE |
+| `src/vaultspec_a2a/core/aggregator.py`           | `EventAggregator`with debounce, chunking, LangGraph ingest                | COMPLETE |
+| `src/vaultspec_a2a/core/registry.py`             | `Registry`class — **stub only (2 lines)**                                 | STUB     |
+| `src/vaultspec_a2a/core/permissions.py`          | `PermissionEngine`class — **stub only (2 lines)**                         | STUB     |
+| `src/vaultspec_a2a/core/graph.py`                | (not audited — pre-existing)                                              | EXISTING |
+| `src/vaultspec_a2a/core/nodes/worker.py`         | (not audited — pre-existing)                                              | EXISTING |
+| `src/vaultspec_a2a/core/nodes/supervisor.py`     | (not audited — pre-existing)                                              | EXISTING |
+| `src/vaultspec_a2a/api/schemas/`                 | 51 Pydantic types, 6 modules + facade                                     | COMPLETE |
+| `src/vaultspec_a2a/api/websocket.py`             | `ConnectionManager`, heartbeat, command dispatch                          | COMPLETE |
+| `src/vaultspec_a2a/api/endpoints.py`             | **Stub only (`router_placeholder`string)**                                | STUB     |
+| `src/vaultspec_a2a/database/models.py`           | 4 SQLAlchemy models: Thread, Artifact, PermissionLog, CostTracking        | COMPLETE |
+| `src/vaultspec_a2a/database/session.py`          | WAL mode, engine factory, session factory,`get_db`DI                      | COMPLETE |
+| `src/vaultspec_a2a/database/crud.py`             | Full CRUD for all 4 models, pagination, aggregation                       | COMPLETE |
+| `src/vaultspec_a2a/database/__init__.py`         | Facade re-exporting all 28 symbols                                        | COMPLETE |
+| `src/vaultspec_a2a/database/migrations/`         | Directory exists,`__init__.py`only — **no migration tooling**             | STUB     |
+| `src/vaultspec_a2a/workspace/git_manager.py`     | `GitManager`, mutex, create/remove/list/merge worktrees                   | COMPLETE |
+| `src/vaultspec_a2a/workspace/environment.py`     | `resolve_venv`, `resolve_env_vars`                                        | COMPLETE |
+| `src/vaultspec_a2a/telemetry/instrumentation.py` | `configure_telemetry`, `get_tracer`, `get_meter`, `TelemetryConfig`       | COMPLETE |
+| `src/vaultspec_a2a/telemetry/middleware.py`      | `TelemetryMiddleware`, `ws_span`, `inject_trace_context`                  | COMPLETE |
+| `src/vaultspec_a2a/providers/acp_chat_model.py`  | `AcpChatModel`BaseChatModel (pre-existing)                                | EXISTING |
+| `src/vaultspec_a2a/providers/factory.py`         | Provider factory (pre-existing)                                           | EXISTING |
+| `src/vaultspec_a2a/providers/probes/`            | Claude/Gemini/OpenAI/Zhipu health probes                                  | EXISTING |
 
 ---
 
@@ -66,7 +66,7 @@ All work is in the single `main`worktree (no git worktrees in use yet).
 | Branch naming`agent/{agent_id}`                       | COVERED     | `git_manager.py:123`                                             |
 | Worktree directory under`agent/`relative to repo root | COVERED     | `git_manager.py:124`                                             |
 | Preserve forensic state — no auto-cleanup on failure  | COVERED     | `remove_worktree` is manual-only, documented                     |
-| Agent Registry (`id→port→health`)                     | **MISSING** | `lib/core/registry.py`is a 2-line stub                           |
+| Agent Registry (`id→port→health`)                     | **MISSING** | `src/vaultspec_a2a/core/registry.py`is a 2-line stub                           |
 | Process Manager (Windows subprocess lifecycle)        | **MISSING** | No process spawning/health check implementation                  |
 | Port allocation for agent processes                   | **MISSING** | No port range or conflict resolution                             |
 | Windows Job Objects (zombie prevention)               | **MISSING** | Not addressed anywhere                                           |
@@ -100,7 +100,7 @@ model selection logic, and retry are unaddressed.
 | ----------------------------------------------------------------------------------------- | ----------- | --------------------------------------------- |
 | MCP state mapping (6 states: idle, working, input_required, completed, failed, cancelled) | COVERED     | `AgentLifecycleState`in`api/schemas/enums.py` |
 | `AgentLifecycleState`(wire) vs internal`AgentState`separation                             | COVERED     | Two distinct enums                            |
-| MCP Server exposing orchestrator as tool surface                                          | **MISSING** | `lib/protocols/mcp/`has only`__init__.py`stub |
+| MCP Server exposing orchestrator as tool surface                                          | **MISSING** | `src/vaultspec_a2a/protocols/mcp/`has only`__init__.py`stub |
 | A2A protocol abandoned per ADR-006                                                        | COVERED     | No A2A code present                           |
 | ACP bridging via`AcpChatModel`                                                            | COVERED     | Pre-existing provider implementation          |
 
@@ -113,7 +113,7 @@ model selection logic, and retry are unaddressed.
 
 | Requirement                                            | Status      | Notes                                            |
 | ------------------------------------------------------ | ----------- | ------------------------------------------------ |
-| `EventAggregator`as central bus                        | COVERED     | `lib/core/aggregator.py`— full implementation    |
+| `EventAggregator`as central bus                        | COVERED     | `src/vaultspec_a2a/core/aggregator.py`— full implementation    |
 | `astream_events(version="v2")`ingestion                | COVERED     | `aggregator.py:632-656`                          |
 | Event filtering (node boundary filter)                 | COVERED     | `_PASSTHROUGH_EVENTS`+`_NODE_BOUNDARY_EVENTS`    |
 | Per-thread monotonic sequence numbers                  | COVERED     | `_next_sequence`+`_sequences`dict                |
@@ -121,7 +121,7 @@ model selection logic, and retry are unaddressed.
 | Token chunk batching (50ms / 4KB)                      | COVERED     | `_buffer_message_chunk`                          |
 | Backpressure via bounded queue (512)                   | COVERED     | `_QUEUE_MAXSIZE = 512`                           |
 | State replay via`graph.get_state()` REST endpoint      | **MISSING** | REST endpoints are a stub (`endpoints.py`)       |
-| `WebSocket ConnectionManager`with heartbeat            | COVERED     | `lib/api/websocket.py`complete                   |
+| `WebSocket ConnectionManager`with heartbeat            | COVERED     | `src/vaultspec_a2a/api/websocket.py`complete                   |
 | Client subscription management (subscribe/unsubscribe) | COVERED     | `ConnectionManager`delegates to`EventAggregator` |
 
 **ADR-004 verdict: MOSTLY COVERED** — Core aggregator complete. State replay
@@ -137,7 +137,7 @@ REST endpoint is the only gap (blocked on Task 5).
 | shadcn-React components                               | COVERED     | 21 component sets installed                                                            |
 | Tailwind CSS v4                                       | COVERED     | Configured                                                                             |
 | TypeScript types from Pydantic schemas                | PARTIAL     | 473 manually-written TS types exist; openapi-typescript generation pipeline not set up |
-| Mock WebSocket adapter (`src/ui/src/lib/api/mock.ts`) | **MISSING** | ADR-011 §2.5 fixture/mock strategy not implemented                                     |
+| Mock WebSocket adapter (`src/ui/src/src/vaultspec_a2a/api/mock.ts`) | **MISSING** | ADR-011 §2.5 fixture/mock strategy not implemented                                     |
 | `src/ui/tests/fixtures/`recorded WS sessions          | **MISSING** | No Playwright fixture recordings                                                       |
 
 **ADR-005 verdict: PARTIAL** — SPA scaffolded. Type generation pipeline and mock
@@ -149,7 +149,7 @@ adapter are missing.
 
 | Requirement                                                              | Status      | Notes                                                                                     |
 | ------------------------------------------------------------------------ | ----------- | ----------------------------------------------------------------------------------------- |
-| LangGraph as core internal engine                                        | COVERED     | Architecture of`lib/core/`                                                                |
+| LangGraph as core internal engine                                        | COVERED     | Architecture of`src/vaultspec_a2a/core/`                                                                |
 | MCP for external tool boundary                                           | PARTIAL     | Consuming tools via LangChain MCP adapters is possible; exposing as MCP server is Task 10 |
 | `AcpChatModel`for CLI subprocess bridge                                  | COVERED     | Pre-existing                                                                              |
 | Claude subprocess:`node.exe <dist/index.js>`NOT .CMD shim                | COVERED     | Per existing`acp_chat_model.py`                                                           |
@@ -205,12 +205,12 @@ wiring (app.py, lifespan, StaticFiles, CORS) is completely absent and UNTRACKED.
 | Requirement                                | Status  | Notes                                                         |
 | ------------------------------------------ | ------- | ------------------------------------------------------------- |
 | `__all__`in all public modules             | COVERED | All audited modules have`__all__`                             |
-| `X as X`re-exports in`__init__.py`facades  | COVERED | `lib/database/__init__.py`, `lib/telemetry/__init__.py`, etc. |
+| `X as X`re-exports in`__init__.py`facades  | COVERED | `src/vaultspec_a2a/database/__init__.py`, `src/vaultspec_a2a/telemetry/__init__.py`, etc. |
 | Relative imports only within `lib/`        | COVERED | Enforced by ruff TID252                                       |
 | Consumer imports from sub-module root only | COVERED | Pattern followed                                              |
-| `lib/workspace/`module                     | COVERED | Facade`__init__.py`present                                    |
-| `lib/database/`module                      | COVERED | Complete facade                                               |
-| `lib/protocols/`— a2a/, mcp/, adapter/     | PARTIAL | Directories exist;`a2a/`, `mcp/`, `adapter/`are empty stubs   |
+| `src/vaultspec_a2a/workspace/`module                     | COVERED | Facade`__init__.py`present                                    |
+| `src/vaultspec_a2a/database/`module                      | COVERED | Complete facade                                               |
+| `src/vaultspec_a2a/protocols/`— a2a/, mcp/, adapter/     | PARTIAL | Directories exist;`a2a/`, `mcp/`, `adapter/`are empty stubs   |
 
 **ADR-009 verdict: MOSTLY COVERED** — Structural patterns enforced. Protocol
 sub-modules are empty stubs.
@@ -240,9 +240,9 @@ wired into the aggregator, WS manager, or graph execution layer.
 
 | Requirement                                          | Status      | Notes                                                                       |
 | ---------------------------------------------------- | ----------- | --------------------------------------------------------------------------- |
-| All 12 server event types                            | COVERED     | `lib/api/schemas/events.py`                                                 |
-| All 6 client command types                           | COVERED     | `lib/api/schemas/commands.py`                                               |
-| `AgentLifecycleState`(8 states)                      | COVERED     | `lib/api/schemas/enums.py`                                                  |
+| All 12 server event types                            | COVERED     | `src/vaultspec_a2a/api/schemas/events.py`                                                 |
+| All 6 client command types                           | COVERED     | `src/vaultspec_a2a/api/schemas/commands.py`                                               |
+| `AgentLifecycleState`(8 states)                      | COVERED     | `src/vaultspec_a2a/api/schemas/enums.py`                                                  |
 | Sequence numbers starting at 1                       | COVERED     | `_next_sequence`increments before first use                                 |
 | `ConnectedEvent`on open with active_threads          | COVERED     | `websocket.py:70-75`                                                        |
 | `HeartbeatEvent`every 30 seconds                     | COVERED     | `websocket.py:233-258`                                                      |
@@ -252,7 +252,7 @@ wired into the aggregator, WS manager, or graph execution layer.
 | Dead connection timeout at 90s (3 missed heartbeats) | **MISSING** | Client-side; no server-side enforcement                                     |
 | Reconnection protocol (§2.3, 7 steps)                | **MISSING** | Client-side only; no server snapshot endpoint                               |
 | TypeScript type generation (`openapi-typescript`)    | **MISSING** | Manual types exist; generation pipeline UNTRACKED                           |
-| `src/ui/src/lib/api/mock.ts`WS mock adapter          | **MISSING** | UNTRACKED                                                                   |
+| `src/ui/src/src/vaultspec_a2a/api/mock.ts`WS mock adapter          | **MISSING** | UNTRACKED                                                                   |
 | Schema fixture builder functions                     | PARTIAL     | Test file has some; not a formal builder module                             |
 
 **ADR-011 verdict: PARTIAL** — Wire contract schemas complete. REST endpoints
@@ -282,15 +282,15 @@ and TypeScript generation pipeline absent.
 | Item                                                    | Status      | Module                            | Notes                                                               |
 | ------------------------------------------------------- | ----------- | --------------------------------- | ------------------------------------------------------------------- |
 | Process Manager (Windows subprocess lifecycle)          | **MISSING** | none                              | CRITICAL — no task currently covers this                            |
-| Event Aggregator (multi-SSE fan-in, WS fan-out)         | COVERED     | `lib/core/aggregator.py`          |                                                                     |
-| Provider Adapter layer (per-provider CLI wrappers)      | PARTIAL     | `lib/providers/acp_chat_model.py` | Claude + Gemini. No formal`AgentAdapter`protocol.                   |
-| LLM Client abstraction (tool-calling translation)       | PARTIAL     | `lib/providers/factory.py`        | Factory exists; abstraction incomplete                              |
-| Permission Manager (runtime policy engine)              | **STUB**    | `lib/core/permissions.py`         | 2 lines                                                             |
+| Event Aggregator (multi-SSE fan-in, WS fan-out)         | COVERED     | `src/vaultspec_a2a/core/aggregator.py`          |                                                                     |
+| Provider Adapter layer (per-provider CLI wrappers)      | PARTIAL     | `src/vaultspec_a2a/providers/acp_chat_model.py` | Claude + Gemini. No formal`AgentAdapter`protocol.                   |
+| LLM Client abstraction (tool-calling translation)       | PARTIAL     | `src/vaultspec_a2a/providers/factory.py`        | Factory exists; abstraction incomplete                              |
+| Permission Manager (runtime policy engine)              | **STUB**    | `src/vaultspec_a2a/core/permissions.py`         | 2 lines                                                             |
 | Scoped MCP Tool Server (per-agent filesystem isolation) | **MISSING** | none                              | Task 10 is MCP server but path isolation not in scope               |
-| WebSocket Connection Manager (channel multiplexing)     | COVERED     | `lib/api/websocket.py`            |                                                                     |
-| Workspace Manager (git worktree lifecycle)              | COVERED     | `lib/workspace/git_manager.py`    |                                                                     |
+| WebSocket Connection Manager (channel multiplexing)     | COVERED     | `src/vaultspec_a2a/api/websocket.py`            |                                                                     |
+| Workspace Manager (git worktree lifecycle)              | COVERED     | `src/vaultspec_a2a/workspace/git_manager.py`    |                                                                     |
 | Message Router (user→correct agent routing)             | **MISSING** | none                              | SEND_MESSAGE command handler is a log stub in`websocket.py:166-172` |
-| Agent Registry (id→port→health mapping)                 | **STUB**    | `lib/core/registry.py`            | 2 lines                                                             |
+| Agent Registry (id→port→health mapping)                 | **STUB**    | `src/vaultspec_a2a/core/registry.py`            | 2 lines                                                             |
 
 ---
 
@@ -324,7 +324,7 @@ These items have no assigned task and are not blocked by pending tasks:
 | Item                                                                         | ADR Reference     | Severity |
 | ---------------------------------------------------------------------------- | ----------------- | -------- |
 | TypeScript type generation via`openapi-typescript`pipeline                   | ADR-011 §2.4      | MEDIUM   |
-| `src/ui/src/lib/api/mock.ts`WS mock adapter for frontend dev                 | ADR-011 §2.5      | MEDIUM   |
+| `src/ui/src/src/vaultspec_a2a/api/mock.ts`WS mock adapter for frontend dev                 | ADR-011 §2.5      | MEDIUM   |
 | Database migration tooling (currently no`alembic`or custom migration runner) | ADR-007, Gap 7    | MEDIUM   |
 | Prompt templates per agent role (system prompts)                             | ADR-002, Gap 2    | MEDIUM   |
 | LLM API retry/backoff logic                                                  | ADR-002, Gap 2    | MEDIUM   |
@@ -344,7 +344,7 @@ The following new tasks should be created to close the untracked gaps:
 
 ### Priority: CRITICAL — blocks all integration
 
-Build`lib/app.py`or`lib/api/app.py`:
+Build`src/vaultspec_a2a/app.py`or`src/vaultspec_a2a/api/app.py`:
 
 - `@asynccontextmanager`lifespan with`anyio.create_task_group()`
 - Startup order: `init_db()`→`configure_telemetry()`→`EventAggregator`start
@@ -369,13 +369,13 @@ Task 5 exists but the scope must explicitly cover:
 
 ### Priority: HIGH
 
-Implement`lib/core/registry.py`:
+Implement`src/vaultspec_a2a/core/registry.py`:
 
 - `agent_id → {state, port, pid, health_url}`mapping
 - State machine: init → ready → running → draining → stopped → error
 - Stale entry detection + cleanup
 
-Implement`lib/core/process_manager.py`:
+Implement`src/vaultspec_a2a/core/process_manager.py`:
 
 - Windows subprocess lifecycle using `asyncio.create_subprocess_exec`
 - Port allocation from configurable range with conflict detection
@@ -387,7 +387,7 @@ Implement`lib/core/process_manager.py`:
 
 ### Priority: HIGH — prerequisite for Task 6
 
-Task 6 scope exists but `lib/core/permissions.py`must be implemented:
+Task 6 scope exists but `src/vaultspec_a2a/core/permissions.py`must be implemented:
 
 - Per-tool-type granularity vs per-call (configurable)
 - In-memory pending request queue (keyed by`request_id`)
@@ -400,10 +400,10 @@ Task 6 scope exists but `lib/core/permissions.py`must be implemented:
 
 ### Priority: HIGH — ADR-010 compliance
 
-`lib/core/aggregator.py`: Add `ws_span()`around`ingest()`and`_broadcast()`
-`lib/api/websocket.py`: Add `ws_span()`around`connect()`, `listen()`,
+`src/vaultspec_a2a/core/aggregator.py`: Add `ws_span()`around`ingest()`and`_broadcast()`
+`src/vaultspec_a2a/api/websocket.py`: Add `ws_span()`around`connect()`, `listen()`,
 `_handle_client_message()`
-`lib/telemetry/instrumentation.py`: Add `get_meter()`usage for token count, WS
+`src/vaultspec_a2a/telemetry/instrumentation.py`: Add `get_meter()`usage for token count, WS
 connection count, active threads
 Add OTel span propagation from incoming WS frame`_trace`field
 
@@ -414,7 +414,7 @@ Add OTel span propagation from incoming WS frame`_trace`field
 - Register all Pydantic schemas on FastAPI endpoints (needed for OpenAPI export)
 - Document`npx openapi-typescript http://localhost:8000/openapi.json`command
 - Add CI step validating generated types match current spec
-- Implement`src/ui/src/lib/api/mock.ts`WS mock adapter
+- Implement`src/ui/src/src/vaultspec_a2a/api/mock.ts`WS mock adapter
 
 ---
 
@@ -453,7 +453,7 @@ Add OTel span propagation from incoming WS frame`_trace`field
 
 ### What is missing or stubbed
 
--`lib/api/endpoints.py`— placeholder string, zero implementation -`lib/core/registry.py`— 2-line stub -`lib/core/permissions.py`— 2-line stub -`lib/protocols/mcp/`, `a2a/`, `adapter/` — empty directories
+-`src/vaultspec_a2a/api/endpoints.py`— placeholder string, zero implementation -`src/vaultspec_a2a/core/registry.py`— 2-line stub -`src/vaultspec_a2a/core/permissions.py`— 2-line stub -`src/vaultspec_a2a/protocols/mcp/`, `a2a/`, `adapter/` — empty directories
 
 - No FastAPI application (`app.py`) — no lifespan, no CORS, no StaticFiles, no
   WS route

@@ -9,7 +9,7 @@ coding CLI/IDE consumers, LangGraph protocol, and A2A protocol.
 
 ## 1. Current MCP Server — Complete Inventory
 
-**File:** `lib/protocols/mcp/server.py` (278 lines)
+**File:** `src/vaultspec_a2a/protocols/mcp/server.py` (278 lines)
 **Framework:** `mcp.server.fastmcp.FastMCP`
 **Server name:** `vaultspec-orchestrator`
 
@@ -58,7 +58,7 @@ coding CLI/IDE consumers, LangGraph protocol, and A2A protocol.
 
 ## 2. REST Endpoint Inventory (full control surface)
 
-The following REST endpoints exist in `lib/api/endpoints.py`. Only 3 are currently MCP-wrapped.
+The following REST endpoints exist in `src/vaultspec_a2a/api/endpoints.py`. Only 3 are currently MCP-wrapped.
 
 | Endpoint                    | Method | MCP-Exposed?                | Purpose                                                  |
 | --------------------------- | ------ | --------------------------- | -------------------------------------------------------- |
@@ -205,7 +205,7 @@ The A2A protocol mandates these core operations for a compliant agent server:
 ### workspace_root threading
 
 `start_thread(workspace_root=...)` must map to `CreateThreadRequest.metadata.workspace_root`.
-The full `ThreadMetadata` model (from `lib/core/metadata.py`) is:
+The full `ThreadMetadata` model (from `src/vaultspec_a2a/core/metadata.py`) is:
 
 - `workspace_root: str` (required when metadata is provided)
 - `feature_tag: str | None`
@@ -252,10 +252,10 @@ None of these are required for Cursor/Windsurf/Claude Code integration, which us
 
 ## 8. References
 
-- `lib/protocols/mcp/server.py` — current MCP server implementation
-- `lib/api/endpoints.py` — all REST endpoints (full read)
-- `lib/api/schemas/rest.py` — `CreateThreadRequest`, `SendMessageRequest` schemas
-- `lib/core/metadata.py` — `ThreadMetadata` model (ADR-014)
+- `src/vaultspec_a2a/protocols/mcp/server.py` — current MCP server implementation
+- `src/vaultspec_a2a/api/endpoints.py` — all REST endpoints (full read)
+- `src/vaultspec_a2a/api/schemas/rest.py` — `CreateThreadRequest`, `SendMessageRequest` schemas
+- `src/vaultspec_a2a/core/metadata.py` — `ThreadMetadata` model (ADR-014)
 - `docs/adrs/012-agent-definition-schema.md` — agent TOML schema
 - `docs/adrs/013-team-composition-topology.md` — team TOML schema, preset discovery
 - `knowledge/repositories/A2A/docs/topics/key-concepts.md` — A2A core concepts

@@ -161,7 +161,7 @@ already a transitional name.
 | `.env.example` | `LANGCHAIN_API_KEY=`, `LANGCHAIN_TRACING_V2=true`, `LANGCHAIN_PROJECT=vaultspec-dev` | Rename to `LANGSMITH_*` equivalents; add comment noting legacy aliases still work |
 | `CLAUDE.md` / `GEMINI.md` | References `LANGCHAIN_TRACING_V2` and `LANGCHAIN_API_KEY` in testing sections | Update to `LANGSMITH_TRACING` + `LANGSMITH_API_KEY` |
 | `ADR-027` | `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` in §2.0 Layer 2 | Update to `LANGSMITH_TRACING` + `LANGSMITH_API_KEY` |
-| `lib/core/instrumentation.py` | Reads `LANGCHAIN_*` vars (if present) | Add `LANGSMITH_*` as primary; keep `LANGCHAIN_*` as fallback or remove |
+| `src/vaultspec_a2a/core/instrumentation.py` | Reads `LANGCHAIN_*` vars (if present) | Add `LANGSMITH_*` as primary; keep `LANGCHAIN_*` as fallback or remove |
 | `.claude/agents/testing-rules.md` | `LANGCHAIN_TRACING_V2=true` + `LANGCHAIN_API_KEY` | Update to `LANGSMITH_*` |
 
 ### The `.env` file (not `.env.example`)

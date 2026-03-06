@@ -22,7 +22,7 @@ The outstanding question is what to do about the builtin rules. The concern is c
 
 Currently, the LangGraph orchestration engine in `vaultspec-a2a` completely lacks a mechanism to discover and load these project rules into its execution context. 
 
-When `lib/core/anchoring.py` constructs the base `SystemMessage` for an agent, it includes only the agent's intrinsic behavioral persona (from the TOML definition). 
+When `src/vaultspec_a2a/core/anchoring.py` constructs the base `SystemMessage` for an agent, it includes only the agent's intrinsic behavioral persona (from the TOML definition). 
 
 Consequently, **none of the project-defined mandates end up in the LangGraph pipeline**. All agents across all supported providers (OpenAI, Zhipu, Claude, Gemini) operate completely blind to the project-specific coding mandates that govern the repository they are working in. This leads to agents generating code that violates the project's established standards.
 
@@ -31,13 +31,13 @@ Consequently, **none of the project-defined mandates end up in the LangGraph pip
 To ensuring LangGraph context availability for project-set rules, we propose implementing a universal discovery and transclusion mechanism:
 
 **1. Rule Discovery (`RuleManager`)**
-We will implement a `RuleManager` in `lib/core/rules.py`
+We will implement a `RuleManager` in `src/vaultspec_a2a/core/rules.py`
 
 **2. Rule Compilation and Transclusion**
 The `RuleManager` will parse these discovered rule files, strip out any YAML frontmatter (which is for IDE metadata, not LLM context), and resolve any internal `@includes` (a vaultspec feature).
 
 **3. LangGraph Context Injection**
-In `lib/core/anchoring.py`, the `build_anchoring_context` function will be updated. It will call the `RuleManager` to retrieve the active project mandates. These rules will be concatenated into a unified `## Project Coding Rules & Guidelines` block and injected into the LangGraph `SystemMessage` immediately *after* the agent's primary persona.
+In `src/vaultspec_a2a/core/anchoring.py`, the `build_anchoring_context` function will be updated. It will call the `RuleManager` to retrieve the active project mandates. These rules will be concatenated into a unified `## Project Coding Rules & Guidelines` block and injected into the LangGraph `SystemMessage` immediately *after* the agent's primary persona.
 
 This ensures that every agent, regardless of whether it is powered by an ACP wrapper or a native API, explicitly receives all project mandates in its context pipeline.
 

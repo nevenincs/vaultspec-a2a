@@ -47,7 +47,7 @@ critical challenges:
   (Claude, Gemini) because those SDKs strictly expect developer
   `x-api-key` headers and reject consumer OAuth tokens with `401
 Unauthorized`. Instead, we build `AcpChatModel` — a custom
-  `BaseChatModel` in `lib/providers/acp_chat_model.py` — that spawns
+  `BaseChatModel` in `src/vaultspec_a2a/providers/acp_chat_model.py` — that spawns
   the provider's CLI as a managed subprocess and communicates via
   JSON-RPC over `stdio`.
   - **Zero PTY / Zero Batch:** Subprocesses are invoked without a PTY
@@ -61,7 +61,7 @@ Unauthorized`. Instead, we build `AcpChatModel` — a custom
   (Claude, Gemini) because those SDKs strictly expect developer
   `x-api-key` headers and reject consumer OAuth tokens with `401
   Unauthorized`. Instead, we build `AcpChatModel` — a custom
-  `BaseChatModel` in `lib/providers/acp_chat_model.py` — that spawns
+  `BaseChatModel` in `src/vaultspec_a2a/providers/acp_chat_model.py` — that spawns
   the provider's CLI as a managed subprocess and communicates via
   JSON-RPC over `stdio`.
   - **Zero PTY / Zero Batch:** Subprocesses are invoked without a PTY

@@ -59,10 +59,10 @@ responsibility — it observes blackboard state, it does not produce it.
 
 ### 2.1 `infer_phase_from_vault_index()` Function
 
-A new module `lib/core/phase.py` provides the canonical phase inference function:
+A new module `src/vaultspec_a2a/core/phase.py` provides the canonical phase inference function:
 
 ```python
-# lib/core/phase.py
+# src/vaultspec_a2a/core/phase.py
 from __future__ import annotations
 
 __all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]
@@ -101,12 +101,12 @@ def infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
   (e.g., Option C tiebreaker logic, if added in a future ADR).
 - `infer_phase_from_vault_index` is a pure function — no I/O, no side effects.
   It is independently testable without any LangGraph context.
-- `lib/core/phase.py` must declare `__all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]`.
+- `src/vaultspec_a2a/core/phase.py` must declare `__all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]`.
   No other names are exported.
 
 ### 2.2 Supervisor Integration
 
-`create_supervisor_node()` (`lib/core/nodes/supervisor.py`) is amended to call
+`create_supervisor_node()` (`src/vaultspec_a2a/core/nodes/supervisor.py`) is amended to call
 `infer_phase_from_vault_index` on every invocation, before building the anchoring
 context, and to include `pipeline_phase` in its return dict:
 
@@ -294,7 +294,7 @@ The deterministic inference provides a floor; the LLM can advance phase forward
 2. **Added complexity.** Requires a structured output schema on the supervisor,
    a forward-only tiebreaker comparison using `PHASE_ORDER`, and test coverage
    for the tiebreaker paths.
-3. **Can be layered on later.** `PHASE_ORDER` is exported from `lib/core/phase.py`
+3. **Can be layered on later.** `PHASE_ORDER` is exported from `src/vaultspec_a2a/core/phase.py`
    specifically to support a future Option C implementation without changing the
    public API. The tiebreaker logic can be added to `create_supervisor_node()` in
    a future ADR without breaking existing callers.
@@ -312,7 +312,7 @@ progression — it cannot be stored in an immutable DB record. Rejected.
 
 ## 5. Implementation Constraints
 
-- `lib/core/phase.py` must declare `__all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]`.
+- `src/vaultspec_a2a/core/phase.py` must declare `__all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]`.
   The module-internal constant `_PHASE_ORDER` is an alias for `PHASE_ORDER` and is
   not exported.
 - `infer_phase_from_vault_index` must be a pure function — no I/O, no LangGraph
@@ -325,15 +325,15 @@ progression — it cannot be stored in an immutable DB record. Rejected.
 - `pipeline_phase` valid values are restricted to the six entries in `PHASE_ORDER`:
   `"research"`, `"reference"`, `"adr"`, `"plan"`, `"exec"`, `"audit"`. No other
   values may be written to `TeamState["pipeline_phase"]` by this mechanism.
-- `PHASE_ORDER` in `lib/core/phase.py` is the single authoritative definition of
+- `PHASE_ORDER` in `src/vaultspec_a2a/core/phase.py` is the single authoritative definition of
   pipeline phase order. No other module may define or duplicate this list.
-- `lib/core/__init__.py` must export `infer_phase_from_vault_index` per the facade
+- `src/vaultspec_a2a/core/__init__.py` must export `infer_phase_from_vault_index` per the facade
   pattern (CLAUDE.md architectural patterns).
 
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
 ├── phase.py            NEW: PHASE_ORDER, infer_phase_from_vault_index;
 │                       __all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]
 ├── nodes/
@@ -352,9 +352,9 @@ lib/core/
 
 ## 7. References
 
-- `lib/core/phase.py` — NEW (infer_phase_from_vault_index, PHASE_ORDER)
-- `lib/core/nodes/supervisor.py` — AMENDED (phase inference on every invocation)
-- `lib/core/__init__.py` — AMENDED (facade export)
+- `src/vaultspec_a2a/core/phase.py` — NEW (infer_phase_from_vault_index, PHASE_ORDER)
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — AMENDED (phase inference on every invocation)
+- `src/vaultspec_a2a/core/__init__.py` — AMENDED (facade export)
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — pipeline_phase field definition,
   vault_index reducer, \_build_initial_vault_index
 - [ADR-020](020-blackboard-content-mounting.md) — \_select_paths uses pipeline_phase

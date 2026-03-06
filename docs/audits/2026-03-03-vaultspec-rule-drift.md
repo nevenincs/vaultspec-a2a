@@ -1,7 +1,7 @@
 ---
 title: VaultSpec Rule Drift Audit
 date: 2026-03-03
-scope: .vaultspec behavioural rules vs A2A engine (lib/core/, lib/api/, lib/worker/)
+scope: .vaultspec behavioural rules vs A2A engine (src/vaultspec_a2a/core/, src/vaultspec_a2a/api/, src/vaultspec_a2a/worker/)
 auditor: docs-researcher-2
 ---
 
@@ -9,7 +9,7 @@ auditor: docs-researcher-2
 
 **Date:** 2026-03-03
 **Scope:** All behavioural rules in `Y:/code/vaultspec-worktrees/main/.vaultspec/` vs
-A2A engine behaviour in `lib/core/`, `lib/api/`, `lib/worker/`.
+A2A engine behaviour in `src/vaultspec_a2a/core/`, `src/vaultspec_a2a/api/`, `src/vaultspec_a2a/worker/`.
 
 Focus areas per mandate: pipeline phase gates, agent persona loading, artifact
 validation, wikilink/reference resolution.
@@ -28,7 +28,7 @@ Formatting rules (frontmatter field names, filenames, YAML syntax) are excluded.
 | D-04 | Executor agents MUST write a Step Record to `.vault/exec/{feature}/{step}.md` for every completed phase                                                                      | `vaultspec-execute/SKILL.md` ("Ensure the executor writes a Step Record")                                                                             | Engine does not verify or enforce step record creation. The executor worker's TOML persona instructs it to create step records, but there is no post-execution structural check that the file was actually written to the correct path. A worker can return without creating a step record and the graph proceeds.          | MEDIUM         |
 | D-05 | After executor completes, Phase Summary MUST be written to `.vault/exec/{feature}/{phase}-summary.md`                                                                        | `vaultspec-execute/SKILL.md`                                                                                                                          | Same as D-04: no structural enforcement. Summary creation is persona-instructed only.                                                                                                                                                                                                                                       | MEDIUM         |
 | D-06 | Artifacts MUST use EXACTLY TWO tags in frontmatter (`tags:` field): one directory tag + one feature tag                                                                      | `vaultspec-documentation.builtin.md`, `vaultspec-execute/SKILL.md`, `vaultspec-research/SKILL.md`                                                     | Engine performs no YAML frontmatter validation on artifacts written by workers. The `validation_errors` accumulator (ADR-019 §2.1) exists for this purpose but no node currently populates it with tag validation results.                                                                                                  | MEDIUM         |
-| D-07 | `related:` field MUST use quoted `"[[wiki-links]]"` — no relative paths, no bare strings                                                                                     | `vaultspec-documentation.builtin.md`                                                                                                                  | Engine does not validate or rewrite `related:` fields after artifact writes. No wikilink resolver exists in the engine — `lib/core/` has no module that parses or validates `[[...]]` syntax in written files.                                                                                                              | MEDIUM         |
+| D-07 | `related:` field MUST use quoted `"[[wiki-links]]"` — no relative paths, no bare strings                                                                                     | `vaultspec-documentation.builtin.md`                                                                                                                  | Engine does not validate or rewrite `related:` fields after artifact writes. No wikilink resolver exists in the engine — `src/vaultspec_a2a/core/` has no module that parses or validates `[[...]]` syntax in written files.                                                                                                              | MEDIUM         |
 | D-08 | Before starting a new pipeline phase, engine MUST check `.vault/` for existing artifacts and resume in-progress work rather than starting fresh                              | `framework.md` ("Before starting a new pipeline phase, check `.vault/` for existing artifacts... Resume work in progress rather than starting fresh") | `_build_initial_vault_index` (ADR-019) scans `.vault/` at thread creation and populates `vault_index`. However, the supervisor does not use `vault_index` to detect in-progress work and resume it. The supervisor routes based on LLM text, not on artifact presence. Phase resumption logic is absent.                    | MEDIUM         |
 | D-09 | Agent persona selection MUST match task complexity — complex architectural changes → complex-executor, standard features → standard-executor, simple edits → simple-executor | `vaultspec-execute/SKILL.md`                                                                                                                          | The A2A engine uses a static team composition defined in TOML at compile time. There is no runtime agent tier selection based on task complexity. The supervisor routes to the roster of available workers as defined in the team preset — it cannot dynamically substitute a higher-tier executor for a more complex task. | MEDIUM         |
 | D-10 | Before starting execution, executor MUST consult `<ADR>`, `<Research>`, and `<Reference>` documents as PRIMARY technical references                                          | `vaultspec-standard-executor.md` ("CONSULT CONTEXT: ADR, Research, and Reference documents are your PRIMARY technical references")                    | ADR-022 anchoring injects vault paths as metadata. ADR-020 (pending implementation) will inject actual content. Currently (pre-ADR-020), workers see paths in the anchoring summary but must issue tool calls to read file content. There is no enforcement that the worker reads binding documents before acting.          | MEDIUM         |
@@ -95,7 +95,7 @@ in `vault_index` or checked before FINISH.
 
 ### 4. Wikilink / Reference Mandates
 
-**No wikilink resolver (D-12):** `lib/core/` contains no module for parsing or
+**No wikilink resolver (D-12):** `src/vaultspec_a2a/core/` contains no module for parsing or
 resolving `[[wiki-links]]`. Written artifacts are not scanned for link syntax
 compliance. This is the largest structural gap relative to vaultspec's documentation
 mandate, which specifies `[[wiki-links]]` exclusively for all internal references.

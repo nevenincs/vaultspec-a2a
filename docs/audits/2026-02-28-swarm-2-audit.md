@@ -26,11 +26,11 @@ regressions, mock/testing mandate enforcement, test meaningfulness.
 
 | Module                                         | CRIT | HIGH | MED | LOW | Total |
 | ---------------------------------------------- | ---- | ---- | --- | --- | ----- |
-| `lib/core/`                                    | 1    | 4    | 6   | 4   | 15    |
-| `lib/api/`                                     | 0    | 3    | 4   | 5   | 12    |
-| `lib/providers/`                               | 0    | 2    | 6   | 4   | 12    |
-| `lib/database/`+`lib/protocols/`               | 0    | 0    | 4   | 5   | 9     |
-| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 0    | 3    | 5   | 4   | 12    |
+| `src/vaultspec_a2a/core/`                                    | 1    | 4    | 6   | 4   | 15    |
+| `src/vaultspec_a2a/api/`                                     | 0    | 3    | 4   | 5   | 12    |
+| `src/vaultspec_a2a/providers/`                               | 0    | 2    | 6   | 4   | 12    |
+| `src/vaultspec_a2a/database/`+`src/vaultspec_a2a/protocols/`               | 0    | 0    | 4   | 5   | 9     |
+| `src/vaultspec_a2a/utils/`+`src/vaultspec_a2a/telemetry/`+`src/vaultspec_a2a/workspace/` | 0    | 3    | 5   | 4   | 12    |
 | Cross-cutting test quality                     | 0    | 5    | 5   | 3   | 13    |
 
 ---
@@ -39,7 +39,7 @@ regressions, mock/testing mandate enforcement, test meaningfulness.
 
 ### C1.`ingest()`swallows GraphInterrupt on exception path —`aggregator.py:1088-1097`
 
-**Module**: `lib/core/`
+**Module**: `src/vaultspec_a2a/core/`
 
 The bare `except Exception`in`ingest()`will
 catch`langgraph.types.GraphInterrupt`(which inherits from`BaseException`in
@@ -81,7 +81,7 @@ request, and the user cannot resume the interrupted graph. Should
 catch`TimeoutError`specifically and re-raise other exceptions.
 
 **H4 —`GitWorkspaceError`in`__all__`of`exceptions.py`but NOT re-exported
-from`lib/core/__init__.py`**
+from`src/vaultspec_a2a/core/__init__.py`**
 Consumers importing `from lib.core import GitWorkspaceError`get`AttributeError`.
 ADR-009 facade compliance gap.
 
@@ -93,7 +93,7 @@ validate/document the response shape in OpenAPI. ADR-011 §2.4 mandates all
 endpoints register schema models for `openapi-typescript`generation. All other
 endpoints have explicit`response_model`; this one is inconsistent.
 
-**H6 — `lib/api/__init__.py` facade intentionally incomplete — violates ADR-009
+**H6 — `src/vaultspec_a2a/api/__init__.py` facade intentionally incomplete — violates ADR-009
 spirit**
 `create_app`and`main`are in`__all__`of`app.py`but NOT re-exported from
 the`lib.api`facade. The in-file comment explains circular import concerns, but
@@ -129,8 +129,8 @@ Semantic Conventions v1.23). Should be`http.response.status_code`. The docstring
 at lines 71-76 also lists the old names.
 
 **H11 — ADR-009 §2.2 mandated files absent: `ansi_buffer.py`and`decorators.py`**
-ADR-009 explicitly lists `lib/utils/ansi_buffer.py`("2000-line ANSI ring
-buffer") and`lib/utils/decorators.py`. Neither file exists. If intentionally
+ADR-009 explicitly lists `src/vaultspec_a2a/utils/ansi_buffer.py`("2000-line ANSI ring
+buffer") and`src/vaultspec_a2a/utils/decorators.py`. Neither file exists. If intentionally
 dropped, a superseding ADR should document the decision.
 
 **H12 — `remove_worktree`does not
@@ -181,8 +181,8 @@ with`--`is interpreted as a git flag.
 | ID  | Finding                                                                                                                              | Location                    |
 | --- | ------------------------------------------------------------------------------------------------------------------------------------ | --------------------------- |
 | M17 | WAL mode never tested against a real file DB —`:memory:`SQLite ignores WAL;`verify_wal_mode()`exists but is never called in any test | `test_database.py:4`        |
-| M18 | `ThreadStatus`enum not re-exported from`lib/database/__init__.py`— facade violation (ADR-009 §5.2)                                   | `database/__init__.py`      |
-| M19 | `crud.py`imports from sibling`lib/core/exceptions`— cross-module dependency violates ADR-009 §5.1 independence                       | `crud.py:25`                |
+| M18 | `ThreadStatus`enum not re-exported from`src/vaultspec_a2a/database/__init__.py`— facade violation (ADR-009 §5.2)                                   | `database/__init__.py`      |
+| M19 | `crud.py`imports from sibling`src/vaultspec_a2a/core/exceptions`— cross-module dependency violates ADR-009 §5.1 independence                       | `crud.py:25`                |
 | M20 | `protocols/a2a/`and`protocols/adapter/`are empty stubs with no`__all__`— violates ADR-009 §5.3 mandate                               | `protocols/a2a/__init__.py` |
 
 ### Utils / Telemetry / Workspace (5) — retaining M numbering from original
@@ -263,13 +263,13 @@ with`--`is interpreted as a git flag.
 
 | Module                     | Quality    | Notes                                                                                                                                                                                         |
 | -------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `lib/core/tests/`          | **Strong** | Worker/supervisor tests exercise real`BaseChatModel`(FakeListChatModel). Aggregator tests comprehensive. Context preservation regression test present. Graph tests improved from prior audit. |
-| `lib/api/tests/`           | **Strong** | FastAPI TestClient throughout. Round-trip serialization for all 12 events and 6 commands. Schema fixtures cover all REST models.                                                              |
-| `lib/providers/tests/`     | **Good**   | Live subprocess tests gated behind`@pytest.mark.live`. Protocol tests thorough but use `_FakeWriter`(borderline).                                                                             |
-| `lib/database/tests/`      | **Good**   | Real SQLite operations. WAL mode untested on file DB (M17).                                                                                                                                   |
-| `lib/protocols/mcp/tests/` | **Mixed**  | App-integrated tests strong; 3 standalone connectivity tests vacuous (T1).                                                                                                                    |
-| `lib/telemetry/tests/`     | **Weak**   | Span tests only assert`is not None`. Config tests are documented no-ops due to import-time freezing.                                                                                          |
-| `lib/workspace/tests/`     | **Good**   | Real git repos via`tmp_path`. Merge conflict tests present but use bare `Exception`instead of domain type.                                                                                    |
+| `src/vaultspec_a2a/core/tests/`          | **Strong** | Worker/supervisor tests exercise real`BaseChatModel`(FakeListChatModel). Aggregator tests comprehensive. Context preservation regression test present. Graph tests improved from prior audit. |
+| `src/vaultspec_a2a/api/tests/`           | **Strong** | FastAPI TestClient throughout. Round-trip serialization for all 12 events and 6 commands. Schema fixtures cover all REST models.                                                              |
+| `src/vaultspec_a2a/providers/tests/`     | **Good**   | Live subprocess tests gated behind`@pytest.mark.live`. Protocol tests thorough but use `_FakeWriter`(borderline).                                                                             |
+| `src/vaultspec_a2a/database/tests/`      | **Good**   | Real SQLite operations. WAL mode untested on file DB (M17).                                                                                                                                   |
+| `src/vaultspec_a2a/protocols/mcp/tests/` | **Mixed**  | App-integrated tests strong; 3 standalone connectivity tests vacuous (T1).                                                                                                                    |
+| `src/vaultspec_a2a/telemetry/tests/`     | **Weak**   | Span tests only assert`is not None`. Config tests are documented no-ops due to import-time freezing.                                                                                          |
+| `src/vaultspec_a2a/workspace/tests/`     | **Good**   | Real git repos via`tmp_path`. Merge conflict tests present but use bare `Exception`instead of domain type.                                                                                    |
 
 ---
 

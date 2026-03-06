@@ -269,8 +269,7 @@ export const createStreamSlice: StateCreator<
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
               agent_name: event.node_name,
-              old_state: 'idle',
-              new_state: event.state,
+              state: event.state,
             });
           },
           false,

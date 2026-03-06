@@ -36,12 +36,12 @@ LangChain `BaseChatModel` interfaces.
 Verify or add the necessary LangChain provider packages (e.g.,
 `langchain-google-genai`, `langchain-anthropic`, `langchain-openai`).
 
-### `lib/core/config.py`
+### `src/vaultspec_a2a/core/config.py`
 
 Update the `Settings`class to manage provider-specific parameters like global
 timeouts and model defaults, ensuring keys are sourced from the environment.
 
-### `lib/providers/factory.py`
+### `src/vaultspec_a2a/providers/factory.py`
 
 Implement the core `ProviderFactory`class that returns a
 configured`BaseChatModel`.
@@ -53,9 +53,9 @@ configured`BaseChatModel`.
   OpenAI-compatibility mandate in ADR-002 without custom translation layers.
 - **Codex/OpenAI**: Standard `ChatOpenAI`.
 
-### `lib/providers/tests/test_factory.py`
+### `src/vaultspec_a2a/providers/tests/test_factory.py`
 
-#### [NEW] `lib/providers/tests/test_factory.py`
+#### [NEW] `src/vaultspec_a2a/providers/tests/test_factory.py`
 
 Implement live integration tests testing the `ProviderFactory`.
 The tests will instantiate a model and use `invoke("Say hi")`to guarantee
@@ -73,7 +73,7 @@ tests.
 
 ```powershell
 .\.venv\Scripts\Activate.ps1
-uv run pytest lib/providers/tests/test_factory.py -v
+uv run pytest src/vaultspec_a2a/providers/tests/test_factory.py -v
 ```
 
 ### Manual Verification

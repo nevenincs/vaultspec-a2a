@@ -28,7 +28,7 @@ COPY pyproject.toml uv.lock ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev --locked
 
-COPY lib/ ./lib/
+COPY src/vaultspec_a2a/ ./src/vaultspec_a2a/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen --no-editable
@@ -40,14 +40,14 @@ USER appuser
 # ── Stage 2b: API (control surface) ─────────────────────────────────────────
 FROM python-base AS api
 
-COPY --from=frontend-build /app/src/ui/build ./lib/api/static/
+COPY --from=frontend-build /app/src/ui/build ./src/vaultspec_a2a/api/static/
 
 # Control surface: auto_spawn_worker=False (worker is a separate container)
 ENV VAULTSPEC_AUTO_SPAWN_WORKER=false \
     VAULTSPEC_WORKER_URL=http://worker:8001
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "lib.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uv", "run", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────
 FROM python-base AS worker
@@ -56,4 +56,4 @@ FROM python-base AS worker
 ENV VAULTSPEC_API_BASE_URL=http://api:8000
 
 EXPOSE 8001
-CMD ["uv", "run", "uvicorn", "lib.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["uv", "run", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]

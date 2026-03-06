@@ -22,10 +22,10 @@ The most impactful regressions are:
 - **`vaultspec-continuous-audit` preset invisible to REST + MCP**: the TOML
   exists but neither `_BUNDLED_TEAM_PRESETS` (endpoints.py) nor
   `_HARDCODED_PRESETS` (mcp/server.py fallback) include it.
-- **`lib/worker/health.py` is an empty stub**: `HealthCheck` class has no
+- **`src/vaultspec_a2a/worker/health.py` is an empty stub**: `HealthCheck` class has no
   methods — health check endpoint and heartbeat emission are not implemented.
 - **`supervisor.py` asyncio regression**: task T19 (`asyncio.get_event_loop()`)
-  was fixed in nodes/supervisor.py but `lib/api/supervisor.py` still uses
+  was fixed in nodes/supervisor.py but `src/vaultspec_a2a/api/supervisor.py` still uses
   `asyncio.wait_for` and `asyncio.get_running_loop()` instead of anyio
   equivalents.
 - **Bare "supervisor" agent IDs in graph.py and websocket.py**: the agent prefix
@@ -42,19 +42,19 @@ The most impactful regressions are:
 
 | ID     | Severity | Module                                                 | Summary                                                                                                                               |
 | ------ | -------- | ------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| REG-01 | HIGH     | `lib/protocols/mcp/server.py`                          | MCP-05 marked complete but inline `AsyncClient()` still created per-call in all 7 tools                                               |
-| REG-02 | HIGH     | `lib/api/endpoints.py` + `lib/protocols/mcp/server.py` | `vaultspec-continuous-audit` preset exists as TOML but absent from both hardcoded preset lists                                        |
-| REG-03 | MEDIUM   | `lib/worker/health.py`                                 | `HealthCheck` class is an empty stub with no methods                                                                                  |
-| REG-04 | MEDIUM   | `lib/api/supervisor.py`                                | Uses `asyncio.wait_for` and `asyncio.get_running_loop()` — anyio convention violation (T29 fix only targeted nodes/supervisor.py)     |
-| REG-05 | MEDIUM   | `lib/api/websocket.py:305`                             | Hardcoded `agent_id="supervisor"` fallback in follow-up message dispatch — should be `"vaultspec-supervisor"` to match renamed preset |
-| REG-06 | MEDIUM   | `lib/api/schemas/internal.py:action`                   | `DispatchRequest.action: str` is unconstrained — should be `Literal["ingest", "resume", "cancel"]` (SCH-05, still open)               |
-| REG-07 | LOW      | `lib/api/schemas/internal.py:agent_id`                 | `DispatchRequest.agent_id` defaults to `"supervisor"` (bare, not `"vaultspec-supervisor"`)                                            |
-| REG-08 | LOW      | `lib/api/auth.py`                                      | `authenticate_request` is a no-op stub; not wired to any endpoint — documented as intentional but not tracked                         |
-| REG-09 | LOW      | `lib/core/team_config.py`                              | `TeamGraphConfig`, `TeamPermissionsConfig`, `TeamPersonaConfig` exported in `__all__` but missing from `lib/core/__init__.py` exports |
-| REG-10 | LOW      | `lib/protocols/mcp/server.py`                          | `list_team_presets` MCP tool still missing (task MCP-R2 in_progress)                                                                  |
-| REG-11 | LOW      | `lib/protocols/mcp/server.py`                          | `cancel_thread` MCP tool still missing (task MCP-R3 in_progress)                                                                      |
-| REG-12 | INFO     | `lib/api/endpoints.py:519`                             | `# type: ignore[arg-type]` on `minimal_state` — may indicate improper ThreadStateSnapshot construction for legacy threads             |
-| REG-13 | INFO     | `lib/api/tests/test_endpoints.py:323`                  | Comment confirms `pending_permissions` always empty (wiring TODO) — correct per architecture but still a gap                          |
+| REG-01 | HIGH     | `src/vaultspec_a2a/protocols/mcp/server.py`                          | MCP-05 marked complete but inline `AsyncClient()` still created per-call in all 7 tools                                               |
+| REG-02 | HIGH     | `src/vaultspec_a2a/api/endpoints.py` + `src/vaultspec_a2a/protocols/mcp/server.py` | `vaultspec-continuous-audit` preset exists as TOML but absent from both hardcoded preset lists                                        |
+| REG-03 | MEDIUM   | `src/vaultspec_a2a/worker/health.py`                                 | `HealthCheck` class is an empty stub with no methods                                                                                  |
+| REG-04 | MEDIUM   | `src/vaultspec_a2a/api/supervisor.py`                                | Uses `asyncio.wait_for` and `asyncio.get_running_loop()` — anyio convention violation (T29 fix only targeted nodes/supervisor.py)     |
+| REG-05 | MEDIUM   | `src/vaultspec_a2a/api/websocket.py:305`                             | Hardcoded `agent_id="supervisor"` fallback in follow-up message dispatch — should be `"vaultspec-supervisor"` to match renamed preset |
+| REG-06 | MEDIUM   | `src/vaultspec_a2a/api/schemas/internal.py:action`                   | `DispatchRequest.action: str` is unconstrained — should be `Literal["ingest", "resume", "cancel"]` (SCH-05, still open)               |
+| REG-07 | LOW      | `src/vaultspec_a2a/api/schemas/internal.py:agent_id`                 | `DispatchRequest.agent_id` defaults to `"supervisor"` (bare, not `"vaultspec-supervisor"`)                                            |
+| REG-08 | LOW      | `src/vaultspec_a2a/api/auth.py`                                      | `authenticate_request` is a no-op stub; not wired to any endpoint — documented as intentional but not tracked                         |
+| REG-09 | LOW      | `src/vaultspec_a2a/core/team_config.py`                              | `TeamGraphConfig`, `TeamPermissionsConfig`, `TeamPersonaConfig` exported in `__all__` but missing from `src/vaultspec_a2a/core/__init__.py` exports |
+| REG-10 | LOW      | `src/vaultspec_a2a/protocols/mcp/server.py`                          | `list_team_presets` MCP tool still missing (task MCP-R2 in_progress)                                                                  |
+| REG-11 | LOW      | `src/vaultspec_a2a/protocols/mcp/server.py`                          | `cancel_thread` MCP tool still missing (task MCP-R3 in_progress)                                                                      |
+| REG-12 | INFO     | `src/vaultspec_a2a/api/endpoints.py:519`                             | `# type: ignore[arg-type]` on `minimal_state` — may indicate improper ThreadStateSnapshot construction for legacy threads             |
+| REG-13 | INFO     | `src/vaultspec_a2a/api/tests/test_endpoints.py:323`                  | Comment confirms `pending_permissions` always empty (wiring TODO) — correct per architecture but still a gap                          |
 
 ---
 
@@ -63,7 +63,7 @@ The most impactful regressions are:
 ### REG-01 — HIGH: MCP-05 regression — inline httpx.AsyncClient in all 7 tools
 
 **Task**: MCP-05 (status: completed in task list)
-**Files**: `lib/protocols/mcp/server.py:156,216,282,333,423,465,525`
+**Files**: `src/vaultspec_a2a/protocols/mcp/server.py:156,216,282,333,423,465,525`
 
 MCP-05 was supposed to share an `httpx.AsyncClient` across MCP tool calls to
 avoid per-call connection overhead and TLS handshake cost. However, every one of
@@ -87,12 +87,12 @@ tool functions, or use a FastMCP lifespan hook to create and dispose it.
 
 ### REG-02 — HIGH: `vaultspec-continuous-audit` preset invisible to REST + MCP
 
-**Files**: `lib/api/endpoints.py:674-679`, `lib/protocols/mcp/server.py:58-60`
+**Files**: `src/vaultspec_a2a/api/endpoints.py:674-679`, `src/vaultspec_a2a/protocols/mcp/server.py:58-60`
 
 A fifth team preset TOML exists on disk:
 
 ```
-lib/core/presets/teams/vaultspec-continuous-audit.toml
+src/vaultspec_a2a/core/presets/teams/vaultspec-continuous-audit.toml
 ```
 
 But neither hardcoded list includes it:
@@ -114,9 +114,9 @@ But neither hardcoded list includes it:
 
 ---
 
-### REG-03 — MEDIUM: `lib/worker/health.py` is an empty stub
+### REG-03 — MEDIUM: `src/vaultspec_a2a/worker/health.py` is an empty stub
 
-**File**: `lib/worker/health.py`
+**File**: `src/vaultspec_a2a/worker/health.py`
 
 ```python
 class HealthCheck:
@@ -125,19 +125,19 @@ class HealthCheck:
 
 The `HealthCheck` class has no attributes, no methods, and no implementation.
 The module docstring promises "health check endpoint and heartbeat emitter" but
-neither exists. The class is imported and exported from `lib/worker/__init__.py`
+neither exists. The class is imported and exported from `src/vaultspec_a2a/worker/__init__.py`
 but appears to be unused in `app.py` and `executor.py` (grep finds no usage).
 
 **Impact**: The worker has no `/healthz` endpoint. The `WorkerSupervisor` in
-`lib/api/supervisor.py` uses process `poll()` to determine liveness — HTTP
+`src/vaultspec_a2a/api/supervisor.py` uses process `poll()` to determine liveness — HTTP
 health probing is not wired. This is a correctness gap for production deployments
 where health checks are needed.
 
 ---
 
-### REG-04 — MEDIUM: `lib/api/supervisor.py` uses `asyncio` primitives (not anyio)
+### REG-04 — MEDIUM: `src/vaultspec_a2a/api/supervisor.py` uses `asyncio` primitives (not anyio)
 
-**File**: `lib/api/supervisor.py:71-80, 106-110`
+**File**: `src/vaultspec_a2a/api/supervisor.py:71-80, 106-110`
 
 ```python
 # Line 71
@@ -152,8 +152,8 @@ elif asyncio.get_running_loop().time() - healthy_since > 60.0:
 ```
 
 Task T19 ("Replace deprecated asyncio.get_event_loop() in supervisor.py") was
-completed, but that task targeted `lib/core/nodes/supervisor.py`. The API-layer
-`lib/api/supervisor.py` uses `asyncio.wait_for` and `asyncio.get_running_loop()`
+completed, but that task targeted `src/vaultspec_a2a/core/nodes/supervisor.py`. The API-layer
+`src/vaultspec_a2a/api/supervisor.py` uses `asyncio.wait_for` and `asyncio.get_running_loop()`
 instead of anyio equivalents. This violates the anyio convention documented in
 architectural patterns.
 
@@ -169,7 +169,7 @@ context manager. Replace `asyncio.get_running_loop().time()` with
 
 ### REG-05 — MEDIUM: Bare `"supervisor"` agent_id fallback in websocket.py
 
-**File**: `lib/api/websocket.py:305`
+**File**: `src/vaultspec_a2a/api/websocket.py:305`
 
 ```python
 agent_id=cmd.agent_id or "supervisor",
@@ -192,7 +192,7 @@ not need to change.
 
 ### REG-06 — MEDIUM: `DispatchRequest.action` unconstrained string
 
-**File**: `lib/api/schemas/internal.py:17`
+**File**: `src/vaultspec_a2a/api/schemas/internal.py:17`
 
 ```python
 action: str = Field(description="'ingest' | 'resume' | 'cancel'")
@@ -208,7 +208,7 @@ but will produce a silent no-op or KeyError in executor dispatch logic.
 
 ### REG-07 — LOW: `DispatchRequest.agent_id` defaults to bare `"supervisor"`
 
-**File**: `lib/api/schemas/internal.py:19`
+**File**: `src/vaultspec_a2a/api/schemas/internal.py:19`
 
 ```python
 agent_id: str = "supervisor"
@@ -221,7 +221,7 @@ when no agent_id is specified — e.g. for initial ingest dispatch.
 
 ### REG-08 — LOW: `authenticate_request` no-op stub not wired to any endpoint
 
-**File**: `lib/api/auth.py`
+**File**: `src/vaultspec_a2a/api/auth.py`
 
 The `authenticate_request` function exists and has a well-documented TODO, but
 is not wired as a `Depends(...)` on any endpoint. The comment says the API is
@@ -231,19 +231,19 @@ no authentication, which is consistent with this design.
 
 ---
 
-### REG-09 — LOW: `lib/core/__init__.py` missing 3 new TOML config exports
+### REG-09 — LOW: `src/vaultspec_a2a/core/__init__.py` missing 3 new TOML config exports
 
-**File**: `lib/core/__init__.py`
+**File**: `src/vaultspec_a2a/core/__init__.py`
 
 `TeamGraphConfig`, `TeamPermissionsConfig`, and `TeamPersonaConfig` were added
-to `lib/core/team_config.py` (TOML-02) and listed in that module's `__all__`,
-but they are not imported or re-exported in `lib/core/__init__.py`.
+to `src/vaultspec_a2a/core/team_config.py` (TOML-02) and listed in that module's `__all__`,
+but they are not imported or re-exported in `src/vaultspec_a2a/core/__init__.py`.
 
 Consumers following the ADR import convention (`from lib.core import X`) cannot
 access these three types. They must use the non-preferred deep-import path
 (`from lib.core.team_config import TeamGraphConfig`).
 
-**Recommended fix**: Add to `lib/core/__init__.py`:
+**Recommended fix**: Add to `src/vaultspec_a2a/core/__init__.py`:
 
 ```python
 from .team_config import TeamGraphConfig as TeamGraphConfig
@@ -257,7 +257,7 @@ And add to `__all__`.
 
 ### REG-10 — LOW: `list_team_presets` MCP tool absent (MCP-R2 in_progress)
 
-**File**: `lib/protocols/mcp/server.py`
+**File**: `src/vaultspec_a2a/protocols/mcp/server.py`
 
 REST endpoint `GET /api/teams` exists and returns `TeamPresetsResponse`. No
 corresponding MCP tool exists. Task MCP-R2 is in_progress — flagging here for
@@ -268,7 +268,7 @@ calling `start_thread` with an invalid preset and reading the error message.
 
 ### REG-11 — LOW: `cancel_thread` MCP tool and REST endpoint absent (MCP-R3 in_progress)
 
-**File**: `lib/protocols/mcp/server.py`, `lib/api/endpoints.py`
+**File**: `src/vaultspec_a2a/protocols/mcp/server.py`, `src/vaultspec_a2a/api/endpoints.py`
 
 No `POST /threads/{id}/cancel` endpoint exists on the REST API, and no
 `cancel_thread` MCP tool. Task MCP-R3 is in_progress.
@@ -277,7 +277,7 @@ No `POST /threads/{id}/cancel` endpoint exists on the REST API, and no
 
 ### REG-12 — INFO: `type: ignore[arg-type]` on `minimal_state` in endpoints.py
 
-**File**: `lib/api/endpoints.py:519`
+**File**: `src/vaultspec_a2a/api/endpoints.py:519`
 
 ```python
 minimal_state,  # type: ignore[arg-type]
@@ -292,14 +292,14 @@ could surface as a runtime error for threads with no checkpoint state.
 
 ### REG-13 — INFO: `pending_permissions` always empty in test comment
 
-**File**: `lib/api/tests/test_endpoints.py:323`
+**File**: `src/vaultspec_a2a/api/tests/test_endpoints.py:323`
 
 ```python
 # pending_permissions is always empty until wired (API-M8 TODO)
 ```
 
 This confirms that `GET /api/team/status` always returns `pending_permissions=[]`
-in tests. However, `lib/core/aggregator.py:801` implements `get_pending_permissions()`
+in tests. However, `src/vaultspec_a2a/core/aggregator.py:801` implements `get_pending_permissions()`
 and `endpoints.py:659` calls it — the wiring appears to exist in production code.
 The test comment may be outdated (test fixtures don't trigger the aggregator path).
 
@@ -309,15 +309,15 @@ The test comment may be outdated (test fixtures don't trigger the aggregator pat
 
 | Module                      | `__all__` | Imports complete              | Issues                                          |
 | --------------------------- | --------- | ----------------------------- | ----------------------------------------------- |
-| `lib/api/__init__.py`       | Yes       | Yes                           | Intentionally partial (circular dep documented) |
-| `lib/core/__init__.py`      | Yes       | Missing 3 TOML types (REG-09) |                                                 |
-| `lib/database/__init__.py`  | Yes       | Yes                           | Clean                                           |
-| `lib/protocols/__init__.py` | Yes       | Yes                           | Only MCP exported (a2a/adapter empty stubs)     |
-| `lib/providers/__init__.py` | Yes       | Yes                           | Lazy imports correct                            |
-| `lib/telemetry/__init__.py` | Yes       | Yes                           | Clean                                           |
-| `lib/utils/__init__.py`     | Yes       | Yes                           | Clean                                           |
-| `lib/worker/__init__.py`    | Yes       | Yes                           | `HealthCheck` exported but stub                 |
-| `lib/workspace/__init__.py` | Yes       | Yes                           | Clean                                           |
+| `src/vaultspec_a2a/api/__init__.py`       | Yes       | Yes                           | Intentionally partial (circular dep documented) |
+| `src/vaultspec_a2a/core/__init__.py`      | Yes       | Missing 3 TOML types (REG-09) |                                                 |
+| `src/vaultspec_a2a/database/__init__.py`  | Yes       | Yes                           | Clean                                           |
+| `src/vaultspec_a2a/protocols/__init__.py` | Yes       | Yes                           | Only MCP exported (a2a/adapter empty stubs)     |
+| `src/vaultspec_a2a/providers/__init__.py` | Yes       | Yes                           | Lazy imports correct                            |
+| `src/vaultspec_a2a/telemetry/__init__.py` | Yes       | Yes                           | Clean                                           |
+| `src/vaultspec_a2a/utils/__init__.py`     | Yes       | Yes                           | Clean                                           |
+| `src/vaultspec_a2a/worker/__init__.py`    | Yes       | Yes                           | `HealthCheck` exported but stub                 |
+| `src/vaultspec_a2a/workspace/__init__.py` | Yes       | Yes                           | Clean                                           |
 
 No import errors found. No circular import issues beyond the documented ones.
 
@@ -327,7 +327,7 @@ No import errors found. No circular import issues beyond the documented ones.
 
 | File              | Line | Comment                                                                     |
 | ----------------- | ---- | --------------------------------------------------------------------------- |
-| `lib/api/auth.py` | 38   | `TODO(vaultspec): implement authentication` — documented, acceptable for v1 |
+| `src/vaultspec_a2a/api/auth.py` | 38   | `TODO(vaultspec): implement authentication` — documented, acceptable for v1 |
 
 No FIXME or HACK comments found in production code.
 
@@ -337,11 +337,11 @@ No FIXME or HACK comments found in production code.
 
 | Module                                | Test file exists                            | Notes                           |
 | ------------------------------------- | ------------------------------------------- | ------------------------------- |
-| `lib/worker/health.py`                | None (only indirect via `test_internal.py`) | Stub has no testable surface    |
-| `lib/api/auth.py`                     | `test_auth.py` exists                       | Thin (stub only)                |
-| `lib/api/supervisor.py`               | `test_supervisor.py` exists                 | Adequate                        |
-| `lib/database/migrations/__init__.py` | Indirect via aggregator                     | Migration logic may be untested |
-| `lib/protocols/mcp/server.py`         | `test_server.py` exists                     | Tests exercise all 7 tools      |
+| `src/vaultspec_a2a/worker/health.py`                | None (only indirect via `test_internal.py`) | Stub has no testable surface    |
+| `src/vaultspec_a2a/api/auth.py`                     | `test_auth.py` exists                       | Thin (stub only)                |
+| `src/vaultspec_a2a/api/supervisor.py`               | `test_supervisor.py` exists                 | Adequate                        |
+| `src/vaultspec_a2a/database/migrations/__init__.py` | Indirect via aggregator                     | Migration logic may be untested |
+| `src/vaultspec_a2a/protocols/mcp/server.py`         | `test_server.py` exists                     | Tests exercise all 7 tools      |
 
 ---
 

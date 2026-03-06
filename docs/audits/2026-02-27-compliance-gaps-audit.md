@@ -29,11 +29,11 @@ is dead code
 when loop_count >= max_loops")
 **Expected:** The loop_node (or a wrapper around it) increments
 `TeamState.loop_count`on each iteration.
-**Actual:**`_loop_router`in`lib/core/graph.py:307`reads`state.get("loop_count",
+**Actual:**`_loop_router`in`src/vaultspec_a2a/core/graph.py:307`reads`state.get("loop_count",
 0)`and compares against`max_loops`, but **no node in the entire codebase ever
 writes `loop_count + 1`back to state**. Worker nodes only return`{"messages":
 [response]}`. The `create_worker_node`function
-at`lib/core/nodes/worker.py:92-102`returns`{"messages": [response]}`with
+at`src/vaultspec_a2a/core/nodes/worker.py:92-102`returns`{"messages": [response]}`with
 no`loop_count`key.
 **Impact:** **CRITICAL.** In any`pipeline_loop`topology, the loop will run
 indefinitely (until token exhaustion or other failure), completely ignoring
@@ -51,7 +51,7 @@ reject if received over WS")
 **Expected:** When a`ClientCommandType.PERMISSION_RESPONSE`command arrives over
 WebSocket, the server should reject it with an error response and NOT process
 it.
-**Actual:** In`lib/api/websocket.py:268-277`, the `PERMISSION_RESPONSE`case
+**Actual:** In`src/vaultspec_a2a/api/websocket.py:268-277`, the `PERMISSION_RESPONSE`case
 simply logs the event and adds a comment "Permission responses are preferably
 handled via REST (ADR-011 section 3.1) for guaranteed delivery" -- but it does
 NOT reject the command. It silently accepts and ignores it, with no error sent
@@ -78,7 +78,7 @@ case ClientCommandType.PERMISSION_RESPONSE:
 **Standard:** ADR-006 section 5.1 point 6, TOAD `agent.py:635-661`
 **Expected:** After `initialize`, store `agentCapabilities`and
 check`loadSession`before attempting`session/load`. Also store `authMethods`.
-**Actual:** In `lib/providers/acp_chat_model.py:706-711`, the implementation
+**Actual:** In `src/vaultspec_a2a/providers/acp_chat_model.py:706-711`, the implementation
 stores `agentCapabilities`and`authMethods`but does NOT validate
 the`protocolVersion`in the response (TOAD asserts`response is not None`and
 stores all fields). However, the`loadSession` check IS correctly done at line
@@ -111,7 +111,7 @@ client will continue with potentially incompatible behavior.
 
 ### [LG-001] loop_count never incremented (see COMP-001)
 
-**File:**`lib/core/graph.py:305-310`, `lib/core/nodes/worker.py:92-102`
+**File:**`src/vaultspec_a2a/core/graph.py:305-310`, `src/vaultspec_a2a/core/nodes/worker.py:92-102`
 **Standard:** ADR-013 section 2.5 ("`loop_count`incremented by loop_node")
 **Actual:** Worker node returns only`{"messages": [response]}`. No code path
 writes `loop_count`.
@@ -119,14 +119,14 @@ writes `loop_count`.
 
 ### [LG-002] astream_events version="v2" correctly used
 
-**File:** `lib/core/aggregator.py:787-791`
+**File:** `src/vaultspec_a2a/core/aggregator.py:787-791`
 **Standard:** ADR-004 (use `astream_events(version="v2")`)
 **Actual:** `graph.astream_events(graph_input, config, version="v2")`-- CORRECT.
 **Status:** PASS
 
 ### [LG-003] add_sequence not used directly -- correct workaround
 
-**File:**`lib/core/graph.py:253-256, 296-300`
+**File:**`src/vaultspec_a2a/core/graph.py:253-256, 296-300`
 **Standard:** ADR-013 section 2.5 references `add_sequence`but the LangGraph API
 signature at`state.py:889`shows`add_sequence`expects callables and
 calls`add_node`internally.
@@ -138,7 +138,7 @@ add_sequence) because nodes are added with metadata via add_node first."
 
 ### [LG-004] interrupt() correctly used from langgraph.types
 
-**File:** `lib/core/nodes/worker.py:8` (`from langgraph.types import interrupt`)
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:8` (`from langgraph.types import interrupt`)
 **Standard:** LangGraph interrupt API
 **Actual:** Correctly imports from `langgraph.types`and
 calls`interrupt()`in`_interrupt_permission_callback`at line 47.
@@ -146,7 +146,7 @@ calls`interrupt()`in`_interrupt_permission_callback`at line 47.
 
 ### [LG-005] Supervisor routing via text parsing is fragile
 
-**File:**`lib/core/nodes/supervisor.py:45-56`
+**File:**`src/vaultspec_a2a/core/nodes/supervisor.py:45-56`
 **Standard:** ADR-013 section 2.5 star spec (supervisor returns `{"next":
 agent_id}`)
 **Actual:** The supervisor invokes the LLM with a text prompt asking it to
@@ -162,7 +162,7 @@ uses structured output (function calling) to avoid text parsing.
 
 ### [LG-006] TeamState`messages`uses`add_messages`reducer -- correct
 
-**File:**`lib/core/state.py:80`
+**File:**`src/vaultspec_a2a/core/state.py:80`
 **Standard:** LangGraph pattern for message accumulation
 **Actual:** `messages: Annotated[list[BaseMessage], add_messages]`-- CORRECT.
 The`add_messages`reducer handles deduplication and proper message append
@@ -171,7 +171,7 @@ semantics, including on interrupt resume.
 
 ### [LG-007] TeamState`loop_count`is last-write-wins (no reducer) -- correct design
 
-**File:**`lib/core/state.py:100`
+**File:**`src/vaultspec_a2a/core/state.py:100`
 **Standard:** ADR-013 section 5 ("plain last-write-wins int")
 **Actual:** `loop_count: NotRequired[int]`with no`Annotated`reducer -- this is
 correct last-write-wins semantics for LangGraph.
@@ -179,7 +179,7 @@ correct last-write-wins semantics for LangGraph.
 
 ### [LG-008] on_chain_stream event not handled in aggregator
 
-**File:**`lib/core/aggregator.py:96-110`
+**File:**`src/vaultspec_a2a/core/aggregator.py:96-110`
 **Standard:** LangGraph v2 emits `on_chain_stream`for structured output
 **Actual:** The`_PASSTHROUGH_EVENTS`and`_NODE_BOUNDARY_EVENTS`sets do not
 include`on_chain_stream`. This event is silently filtered out (logged as debug
@@ -330,7 +330,7 @@ and `version`fields. TOAD`agent.py:649`sends`title: toad.TITLE`.
 | ----------------------------------------- | ------------ | ------------------------------------------------------------ |
 | Managed CLI subprocesses via AcpChatModel | PASS         | Correctly implemented                                        |
 | Zero PTY / Zero Batch                     | PASS         | `create_subprocess_shell`with piped stdin/stdout/stderr      |
-| Workspace isolation (worktrees)           | PASS         | `lib/workspace/git_manager.py`exists                         |
+| Workspace isolation (worktrees)           | PASS         | `src/vaultspec_a2a/workspace/git_manager.py`exists                         |
 | Global Git Mutex                          | NOT VERIFIED | `git_manager.py`exists but not read in detail for this audit |
 
 ### ADR-004: Event Aggregation & State Replay
@@ -365,23 +365,23 @@ and `version`fields. TOAD`agent.py:649`sends`title: toad.TITLE`.
 
 | Sub-module                    | `__all__` | `X as X`                       | Relative imports | Status                                                                                              |
 | ----------------------------- | --------- | ------------------------------ | ---------------- | --------------------------------------------------------------------------------------------------- |
-| `lib/api/__init__.py`         | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/api/schemas/__init__.py` | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/core/__init__.py`        | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
-| `lib/core/nodes/__init__.py`  | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/providers/__init__.py`   | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
-| `lib/database/__init__.py`    | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/telemetry/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/workspace/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
-| `lib/utils/__init__.py`       | PASS      | **FAIL**                       | PASS             | Missing`X as X`pattern -- uses bare`from .enums import AgentState, Environment, LogLevel, Provider` |
-| `lib/core/registry.py`        | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
-| `lib/core/permissions.py`     | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
+| `src/vaultspec_a2a/api/__init__.py`         | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/api/schemas/__init__.py` | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/core/__init__.py`        | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/core/nodes/__init__.py`  | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/providers/__init__.py`   | PASS      | Uses lazy`__getattr__`for some | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/database/__init__.py`    | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/telemetry/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/workspace/__init__.py`   | PASS      | PASS                           | PASS             | CLEAN                                                                                               |
+| `src/vaultspec_a2a/utils/__init__.py`       | PASS      | **FAIL**                       | PASS             | Missing`X as X`pattern -- uses bare`from .enums import AgentState, Environment, LogLevel, Provider` |
+| `src/vaultspec_a2a/core/registry.py`        | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
+| `src/vaultspec_a2a/core/permissions.py`     | DELETED   | N/A                            | N/A              | CLEAN (per ADR-009)                                                                                 |
 
 ### ADR-010: Observability & Telemetry
 
 | Clause                       | Status | Notes                                                              |
 | ---------------------------- | ------ | ------------------------------------------------------------------ |
-| OpenTelemetry from day one   | PASS   | `lib/telemetry/instrumentation.py`exists with TracerProvider setup |
+| OpenTelemetry from day one   | PASS   | `src/vaultspec_a2a/telemetry/instrumentation.py`exists with TracerProvider setup |
 | FastAPI auto-instrumentation | PASS   | `TelemetryMiddleware`in`app.py:158`                                |
 | LangSmith tracing            | PASS   | Referenced in telemetry config                                     |
 | Trace ID in WebSocket frames | PASS   | `websocket.py:315-318`injects`_trace`dict                          |
@@ -402,9 +402,9 @@ and `version`fields. TOAD`agent.py:649`sends`title: toad.TITLE`.
 
 | Clause                                                      | Status | Notes                                                            |
 | ----------------------------------------------------------- | ------ | ---------------------------------------------------------------- |
-| AgentConfig Pydantic model                                  | PASS   | `lib/core/team_config.py`                                        |
+| AgentConfig Pydantic model                                  | PASS   | `src/vaultspec_a2a/core/team_config.py`                                        |
 | TOML loading via tomllib                                    | PASS   | `from_toml()`uses`tomllib.load()`                                |
-| Preset agents in`lib/core/presets/agents/`                  | PASS   | Directory exists                                                 |
+| Preset agents in`src/vaultspec_a2a/core/presets/agents/`                  | PASS   | Directory exists                                                 |
 | ACP capability binding (agent_config -> clientCapabilities) | PASS   | `acp_chat_model.py:682-699`reads from`agent_config.capabilities` |
 | Config discovery order (workspace -> preset -> error)       | PASS   | `load_agent_config()`in`team_config.py`                          |
 
@@ -412,7 +412,7 @@ and `version`fields. TOAD`agent.py:649`sends`title: toad.TITLE`.
 
 | Clause                                              | Status            | Notes                     |
 | --------------------------------------------------- | ----------------- | ------------------------- |
-| TeamConfig Pydantic model                           | PASS              | `lib/core/team_config.py` |
+| TeamConfig Pydantic model                           | PASS              | `src/vaultspec_a2a/core/team_config.py` |
 | 3 topology types (star, pipeline, pipeline_loop)    | PASS              | All three in`graph.py`    |
 | loop_count field in TeamState                       | PASS (declared)   | `state.py:100`            |
 | loop_count incremented by loop_node                 | **CRITICAL FAIL** | See COMP-001              |
@@ -437,7 +437,7 @@ letter queue for failed events.
 
 **Standard:** ADR-006 section 2 (MCP server exposing team/create, team/status
 tools)
-**Actual:**`lib/protocols/mcp/server.py`exists (imported in`app.py:31`) and
+**Actual:**`src/vaultspec_a2a/protocols/mcp/server.py`exists (imported in`app.py:31`) and
 mounted at `/mcp`, but the actual tool implementations are not audited in this
 pass. Based on the import and mount pattern, it appears to be wired but
 functionality level is unclear.
@@ -490,7 +490,7 @@ The following areas passed all compliance checks:
 - **Windows pipe cleanup** (\_transport.close() pattern)
 - **session/cancel as proper RPC** (with 3-second timeout)
 - **Batch JSON-RPC handling** (array dispatch in \_process_stdout_loop)
-- **Facade pattern compliance** (all sub-modules except lib/utils have correct
+- **Facade pattern compliance** (all sub-modules except src/vaultspec_a2a/utils have correct
   **all** and X as X)
 - **Registry and permissions deletion** (ADR-009 mandate fulfilled)
 - **CORS middleware** (present in dev mode)

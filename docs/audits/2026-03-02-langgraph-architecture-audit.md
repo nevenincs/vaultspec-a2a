@@ -31,7 +31,7 @@ Where findings from both sources overlap they are marked **⚠ confirmed**.
 
 ### C1 — Supervisor routing failure is silent (no state field, only a log)
 
-**File:** `lib/core/nodes/supervisor.py:88-92`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:88-92`
 
 The warning log added in the latest session is not visible to callers, the API,
 or the frontend. When the supervisor cannot parse a valid worker name from the
@@ -51,7 +51,7 @@ expose it.
 
 ### C2 — Supervisor uses fragile text parsing; structured output is the canonical approach
 
-**File:** `lib/core/nodes/supervisor.py:72-82`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:72-82`
 
 `with_structured_output(RouteSchema)` is the LangGraph-recommended way to
 enforce a valid routing decision. The current substring scan over `options`
@@ -81,7 +81,7 @@ routing state + edge dispatch into one step.
 
 ### C3 — `state["next"]` KeyError crashes graph on first star-topology invocation
 
-**File:** `lib/core/graph.py:299` (conditional edge lambda)
+**File:** `src/vaultspec_a2a/core/graph.py:299` (conditional edge lambda)
 
 ```python
 lambda state: state["next"]   # raises KeyError if next not in state
@@ -104,8 +104,8 @@ undefined → `KeyError` propagates through LangGraph as an uncaught exception.
 
 ### H1 — No `RetryPolicy` on any node
 
-**Files:** `lib/core/graph.py:267-283`, `lib/core/graph.py:363-378`,
-`lib/core/graph.py:508-516`
+**Files:** `src/vaultspec_a2a/core/graph.py:267-283`, `src/vaultspec_a2a/core/graph.py:363-378`,
+`src/vaultspec_a2a/core/graph.py:508-516`
 
 All three topology compilers call `builder.add_node()` without a `retry`
 argument. Every transient LLM failure (rate limit, 429, connection reset,
@@ -144,7 +144,7 @@ irreversible side effects.
 
 ### H2 — Worker exceptions propagate without agent identity in the exception
 
-**File:** `lib/core/nodes/worker.py:168-176`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:168-176`
 
 The `try/except` added in the latest session logs the agent name, but the
 re-raised exception is the raw provider exception (e.g. `BadRequestError`).
@@ -178,7 +178,7 @@ are exhausted.
 
 ### H3 — Supervisor node receives full message history (no context compaction)
 
-**File:** `lib/core/nodes/supervisor.py:52-54`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:52-54`
 
 Worker nodes call `compact_context()` when approaching `_CONTEXT_LIMIT`
 (120k tokens). The supervisor node passes the raw `state["messages"]` list
@@ -203,7 +203,7 @@ Import `_CONTEXT_LIMIT`, `compact_context`, `should_compact` from
 
 ### H4 — `next: str` declared required in `TeamState`; no default
 
-**File:** `lib/core/state.py:102`
+**File:** `src/vaultspec_a2a/core/state.py:102`
 
 `next: str` (no `NotRequired`) means the TypedDict technically requires `next`
 to be present on construction. In practice the API's initial state never sets
@@ -217,7 +217,7 @@ on a star topology is fragile.
 
 ### H5 — Loop count not logged; loop termination invisible in traces
 
-**File:** `lib/core/graph.py:479-496` (`_loop_node_with_counter`)
+**File:** `src/vaultspec_a2a/core/graph.py:479-496` (`_loop_node_with_counter`)
 
 The wrapper increments `loop_count` silently. There is no log entry when a
 loop iteration begins, completes, or when `max_loops` is hit. Diagnosing
@@ -233,7 +233,7 @@ on each iteration, and at WARNING when the loop terminates due to `max_loops`.
 
 ### M1 — Supervisor routing LLM tokens are visible to users
 
-**File:** `lib/core/nodes/supervisor.py:52`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:52`
 
 Supervisor routing is an internal control-flow decision. Its tokens stream to
 the client as visible `on_chat_model_stream` events, polluting the UI with
@@ -252,7 +252,7 @@ response = await routing_model.ainvoke(messages)
 
 ### M2 — `Command` objects not used; older `state["next"]` pattern
 
-**File:** `lib/core/graph.py:293-299`, `lib/core/nodes/supervisor.py:67`
+**File:** `src/vaultspec_a2a/core/graph.py:293-299`, `src/vaultspec_a2a/core/nodes/supervisor.py:67`
 
 The current pattern is:
 
@@ -272,7 +272,7 @@ but is two steps where one suffices.
 
 ### M3 — Routing options use insertion-order substring scan
 
-**File:** `lib/core/nodes/supervisor.py:77-82`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:77-82`
 
 When `options = ["coder", "code", "reviewer", "FINISH"]` and the supervisor
 says `"the code agent should handle this"`, the current loop returns `"coder"`
@@ -293,7 +293,7 @@ for option in sorted(options, key=len, reverse=True):
 
 ### M4 — `_wrap_loop_node` captures no `max_loops` reference for logging
 
-**File:** `lib/core/graph.py:439-456`
+**File:** `src/vaultspec_a2a/core/graph.py:439-456`
 
 `_wrap_loop_node()` only receives the `worker_node` callable. It has no
 reference to `max_loops` or `loop_node_id`, preventing meaningful loop-progress
@@ -306,7 +306,7 @@ so the inner function can log `"loop iteration {n}/{max}"`.
 
 ### M5 — No test coverage for star topology KeyError on missing `next`
 
-**File:** `lib/core/tests/test_graph.py`
+**File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 
 No test exercises what happens when a star-topology graph is invoked with
 initial state that omits the `next` field. This is the exact condition that
@@ -316,7 +316,7 @@ causes C3.
 
 ### M6 — No test for supervisor routing ambiguity (substring collision)
 
-**File:** `lib/core/tests/test_graph.py`
+**File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 
 No unit test creates a supervisor with workers named `"code"` and `"coder"`
 and verifies the correct one is selected when the supervisor responds
@@ -328,7 +328,7 @@ and verifies the correct one is selected when the supervisor responds
 
 ### L1 — Log truncation at 80/120 chars may hide routing information
 
-**File:** `lib/core/nodes/supervisor.py:90-92`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:90-92`
 
 `text[:120]` in the warning log may cut off the actual routing keyword if the
 model produces a long preamble. Increase to 500 chars or log full response at
@@ -338,7 +338,7 @@ DEBUG and truncated at WARNING.
 
 ### L2 — `_resolve_supervisor_model` capability log uses `.value` without guard
 
-**File:** `lib/core/graph.py:101`
+**File:** `src/vaultspec_a2a/core/graph.py:101`
 
 `capability.value if capability else "default"` — already correct after the
 recent logging additions. Confirm this guard is present (verified: it is).
@@ -347,7 +347,7 @@ recent logging additions. Confirm this guard is present (verified: it is).
 
 ### L3 — `recursion_limit` defaults are low for multi-agent pipelines
 
-**Files:** `lib/core/tests/test_e2e_live.py:136`, `probes/probe_graph_openai.py:91`
+**Files:** `src/vaultspec_a2a/core/tests/test_e2e_live.py:136`, `probes/probe_graph_openai.py:91`
 
 Pipeline tests use `recursion_limit: 20`. A three-agent pipeline with one
 loop iteration consumes at minimum 3 supersteps. With `RetryPolicy` retries,

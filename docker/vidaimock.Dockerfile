@@ -6,7 +6,7 @@ RUN apt-get update && \
 
 WORKDIR /app
 
-RUN curl -LO https://github.com/vidaiUK/VidaiMock/releases/latest/download/vidaimock-linux-x64.tar.gz && \
+RUN curl -LO https://github.com/vidaiUK/VidaiMock/releases/download/v0.1.2/vidaimock-linux-x64.tar.gz && \
     tar -xzf vidaimock-linux-x64.tar.gz && \
     rm vidaimock-linux-x64.tar.gz && \
     mv vidaimock/vidaimock /usr/local/bin/vidaimock && \

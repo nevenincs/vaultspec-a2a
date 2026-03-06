@@ -10,7 +10,7 @@ related:
 
 # ACP Protocol Feature Parity Audit
 
-**Our implementation:** `lib/providers/acp_chat_model.py`
+**Our implementation:** `src/vaultspec_a2a/providers/acp_chat_model.py`
 **Date:** 2026-02-26
 
 ## Sources audited

@@ -2,7 +2,7 @@
 adr_id: 031
 title: Worker Process Architecture
 date: 2026-03-04
-status: Proposed
+status: Accepted
 related:
   - docs/adrs/007-tech-stack-deployment.md
   - docs/adrs/010-observability-telemetry-integration.md
@@ -13,17 +13,17 @@ related:
 # ADR-031: Worker Process Architecture
 
 **Date:** 2026-03-04
-**Status:** Proposed
+**Status:** Accepted
 
 ## 1. Context & Problem Statement
 
 The VaultSpec backend has two distinct runtime concerns that benefit from
 process-level separation:
 
-- **Control surface** (`lib/api/`): Handles REST and WebSocket connections,
+- **Control surface** (`src/vaultspec_a2a/api/`): Handles REST and WebSocket connections,
   thread lifecycle, permission responses, and SSE event streaming to the
   frontend. Latency-sensitive; must stay responsive even during long LLM calls.
-- **Graph execution** (`lib/worker/`): Runs LangGraph agent graphs, invokes LLM
+- **Graph execution** (`src/vaultspec_a2a/worker/`): Runs LangGraph agent graphs, invokes LLM
   providers, streams events back to the control surface. CPU- and I/O-bound;
   a single run can last minutes and spawn multiple async tasks.
 
@@ -33,7 +33,7 @@ enables independent scaling: the worker can be scaled horizontally while the
 control surface remains a singleton (SQLite WAL limitation).
 
 This ADR ratifies the implemented worker process design that was not covered by
-an existing ADR (referenced in `lib/worker/app.py` and `lib/worker/executor.py`
+an existing ADR (referenced in `src/vaultspec_a2a/worker/app.py` and `src/vaultspec_a2a/worker/executor.py`
 as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
 
 ## 2. Decision
@@ -42,7 +42,7 @@ as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
 
 ```
 ┌──────────────────────────────────────┐      ┌────────────────────────┐
-│  Control Surface (lib/api/)          │      │  Worker (lib/worker/)  │
+│  Control Surface (src/vaultspec_a2a/api/)          │      │  Worker (src/vaultspec_a2a/worker/)  │
 │  FastAPI app  :8000                  │ HTTP │  FastAPI app  :8001     │
 │  REST + WebSocket endpoints          │─────▶│  /dispatch endpoint    │
 │  Permission response handling        │      │  /health endpoint      │
@@ -107,7 +107,7 @@ The control surface supports two worker deployment modes:
 ### 2.5 Worker Module Structure
 
 ```
-lib/worker/
+src/vaultspec_a2a/worker/
   __init__.py       Public facade: exports WorkerApp, Executor, WorkerBridge
   __main__.py       Entry point: python -m lib.worker
   app.py            FastAPI application factory + lifespan (checkpointer, bridge, executor)
@@ -120,7 +120,7 @@ lib/worker/
 
 ### 2.6 Executor Responsibilities
 
-`Executor` (`lib/worker/executor.py`) is the central graph execution engine:
+`Executor` (`src/vaultspec_a2a/worker/executor.py`) is the central graph execution engine:
 
 - Maintains a `dict[str, CompiledStateGraph]` mapping `thread_id` to compiled
   graph (lazy compilation on first dispatch).
@@ -196,10 +196,10 @@ existing `ServerEvent`/`DispatchRequest` schemas without code generation.
 
 ## 5. Implementation Constraints
 
-- `lib/worker/` must remain independent of `lib/api/` internals. It may import
-  from `lib/api/schemas/` (shared schema types) but NOT from `lib/api/endpoints`,
-  `lib/api/websocket`, or `lib/api/app`. The dependency arrow is:
-  `lib/api/` → `lib/worker/` (for spawn), `lib/worker/` → `lib/api/schemas/`.
+- `src/vaultspec_a2a/worker/` must remain independent of `src/vaultspec_a2a/api/` internals. It may import
+  from `src/vaultspec_a2a/api/schemas/` (shared schema types) but NOT from `src/vaultspec_a2a/api/endpoints`,
+  `src/vaultspec_a2a/api/websocket`, or `src/vaultspec_a2a/api/app`. The dependency arrow is:
+  `src/vaultspec_a2a/api/` → `src/vaultspec_a2a/worker/` (for spawn), `src/vaultspec_a2a/worker/` → `src/vaultspec_a2a/api/schemas/`.
 - The worker's internal HTTP port (`VAULTSPEC_WORKER_PORT=8001`) must not
   conflict with the control surface port (`VAULTSPEC_PORT=8000`).
 - `VAULTSPEC_INTERNAL_TOKEN` must be set to a non-empty value in production.
@@ -226,10 +226,10 @@ lib/
 
 ## 7. References
 
-- `lib/worker/app.py` — FastAPI application + lifespan (checkpointer, bridge, executor)
-- `lib/worker/executor.py` — Executor class (graph compilation, EventAggregator, run dispatch)
-- `lib/worker/ipc.py` — WorkerBridge (httpx client for event forwarding)
-- `lib/core/config.py` — `settings.worker_url`, `settings.worker_port`, `settings.auto_spawn_worker`
+- `src/vaultspec_a2a/worker/app.py` — FastAPI application + lifespan (checkpointer, bridge, executor)
+- `src/vaultspec_a2a/worker/executor.py` — Executor class (graph compilation, EventAggregator, run dispatch)
+- `src/vaultspec_a2a/worker/ipc.py` — WorkerBridge (httpx client for event forwarding)
+- `src/vaultspec_a2a/core/config.py` — `settings.worker_url`, `settings.worker_port`, `settings.auto_spawn_worker`
 - [ADR-007](007-tech-stack-deployment.md) — FastAPI + SQLite tech stack rationale
 - [ADR-010](010-observability-telemetry-integration.md) — OTel for worker spans
 - [ADR-017](017-containerization-strategy.md) — Docker Compose multi-service deployment

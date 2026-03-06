@@ -99,20 +99,20 @@ Remove `claude-agent-sdk` from `pyproject.toml` `[project.dependencies]`.
   re-added (with a PyPI release or as an optional extra) and a
   `ClaudeSDKChatModel(BaseChatModel)` adapter built alongside
   `AcpChatModel` — the `BaseChatModel` interface in
-  `lib/core/nodes/worker.py` is already the correct abstraction point.
+  `src/vaultspec_a2a/core/nodes/worker.py` is already the correct abstraction point.
 
 ### 2.3 Promote OpenTelemetry to Mandatory Runtime Dependency
 
 Move the three OpenTelemetry packages from `[project.optional-dependencies]
 telemetry` to `[project.dependencies]` and remove all try/except guards
-and conditional checks in `lib/api/app.py`.
+and conditional checks in `src/vaultspec_a2a/api/app.py`.
 
 **Rationale:**
 
 - ADR-010 mandates observability as a first-class architectural concern.
   Optional telemetry contradicts this mandate — if OTel is optional,
   production deployments may silently lack instrumentation.
-- The `lib/telemetry/` module already imports OTel unconditionally (no
+- The `src/vaultspec_a2a/telemetry/` module already imports OTel unconditionally (no
   guards in `middleware.py` or `instrumentation.py`). The try/except
   existed only in `app.py` as a consumer convenience — but it masked
   installation failures rather than surfacing them.
@@ -125,7 +125,7 @@ and conditional checks in `lib/api/app.py`.
 - `opentelemetry-exporter-otlp-proto-grpc>=1.39.1`
 - `opentelemetry-instrumentation-fastapi>=0.60b0`
 
-**Code changes in `lib/api/app.py`:**
+**Code changes in `src/vaultspec_a2a/api/app.py`:**
 
 - `try: from ..telemetry import ...` → direct import (no guard)
 - `if _configure_telemetry is not None:` → unconditional `configure_telemetry()`
@@ -138,7 +138,7 @@ Add `anyio>=4.9.0` to `[project.dependencies]`.
 
 **Rationale:**
 
-- Directly imported in `lib/api/app.py` and `lib/api/endpoints.py` for
+- Directly imported in `src/vaultspec_a2a/api/app.py` and `src/vaultspec_a2a/api/endpoints.py` for
   `anyio.create_task_group()` — a core concurrency primitive.
 - Previously only available transitively via FastAPI/uvicorn/starlette.
   Relying on transitive availability is fragile — if a dep drops anyio,
@@ -147,7 +147,7 @@ Add `anyio>=4.9.0` to `[project.dependencies]`.
 
 ### 2.5 Add CLI Entry Point
 
-Add a `main()` function to `lib/api/app.py` and declare a
+Add a `main()` function to `src/vaultspec_a2a/api/app.py` and declare a
 `[project.scripts]` entry point in `pyproject.toml`:
 
 ```toml
@@ -260,7 +260,7 @@ resolved before any packaging or distribution work proceeds.
 **Net result:** 25 → 17 runtime deps. 11 removed, 3 promoted (OTel
 from optional), 1 added (anyio from transitive).
 
-### 3.2 lib/api/app.py Changes
+### 3.2 src/vaultspec_a2a/api/app.py Changes
 
 ```diff
 -# Telemetry is an optional extra; import once at module level so the
@@ -381,7 +381,7 @@ vaultspec-a2a` works for ephemeral use.
 | ADR                        | Relationship                                                        | Status    |
 | -------------------------- | ------------------------------------------------------------------- | --------- |
 | ADR-007 (Tech Stack)       | Aligns — removes undeclared platform coupling                       | Compliant |
-| ADR-009 (Module Hierarchy) | Aligns — `lib/api/app.py` gains `main()` in its public surface      | Compliant |
+| ADR-009 (Module Hierarchy) | Aligns — `src/vaultspec_a2a/api/app.py` gains `main()` in its public surface      | Compliant |
 | ADR-010 (Observability)    | **Enforces** — OTel promoted from optional to mandatory runtime dep | Compliant |
 | Research doc               | Implements "Immediate Action Items §7.1" from packaging research    | Compliant |
 

@@ -32,7 +32,7 @@ to`True`.
 **Evidence:**
 
 ```python
-# lib/providers/acp_chat_model.py:466-472
+# src/vaultspec_a2a/providers/acp_chat_model.py:466-472
 
 def _sandbox_path(self, path: str) -> Path:
     """Resolve and sandbox a path to the agent cwd."""
@@ -64,7 +64,7 @@ accidentally execute destructive commands. |
 **Evidence:**
 
 ```python
-# lib/providers/acp_chat_model.py:509-520
+# src/vaultspec_a2a/providers/acp_chat_model.py:509-520
 
 command = params["command"]
 args = params.get("args") or []
@@ -107,7 +107,7 @@ to`"claude-agent-acp; rm -rf /"` and executed by the shell.
 **Evidence:**
 
 ```python
-# lib/providers/acp_chat_model.py:158-166
+# src/vaultspec_a2a/providers/acp_chat_model.py:158-166
 
 shell_command = " ".join(self.command)
 # ...
@@ -151,7 +151,7 @@ permissions, or exfiltrate thread state.
 **Evidence:**
 
 ```python
-# lib/api/app.py:147-154
+# src/vaultspec_a2a/api/app.py:147-154
 
 if settings.is_dev:
     app.add_middleware(
@@ -188,7 +188,7 @@ and read streaming LLM output, tool calls, and permission requests.
 **Evidence:**
 
 ```python
-# lib/api/app.py:168-173
+# src/vaultspec_a2a/api/app.py:168-173
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket) -> None:
@@ -218,7 +218,7 @@ subscribe to events.
 effectively bypassing the human-in-the-loop safety mechanism (ADR-006).
 **Evidence:** No authentication middleware, no JWT validation, no API key checks
 anywhere in `endpoints.py`, `websocket.py`, or `app.py`. The only auth-related
-module mentioned in ADR-009 (`lib/api/auth.py`) does not exist.
+module mentioned in ADR-009 (`src/vaultspec_a2a/api/auth.py`) does not exist.
 **Fix:** For v1 local-only deployment, add at minimum:
 
 1. A startup-generated random token printed to the console (like Jupyter).
@@ -241,7 +241,7 @@ guesses or observes a`request_id`can auto-approve destructive actions
 **Evidence:**
 
 ```python
-# lib/api/endpoints.py:486-490
+# src/vaultspec_a2a/api/endpoints.py:486-490
 
 thread_id = ""
 if ":" in request_id:
@@ -271,7 +271,7 @@ no`maxsize` bound.
 **Evidence:**
 
 ```python
-# lib/providers/acp_chat_model.py:183
+# src/vaultspec_a2a/providers/acp_chat_model.py:183
 
 chunk_queue=asyncio.Queue(),
 ```
@@ -296,7 +296,7 @@ WebSocket frame size limit.
 **Evidence:**
 
 ```python
-# lib/api/websocket.py:176
+# src/vaultspec_a2a/api/websocket.py:176
 
 raw = await asyncio.wait_for(
     websocket.receive_json(),
@@ -321,7 +321,7 @@ on`load_team_config` implementation.
 **Evidence:**
 
 ```python
-# lib/api/endpoints.py:163-170
+# src/vaultspec_a2a/api/endpoints.py:163-170
 
 if body.team_preset:
     try:
@@ -347,7 +347,7 @@ thread's events.
 **Evidence:**
 
 ```python
-# lib/api/websocket.py:214-222
+# src/vaultspec_a2a/api/websocket.py:214-222
 
 case ClientCommandType.SUBSCRIBE:
     cmd = cast(SubscribeCommand, command)
@@ -630,7 +630,7 @@ with`self._lock`.
 
 ## TEST QUALITY VIOLATIONS
 
-### [TEST-001] `monkeypatch.setenv`usage -- lib/core/tests/test_config.py:19-54
+### [TEST-001] `monkeypatch.setenv`usage -- src/vaultspec_a2a/core/tests/test_config.py:19-54
 
 **Violation:** FORBIDDEN per CLAUDE.md: "Avoid monkeypatching."
 **Evidence:** Functions`test_config_vaultspec_env_prefix`(line 19)
@@ -643,7 +643,7 @@ API (e.g., pass env dict to `Settings()`).
 
 ---
 
-### [TEST-002] `monkeypatch.setenv`/`monkeypatch.delenv`usage -- lib/telemetry/tests/test_telemetry.py:60-101
+### [TEST-002] `monkeypatch.setenv`/`monkeypatch.delenv`usage -- src/vaultspec_a2a/telemetry/tests/test_telemetry.py:60-101
 
 **Violation:** FORBIDDEN per CLAUDE.md: "Avoid monkeypatching."
 **Evidence:**
@@ -659,7 +659,7 @@ pytest.MonkeyPatch)`uses`monkeypatch.setenv("OTEL_SDK_DISABLED", "true")`
 
 ---
 
-### [TEST-003] `pytest.skip()` usage in live tests -- lib/providers/tests/test_acp_chat_model.py:41,103
+### [TEST-003] `pytest.skip()` usage in live tests -- src/vaultspec_a2a/providers/tests/test_acp_chat_model.py:41,103
 
 **Violation:** Red flag per audit scope. Tests that skip based on missing
 credentials.
@@ -681,7 +681,7 @@ that require real external services.
 
 ## STUBS / PLACEHOLDERS IN SOURCE CODE
 
-### [STUB-001] `NotImplementedError`in`_generate` -- lib/providers/acp_chat_model.py:323
+### [STUB-001] `NotImplementedError`in`_generate` -- src/vaultspec_a2a/providers/acp_chat_model.py:323
 
 ### Evidence
 
@@ -698,10 +698,10 @@ abstract method that deliberately refuses synchronous invocation.
 
 ---
 
-### [STUB-002]`lib/core/registry.py`and`lib/core/permissions.py` -- DELETED (confirmed)
+### [STUB-002]`src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py` -- DELETED (confirmed)
 
 **Evidence:** Both files are listed as deleted in git status (`MD
-lib/core/registry.py`, and `permissions.py`does not exist on disk). ADR-009
+src/vaultspec_a2a/core/registry.py`, and `permissions.py`does not exist on disk). ADR-009
 mandates their deletion, and this has been completed.
 **Assessment:** CLEAN. The ADR-009 mandate is fulfilled. However, git status
 shows`registry.py`as`MD`(modified + deleted), suggesting it was staged for
@@ -742,7 +742,7 @@ is unnecessary for exec-style invocation.
 **ADR reference:** ADR-009 section 5 mandates facade pattern with explicit
 imports.
 **Evidence:**
-Both`lib/core/__init__.py:88-94`and`lib/providers/__init__.py:20-26`use`importlib.import_module()`
+Both`src/vaultspec_a2a/core/__init__.py:88-94`and`src/vaultspec_a2a/providers/__init__.py:20-26`use`importlib.import_module()`
 lazy imports with comments identifying the circular chain:
 
 ```python
@@ -784,11 +784,11 @@ strategy is wrong. See [ROB-002] for details.
 
 ---
 
-### [CONTRA-004] ADR-009 lists`lib/api/auth.py`but the file does not exist
+### [CONTRA-004] ADR-009 lists`src/vaultspec_a2a/api/auth.py`but the file does not exist
 
 **ADR reference:** ADR-009 section 2.2 hierarchy
-shows`lib/api/auth.py`(WebSocket/REST authentication).
-**Evidence:** No`auth.py`exists in`lib/api/`. No authentication is implemented
+shows`src/vaultspec_a2a/api/auth.py`(WebSocket/REST authentication).
+**Evidence:** No`auth.py`exists in`src/vaultspec_a2a/api/`. No authentication is implemented
 anywhere. See [SEC-006].
 **Assessment:** ADR-009 describes the target architecture. The authentication
 module is unimplemented.
@@ -797,29 +797,29 @@ module is unimplemented.
 
 ## CLEAN (passed all checks)
 
-- **lib/database/crud.py** -- All queries use SQLAlchemy ORM. No raw SQL.
+- **src/vaultspec_a2a/database/crud.py** -- All queries use SQLAlchemy ORM. No raw SQL.
   Parameterized queries throughout. No injection vectors.
-- **lib/database/models.py** -- Clean SQLAlchemy declarative models with proper
+- **src/vaultspec_a2a/database/models.py** -- Clean SQLAlchemy declarative models with proper
   FK constraints and indexes.
-- **lib/database/session.py** -- WAL mode correctly set via `PRAGMA
+- **src/vaultspec_a2a/database/session.py** -- WAL mode correctly set via `PRAGMA
 journal_mode=WAL`. Connection lifecycle properly managed.
-- **lib/database/**init**.py** -- Proper facade with `X as X`re-exports
+- **src/vaultspec_a2a/database/**init**.py** -- Proper facade with `X as X`re-exports
   and`__all__`.
-- **lib/core/state.py** -- Clean TypedDict with custom reducers.
+- **src/vaultspec_a2a/core/state.py** -- Clean TypedDict with custom reducers.
   JSON-serializable as required.
-- **lib/core/exceptions.py** -- Well-structured error taxonomy with
+- **src/vaultspec_a2a/core/exceptions.py** -- Well-structured error taxonomy with
   severity/recovery hints.
-- **lib/providers/gemini_auth.py** -- Atomic file write pattern. Proper timeout
+- **src/vaultspec_a2a/providers/gemini_auth.py** -- Atomic file write pattern. Proper timeout
   on HTTP call. Public client credentials documented correctly.
-- **lib/api/schemas/** -- All 6 schema modules clean. Proper `__all__`,
+- **src/vaultspec_a2a/api/schemas/** -- All 6 schema modules clean. Proper `__all__`,
   discriminated unions, and Pydantic v2 patterns.
-- **lib/workspace/git_manager.py** -- `create_subprocess_exec` used correctly.
+- **src/vaultspec_a2a/workspace/git_manager.py** -- `create_subprocess_exec` used correctly.
   Mutex + shield pattern correct (except TOCTOU in merge, see [ROB-005]).
-- **lib/core/tests/test_exceptions.py** -- No mocks, no stubs.
-- **lib/core/tests/test_graph.py** -- No mocks, no stubs.
-- **lib/api/schemas/tests/test_schemas.py** -- No mocks, no stubs.
-- **lib/utils/tests/test_logging.py** -- No mocks, no stubs.
-- **lib/workspace/tests/test_workspace.py** -- Explicitly states "no mocks, no
+- **src/vaultspec_a2a/core/tests/test_exceptions.py** -- No mocks, no stubs.
+- **src/vaultspec_a2a/core/tests/test_graph.py** -- No mocks, no stubs.
+- **src/vaultspec_a2a/api/schemas/tests/test_schemas.py** -- No mocks, no stubs.
+- **src/vaultspec_a2a/utils/tests/test_logging.py** -- No mocks, no stubs.
+- **src/vaultspec_a2a/workspace/tests/test_workspace.py** -- Explicitly states "no mocks, no
   monkeypatching" and creates real temp git repos.
-- **lib/database/tests/test_database.py** -- Explicitly states "No mocks, no
+- **src/vaultspec_a2a/database/tests/test_database.py** -- Explicitly states "No mocks, no
   monkeypatching" and runs against real aiosqlite.

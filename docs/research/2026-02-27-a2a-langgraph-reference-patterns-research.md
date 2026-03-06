@@ -199,7 +199,7 @@ itself — it's expected to be added by the application that wraps the A2A app.
 
 ### What Our Code Should Do (3)
 
-1. Create`lib/api/auth.py`with a`User`ABC and`UnauthenticatedUser`class
+1. Create`src/vaultspec_a2a/api/auth.py`with a`User`ABC and`UnauthenticatedUser`class
    (matching A2A's pattern).
 2. Add a`CallContext`or`RequestContext`that propagates user info through
    handlers.

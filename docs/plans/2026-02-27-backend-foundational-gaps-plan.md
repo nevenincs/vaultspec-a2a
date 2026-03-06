@@ -125,38 +125,38 @@ Source: Implementation Alignment Audit 2026-02-27.
 
 | Component                    | Module                                              | ADR Coverage              |
 | ---------------------------- | --------------------------------------------------- | ------------------------- |
-| Wire contract schemas        | `lib/api/schemas/`(51 Pydantic types, 6 modules)    | ADR-011 COMPLETE          |
-| Event aggregator             | `lib/core/aggregator.py`                            | ADR-004 COMPLETE          |
-| WebSocket connection manager | `lib/api/websocket.py`                              | ADR-004 COMPLETE          |
-| Database models + CRUD       | `lib/database/models.py`, `crud.py`, `session.py`   | ADR-007 COMPLETE          |
-| Git workspace management     | `lib/workspace/git_manager.py`, `environment.py`    | ADR-001 COMPLETE          |
-| Context window management    | `lib/core/context.py`                               | ADR-002 COMPLETE          |
-| Error taxonomy               | `lib/core/exceptions.py`                            | Gap 6 COMPLETE            |
-| LangGraph state              | `lib/core/state.py`(TeamState TypedDict)            | ADR-008 COMPLETE          |
-| Telemetry infrastructure     | `lib/telemetry/instrumentation.py`, `middleware.py` | ADR-010 PARTIAL (unwired) |
-| AcpChatModel provider        | `lib/providers/acp_chat_model.py`(642 lines)        | ADR-006 COMPLETE          |
-| Provider factory             | `lib/providers/factory.py`                          | ADR-002 PARTIAL           |
-| Provider health probes       | `lib/providers/probes/`                             | N/A                       |
+| Wire contract schemas        | `src/vaultspec_a2a/api/schemas/`(51 Pydantic types, 6 modules)    | ADR-011 COMPLETE          |
+| Event aggregator             | `src/vaultspec_a2a/core/aggregator.py`                            | ADR-004 COMPLETE          |
+| WebSocket connection manager | `src/vaultspec_a2a/api/websocket.py`                              | ADR-004 COMPLETE          |
+| Database models + CRUD       | `src/vaultspec_a2a/database/models.py`, `crud.py`, `session.py`   | ADR-007 COMPLETE          |
+| Git workspace management     | `src/vaultspec_a2a/workspace/git_manager.py`, `environment.py`    | ADR-001 COMPLETE          |
+| Context window management    | `src/vaultspec_a2a/core/context.py`                               | ADR-002 COMPLETE          |
+| Error taxonomy               | `src/vaultspec_a2a/core/exceptions.py`                            | Gap 6 COMPLETE            |
+| LangGraph state              | `src/vaultspec_a2a/core/state.py`(TeamState TypedDict)            | ADR-008 COMPLETE          |
+| Telemetry infrastructure     | `src/vaultspec_a2a/telemetry/instrumentation.py`, `middleware.py` | ADR-010 PARTIAL (unwired) |
+| AcpChatModel provider        | `src/vaultspec_a2a/providers/acp_chat_model.py`(642 lines)        | ADR-006 COMPLETE          |
+| Provider factory             | `src/vaultspec_a2a/providers/factory.py`                          | ADR-002 PARTIAL           |
+| Provider health probes       | `src/vaultspec_a2a/providers/probes/`                             | N/A                       |
 
 ### Stubbed (Requires Implementation or Deletion)
 
 | Component                                | Current State                             | Action Required                                     |
 | ---------------------------------------- | ----------------------------------------- | --------------------------------------------------- |
-| `lib/api/endpoints.py`                   | Placeholder string (`router_placeholder`) | **REPLACE** with 6 REST routes                      |
-| `lib/core/registry.py`                   | 2-line stub                               | **DELETE** per ADR-009                              |
-| `lib/core/permissions.py`                | 2-line stub                               | **DELETE** per ADR-009                              |
-| `lib/protocols/mcp/`, `a2a/`, `adapter/` | Empty directories with`__init__.py`       | Deferred (MCP server is out of scope for this plan) |
+| `src/vaultspec_a2a/api/endpoints.py`                   | Placeholder string (`router_placeholder`) | **REPLACE** with 6 REST routes                      |
+| `src/vaultspec_a2a/core/registry.py`                   | 2-line stub                               | **DELETE** per ADR-009                              |
+| `src/vaultspec_a2a/core/permissions.py`                | 2-line stub                               | **DELETE** per ADR-009                              |
+| `src/vaultspec_a2a/protocols/mcp/`, `a2a/`, `adapter/` | Empty directories with`__init__.py`       | Deferred (MCP server is out of scope for this plan) |
 
 ### Completely Missing (Must Create)
 
 | Component                    | File Path                                        | Blocking                           |
 | ---------------------------- | ------------------------------------------------ | ---------------------------------- |
-| FastAPI application          | `lib/api/app.py`                                 | **Everything**                     |
-| REST endpoint implementation | `lib/api/endpoints.py`                           | Reconnection protocol, permissions |
-| Provider facade              | `lib/providers/__init__.py`(empty)               | Import ergonomics                  |
-| Core facade cleanup          | `lib/core/__init__.py`(references deleted stubs) | Import correctness                 |
+| FastAPI application          | `src/vaultspec_a2a/api/app.py`                                 | **Everything**                     |
+| REST endpoint implementation | `src/vaultspec_a2a/api/endpoints.py`                           | Reconnection protocol, permissions |
+| Provider facade              | `src/vaultspec_a2a/providers/__init__.py`(empty)               | Import ergonomics                  |
+| Core facade cleanup          | `src/vaultspec_a2a/core/__init__.py`(references deleted stubs) | Import correctness                 |
 | OTel wiring into runtime     | Aggregator, WS manager                           | ADR-010 compliance                 |
-| TOML agent/team config       | `lib/core/team_config.py`, `lib/core/presets/`   | ADR-012, ADR-013                   |
+| TOML agent/team config       | `src/vaultspec_a2a/core/team_config.py`, `src/vaultspec_a2a/core/presets/`   | ADR-012, ADR-013                   |
 
 ---
 
@@ -174,8 +174,8 @@ that govern it, and what the audit found about its current state.
 **Audit status:** MISSING. No task currently owns this file. (Audit section 5,
 CRITICAL item 1; Recommended Task A.)
 
-**Create:**`lib/api/app.py`
-**Modify:** `lib/api/__init__.py`, `pyproject.toml`
+**Create:**`src/vaultspec_a2a/api/app.py`
+**Modify:** `src/vaultspec_a2a/api/__init__.py`, `pyproject.toml`
 
 ### Requirements
 
@@ -223,12 +223,12 @@ ADR-009 section 2; ADR-010 section 2.
 ### Gap 2: WebSocket Multiplexer Wiring
 
 **Audit status:** WebSocket`ConnectionManager` is COMPLETE in
-`lib/api/websocket.py`. What is missing is: (a) mounting the WS endpoint in the
+`src/vaultspec_a2a/api/websocket.py`. What is missing is: (a) mounting the WS endpoint in the
 FastAPI app, (b) `SEND_MESSAGE` command routing to graph invocation, (c)
 `PERMISSION_RESPONSE`rejection over WS, and (d) server-side dead client
 enforcement at 90 seconds.
 
-**Modify:**`lib/api/websocket.py`, `lib/api/app.py`
+**Modify:**`src/vaultspec_a2a/api/websocket.py`, `src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (2)
 
@@ -243,7 +243,7 @@ enforcement at 90 seconds.
    connection dead after 90 seconds"; Audit section 5: MEDIUM item "Client dead
    timeout enforcement").
 3. Inject OTel spans around `connect()`, `listen()`, and
-   `_handle_client_message()`using`ws_span()`from`lib/telemetry/middleware.py`
+   `_handle_client_message()`using`ws_span()`from`src/vaultspec_a2a/telemetry/middleware.py`
    (ADR-010 section 5; Audit Recommended Task E).
 4. All agent events must carry `agent_id`for client-side routing (ADR-011
    section 2.1).
@@ -267,12 +267,12 @@ section 5; ADR-010 section 5.
 
 ### Gap 3: Event Aggregator Wiring
 
-**Audit status:**`EventAggregator`at`lib/core/aggregator.py`is COMPLETE with
+**Audit status:**`EventAggregator`at`src/vaultspec_a2a/core/aggregator.py`is COMPLETE with
 debounce, chunking, backpressure, sequence numbering, and subscriber management.
 The gap is integration: the aggregator is not started from any lifespan, not
 bound to any graph invocation trigger, and does not have OTel spans.
 
-**Modify:**`lib/core/aggregator.py`, `lib/api/app.py`
+**Modify:**`src/vaultspec_a2a/core/aggregator.py`, `src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (3)
 
@@ -304,11 +304,11 @@ ADR-011 section 2.1.
 
 ### Gap 4: REST Endpoint Implementation (6 Routes)
 
-**Audit status:**`lib/api/endpoints.py`is a placeholder string -- zero
+**Audit status:**`src/vaultspec_a2a/api/endpoints.py`is a placeholder string -- zero
 implementation. (Audit section 2, ADR-011: "REST endpoints (6 routes) MISSING";
 Recommended Task B.)
 
-**Modify:**`lib/api/endpoints.py`-- replace stub entirely.
+**Modify:**`src/vaultspec_a2a/api/endpoints.py`-- replace stub entirely.
 
 Six endpoints per ADR-011 section 2.2:
 
@@ -362,7 +362,7 @@ All 9 subprocess patterns from ADR-006 section 5.1 are present. What is missing:
 for `fs/*`and`terminal/*`methods, (c)`session/cancel`is sent as a
 notification instead of an RPC with 3-second timeout.
 
-**Modify:**`lib/providers/acp_chat_model.py`
+**Modify:**`src/vaultspec_a2a/providers/acp_chat_model.py`
 
 ### Requirements: (4)
 
@@ -400,13 +400,13 @@ handlers); Toad`protocol.py`(TypedDict definitions for terminal/fs types).
 
 ### Gap 6: Database Layer Integration
 
-**Audit status:**`lib/database/`is COMPLETE with 4 SQLAlchemy models, CRUD,
+**Audit status:**`src/vaultspec_a2a/database/`is COMPLETE with 4 SQLAlchemy models, CRUD,
 WAL session, and facade. The gap is: (a) no integration with the FastAPI
 lifespan (tables are never created at startup), (b) no migration tooling, (c)
 the database is not connected to the REST endpoints.
 
-**Modify:**`lib/database/session.py`, `lib/database/__init__.py`,
-`lib/api/app.py`
+**Modify:**`src/vaultspec_a2a/database/session.py`, `src/vaultspec_a2a/database/__init__.py`,
+`src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (5)
 
@@ -416,7 +416,7 @@ the database is not connected to the REST endpoints.
 2. Expose`get_db()`as a FastAPI dependency for REST endpoint injection
    (Research section 2.3; ADR-007 section 3).
 3. Implement simple version-table migration runner:
-   `lib/database/migrations/`with sequential numbered scripts and a
+   `src/vaultspec_a2a/database/migrations/`with sequential numbered scripts and a
    `schema_migrations`table (Research section 2.5; Audit section 5: MEDIUM
    item "Database migration tooling").
 4. Ensure the application database shares the same SQLite file as the LangGraph
@@ -430,15 +430,15 @@ the database is not connected to the REST endpoints.
 
 - WAL mode is mandatory (ADR-007 section 3).
 - Write batching or single-writer pattern for CRUD (ADR-007 section 5).
-- `lib/core/config.py`already has`database_url`field.
+- `src/vaultspec_a2a/core/config.py`already has`database_url`field.
 
 ---
 
 ### Gap 7: Provider Facade + Core Facade Cleanup
 
-**Audit status:**`lib/providers/__init__.py`is empty (facade violation per
-ADR-009 section 5).`lib/core/registry.py`and`lib/core/permissions.py`are
-2-line stubs that ADR-009 mandates for deletion.`lib/core/__init__.py`
+**Audit status:**`src/vaultspec_a2a/providers/__init__.py`is empty (facade violation per
+ADR-009 section 5).`src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py`are
+2-line stubs that ADR-009 mandates for deletion.`src/vaultspec_a2a/core/__init__.py`
 references these stubs.
 
 This gap combines the original Gap 7 (Provider Facade) and Gap 8 (Core Facade
@@ -447,7 +447,7 @@ dependencies.
 
 #### Part A: Provider Facade
 
-**Modify:** `lib/providers/__init__.py`, add `__all__`to sub-modules that lack
+**Modify:** `src/vaultspec_a2a/providers/__init__.py`, add `__all__`to sub-modules that lack
 it.
 
 1. Export:`AcpChatModel`, `ProviderFactory`, `AcpError`, `AcpErrorCode`,
@@ -460,25 +460,25 @@ it.
 
 #### Part B: Core Facade Cleanup
 
-**Delete:**`lib/core/registry.py`, `lib/core/permissions.py`
-**Modify:** `lib/core/__init__.py`, `lib/core/nodes/__init__.py`
+**Delete:**`src/vaultspec_a2a/core/registry.py`, `src/vaultspec_a2a/core/permissions.py`
+**Modify:** `src/vaultspec_a2a/core/__init__.py`, `src/vaultspec_a2a/core/nodes/__init__.py`
 
 ADR-009 "Key Architectural Shifts" table mandates:
 
 - `registry.py`DELETED: LangGraph checkpointer replaces agent state tracking. -`permissions.py`DELETED: LangGraph`interrupt()`in worker node replaces
   PermissionEngine.
 
-1. DELETE`lib/core/registry.py`and`lib/core/permissions.py`.
+1. DELETE`src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py`.
 2. Remove all imports/exports of `Registry`or`PermissionEngine`from
-   `lib/core/__init__.py`.
+   `src/vaultspec_a2a/core/__init__.py`.
 3. Export `compile_team_graph`, `create_worker_node`, `create_supervisor_node`
-   from `lib/core/`.
-4. `lib/core/nodes/__init__.py`: add proper exports with `__all__`.
-5. Add `__all__`to`lib/core/graph.py`, `lib/core/state.py`,
-   `lib/core/config.py`, `lib/core/exceptions.py`.
+   from `src/vaultspec_a2a/core/`.
+4. `src/vaultspec_a2a/core/nodes/__init__.py`: add proper exports with `__all__`.
+5. Add `__all__`to`src/vaultspec_a2a/core/graph.py`, `src/vaultspec_a2a/core/state.py`,
+   `src/vaultspec_a2a/core/config.py`, `src/vaultspec_a2a/core/exceptions.py`.
 
 **Validation:** `from lib.core import compile_team_graph` works.
-`lib/core/registry.py`and`lib/core/permissions.py` are deleted.
+`src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py` are deleted.
 
 **ADR References:** ADR-009 section 2, section 5; ADR-009 "Key Architectural
 Shifts" table.
@@ -493,17 +493,17 @@ Shifts" table.
 section 2, ADR-010: "Instrumentation not yet wired into the aggregator, WS
 manager, or graph execution layer.")
 
-**Modify:** `lib/core/aggregator.py`, `lib/api/websocket.py`,
-`lib/telemetry/instrumentation.py`, `lib/api/app.py`, `pyproject.toml`
+**Modify:** `src/vaultspec_a2a/core/aggregator.py`, `src/vaultspec_a2a/api/websocket.py`,
+`src/vaultspec_a2a/telemetry/instrumentation.py`, `src/vaultspec_a2a/api/app.py`, `pyproject.toml`
 
 ### Requirements: (6)
 
 1. Call `configure_telemetry()`from the FastAPI lifespan startup (Gap 1 step
    2c; ADR-010 section 2).
 2. Add`ws_span()`around`ingest()`and`_broadcast()`in
-   `lib/core/aggregator.py`(ADR-010 section 5; Audit Recommended Task E).
+   `src/vaultspec_a2a/core/aggregator.py`(ADR-010 section 5; Audit Recommended Task E).
 3. Add`ws_span()`around`connect()`, `listen()`, and
-   `_handle_client_message()`in`lib/api/websocket.py`(ADR-010 section 5;
+   `_handle_client_message()`in`src/vaultspec_a2a/api/websocket.py`(ADR-010 section 5;
    Audit Recommended Task E).
 4. Add`get_meter()`usage for: token count, WS connection count, active
    threads (Audit Recommended Task E).
@@ -514,7 +514,7 @@ manager, or graph execution layer.")
    in`pyproject.toml`dependencies.
 7. Use`BatchSpanProcessor`(not`SimpleSpanProcessor`) to avoid blocking the
    event loop.
-8. Exporter endpoint configurable via `lib/core/config.py`Settings.
+8. Exporter endpoint configurable via `src/vaultspec_a2a/core/config.py`Settings.
 
 **ADR References:** ADR-010 (entire document); ADR-009 section 2.
 
@@ -528,19 +528,19 @@ manager, or graph execution layer.")
 ADR-012 and ADR-013 were published on 2026-02-27 and introduce requirements
 that refactor`compile_team_graph()`and the supervisor prompt.
 
-**Create:**`lib/core/team_config.py`, `lib/core/presets/agents/*.toml`,
-`lib/core/presets/teams/*.toml`, `lib/core/tests/test_team_config.py`
-**Modify:** `lib/core/graph.py`, `lib/core/nodes/supervisor.py`,
-`lib/core/state.py`, `lib/core/__init__.py`, `lib/api/schemas/rest.py`,
-`lib/api/endpoints.py`, `lib/providers/acp_chat_model.py`
+**Create:**`src/vaultspec_a2a/core/team_config.py`, `src/vaultspec_a2a/core/presets/agents/*.toml`,
+`src/vaultspec_a2a/core/presets/teams/*.toml`, `src/vaultspec_a2a/core/tests/test_team_config.py`
+**Modify:** `src/vaultspec_a2a/core/graph.py`, `src/vaultspec_a2a/core/nodes/supervisor.py`,
+`src/vaultspec_a2a/core/state.py`, `src/vaultspec_a2a/core/__init__.py`, `src/vaultspec_a2a/api/schemas/rest.py`,
+`src/vaultspec_a2a/api/endpoints.py`, `src/vaultspec_a2a/providers/acp_chat_model.py`
 
 #### Part A: Agent Config (ADR-012)
 
-1. Implement `AgentConfig`Pydantic model in`lib/core/team_config.py`with
+1. Implement `AgentConfig`Pydantic model in`src/vaultspec_a2a/core/team_config.py`with
    `from_toml(path)`classmethod (ADR-012 section 2.3).
 2. Implement config discovery: workspace override at
    `{workspace_root}/.vaultspec/agents/{agent_id}.toml`, then bundled default
-   at `lib/core/presets/agents/{agent_id}.toml`, then fail fast with
+   at `src/vaultspec_a2a/core/presets/agents/{agent_id}.toml`, then fail fast with
    `AgentConfigNotFoundError`(ADR-012 section 2.8).
 3. Create four preset agent TOML files:`planner.toml`, `coder.toml`,
    `reviewer.toml`, `analyst.toml` (ADR-012 section 2.7).
@@ -553,11 +553,11 @@ that refactor`compile_team_graph()`and the supervisor prompt.
 #### Part B: Team Config (ADR-013)
 
 1. Implement`TeamConfig`, `TopologyConfig`, `WorkerRef`, `SupervisorConfig`,
-   `TeamDefaultsConfig`Pydantic models in`lib/core/team_config.py`with
+   `TeamDefaultsConfig`Pydantic models in`src/vaultspec_a2a/core/team_config.py`with
    `from_toml(path)`(ADR-013 section 2.4).
 2. Implement config discovery: workspace at
    `{workspace_root}/.vaultspec/teams/{team_id}.toml`, then bundled default at
-   `lib/core/presets/teams/{team_id}.toml`, then fail fast with
+   `src/vaultspec_a2a/core/presets/teams/{team_id}.toml`, then fail fast with
    `TeamConfigNotFoundError`(ADR-013 section 2.8).
 3. Create four preset team TOML files:`coding-star.toml`,
    `coding-pipeline.toml`, `coding-loop.toml`, `solo-coder.toml`(ADR-013
@@ -584,7 +584,7 @@ metadata={...})`(ADR-012 section 2.5).
 #### Part D: Wire Contract Amendments
 
 1. Add`role`, `display_name`, `description`fields to`AgentSummary`in
-   `lib/api/schemas/`(ADR-012 section 6).
+   `src/vaultspec_a2a/api/schemas/`(ADR-012 section 6).
    | 2. Add`team_preset: str | None = None`field to`CreateThreadRequest` |
    (ADR-013 section 6).
 1. Add`GET /api/teams`endpoint returning`TeamPresetsResponse`(ADR-013
@@ -616,10 +616,10 @@ subsequent phases import from clean, well-structured facades.
 
 ### Deliverables
 
--`lib/providers/__init__.py`exports`AcpChatModel`, `ProviderFactory`,
+-`src/vaultspec_a2a/providers/__init__.py`exports`AcpChatModel`, `ProviderFactory`,
 exception classes.
 
-- `lib/core/registry.py`and`lib/core/permissions.py`deleted. -`lib/core/__init__.py`exports`compile_team_graph`, worker/supervisor
+- `src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py`deleted. -`src/vaultspec_a2a/core/__init__.py`exports`compile_team_graph`, worker/supervisor
   creators.
 - All modules have `__all__`.
 - All existing tests pass.
@@ -769,7 +769,7 @@ checks and ADR-012/ADR-013 requirements.
 | --- | -------------------------------------------------------------- | -------------------- |
 | V19 | `from lib.core import compile_team_graph`works                 | Prompt V7            |
 | V20 | `from lib.providers import AcpChatModel, ProviderFactory`works | Prompt V8            |
-| V21 | `lib/core/registry.py`and`lib/core/permissions.py`are DELETED  | Prompt V9            |
+| V21 | `src/vaultspec_a2a/core/registry.py`and`src/vaultspec_a2a/core/permissions.py`are DELETED  | Prompt V9            |
 | V22 | `from lib.telemetry import configure_telemetry`works           | Prompt V10 (adapted) |
 | V23 | `from lib.core import TeamConfig, AgentConfig`works            | ADR-012, ADR-013     |
 

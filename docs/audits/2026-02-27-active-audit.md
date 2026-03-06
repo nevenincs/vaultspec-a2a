@@ -27,22 +27,22 @@ Zero critical violations remaining
 
 | File                              | Change                                                                                                                    | Impact                                 |
 | --------------------------------- | ------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
-| `lib/core/permissions.py`         | DELETED (376 lines removed)                                                                                               | Resolves ADR-009 tension from Rev 1    |
-| `lib/core/__init__.py`            | +24 lines: added`compile_team_graph`, `create_worker_node`, `create_supervisor_node`exports; removed 6 permission symbols | Resolves CRITICAL #4 from Rev 1        |
-| `lib/core/aggregator.py`          | +54 lines: expanded OTel metrics, public buffer/flush methods                                                             | Improved ADR-010 wiring                |
-| `lib/api/endpoints.py`            | +226 lines,`_enrich_snapshot_from_state()`added                                                                           | CRITICAL #4 from Rev 2 RESOLVED        |
-| `lib/providers/acp_chat_model.py` | +300 lines: 7 RPC handlers, \_RPC_DISPATCH dict, batch JSON-RPC, sandbox path validation                                  | CRITICAL #1 and #2 from Rev 2 RESOLVED |
-| `lib/providers/__init__.py`       | Full facade: 8 symbols in`__all__`, lazy imports for circular deps                                                        | CRITICAL #3 from Rev 2 RESOLVED        |
-| `lib/providers/factory.py`        | `__all__ = ["ProviderFactory"]`added                                                                                      | Gap 4 from Rev 2 RESOLVED              |
-| `lib/providers/acp_exceptions.py` | `__all__`with 6 symbols added                                                                                             | Gap 4 from Rev 2 RESOLVED              |
-| `lib/core/nodes/supervisor.py`    | `__all__ = ["create_supervisor_node"]`added                                                                               | Gap 4 from Rev 2 RESOLVED              |
-| `lib/core/nodes/__init__.py`      | Full facade:`X as X`pattern,`__all__`defined                                                                              | Gap 4 from Rev 2 RESOLVED              |
-| `lib/api/websocket.py`            | `_DEAD_CLIENT_TIMEOUT = 90.0`, `asyncio.wait_for()`, `inject_trace_context`in writer                                      | Gap 3 + OTel Gap RESOLVED              |
-| `lib/api/app.py`                  | `TelemetryMiddleware`mounted via`app.add_middleware()`                                                                    | OTel Gap RESOLVED                      |
+| `src/vaultspec_a2a/core/permissions.py`         | DELETED (376 lines removed)                                                                                               | Resolves ADR-009 tension from Rev 1    |
+| `src/vaultspec_a2a/core/__init__.py`            | +24 lines: added`compile_team_graph`, `create_worker_node`, `create_supervisor_node`exports; removed 6 permission symbols | Resolves CRITICAL #4 from Rev 1        |
+| `src/vaultspec_a2a/core/aggregator.py`          | +54 lines: expanded OTel metrics, public buffer/flush methods                                                             | Improved ADR-010 wiring                |
+| `src/vaultspec_a2a/api/endpoints.py`            | +226 lines,`_enrich_snapshot_from_state()`added                                                                           | CRITICAL #4 from Rev 2 RESOLVED        |
+| `src/vaultspec_a2a/providers/acp_chat_model.py` | +300 lines: 7 RPC handlers, \_RPC_DISPATCH dict, batch JSON-RPC, sandbox path validation                                  | CRITICAL #1 and #2 from Rev 2 RESOLVED |
+| `src/vaultspec_a2a/providers/__init__.py`       | Full facade: 8 symbols in`__all__`, lazy imports for circular deps                                                        | CRITICAL #3 from Rev 2 RESOLVED        |
+| `src/vaultspec_a2a/providers/factory.py`        | `__all__ = ["ProviderFactory"]`added                                                                                      | Gap 4 from Rev 2 RESOLVED              |
+| `src/vaultspec_a2a/providers/acp_exceptions.py` | `__all__`with 6 symbols added                                                                                             | Gap 4 from Rev 2 RESOLVED              |
+| `src/vaultspec_a2a/core/nodes/supervisor.py`    | `__all__ = ["create_supervisor_node"]`added                                                                               | Gap 4 from Rev 2 RESOLVED              |
+| `src/vaultspec_a2a/core/nodes/__init__.py`      | Full facade:`X as X`pattern,`__all__`defined                                                                              | Gap 4 from Rev 2 RESOLVED              |
+| `src/vaultspec_a2a/api/websocket.py`            | `_DEAD_CLIENT_TIMEOUT = 90.0`, `asyncio.wait_for()`, `inject_trace_context`in writer                                      | Gap 3 + OTel Gap RESOLVED              |
+| `src/vaultspec_a2a/api/app.py`                  | `TelemetryMiddleware`mounted via`app.add_middleware()`                                                                    | OTel Gap RESOLVED                      |
 
 ---
 
-## lib/core/graph.py
+## src/vaultspec_a2a/core/graph.py
 
 - [ADR-013 SS2.5] compile_team_graph() signature`(team_config, agent_configs,
 checkpointer, supervisor_agent_config)`: **PASS** -- Line 85-90. Matches
@@ -71,7 +71,7 @@ to`builder.add_node()`.
 
 ---
 
-## lib/core/state.py
+## src/vaultspec_a2a/core/state.py
 
 - [ADR-013 SS5]`loop_count: int`field exists: **PASS** -- Line 100:`loop_count:
 NotRequired[int]`.
@@ -84,7 +84,7 @@ Annotated[dict[str, dict[str, int]], _merge_token_usage]`at line 94.
 
 ---
 
-## lib/core/aggregator.py
+## src/vaultspec_a2a/core/aggregator.py
 
 - [ADR-004 SS2] Uses`astream_events(version="v2")`: **PASS** -- Line 787-790.
 - [ADR-011 SS5] Per-thread monotonic sequence numbers starting at 1: **PASS** --
@@ -108,7 +108,7 @@ Annotated[dict[str, dict[str, int]], _merge_token_usage]`at line 94.
 
 ---
 
-## lib/core/team_config.py
+## src/vaultspec_a2a/core/team_config.py
 
 - [ADR-012 SS2.3] AgentConfig exact fields: **PASS**.
 - [ADR-012 SS5] agent.id validated as Python identifier: **PASS**.
@@ -123,7 +123,7 @@ Annotated[dict[str, dict[str, int]], _merge_token_usage]`at line 94.
 
 ---
 
-## lib/core/**init**.py
+## src/vaultspec_a2a/core/**init**.py
 
 - [ADR-009] Facade re-exports with`X as X`pattern: **PASS** -- All exports use
   explicit`X as X`pattern.
@@ -131,7 +131,7 @@ Annotated[dict[str, dict[str, int]], _merge_token_usage]`at line 94.
 - [ADR-009 Key Shifts] registry.py DELETED: **PASS** -- File does not exist on
   disk.
 - [ADR-009 Key Shifts] permissions.py DELETED: **PASS** (Rev 2)
-  --`lib/core/permissions.py` has been deleted. The 6 permission symbols
+  --`src/vaultspec_a2a/core/permissions.py` has been deleted. The 6 permission symbols
   (`PermissionEngine`, `PermissionAction`, `PermissionDecision`,
   `PermissionPolicy`, `PermissionRequest`, `PermissionScope`) are no longer
   imported or exported. `PermissionDeniedError`still correctly exported
@@ -150,7 +150,7 @@ create_supervisor_node`. In `__all__`at line 140.
 
 ---
 
-## lib/core/permissions.py
+## src/vaultspec_a2a/core/permissions.py
 
 - **DELETED** (Rev 2). The 377-line`PermissionEngine`implementation has been
   removed per ADR-009 Key Architectural Shifts table. Permission handling is now
@@ -159,7 +159,7 @@ create_supervisor_node`. In `__all__`at line 140.
 
 ---
 
-## lib/core/exceptions.py
+## src/vaultspec_a2a/core/exceptions.py
 
 - [ADR-009] `__all__`defined: **PASS** -- Lines 223-240.
 - All exception classes remain intact after permissions.py
@@ -167,7 +167,7 @@ create_supervisor_node`. In `__all__`at line 140.
 
 ---
 
-## lib/core/presets/agents/\*.toml
+## src/vaultspec_a2a/core/presets/agents/\*.toml
 
 - [ADR-012 SS2.7] 4 required preset agents (planner, coder, reviewer, analyst):
   **PASS** -- All 4 files exist + supervisor.toml.
@@ -175,7 +175,7 @@ create_supervisor_node`. In `__all__`at line 140.
 
 ---
 
-## lib/core/presets/teams/\*.toml
+## src/vaultspec_a2a/core/presets/teams/\*.toml
 
 - [ADR-013 SS2.9] 4 required team presets: **PASS** -- coding-star,
   coding-pipeline, coding-loop, solo-coder.
@@ -183,7 +183,7 @@ create_supervisor_node`. In `__all__`at line 140.
 
 ---
 
-## lib/core/nodes/worker.py
+## src/vaultspec_a2a/core/nodes/worker.py
 
 - [ADR-012 SS2.4]`create_worker_node(model, system_prompt, name)`signature:
   **PASS** -- Line 64.
@@ -196,7 +196,7 @@ hasattr(model, "permission_callback")`at line 97.
 
 ---
 
-## lib/core/nodes/supervisor.py
+## src/vaultspec_a2a/core/nodes/supervisor.py
 
 - [ADR-013 SS2.6] Routing logic: text-parsing supervisor output: **PASS** --
   Lines 43-54.
@@ -207,7 +207,7 @@ hasattr(model, "permission_callback")`at line 97.
 
 ---
 
-## lib/api/app.py
+## src/vaultspec_a2a/api/app.py
 
 - [ADR-007]`@asynccontextmanager`lifespan: **PASS** -- Line 55.
 - [ADR-007] CORS middleware (permissive in dev): **PASS** -- Lines 147-154.
@@ -228,7 +228,7 @@ hasattr(model, "permission_callback")`at line 97.
 
 ---
 
-## lib/api/endpoints.py
+## src/vaultspec_a2a/api/endpoints.py
 
 - [ADR-011 SS2.2] POST /threads: **PASS** -- Line 131.
 - [ADR-011 SS2.2] GET /threads: **PASS** -- Line 217.
@@ -248,7 +248,7 @@ hasattr(model, "permission_callback")`at line 97.
 
 ---
 
-## lib/api/websocket.py
+## src/vaultspec_a2a/api/websocket.py
 
 - [ADR-011 SS5] Heartbeat every 30 seconds: **PASS** --`_HEARTBEAT_INTERVAL =
 30.0`at line 65.
@@ -277,7 +277,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/api/schemas/events.py
+## src/vaultspec_a2a/api/schemas/events.py
 
 - [ADR-011] All 12 server event types present: **PASS** -- All 12 present.
 - [ADR-012 SS6] AgentSummary has role, display_name, description: **PASS** --
@@ -293,7 +293,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/api/schemas/rest.py
+## src/vaultspec_a2a/api/schemas/rest.py
 
 - [ADR-013 SS6] CreateThreadRequest has team_preset field: **PASS**.
 - [ADR-013 SS6] TeamPresetsResponse model exists: **PASS**.
@@ -304,7 +304,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/api/schemas/enums.py
+## src/vaultspec_a2a/api/schemas/enums.py
 
 - [ADR-011] AgentLifecycleState (8 states): **PASS**.
 - [ADR-011] ServerEventType (12 types): **PASS**.
@@ -313,7 +313,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/api/schemas/commands.py
+## src/vaultspec_a2a/api/schemas/commands.py
 
 - [ADR-011] All 6 client command types: **PASS**.
 - [ADR-011] ClientMessage discriminated union: **PASS**.
@@ -322,7 +322,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/providers/acp_chat_model.py
+## src/vaultspec_a2a/providers/acp_chat_model.py
 
 - [ADR-006 SS5.1 pt 1]`asyncio.create_subprocess_shell`with single string:
   **PASS** -- Line 164.
@@ -360,7 +360,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/providers/factory.py
+## src/vaultspec_a2a/providers/factory.py
 
 - [ADR-012 SS2.4]`ProviderFactory.create(provider, capability)`accepts
   AgentConfig: **PASS** -- Line 27.
@@ -372,7 +372,7 @@ timeout=_DEAD_CLIENT_TIMEOUT)`at line 176. Heartbeat loop runs independently
 
 ---
 
-## lib/providers/**init**.py
+## src/vaultspec_a2a/providers/**init**.py
 
 - [ADR-009] Facade with`X as X`re-exports: **PASS** (Rev 3) -- Eager`X as
 X`imports for 6 exception types (lines 12-17). Lazy imports
@@ -385,7 +385,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/providers/acp_exceptions.py
+## src/vaultspec_a2a/providers/acp_exceptions.py
 
 - [ADR-009] `__all__`: **PASS** (Rev 3) -- `__all__`with 6 symbols at lines
   9-16.
@@ -393,7 +393,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/database/session.py
+## src/vaultspec_a2a/database/session.py
 
 - [ADR-007] WAL mode pragmas: **PASS**.
 - [ADR-007] aiosqlite via async engine: **PASS**.
@@ -402,14 +402,14 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/database/**init**.py
+## src/vaultspec_a2a/database/**init**.py
 
 - [ADR-009] Facade with`X as X`re-exports: **PASS**.
 - [ADR-009]`__all__`defined: **PASS**.
 
 ---
 
-## lib/workspace/git_manager.py
+## src/vaultspec_a2a/workspace/git_manager.py
 
 - [ADR-001]`asyncio.Lock()`mutex: **PASS**.
 - [ADR-001]`asyncio.create_subprocess_exec`: **PASS**.
@@ -420,7 +420,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/telemetry/instrumentation.py
+## src/vaultspec_a2a/telemetry/instrumentation.py
 
 - [ADR-010] Optional OTel with no-op fallback: **PASS**.
 - [ADR-010]`configure_telemetry()`function: **PASS**.
@@ -429,7 +429,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/telemetry/middleware.py
+## src/vaultspec_a2a/telemetry/middleware.py
 
 - [ADR-010] TelemetryMiddleware for HTTP spans: **PASS**.
 - [ADR-010] ws_span for WebSocket operations: **PASS**.
@@ -440,14 +440,14 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ---
 
-## lib/telemetry/**init**.py
+## src/vaultspec_a2a/telemetry/**init**.py
 
 - [ADR-009] Facade with`X as X`re-exports: **PASS**.
 - [ADR-009]`__all__`defined: **PASS**.
 
 ---
 
-## lib/protocols/mcp/server.py
+## src/vaultspec_a2a/protocols/mcp/server.py
 
 - [ADR-006 SS5] MCP server returns immediate response: **PASS**.
 - [ADR-003] MCP tools exposed: **PASS** -- 3 tools.
@@ -461,7 +461,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 
 ### Resolved from Rev 1
 
-- ~~CRITICAL #4:`lib/core/__init__.py`missing graph and node exports~~ --
+- ~~CRITICAL #4:`src/vaultspec_a2a/core/__init__.py`missing graph and node exports~~ --
   **RESOLVED** (Rev 2). Task #4.
 - ~~ADR-009 permissions.py tension~~ -- **RESOLVED** (Rev 2). Task #4.
 
@@ -473,7 +473,7 @@ X`imports for 6 exception types (lines 12-17). Lazy imports
 - ~~CRITICAL #2:`_process_stdout_loop`doesn't handle batch JSON-RPC~~ --
   **RESOLVED** (Rev 3). Task #3. Batch JSON-RPC arrays now iterated and
   dispatched.
-- ~~CRITICAL #3:`lib/providers/__init__.py`empty facade~~ -- **RESOLVED** (Rev
+- ~~CRITICAL #3:`src/vaultspec_a2a/providers/__init__.py`empty facade~~ -- **RESOLVED** (Rev
   3). Task #10. Full facade with 8 symbols, lazy imports,`X as X`pattern.
 - ~~CRITICAL #4: GET /threads/{id}/state missing graph.get_state()~~ --
   **RESOLVED** (Rev 3). Task #12.`_enrich_snapshot_from_state()`maps messages,

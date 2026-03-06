@@ -1,6 +1,6 @@
 ## 44. Gaps & Missing Information (Cycle 42 Audit)
 
-Cycle 42 audited the state recovery and linear history enforcement within the `lib/worker/executor.py` and `lib/api/endpoints.py`.
+Cycle 42 audited the state recovery and linear history enforcement within the `src/vaultspec_a2a/worker/executor.py` and `src/vaultspec_a2a/api/endpoints.py`.
 
 ### A. No State Rewind or "Undo" Mechanism [HIGH]
 The system tracks detailed history via LangGraph checkpoints, but the edge surface only supports linear resumption.
@@ -43,7 +43,7 @@ LangGraph allows multiple nodes to run concurrently. The `EventAggregator` corre
 
 ## 46. Gaps & Missing Information (Cycle 44 Audit)
 
-Cycle 44 audited the ACP (Agent Control Protocol) provider layer (`lib/providers/acp_chat_model.py`) specifically for its handling of structured metadata and streaming notifications.
+Cycle 44 audited the ACP (Agent Control Protocol) provider layer (`src/vaultspec_a2a/providers/acp_chat_model.py`) specifically for its handling of structured metadata and streaming notifications.
 
 ### A. Provider-Level Plan Swallowing [CRITICAL]
 The `AcpChatModel` communicates with external agent subprocesses. These agents stream planning updates via the `session/update` method with `type: "plan"`.
@@ -64,7 +64,7 @@ LangChain chunks support `usage_metadata` (token counts) and `response_metadata`
 
 ## 47. Gaps & Missing Information (Cycle 45 Audit)
 
-Cycle 45 audited thread identity management and nickname immutability (`lib/core/metadata.py` and `lib/database/crud.py`).
+Cycle 45 audited thread identity management and nickname immutability (`src/vaultspec_a2a/core/metadata.py` and `src/vaultspec_a2a/database/crud.py`).
 
 ### A. Thread Identity Immutability [HIGH]
 The system generates a human-friendly nickname at thread creation (e.g., "auth-flow-star-a3f2") and persists it in the `ThreadMetadata` JSON.
@@ -79,7 +79,7 @@ The system generates a human-friendly nickname at thread creation (e.g., "auth-f
 
 ## 48. Gaps & Missing Information (Cycle 46 Audit)
 
-Cycle 46 audited project awareness and the static nature of context discovery (`lib/core/metadata.py` and `lib/core/preamble.py`).
+Cycle 46 audited project awareness and the static nature of context discovery (`src/vaultspec_a2a/core/metadata.py` and `src/vaultspec_a2a/core/preamble.py`).
 
 ### A. Static Context Awareness [MEDIUM]
 `discover_context_refs()` runs once when a thread is created to find all `.vault/` documents matching the `feature_tag`. 
@@ -90,7 +90,7 @@ Cycle 46 audited project awareness and the static nature of context discovery (`
 
 ## 49. Gaps & Missing Information (Cycle 47 Audit)
 
-Cycle 47 audited the worker process concurrency limits and resource management (`lib/worker/executor.py`).
+Cycle 47 audited the worker process concurrency limits and resource management (`src/vaultspec_a2a/worker/executor.py`).
 
 ### A. Unbounded Concurrent Threads [HIGH]
 The worker's `Executor` tracks active threads in `self._active_ingests` to prevent double-ingest on a single thread.
@@ -102,7 +102,7 @@ The worker's `Executor` tracks active threads in `self._active_ingests` to preve
 
 ## 50. Gaps & Missing Information (Cycle 48 Audit)
 
-Cycle 48 audited the database initialization and migration strategy (`lib/database/session.py`).
+Cycle 48 audited the database initialization and migration strategy (`src/vaultspec_a2a/database/session.py`).
 
 ### A. Missing Migration Framework [MEDIUM]
 The backend uses `Base.metadata.create_all` and manual `ALTER TABLE` statements for "idempotent migration" during `init_db()`.
@@ -113,7 +113,7 @@ The backend uses `Base.metadata.create_all` and manual `ALTER TABLE` statements 
 
 ## 51. Gaps & Missing Information (Cycle 49 Audit)
 
-Cycle 49 audited the persistence of the thread "Objective" vs. conversation history (`lib/worker/executor.py` and `lib/core/context.py`).
+Cycle 49 audited the persistence of the thread "Objective" vs. conversation history (`src/vaultspec_a2a/worker/executor.py` and `src/vaultspec_a2a/core/context.py`).
 
 ### A. Core Objective Loss via Compaction [HIGH]
 The thread's `initial_message` is injected as a standard `HumanMessage` at the start of the conversation history.

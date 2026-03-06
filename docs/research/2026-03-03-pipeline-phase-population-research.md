@@ -245,7 +245,7 @@ Rationale:
 
 **For the ADR-026 scope**, the minimum binding decision is:
 
-1. `_infer_phase_from_vault_index(vault_index)` is a private function in `lib/core/graph.py` (or `lib/core/phase.py`)
+1. `_infer_phase_from_vault_index(vault_index)` is a private function in `src/vaultspec_a2a/core/graph.py` (or `src/vaultspec_a2a/core/phase.py`)
 2. Called by `create_supervisor_node()` on every invocation
 3. Result written as `pipeline_phase` in the supervisor return dict
 4. No LLM involvement in phase computation (Option A) unless team lead explicitly locks in Option C

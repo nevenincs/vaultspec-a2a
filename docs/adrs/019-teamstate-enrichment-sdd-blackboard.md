@@ -18,7 +18,7 @@ related:
 
 ## 1. Context & Problem Statement
 
-`TeamState` (ADR-008, `lib/core/state.py`) is the single source of truth for
+`TeamState` (ADR-008, `src/vaultspec_a2a/core/state.py`) is the single source of truth for
 all LangGraph node communication. It currently carries routing signals, message
 history, per-agent token accounting, and an ephemeral plan list. It has no
 awareness of the SDD pipeline context --- which feature is being worked on, what
@@ -66,7 +66,7 @@ mount step (scoped to ADR-020).
 ### 2.1 Four New Required Fields in `TeamState`
 
 ```python
-# lib/core/state.py
+# src/vaultspec_a2a/core/state.py
 
 class TeamState(TypedDict):
     # ... existing fields unchanged ...
@@ -102,7 +102,7 @@ adds these columns to all existing checkpoint rows (S2.5).
 
 ### 2.2 Reducers
 
-Two new reducers are added to `lib/core/state.py`:
+Two new reducers are added to `src/vaultspec_a2a/core/state.py`:
 
 ```python
 def _merge_vault_index(
@@ -144,7 +144,7 @@ default for plain typed fields --- the most recent node return value overwrites)
 
 ### 2.3 Bridge from `ThreadMetadata` at Graph Compilation
 
-`compile_team_graph()` (`lib/core/graph.py`) gains a required
+`compile_team_graph()` (`src/vaultspec_a2a/core/graph.py`) gains a required
 `feature_tag: str | None` parameter. The caller always includes a complete
 state patch alongside the messages list at thread creation:
 
@@ -167,7 +167,7 @@ These four fields are always present in every graph invocation.
 
 ### 2.4 `_build_initial_vault_index()` Utility
 
-A new private function in `lib/core/graph.py`, co-located with the existing
+A new private function in `src/vaultspec_a2a/core/graph.py`, co-located with the existing
 graph compilation utilities:
 
 ```python
@@ -220,7 +220,7 @@ SQLite checkpoint rows that pre-date this ADR will be missing these keys.
 The migration strategy is a one-time update applied at startup:
 
 ```python
-# lib/database/migrations.py (new)
+# src/vaultspec_a2a/database/migrations.py (new)
 # For every existing checkpoint row, if the serialised state dict is missing
 # the four new keys, patch them in:
 #   active_feature  -> None
@@ -322,7 +322,7 @@ Deferred, not rejected.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
   state.py            AMENDED: 4 new required fields + 2 new reducers
                       (_merge_vault_index, _append_validation_errors)
   graph.py            AMENDED: compile_team_graph() gains feature_tag param;
@@ -332,22 +332,22 @@ lib/core/
   tests/
     test_models.py    AMENDED: tests for new reducers
 
-lib/api/
+src/vaultspec_a2a/api/
   endpoints.py        AMENDED: create_thread_endpoint() always sets all four
                       new fields in graph_input
 
-lib/database/
+src/vaultspec_a2a/database/
   migrations.py       NEW: startup migration to backfill missing fields in
                       existing checkpoint rows
 ```
 
 ## 7. References
 
-- `lib/core/state.py:72` --- `TeamState` (to be amended)
-- `lib/core/graph.py:194` --- `compile_team_graph()` (gains `feature_tag` param)
-- `lib/core/graph.py:169` --- `_build_supervisor_prompt()` (unchanged here; extended by ADR-022)
-- `lib/core/metadata.py:89` --- `discover_context_refs()` (glob patterns reused)
-- `lib/api/endpoints.py` --- `create_thread_endpoint()` (always sets all four fields)
+- `src/vaultspec_a2a/core/state.py:72` --- `TeamState` (to be amended)
+- `src/vaultspec_a2a/core/graph.py:194` --- `compile_team_graph()` (gains `feature_tag` param)
+- `src/vaultspec_a2a/core/graph.py:169` --- `_build_supervisor_prompt()` (unchanged here; extended by ADR-022)
+- `src/vaultspec_a2a/core/metadata.py:89` --- `discover_context_refs()` (glob patterns reused)
+- `src/vaultspec_a2a/api/endpoints.py` --- `create_thread_endpoint()` (always sets all four fields)
 - [ADR-008](008-orchestration-topology-pipeline.md) --- Orchestration Topology
 - [ADR-013](013-team-composition-topology.md) --- Team Composition & Topology
 - [ADR-014](014-thread-metadata-context-injection.md) --- Thread Metadata & Context Injection

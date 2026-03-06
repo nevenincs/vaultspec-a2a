@@ -106,7 +106,7 @@ namespace (i.e.,`event["name"]` matches a known graph node name like
 
 ### 1.3 Recommended Aggregator Architecture
 
-The central `EventAggregator`in`lib/core/aggregator.py`should:
+The central `EventAggregator`in`src/vaultspec_a2a/core/aggregator.py`should:
 
 1. **Own one`asyncio.Queue`per`thread_id`**: Incoming LangGraph events are
    enqueued by a task running `astream_events`. The queue is the backpressure
@@ -261,7 +261,7 @@ class EventAggregator:
 
 ### 1.4 WebSocket Multiplexing Pattern
 
-The `lib/api/websocket.py`handler should:
+The `src/vaultspec_a2a/api/websocket.py`handler should:
 
 1. Accept one WebSocket per browser tab.
 2. Parse`ClientCommand`frames (discriminated on`type`).
@@ -427,7 +427,7 @@ to avoid deadlocking LangGraph's internal lock.
 ### Recommended pattern
 
 ```python
-# lib/database/session.py
+# src/vaultspec_a2a/database/session.py
 
 import aiosqlite
 from contextlib import asynccontextmanager
@@ -489,7 +489,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
 ```
 
 Migration runner checks `MAX(version)` and applies numbered scripts from
-`lib/database/migrations/` in order. This gives us forward-only migration
+`src/vaultspec_a2a/database/migrations/` in order. This gives us forward-only migration
 without the overhead of Alembic.
 
 ---
@@ -795,7 +795,7 @@ the`git merge`call) — not for the entire`_run_git` wrapper.
 
 ## 4. Implementation Recommendations for Downstream Tasks
 
-### 4.1 For Task #4: Event Aggregator (`lib/core/aggregator.py`)
+### 4.1 For Task #4: Event Aggregator (`src/vaultspec_a2a/core/aggregator.py`)
 
 - Implement the `EventAggregator`class per section 1.3
 - Use`stream_mode=["updates", "messages"]`via`astream`for structured
@@ -806,7 +806,7 @@ the`git merge`call) — not for the entire`_run_git` wrapper.
 - Singleton lifecycle bound to FastAPI lifespan via`anyio.create_task_group`
 - Expose `subscribe(thread_id, send_fn)`/`unsubscribe`/`ingest` public API
 
-### 4.2 For Task #3: Database Layer (`lib/database/`)
+### 4.2 For Task #3: Database Layer (`src/vaultspec_a2a/database/`)
 
 - Module structure: `session.py`(connection + setup),`models.py`(dataclasses
   for our tables),`crud.py`(async CRUD functions)
@@ -817,7 +817,7 @@ the`git merge`call) — not for the entire`_run_git` wrapper.
   (both are`TEXT`, both are UUIDs)
 - Expose `get_db()` as an async context manager FastAPI dependency
 
-### 4.3 For Task #7: Workspace Manager (`lib/workspace/git_manager.py`)
+### 4.3 For Task #7: Workspace Manager (`src/vaultspec_a2a/workspace/git_manager.py`)
 
 - Implement `_run_git`, `_git_mutex`, `WorkspaceConfig`per section 3
 - Expose`WorkspaceManager`class with methods:`create_worktree`,
@@ -842,5 +842,5 @@ the`git merge`call) — not for the entire`_run_git` wrapper.
 - `docs/adrs/001-process-and-workspace-management.md`— Global Git Mutex,
   dual-mode workspaces -`docs/adrs/004-event-aggregation-server-side-replay.md`— Aggregator
   requirements -`docs/adrs/007-tech-stack-deployment.md`— SQLite WAL, aiosqlite, lifespan
-  management -`docs/adrs/009-approved-module-hierarchy.md`—`lib/database/`, `lib/workspace/`,
-  `lib/core/aggregator.py`
+  management -`docs/adrs/009-approved-module-hierarchy.md`—`src/vaultspec_a2a/database/`, `src/vaultspec_a2a/workspace/`,
+  `src/vaultspec_a2a/core/aggregator.py`

@@ -39,7 +39,7 @@ feature, or which documents are relevant. ADR-014
 
 ### Task 1A: ThreadMetadata + ContextRef + Discovery + Nickname (Coder A)
 
-**Create** `lib/core/metadata.py`:
+**Create** `src/vaultspec_a2a/core/metadata.py`:
 
 - `ContextRef(BaseModel)`: `path: str`(relative, validated),`stage: str`,
   `summary: str = ""`
@@ -54,13 +54,13 @@ str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
   `".vault/exec/*{tag}*/**/*.md"`— cap at 50 -`generate_nickname(feature_tag: str, topology: str, thread_id: str) -> str`—
   format:`{feature_tag}-{topology}-{thread_id[:4]}`
 
-**Modify** `lib/core/__init__.py`:
+**Modify** `src/vaultspec_a2a/core/__init__.py`:
 
 - Add direct imports: `ContextRef`, `ThreadMetadata`, `discover_context_refs`,
   `generate_nickname`
 - Add to `__all__`
 
-**Create** `lib/core/tests/test_metadata.py`:
+**Create** `src/vaultspec_a2a/core/tests/test_metadata.py`:
 
 - Validate ContextRef rejects absolute paths
 - Validate ThreadMetadata nickname slug, workspace_root absolute requirement
@@ -70,23 +70,23 @@ str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
 
 ### Task 1B: DB Schema + Provider Workspace + NicknameConflictError (Coder B)
 
-**Modify**`lib/core/exceptions.py`:
+**Modify**`src/vaultspec_a2a/core/exceptions.py`:
 
 - Add `NicknameConflictError(VaultspecError)`with`severity=PERMANENT`,
   `recovery_action=ESCALATE_TO_USER`, stores `self.nickname`
 - Add to `__all__`
 
-**Modify** `lib/core/__init__.py`:
+**Modify** `src/vaultspec_a2a/core/__init__.py`:
 
 - Add `NicknameConflictError`import and`__all__`entry
 
-**Modify**`lib/database/models.py`:
+**Modify**`src/vaultspec_a2a/database/models.py`:
 
 - Rename `agent_config`column to`metadata`(same Text type)
   | - Add`nickname: Mapped[str | None] = mapped_column(default=None)` |
 - Add`__table_args__ = (Index("ix_threads_nickname", "nickname", unique=True),)`
 
-**Modify** `lib/database/crud.py`:
+**Modify** `src/vaultspec_a2a/database/crud.py`:
 
 | - Rename `create_thread()`param:`agent_config`→`metadata`, add `nickname: str
 | None = None` |
@@ -97,11 +97,11 @@ str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
   | - Add`get_thread_metadata(session, thread_id) -> str | None` |
 - Add both to`__all__`
 
-**Modify** `lib/database/__init__.py`:
+**Modify** `src/vaultspec_a2a/database/__init__.py`:
 
 - Add `get_thread_metadata`re-export
 
-**Modify**`lib/providers/acp_chat_model.py`:
+**Modify**`src/vaultspec_a2a/providers/acp_chat_model.py`:
 
 | - Add field: `workspace_root: str | None = Field(default=None, exclude=True)`
 |
@@ -110,21 +110,21 @@ str`(absolute, validated),`source_repo: str = ""`, `source_branch: str = ""`,
 str(Path.cwd())`
 - Same in `_sandbox_path()`and terminal creation paths
 
-**Modify**`lib/providers/factory.py`:
+**Modify**`src/vaultspec_a2a/providers/factory.py`:
 
 | - Add `workspace_root: Path | None = None`kwarg to`ProviderFactory.create()` |
 
 - Forward`workspace_root=str(workspace_root) if workspace_root else
 None`to`AcpChatModel()`in Claude/Gemini branches
 
-**Modify**`lib/database/tests/test_database.py`:
+**Modify**`src/vaultspec_a2a/database/tests/test_database.py`:
 
 - Update `test_create_thread_with_agent_config`→ use`metadata=`param
 - Add`test_create_thread_with_nickname`
 - Add `test_nickname_uniqueness_conflict`
 - Add `test_get_thread_metadata`
 
-**Modify** `lib/providers/tests/test_factory.py`:
+**Modify** `src/vaultspec_a2a/providers/tests/test_factory.py`:
 
 - Add test that `ProviderFactory.create()`accepts`workspace_root`kwarg
 
@@ -134,7 +134,7 @@ None`to`AcpChatModel()`in Claude/Gemini branches
 
 ### Task 2A: REST Schema Amendments (Coder A)
 
-**Modify**`lib/api/schemas/rest.py`:
+**Modify**`src/vaultspec_a2a/api/schemas/rest.py`:
 
 - Import `ThreadMetadata`from`...core.metadata`
   | - `CreateThreadRequest`: add `metadata: ThreadMetadata | None = None` |
@@ -144,23 +144,23 @@ None`to`AcpChatModel()`in Claude/Gemini branches
 
 ### Task 2B: Context Preamble Builder + Regression Test (Coder B)
 
-**Create** `lib/core/preamble.py`:
+**Create** `src/vaultspec_a2a/core/preamble.py`:
 
 - `build_context_preamble(metadata: ThreadMetadata) -> SystemMessage`— formats
   workspace, feature, repo, branch, context_refs into a structured SystemMessage
 
-**Modify**`lib/core/__init__.py`:
+**Modify**`src/vaultspec_a2a/core/__init__.py`:
 
 - Add `build_context_preamble`import and`__all__`entry
 
-**Create**`lib/core/tests/test_preamble.py`:
+**Create**`src/vaultspec_a2a/core/tests/test_preamble.py`:
 
 - Test minimal preamble (workspace_root only)
 - Test full preamble (all fields)
 - Test context_refs listed correctly
 - Test return type is SystemMessage
 
-**Modify** `lib/core/tests/test_context.py`:
+**Modify** `src/vaultspec_a2a/core/tests/test_context.py`:
 
 - Add regression test: `test_preserves_context_preamble_system_message`—
   verify`compact_context()`preserves leading SystemMessages including a preamble
@@ -171,7 +171,7 @@ None`to`AcpChatModel()`in Claude/Gemini branches
 
 ### Task 3A: create_thread_endpoint Integration (Coder A)
 
-**Modify**`lib/api/endpoints.py`—`create_thread_endpoint()`(lines 182-284):
+**Modify**`src/vaultspec_a2a/api/endpoints.py`—`create_thread_endpoint()`(lines 182-284):
 
 1. Extract`metadata`from request body
 2. Validate`workspace_root`is existing directory → 422 if not
@@ -188,7 +188,7 @@ New imports: `discover_context_refs`, `generate_nickname`,
 
 ### Task 3B: list/metadata Endpoints (Coder B)
 
-**Modify** `lib/api/endpoints.py`:
+**Modify** `src/vaultspec_a2a/api/endpoints.py`:
 
 - `list_threads_endpoint()`(lines 292-310): Parse`thread.metadata`JSON to
   populate new`ThreadSummary`fields (nickname, feature_tag, source_branch,
@@ -206,7 +206,7 @@ orchestrator merges.
 
 ### Task 4A: compile_team_graph workspace_root Threading (Coder A)
 
-**Modify**`lib/core/graph.py`:
+**Modify**`src/vaultspec_a2a/core/graph.py`:
 
 | - Add `workspace_root: Path | None = None`kwarg to`compile_team_graph()` |
 
@@ -215,13 +215,13 @@ orchestrator merges.
 - Update `_compile_star()`, `_compile_pipeline()`,
   `_compile_pipeline_loop()`signatures
 
-**Modify**`lib/api/endpoints.py`:
+**Modify**`src/vaultspec_a2a/api/endpoints.py`:
 
 - Pass `workspace_root=ws_root`to`compile_team_graph()`call
 
 ### Task 4B: Integration Tests (Coder B)
 
-**Create**`lib/api/tests/test_thread_metadata.py`:
+**Create**`src/vaultspec_a2a/api/tests/test_thread_metadata.py`:
 
 - `test_create_thread_with_metadata_stores_in_db`
 - `test_create_thread_invalid_workspace_422`
@@ -233,7 +233,7 @@ orchestrator merges.
 - `test_legacy_thread_backward_compat`
 - `test_auto_discovery_populates_context_refs`(real temp .vault/ dir)
 
-**Modify**`lib/core/tests/test_graph.py`:
+**Modify**`src/vaultspec_a2a/core/tests/test_graph.py`:
 
 - Add `test_compile_team_graph_accepts_workspace_root`
 
@@ -243,25 +243,25 @@ orchestrator merges.
 
 | File                                    | Phase    | Change                                                                                  |
 | --------------------------------------- | -------- | --------------------------------------------------------------------------------------- |
-| `lib/core/metadata.py`                  | 1A       | **NEW** — ThreadMetadata, ContextRef, discover_context_refs, generate_nickname          |
-| `lib/core/preamble.py`                  | 2B       | **NEW** — build_context_preamble                                                        |
-| `lib/core/exceptions.py`                | 1B       | Add NicknameConflictError                                                               |
-| `lib/core/__init__.py`                  | 1A+1B+2B | Re-exports for new types                                                                |
-| `lib/database/models.py`                | 1B       | agent_config→metadata rename, add nickname column + unique index                        |
-| `lib/database/crud.py`                  | 1B       | Rename param, add nickname, add get_thread_metadata                                     |
-| `lib/database/__init__.py`              | 1B       | Add get_thread_metadata re-export                                                       |
-| `lib/providers/acp_chat_model.py`       | 1B       | Add workspace_root field, thread to CWD                                                 |
-| `lib/providers/factory.py`              | 1B       | Accept + forward workspace_root                                                         |
-| `lib/api/schemas/rest.py`               | 2A       | Amend CreateThreadRequest, CreateThreadResponse, ThreadSummary                          |
-| `lib/api/endpoints.py`                  | 3A+3B+4A | create_thread integration, list enrichment, new metadata endpoint, graph workspace_root |
-| `lib/core/graph.py`                     | 4A       | Accept + thread workspace_root                                                          |
-| `lib/core/tests/test_metadata.py`       | 1A       | **NEW**                                                                                 |
-| `lib/core/tests/test_preamble.py`       | 2B       | **NEW**                                                                                 |
-| `lib/core/tests/test_context.py`        | 2B       | Regression test                                                                         |
-| `lib/database/tests/test_database.py`   | 1B       | Updated + new tests                                                                     |
-| `lib/providers/tests/test_factory.py`   | 1B       | workspace_root kwarg test                                                               |
-| `lib/api/tests/test_thread_metadata.py` | 4B       | **NEW** — integration tests                                                             |
-| `lib/core/tests/test_graph.py`          | 4B       | workspace_root acceptance test                                                          |
+| `src/vaultspec_a2a/core/metadata.py`                  | 1A       | **NEW** — ThreadMetadata, ContextRef, discover_context_refs, generate_nickname          |
+| `src/vaultspec_a2a/core/preamble.py`                  | 2B       | **NEW** — build_context_preamble                                                        |
+| `src/vaultspec_a2a/core/exceptions.py`                | 1B       | Add NicknameConflictError                                                               |
+| `src/vaultspec_a2a/core/__init__.py`                  | 1A+1B+2B | Re-exports for new types                                                                |
+| `src/vaultspec_a2a/database/models.py`                | 1B       | agent_config→metadata rename, add nickname column + unique index                        |
+| `src/vaultspec_a2a/database/crud.py`                  | 1B       | Rename param, add nickname, add get_thread_metadata                                     |
+| `src/vaultspec_a2a/database/__init__.py`              | 1B       | Add get_thread_metadata re-export                                                       |
+| `src/vaultspec_a2a/providers/acp_chat_model.py`       | 1B       | Add workspace_root field, thread to CWD                                                 |
+| `src/vaultspec_a2a/providers/factory.py`              | 1B       | Accept + forward workspace_root                                                         |
+| `src/vaultspec_a2a/api/schemas/rest.py`               | 2A       | Amend CreateThreadRequest, CreateThreadResponse, ThreadSummary                          |
+| `src/vaultspec_a2a/api/endpoints.py`                  | 3A+3B+4A | create_thread integration, list enrichment, new metadata endpoint, graph workspace_root |
+| `src/vaultspec_a2a/core/graph.py`                     | 4A       | Accept + thread workspace_root                                                          |
+| `src/vaultspec_a2a/core/tests/test_metadata.py`       | 1A       | **NEW**                                                                                 |
+| `src/vaultspec_a2a/core/tests/test_preamble.py`       | 2B       | **NEW**                                                                                 |
+| `src/vaultspec_a2a/core/tests/test_context.py`        | 2B       | Regression test                                                                         |
+| `src/vaultspec_a2a/database/tests/test_database.py`   | 1B       | Updated + new tests                                                                     |
+| `src/vaultspec_a2a/providers/tests/test_factory.py`   | 1B       | workspace_root kwarg test                                                               |
+| `src/vaultspec_a2a/api/tests/test_thread_metadata.py` | 4B       | **NEW** — integration tests                                                             |
+| `src/vaultspec_a2a/core/tests/test_graph.py`          | 4B       | workspace_root acceptance test                                                          |
 
 ## Verification
 

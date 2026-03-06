@@ -29,9 +29,9 @@ mid-session)
 
 | Agent              | Model  | Domain                                                          | Findings                   |
 | ------------------ | ------ | --------------------------------------------------------------- | -------------------------- |
-| codeview-core      | Sonnet | `lib/core/`(graph, state, team_config, nodes, aggregator)       | 0 critical, 2 minor        |
-| codeview-providers | Sonnet | `lib/providers/`(AcpChatModel, factory, probes, facade)         | Report delivered           |
-| codeview-serving   | Sonnet | `lib/api/`, `lib/database/`, `lib/telemetry/`, `lib/workspace/` | 0 critical, 4 gaps         |
+| codeview-core      | Sonnet | `src/vaultspec_a2a/core/`(graph, state, team_config, nodes, aggregator)       | 0 critical, 2 minor        |
+| codeview-providers | Sonnet | `src/vaultspec_a2a/providers/`(AcpChatModel, factory, probes, facade)         | Report delivered           |
+| codeview-serving   | Sonnet | `src/vaultspec_a2a/api/`, `src/vaultspec_a2a/database/`, `src/vaultspec_a2a/telemetry/`, `src/vaultspec_a2a/workspace/` | 0 critical, 4 gaps         |
 | orchestrator       | Opus   | Compiled unified report from 3 codeview agents                  | Unified gap analysis       |
 | auditor            | Opus   | Final architectural authority                                   | Prioritized findings below |
 
@@ -67,13 +67,13 @@ mid-session)
 ### C1: LangGraph Checkpointer Is Never Initialized or Wired
 
 **ADR Violations:** ADR-004 SS2, ADR-008 SS2
-**Files:**`lib/api/app.py`(lifespan),`lib/api/endpoints.py:194`
+**Files:**`src/vaultspec_a2a/api/app.py`(lifespan),`src/vaultspec_a2a/api/endpoints.py:194`
 **Impact:** The entire interrupt/resume flow, state persistence, and
 reconnection protocol are non-functional.
 
 ### Details
 
-- `lib/api/app.py`lifespan never creates an`AsyncSqliteSaver`instance. -`lib/api/endpoints.py:194`calls`compile_team_graph()`without passing
+- `src/vaultspec_a2a/api/app.py`lifespan never creates an`AsyncSqliteSaver`instance. -`src/vaultspec_a2a/api/endpoints.py:194`calls`compile_team_graph()`without passing
   a`checkpointer`argument (defaults to`None`).
 - Without a checkpointer, `graph.aget_state()` returns nothing meaningful
   (`endpoints.py:321`), breaking `GET /threads/{id}/state`.
@@ -91,7 +91,7 @@ to `compile_team_graph()`from`create_thread_endpoint()`.
 ### C2: `POST /threads`Does Not Invoke the Graph
 
 **ADR Violations:** ADR-011 SS2.2, ADR-004 SS2
-**Files:**`lib/api/endpoints.py:133-211`
+**Files:**`src/vaultspec_a2a/api/endpoints.py:133-211`
 **Impact:** Creating a thread compiles the graph but never starts execution. The
 user sends `initial_message`but it is discarded.
 
@@ -114,8 +114,8 @@ the graph.
 ### C3: Fire-and-Forget`asyncio.create_task`With No Reference Retention
 
 **ADR Violations:** ADR-007 SS5
-**Files:**`lib/api/app.py:102`, `lib/api/endpoints.py:376`,
-`lib/api/endpoints.py:494`
+**Files:**`src/vaultspec_a2a/api/app.py:102`, `src/vaultspec_a2a/api/endpoints.py:376`,
+`src/vaultspec_a2a/api/endpoints.py:494`
 **Impact:** Graph execution tasks can be silently garbage-collected
 mid-execution, causing lost work.
 
@@ -139,7 +139,7 @@ with`task.add_done_callback(active_tasks.discard)`pattern.
 ### H1:`_sandbox_path`Uses String Prefix Comparison (Path Traversal Risk)
 
 **ADR Violations:** ADR-001 SS2 (workspace isolation)
-**Files:**`lib/providers/acp_chat_model.py:470`
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py:470`
 **Impact:** Potential filesystem escape in ACP RPC handlers.
 
 ### Details: (4)
@@ -157,7 +157,7 @@ with`task.add_done_callback(active_tasks.discard)`pattern.
 ### H2: No LangGraph Checkpointer Lifecycle Management
 
 **ADR Violations:** ADR-004 SS2
-**Files:**`lib/api/app.py`(lifespan)
+**Files:**`src/vaultspec_a2a/api/app.py`(lifespan)
 **Impact:** Even when C1 is fixed, the
 checkpointer's`__aenter__`/`__aexit__`lifecycle is not managed.
 
@@ -172,7 +172,7 @@ AsyncSqliteSaver.from_conn_string(...)`. The lifespan must do the same.
 ### H3: `GET /team/status`Returns Empty Agent List
 
 **ADR Violations:** ADR-012 SS6, ADR-013 SS2.6
-**Files:**`lib/api/endpoints.py:405-409`
+**Files:**`src/vaultspec_a2a/api/endpoints.py:405-409`
 **Impact:** Frontend team overview useless — always returns `agents=[]`.
 
 ### Details: (6)
@@ -190,7 +190,7 @@ build`AgentSummary`objects.
 ### H4:`fs/write_text_file`Does Not Respect Global Git Mutex
 
 **ADR Violations:** ADR-001 SS2
-**Files:**`lib/providers/acp_chat_model.py:489-503`
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py:489-503`
 **Impact:** Concurrent file writes from multiple agents can corrupt the git
 index.
 
@@ -205,8 +205,8 @@ index.
 ### H5:`fs/read_text_file`and`fs/write_text_file`Are Synchronous I/O
 
 **ADR Violations:** ADR-001 SS5 ("all tools must be strictly asynchronous")
-**Files:**`lib/providers/acp_chat_model.py:481`,
-`lib/providers/acp_chat_model.py:496`
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py:481`,
+`src/vaultspec_a2a/providers/acp_chat_model.py:496`
 **Impact:** Blocks the asyncio event loop during file I/O operations.
 
 ### Details: (8)
@@ -218,7 +218,7 @@ index.
 
 ### H6: `terminal/create`Does Not Sandbox Command Execution
 
-**Files:**`lib/providers/acp_chat_model.py:510-513`
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py:510-513`
 **Impact:** Arbitrary command execution without validation. LLM outputs directly
 drive subprocess execution.
 
@@ -233,8 +233,8 @@ drive subprocess execution.
 ### H7: Database Path Mismatch Between`config.py`and`session.py`
 
 **ADR Violations:** ADR-007 SS2
-**Files:** `lib/core/config.py:23`, `lib/database/session.py:40`,
-`lib/api/app.py:73`
+**Files:** `src/vaultspec_a2a/core/config.py:23`, `src/vaultspec_a2a/database/session.py:40`,
+`src/vaultspec_a2a/api/app.py:73`
 **Impact:** Application and LangGraph may use different databases, breaking
 state coherence.
 
@@ -261,27 +261,27 @@ background tasks. Codebase uses raw`asyncio.create_task()`everywhere.
 ### M2: CORS Middleware Is`allow_origins=["*"]`
 
 **ADR Violations:** ADR-007 SS5 (implicit — permissive dev config)
-**Files:** `lib/api/app.py:149`
+**Files:** `src/vaultspec_a2a/api/app.py:149`
 **Details:** Should be `["http://localhost:5173", "http://127.0.0.1:5173"]`per
 ADR-007.
 
 ### M3:`PermissionResponseCommand`Over WebSocket Silently Logged, Not Rejected
 
 **ADR Violations:** ADR-011 SS3.1
-**Files:**`lib/api/websocket.py:268-275`
+**Files:**`src/vaultspec_a2a/api/websocket.py:268-275`
 **Details:** Must send an `ErrorEvent`back to the client directing them to REST
 endpoint.
 
 ### M4:`AgentControlCommand`Is a No-Op
 
-**Files:**`lib/api/websocket.py:257-265`
+**Files:**`src/vaultspec_a2a/api/websocket.py:257-265`
 **Details:** Agent pause/cancel/resume not implemented. Stub only logs.
 
 ### M5: `_enrich_snapshot_from_state()`Uses`datetime.now(UTC)`Instead of Stored
 
 Timestamp
 
-**Files:**`lib/api/endpoints.py:272`
+**Files:**`src/vaultspec_a2a/api/endpoints.py:272`
 **Details:** Message timestamps in state snapshot use current time rather than
 actual creation time.
 
@@ -292,7 +292,7 @@ at`ainvoke()`time. But worth noting for operational understanding.
 
 ### M7:`POST /threads`Catches Generic`Exception`for Agent Config Loading
 
-**Files:**`lib/api/endpoints.py:179`
+**Files:**`src/vaultspec_a2a/api/endpoints.py:179`
 **Details:** Should catch `AgentConfigNotFoundError`specifically and propagate
 unexpected errors.
 
@@ -302,25 +302,25 @@ unexpected errors.
 
 ### L1:`_loop_router`Closure Captures`max_loops`by Reference
 
-**Files:**`lib/graph.py:305-310`
+**Files:**`src/vaultspec_a2a/graph.py:305-310`
 **Details:** Fine for current usage but could surprise if
 `compile_team_graph`called multiple times.
 
 ### L2:`terminal/output`Concatenates stdout and stderr
 
-**Files:**`lib/providers/acp_chat_model.py:581`
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py:581`
 **Details:** Acceptable for v1.
 
 ### L3: MCP Tools Are Stubs
 
-**Files:** `lib/protocols/mcp/server.py`
+**Files:** `src/vaultspec_a2a/protocols/mcp/server.py`
 **Details:** Return documentation text, do not invoke graph engine. Deferred to
 MCP integration phase.
 
 ### L4: No `Cache-Control`Headers for Static Assets
 
 **ADR Violations:** ADR-007 SS5 (pitfall warning)
-**Files:**`lib/api/app.py:177-181`
+**Files:**`src/vaultspec_a2a/api/app.py:177-181`
 **Details:** `StaticFiles` mounted without cache headers.
 
 ---

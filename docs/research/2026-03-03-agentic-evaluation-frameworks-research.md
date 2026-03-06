@@ -227,7 +227,7 @@ The LangChain docs do not cover alternatives in detail. Based on the ecosystem l
 - Observability-first platform (similar to LangSmith but broader ML scope)
 - **LangGraph compatibility**: Supports OpenTelemetry tracing — LangGraph can emit OTEL traces which Phoenix can ingest
 - Provides span-level evaluation via evaluators bound to trace spans
-- Relevant for teams already using OTEL (our system uses OTel via `lib/telemetry/`)
+- Relevant for teams already using OTEL (our system uses OTel via `src/vaultspec_a2a/telemetry/`)
 - Supports LLM-as-judge evaluators attached to trace data
 
 ### 3.4 AgentBench

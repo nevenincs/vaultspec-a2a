@@ -67,7 +67,7 @@ The backend enforces REST for guaranteed delivery (like permissions) and state r
 
 ## 3. Gaps & Missing Information (Cycle 1 Audit)
 
-Based on a continuous audit of the backend schema (`lib/api/schemas/` vs `lib/core/state.py` and `docs/adrs/019-teamstate-enrichment-sdd-blackboard.md`), the following critical context and metadata elements are currently **missing** from the frontend edge surface:
+Based on a continuous audit of the backend schema (`src/vaultspec_a2a/api/schemas/` vs `src/vaultspec_a2a/core/state.py` and `docs/adrs/019-teamstate-enrichment-sdd-blackboard.md`), the following critical context and metadata elements are currently **missing** from the frontend edge surface:
 
 ### A. SDD Blackboard Awareness Not Exported [CRITICAL]
 
@@ -78,7 +78,7 @@ ADR-019 introduced four mandatory fields to the backend's internal `TeamState` t
 3. `vault_index` (dict[str, list[str]]): A mapping of document types to their `.vault/` paths (binding documents).
 4. `validation_errors` (list[str]): Accumulated quality gate errors.
 
-**The Gap:** None of these fields are exported in the `ThreadStateSnapshot` REST payload (`lib/api/schemas/snapshots.py`). Furthermore, there is no WebSocket `ServerEvent` defined to push updates to the UI when the `vault_index` mutates or the `pipeline_phase` shifts.
+**The Gap:** None of these fields are exported in the `ThreadStateSnapshot` REST payload (`src/vaultspec_a2a/api/schemas/snapshots.py`). Furthermore, there is no WebSocket `ServerEvent` defined to push updates to the UI when the `vault_index` mutates or the `pipeline_phase` shifts.
 
 ### B. Mounted Context Visibility [HIGH]
 
@@ -101,7 +101,7 @@ To achieve a "data-rich UI" that exposes the whole context:
 
 ## 4. Gaps & Missing Information (Cycle 2 Audit)
 
-The second cycle of auditing focused on the worker definitions (`lib/core/team_config.py`, ADR-012, ADR-013), backend database models (`lib/database/models.py`), and telemetry systems (`ADR-010`). The following additional gaps were found:
+The second cycle of auditing focused on the worker definitions (`src/vaultspec_a2a/core/team_config.py`, ADR-012, ADR-013), backend database models (`src/vaultspec_a2a/database/models.py`), and telemetry systems (`ADR-010`). The following additional gaps were found:
 
 ### A. Telemetry and Trace IDs Not Exported [CRITICAL]
 
@@ -115,7 +115,7 @@ The REST endpoint `GET /teams` returns a `TeamPresetSummary` which contains only
 
 ### C. Cost and Token Accounting Visibility [MEDIUM]
 
-The backend tracks `CostTrackingModel` in SQLite, associating token usage (`input_tokens`, `output_tokens`) and `estimated_cost` with each thread and agent (see `lib/database/crud.py`).
+The backend tracks `CostTrackingModel` in SQLite, associating token usage (`input_tokens`, `output_tokens`) and `estimated_cost` with each thread and agent (see `src/vaultspec_a2a/database/crud.py`).
 **The Gap:** This cost tracking data is never exported. Neither `ThreadSummary` nor `ThreadStateSnapshot` includes the accumulated token usage or cost. A data-rich UI needs this to show users the financial impact of their sessions.
 
 ### D. Required Next Steps for the Backend Edge (Cycle 2)
@@ -128,17 +128,17 @@ The backend tracks `CostTrackingModel` in SQLite, associating token usage (`inpu
 
 ## 5. Gaps & Missing Information (Cycle 3 Audit)
 
-The third cycle audited the LangGraph checkpoint persistence, the worker IPC dispatch payload (`lib/worker/executor.py`), and Artifact handling. The following critical bugs and architectural gaps were discovered:
+The third cycle audited the LangGraph checkpoint persistence, the worker IPC dispatch payload (`src/vaultspec_a2a/worker/executor.py`), and Artifact handling. The following critical bugs and architectural gaps were discovered:
 
 ### A. Broken Thread Reconnection State (Missing Rehydration) [CRITICAL]
 
 The `GET /threads/{id}/state` endpoint is the sole mechanism for the UI to recover state on WebSocket reconnect or page refresh.
-**The Gap:** While the `ThreadStateSnapshot` schema defines fields for `tool_calls`, `artifacts`, `plan`, `pending_permissions`, and `agents`, the backend function `_enrich_snapshot_from_state` in `lib/api/endpoints.py` **only populates the `messages` list**. All other fields are returned as empty lists. The UI permanently loses the entire team status, current plan, active tool calls, and artifact lists upon reconnection.
+**The Gap:** While the `ThreadStateSnapshot` schema defines fields for `tool_calls`, `artifacts`, `plan`, `pending_permissions`, and `agents`, the backend function `_enrich_snapshot_from_state` in `src/vaultspec_a2a/api/endpoints.py` **only populates the `messages` list**. All other fields are returned as empty lists. The UI permanently loses the entire team status, current plan, active tool calls, and artifact lists upon reconnection.
 
 ### B. Worker Dispatch Ignores Blackboard Fields (ADR-019 Broken) [CRITICAL]
 
 The control surface sends a `DispatchRequest` to the worker process containing `active_feature`, `pipeline_phase`, and `vault_index`.
-**The Bug:** In `lib/worker/executor.py`, the `_handle_ingest()` method completely ignores these fields when constructing the initial `graph_input` for a new thread. The checkpointer starts with an empty state for the 4 mandatory ADR-019 blackboard fields, fundamentally breaking the SDD blackboard capabilities for the entire lifecycle of the thread.
+**The Bug:** In `src/vaultspec_a2a/worker/executor.py`, the `_handle_ingest()` method completely ignores these fields when constructing the initial `graph_input` for a new thread. The checkpointer starts with an empty state for the 4 mandatory ADR-019 blackboard fields, fundamentally breaking the SDD blackboard capabilities for the entire lifecycle of the thread.
 
 ### C. Missing Artifact Retrieval Endpoints [HIGH]
 
@@ -149,13 +149,13 @@ The backend tracks generated files via `ArtifactModel` in the SQLite database an
 
 1. Rewrite `_enrich_snapshot_from_state()` to map checkpointer state into `tool_calls`, `artifacts`, `plan`, `agents`, and `pending_permissions` so the UI can fully recover.
 2. Fix `Executor._handle_ingest()` to correctly inject `active_feature`, `pipeline_phase`, `vault_index`, and `validation_errors` from the `DispatchRequest` into the `graph_input`.
-3. Implement `GET /threads/{thread_id}/artifacts` and `GET /artifacts/{artifact_id}` in `lib/api/endpoints.py` for direct artifact retrieval.
+3. Implement `GET /threads/{thread_id}/artifacts` and `GET /artifacts/{artifact_id}` in `src/vaultspec_a2a/api/endpoints.py` for direct artifact retrieval.
 
 ---
 
 ## 6. Gaps & Missing Information (Cycle 4 Audit)
 
-Cycle 4 audited error propagation (`lib/core/aggregator.py`), the Supervisor node logic (`lib/core/nodes/supervisor.py`), and tool bindings.
+Cycle 4 audited error propagation (`src/vaultspec_a2a/core/aggregator.py`), the Supervisor node logic (`src/vaultspec_a2a/core/nodes/supervisor.py`), and tool bindings.
 
 ### A. Tool Failure Blindness [HIGH]
 
@@ -186,7 +186,7 @@ Cycle 5 audited the `PlanUpdateEvent` logic within the `EventAggregator`, the wo
 
 ### A. Dead Code Path: Plan Updates are Never Emitted [CRITICAL]
 
-The backend defines a `PlanUpdateEvent` and `lib/core/aggregator.py` contains debouncing logic (`_broadcast_debounced_plan_update`) and placeholders for `_plan_update_pending`.
+The backend defines a `PlanUpdateEvent` and `src/vaultspec_a2a/core/aggregator.py` contains debouncing logic (`_broadcast_debounced_plan_update`) and placeholders for `_plan_update_pending`.
 **The Bug:** There is absolutely no method in `EventAggregator` (like `emit_plan_update`) to actually construct or trigger a `PlanUpdateEvent`, nor is there any hook in `process_langgraph_event` that listens for LangGraph state changes to the `current_plan`. The planner's output goes into the SQLite checkpointer but is never streamed to the UI over WebSocket.
 
 ### B. Worker Liveness Opacity [HIGH]
@@ -196,7 +196,7 @@ Following ADR-019, the worker process sends HTTP POST heartbeats to the control 
 
 ### C. Trace Context Injection Format Mismatch [MEDIUM]
 
-In `lib/api/websocket.py`, the `_writer_loop` injects the OTel trace context into the outgoing WebSocket payload by adding a `_trace` dictionary (containing `traceparent`).
+In `src/vaultspec_a2a/api/websocket.py`, the `_writer_loop` injects the OTel trace context into the outgoing WebSocket payload by adding a `_trace` dictionary (containing `traceparent`).
 **The Gap:** This violates the strongly-typed `EventEnvelope` defined in `events.py`. The frontend's Pydantic/Zod schemas do not expect a loose `_trace` key at the root of the JSON payload. `_trace` should be formalized as a field on `EventEnvelope` or the metadata structure.
 
 ### D. Required Next Steps for the Backend Edge (Cycle 5)
@@ -209,11 +209,11 @@ In `lib/api/websocket.py`, the `_writer_loop` injects the OTel trace context int
 
 ## 8. Gaps & Missing Information (Cycle 6 Audit)
 
-Cycle 6 focused on the fundamental nature of "Planning" within the system by auditing `lib/core/state.py` against ADR-019 (SDD Blackboard), ADR-023 (Phase Gates), and ADR-024 (Plan Approval).
+Cycle 6 focused on the fundamental nature of "Planning" within the system by auditing `src/vaultspec_a2a/core/state.py` against ADR-019 (SDD Blackboard), ADR-023 (Phase Gates), and ADR-024 (Plan Approval).
 
 ### A. Architectural Mismatch: Structured Plans vs. SDD Markdown [CRITICAL]
 
-The frontend UI and the `PlanUpdateEvent` schema (`lib/api/schemas/events.py`) expect a plan to be a structured array of discrete steps (`entries: { content, status, priority }[]`). The backend's `TeamState` still contains a `current_plan: list[dict]` field to support this.
+The frontend UI and the `PlanUpdateEvent` schema (`src/vaultspec_a2a/api/schemas/events.py`) expect a plan to be a structured array of discrete steps (`entries: { content, status, priority }[]`). The backend's `TeamState` still contains a `current_plan: list[dict]` field to support this.
 **The Mismatch:** Following ADR-019 and ADR-024, the backend shifted entirely to an SDD (Software Design Document) blackboard pattern. Planners do not generate JSON arrays; they write markdown files (`docs/{feature}/plan.md`) which are tracked in the `vault_index["plan"]`. The `current_plan` array in `TeamState` is now _completely dead legacy code_. It is never populated by any node. The frontend is building UI components to render an array of steps that the backend will never send.
 
 ### B. Missing `plan_approved` State Export [HIGH]
@@ -230,12 +230,12 @@ ADR-024 introduced a `plan_approved` boolean field to `TeamState`. If `vault_ind
 
 ## 9. Gaps & Missing Information (Cycle 7 Audit)
 
-Cycle 7 audited the persistent task queue implementation (`lib/core/task_queue.py`), ADR-021, and its impact on the internal state (`lib/core/state.py`) versus the frontend schemas (`lib/api/schemas/`).
+Cycle 7 audited the persistent task queue implementation (`src/vaultspec_a2a/core/task_queue.py`), ADR-021, and its impact on the internal state (`src/vaultspec_a2a/core/state.py`) versus the frontend schemas (`src/vaultspec_a2a/api/schemas/`).
 
 ### A. Active Task Blindness (`current_task_id`) [HIGH]
 
-ADR-021 introduced a `current_task_id` pointer into the `TeamState` (`lib/core/state.py`). This string tracks exactly which sub-task from the `plan.md` or `queue.md` the worker agent is actively executing.
-**The Gap:** `current_task_id` is entirely omitted from the `ThreadStateSnapshot` in `lib/api/schemas/snapshots.py`. The UI has no idea which task is currently assigned to the active worker. Even if the UI fetches the raw `queue.md` document, it cannot highlight or pin the active task row for the user.
+ADR-021 introduced a `current_task_id` pointer into the `TeamState` (`src/vaultspec_a2a/core/state.py`). This string tracks exactly which sub-task from the `plan.md` or `queue.md` the worker agent is actively executing.
+**The Gap:** `current_task_id` is entirely omitted from the `ThreadStateSnapshot` in `src/vaultspec_a2a/api/schemas/snapshots.py`. The UI has no idea which task is currently assigned to the active worker. Even if the UI fetches the raw `queue.md` document, it cannot highlight or pin the active task row for the user.
 
 ### B. Pipeline Phase Transitions are Silent [CRITICAL]
 
@@ -245,22 +245,22 @@ The worker's execution environment constantly recalculates the `pipeline_phase` 
 ### C. Required Next Steps for the Backend Edge (Cycle 7)
 
 1. Export `current_task_id` in the `ThreadStateSnapshot` payload.
-2. Implement a `PhaseTransitionEvent` or `TeamStateUpdateEvent` in `lib/api/schemas/events.py` that broadcasts changes to `pipeline_phase`, `current_task_id`, and `vault_index` over the WebSocket stream in real-time.
+2. Implement a `PhaseTransitionEvent` or `TeamStateUpdateEvent` in `src/vaultspec_a2a/api/schemas/events.py` that broadcasts changes to `pipeline_phase`, `current_task_id`, and `vault_index` over the WebSocket stream in real-time.
 
 ---
 
 ## 10. Gaps & Missing Information (Cycle 8 Audit)
 
-Cycle 8 focused on the external protocol translation layer (`lib/protocols/mcp/server.py` and `lib/protocols/a2a/`) and the overall context mapping across boundaries.
+Cycle 8 focused on the external protocol translation layer (`src/vaultspec_a2a/protocols/mcp/server.py` and `src/vaultspec_a2a/protocols/a2a/`) and the overall context mapping across boundaries.
 
 ### A. A2A Protocol Abandonment (Dead Code) [COSMETIC]
 
-The `lib/protocols/a2a/` directory exists but contains only an empty `__init__.py` with a docstring calling it a "stub". ADR-006 ("Protocol Ecosystem Bridge") explicitly abandoned A2A in favor of LangGraph + MCP.
+The `src/vaultspec_a2a/protocols/a2a/` directory exists but contains only an empty `__init__.py` with a docstring calling it a "stub". ADR-006 ("Protocol Ecosystem Bridge") explicitly abandoned A2A in favor of LangGraph + MCP.
 **The Gap:** The directory and related terminology in older ADRs creates confusion, but operationally, the codebase is entirely LangGraph/MCP driven. This is a cosmetic hygiene issue.
 
 ### B. MCP Server Skews Thread Metadata (ADR-014 Violation) [MEDIUM]
 
-The `start_thread` MCP tool (`lib/protocols/mcp/server.py`) accepts `initial_message`, `team_preset`, `autonomous`, and `workspace_root`. It passes these to the `POST /api/threads` REST endpoint.
+The `start_thread` MCP tool (`src/vaultspec_a2a/protocols/mcp/server.py`) accepts `initial_message`, `team_preset`, `autonomous`, and `workspace_root`. It passes these to the `POST /api/threads` REST endpoint.
 **The Gap:** It completely omits the `metadata: ThreadMetadata` payload structure (ADR-014) from the POST request. This means threads created via the MCP server (e.g., from Cursor or Windsurf) will never have `feature_tag`, `context_refs`, or provenance tracking attached to them. This creates a two-tier system where the UI control surface can launch fully contextualized threads, but external IDEs cannot.
 
 ### C. MCP Output Missing Cost/Token Telemetry [LOW]
@@ -271,18 +271,18 @@ The `get_thread_status` MCP tool returns a human-readable text block summarizing
 ### D. Required Next Steps for the Backend Edge (Cycle 8)
 
 1. Add `feature_tag: str | None` and `context_refs: list[str] | None` to the `start_thread` MCP tool parameters and map them into the `metadata` object of the `POST /api/threads` request.
-2. Consider removing the `lib/protocols/a2a/` directory if no further integration is planned to reduce cognitive load.
+2. Consider removing the `src/vaultspec_a2a/protocols/a2a/` directory if no further integration is planned to reduce cognitive load.
 
 ---
 
 ## 11. Gaps & Missing Information (Cycle 9 Audit)
 
-Cycle 9 audited the creation and streaming of `Artifacts` between the `lib/database/crud.py`, the `lib/core/aggregator.py`, and the `lib/core/state.py`.
+Cycle 9 audited the creation and streaming of `Artifacts` between the `src/vaultspec_a2a/database/crud.py`, the `src/vaultspec_a2a/core/aggregator.py`, and the `src/vaultspec_a2a/core/state.py`.
 
 ### A. Dead Code Path: Artifact Updates are Never Emitted [CRITICAL]
 
-The backend defines an `ArtifactUpdateEvent` in `lib/api/schemas/events.py` intended for streaming file generation to the UI. The `TeamState` also defines an `artifacts` array.
-**The Bug:** I audited `lib/core/aggregator.py` and `lib/core/nodes/worker.py`. There is **no code** anywhere in the execution engine that actually emits an `ArtifactUpdateEvent`. When an agent writes a file (via a tool), the tool might create a database record, but it is never streamed to the UI over the WebSocket. The frontend will never see files being generated in real-time.
+The backend defines an `ArtifactUpdateEvent` in `src/vaultspec_a2a/api/schemas/events.py` intended for streaming file generation to the UI. The `TeamState` also defines an `artifacts` array.
+**The Bug:** I audited `src/vaultspec_a2a/core/aggregator.py` and `src/vaultspec_a2a/core/nodes/worker.py`. There is **no code** anywhere in the execution engine that actually emits an `ArtifactUpdateEvent`. When an agent writes a file (via a tool), the tool might create a database record, but it is never streamed to the UI over the WebSocket. The frontend will never see files being generated in real-time.
 
 ### B. State `artifacts` Array is Orphaned [HIGH]
 
@@ -292,27 +292,27 @@ The `TeamState` defines `artifacts: Annotated[list[dict[str, str]], _append_arti
 ### C. Required Next Steps for the Backend Edge (Cycle 9)
 
 1. Implement `emit_artifact_update` in the `EventAggregator` and wire it into the specific tools (e.g., `fs.writeTextFile`) or a state listener so the UI receives real-time file generation streams.
-2. Ensure that when an artifact is created in the database (`create_artifact` in `lib/database/crud.py`), a corresponding entry is appended to the `TeamState["artifacts"]` array so it persists in the LangGraph checkpointer.
+2. Ensure that when an artifact is created in the database (`create_artifact` in `src/vaultspec_a2a/database/crud.py`), a corresponding entry is appended to the `TeamState["artifacts"]` array so it persists in the LangGraph checkpointer.
 
 ---
 
 ## 12. Gaps & Missing Information (Cycle 10 Audit)
 
-Cycle 10 audited exception handling across the worker process (`lib/worker/executor.py`), custom exceptions (`lib/core/exceptions.py`), and the worker graph nodes (`lib/core/nodes/worker.py`).
+Cycle 10 audited exception handling across the worker process (`src/vaultspec_a2a/worker/executor.py`), custom exceptions (`src/vaultspec_a2a/core/exceptions.py`), and the worker graph nodes (`src/vaultspec_a2a/core/nodes/worker.py`).
 
 ### A. WorkerExecutionError is Swallowed by Executor [CRITICAL]
 
-In `lib/core/nodes/worker.py`, if the LLM invocation fails (e.g., context window overflow, provider outage), the code raises a custom `WorkerExecutionError`.
-**The Bug:** In `lib/worker/executor.py`, both `_handle_ingest()` and `_handle_resume()` wrap the LangGraph invocation in a generic `except Exception:` block. This block logs the exception to the terminal but **does not emit an `ErrorEvent`** over the IPC bridge or WebSocket. The orchestrator silently dies, the thread state never updates to `failed`, and the frontend UI remains permanently stuck in a "working" state, waiting for a response that will never come.
+In `src/vaultspec_a2a/core/nodes/worker.py`, if the LLM invocation fails (e.g., context window overflow, provider outage), the code raises a custom `WorkerExecutionError`.
+**The Bug:** In `src/vaultspec_a2a/worker/executor.py`, both `_handle_ingest()` and `_handle_resume()` wrap the LangGraph invocation in a generic `except Exception:` block. This block logs the exception to the terminal but **does not emit an `ErrorEvent`** over the IPC bridge or WebSocket. The orchestrator silently dies, the thread state never updates to `failed`, and the frontend UI remains permanently stuck in a "working" state, waiting for a response that will never come.
 
 ### B. Recovery Action Blindness [MEDIUM]
 
-`lib/core/exceptions.py` defines a sophisticated taxonomy of errors with `severity` and `recovery_action` (e.g., `RETRY_WITH_BACKOFF`, `ESCALATE_TO_USER`).
-**The Gap:** The `ErrorEvent` schema (`lib/api/schemas/events.py`) only has a boolean `recoverable: bool` field. It completely strips away the specific `recovery_action` hint. The frontend UI cannot display intelligent recovery options (like a "Retry" button vs. a "Reassign Agent" button) because the nuanced error classification is lost at the edge.
+`src/vaultspec_a2a/core/exceptions.py` defines a sophisticated taxonomy of errors with `severity` and `recovery_action` (e.g., `RETRY_WITH_BACKOFF`, `ESCALATE_TO_USER`).
+**The Gap:** The `ErrorEvent` schema (`src/vaultspec_a2a/api/schemas/events.py`) only has a boolean `recoverable: bool` field. It completely strips away the specific `recovery_action` hint. The frontend UI cannot display intelligent recovery options (like a "Retry" button vs. a "Reassign Agent" button) because the nuanced error classification is lost at the edge.
 
 ### C. Required Next Steps for the Backend Edge (Cycle 10)
 
-1. Fix `lib/worker/executor.py`'s `except Exception:` blocks to explicitly call `self._aggregator.emit_error()` before returning, ensuring catastrophic failures are pushed to the UI.
+1. Fix `src/vaultspec_a2a/worker/executor.py`'s `except Exception:` blocks to explicitly call `self._aggregator.emit_error()` before returning, ensuring catastrophic failures are pushed to the UI.
 2. Update the `ErrorEvent` schema to include `recovery_action: str | None` and `severity: str | None`, mapping them from the `VaultspecError` base class, so the UI can render actionable error states.
 
 ---
@@ -324,17 +324,17 @@ Cycle 11 audited the human-in-the-loop interruption mechanisms, specifically foc
 ### A. Supervisor Completely Skips Plan Approval [CRITICAL]
 
 ADR-024 mandates that if an SDD plan exists but has not been approved, the `supervisor.py` node must block execution and fire a LangGraph `interrupt({"type": "plan_approval_request", ...})`.
-**The Bug:** I audited `lib/core/nodes/supervisor.py`. The required `interrupt()` call is entirely missing. The supervisor node does not check the `plan_approved` state field before routing to an executor. The human-in-the-loop plan approval gate is completely non-existent in the actual runtime.
+**The Bug:** I audited `src/vaultspec_a2a/core/nodes/supervisor.py`. The required `interrupt()` call is entirely missing. The supervisor node does not check the `plan_approved` state field before routing to an executor. The human-in-the-loop plan approval gate is completely non-existent in the actual runtime.
 
 ### B. Aggregator Silently Swallows Plan Approvals [CRITICAL]
 
-Even if the supervisor node _did_ trigger the interrupt, the UI would still never see it. In `lib/core/aggregator.py`, the `_emit_interrupt_events()` function inspects the LangGraph suspended task.
+Even if the supervisor node _did_ trigger the interrupt, the UI would still never see it. In `src/vaultspec_a2a/core/aggregator.py`, the `_emit_interrupt_events()` function inspects the LangGraph suspended task.
 **The Bug:** The code explicitly filters out any interrupt that is not a tool permission request: `if payload.get("type") != "permission_request": continue`. If a `plan_approval_request` were emitted by the graph, the aggregator would silently drop it. The backend thread would enter a suspended state forever, and the UI would be stuck waiting, completely unaware that a plan approval modal should be rendered.
 
 ### C. Required Next Steps for the Backend Edge (Cycle 11)
 
-1. Implement the ADR-024 logic inside `lib/core/nodes/supervisor.py`: import `interrupt` and trigger it when routing to an exec worker if `vault_index["plan"]` exists but `state.get("plan_approved")` is False.
-2. Fix `lib/core/aggregator.py`'s `_emit_interrupt_events` to accept `payload.get("type") in ("permission_request", "plan_approval_request")` and map the plan approval payload into a `PermissionRequestEvent` that the UI can consume.
+1. Implement the ADR-024 logic inside `src/vaultspec_a2a/core/nodes/supervisor.py`: import `interrupt` and trigger it when routing to an exec worker if `vault_index["plan"]` exists but `state.get("plan_approved")` is False.
+2. Fix `src/vaultspec_a2a/core/aggregator.py`'s `_emit_interrupt_events` to accept `payload.get("type") in ("permission_request", "plan_approval_request")` and map the plan approval payload into a `PermissionRequestEvent` that the UI can consume.
 
 ---
 
@@ -344,12 +344,12 @@ Cycle 12 audited the team topology state tracking, specifically focusing on the 
 
 ### A. REST Endpoint Hardcodes All Agents to IDLE [CRITICAL]
 
-The control surface provides a `GET /team/status` endpoint (`lib/api/endpoints.py`) that the frontend polls to build the "Agent Dashboard" view.
+The control surface provides a `GET /team/status` endpoint (`src/vaultspec_a2a/api/endpoints.py`) that the frontend polls to build the "Agent Dashboard" view.
 **The Bug:** In `get_team_status_endpoint()`, the response constructor loops over `node_summaries` and explicitly hardcodes `state=AgentLifecycleState.IDLE` for every single agent. The backend aggregator completely fails to track the actual running state (working, blocked, failed) of the agents in memory. If the frontend relies on this endpoint, it will forever show all agents as sleeping, even when a thread is actively spinning at 100% CPU.
 
 ### B. Dead Code Path: TeamStatusEvent is Never Emitted [CRITICAL]
 
-The WebSocket protocol defines a `TeamStatusEvent` to push topology and agent lifecycle changes to the UI in real-time. `lib/core/aggregator.py` provides an `emit_team_status()` method to construct this payload.
+The WebSocket protocol defines a `TeamStatusEvent` to push topology and agent lifecycle changes to the UI in real-time. `src/vaultspec_a2a/core/aggregator.py` provides an `emit_team_status()` method to construct this payload.
 **The Bug:** A codebase-wide search reveals that `emit_team_status()` is _never called anywhere_ outside of test files. The execution engine never broadcasts topology updates. The frontend is completely starved of real-time team status changes.
 
 ### C. Required Next Steps for the Backend Edge (Cycle 12)
@@ -362,18 +362,18 @@ The WebSocket protocol defines a `TeamStatusEvent` to push topology and agent li
 
 ## 15. Gaps & Missing Information (Cycle 13 Audit)
 
-Cycle 13 audited the Context Compaction layer (`lib/core/context.py`) and its interactions with the LangGraph state (`TeamState`), specifically evaluating how ADR-002 (Context Management) impacts the frontend's view of the message history.
+Cycle 13 audited the Context Compaction layer (`src/vaultspec_a2a/core/context.py`) and its interactions with the LangGraph state (`TeamState`), specifically evaluating how ADR-002 (Context Management) impacts the frontend's view of the message history.
 
 ### A. Silent UI Message Truncation (Amnesia) [CRITICAL]
 
-`lib/core/context.py` implements a `compact_context()` function that triggers when the conversation history exceeds 80% of `CONTEXT_LIMIT` (120k tokens). It aggressively truncates the middle of the `TeamState["messages"]` list, replacing it with a single `HumanMessage` summarizing the compaction.
+`src/vaultspec_a2a/core/context.py` implements a `compact_context()` function that triggers when the conversation history exceeds 80% of `CONTEXT_LIMIT` (120k tokens). It aggressively truncates the middle of the `TeamState["messages"]` list, replacing it with a single `HumanMessage` summarizing the compaction.
 **The Gap:** This compacted message list is returned as a _new_ state dict for the LLM invocation, but because `worker_node` does not explicitly merge this compacted message back into the global LangGraph checkpointer state via a reducer, the checkpointer retains the _uncompacted_ history.
 **The UI Bug:** However, if a future state rehydration attempt ever uses the compacted list, or if the UI relies on an event stream that reflects the compacted state, the UI will suddenly experience "amnesia"—messages will disappear from the screen and be replaced by `[Context compacted: earlier conversation history removed...]`. There is no `ContextCompactionEvent` sent to the frontend to explain this to the user.
 
 ### B. Opaque Context Window Telemetry [HIGH]
 
 The frontend UI has no idea how close the current thread is to hitting the `CONTEXT_LIMIT`.
-**The Gap:** `should_compact()` calculates the exact token usage via `estimate_tokens()`, but this metric is entirely internal to `lib/core/context.py`. Neither `ThreadStateSnapshot` nor `HeartbeatEvent` nor `AgentStatusEvent` exposes a `current_context_tokens` or `compaction_warning` flag. The UI cannot show the user a "Memory Pressure" bar or warn them that their thread is about to undergo aggressive truncation.
+**The Gap:** `should_compact()` calculates the exact token usage via `estimate_tokens()`, but this metric is entirely internal to `src/vaultspec_a2a/core/context.py`. Neither `ThreadStateSnapshot` nor `HeartbeatEvent` nor `AgentStatusEvent` exposes a `current_context_tokens` or `compaction_warning` flag. The UI cannot show the user a "Memory Pressure" bar or warn them that their thread is about to undergo aggressive truncation.
 
 ### C. Required Next Steps for the Backend Edge (Cycle 13)
 
@@ -387,8 +387,8 @@ The frontend UI has no idea how close the current thread is to hitting the `CONT
 Cycle 14 audited the token accounting and cost tracking subsystems (`CostTrackingModel`, `token_usage` in `TeamState`, and the `AcpChatModel` provider layer).
 
 ### A. Dead Code Path: Token Usage is Never Written to DB [CRITICAL]
-The backend database layer defines a `CostTrackingModel` (ADR-010) and provides `append_cost_record` and `sum_cost_by_thread` in `lib/database/crud.py`.
-**The Bug:** A codebase-wide search reveals that **`append_cost_record` is never called anywhere** outside of the database test files. The execution engine (`lib/worker/executor.py`) and the LangGraph nodes (`worker.py`, `supervisor.py`) never write to the cost tracking database table. The token usage database is permanently empty.
+The backend database layer defines a `CostTrackingModel` (ADR-010) and provides `append_cost_record` and `sum_cost_by_thread` in `src/vaultspec_a2a/database/crud.py`.
+**The Bug:** A codebase-wide search reveals that **`append_cost_record` is never called anywhere** outside of the database test files. The execution engine (`src/vaultspec_a2a/worker/executor.py`) and the LangGraph nodes (`worker.py`, `supervisor.py`) never write to the cost tracking database table. The token usage database is permanently empty.
 
 ### B. Dead Code Path: `token_usage` in TeamState is Never Updated [CRITICAL]
 The LangGraph `TeamState` includes `token_usage: Annotated[dict[str, dict[str, int]], _merge_token_usage]`.
@@ -411,25 +411,25 @@ Cycle 15 audited thread cancellation (`POST /threads/{id}/cancel` -> `executor.p
 
 ### A. Zombie Cancellations [HIGH]
 The REST API provides `POST /threads/{id}/cancel`. It updates the SQLite database status to `CANCELLED` and sends a `DispatchRequest(action="cancel")` to the worker process. The worker process calls `self._aggregator.cancel_thread(thread_id)` which sets an `asyncio.Event()`.
-**The Bug:** The underlying LangChain `ainvoke()` call inside `lib/core/nodes/worker.py` does not monitor this `asyncio.Event`. Once an LLM is spinning or a tool is executing (which could take minutes), it completely ignores the cancellation signal. The `EventAggregator` stops broadcasting events, but the worker process burns CPU and tokens in the background until the current node finishes. The UI thinks the thread is cancelled, but the backend worker is effectively a zombie.
+**The Bug:** The underlying LangChain `ainvoke()` call inside `src/vaultspec_a2a/core/nodes/worker.py` does not monitor this `asyncio.Event`. Once an LLM is spinning or a tool is executing (which could take minutes), it completely ignores the cancellation signal. The `EventAggregator` stops broadcasting events, but the worker process burns CPU and tokens in the background until the current node finishes. The UI thinks the thread is cancelled, but the backend worker is effectively a zombie.
 
 ### B. Tool Call Payloads are Stripped [CRITICAL]
 The frontend defines rich tool schemas (`ToolCallContentText`, `ToolCallContentDiff`, `ToolCallContentTerminal`) to render beautiful interactive blocks for filesystem edits and terminal commands.
 **The Bug:** `EventAggregator.process_langgraph_event()` intercepts `on_tool_end`. It emits a `ToolCallUpdateEvent` with `status=COMPLETED`. **It completely drops the tool's actual output/content.** It does not map `event_data["data"].get("output")` into the `content` array of the `ToolCallUpdateEvent`. The frontend knows a tool finished, but it never receives the text, diff, or terminal output to display to the user. The tool output is only ever seen by the LLM (written to the checkpointer); the UI is completely blind to it.
 
 ### C. Required Next Steps for the Backend Edge (Cycle 15)
-1. In `worker_node` (`lib/core/nodes/worker.py`), wrap `model.ainvoke()` with `asyncio.wait_for` or a similar cancellation wrapper tied to the aggregator's cancel event to actually kill the running LLM/tool task.
-2. In `lib/core/aggregator.py`, update the `on_tool_end` handler to extract the tool's output string from the LangGraph event payload, determine its `ToolCallContent` type (text vs. terminal), and inject it into the `content` array of the `ToolCallUpdateEvent`.
+1. In `worker_node` (`src/vaultspec_a2a/core/nodes/worker.py`), wrap `model.ainvoke()` with `asyncio.wait_for` or a similar cancellation wrapper tied to the aggregator's cancel event to actually kill the running LLM/tool task.
+2. In `src/vaultspec_a2a/core/aggregator.py`, update the `on_tool_end` handler to extract the tool's output string from the LangGraph event payload, determine its `ToolCallContent` type (text vs. terminal), and inject it into the `content` array of the `ToolCallUpdateEvent`.
 
 ---
 
 ## 18. Gaps & Missing Information (Cycle 16 Audit)
 
-Cycle 16 audited the real-time agent execution controls, specifically focusing on the `AgentControlCommand` sent from the UI over WebSocket to pause, resume, or terminate an active agent (`lib/api/app.py`).
+Cycle 16 audited the real-time agent execution controls, specifically focusing on the `AgentControlCommand` sent from the UI over WebSocket to pause, resume, or terminate an active agent (`src/vaultspec_a2a/api/app.py`).
 
 ### A. PAUSE and RESUME are Hardcoded No-Ops [CRITICAL]
 The WebSocket `ClientMessage` schema exposes an `AgentControlCommand` with `action: "pause" | "resume" | "terminate"`. The UI expects these to halt or un-halt the LangGraph worker loop dynamically.
-**The Bug:** In `lib/api/app.py`, the `_create_dispatch_control_handler()` method explicitly swallows the `PAUSE` and `RESUME` actions. 
+**The Bug:** In `src/vaultspec_a2a/api/app.py`, the `_create_dispatch_control_handler()` method explicitly swallows the `PAUSE` and `RESUME` actions. 
 - For `PAUSE`, it logs `"Pause not supported -- ignoring"` and returns immediately.
 - For `RESUME`, it logs `"WS RESUME without option_id is a no-op; use POST /permissions/{id}/respond"` and returns immediately.
 **The UI Impact:** If the frontend builds a "Pause Agent" or "Resume" button, clicking it does absolutely nothing. The execution engine does not support dynamic pausing outside of hardcoded LangGraph interrupts.
@@ -439,7 +439,7 @@ When the UI sends `AgentControlCommand(action="terminate", agent_id="coder")`, i
 **The Bug:** The control handler maps `TERMINATE` directly to the `cancel` dispatch action, which kills the *entire thread* via `_aggregator.cancel_thread()`. There is no mechanism to kill an unruly sub-agent and recover; the entire session is destroyed. 
 
 ### C. Required Next Steps for the Backend Edge (Cycle 16)
-1. **Decision Required:** Remove `PAUSE` and `RESUME` from the `AgentControlCommand` schema entirely to prevent the frontend from building dead UI buttons, or implement true dynamic graph interruption inside `lib/worker/executor.py`'s `astream_events` loop.
+1. **Decision Required:** Remove `PAUSE` and `RESUME` from the `AgentControlCommand` schema entirely to prevent the frontend from building dead UI buttons, or implement true dynamic graph interruption inside `src/vaultspec_a2a/worker/executor.py`'s `astream_events` loop.
 2. Consider implementing a true "Agent Termination" signal that injects a `routing_error` and forces the active worker node to crash gracefully back to the supervisor, rather than nuking the entire orchestrator thread.
 
 ---
@@ -450,11 +450,11 @@ Cycle 17 audited the mapping of LangGraph tool invocation metadata into the `Too
 
 ### A. Dead Code Path: Tool Locations are Never Sent [HIGH]
 The `ToolCallLocation` schema (`path`, `line`) is intended to allow the UI to show exactly *where* in the codebase a tool is operating (e.g. `src/main.ts:42`).
-**The Bug:** In `lib/core/aggregator.py`, the `emit_tool_call_start` function initializes `locations=[]` (via the default factory) and the `emit_tool_call_update` function never sets `locations`. The backend entirely fails to parse the tool arguments (e.g., extracting the `file_path` arg from a file-edit tool) to construct a `ToolCallLocation`. The UI will never receive file location hints for tool calls.
+**The Bug:** In `src/vaultspec_a2a/core/aggregator.py`, the `emit_tool_call_start` function initializes `locations=[]` (via the default factory) and the `emit_tool_call_update` function never sets `locations`. The backend entirely fails to parse the tool arguments (e.g., extracting the `file_path` arg from a file-edit tool) to construct a `ToolCallLocation`. The UI will never receive file location hints for tool calls.
 
 ### B. Dead Code Path: Rich Tool Content is Never Sent [CRITICAL]
 The `ToolCallContent` union (`ToolCallContentText`, `ToolCallContentDiff`, `ToolCallContentTerminal`) allows the UI to render tool arguments and outputs using rich components (like syntax highlighters or diff viewers).
-**The Bug:** In `lib/core/aggregator.py`, `emit_tool_call_start` and `emit_tool_call_update` **never** populate the `content` list.
+**The Bug:** In `src/vaultspec_a2a/core/aggregator.py`, `emit_tool_call_start` and `emit_tool_call_update` **never** populate the `content` list.
 - During `on_tool_start`, the `event_data["data"].get("input")` containing the tool's arguments (what the LLM generated) is completely ignored.
 - During `on_tool_end`, the `event_data["data"].get("output")` containing the result (what the tool returned) is completely ignored.
 The UI receives a `ToolCallUpdateEvent` that only says `status="completed"`. It never receives the arguments passed to the tool, nor the result returned by the tool.
@@ -488,7 +488,7 @@ LangGraph supports explicit state versioning via `checkpoint_id`.
 
 ## 21. Gaps & Missing Information (Cycle 19 Audit)
 
-Cycle 19 audited the persistence and provenance of message history within `lib/database/models.py`, `lib/database/crud.py`, and the snapshot enrichment logic in `lib/api/endpoints.py`.
+Cycle 19 audited the persistence and provenance of message history within `src/vaultspec_a2a/database/models.py`, `src/vaultspec_a2a/database/crud.py`, and the snapshot enrichment logic in `src/vaultspec_a2a/api/endpoints.py`.
 
 ### A. Message History is Not Persisted in SQL [HIGH]
 The backend's SQL schema (`ThreadModel`, `ArtifactModel`, etc.) contains no table for messages.
@@ -496,8 +496,8 @@ The backend's SQL schema (`ThreadModel`, `ArtifactModel`, etc.) contains no tabl
 
 ### B. Mismatch Between Streaming `message_id` and Snapshot `message_id` [CRITICAL]
 The system uses different identification strategies for the same messages depending on whether they are streamed or fetched as a snapshot.
-- **Streaming:** In `lib/core/aggregator.py`, `MessageChunkEvent` uses the LangGraph `run_id` (the ID of the model invocation) as the `message_id`.
-- **Snapshot:** In `lib/api/endpoints.py`, `_enrich_snapshot_from_state` attempts to read `m.id` from the persisted message. If `m.id` is missing (common for checkpointer messages), it falls back to a **deterministic hash of role + content**.
+- **Streaming:** In `src/vaultspec_a2a/core/aggregator.py`, `MessageChunkEvent` uses the LangGraph `run_id` (the ID of the model invocation) as the `message_id`.
+- **Snapshot:** In `src/vaultspec_a2a/api/endpoints.py`, `_enrich_snapshot_from_state` attempts to read `m.id` from the persisted message. If `m.id` is missing (common for checkpointer messages), it falls back to a **deterministic hash of role + content**.
 **The Bug:** The deterministic hash will **never** match the `run_id` used during the stream.
 **The UI Impact:** When a user refreshes the page, the message IDs will change. The frontend's deduplication logic will fail, leading to duplicate messages in the UI or loss of UI state linked to the original streaming message (e.g., collapsed states, local annotations).
 

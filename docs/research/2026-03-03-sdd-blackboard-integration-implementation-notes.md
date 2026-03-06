@@ -250,7 +250,7 @@ explicit `id`, LangChain assigns a UUID at construction time. Since the anchorin
 matters if messages are returned for storage.
 
 **Pitfall — `compact_context` and leading SystemMessages:** The project's
-`compact_context()` (`lib/core/context.py`) preserves all leading `SystemMessage`
+`compact_context()` (`src/vaultspec_a2a/core/context.py`) preserves all leading `SystemMessage`
 instances before the first non-system message (ADR-014 §5). The anchoring
 `SystemMessage` is constructed fresh per-invocation and never enters
 `state["messages"]`, so it is unaffected by compaction. No code change needed
@@ -314,7 +314,7 @@ in `route_map` (it is a valid worker ID), this is safe.
 
 ### 2.4 `_build_supervisor_prompt()` Template Replacement
 
-Current implementation (`lib/core/graph.py:169`):
+Current implementation (`src/vaultspec_a2a/core/graph.py:169`):
 
 ```python
 def _build_supervisor_prompt(

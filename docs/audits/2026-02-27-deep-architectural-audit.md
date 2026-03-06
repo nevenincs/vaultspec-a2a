@@ -2,7 +2,7 @@
 date: 2026-02-27
 type: audit
 feature: deep-architectural
-description: 'Deep architectural audit of lib/core/, lib/providers/, and lib/api/ against A2A SDK and LangGraph references, fixing 5 confirmed bugs including pipeline_loop routing, CORS, log dedup, and sandbox path collision.'
+description: 'Deep architectural audit of src/vaultspec_a2a/core/, src/vaultspec_a2a/providers/, and src/vaultspec_a2a/api/ against A2A SDK and LangGraph references, fixing 5 confirmed bugs including pipeline_loop routing, CORS, log dedup, and sandbox path collision.'
 related:
   - docs/adrs/2026-02-26-001-process-workspace-management-adr.md
   - docs/adrs/2026-02-26-004-event-aggregation-replay-adr.md
@@ -12,7 +12,7 @@ related:
 
 # Deep Architectural Audit — 2026-02-27
 
-**Scope:** lib/core/, lib/providers/, lib/api/, lib/utils/logging.py
+**Scope:** src/vaultspec_a2a/core/, src/vaultspec_a2a/providers/, src/vaultspec_a2a/api/, src/vaultspec_a2a/utils/logging.py
 **Against:** A2A SDK (knowledge/repositories/a2a-python/), LangGraph
 (knowledge/repositories/langgraph/), ACP/TOAD references
 **Outcome:** 5 confirmed bugs fixed; 2 design notes identified
@@ -23,7 +23,7 @@ related:
 
 ### CRITICAL-1: `pipeline_loop`topology always terminates after 1 iteration
 
-**File:**`lib/core/graph.py:330`/`lib/core/nodes/worker.py:102`
+**File:**`src/vaultspec_a2a/core/graph.py:330`/`src/vaultspec_a2a/core/nodes/worker.py:102`
 
 **Root cause:** `_loop_router`read`state.get("next", "FINISH")`. The
 `create_worker_node`
@@ -53,7 +53,7 @@ when the cap is reached. Corrected the `state.py`comment to match.
 
 ### CRITICAL-2: CORS —`allow_origins=["*"]`+`allow_credentials=True`
 
-**File:** `lib/api/app.py:172-178`
+**File:** `src/vaultspec_a2a/api/app.py:172-178`
 
 **Root cause:** Per the CORS specification (Fetch Standard §4.7), when
 `Access-Control-Allow-Credentials: true`is present,
@@ -82,7 +82,7 @@ allow_credentials=True,
 
 ### HIGH-1: Log duplication — uvicorn `propagate`not disabled
 
-**File:**`lib/utils/logging.py:84-85`
+**File:**`src/vaultspec_a2a/utils/logging.py:84-85`
 
 **Root cause:** Both `uvicorn.access`and`uvicorn.error`were assigned a direct
 handler
@@ -106,7 +106,7 @@ for lib_logger_name in ("uvicorn.access", "uvicorn.error"):
 
 ### HIGH-2: `JSONFormatter`drops structured`extra={}`fields silently
 
-**File:**`lib/utils/logging.py:16-31`
+**File:**`src/vaultspec_a2a/utils/logging.py:16-31`
 
 **Root cause:** `JSONFormatter.format()`only emitted 4 fixed fields:`timestamp`,
 `level`,
@@ -127,7 +127,7 @@ via `extra={}`without any change to call sites.
 
 ### BUG-1:`app.py`NameError —`_checkpointer_conn`undefined
 
-**File:**`lib/api/app.py:86`(already fixed before this audit session)
+**File:**`src/vaultspec_a2a/api/app.py:86`(already fixed before this audit session)
 
 **Root cause:**`logger.info("LangGraph checkpointer initialised at %s",
 _checkpointer_conn)`
@@ -143,7 +143,7 @@ before any requests could be served.
 
 ### NOTE-1: Debounced tool updates assign sequence numbers pre-broadcast
 
-**File:**`lib/core/aggregator.py:563`
+**File:**`src/vaultspec_a2a/core/aggregator.py:563`
 
 In `emit_tool_call_update`, a sequence number is assigned at the start of the
 method, before
@@ -169,7 +169,7 @@ reports spurious
 
 ### NOTE-2: Supervisor text-parsing fragility (substring match)
 
-**File:** `lib/core/nodes/supervisor.py:50-55`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:50-55`
 
 The supervisor uses substring matching as a fallback when the LLM response is
 not an exact
@@ -193,7 +193,7 @@ matching if agent id collisions become a problem.
 
 ### MED-1: Agent ID misattribution in `process_langgraph_event`
 
-**File:** `lib/core/aggregator.py:702-771`
+**File:** `src/vaultspec_a2a/core/aggregator.py:702-771`
 
 **Root cause:** `agent_id`in`process_langgraph_event`is the outer invocation
 parameter
@@ -217,7 +217,7 @@ without`langgraph_node`metadata (e.g., top-level graph events).
 
 ### MED-2: Chunk buffer metadata collision
 
-**File:**`lib/core/aggregator.py:413-432`
+**File:**`src/vaultspec_a2a/core/aggregator.py:413-432`
 
 **Root cause:** `_chunk_buffers`and`_chunk_buffer_meta`are keyed
 by`thread_id`only.
@@ -242,7 +242,7 @@ design (minimal refactor) while eliminating the collision.
 
 ### MED-3: Pagination DoS via unbounded`limit`
 
-**File:** `lib/api/endpoints.py:290-293`
+**File:** `src/vaultspec_a2a/api/endpoints.py:290-293`
 
 **Root cause:** `GET /threads?limit=N`accepted any integer. A client
 sending`?limit=999999`
@@ -259,7 +259,7 @@ values.
 
 ### MED-4: `aget_state()`with no timeout hangs endpoint
 
-**File:**`lib/api/endpoints.py:390-401`
+**File:**`src/vaultspec_a2a/api/endpoints.py:390-401`
 
 **Root cause:** `graph.aget_state()`calls into the SQLite async checkpointer. If
 the DB is
@@ -282,7 +282,7 @@ gracefully.
 
 ### MED-5: `on_tool_error`and`on_chain_error`not handled
 
-**File:**`lib/core/aggregator.py`
+**File:**`src/vaultspec_a2a/core/aggregator.py`
 
 **Root cause:** LangGraph emits `on_tool_error` when a tool call raises an
 exception, and

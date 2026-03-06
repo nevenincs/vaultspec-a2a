@@ -27,11 +27,11 @@ audits)
 
 | Agent                | Scope                                          | CRIT   | HIGH   | MED    | LOW    | Total   |
 | -------------------- | ---------------------------------------------- | ------ | ------ | ------ | ------ | ------- |
-| core-auditor         | `lib/core/`                                    | 4      | 6      | 8      | 7      | 25      |
-| api-auditor          | `lib/api/`                                     | 0      | 6      | 13     | 7      | 26      |
-| providers-auditor    | `lib/providers/`                               | 2      | 6      | 9      | 6      | 23      |
-| db-protocol-auditor  | `lib/database/`+`lib/protocols/`               | 0      | 5      | 8      | 6      | 19      |
-| utils-auditor        | `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 3      | 5      | 6      | 4      | 18      |
+| core-auditor         | `src/vaultspec_a2a/core/`                                    | 4      | 6      | 8      | 7      | 25      |
+| api-auditor          | `src/vaultspec_a2a/api/`                                     | 0      | 6      | 13     | 7      | 26      |
+| providers-auditor    | `src/vaultspec_a2a/providers/`                               | 2      | 6      | 9      | 6      | 23      |
+| db-protocol-auditor  | `src/vaultspec_a2a/database/`+`src/vaultspec_a2a/protocols/`               | 0      | 5      | 8      | 6      | 19      |
+| utils-auditor        | `src/vaultspec_a2a/utils/`+`src/vaultspec_a2a/telemetry/`+`src/vaultspec_a2a/workspace/` | 3      | 5      | 6      | 4      | 18      |
 | test-quality-auditor | Cross-cutting test quality                     | 5      | 9      | 15     | 8      | 37      |
 | **TOTAL (raw)**      |                                                | **14** | **37** | **59** | **38** | **148** |
 
@@ -45,7 +45,7 @@ agents' test findings. After dedup, unique actionable findings are approximately
 
 ### CORE-C1:`_loop_router`Can Return Unregistered Route Key
 
-**File:**`lib/core/graph.py:513-533`
+**File:**`src/vaultspec_a2a/core/graph.py:513-533`
 The router returns `state.get("next", "revise")`but the conditional edges map
 only registers`{"revise": loop_target, "FINISH": END}`. Any worker setting
 `state["next"]`to a value other than`"revise"`or`"FINISH"`causes a runtime
@@ -53,55 +53,55 @@ crash.
 
 ### CORE-C2:`load_team_config`Has No Path Traversal Protection
 
-**File:**`lib/core/team_config.py:336-365`
+**File:**`src/vaultspec_a2a/core/team_config.py:336-365`
 `team_id`is interpolated into filesystem paths without validation
 (unlike`load_agent_config`which validates against`_SAFE_AGENT_ID_RE`). A crafted
 `team_id`like`"../../etc/passwd"`creates a path-traversal vector.
 
 ### CORE-C3:`config.py`Missing`__all__`Declaration
 
-**File:**`lib/core/config.py`
+**File:**`src/vaultspec_a2a/core/config.py`
 ADR-009 §5.3 mandates `__all__`on every
 sub-sub-module.`config.py`exports`Settings`and`settings`but declares neither.
 
 ### CORE-C4: Pervasive Hand-Rolled Stubs in`test_aggregator.py`
 
-**File:** `lib/core/tests/test_aggregator.py` (multiple locations)
+**File:** `src/vaultspec_a2a/core/tests/test_aggregator.py` (multiple locations)
 `_FakeNode`, `_FakeGraph`, `FakeChunk`, `BigChunk`, `EmptyChunk`,
 `_FakeInterrupt`, `_FakeTask`, `_FakeState`, `_FakeGraphWithInterrupt`— all
 violate the no-mocks/no-stubs mandate.
 
 ### PROV-C1:`prompt_future.result()`Raises RuntimeError, Bypasses Domain Error Path
 
-**File:**`lib/providers/acp_chat_model.py:368-393`
+**File:**`src/vaultspec_a2a/providers/acp_chat_model.py:368-393`
 When subprocess dies mid-session,
 `prompt_future.result()`re-raises`RuntimeError("Subprocess closed")`instead of
 going through the`AcpError`domain error path.
 
 ### PROV-C2:`_FakeWriter`and`_FakeCtx`Stubs Violate No-Mocks Mandate
 
-**Files:**`lib/providers/probes/tests/test_protocol.py:141-326`,
-`lib/providers/tests/test_acp_security.py:200-215`
+**Files:**`src/vaultspec_a2a/providers/probes/tests/test_protocol.py:141-326`,
+`src/vaultspec_a2a/providers/tests/test_acp_security.py:200-215`
 Five `_FakeWriter`classes and`_FakeCtx`are hand-rolled stubs replacing real
 objects.
 
 ### WS-CRIT-001:`is_main`Detection Inverted in`list_worktrees`
 
-**File:** `lib/workspace/git_manager.py:245-258`
+**File:** `src/vaultspec_a2a/workspace/git_manager.py:245-258`
 Off-by-one in `entry_index`causes the main worktree to always
 get`is_main=False`in multi-worktree scenarios. Only single-worktree repos
 produce correct results.
 
 ### TEL-CRIT-001: Dead`except ImportError`in`_build_sdk_meter_provider`
 
-**File:** `lib/telemetry/instrumentation.py:218-226`
+**File:** `src/vaultspec_a2a/telemetry/instrumentation.py:218-226`
 Inner `try/except ImportError`inside`if otlp_available:`branch is both
 unreachable dead code AND an ADR-015 §2.3 violation (no try/except guards for
 OTel packages).
 
 ### TEL-CRIT-002: Stale Docstring + Dead Code Branch for "Optional SDK"
 
-**File:**`lib/telemetry/instrumentation.py:1-8, 269-275`
+**File:**`src/vaultspec_a2a/telemetry/instrumentation.py:1-8, 269-275`
 Module docstring still describes SDK as optional; `else` branch at line 271 is
 unreachable. Both contradict ADR-015 which mandates SDK as a runtime dependency.
 
@@ -322,7 +322,7 @@ The following areas were confirmed compliant across all auditors:
 - **`__all__`declarations**: Present on all production modules
   (except`config.py`)
 - **Relative imports**: No violations found in any production code
-- **Facade pattern**: `lib/database/__init__.py` is a model implementation (all
+- **Facade pattern**: `src/vaultspec_a2a/database/__init__.py` is a model implementation (all
   22 symbols)
 - **`permission_callback`isolation**:`model_copy()`correctly isolates per
   invocation

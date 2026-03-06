@@ -14,7 +14,7 @@ relevance: 10
 
 The core premise of the `.vaultspec` architecture is the **File-System-as-a-Blackboard**. It uses a rigid, auditable pipeline (`Research → Specify → Plan → Execute → Verify`) where the "State" is not a transient chat history, but a persistent network of markdown artifacts stored in `.vault/`, linked via `[[wikilinks]]`.
 
-Our current A2A implementation (`lib/core/state.py` and `lib/core/graph.py`) provides the mechanical engine (LangGraph), but it currently lacks the semantic awareness of this file-based blackboard.
+Our current A2A implementation (`src/vaultspec_a2a/core/state.py` and `src/vaultspec_a2a/core/graph.py`) provides the mechanical engine (LangGraph), but it currently lacks the semantic awareness of this file-based blackboard.
 
 ## 1. The Enrichment Gaps
 
@@ -55,7 +55,7 @@ To align the A2A engine with the `.vaultspec` rules and mitigate context loss, w
 
 ### Step 1: Enrich `TeamState` with the VaultSpec Schema
 
-Expand `lib/core/state.py` to track the SDD context natively:
+Expand `src/vaultspec_a2a/core/state.py` to track the SDD context natively:
 
 ```python
 class TeamState(TypedDict):
@@ -70,7 +70,7 @@ class TeamState(TypedDict):
 
 ### Step 2: Implement "Blackboard Context Mounting"
 
-Modify `lib/core/nodes/worker.py`. Instead of just passing `state["messages"]`, we implement a context-mounting step:
+Modify `src/vaultspec_a2a/core/nodes/worker.py`. Instead of just passing `state["messages"]`, we implement a context-mounting step:
 
 1.  Look at `state["active_feature"]`.
 2.  Scan `.vault/` for the relevant `Research`, `ADR`, and `Plan` files.
@@ -80,7 +80,7 @@ Modify `lib/core/nodes/worker.py`. Instead of just passing `state["messages"]`, 
 
 The VaultSpec mandate states: _"DO NOT mark the task as complete until the review passes."_
 
-We need to add a specialized node (or modify the `_loop_router` in `lib/core/graph.py`) that acts as the **Blind Critic**.
+We need to add a specialized node (or modify the `_loop_router` in `src/vaultspec_a2a/core/graph.py`) that acts as the **Blind Critic**.
 
 - When the `executor` attempts to return `FINISH`, the graph intercepts it.
 - It routes to the `vaultspec-code-reviewer` agent.

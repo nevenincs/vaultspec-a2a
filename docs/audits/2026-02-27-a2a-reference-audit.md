@@ -315,7 +315,7 @@ async def consume_and_break_on_interrupt(
 - Event callback invoked after each event in background
 - TODO comment (line 161) notes tracking outstanding tasks
 
-### Our Implementation: lib/core/aggregator.py
+### Our Implementation: src/vaultspec_a2a/core/aggregator.py
 
 ### What we have: (2)
 
@@ -458,7 +458,7 @@ async def on_message_send_stream(...) -> AsyncGenerator[Event]:
         self._track_background_task(cleanup_task)
 ```
 
-### Our Implementation: lib/api/endpoints.py
+### Our Implementation: src/vaultspec_a2a/api/endpoints.py
 
 ### What we have: (3)
 
@@ -556,7 +556,7 @@ def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
 - On next iteration, exception is raised in consumer context (not async task
   context)
 
-### Our Implementation: lib/api/websocket.React.ts (frontend)
+### Our Implementation: src/vaultspec_a2a/api/websocket.React.ts (frontend)
 
 ### What we have: (4)
 
@@ -700,7 +700,7 @@ def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
 
 ### Our Implementation
 
-- `lib/core/aggregator.py`(EventAggregator) -`lib/api/endpoints.py` (REST handlers)
+- `src/vaultspec_a2a/core/aggregator.py`(EventAggregator) -`src/vaultspec_a2a/api/endpoints.py` (REST handlers)
 
 ---
 

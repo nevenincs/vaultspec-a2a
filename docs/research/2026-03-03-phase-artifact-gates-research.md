@@ -160,4 +160,4 @@ The gate is stateless with respect to `pipeline_phase` — it checks vault_index
 - [ADR-022](../adrs/022-contextual-anchoring-graph-lifecycle.md) — existing FINISH gate pattern
 - [ADR-025](../adrs/025-mandatory-review-gate.md) — review artifact FINISH gate (same pattern)
 - [ADR-026](../adrs/026-pipeline-phase-population.md) — pipeline_phase inference (complementary, not conflicting)
-- `lib/core/nodes/supervisor.py` — existing gate implementation reference
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — existing gate implementation reference

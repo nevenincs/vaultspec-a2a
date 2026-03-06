@@ -32,7 +32,7 @@ to the coder.
 ## Scope — Files Under Change
 
 ```
-lib/core/
+src/vaultspec_a2a/core/
   state.py                   # TeamState field changes
   graph.py                   # RetryPolicy, try/except, logging
   nodes/
@@ -40,7 +40,7 @@ lib/core/
     supervisor.py            # compaction, structured output, TAG_NOSTREAM
   context.py                 # possible compaction fixes
   exceptions.py              # new domain exceptions
-lib/core/tests/
+src/vaultspec_a2a/core/tests/
   test_graph.py              # new edge-case tests
   test_worker.py             # new (if absent)
   test_supervisor.py         # new (if absent)
@@ -54,36 +54,36 @@ lib/core/tests/
 
 **T01** — Fix `state["next"]` KeyError in star topology conditional edge
 
-- File: `lib/core/graph.py` (conditional edge lambda)
+- File: `src/vaultspec_a2a/core/graph.py` (conditional edge lambda)
 - Change: `lambda state: state["next"]` → `lambda state: state.get("next", "")`
 - Also mark `next: NotRequired[str]` in `state.py`
 - Test: add `test_star_missing_next_field` to `test_graph.py`
 
 **T02** — Fix substring routing collision (sort options by descending length)
 
-- File: `lib/core/nodes/supervisor.py`
+- File: `src/vaultspec_a2a/core/nodes/supervisor.py`
 - Change: `for option in options` → `for option in sorted(options, key=len, reverse=True)`
 - Test: add `test_supervisor_routing_substring_collision`
 
 **T03** — Add `routing_error` field to `TeamState`
 
-- File: `lib/core/state.py`
+- File: `src/vaultspec_a2a/core/state.py`
 - Change: add `routing_error: NotRequired[str]`
-- File: `lib/core/nodes/supervisor.py`
+- File: `src/vaultspec_a2a/core/nodes/supervisor.py`
 - Change: return `routing_error` on FINISH fallback
 - Test: add `test_supervisor_sets_routing_error_on_parse_failure`
 
 **T04** — Add `WorkerExecutionError` domain exception
 
-- File: `lib/core/exceptions.py` (add class)
-- File: `lib/core/nodes/worker.py` (wrap ainvoke catch)
+- File: `src/vaultspec_a2a/core/exceptions.py` (add class)
+- File: `src/vaultspec_a2a/core/nodes/worker.py` (wrap ainvoke catch)
 - Test: add `test_worker_exception_wraps_with_context`
 
 ### BATCH 2 — Robustness additions (S, may touch API surface)
 
 **T05** — Add `RetryPolicy` to all `add_node()` calls
 
-- File: `lib/core/graph.py`
+- File: `src/vaultspec_a2a/core/graph.py`
 - Change: define `_WORKER_RETRY = RetryPolicy(initial_interval=1.0, backoff_factor=2.0, max_interval=30.0, max_attempts=3, jitter=True)`
 - Apply to all three topology builders' `add_node()` calls (workers + supervisor)
 - Verify: `RetryPolicy` is in `langgraph.types`
@@ -91,27 +91,27 @@ lib/core/tests/
 
 **T06** — Add context compaction to supervisor node
 
-- File: `lib/core/nodes/supervisor.py`
+- File: `src/vaultspec_a2a/core/nodes/supervisor.py`
 - Change: import + apply `should_compact` / `compact_context` from `..context`
 - Test: add `test_supervisor_compacts_on_large_state`
 
 **T07** — Add `TAG_NOSTREAM` to supervisor routing model invocation
 
-- File: `lib/core/nodes/supervisor.py`
+- File: `src/vaultspec_a2a/core/nodes/supervisor.py`
 - Change: `routing_model = model.with_config({"tags": [TAG_NOSTREAM]})`; use for ainvoke
 - Import: `from langgraph.constants import TAG_NOSTREAM`
 - Test: streaming test to verify no routing tokens in `on_chat_model_stream` events
 
 **T08** — Add loop iteration logging to `_wrap_loop_node`
 
-- File: `lib/core/graph.py`
+- File: `src/vaultspec_a2a/core/graph.py`
 - Change: pass `max_loops` and `loop_node_id` into wrapper factory; add DEBUG log per iteration, WARNING on max_loops hit
 
 ### BATCH 3 — Structured output for supervisor routing (M)
 
 **T09** — Structured output for supervisor routing
 
-- File: `lib/core/nodes/supervisor.py`
+- File: `src/vaultspec_a2a/core/nodes/supervisor.py`
 - Change: replace text-parsing with `model.with_structured_output(RouteSchema)` where `RouteSchema` is a Pydantic model with `next: Literal[workers..., "FINISH"]`
 - Dependency: T02 can be removed after this is in place
 - Test: add `test_supervisor_structured_routing`
@@ -121,7 +121,7 @@ lib/core/tests/
 
 **T10** — Migrate supervisor to `Command(goto=...)` routing
 
-- File: `lib/core/graph.py`, `lib/core/nodes/supervisor.py`, `lib/core/state.py`
+- File: `src/vaultspec_a2a/core/graph.py`, `src/vaultspec_a2a/core/nodes/supervisor.py`, `src/vaultspec_a2a/core/state.py`
 - Change: remove `next: str` from TeamState; supervisor returns `Command(goto=route)`
 - Dependency: T09 complete
 - Note: removes the conditional-edge routing table entirely; supervisor node
@@ -166,7 +166,7 @@ lib/core/tests/
 ## Definition of Done
 
 - All BATCH 1 + BATCH 2 tasks complete
-- All tests passing (`pytest lib/core/ -x -q`)
+- All tests passing (`pytest src/vaultspec_a2a/core/ -x -q`)
 - No new CRITICAL or HIGH findings from research loops for two consecutive cycles
 - Audit report updated with resolution status for each finding
 - ADR-013 updated if `Command` migration (T10) is completed

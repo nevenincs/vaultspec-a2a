@@ -5,9 +5,9 @@ author: docs-researcher
 relevance: 10
 related:
   - docs/adrs/029-database-migration-framework.md
-  - lib/database/session.py
-  - lib/database/models.py
-  - lib/database/migrations/__init__.py
+  - src/vaultspec_a2a/database/session.py
+  - src/vaultspec_a2a/database/models.py
+  - src/vaultspec_a2a/database/migrations/__init__.py
 ---
 
 # ADR-029: Alembic + Async SQLAlchemy + SQLite — Technical Integration Research
@@ -30,7 +30,7 @@ established the *why*. This document establishes the *how*.
 
 ### 2.1 App-owned tables (tracked by `Base.metadata`)
 
-From `lib/database/models.py`:
+From `src/vaultspec_a2a/database/models.py`:
 
 | Table name       | Purpose                                        |
 |------------------|------------------------------------------------|
@@ -40,11 +40,11 @@ From `lib/database/models.py`:
 | `cost_tracking`  | Token usage and cost per LLM invocation        |
 
 These four tables are all that Alembic should own. `Base.metadata` contains
-exactly these four — confirmed by reading `lib/database/models.py`.
+exactly these four — confirmed by reading `src/vaultspec_a2a/database/models.py`.
 
 ### 2.2 LangGraph-owned tables (must be excluded)
 
-From reading `langgraph-checkpoint-sqlite` source and `lib/database/migrations/__init__.py`:
+From reading `langgraph-checkpoint-sqlite` source and `src/vaultspec_a2a/database/migrations/__init__.py`:
 
 | Table name    | Owner                        | Created by         |
 |---------------|------------------------------|--------------------|
@@ -56,7 +56,7 @@ Both are created with `CREATE TABLE IF NOT EXISTS` via `executescript()` in
 our ORM. Alembic must never touch them.
 
 Note: the `backfill_teamstate_sdd_fields()` function in
-`lib/database/migrations/__init__.py` directly patches `checkpoints` rows via
+`src/vaultspec_a2a/database/migrations/__init__.py` directly patches `checkpoints` rows via
 raw `sqlite3` — this is an accepted one-off data migration, not a schema change.
 
 ### 2.3 Current schema fragility
@@ -169,7 +169,7 @@ else:
 
 ```ini
 [alembic]
-script_location = lib/database/migrations
+script_location = src/vaultspec_a2a/database/migrations
 sqlalchemy.url = sqlite+aiosqlite:///vaultspec.db
 
 [loggers]
@@ -277,9 +277,9 @@ uv run alembic stamp head
 
 ### 5.2 Adding a column (typical workflow)
 
-1. Add the column to the model in `lib/database/models.py`
+1. Add the column to the model in `src/vaultspec_a2a/database/models.py`
 2. Generate migration: `uv run alembic revision --autogenerate -m "add_foo_to_threads"`
-3. Review `lib/database/migrations/versions/<hash>_add_foo_to_threads.py`
+3. Review `src/vaultspec_a2a/database/migrations/versions/<hash>_add_foo_to_threads.py`
 4. Apply: `uv run alembic upgrade head`
 5. Rollback if needed: `uv run alembic downgrade -1`
 
@@ -409,10 +409,10 @@ Always manually review generated migrations before applying.
 
 ## 7. Migration Directory Structure
 
-Recommended layout under `lib/database/`:
+Recommended layout under `src/vaultspec_a2a/database/`:
 
 ```
-lib/database/
+src/vaultspec_a2a/database/
 ├── __init__.py
 ├── models.py           # SQLAlchemy ORM models (Base.metadata)
 ├── session.py          # Engine / session factory
@@ -422,12 +422,12 @@ lib/database/
 │   ├── script.py.mako  # NEW — Alembic migration template
 │   └── versions/       # NEW — generated migration files
 │       └── 0001_initial_schema.py
-alembic.ini             # NEW — at repo root (or lib/database/alembic.ini)
+alembic.ini             # NEW — at repo root (or src/vaultspec_a2a/database/alembic.ini)
 ```
 
 **Note:** `alembic.ini` can live at the repo root (conventional) or inside
-`lib/database/`. If placed inside `lib/database/`, the `script_location`
-is `migrations` (relative). If at repo root, use `lib/database/migrations`.
+`src/vaultspec_a2a/database/`. If placed inside `src/vaultspec_a2a/database/`, the `script_location`
+is `migrations` (relative). If at repo root, use `src/vaultspec_a2a/database/migrations`.
 
 ---
 

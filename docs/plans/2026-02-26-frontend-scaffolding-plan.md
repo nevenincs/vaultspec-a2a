@@ -17,7 +17,7 @@ related_research:
 
 ## Context
 
-The backend wire contract (`lib/api/schemas/`) is complete with 51 Pydantic v2
+The backend wire contract (`src/vaultspec_a2a/api/schemas/`) is complete with 51 Pydantic v2
 types defining the full WebSocket + REST protocol. No frontend code exists yet.
 This plan scaffolds the React application at `src/ui/`per ADR-005, ADR-007,
 ADR-009, and ADR-011, producing a buildable project with typed API layer, state
@@ -56,7 +56,7 @@ This sets up:
 
 - Tailwind CSS v4 (Oxide engine) via `@tailwindcss/vite`
 - Bits UI (headless primitives underneath shadcn-React)
-- `src/ui/src/lib/components/ui/` directory for shadcn components
+- `src/ui/src/src/vaultspec_a2a/components/ui/` directory for shadcn components
 
 Add initial shadcn components needed for the control surface:
 
@@ -65,7 +65,7 @@ npx shadcn-React@latest add button card badge separator scroll-area dialog alert
 ```
 
 **Files created/modified:** `src/ui/src/app.css` (Tailwind directives + theme),
-`src/ui/src/lib/utils.ts`(cn utility),`src/ui/src/lib/components/ui/**`
+`src/ui/src/src/vaultspec_a2a/utils.ts`(cn utility),`src/ui/src/src/vaultspec_a2a/components/ui/**`
 
 ## Step 3 — Hand-write TypeScript types
 
@@ -75,9 +75,9 @@ matching all Pydantic models. These will later be replaced by
 `openapi-typescript`
 generated output.
 
-### File: `src/ui/src/lib/api/types.ts`
+### File: `src/ui/src/src/vaultspec_a2a/api/types.ts`
 
-Contents (mirrors `lib/api/schemas/` 1:1):
+Contents (mirrors `src/vaultspec_a2a/api/schemas/` 1:1):
 
 - 9 string enum types (`ServerEventType`, `ClientCommandType`,
   `AgentLifecycleState`, `ToolKind`, `ToolCallStatus`, `PermissionOptionKind`,
@@ -98,7 +98,7 @@ All discriminated unions use `type`field for TypeScript narrowing.
 
 ## Step 4 — WebSocket client
 
-### File:`src/ui/src/lib/api/websocket.ts`
+### File:`src/ui/src/src/vaultspec_a2a/api/websocket.ts`
 
 Multiplexed, backpressure-aware WebSocket client:
 
@@ -118,7 +118,7 @@ Multiplexed, backpressure-aware WebSocket client:
 
 ## Step 5 — REST client
 
-### File: `src/ui/src/lib/api/rest.ts`
+### File: `src/ui/src/src/vaultspec_a2a/api/rest.ts`
 
 Typed fetch wrappers for all 6 REST endpoints:
 
@@ -136,7 +136,7 @@ Base URL configurable. All functions throw typed errors.
 
 Three stores using `$state`and`$derived`runes:
 
-### `src/ui/src/lib/stores/agent-state.React.ts`
+### `src/ui/src/src/vaultspec_a2a/stores/agent-state.React.ts`
 
 - Per-thread state map: `Map<threadId, ThreadState>`
 - `ThreadState`tracks: lifecycle state, messages (append-only),
@@ -147,13 +147,13 @@ Three stores using `$state`and`$derived`runes:
 - `restoreFromSnapshot(snapshot: ThreadStateSnapshot)`— bulk state
   restoration on reconnect
 
-### `src/ui/src/lib/stores/team-state.React.ts`
+### `src/ui/src/src/vaultspec_a2a/stores/team-state.React.ts`
 
 - `agents: AgentSummary[]`— updated from`TeamStatusEvent`
 - `activeThreadIds: string[]`
 - Method: `applyTeamStatus(event: TeamStatusEvent)`
 
-### `src/ui/src/lib/stores/permission-queue.React.ts`
+### `src/ui/src/src/vaultspec_a2a/stores/permission-queue.React.ts`
 
 - FIFO queue of `PermissionRequestEvent`
 - `current`— the head of the queue (active permission request) -`enqueue(event: PermissionRequestEvent)`
@@ -185,7 +185,7 @@ accept the correct typed props. Each renders a basic placeholder using
 shadcn primitives so the app is visually functional from first build.
 
 ```text
-src/ui/src/lib/components/
+src/ui/src/src/vaultspec_a2a/components/
 ├── message/
 │   └── MessageBubble.React        # props: MessageChunkEvent | ThoughtChunkEvent
 ├── tool-call/
@@ -209,7 +209,7 @@ src/ui/src/lib/components/
 Each component will:
 
 - Import and use shadcn Card/Badge/Button as appropriate
-- Accept strongly-typed props from `$lib/api/types`
+- Accept strongly-typed props from `$src/vaultspec_a2a/api/types`
 - Render basic content (text, status badges, formatted JSON as fallback)
 - Be ready for progressive enhancement (markdown streaming, CodeMirror, etc.)
 

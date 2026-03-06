@@ -111,7 +111,7 @@ steps is not permitted.
 
 - **Independent Sub-modules**: `lib/` sub-modules (API, Core, Database, etc.)
   must be independent, independently testable, and verifiable.
-- **Facade Pattern**: Sub-modules (e.g., `lib/api/`) must act as facades for
+- **Facade Pattern**: Sub-modules (e.g., `src/vaultspec_a2a/api/`) must act as facades for
   their sub-sub-modules. Root `__init__.py` files in these sub-modules must
   explicitly import and expose public APIs.
 - **Public API Exposure**: All sub-sub-modules must declare `__all__`

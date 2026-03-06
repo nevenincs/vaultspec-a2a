@@ -3,7 +3,7 @@ title: 'Gap Analysis: Current A2A Engine vs. SDD Blackboard Integration Mandate'
 date: 2026-03-03
 type: research
 feature: sdd-blackboard-integration
-description: 'Precise code-level gap analysis comparing the current lib/core implementation against the four SDD blackboard mandate areas.'
+description: 'Precise code-level gap analysis comparing the current src/vaultspec_a2a/core implementation against the four SDD blackboard mandate areas.'
 ---
 
 # Gap Analysis: Current A2A Engine vs. SDD Blackboard Integration Mandate
@@ -11,7 +11,7 @@ description: 'Precise code-level gap analysis comparing the current lib/core imp
 **Date:** 2026-03-03
 **Feature tag:** `#sdd-blackboard-integration`
 **Reference:** `docs/research/2026-03-02-sdd-blackboard-architecture-research.md`
-**Scope:** `lib/core/state.py`, `lib/core/nodes/worker.py`, `lib/core/nodes/supervisor.py`, `lib/core/graph.py`, `lib/core/team_config.py`, `lib/core/metadata.py`, `lib/core/preamble.py`, `lib/core/context.py`
+**Scope:** `src/vaultspec_a2a/core/state.py`, `src/vaultspec_a2a/core/nodes/worker.py`, `src/vaultspec_a2a/core/nodes/supervisor.py`, `src/vaultspec_a2a/core/graph.py`, `src/vaultspec_a2a/core/team_config.py`, `src/vaultspec_a2a/core/metadata.py`, `src/vaultspec_a2a/core/preamble.py`, `src/vaultspec_a2a/core/context.py`
 
 ---
 
@@ -19,7 +19,7 @@ description: 'Precise code-level gap analysis comparing the current lib/core imp
 
 ### What `TeamState` currently has
 
-**File:** `lib/core/state.py:72–111`
+**File:** `src/vaultspec_a2a/core/state.py:72–111`
 
 ```python
 class TeamState(TypedDict):
@@ -47,7 +47,7 @@ The `artifacts` field (line 84) stores in-memory `dict[str, str]` records — no
 
 ### Partial existing bridge
 
-`lib/core/metadata.py` (`ThreadMetadata`, line 51) and `lib/core/preamble.py` (`build_context_preamble`, line 19) implement `feature_tag` and `context_refs` at the **thread creation layer** (ADR-014). The preamble is injected as a `SystemMessage` once at thread start (line 46–56 of `preamble.py`). However:
+`src/vaultspec_a2a/core/metadata.py` (`ThreadMetadata`, line 51) and `src/vaultspec_a2a/core/preamble.py` (`build_context_preamble`, line 19) implement `feature_tag` and `context_refs` at the **thread creation layer** (ADR-014). The preamble is injected as a `SystemMessage` once at thread start (line 46–56 of `preamble.py`). However:
 
 - `feature_tag` and `context_refs` live on `ThreadMetadata`, a Pydantic model created at the API endpoint, **not on `TeamState`**. The graph itself is completely unaware of them after the initial preamble injection.
 - `discover_context_refs` (`metadata.py:89`) scans `.vault/` for matching files but the results are only used to compose a text message — they are never structured into a `vault_index` dict that nodes can query programmatically.
@@ -59,7 +59,7 @@ The `artifacts` field (line 84) stores in-memory `dict[str, str]` records — no
 
 ### How workers currently receive context
 
-**File:** `lib/core/nodes/worker.py:126–137`
+**File:** `src/vaultspec_a2a/core/nodes/worker.py:126–137`
 
 ```python
 async def worker_node(state: TeamState) -> dict[str, Any]:
@@ -111,7 +111,7 @@ This would require:
 
 ### How the supervisor currently routes
 
-**File:** `lib/core/nodes/supervisor.py:29–110`
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:29–110`
 
 The supervisor is created via `create_supervisor_node(model, system_prompt, workers)` (line 29). It operates as follows:
 
@@ -128,7 +128,7 @@ The routing decision is grounded in **nothing but conversational text**. The sup
 
 ### Where feature-lifecycle-aware routing would be added
 
-**File:** `lib/core/nodes/supervisor.py:54–106` (the `supervisor_node` closure)
+**File:** `src/vaultspec_a2a/core/nodes/supervisor.py:54–106` (the `supervisor_node` closure)
 
 The supervisor would need to:
 
@@ -141,7 +141,7 @@ The `_build_supervisor_prompt` function (`graph.py:169–191`) already handles p
 
 ### Star topology routing (graph.py)
 
-**File:** `lib/core/graph.py:409–415`
+**File:** `src/vaultspec_a2a/core/graph.py:409–415`
 
 ```python
 route_map: dict[str, str] = {wid: wid for wid in compiled_worker_ids}
@@ -194,9 +194,9 @@ Per the mandate:
 
 | Gap Area              | Current State                                                              | Missing                                                                     | Primary Insertion Point                                                                   |
 | --------------------- | -------------------------------------------------------------------------- | --------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **State Disconnect**  | `TeamState` has `active_agent`, `artifacts`, `current_plan`, `messages`    | `active_feature`, `pipeline_phase`, `vault_index`, `validation_errors`      | `lib/core/state.py:72` — add 4 new `NotRequired` fields                                   |
-| **Context Dilution**  | `worker.py:137` builds `[SystemMessage(prompt), *history]`                 | Blackboard mount step reading `.vault/` file content for active feature     | `lib/core/nodes/worker.py:136–137` — inject between compaction and `ainvoke`              |
-| **Orchestration Gap** | Supervisor routes purely on conversation text (`supervisor.py:61`)         | Feature-lifecycle context block injection; phase-aware routing instructions | `lib/core/nodes/supervisor.py:61` + conditional edge at `graph.py:412–415`                |
+| **State Disconnect**  | `TeamState` has `active_agent`, `artifacts`, `current_plan`, `messages`    | `active_feature`, `pipeline_phase`, `vault_index`, `validation_errors`      | `src/vaultspec_a2a/core/state.py:72` — add 4 new `NotRequired` fields                                   |
+| **Context Dilution**  | `worker.py:137` builds `[SystemMessage(prompt), *history]`                 | Blackboard mount step reading `.vault/` file content for active feature     | `src/vaultspec_a2a/core/nodes/worker.py:136–137` — inject between compaction and `ainvoke`              |
+| **Orchestration Gap** | Supervisor routes purely on conversation text (`supervisor.py:61`)         | Feature-lifecycle context block injection; phase-aware routing instructions | `src/vaultspec_a2a/core/nodes/supervisor.py:61` + conditional edge at `graph.py:412–415`                |
 | **Task Tracking Gap** | No task queue; `current_plan` is an unstructured, ephemeral in-memory list | Sequential task IDs, status tracking, disk-persisted queue file             | New `task_queue` + `active_task_id` fields in `state.py`; new queue reader/writer utility |
 
 ---

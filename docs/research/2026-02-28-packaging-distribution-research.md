@@ -83,8 +83,8 @@ static assets via `StaticFiles(html=True)`.
 ```text
 src/ui/ (React source)
   └── npm run build → src/ui/build/ (static HTML/JS/CSS)
-       └── hatch_build.py copies to → lib/api/static/
-            └── uv build → wheel includes lib/api/static/**
+       └── hatch_build.py copies to → src/vaultspec_a2a/api/static/
+            └── uv build → wheel includes src/vaultspec_a2a/api/static/**
                  └── FastAPI serves via StaticFiles(html=True)
 ```
 
@@ -94,7 +94,7 @@ src/ui/ (React source)
 [tool.hatch.build.targets.wheel]
 packages = ["lib"]
 artifacts = [
-  "lib/api/static/**",  # VCS-ignored but included in wheel
+  "src/vaultspec_a2a/api/static/**",  # VCS-ignored but included in wheel
 ]
 
 [tool.hatch.build.targets.wheel.hooks.custom]
@@ -187,7 +187,7 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev --locked
 
 COPY lib/ ./lib/
-COPY --from=frontend-build /app/src/ui/build ./lib/api/static/
+COPY --from=frontend-build /app/src/ui/build ./src/vaultspec_a2a/api/static/
 
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-dev --frozen --no-editable
@@ -401,7 +401,7 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 **Phase 1 (Now):** Developer tooling + Docker
 
 - Justfile for dev bootstrap (`just setup`, `just dev`, `just test`)
-- Dockerfile + docker-compose.yml with Jaeger
+- Dockerfile + docker-compose.dev.yml with Jaeger
 - `.devcontainer`for Codespaces/VS Code -`.env.example` template
 
 **Phase 2 (Next):** PyPI distribution
@@ -436,7 +436,7 @@ Already using`pydantic-settings`with`.env` file support. Justfile's
 
 ### 7.2 Remaining: New Files to Create
 
-1. `Justfile`— task runner for dev workflow 2.`Dockerfile`— multi-stage build 3.`docker-compose.yml`— dev environment (with Jaeger) 4.`.devcontainer/devcontainer.json`— VS Code dev container 5.`hatch_build.py`— frontend build hook (Phase 2) 6.`.env.example`— environment template 7.`.dockerignore`— exclude knowledge/, node_modules/, .venv/, etc.
+1. `Justfile`— task runner for dev workflow 2.`Dockerfile`— multi-stage build 3.`docker-compose.dev.yml`— dev environment (with Jaeger) 4.`.devcontainer/devcontainer.json`— VS Code dev container 5.`hatch_build.py`— frontend build hook (Phase 2) 6.`.env.example`— environment template 7.`.dockerignore`— exclude knowledge/, node_modules/, .venv/, etc.
 
 ### 7.3 Remaining: ADR Topics
 

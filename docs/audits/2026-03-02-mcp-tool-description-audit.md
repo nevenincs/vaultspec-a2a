@@ -1,6 +1,6 @@
 # MCP Tool Description Audit — 2026-03-02
 
-**Scope**: `lib/protocols/mcp/server.py` — all `@mcp.tool()` functions and the
+**Scope**: `src/vaultspec_a2a/protocols/mcp/server.py` — all `@mcp.tool()` functions and the
 FastMCP `instructions` string.
 
 **Audited by**: codebase-researcher (langgraph-hardening team)

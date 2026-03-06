@@ -44,8 +44,8 @@ Each team preset is defined by a TOML file at:
 {workspace_root}/.vaultspec/teams/{team_id}.toml
 ```
 
-Built-in presets ship in `lib/core/presets/teams/`. A new `TeamConfig`
-Pydantic model in `lib/core/team_config.py` validates and deserializes these
+Built-in presets ship in `src/vaultspec_a2a/core/presets/teams/`. A new `TeamConfig`
+Pydantic model in `src/vaultspec_a2a/core/team_config.py` validates and deserializes these
 files. `compile_team_graph()` is refactored to accept a `TeamConfig` instead
 of raw `BaseChatModel` dicts.
 
@@ -224,7 +224,7 @@ three-level chain: worker override wins over agent TOML, which wins over
 team defaults. Lists are not merged — the highest-priority non-empty list
 is used verbatim.
 
-### 2.4 Pydantic Models (`lib/core/team_config.py`)
+### 2.4 Pydantic Models (`src/vaultspec_a2a/core/team_config.py`)
 
 ```python
 import tomllib
@@ -396,7 +396,7 @@ the supervisor LLM reads them and selects agents accordingly.
 > superseded. The graph now **always** compiles with `interrupt_before=[]`.
 
 Permission gating is handled entirely by the `permission_callback` closure
-wired into each worker node at compile time (see `lib/core/graph.py`). When
+wired into each worker node at compile time (see `src/vaultspec_a2a/core/graph.py`). When
 `autonomous=False`, the callback calls `interrupt()` to suspend the graph
 and emit a `PermissionRequestEvent`; when `autonomous=True`, the callback
 auto-approves.
@@ -410,7 +410,7 @@ may be used in a future fine-grained per-tool approval implementation.
 
 ```text
 1. {workspace_root}/.vaultspec/teams/{team_id}.toml   (workspace override)
-2. lib/core/presets/teams/{team_id}.toml               (bundled default)
+2. src/vaultspec_a2a/core/presets/teams/{team_id}.toml               (bundled default)
 3. Raise TeamConfigNotFoundError                        (fail fast)
 ```
 
@@ -447,12 +447,12 @@ The `[team.topology.type]` field declares the **structural pattern**
 (star/pipeline/loop); the LLM decides **which agent within that pattern** acts
 next. These are orthogonal concerns.
 
-### `lib/core/team_config.py` Over a New `lib/teams/` Submodule
+### `src/vaultspec_a2a/core/team_config.py` Over a New `src/vaultspec_a2a/teams/` Submodule
 
-A full `lib/teams/` submodule (loader + registry + Pydantic models + tests)
+A full `src/vaultspec_a2a/teams/` submodule (loader + registry + Pydantic models + tests)
 adds structural overhead for a feature that is, at its core, two Pydantic
 model trees and a `tomllib.load()` call. For v1, co-locating `team_config.py`
-in `lib/core/` alongside `graph.py` minimizes the module surface. If team
+in `src/vaultspec_a2a/core/` alongside `graph.py` minimizes the module surface. If team
 management grows (e.g., team versioning, team-to-thread mapping, team registry
 persistence), promotion to a standalone submodule is the correct next step.
 
@@ -557,10 +557,10 @@ This endpoint powers the team picker in the frontend thread creation flow.
 
 ## 7. Module Hierarchy Impact (ADR-009 Amendment)
 
-`lib/core/` gains:
+`src/vaultspec_a2a/core/` gains:
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
 ├── team_config.py       # NEW: AgentConfig, TeamConfig Pydantic models + TOML loaders
 ├── presets/             # NEW: bundled default config files
 │   ├── agents/
@@ -577,16 +577,16 @@ lib/core/
 │   └── test_team_config.py   # NEW: validates TOML loading + model resolution
 ```
 
-`lib/core/__init__.py` facade gains `TeamConfig`, `AgentConfig` exports.
+`src/vaultspec_a2a/core/__init__.py` facade gains `TeamConfig`, `AgentConfig` exports.
 
 ## 8. References
 
-- `lib/core/graph.py` — `compile_team_graph()` entry point (to be refactored)
-- `lib/core/state.py` — `TeamState` TypedDict (gains `loop_count`)
-- `lib/core/nodes/worker.py:64` — `create_worker_node(model, system_prompt, name)`
-- `lib/core/nodes/supervisor.py` — `create_supervisor_node()` (prompt enhanced)
-- `lib/providers/factory.py` — `ProviderFactory.create(provider, capability)`
-- `lib/api/schemas/rest.py` — `CreateThreadRequest` (gains `team_preset`)
+- `src/vaultspec_a2a/core/graph.py` — `compile_team_graph()` entry point (to be refactored)
+- `src/vaultspec_a2a/core/state.py` — `TeamState` TypedDict (gains `loop_count`)
+- `src/vaultspec_a2a/core/nodes/worker.py:64` — `create_worker_node(model, system_prompt, name)`
+- `src/vaultspec_a2a/core/nodes/supervisor.py` — `create_supervisor_node()` (prompt enhanced)
+- `src/vaultspec_a2a/providers/factory.py` — `ProviderFactory.create(provider, capability)`
+- `src/vaultspec_a2a/api/schemas/rest.py` — `CreateThreadRequest` (gains `team_preset`)
 - LangGraph `state.py:575` — `StateGraph.add_node(name, action, metadata=...)`
 - LangGraph `state.py:839` — `StateGraph.add_conditional_edges(...)`
 - LangGraph `state.py:889` — `StateGraph.add_sequence(nodes)`

@@ -346,11 +346,11 @@ plain
 ```js
 // Button.figma.js
 // @url https://www.figma.com/design/FILE_ID/Name?node-id=X%3AY
-// @source src/lib/components/ui/button/button.React
+// @source src/src/vaultspec_a2a/components/ui/button/button.React
 // @component Button
 
 export default {
-  imports: ['import { Button } from "$lib/components/ui/button"'],
+  imports: ['import { Button } from "$src/vaultspec_a2a/components/ui/button"'],
   example: (figma) => {
     const variant = figma.selectedInstance.getEnum('Variant', {
       Default: 'default',
@@ -521,11 +521,11 @@ Returns the mapping from Figma node IDs to codebase component paths:
 ```json
 {
   "1:234": {
-    "codeConnectSrc": "src/lib/components/ui/button/button.React",
+    "codeConnectSrc": "src/src/vaultspec_a2a/components/ui/button/button.React",
     "codeConnectName": "Button"
   },
   "1:567": {
-    "codeConnectSrc": "src/lib/components/ui/card/card.React",
+    "codeConnectSrc": "src/src/vaultspec_a2a/components/ui/card/card.React",
     "codeConnectName": "Card"
   }
 }

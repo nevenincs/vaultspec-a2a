@@ -124,8 +124,8 @@ killer = await asyncio.create_subprocess_exec(
 await asyncio.wait_for(killer.wait(), timeout=5.0)
 ```
 
-This is implemented in `lib/providers/acp_chat_model._kill_process_tree`and
-mirrored in`lib/providers/probes/_protocol._kill_process_tree`.
+This is implemented in `src/vaultspec_a2a/providers/acp_chat_model._kill_process_tree`and
+mirrored in`src/vaultspec_a2a/providers/probes/_protocol._kill_process_tree`.
 
 ### Spawn-time isolation: `CREATE_NEW_PROCESS_GROUP`
 

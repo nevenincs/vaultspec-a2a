@@ -63,7 +63,7 @@ related_research:
 | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
 | `knowledge/repositories/toad/src/toad/acp/agent.py`                                          | Lines 348-468: Host-side RPC handler patterns for H4, H5, H6 |
 | `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py` | `AsyncSqliteSaver`bootstrap for C1, H2                       |
-| `lib/core/tests/test_graph.py:19`                                                            | Correct checkpointer usage pattern (`async with`)            |
+| `src/vaultspec_a2a/core/tests/test_graph.py:19`                                                            | Correct checkpointer usage pattern (`async with`)            |
 
 ---
 
@@ -127,8 +127,8 @@ execute graphs, stream events, and handle interrupt/resume.
 
 **Source:** Audit C1 + H2
 **ADR Mandate:** ADR-004 SS2, ADR-008 SS2
-**Files:** `lib/api/app.py`, `lib/api/endpoints.py`
-**Reference:** `lib/core/tests/test_graph.py:19`(correct pattern)
+**Files:** `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/endpoints.py`
+**Reference:** `src/vaultspec_a2a/core/tests/test_graph.py:19`(correct pattern)
 
 ### Requirements
 
@@ -171,7 +171,7 @@ The `async with`manages`__aenter__`/`__aexit__`(H2).
 **Source:** Audit C2
 **ADR Mandate:** ADR-011 SS2.2 (`POST /threads`creates thread AND kicks off
 processing)
-**Files:**`lib/api/endpoints.py`(create_thread_endpoint)
+**Files:**`src/vaultspec_a2a/api/endpoints.py`(create_thread_endpoint)
 
 ### Requirements: (2)
 
@@ -210,7 +210,7 @@ processing)
 
 **Source:** Audit C3, M1
 **ADR Mandate:** ADR-007 SS5
-**Files:**`lib/api/app.py`, `lib/api/endpoints.py`
+**Files:**`src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/endpoints.py`
 
 ### Requirements: (3)
 
@@ -249,7 +249,7 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H7
 **ADR Mandate:** ADR-007 SS2
-**Files:** `lib/core/config.py`, `lib/database/session.py`, `lib/api/app.py`
+**Files:** `src/vaultspec_a2a/core/config.py`, `src/vaultspec_a2a/database/session.py`, `src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (4)
 
@@ -266,7 +266,7 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H1
 **ADR Mandate:** ADR-001 SS2
-**Files:** `lib/providers/acp_chat_model.py`(\_sandbox_path)
+**Files:** `src/vaultspec_a2a/providers/acp_chat_model.py`(\_sandbox_path)
 
 ### Requirements: (5)
 
@@ -279,7 +279,7 @@ is safe for real multi-agent coding sessions.
 
 **Source:** Audit H3
 **ADR Mandate:** ADR-012 SS6, ADR-013 SS2.6
-**Files:**`lib/api/endpoints.py`(team_status_endpoint)
+**Files:**`src/vaultspec_a2a/api/endpoints.py`(team_status_endpoint)
 
 ### Requirements: (6)
 
@@ -297,7 +297,7 @@ metadata={...})`in`graph.py`.
 
 **Source:** Audit H4
 **ADR Mandate:** ADR-001 SS2
-**Files:**`lib/providers/acp_chat_model.py`(\_on_fs_write_text_file)
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py`(\_on_fs_write_text_file)
 
 ### Requirements: (7)
 
@@ -314,7 +314,7 @@ metadata={...})`in`graph.py`.
 
 **Source:** Audit H5
 **ADR Mandate:** ADR-001 SS5
-**Files:**`lib/providers/acp_chat_model.py`(\_on_fs_read_text_file,\_on_fs_write_text_file)
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py`(\_on_fs_read_text_file,\_on_fs_write_text_file)
 
 ### Requirements: (8)
 
@@ -329,7 +329,7 @@ asyncio.to_thread(file_path.write_text, content)`.
 ### Fix 9: Terminal Command Validation (H6)
 
 **Source:** Audit H6
-**Files:**`lib/providers/acp_chat_model.py`(\_on_terminal_create)
+**Files:**`src/vaultspec_a2a/providers/acp_chat_model.py`(\_on_terminal_create)
 
 ### Requirements: (9)
 
@@ -358,7 +358,7 @@ resolved.
 
 **Source:** Audit M3
 **ADR Mandate:** ADR-011 SS3.1
-**Files:**`lib/api/websocket.py`
+**Files:**`src/vaultspec_a2a/api/websocket.py`
 
 ### Requirements: (10)
 
@@ -384,7 +384,7 @@ resolved.
 
 **Source:** Audit M2
 **ADR Mandate:** ADR-007
-**Files:** `lib/api/app.py`
+**Files:** `src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (11)
 
@@ -397,7 +397,7 @@ resolved.
 ### Fix 13: State Snapshot Timestamps (M5)
 
 **Source:** Audit M5
-**Files:** `lib/api/endpoints.py`(\_enrich_snapshot_from_state)
+**Files:** `src/vaultspec_a2a/api/endpoints.py`(\_enrich_snapshot_from_state)
 
 ### Requirements: (12)
 
@@ -409,7 +409,7 @@ resolved.
 ### Fix 14: Specific Exception Handling in `POST /threads`(M7)
 
 **Source:** Audit M7
-**Files:**`lib/api/endpoints.py`
+**Files:**`src/vaultspec_a2a/api/endpoints.py`
 
 ### Requirements: (13)
 
@@ -422,7 +422,7 @@ resolved.
 ### Fix 15:`AgentControlCommand`Implementation (M4)
 
 **Source:** Audit M4
-**Files:**`lib/api/websocket.py`
+**Files:**`src/vaultspec_a2a/api/websocket.py`
 
 ### Requirements: (14)
 
@@ -435,7 +435,7 @@ resolved.
 
 **Source:** Audit L4
 **ADR Mandate:** ADR-007 SS5
-**Files:**`lib/api/app.py`
+**Files:**`src/vaultspec_a2a/api/app.py`
 
 ### Requirements: (15)
 

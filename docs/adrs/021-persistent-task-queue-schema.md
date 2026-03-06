@@ -92,7 +92,7 @@ reference across sessions, workers, and thread restarts.
 
 ### 2.3 TeamState Integration
 
-A single new field is added to `TeamState` (`lib/core/state.py`):
+A single new field is added to `TeamState` (`src/vaultspec_a2a/core/state.py`):
 
 ```python
 class TeamState(TypedDict):
@@ -126,11 +126,11 @@ https://docs.langchain.com/oss/python/langgraph/use-graph-api).
 - `ToolNode` automatically propagates `Command` objects returned by tools. No drain
   step or wrapper node is needed.
 
-`create_mark_task_complete_tool` (in `lib/core/task_queue.py`) is a factory that
+`create_mark_task_complete_tool` (in `src/vaultspec_a2a/core/task_queue.py`) is a factory that
 returns a single `@tool`-decorated async function:
 
 ```python
-# lib/core/task_queue.py
+# src/vaultspec_a2a/core/task_queue.py
 from __future__ import annotations
 
 import asyncio
@@ -222,7 +222,7 @@ def create_mark_task_complete_tool(
     return mark_task_complete
 ```
 
-**Worker integration** in `create_worker_node()` (`lib/core/nodes/worker.py`):
+**Worker integration** in `create_worker_node()` (`src/vaultspec_a2a/core/nodes/worker.py`):
 
 ```python
 # worker_node no longer needs a drain step — ToolNode propagates Command automatically.
@@ -239,7 +239,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
 
 ### 2.5 Filtered Queue Injection
 
-`_filter_queue_content` (in `lib/core/task_queue.py`) is called by `mount_node`
+`_filter_queue_content` (in `src/vaultspec_a2a/core/task_queue.py`) is called by `mount_node`
 (ADR-020) when processing a `{feature}-queue.md` path. It returns a filtered view:
 the current task (from `state.get("current_task_id")`) plus the next 2 pending tasks.
 
@@ -346,7 +346,7 @@ The SWE-agent pattern (filtered view) is more efficient. Rejected.
 
 ## 5. Implementation Constraints
 
-- `lib/core/task_queue.py` must declare `__all__ = ["create_mark_task_complete_tool"]`.
+- `src/vaultspec_a2a/core/task_queue.py` must declare `__all__ = ["create_mark_task_complete_tool"]`.
   `_filter_queue_content` is private (not exported), but may be imported by `mount.py`
   as an internal sibling import pending a refactor to a shared utility (tracked as M-2
   in the LangGraph drift audit).
@@ -370,7 +370,7 @@ The SWE-agent pattern (filtered view) is more efficient. Rejected.
 ## 6. Module Hierarchy Impact
 
 ```text
-lib/core/
+src/vaultspec_a2a/core/
 ├── state.py            AMENDED: current_task_id: NotRequired[str | None] added
 ├── task_queue.py       NEW: create_mark_task_complete_tool() factory (single callable,
 │                       no drain_fn); _filter_queue_content (private);
@@ -388,10 +388,10 @@ lib/core/
 
 ## 7. References
 
-- `lib/core/task_queue.py` — NEW (create_mark_task_complete_tool factory)
-- `lib/core/state.py` — TeamState (current_task_id field added)
-- `lib/core/nodes/mount.py` — queue content filtering integration
-- `lib/core/nodes/worker.py` — mark_task_complete tool binding; no drain_fn
+- `src/vaultspec_a2a/core/task_queue.py` — NEW (create_mark_task_complete_tool factory)
+- `src/vaultspec_a2a/core/state.py` — TeamState (current_task_id field added)
+- `src/vaultspec_a2a/core/nodes/mount.py` — queue content filtering integration
+- `src/vaultspec_a2a/core/nodes/worker.py` — mark_task_complete tool binding; no drain_fn
 - [LangGraph docs — Update state from tools](https://docs.langchain.com/oss/python/langgraph/use-graph-api)
   — `Command(update={...})` pattern, `InjectedToolCallId`, `ToolNode` propagation
 - [LangGraph docs — Command reference](https://docs.langchain.com/oss/python/langgraph/graph-api)

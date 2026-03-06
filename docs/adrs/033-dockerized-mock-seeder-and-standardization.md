@@ -16,14 +16,14 @@ Simultaneously, evaluating the integration of this "Mock Seeder" service exposed
 ### 1. Automated Mock Data Seeder
 We will implement an automated mock data generation backend (`docker/mock_seeder.py`).
 * **Behavior:** It will infinitely cycle through predefined mock team presets, invoking them against the local `init_db()` SQLAlchemy engine and `AsyncSqliteSaver` checkpointer.
-* **Deployment:** This script will be wrapped in a dedicated `mock-seeder` Docker service, active in the local `docker-compose.yml` stack, ensuring local DB saturation occurs automatically during `docker compose up`.
+* **Deployment:** This script will be wrapped in a dedicated `mock-seeder` Docker service, active in the local `docker-compose.dev.yml` stack, ensuring local DB saturation occurs automatically during `docker compose up`.
 
 ### 2. Docker Architecture Standardization
 To clean up container sprawl, all `Dockerfile` definitions must be centralized within the `docker/` subdirectory.
 * **Rename/Move** `Dockerfile.dev` -> `docker/dev.Dockerfile`
 * **Rename/Move** `Dockerfile` -> `docker/prod.Dockerfile`
 * **Target Isolation:** The `mock-seeder` container will be implemented as a new target inside `docker/dev.Dockerfile` (leveraging the existing Python uv-cache multi-stage base).
-* **Compose Paths:** `docker-compose.yml` and `docker-compose.prod.yml` must be updated to target these new relative paths (`build.dockerfile: docker/dev.Dockerfile`).
+* **Compose Paths:** `docker-compose.dev.yml` and `docker-compose.prod.yml` must be updated to target these new relative paths (`build.dockerfile: docker/dev.Dockerfile`).
 
 ## Consequences
 * **Positive:** Developers get instant, saturated UI timelines by simply starting Docker. Local setup is zero-touch.

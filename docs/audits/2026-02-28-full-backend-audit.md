@@ -25,18 +25,18 @@ before auditing.
 
 | Module                                         | CRIT | HIGH | MED | LOW | Total |
 | ---------------------------------------------- | ---- | ---- | --- | --- | ----- |
-| `lib/core/`                                    | 0    | 7    | 9   | 5   | 21    |
-| `lib/api/`                                     | 3    | 5    | 7   | 4   | 19    |
-| `lib/providers/`                               | 1    | 4    | 7   | 4   | 16    |
-| `lib/database/`+`lib/protocols/`               | 0    | 3    | 6   | 4   | 13    |
-| `lib/utils/`+`lib/telemetry/`+`lib/workspace/` | 1    | 5    | 8   | 6   | 20    |
+| `src/vaultspec_a2a/core/`                                    | 0    | 7    | 9   | 5   | 21    |
+| `src/vaultspec_a2a/api/`                                     | 3    | 5    | 7   | 4   | 19    |
+| `src/vaultspec_a2a/providers/`                               | 1    | 4    | 7   | 4   | 16    |
+| `src/vaultspec_a2a/database/`+`src/vaultspec_a2a/protocols/`               | 0    | 3    | 6   | 4   | 13    |
+| `src/vaultspec_a2a/utils/`+`src/vaultspec_a2a/telemetry/`+`src/vaultspec_a2a/workspace/` | 1    | 5    | 8   | 6   | 20    |
 | All tests                                      | 3    | 9    | 12  | 0   | 24    |
 
 ---
 
 ## CRITICAL (8)
 
-### C1.`lib/api/app.py:278-292`— No CORS in production mode
+### C1.`src/vaultspec_a2a/api/app.py:278-292`— No CORS in production mode
 
 The`create_app()`factory adds`CORSMiddleware`only when`debug=True`. In
 production mode, the middleware is absent entirely. Any browser-based UI (the
@@ -48,14 +48,14 @@ the configured frontend URL; in debug, allow`["*"]`.
 
 ---
 
-### C2. `lib/api/websocket.py:23-40` — Self-referential import path
+### C2. `src/vaultspec_a2a/api/websocket.py:23-40` — Self-referential import path
 
 ```python
 from ..api.schemas.events import ...  # should be .schemas.events
 ```
 
-The import `..api.schemas.*`from within`lib/api/websocket.py`traverses up
-to`lib/`then back down into`lib/api/`. This works by coincidence but is
+The import `..api.schemas.*`from within`src/vaultspec_a2a/api/websocket.py`traverses up
+to`lib/`then back down into`src/vaultspec_a2a/api/`. This works by coincidence but is
 semantically wrong and will break if the module is ever moved or if Python's
 import resolver changes relative resolution behavior.
 
@@ -63,7 +63,7 @@ import resolver changes relative resolution behavior.
 
 ---
 
-### C3. `lib/api/endpoints.py:439-452`— Missing`response_model`on metadata endpoint
+### C3. `src/vaultspec_a2a/api/endpoints.py:439-452`— Missing`response_model`on metadata endpoint
 
 The new`GET /threads/{thread_id}/metadata`endpoint lacks
 a`response_model`declaration. FastAPI will not validate or document the response
@@ -74,7 +74,7 @@ the route decorator. |
 
 ---
 
-### C4.`lib/providers/acp_chat_model.py:683-747`— Command injection via`terminal/create`
+### C4.`src/vaultspec_a2a/providers/acp_chat_model.py:683-747`— Command injection via`terminal/create`
 
 The `terminal/create`RPC handler passes user-supplied`command`directly
 to`create_subprocess_shell`without any allowlist or sanitization. A malicious or
@@ -86,7 +86,7 @@ containing shell metacharacters (`|`, `&`, `;`, backticks). |
 
 ---
 
-### C5. `lib/workspace/git_manager.py:141-142`— Git command injection via unsanitized`agent_id`
+### C5. `src/vaultspec_a2a/workspace/git_manager.py:141-142`— Git command injection via unsanitized`agent_id`
 
 `agent_id`flows directly into`git worktree add -b
 agent/{agent_id}`and`self._root / "agent" / agent_id`without validation.
@@ -98,7 +98,7 @@ for`base_branch`.
 
 ---
 
-### C6. `lib/core/tests/test_graph.py:186`— Bare`except Exception: pass`
+### C6. `src/vaultspec_a2a/core/tests/test_graph.py:186`— Bare`except Exception: pass`
 
 swallows test failures
 
@@ -111,7 +111,7 @@ Add credential skip guard.
 
 ---
 
-### C7.`lib/core/tests/test_graph.py:26-144`— Compile-only tests are tautological
+### C7.`src/vaultspec_a2a/core/tests/test_graph.py:26-144`— Compile-only tests are tautological
 
 Seven tests assert only`graph is not None`. A `compile_team_graph`that
 returned`object()`would pass all of them. No structural assertions on nodes,
@@ -122,7 +122,7 @@ topology, or configuration.
 
 ---
 
-### C8. `lib/providers/tests/test_acp_chat_model.py:63`— Live Gemini tests missing`@pytest.mark.live`
+### C8. `src/vaultspec_a2a/providers/tests/test_acp_chat_model.py:63`— Live Gemini tests missing`@pytest.mark.live`
 
 `test_acp_gemini_streaming`and`test_acp_gemini_ainvoke`spawn real Gemini
 subprocesses but lack`@pytest.mark.live`. Will fail in CI without Gemini CLI.
@@ -280,10 +280,10 @@ Don't verify that`interrupt_before_nodes`differs between modes.
 
 **H33. Coverage gaps — 10 source modules have NO tests**:
 
--`lib/core/models.py`— dataclass round-trip untested -`lib/core/nodes/supervisor.py`— routing logic untested -`lib/core/nodes/worker.py`— node execution untested -`lib/providers/acp_exceptions.py`
+-`src/vaultspec_a2a/core/models.py`— dataclass round-trip untested -`src/vaultspec_a2a/core/nodes/supervisor.py`— routing logic untested -`src/vaultspec_a2a/core/nodes/worker.py`— node execution untested -`src/vaultspec_a2a/providers/acp_exceptions.py`
 
-- `lib/providers/gemini_auth.py`— OAuth token refresh untested -`lib/providers/probes/_protocol.py`(+ claude, gemini, openai, zhipu) -`lib/utils/enums.py`
-- `lib/utils/printer.py`
+- `src/vaultspec_a2a/providers/gemini_auth.py`— OAuth token refresh untested -`src/vaultspec_a2a/providers/probes/_protocol.py`(+ claude, gemini, openai, zhipu) -`src/vaultspec_a2a/utils/enums.py`
+- `src/vaultspec_a2a/utils/printer.py`
 
 ---
 
@@ -446,37 +446,37 @@ L7.`schemas/rest.py`—`CreateThreadResponse`includes`thread_id`and`id`(redundan
 
 | Source Module                      | Test Coverage                                  |
 | ---------------------------------- | ---------------------------------------------- |
-| `lib/core/aggregator.py`           | Covered (structural fakes, not real LangGraph) |
-| `lib/core/config.py`               | Covered                                        |
-| `lib/core/context.py`              | Covered                                        |
-| `lib/core/exceptions.py`           | Covered (some tautological)                    |
-| `lib/core/graph.py`                | Covered (compile-only, tautological)           |
-| `lib/core/metadata.py`             | Covered                                        |
-| `lib/core/models.py`               | **MISSING**                                    |
-| `lib/core/nodes/supervisor.py`     | **MISSING**                                    |
-| `lib/core/nodes/worker.py`         | **MISSING**                                    |
-| `lib/core/preamble.py`             | Covered                                        |
-| `lib/core/state.py`                | Covered                                        |
-| `lib/core/team_config.py`          | Covered                                        |
-| `lib/api/endpoints.py`             | Covered                                        |
-| `lib/api/websocket.py`             | Covered (timing-dependent)                     |
-| `lib/api/schemas/*`                | Covered                                        |
-| `lib/database/crud.py`             | Covered                                        |
-| `lib/database/models.py`           | Covered                                        |
-| `lib/database/session.py`          | Covered (singleton leaks)                      |
-| `lib/providers/acp_chat_model.py`  | Live-only                                      |
-| `lib/providers/acp_exceptions.py`  | **MISSING**                                    |
-| `lib/providers/factory.py`         | Covered                                        |
-| `lib/providers/gemini_auth.py`     | **MISSING**                                    |
-| `lib/providers/probes/*`           | **MISSING** (5 files)                          |
-| `lib/protocols/mcp/server.py`      | Partial                                        |
-| `lib/telemetry/instrumentation.py` | Covered (import-time limitation)               |
-| `lib/telemetry/middleware.py`      | Covered                                        |
-| `lib/utils/enums.py`               | **MISSING**                                    |
-| `lib/utils/logging.py`             | Covered (state leaks)                          |
-| `lib/utils/printer.py`             | **MISSING**                                    |
-| `lib/workspace/git_manager.py`     | Covered                                        |
-| `lib/workspace/environment.py`     | Covered                                        |
+| `src/vaultspec_a2a/core/aggregator.py`           | Covered (structural fakes, not real LangGraph) |
+| `src/vaultspec_a2a/core/config.py`               | Covered                                        |
+| `src/vaultspec_a2a/core/context.py`              | Covered                                        |
+| `src/vaultspec_a2a/core/exceptions.py`           | Covered (some tautological)                    |
+| `src/vaultspec_a2a/core/graph.py`                | Covered (compile-only, tautological)           |
+| `src/vaultspec_a2a/core/metadata.py`             | Covered                                        |
+| `src/vaultspec_a2a/core/models.py`               | **MISSING**                                    |
+| `src/vaultspec_a2a/core/nodes/supervisor.py`     | **MISSING**                                    |
+| `src/vaultspec_a2a/core/nodes/worker.py`         | **MISSING**                                    |
+| `src/vaultspec_a2a/core/preamble.py`             | Covered                                        |
+| `src/vaultspec_a2a/core/state.py`                | Covered                                        |
+| `src/vaultspec_a2a/core/team_config.py`          | Covered                                        |
+| `src/vaultspec_a2a/api/endpoints.py`             | Covered                                        |
+| `src/vaultspec_a2a/api/websocket.py`             | Covered (timing-dependent)                     |
+| `src/vaultspec_a2a/api/schemas/*`                | Covered                                        |
+| `src/vaultspec_a2a/database/crud.py`             | Covered                                        |
+| `src/vaultspec_a2a/database/models.py`           | Covered                                        |
+| `src/vaultspec_a2a/database/session.py`          | Covered (singleton leaks)                      |
+| `src/vaultspec_a2a/providers/acp_chat_model.py`  | Live-only                                      |
+| `src/vaultspec_a2a/providers/acp_exceptions.py`  | **MISSING**                                    |
+| `src/vaultspec_a2a/providers/factory.py`         | Covered                                        |
+| `src/vaultspec_a2a/providers/gemini_auth.py`     | **MISSING**                                    |
+| `src/vaultspec_a2a/providers/probes/*`           | **MISSING** (5 files)                          |
+| `src/vaultspec_a2a/protocols/mcp/server.py`      | Partial                                        |
+| `src/vaultspec_a2a/telemetry/instrumentation.py` | Covered (import-time limitation)               |
+| `src/vaultspec_a2a/telemetry/middleware.py`      | Covered                                        |
+| `src/vaultspec_a2a/utils/enums.py`               | **MISSING**                                    |
+| `src/vaultspec_a2a/utils/logging.py`             | Covered (state leaks)                          |
+| `src/vaultspec_a2a/utils/printer.py`             | **MISSING**                                    |
+| `src/vaultspec_a2a/workspace/git_manager.py`     | Covered                                        |
+| `src/vaultspec_a2a/workspace/environment.py`     | Covered                                        |
 
 ### 10 source modules have zero test coverage
 
@@ -491,7 +491,7 @@ L7.`schemas/rest.py`—`CreateThreadResponse`includes`thread_id`and`id`(redundan
 | `monkeypatch.setattr/delattr`  | PASS — only`setenv/delenv`(permitted)                                       |
 | pytest only                    | PASS                                                                        |
 | Tests in`tests/`subdirectories | PASS                                                                        |
-| ADR-009 facade re-exports      | PARTIAL —`lib/utils/__init__.py`missing`Model`, `MODEL_MAP`, `AcpRequestId` |
+| ADR-009 facade re-exports      | PARTIAL —`src/vaultspec_a2a/utils/__init__.py`missing`Model`, `MODEL_MAP`, `AcpRequestId` |
 | ADR-010 OTel compliance        | PARTIAL — deprecated semantic convention attributes in middleware           |
 | ADR-001 process safety         | PASS —`taskkill /T /F`pattern correct                                       |
 

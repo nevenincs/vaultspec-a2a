@@ -24,14 +24,14 @@ This document analyzes the gap in rule propagation within the `vaultspec-a2a` La
    Currently, the LangGraph orchestration engine in `vaultspec-a2a` constructs a bare `SystemMessage` comprising *only* the intrinsic behavioral persona defined in the agent TOML files. It completely lacks a discovery pipeline to load the actual deployed project mandates.
 
 2. **Universal Rule Blindness Across Providers:**
-   Because `lib/core/anchoring.py` does not resolve these project rule files, all native API agents (OpenAI, Zhipu) and ACP CLI wrapped agents (Gemini, Claude) operating within LangGraph are completely blind to the codebase's specific guidelines. This leads to code generations that violate project standards.
+   Because `src/vaultspec_a2a/core/anchoring.py` does not resolve these project rule files, all native API agents (OpenAI, Zhipu) and ACP CLI wrapped agents (Gemini, Claude) operating within LangGraph are completely blind to the codebase's specific guidelines. This leads to code generations that violate project standards.
 
 ## Proposed Architecture (Awaiting Author Approval)
 
 To fix this architectural gap, `vaultspec-a2a` must natively load these project mandates into the LLM context pipeline:
 
 1. **Implement `RuleManager` Discovery Array:**
-   The `RuleManager` (in `lib/core/rules.py`) strictly targets the active project's file system (`workspace_root`). It must scan for actual rule directories in priority order:
+   The `RuleManager` (in `src/vaultspec_a2a/core/rules.py`) strictly targets the active project's file system (`workspace_root`). It must scan for actual rule directories in priority order:
    1. `[workspace_root]/.agent/rules/*.md` and `[workspace_root]/.agents/rules/*.md`
    2. `[workspace_root]/.gemini/rules/*.md` (or `.claude/rules/`)
    3. `[workspace_root]/.vaultspec/rules/rules/*.md` (Raw fallback if the CLI hasn't deployed them yet)
@@ -49,4 +49,4 @@ This research is formalized in **ADR-028: Universal Rule Propagation**. It execu
 Source references for original logic studied:
 - `y:/code/vaultspec-worktrees/main/src/vaultspec/protocol/providers/base.py` (for `resolve_includes`)
 - `y:/code/vaultspec-worktrees/main/core/config_gen.py` (for `.gemini/` rule sync mechanics)
-- `y:/code/vaultspec-a2a-worktrees/main/lib/core/presets/agents/vaultspec-coder.toml` (for context bloat evidence)
+- `y:/code/vaultspec-a2a-worktrees/main/src/vaultspec_a2a/core/presets/agents/vaultspec-coder.toml` (for context bloat evidence)

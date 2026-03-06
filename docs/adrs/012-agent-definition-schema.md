@@ -41,11 +41,11 @@ Each logical agent role is defined by a TOML file located at:
 ```
 
 A set of **built-in default agent definitions** is bundled inside the package
-at `lib/core/presets/agents/` and loaded as fallbacks when no workspace
+at `src/vaultspec_a2a/core/presets/agents/` and loaded as fallbacks when no workspace
 override exists.
 
 The canonical schema is a Pydantic model (`AgentConfig`) defined in
-`lib/core/team_config.py`, validated via `tomllib` (stdlib Python 3.11+).
+`src/vaultspec_a2a/core/team_config.py`, validated via `tomllib` (stdlib Python 3.11+).
 
 ### 2.1 TOML Schema
 
@@ -75,7 +75,7 @@ capability = "high"     # Model enum: low | mid | high | max
 
 [agent.capabilities]
 # Maps directly to ACP _initialize_session() clientCapabilities flags
-# (lib/providers/acp_chat_model.py:469)
+# (src/vaultspec_a2a/providers/acp_chat_model.py:469)
 filesystem_read  = true
 filesystem_write = true
 terminal         = false
@@ -103,7 +103,7 @@ require_approval_for = ["fs.writeTextFile"]
 | `agent.capabilities.terminal`            | `bool`      | No       | ACP `terminal` flag (default `false`).                                                                                                                                                            |
 | `agent.permissions.require_approval_for` | `list[str]` | No       | ACP capability names requiring human approval. Contributes to graph `interrupt_before`.                                                                                                           |
 
-### 2.3 Pydantic Model (`lib/core/team_config.py`)
+### 2.3 Pydantic Model (`src/vaultspec_a2a/core/team_config.py`)
 
 ```python
 import tomllib
@@ -216,7 +216,7 @@ via `ProviderFactory`.
 ### 2.7 Built-in Preset Agents
 
 The following agent definitions ship as package defaults in
-`lib/core/presets/agents/`:
+`src/vaultspec_a2a/core/presets/agents/`:
 
 | File            | Role       | Capabilities                                                       |
 | --------------- | ---------- | ------------------------------------------------------------------ |
@@ -231,7 +231,7 @@ Workspace-local files at `.vaultspec/agents/{id}.toml` shadow preset defaults.
 
 ```text
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (workspace override)
-2. lib/core/presets/agents/{agent_id}.toml               (bundled default)
+2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml               (bundled default)
 3. Raise AgentConfigNotFoundError                         (fail fast)
 ```
 
@@ -329,11 +329,11 @@ at aggregator emit time.
 
 ## 7. References
 
-- `lib/core/graph.py` — current `compile_team_graph()` entry point
-- `lib/core/nodes/worker.py:64` — `create_worker_node(model, system_prompt, name)`
-- `lib/providers/acp_chat_model.py:469` — `_initialize_session()` ACP flags
-- `lib/providers/factory.py` — `ProviderFactory.create(provider, capability)`
-- `lib/utils/enums.py` — `Provider`, `Model`, `MODEL_MAP`
+- `src/vaultspec_a2a/core/graph.py` — current `compile_team_graph()` entry point
+- `src/vaultspec_a2a/core/nodes/worker.py:64` — `create_worker_node(model, system_prompt, name)`
+- `src/vaultspec_a2a/providers/acp_chat_model.py:469` — `_initialize_session()` ACP flags
+- `src/vaultspec_a2a/providers/factory.py` — `ProviderFactory.create(provider, capability)`
+- `src/vaultspec_a2a/utils/enums.py` — `Provider`, `Model`, `MODEL_MAP`
 - LangGraph `state.py:575` — `StateGraph.add_node(name, action, metadata=...)`
 - LangGraph `_node.py:87` — `StateNodeSpec.metadata`
 - LangGraph `state.py:1035` — `compile(interrupt_before=[...])`

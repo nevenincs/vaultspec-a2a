@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, cast
 
@@ -23,14 +24,15 @@ from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
 from ..api.schemas.internal import DispatchRequest
-from ..core.aggregator import EventAggregator, StreamableGraph
-from ..core.config import settings
-from ..core.graph import compile_team_graph
-from ..core.team_config import (
+from ..core import (
     AgentConfig,
     AgentConfigNotFoundError,
+    EventAggregator,
+    StreamableGraph,
     TeamConfigNotFoundError,
+    compile_team_graph,
     load_agent_config,
+    settings,
     load_team_config,
 )
 from .ipc import WorkerBridge
@@ -51,13 +53,25 @@ _GRAPH_RECURSION_LIMIT = 100
 # WPA-001: Default cap; overridden by settings.max_concurrent_threads.
 _DEFAULT_MAX_CONCURRENT_THREADS = 5
 
+# Maximum number of compiled graphs kept in the LRU cache.
+# Threads sharing the same (team_preset, workspace_root, autonomous) key
+# reuse a single CompiledStateGraph — thread isolation comes from
+# thread_id in the checkpointer config, not from the graph object.
+_MAX_CACHED_GRAPHS = 32
+
+# Type alias for the graph cache key.
+_CacheKey = tuple[str, str | None, bool]
+
 
 class Executor:
     """Compiles and runs LangGraph graphs, dispatching events via IPC bridge.
 
     The executor maintains:
 
-    * A ``dict[str, CompiledStateGraph]`` mapping thread_id to compiled graph.
+    * An LRU ``OrderedDict`` mapping ``(team_preset, workspace_root, autonomous)``
+      to compiled ``CompiledStateGraph``.  Threads with identical config share
+      one graph (thread isolation comes from the checkpointer's ``thread_id``).
+    * A ``dict[str, _CacheKey]`` mapping thread_id to its cache key.
     * An ``EventAggregator`` that drives the ``astream_events`` consumer loop.
     * A set of ``_active_ingests`` guarded by an ``asyncio.Lock`` to prevent
       concurrent graph execution on the same thread (which would race on
@@ -78,10 +92,10 @@ class Executor:
     ) -> None:
         self._checkpointer = checkpointer
         self._bridge = bridge
-        self._graphs: dict[str, CompiledStateGraph] = {}
-        # Stores (team_preset, workspace_root) for each compiled thread so that
-        # _handle_resume can recompile the graph if it was lost (e.g. eviction).
-        self._graph_presets: dict[str, tuple[str, str | None]] = {}
+        self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
+        # Maps thread_id -> cache key so _handle_resume can find the graph
+        # and recompile if evicted.
+        self._thread_to_cache_key: dict[str, _CacheKey] = {}
         self._aggregator = EventAggregator()
 
         # Wire bridge relay: every broadcast event is forwarded to the control
@@ -110,7 +124,7 @@ class Executor:
     @property
     def graph_count(self) -> int:
         """Number of compiled graphs currently held."""
-        return len(self._graphs)
+        return len(self._graph_cache)
 
     @property
     def active_ingest_count(self) -> int:
@@ -171,29 +185,93 @@ class Executor:
     # Ingest handler
     # ------------------------------------------------------------------
 
+    async def _get_or_compile_graph(
+        self, req: DispatchRequest
+    ) -> CompiledStateGraph | None:
+        """Return a compiled graph for *req*, using the LRU cache.
+
+        If the thread already maps to a cached graph, return it (LRU touch).
+        If the preset is known but no graph is cached (eviction or first use),
+        compile a new one, cache it, and register with the aggregator.
+        Returns ``None`` if no preset is available.
+        """
+        # Check if thread already has a cached graph.
+        cache_key = self._thread_to_cache_key.get(req.thread_id)
+        if cache_key and cache_key in self._graph_cache:
+            self._graph_cache.move_to_end(cache_key)
+            return self._graph_cache[cache_key]
+
+        # Resolve preset — from request or previously stored mapping.
+        team_preset = req.team_preset
+        workspace_root = req.workspace_root
+        autonomous = req.autonomous
+        if not team_preset and cache_key:
+            team_preset = cache_key[0]
+            workspace_root = cache_key[1]
+            autonomous = cache_key[2]
+        if not team_preset:
+            return None
+
+        new_key: _CacheKey = (team_preset, workspace_root, autonomous)
+
+        # Check if another thread already compiled for this key.
+        if new_key in self._graph_cache:
+            self._graph_cache.move_to_end(new_key)
+            self._thread_to_cache_key[req.thread_id] = new_key
+            return self._graph_cache[new_key]
+
+        # Compile fresh.
+        try:
+            graph = self._compile_graph(req)
+        except Exception:
+            logger.exception(
+                "Failed to compile graph for thread %s (preset=%s)",
+                req.thread_id,
+                team_preset,
+            )
+            return None
+
+        # Evict LRU if at capacity.
+        while len(self._graph_cache) >= _MAX_CACHED_GRAPHS:
+            self._graph_cache.popitem(last=False)
+
+        self._graph_cache[new_key] = graph
+        self._thread_to_cache_key[req.thread_id] = new_key
+        self._aggregator.register_graph(cast(StreamableGraph, graph))
+        # BE-12: relay node metadata to the control-surface aggregator so
+        # REST /team-status and WS team_status events include role/display_name.
+        await self._send_graph_registered(req.thread_id, graph)
+        return graph
+
+    async def _send_graph_registered(
+        self, thread_id: str, graph: CompiledStateGraph
+    ) -> None:
+        """Send a ``graph_registered`` event with node metadata via the bridge.
+
+        The control-surface aggregator uses this to populate its
+        ``_node_metadata`` cache so that ``emit_team_status`` and the REST
+        ``/team-status`` endpoint include role/display_name/description (BE-12).
+        """
+        nodes: dict[str, dict[str, str]] = {}
+        for node_name, node_spec in getattr(graph, "nodes", {}).items():
+            meta = getattr(node_spec, "metadata", None) or {}
+            if meta:
+                nodes[node_name] = {
+                    "role": str(meta.get("role", "")),
+                    "display_name": str(meta.get("display_name", "")),
+                    "description": str(meta.get("description", "")),
+                }
+        if nodes:
+            await self._bridge.send_event(
+                thread_id,
+                {"type": "graph_registered", "nodes": nodes},
+            )
+
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
-        # Compile on first encounter for this thread
-        is_first_ingest = req.thread_id not in self._graphs
-        if is_first_ingest and req.team_preset:
-            try:
-                graph = self._compile_graph(req)
-                self._graphs[req.thread_id] = graph
-                self._aggregator.register_graph(cast(StreamableGraph, graph))
-                # Cache preset so _handle_resume can recompile after eviction.
-                self._graph_presets[req.thread_id] = (
-                    req.team_preset,
-                    req.workspace_root,
-                )
-            except Exception:
-                logger.exception(
-                    "Failed to compile graph for thread %s (preset=%s)",
-                    req.thread_id,
-                    req.team_preset,
-                )
-                return
+        is_first_ingest = req.thread_id not in self._thread_to_cache_key
 
-        graph = self._graphs.get(req.thread_id)
+        graph = await self._get_or_compile_graph(req)
         if graph is None:
             logger.warning("No graph for thread %s -- cannot ingest", req.thread_id)
             return
@@ -229,6 +307,16 @@ class Executor:
                     "token_usage": {},
                 }
             )
+            # ADR-019 SDD blackboard fields (MED-01): pass through to TeamState
+            # so vault context reaches the graph on initial thread creation.
+            if req.active_feature:
+                graph_input["active_feature"] = req.active_feature
+            if req.pipeline_phase:
+                graph_input["pipeline_phase"] = req.pipeline_phase
+            if req.vault_index:
+                graph_input["vault_index"] = req.vault_index
+            if req.validation_errors:
+                graph_input["validation_errors"] = req.validation_errors
         config = {
             "configurable": {"thread_id": req.thread_id},
             "recursion_limit": req.recursion_limit or _GRAPH_RECURSION_LIMIT,
@@ -237,7 +325,7 @@ class Executor:
         agent_id = req.agent_id or "vaultspec-supervisor"
 
         try:
-            await self._aggregator.ingest(
+            outcome = await self._aggregator.ingest(
                 req.thread_id,
                 agent_id,
                 cast(StreamableGraph, graph),
@@ -245,8 +333,10 @@ class Executor:
                 config,
             )
         except Exception:
+            outcome = "failed"
             logger.exception("Ingest failed for thread %s", req.thread_id)
         finally:
+            await self._emit_terminal_status(req.thread_id, outcome)
             await self._mark_ingest_done(req.thread_id)
 
     # ------------------------------------------------------------------
@@ -259,37 +349,7 @@ class Executor:
         Uses ``Command(resume=option_id)`` as graph input, which causes the
         ``interrupt()`` call in the worker node to return the chosen option.
         """
-        graph = self._graphs.get(req.thread_id)
-        if graph is None:
-            # Attempt lazy recompilation using cached preset (handles graph
-            # eviction within the same process) or req.team_preset supplied
-            # by the API (handles cold-restart recovery when caller provides it).
-            preset_info = self._graph_presets.get(req.thread_id)
-            team_preset = preset_info[0] if preset_info else req.team_preset
-            workspace_root = preset_info[1] if preset_info else req.workspace_root
-            if team_preset:
-                recompile_req = req.model_copy(
-                    update={
-                        "team_preset": team_preset,
-                        "workspace_root": workspace_root,
-                    }
-                )
-                try:
-                    graph = self._compile_graph(recompile_req)
-                    self._graphs[req.thread_id] = graph
-                    self._aggregator.register_graph(cast(StreamableGraph, graph))
-                    self._graph_presets[req.thread_id] = (team_preset, workspace_root)
-                    logger.info(
-                        "Lazily recompiled graph for thread %s (preset=%s)",
-                        req.thread_id,
-                        team_preset,
-                    )
-                except Exception:
-                    logger.exception(
-                        "Failed to recompile graph for thread %s (preset=%s)",
-                        req.thread_id,
-                        team_preset,
-                    )
+        graph = await self._get_or_compile_graph(req)
         if graph is None:
             logger.warning("No graph for thread %s -- cannot resume", req.thread_id)
             return
@@ -303,11 +363,11 @@ class Executor:
         self._bridge.track_thread(req.thread_id)
 
         # Resolve recursion_limit: explicit request > team TOML > global default.
-        preset_info = self._graph_presets.get(req.thread_id)
-        team_preset = preset_info[0] if preset_info else req.team_preset
+        cache_key = self._thread_to_cache_key.get(req.thread_id)
+        team_preset = cache_key[0] if cache_key else req.team_preset
         ws_root = (
-            Path(preset_info[1]).resolve()
-            if preset_info and preset_info[1]
+            Path(cache_key[1]).resolve()
+            if cache_key and cache_key[1]
             else (Path(req.workspace_root).resolve() if req.workspace_root else None)
         )
         team_recursion_limit: int | None = None
@@ -329,7 +389,7 @@ class Executor:
         try:
             # Command(resume=...) is accepted by astream_events in place of
             # a dict graph_input -- LangGraph handles the type internally.
-            await self._aggregator.ingest(
+            outcome = await self._aggregator.ingest(
                 req.thread_id,
                 agent_id,
                 cast(StreamableGraph, graph),
@@ -337,9 +397,35 @@ class Executor:
                 config,
             )
         except Exception:
+            outcome = "failed"
             logger.exception("Resume failed for thread %s", req.thread_id)
         finally:
+            await self._emit_terminal_status(req.thread_id, outcome)
             await self._mark_ingest_done(req.thread_id)
+
+    # ------------------------------------------------------------------
+    # Terminal status relay
+    # ------------------------------------------------------------------
+
+    async def _emit_terminal_status(
+        self, thread_id: str, outcome: str
+    ) -> None:
+        """Emit a ``thread_terminal`` event to the control surface.
+
+        Emits for ``"completed"``, ``"failed"``, and ``"cancelled"`` outcomes.
+        ``"interrupted"`` means the graph is suspended (awaiting permission)
+        and the thread should remain ``RUNNING``.
+        """
+        if outcome not in ("completed", "failed", "cancelled"):
+            return
+        await self._bridge.send_event(
+            thread_id,
+            {
+                "event_type": "thread_terminal",
+                "thread_id": thread_id,
+                "status": outcome,
+            },
+        )
 
     # ------------------------------------------------------------------
     # Graph compilation
@@ -387,6 +473,8 @@ class Executor:
             autonomous=req.autonomous,
             # Let compile_team_graph use team_config.graph.step_timeout_seconds
             step_timeout=None,
+            # MED-05: thread feature_tag so vault indexing works in worker
+            feature_tag=req.active_feature,
         )
 
     # ------------------------------------------------------------------
@@ -396,5 +484,5 @@ class Executor:
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""
         await self._aggregator.shutdown()
-        self._graphs.clear()
-        self._graph_presets.clear()
+        self._graph_cache.clear()
+        self._thread_to_cache_key.clear()

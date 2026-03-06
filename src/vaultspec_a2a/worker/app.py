@@ -27,7 +27,7 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 
 from ..api.schemas.internal import DispatchRequest, DispatchResponse
-from ..core.config import settings
+from ..core import settings
 from .executor import Executor
 from .ipc import WorkerBridge
 
@@ -36,7 +36,7 @@ __all__ = ["WorkerApp", "create_worker_app", "main"]
 
 logger = logging.getLogger(__name__)
 
-# Re-export so the facade ``lib.worker`` can expose ``WorkerApp``
+# Re-export so the facade ``vaultspec_a2a.worker`` can expose ``WorkerApp``
 # as the public type alias (matches the placeholder's API contract).
 WorkerApp = FastAPI
 

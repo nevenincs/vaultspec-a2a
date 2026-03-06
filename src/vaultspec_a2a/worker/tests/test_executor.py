@@ -1,4 +1,4 @@
-"""Tests for lib/worker/executor.py -- Executor graph engine (ADR-019).
+"""Tests for src/vaultspec_a2a/worker/executor.py -- Executor graph engine (ADR-019).
 
 Validates the Executor's ingest gating logic, dispatch routing, and
 shutdown behaviour using a real ``AsyncSqliteSaver`` and a real
@@ -43,6 +43,18 @@ def _make_bridge(
         base_url=bridge._api_url,
     )
     return bridge
+
+
+# Default cache key for test graphs.
+_TEST_CACHE_KEY = ("test-preset", None, False)
+
+
+def _inject_graph(executor: Executor, thread_id: str, *, cache_key=_TEST_CACHE_KEY):
+    """Insert a sentinel graph into the executor's LRU cache for *thread_id*."""
+    sentinel = object()
+    if cache_key not in executor._graph_cache:
+        executor._graph_cache[cache_key] = sentinel  # type: ignore[assignment]
+    executor._thread_to_cache_key[thread_id] = cache_key
 
 
 # ---------------------------------------------------------------------------
@@ -274,7 +286,7 @@ class TestHandleDispatch:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 # Inject a placeholder graph so the code reaches the gating check
-                executor._graphs["t-1"] = object()  # type: ignore[assignment]
+                _inject_graph(executor, "t-1")
                 # Pre-occupy the slot (simulates a running ingest)
                 await executor._mark_ingest_active("t-1")
 
@@ -402,8 +414,8 @@ class TestGraphInputInitialisation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
-                # Pre-populate _graphs to simulate a follow-up message (graph exists).
-                executor._graphs["t-followup"] = object()  # type: ignore[assignment]
+                # Pre-populate cache to simulate a follow-up message (graph exists).
+                _inject_graph(executor, "t-followup")
 
                 req = DispatchRequest(
                     action="ingest",
@@ -452,7 +464,7 @@ class TestGraphInputInitialisation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
-                executor._graphs["thread-xyz"] = object()  # type: ignore[assignment]
+                _inject_graph(executor, "thread-xyz")
 
                 req = DispatchRequest(
                     action="ingest",
@@ -462,6 +474,103 @@ class TestGraphInputInitialisation:
                 await executor.handle_dispatch(req)
 
                 assert captured[0]["thread_id"] == "thread-xyz"
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_graph_input_includes_sdd_fields_on_first_ingest(self) -> None:
+        """ADR-019 SDD blackboard fields are included in graph_input on first ingest."""
+        captured: list[dict] = []
+        sentinel_graph = object()
+
+        class _CapturingAggregator:
+            _cancel_events: dict = {}
+
+            async def ingest(self, thread_id, agent_id, graph, graph_input, config):
+                captured.append(graph_input)
+
+            def register_graph(self, graph):
+                pass
+
+            def cancel_thread(self, thread_id):
+                pass
+
+            async def shutdown(self):
+                pass
+
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._compile_graph = lambda req: sentinel_graph  # type: ignore[method-assign]
+
+                req = DispatchRequest(
+                    action="ingest",
+                    thread_id="t-sdd",
+                    content="Hello",
+                    team_preset="vaultspec-adaptive-coder",
+                    active_feature="auth-flow",
+                    pipeline_phase="implement",
+                    vault_index={"specs": ["auth.md"]},
+                    validation_errors=["missing tests"],
+                )
+                await executor.handle_dispatch(req)
+
+                assert len(captured) == 1
+                inp = captured[0]
+                assert inp["active_feature"] == "auth-flow"
+                assert inp["pipeline_phase"] == "implement"
+                assert inp["vault_index"] == {"specs": ["auth.md"]}
+                assert inp["validation_errors"] == ["missing tests"]
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_graph_input_omits_empty_sdd_fields_on_first_ingest(self) -> None:
+        """SDD fields with default/empty values are not included in graph_input."""
+        captured: list[dict] = []
+        sentinel_graph = object()
+
+        class _CapturingAggregator:
+            _cancel_events: dict = {}
+
+            async def ingest(self, thread_id, agent_id, graph, graph_input, config):
+                captured.append(graph_input)
+
+            def register_graph(self, graph):
+                pass
+
+            def cancel_thread(self, thread_id):
+                pass
+
+            async def shutdown(self):
+                pass
+
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._compile_graph = lambda req: sentinel_graph  # type: ignore[method-assign]
+
+                req = DispatchRequest(
+                    action="ingest",
+                    thread_id="t-sdd-empty",
+                    content="Hello",
+                    team_preset="vaultspec-adaptive-coder",
+                    # SDD fields left at defaults (None/empty)
+                )
+                await executor.handle_dispatch(req)
+
+                assert len(captured) == 1
+                inp = captured[0]
+                assert "active_feature" not in inp
+                assert "pipeline_phase" not in inp
+                assert "vault_index" not in inp
+                assert "validation_errors" not in inp
             finally:
                 await bridge.close()
 
@@ -498,20 +607,16 @@ class TestLazyRecompilation:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_preset_cached_after_ingest(self) -> None:
-        """After a successful ingest compile, _graph_presets holds the preset."""
+        """After a successful ingest compile, _thread_to_cache_key holds the mapping."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                # Pre-inject a sentinel graph so compile is skipped
-                executor._graphs["t-cache"] = object()  # type: ignore[assignment]
-                # Manually populate _graph_presets as ingest would
-                executor._graph_presets["t-cache"] = ("vaultspec-adaptive-coder", None)
-                assert executor._graph_presets["t-cache"] == (
-                    "vaultspec-adaptive-coder",
-                    None,
-                )
+                cache_key = ("vaultspec-adaptive-coder", None, False)
+                executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
+                executor._thread_to_cache_key["t-cache"] = cache_key
+                assert executor._thread_to_cache_key["t-cache"] == cache_key
             finally:
                 await bridge.close()
 
@@ -542,8 +647,8 @@ class TestLazyRecompilation:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_ingest_stores_preset_in_graph_presets(self) -> None:
-        """_handle_ingest stores (team_preset, workspace_root) in _graph_presets."""
+    async def test_ingest_stores_cache_key_mapping(self) -> None:
+        """_handle_ingest stores thread_id -> cache_key in _thread_to_cache_key."""
         captured: list = []
 
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
@@ -552,8 +657,9 @@ class TestLazyRecompilation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 executor._aggregator = self._make_capturing_aggregator(captured)  # type: ignore[assignment]
-                # Pre-inject graph so compile step is skipped and we reach preset caching
-                executor._graphs["t-preset"] = object()  # type: ignore[assignment]
+                cache_key = ("vaultspec-adaptive-coder", "/some/path", False)
+                executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
+                executor._thread_to_cache_key["t-preset"] = cache_key
 
                 req = DispatchRequest(
                     action="ingest",
@@ -563,27 +669,23 @@ class TestLazyRecompilation:
                     workspace_root="/some/path",
                 )
                 await executor.handle_dispatch(req)
-                # Preset should NOT be stored because thread was already in _graphs
-                # (compile branch was skipped). But workspace_root was already there.
-                # The key behaviour: when compile IS run, preset is stored.
-                # Verify the dict is accessible (no AttributeError).
-                assert hasattr(executor, "_graph_presets")
+                assert hasattr(executor, "_thread_to_cache_key")
             finally:
                 await bridge.close()
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_shutdown_clears_graph_presets(self) -> None:
-        """shutdown() clears _graph_presets alongside _graphs."""
+    async def test_shutdown_clears_thread_to_cache_key(self) -> None:
+        """shutdown() clears _thread_to_cache_key alongside _graph_cache."""
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._graph_presets["t-1"] = ("vaultspec-adaptive-coder", None)
-                assert executor._graph_presets
+                executor._thread_to_cache_key["t-1"] = ("vaultspec-adaptive-coder", None, False)
+                assert executor._thread_to_cache_key
 
                 await executor.shutdown()
-                assert not executor._graph_presets
+                assert not executor._thread_to_cache_key
             finally:
                 await bridge.close()
 
@@ -606,7 +708,7 @@ class TestShutdown:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 # Inject a graph entry -- this is the only way to pre-populate
                 # without running a full team config compilation.
-                executor._graphs["thread-1"] = object()  # type: ignore[assignment]
+                _inject_graph(executor, "thread-1")
                 assert executor.graph_count == 1
 
                 await executor.shutdown()

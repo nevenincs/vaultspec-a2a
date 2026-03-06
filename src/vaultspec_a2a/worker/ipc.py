@@ -3,10 +3,14 @@
 Uses HTTP POST to push events and heartbeats to the control surface.
 Avoids introducing a WebSocket client dependency by using httpx
 (already in the project's dependency set).
+
+Events are batched for up to ``_FLUSH_INTERVAL`` seconds before being
+sent as a single HTTP POST to ``/internal/events/batch`` (CRIT-02).
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 
@@ -20,6 +24,9 @@ __all__ = ["WorkerBridge"]
 
 logger = logging.getLogger(__name__)
 
+# CRIT-02: batch flush interval in seconds.
+_FLUSH_INTERVAL = 0.05
+
 
 class WorkerBridge:
     """Pushes events and heartbeats to the control surface via HTTP.
@@ -27,6 +34,9 @@ class WorkerBridge:
     The bridge maintains an ``httpx.AsyncClient`` pointed at the control
     surface's ``/internal/`` endpoints.  It tracks which thread IDs are
     actively being processed so the heartbeat payload can report them.
+
+    Events are accumulated in a buffer and flushed as a batch every
+    ``_FLUSH_INTERVAL`` seconds to reduce HTTP overhead (CRIT-02).
 
     Parameters
     ----------
@@ -56,12 +66,19 @@ class WorkerBridge:
         self._active_threads: set[str] = set()
         self._start_time = time.monotonic()  # WPA-004: track uptime
 
+        # CRIT-02: event batching state
+        self._event_buffer: list[dict[str, Any]] = []
+        self._flush_task: asyncio.Task[None] | None = None
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
     async def close(self) -> None:
-        """Shut down the underlying HTTP client."""
+        """Flush pending events and shut down the underlying HTTP client."""
+        if self._flush_task and not self._flush_task.done():
+            self._flush_task.cancel()
+        await self.flush_events()
         await self._client.aclose()
 
     # ------------------------------------------------------------------
@@ -82,34 +99,55 @@ class WorkerBridge:
         return frozenset(self._active_threads)
 
     # ------------------------------------------------------------------
-    # Event relay
+    # Event relay (batched, CRIT-02)
     # ------------------------------------------------------------------
 
     async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
-        """Push a single event to the control surface for relay to browser clients.
+        """Buffer an event for batched relay to the control surface.
+
+        Events are accumulated and flushed as a single HTTP POST after
+        ``_FLUSH_INTERVAL`` seconds of inactivity or when ``flush_events``
+        is called explicitly.
+        """
+        self._event_buffer.append(
+            {"thread_id": thread_id, "payload": payload}
+        )
+        # Schedule a flush if one isn't already pending.
+        if self._flush_task is None or self._flush_task.done():
+            self._flush_task = asyncio.create_task(self._deferred_flush())
+
+    async def _deferred_flush(self) -> None:
+        """Wait for the flush interval then send accumulated events."""
+        await asyncio.sleep(_FLUSH_INTERVAL)
+        await self.flush_events()
+
+    async def flush_events(self) -> None:
+        """Immediately send all buffered events as a single batch POST.
 
         Failures are logged at WARNING level but never raised -- the worker
         must not crash because the control surface is temporarily unavailable.
         """
+        if not self._event_buffer:
+            return
+
+        batch = self._event_buffer[:]
+        self._event_buffer.clear()
+
         try:
             resp = await self._client.post(
-                "/internal/events",
-                json={
-                    "type": "event",
-                    "thread_id": thread_id,
-                    "payload": payload,
-                },
+                "/internal/events/batch",
+                json={"events": batch},
             )
             if resp.status_code != 200:
                 logger.warning(
-                    "Event relay failed (HTTP %d) for thread %s",
+                    "Batch event relay failed (HTTP %d), %d events dropped",
                     resp.status_code,
-                    thread_id,
+                    len(batch),
                 )
         except httpx.HTTPError:
             logger.warning(
-                "Failed to send event to control surface for thread %s",
-                thread_id,
+                "Failed to send %d events to control surface",
+                len(batch),
                 exc_info=True,
             )
 

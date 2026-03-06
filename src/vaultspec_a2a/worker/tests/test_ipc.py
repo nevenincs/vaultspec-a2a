@@ -1,4 +1,4 @@
-"""Tests for lib/worker/ipc.py -- WorkerBridge IPC layer (ADR-019).
+"""Tests for src/vaultspec_a2a/worker/ipc.py -- WorkerBridge IPC layer (ADR-019).
 
 Validates thread tracking, event relay, heartbeat sending, and the
 resilient error-swallowing behaviour of the bridge.
@@ -97,10 +97,10 @@ class TestThreadTracking:
 
 
 class TestSendEvent:
-    """Verify that send_event POSTs the correct JSON to /internal/events."""
+    """Verify that send_event buffers and flush_events POSTs the batch."""
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_sends_correct_json(self) -> None:
+    async def test_sends_correct_json_via_batch(self) -> None:
         captured: list[dict] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -110,17 +110,45 @@ class TestSendEvent:
         bridge = _make_bridge_with_transport(handler)
         try:
             await bridge.send_event("thread-42", {"key": "value"})
+            # Explicit flush to avoid waiting for deferred flush task
+            await bridge.flush_events()
         finally:
             await bridge.close()
 
         assert len(captured) == 1
         body = captured[0]
-        assert body["type"] == "event"
-        assert body["thread_id"] == "thread-42"
-        assert body["payload"] == {"key": "value"}
+        assert "events" in body
+        assert len(body["events"]) == 1
+        evt = body["events"][0]
+        assert evt["thread_id"] == "thread-42"
+        assert evt["payload"] == {"key": "value"}
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_posts_to_internal_events_path(self) -> None:
+    async def test_batches_multiple_events(self) -> None:
+        captured: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content))
+            return httpx.Response(200, json={"status": "ok"})
+
+        bridge = _make_bridge_with_transport(handler)
+        try:
+            await bridge.send_event("t1", {"a": 1})
+            await bridge.send_event("t2", {"b": 2})
+            await bridge.send_event("t1", {"c": 3})
+            await bridge.flush_events()
+        finally:
+            await bridge.close()
+
+        assert len(captured) == 1
+        events = captured[0]["events"]
+        assert len(events) == 3
+        assert events[0]["thread_id"] == "t1"
+        assert events[1]["thread_id"] == "t2"
+        assert events[2]["thread_id"] == "t1"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_posts_to_batch_events_path(self) -> None:
         paths: list[str] = []
 
         def handler(request: httpx.Request) -> httpx.Response:
@@ -130,10 +158,11 @@ class TestSendEvent:
         bridge = _make_bridge_with_transport(handler)
         try:
             await bridge.send_event("t1", {"a": 1})
+            await bridge.flush_events()
         finally:
             await bridge.close()
 
-        assert paths == ["/internal/events"]
+        assert "/internal/events/batch" in paths
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_non_200_response_logs_warning_but_does_not_raise(
@@ -145,10 +174,10 @@ class TestSendEvent:
         bridge = _make_bridge_with_transport(handler)
         try:
             with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.ipc"):
-                # Must not raise
                 await bridge.send_event("thread-fail", {"x": 1})
+                await bridge.flush_events()
 
-            assert any("Event relay failed" in rec.message for rec in caplog.records)
+            assert any("Batch event relay failed" in rec.message for rec in caplog.records)
         finally:
             await bridge.close()
 
@@ -162,12 +191,44 @@ class TestSendEvent:
         bridge = _make_bridge_with_transport(handler)
         try:
             with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.ipc"):
-                # Must not raise despite connection error
                 await bridge.send_event("t-err", {"data": True})
+                await bridge.flush_events()
 
-            assert any("Failed to send event" in rec.message for rec in caplog.records)
+            assert any("Failed to send" in rec.message for rec in caplog.records)
         finally:
             await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_close_flushes_pending_events(self) -> None:
+        captured: list[dict] = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            captured.append(json.loads(request.content))
+            return httpx.Response(200, json={"status": "ok"})
+
+        bridge = _make_bridge_with_transport(handler)
+        await bridge.send_event("t1", {"flush": "on_close"})
+        await bridge.close()
+
+        assert len(captured) == 1
+        assert captured[0]["events"][0]["thread_id"] == "t1"
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_flush_empty_buffer_is_noop(self) -> None:
+        call_count = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal call_count
+            call_count += 1
+            return httpx.Response(200, json={"status": "ok"})
+
+        bridge = _make_bridge_with_transport(handler)
+        try:
+            await bridge.flush_events()
+        finally:
+            await bridge.close()
+
+        assert call_count == 0
 
 
 # ---------------------------------------------------------------------------

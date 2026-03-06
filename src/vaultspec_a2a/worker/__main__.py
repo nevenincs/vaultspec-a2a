@@ -1,4 +1,4 @@
-"""Allow running the worker as ``python -m lib.worker``."""
+"""Allow running the worker as ``python -m vaultspec_a2a.worker``."""
 
 from .app import main
 

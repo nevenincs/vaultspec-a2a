@@ -19,9 +19,6 @@ __all__ = ["ProviderFactory"]
 
 logger = logging.getLogger(__name__)
 
-# PROV-01: cache created model clients to avoid repeated instantiation.
-_client_cache: dict[tuple, "BaseChatModel"] = {}
-
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # src/vaultspec_a2a/providers/factory.py -> providers -> vaultspec_a2a -> src -> project root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -218,12 +215,7 @@ class ProviderFactory:
             kwargs["timeout"] = timeout
             kwargs["max_retries"] = 2
 
-            cache_key = (provider, model_name)
-            if cache_key in _client_cache:
-                return _client_cache[cache_key]
-            client = ChatOpenAI(**kwargs)
-            _client_cache[cache_key] = client
-            return client
+            return ChatOpenAI(**kwargs)
 
         if provider == Provider.OPENAI:
             auth_resolved = (
@@ -249,12 +241,7 @@ class ProviderFactory:
             kwargs["timeout"] = timeout
             kwargs["max_retries"] = 2
 
-            cache_key = (provider, model_name)
-            if cache_key in _client_cache:
-                return _client_cache[cache_key]
-            client = ChatOpenAI(**kwargs)
-            _client_cache[cache_key] = client
-            return client
+            return ChatOpenAI(**kwargs)
 
         logger.error("Failed to instantiate: Unsupported provider %s", provider)
         raise ValueError(f"Unsupported provider: {provider}")

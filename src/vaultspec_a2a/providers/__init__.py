@@ -1,6 +1,6 @@
 """LLM provider abstractions and ACP chat model.
 
-Facade re-exporting all public types from the ``lib.providers`` subpackage.
+Facade re-exporting all public types from the ``vaultspec_a2a.providers`` subpackage.
 Consumers should import from this module rather than reaching into
 sub-modules directly::
 

@@ -3,11 +3,11 @@
 Runs a single-turn conversation through the Zhipu GLM API
 (``https://open.bigmodel.cn/api/paas/v4/``) using the ``ZHIPU_API_KEY``
 configured in VaultSpec settings and the default model resolved by
-:class:`~lib.providers.factory.ProviderFactory`.
+:class:`~vaultspec_a2a.providers.factory.ProviderFactory`.
 
 Run directly::
 
-    python -m lib.providers.probes.zhipu
+    python -m vaultspec_a2a.providers.probes.zhipu
 
 Exit code 0 on success, 1 on failure.
 """
@@ -34,7 +34,7 @@ _PROMPT = "Reply with only the single word 'Hello'. No other text."
 async def main() -> ProbeResult:
     """Run the Zhipu GLM HTTP API probe and return the result.
 
-    Reads the API key from :attr:`~lib.core.config.Settings.zhipu_api_key`.
+    Reads the API key from :attr:`~vaultspec_a2a.core.config.Settings.zhipu_api_key`.
     Returns a failing :class:`~._protocol.ProbeResult` when the key is not
     configured rather than raising.
     """

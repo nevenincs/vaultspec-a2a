@@ -2,12 +2,12 @@
 
 Runs the full ACP protocol lifecycle — ``initialize`` -> ``session/new`` ->
 ``session/prompt`` — against a real Gemini CLI subprocess.  Refreshes the
-local OAuth credentials via :func:`~lib.providers.gemini_auth.refresh_gemini_token`
+local OAuth credentials via :func:`~vaultspec_a2a.providers.gemini_auth.refresh_gemini_token`
 before spawning so that an expired token never causes a silent hang.
 
 Run directly::
 
-    python -m lib.providers.probes.gemini
+    python -m vaultspec_a2a.providers.probes.gemini
 
 Exit code 0 on success, 1 on failure.  All protocol traffic is logged at DEBUG.
 """

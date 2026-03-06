@@ -6,10 +6,10 @@ both structured logging and process exit code.
 
 Usage::
 
-    python -m lib.providers.probes.claude   # ACP subprocess
-    python -m lib.providers.probes.gemini   # ACP subprocess
-    python -m lib.providers.probes.openai   # HTTP API
-    python -m lib.providers.probes.zhipu    # HTTP API (GLM)
+    python -m vaultspec_a2a.providers.probes.claude   # ACP subprocess
+    python -m vaultspec_a2a.providers.probes.gemini   # ACP subprocess
+    python -m vaultspec_a2a.providers.probes.openai   # HTTP API
+    python -m vaultspec_a2a.providers.probes.zhipu    # HTTP API (GLM)
 
 Public API
 ----------

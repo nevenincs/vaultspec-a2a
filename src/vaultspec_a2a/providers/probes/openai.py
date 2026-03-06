@@ -2,11 +2,11 @@
 
 Runs a single-turn conversation through the OpenAI API using the
 ``OPENAI_API_KEY`` configured in VaultSpec settings and the default
-model resolved by :class:`~lib.providers.factory.ProviderFactory`.
+model resolved by :class:`~vaultspec_a2a.providers.factory.ProviderFactory`.
 
 Run directly::
 
-    python -m lib.providers.probes.openai
+    python -m vaultspec_a2a.providers.probes.openai
 
 Exit code 0 on success, 1 on failure.
 """
@@ -33,7 +33,7 @@ _PROMPT = "Reply with only the single word 'Hello'. No other text."
 async def main() -> ProbeResult:
     """Run the OpenAI HTTP API probe and return the result.
 
-    Reads the API key from :attr:`~lib.core.config.Settings.openai_api_key`.
+    Reads the API key from :attr:`~vaultspec_a2a.core.config.Settings.openai_api_key`.
     Returns a failing :class:`~._protocol.ProbeResult` when the key is not
     configured rather than raising.
     """

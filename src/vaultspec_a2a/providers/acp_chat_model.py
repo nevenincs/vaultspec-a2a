@@ -136,109 +136,8 @@ def _log_task_exception(task: asyncio.Task) -> None:
         logger.error("Background RPC task failed: %s", exc, exc_info=exc)
 
 
-async def _spawn_acp_process(
-    command: list[str],
-    env: dict[str, str],
-    cwd: str,
-    *,
-    use_exec: bool = False,
-) -> asyncio.subprocess.Process:
-    """Spawn an ACP subprocess with platform-appropriate isolation.
-
-    Windows (default): ``create_subprocess_shell`` with ``CREATE_NEW_PROCESS_GROUP``
-    so that ``.cmd`` shims (e.g. ``gemini.cmd``) work AND the full process tree
-    (cmd.exe + node.exe + any grandchildren) can be atomically reaped via
-    ``taskkill /T /F`` in ``_kill_process_tree``.
-
-    Windows (use_exec=True): ``create_subprocess_exec`` — bypasses the cmd.exe
-    shell intermediary for native PE32+ executables (e.g. the precompiled Bun
-    binary) that do not need a .cmd shim.  Aligns with ADR-002's zero-PTY/
-    zero-batch mandate.  ``CREATE_NEW_PROCESS_GROUP`` is still applied so the
-    binary's process tree can be reaped atomically.
-
-    Unix/Linux/macOS: ``create_subprocess_exec`` — no shell intermediary;
-    POSIX signals (SIGTERM/SIGKILL) deliver directly to the target process.
-    ``use_exec`` has no effect on non-Windows platforms.
-    """
-    kwargs: dict[str, Any] = {
-        "stdin": asyncio.subprocess.PIPE,
-        "stdout": asyncio.subprocess.PIPE,
-        "stderr": asyncio.subprocess.PIPE,
-        "env": env,
-        "cwd": cwd,
-        "limit": 10 * 1024 * 1024,
-    }
-    if sys.platform == "win32":
-        if use_exec:
-            # Native PE32+ binary — no shell shim needed.  CREATE_NEW_PROCESS_GROUP
-            # still applied for clean tree reaping via taskkill /T /F.
-            return await asyncio.create_subprocess_exec(
-                command[0],
-                *command[1:],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-                **kwargs,
-            )
-        # CREATE_NEW_PROCESS_GROUP isolates console-signal handling so that
-        # Ctrl+C in the parent terminal cannot propagate into the subprocess
-        # group. list2cmdline escapes args for cmd.exe to prevent metachar
-        # injection when model names or paths contain special characters.
-        return await asyncio.create_subprocess_shell(
-            subprocess.list2cmdline(command),
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-            **kwargs,
-        )
-    return await asyncio.create_subprocess_exec(command[0], *command[1:], **kwargs)
-
-
-async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
-    """Terminate an ACP subprocess and its entire process tree.
-
-    Windows: ``process.terminate()`` and ``process.kill()`` both call
-    ``TerminateProcess()`` on the **immediate** child (cmd.exe) only.
-    node.exe and any grandchildren survive as orphans, holding memory and
-    file handles indefinitely.  ``taskkill /T /F /PID`` kills the whole
-    tree atomically and is the only reliable approach.
-
-    Unix/Linux/macOS: SIGTERM with a 5-second escalation to SIGKILL is
-    sufficient because ACP agents do not spawn independent child processes.
-
-    The asyncio transport handle is closed last in both paths to prevent
-    OS handle leaks when the event loop finalizer runs (cpython#114177).
-    """
-    if sys.platform == "win32":
-        try:
-            killer = await asyncio.create_subprocess_exec(
-                "taskkill",
-                "/T",
-                "/F",
-                "/PID",
-                str(process.pid),
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
-            await asyncio.wait_for(killer.wait(), timeout=5.0)
-        except Exception:
-            with suppress(OSError):
-                process.kill()
-        with suppress(Exception):
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-    else:
-        with suppress(OSError):
-            process.terminate()
-        try:
-            await asyncio.wait_for(process.wait(), timeout=5.0)
-        except TimeoutError:
-            logger.warning(
-                "ACP process %s did not exit after SIGTERM; escalating to SIGKILL",
-                process.pid,
-            )
-            with suppress(OSError):
-                process.kill()
-            await process.wait()
-
-    transport = getattr(process, "_transport", None)
-    if transport is not None:
-        transport.close()
+from ._subprocess import kill_process_tree as _kill_process_tree
+from ._subprocess import spawn_acp_process as _spawn_acp_process
 
 
 @dataclass
@@ -703,7 +602,7 @@ class AcpChatModel(BaseChatModel):
         options = params.get("options", [])
         tool_call = params.get("toolCall", {})
         name = tool_call.get("title", "unknown")
-        args = tool_call.get("input", {})
+        args = tool_call.get("rawInput", {})
 
         if self.permission_callback:
             try:
@@ -1105,8 +1004,8 @@ class AcpChatModel(BaseChatModel):
         elif u_type == "plan":
             # Plan updates are metadata; log receipt and let graph-level plan
             # handling in the supervisor/aggregator layer process them.
-            plan_steps = update.get("plan", {}).get("steps", [])
-            logger.debug("ACP plan update: %d steps received", len(plan_steps))
+            plan_entries = update.get("entries", [])
+            logger.debug("ACP plan update: %d entries received", len(plan_entries))
 
     async def _on_tool_call(self, update: dict, ctx: _AcpSessionContext) -> None:
         tid = update.get("toolCallId", "")
@@ -1118,7 +1017,7 @@ class AcpChatModel(BaseChatModel):
                     {
                         "id": tid,
                         "name": update.get("title", ""),
-                        "args": json.dumps(update.get("input")),
+                        "args": json.dumps(update.get("rawInput")),
                         "index": 0,
                     }
                 ],

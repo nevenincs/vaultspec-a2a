@@ -40,8 +40,7 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
-from ..core.aggregator import EventAggregator
-from ..core.config import settings
+from ..core import EventAggregator, settings
 from ..database.crud import get_thread
 from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.session import close_db, get_session_factory, init_db

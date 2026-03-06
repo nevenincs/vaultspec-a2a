@@ -96,9 +96,7 @@ async def _verify_internal_token(
 
     Skipped when settings.internal_token is None (dev mode).
     """
-    from ..core.config import (
-        settings,  # local import avoids circular dep at module level
-    )
+    from ..core import settings  # local import avoids circular dep at module level
 
     token = settings.internal_token
     if token is None:

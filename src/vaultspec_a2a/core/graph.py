@@ -425,6 +425,7 @@ def _compile_star(
         workers=worker_ids,
         worker_phase_map=worker_phase_map or None,
         autonomous=autonomous,
+        workspace_root=workspace_root,
     )
     builder.add_node(
         "supervisor", supervisor_node, metadata=sv_meta, retry_policy=_NODE_RETRY_POLICY

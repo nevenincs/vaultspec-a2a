@@ -36,14 +36,17 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import StateSnapshot
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.aggregator import EventAggregator
-from ..core.exceptions import ConfigError, NicknameConflictError
-from ..core import build_initial_vault_index
-from ..core.metadata import ThreadMetadata, discover_context_refs, generate_nickname
-from ..core.preamble import build_context_preamble
-from ..core.team_config import (
+from ..core import (
+    ConfigError,
+    EventAggregator,
+    NicknameConflictError,
     TeamConfigNotFoundError,
+    ThreadMetadata,
+    build_context_preamble,
+    build_initial_vault_index,
+    discover_context_refs,
     discover_team_preset_ids,
+    generate_nickname,
     load_team_config,
 )
 from ..database.crud import (
@@ -1040,5 +1043,5 @@ async def shutdown_endpoint() -> dict[str, str]:
     import os
     import signal
 
-    os.kill(os.getpid(), signal.SIGTERM)
+    os.kill(os.getpid(), signal.SIGINT)
     return {"status": "shutting_down"}

@@ -21,7 +21,7 @@ from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from ..core.aggregator import EventAggregator
+from ..core import EventAggregator
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from .schemas.commands import (

@@ -49,6 +49,9 @@ class CreateThreadRequest(BaseModel):
     team_preset: str | None = Field(default=None, max_length=64)
     # NEW: thread metadata for provenance and context (ADR-014)
     metadata: ThreadMetadata | None = None
+    # Optional nickname for the thread (ADR-034). Overrides metadata.nickname
+    # when both are set. Allows CLI users to name threads without full metadata.
+    nickname: str | None = Field(default=None, max_length=64)
     # None = use team preset default (auto_approve); False = always supervised
     autonomous: bool | None = None
     # DEPRECATED: kept for backward compat, ignored if team_preset is set

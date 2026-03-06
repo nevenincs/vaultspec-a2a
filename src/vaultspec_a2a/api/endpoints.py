@@ -233,6 +233,11 @@ async def create_thread_endpoint(
     # --- ADR-014: Metadata processing ---
     ws_root, nickname, metadata_json = _process_metadata(body, thread_id)
 
+    # ADR-034: top-level nickname overrides metadata-derived nickname when
+    # metadata is absent (CLI users without full metadata can still name threads).
+    if nickname is None and body.nickname is not None:
+        nickname = body.nickname
+
     # Create thread in DB
     try:
         thread = await create_thread(

@@ -22,13 +22,16 @@ def cli() -> None:
 
 from ._agent import agent  # noqa: E402
 from ._database import database  # noqa: E402
+from ._mcp import mcp_group  # noqa: E402
 from ._run import run  # noqa: E402
 from ._service import service  # noqa: E402
 from ._team import team  # noqa: E402
 from ._test import test  # noqa: E402
 
+
 cli.add_command(agent)
 cli.add_command(database)
+cli.add_command(mcp_group)
 cli.add_command(run)
 cli.add_command(service)
 cli.add_command(team)

@@ -90,8 +90,8 @@ build:
 
 # Remove build artifacts and caches
 clean:
-    rm -rf dist/ *.egg-info
-    fd -t d __pycache__ --exclude .venv -x rm -rf {}
+    Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
+    fd -t d __pycache__ --exclude .venv -x Remove-Item -Recurse -Force
 
 # Build production Docker images
 docker-build:
@@ -129,6 +129,10 @@ service-status:
 # Stop running services
 service-stop:
     uv run vaultspec service stop
+
+# Start standalone MCP server (stdio by default, use TRANSPORT=streamable-http for HTTP)
+mcp TRANSPORT="stdio" *ARGS:
+    uv run vaultspec-mcp --transport {{TRANSPORT}} {{ARGS}}
 
 # ── Internal recipes ─────────────────────────────────────────────────────────
 

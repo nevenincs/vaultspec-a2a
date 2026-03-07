@@ -19,11 +19,14 @@ Available tools:
 - ``get_team_status``:           Get agent lifecycle states and active threads
 - ``get_pending_permissions``:   List outstanding permission requests
 - ``list_team_presets``:         List available team presets with details
+- ``delete_thread``:             Permanently delete a thread and its data
+- ``archive_thread``:            Archive a completed/failed/cancelled thread
 - ``cancel_thread``:             Cancel a running thread
 
 See ADR-003 §2 (Protocol Bridging), ADR-006 §5 (MCP Tool Mapping).
 """
 
+import contextlib
 import logging
 
 from typing import Annotated
@@ -34,18 +37,53 @@ import httpx
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
-
-from ...core.config import settings
-from ...core.team_config import discover_team_preset_ids
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 __all__ = ["mcp"]
 
 logger = logging.getLogger(__name__)
 
+
+class McpSettings(BaseSettings):
+    """Standalone settings for the MCP server.
+
+    Reads the same ``VAULTSPEC_`` prefixed env vars as the core settings
+    but is self-contained — no imports from the gateway's config module.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="VAULTSPEC_",
+        extra="ignore",
+    )
+
+    mcp_api_base_url: str = Field(
+        default="http://localhost:8000",
+        description="Base URL of the gateway API that MCP tools call.",
+    )
+    mcp_host: str = Field(
+        default="0.0.0.0",
+        description="Bind host for MCP streamable-http transport.",
+    )
+    mcp_port: int = Field(
+        default=8100,
+        description="Bind port for MCP streamable-http transport.",
+    )
+
+
+_mcp_settings = McpSettings()
+
+
+def _get_api_base_url() -> str:
+    """Return the gateway API base URL from settings."""
+    return _mcp_settings.mcp_api_base_url
+
+
 # MCP-05: Shared httpx.AsyncClient — lazily created on first use and reused
 # across all tool calls to avoid per-request connection setup overhead.
-# The client has no base_url so it works with the runtime settings value.
+# The client has no base_url so it works with the runtime env var value.
 #
 # When the underlying event loop changes (e.g. between test functions), the
 # client's transport raises "Event loop is closed".  ``_get_client()`` detects
@@ -71,10 +109,8 @@ def _reset_client() -> None:
     global _shared_client  # noqa: PLW0603
     if _shared_client is not None and not _shared_client.is_closed:
         # LG-030: use close() instead of __del__() for proper cleanup.
-        try:
-            _shared_client._transport.close()  # type: ignore[union-attr]
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            _shared_client._transport.close()  # type: ignore[union-attr]  # noqa: SLF001
     _shared_client = None
 
 
@@ -82,16 +118,60 @@ def _reset_client() -> None:
 # located and adjusted without hunting for magic numbers in each tool function.
 _MCP_CREATE_TIMEOUT = 30.0  # POST /api/threads (synchronous setup overhead)
 _MCP_QUERY_TIMEOUT = 15.0  # GET /api/threads/{id}/state and POST /api/messages
+_HTTP_OK = 200
 _HTTP_NOT_FOUND = 404
+_HTTP_CONFLICT = 409
 
 # MCP-01: cap initial_message to prevent unbounded payloads from filling the
-# LLM context window or triggering HTTP 413 errors from the control surface.
+# LLM context window or triggering HTTP 413 errors from the gateway.
 _MAX_INITIAL_MESSAGE_CHARS = 32_000  # ~8k tokens at 4 chars/token
+_PREVIEW_TRUNCATE_LEN = 200  # Max chars for message preview in status output
 
-# DYN-01: Dynamic preset discovery — delegates to the canonical
-# discover_team_preset_ids() in team_config.py so adding/removing a TOML
-# file automatically updates all surfaces with no code change required.
-_KNOWN_PRESETS: frozenset[str] = discover_team_preset_ids()
+# DYN-01: Known presets — lazily fetched from the gateway via HTTP on first
+# use.  This replaces the former import of discover_team_preset_ids() so the
+# MCP server has zero coupling to the core team_config module.  The cache is
+# populated once per process lifetime; restart the MCP server to pick up new
+# presets.
+_known_presets_cache: frozenset[str] | None = None
+
+
+async def _get_known_presets() -> frozenset[str]:
+    """Fetch known team preset IDs from the gateway, with caching.
+
+    On first call, issues GET /api/teams to the gateway and caches
+    the result.  Subsequent calls return the cached value immediately.
+    If the gateway is unreachable, returns an empty frozenset (allowing
+    the gateway itself to reject unknown presets at create time).
+    """
+    global _known_presets_cache  # noqa: PLW0603
+    if _known_presets_cache is not None:
+        return _known_presets_cache
+
+    api_base = _get_api_base_url()
+    try:
+        client = _get_client()
+        resp = await client.get(
+            f"{api_base}/api/teams",
+            timeout=_MCP_QUERY_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        presets = data.get("presets", [])
+        _known_presets_cache = frozenset(
+            p.get("id", "") for p in presets if p.get("id")
+        )
+    except Exception:
+        logger.warning(
+            "Could not fetch team presets from %s/api/teams", api_base, exc_info=True
+        )
+        _known_presets_cache = frozenset()
+    return _known_presets_cache
+
+
+def _reset_known_presets() -> None:
+    """Clear the preset cache.  Used by test fixtures."""
+    global _known_presets_cache  # noqa: PLW0603
+    _known_presets_cache = None
 
 
 mcp = FastMCP(
@@ -101,13 +181,15 @@ mcp = FastMCP(
         "coding workflows.\n\n"
         "Autonomous workflow (no human approval needed):\n"
         "  1. start_thread(initial_message, autonomous=True) → get thread_id\n"
-        "  2. get_thread_status(thread_id) → poll until status is 'completed' or 'failed'\n"
+        "  2. get_thread_status(thread_id) → poll until "
+        "status is 'completed' or 'failed'\n"
         "  3. send_message(thread_id, ...) → inject follow-up input\n\n"
         "Supervised workflow (human approves tool calls):\n"
         "  1. start_thread(initial_message, autonomous=False) → get thread_id\n"
         "  2. get_thread_status(thread_id) → poll; when status is 'input_required':\n"
         "  3. get_pending_permissions() → list request IDs and option IDs\n"
-        "  4. respond_to_permission(permission_request_id, option_id) → unblock thread\n\n"
+        "  4. respond_to_permission(permission_request_id,"
+        " option_id) → unblock thread\n\n"
         "Discovery: list_threads() to find existing threads. "
         "get_team_status() for overall agent health and active thread count."
     ),
@@ -136,25 +218,45 @@ async def start_thread(
     initial_message: Annotated[
         str,
         Field(
-            description="The coding task description for the agent team. Maximum 32,000 characters."
+            description=(
+                "The coding task description for the"
+                " agent team. Maximum 32,000 characters."
+            )
         ),
     ],
     team_preset: Annotated[
         str | None,
         Field(
-            description="Team configuration preset ID. Use list_team_presets to discover all available presets. Defaults to 'vaultspec-adaptive-coder'."
+            description=(
+                "Team configuration preset ID."
+                " Use list_team_presets to discover"
+                " all available presets."
+                " Defaults to"
+                " 'vaultspec-adaptive-coder'."
+            )
         ),
     ] = None,
     autonomous: Annotated[
         bool,
         Field(
-            description="If True (default), agents auto-approve all tool calls. Set to False to require manual approval via get_pending_permissions and respond_to_permission."
+            description=(
+                "If True (default), agents auto-approve"
+                " all tool calls. Set to False to"
+                " require manual approval via"
+                " get_pending_permissions and"
+                " respond_to_permission."
+            )
         ),
     ] = True,
     workspace_root: Annotated[
         str | None,
         Field(
-            description="Absolute path to the project directory, e.g. 'C:/projects/myapp'. Enables .vault/ context injection and scopes file operations to this directory."
+            description=(
+                "Absolute path to the project directory,"
+                " e.g. 'C:/projects/myapp'. Enables"
+                " .vault/ context injection and scopes"
+                " file operations to this directory."
+            )
         ),
     ] = None,
 ) -> str:
@@ -204,10 +306,9 @@ async def start_thread(
             f"Maximum allowed: {_MAX_INITIAL_MESSAGE_CHARS} chars."
         )
     preset = team_preset or "vaultspec-adaptive-coder"
-    if preset not in _KNOWN_PRESETS:
-        raise ToolError(
-            f"Unknown preset {preset!r}. Valid: {', '.join(sorted(_KNOWN_PRESETS))}"
-        )
+    known = await _get_known_presets()
+    if known and preset not in known:
+        raise ToolError(f"Unknown preset {preset!r}. Valid: {', '.join(sorted(known))}")
     try:
         payload: dict[str, object] = {
             "title": initial_message[:80],
@@ -219,7 +320,7 @@ async def start_thread(
             payload["metadata"] = {"workspace_root": workspace_root}
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads",
+            f"{_get_api_base_url()}/api/threads",
             timeout=_MCP_CREATE_TIMEOUT,
             json=payload,
         )
@@ -229,19 +330,19 @@ async def start_thread(
         return (
             f"Thread started: {thread_id}\n"
             f"Preset: {preset}\n"
-            f"Monitor: {settings.mcp_api_base_url}/\n"
-            f"Status: GET {settings.mcp_api_base_url}/api/threads/{thread_id}/state"
+            f"Monitor: {_get_api_base_url()}/\n"
+            f"Status: GET {_get_api_base_url()}/api/threads/{thread_id}/state"
         )
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure (server not running, DNS error, etc.)
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: request timed out waiting for the server
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -250,8 +351,7 @@ async def start_thread(
     except httpx.RequestError as exc:
         # MCP-H1: other transport-level errors (SSL, proxy, etc.)
         raise ToolError(
-            f"Connection error (is the server running at {settings.mcp_api_base_url}?): "
-            f"{exc}"
+            f"Connection error (is the server running at {_get_api_base_url()}?): {exc}"
         ) from exc
 
 
@@ -260,7 +360,7 @@ async def list_threads(
     limit: Annotated[
         int,
         Field(
-            description="Maximum number of threads to return (1–200). Defaults to 20.",
+            description="Maximum number of threads to return (1-200). Defaults to 20.",
             ge=1,
             le=200,
         ),
@@ -272,7 +372,7 @@ async def list_threads(
         ),
     ] = 0,
 ) -> str:
-    """List existing orchestration threads to discover work that can be resumed or monitored.
+    """List existing orchestration threads to discover resumable or monitorable work.
 
     Use this tool before calling ``start_thread`` to check whether a thread
     for the same task already exists.  Use ``send_message`` to continue an
@@ -301,7 +401,7 @@ async def list_threads(
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/threads",
+            f"{_get_api_base_url()}/api/threads",
             params={"limit": limit, "offset": offset},
             timeout=_MCP_QUERY_TIMEOUT,
         )
@@ -328,12 +428,12 @@ async def list_threads(
         return "".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -392,7 +492,7 @@ async def respond_to_permission(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/permissions/{permission_request_id}/respond",
+            f"{_get_api_base_url()}/api/permissions/{permission_request_id}/respond",
             json={"option_id": option_id},
             timeout=_MCP_QUERY_TIMEOUT,
         )
@@ -408,12 +508,12 @@ async def respond_to_permission(
         )
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -467,11 +567,11 @@ async def get_thread_status(
                    (in the thread listing), e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
-    ws_live_url = _ws_url_from_api_base(settings.mcp_api_base_url)
+    ws_live_url = _ws_url_from_api_base(_get_api_base_url())
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/state",
+            f"{_get_api_base_url()}/api/threads/{thread_id}/state",
             timeout=_MCP_QUERY_TIMEOUT,
         )
         resp.raise_for_status()
@@ -489,12 +589,13 @@ async def get_thread_status(
             f"Messages: {len(messages)}",
         ]
 
-        # Last message preview (truncated to 200 chars)
+        # Last message preview
         if messages:
             last_msg = messages[-1]
             content = last_msg.get("content", "")
             role = last_msg.get("role", "unknown")
-            preview = content[:200] + ("..." if len(content) > 200 else "")
+            ellipsis = "..." if len(content) > _PREVIEW_TRUNCATE_LEN else ""
+            preview = content[:_PREVIEW_TRUNCATE_LEN] + ellipsis
             lines.append(f"Last message ({role}): {preview}")
 
         # Agent summaries
@@ -524,13 +625,13 @@ async def get_thread_status(
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -548,7 +649,11 @@ async def send_message(
     thread_id: Annotated[
         str,
         Field(
-            description="The UUID of the target thread. Obtain from start_thread or list_threads.",
+            description=(
+                "The UUID of the target thread."
+                " Obtain from start_thread"
+                " or list_threads."
+            ),
         ),
     ],
     message: Annotated[
@@ -562,7 +667,7 @@ async def send_message(
         ),
     ],
 ) -> str:
-    """Send a follow-up message into an existing thread to provide input or new instructions.
+    """Send a follow-up message into an existing thread.
 
     Use this tool to continue a conversation with an already-running or
     paused thread.  Do NOT use this to start a new workflow — use
@@ -589,7 +694,7 @@ async def send_message(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/messages",
+            f"{_get_api_base_url()}/api/threads/{thread_id}/messages",
             json={"content": message},
             timeout=_MCP_QUERY_TIMEOUT,
         )
@@ -598,13 +703,13 @@ async def send_message(
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -619,7 +724,10 @@ async def send_message(
 
 @mcp.tool()
 async def get_team_status() -> str:
-    """Get a global overview of the orchestration team: all agents, active threads, and pending permissions.
+    """Get a global overview of the orchestration team.
+
+    Includes all agents, active threads, and pending
+    permissions.
 
     Use this tool for a high-level dashboard view of the entire system.  Do
     NOT use this to check the status of a single thread — use
@@ -628,7 +736,7 @@ async def get_team_status() -> str:
     ``get_pending_permissions`` for a focused permission-only view.
 
     Agent lifecycle states may lag behind real-time execution because the
-    control surface aggregates data relayed from the worker process.  If no
+    gateway aggregates data relayed from the worker process.  If no
     threads have been started, all lists will be empty.
 
     Returns a structured plain-text block containing:
@@ -641,7 +749,7 @@ async def get_team_status() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/team/status",
+            f"{_get_api_base_url()}/api/team/status",
             timeout=_MCP_QUERY_TIMEOUT,
         )
         resp.raise_for_status()
@@ -672,12 +780,12 @@ async def get_team_status() -> str:
         return "\n".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -688,7 +796,7 @@ async def get_team_status() -> str:
 
 @mcp.tool()
 async def get_pending_permissions() -> str:
-    """List all pending permission requests across all active threads that need a response.
+    """List all pending permission requests across active threads that need a response.
 
     Use this tool to discover which agent actions are blocked waiting for
     human approval.  After reviewing the results, call
@@ -711,7 +819,7 @@ async def get_pending_permissions() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/team/status",
+            f"{_get_api_base_url()}/api/team/status",
             timeout=_MCP_QUERY_TIMEOUT,
         )
         resp.raise_for_status()
@@ -732,12 +840,12 @@ async def get_pending_permissions() -> str:
         return "\n".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -748,7 +856,7 @@ async def get_pending_permissions() -> str:
 
 @mcp.tool()
 async def list_team_presets() -> str:
-    """List all available team configuration presets that can be used with ``start_thread``.
+    """List all available team configuration presets usable with ``start_thread``.
 
     Use this tool to discover valid ``team_preset`` values before calling
     ``start_thread``.  Do NOT use this to check which preset a running thread
@@ -767,7 +875,7 @@ async def list_team_presets() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/teams",
+            f"{_get_api_base_url()}/api/teams",
             timeout=_MCP_QUERY_TIMEOUT,
         )
         resp.raise_for_status()
@@ -791,15 +899,125 @@ async def list_team_presets() -> str:
         return "".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
+    except httpx.RequestError as exc:
+        raise ToolError(f"Connection error: {exc}") from exc
+
+
+@mcp.tool()
+async def delete_thread(
+    thread_id: Annotated[
+        str,
+        Field(
+            description=("The UUID of the thread to delete. Obtain from list_threads."),
+        ),
+    ],
+) -> str:
+    """Permanently delete a thread and all its associated data.
+
+    Use this tool to remove a thread that is no longer needed.  This is
+    irreversible — all messages, artifacts, plan entries, and checkpoints
+    are permanently destroyed.  Do NOT use this on active/running threads;
+    cancel them first with ``cancel_thread``.
+
+    Returns 404 if the thread_id does not match any known thread.
+
+    Args:
+        thread_id: The UUID of the thread to delete, e.g.
+                   '550e8400-e29b-41d4-a716-446655440000'.
+    """
+    try:
+        client = _get_client()
+        resp = await client.delete(
+            f"{_get_api_base_url()}/api/threads/{thread_id}",
+            timeout=_MCP_QUERY_TIMEOUT,
+        )
+        resp.raise_for_status()
+        return f"Thread {thread_id} deleted."
+    except httpx.ConnectError as exc:
+        raise ToolError(
+            f"Network error: could not connect to {_get_api_base_url()}. "
+            f"Is the server running? Detail: {exc}"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise ToolError(
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
+            f"Detail: {exc}"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_NOT_FOUND:
+            raise ToolError(f"Thread {thread_id!r} not found.") from exc
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
+    except httpx.RequestError as exc:
+        raise ToolError(f"Connection error: {exc}") from exc
+
+
+@mcp.tool()
+async def archive_thread(
+    thread_id: Annotated[
+        str,
+        Field(
+            description=(
+                "The UUID of the thread to archive. Obtain from list_threads."
+            ),
+        ),
+    ],
+) -> str:
+    """Archive a completed, failed, or cancelled thread to mark it as historical.
+
+    Use this tool to move a terminal-state thread into the archive.  Archived
+    threads remain queryable but are excluded from active listings.  Do NOT
+    use this on running threads — they must reach a terminal state first
+    (completed, failed, or cancelled).  Already-archived threads are accepted
+    idempotently.
+
+    Returns 404 if the thread_id does not match any known thread.  Returns
+    409 if the thread is still in a non-terminal state.
+
+    Args:
+        thread_id: The UUID of the thread to archive, e.g.
+                   '550e8400-e29b-41d4-a716-446655440000'.
+    """
+    try:
+        client = _get_client()
+        resp = await client.post(
+            f"{_get_api_base_url()}/api/threads/{thread_id}/archive",
+            timeout=_MCP_QUERY_TIMEOUT,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        status = data.get("status", "archived")
+        return f"Thread {thread_id} archived (status: {status})."
+    except httpx.ConnectError as exc:
+        raise ToolError(
+            f"Network error: could not connect to {_get_api_base_url()}. "
+            f"Is the server running? Detail: {exc}"
+        ) from exc
+    except httpx.TimeoutException as exc:
+        raise ToolError(
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
+            f"Detail: {exc}"
+        ) from exc
+    except httpx.HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_NOT_FOUND:
+            raise ToolError(f"Thread {thread_id!r} not found.") from exc
+        if exc.response.status_code == _HTTP_CONFLICT:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Cannot archive thread {thread_id}: "
+                f"{detail or 'thread is not in a terminal state'}."
+            ) from exc
         raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     except httpx.RequestError as exc:
         raise ToolError(f"Connection error: {exc}") from exc
@@ -810,7 +1028,11 @@ async def cancel_thread(
     thread_id: Annotated[
         str,
         Field(
-            description="The UUID of the thread to cancel. Obtain from start_thread or list_threads.",
+            description=(
+                "The UUID of the thread to cancel."
+                " Obtain from start_thread"
+                " or list_threads."
+            ),
         ),
     ],
 ) -> str:
@@ -838,7 +1060,7 @@ async def cancel_thread(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/cancel",
+            f"{_get_api_base_url()}/api/threads/{thread_id}/cancel",
             timeout=_MCP_QUERY_TIMEOUT,
         )
         resp.raise_for_status()
@@ -850,12 +1072,12 @@ async def cancel_thread(
         return f"Thread {thread_id} not cancelled (current status: {status})."
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {_get_api_base_url()}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {_get_api_base_url()} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:

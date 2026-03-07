@@ -31,6 +31,7 @@ dependencies = [
 
 [project.scripts]
 vaultspec = "vaultspec_a2a.cli:cli"
+vaultspec-mcp = "vaultspec_a2a.protocols.mcp.__main__:main"
 
 [project.optional-dependencies]
 eval = [
@@ -84,7 +85,7 @@ line-length = 88
 indent-width = 4
 target-version = "py313"
 # Exclude throwaway utility scripts at repo root (not part of the package).
-exclude = ["fix_*.py"]
+exclude = ["fix_*.py", "_to_oragnize"]
 
 
 [tool.ruff.lint]
@@ -177,7 +178,7 @@ unfixable = ["B"]
 [tool.ruff.lint.pylint]
 # Default max-args=5 is too restrictive for graph compilation and CRUD
 # functions that need thread_id + session + several configuration params.
-max-args = 7
+max-args = 8
 
 [tool.ruff.lint.pydocstyle]
 convention = "google"
@@ -225,4 +226,7 @@ DEP002 = [
 [tool.ty.environment]
 python-version = "3.13"
 root = [".", "src"]
+
+[tool.ty.src]
+exclude = ["_to_oragnize"]
 

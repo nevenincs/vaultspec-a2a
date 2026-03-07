@@ -1,7 +1,15 @@
 """MCP protocol sub-module for the Vaultspec A2A Orchestrator.
 
-Exposes the FastMCP server instance so the FastAPI app can mount it
-at startup. See ADR-003 (Protocol Bridging) and ADR-006 (MCP Tool Mapping).
+Standalone MCP server that communicates with the gateway over HTTP.
+No internal imports from core/ or api/ — all coupling is via the
+VAULTSPEC_MCP_API_BASE_URL environment variable.
+
+Run standalone::
+
+    python -m vaultspec_a2a.protocols.mcp                  # stdio
+    python -m vaultspec_a2a.protocols.mcp --transport streamable-http
+
+See ADR-003 (Protocol Bridging) and ADR-006 (MCP Tool Mapping).
 """
 
 from .server import mcp as mcp

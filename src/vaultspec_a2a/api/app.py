@@ -1,4 +1,4 @@
-"""FastAPI application factory -- the control surface entry point (ADR-019).
+"""FastAPI application factory -- the gateway entry point (ADR-019).
 
 Creates the ASGI application with:
 - Lifespan management (init/close DB, EventAggregator, telemetry)
@@ -7,9 +7,8 @@ Creates the ASGI application with:
 - Internal router from ``internal.py`` (worker relay)
 - WebSocket route via ``ConnectionManager``
 - StaticFiles mount for React SPA build at ``src/ui/build/`` (ADR-007/018)
-- Worker supervisor for auto-spawn mode
 
-The control surface NO LONGER runs agent execution locally.  All graph
+The gateway NO LONGER runs agent execution locally.  All graph
 compilation and ``aggregator.ingest()`` calls are dispatched to the
 worker process via HTTP POST to ``/dispatch`` (ADR-019 service separation).
 
@@ -27,7 +26,6 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any, cast
 
-import anyio
 import httpx
 import uvicorn
 
@@ -44,13 +42,11 @@ from ..core import EventAggregator, settings
 from ..database.crud import get_thread
 from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.session import close_db, get_session_factory, init_db
-from ..protocols import mcp as mcp_server
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from .endpoints import router
 from .internal import internal_router
 from .schemas.enums import AgentControlAction
 from .schemas.internal import DispatchRequest
-from .supervisor import WorkerSupervisor
 from .websocket import ConnectionManager
 
 
@@ -59,7 +55,9 @@ __all__ = ["create_app", "main"]
 logger = logging.getLogger(__name__)
 
 # Path to the React SPA build output (ADR-007 / ADR-018)
-_UI_BUILD_DIR = Path(__file__).resolve().parent.parent.parent.parent / "src" / "ui" / "build"
+_UI_BUILD_DIR = (
+    Path(__file__).resolve().parent.parent.parent.parent / "src" / "ui" / "build"
+)
 
 # React/Vite hashed immutable assets: /_app/immutable/** or /assets/**
 _IMMUTABLE_PATTERN = re.compile(r"^/(_app/immutable|assets)/")
@@ -95,7 +93,7 @@ class _CacheControlMiddleware(BaseHTTPMiddleware):
 
 def _create_dispatch_message_handler(
     worker_client: httpx.AsyncClient,
-    session_factory: Any,
+    session_factory: Any,  # noqa: ANN401
 ) -> Callable:
     """Create message handler that dispatches to the worker process.
 
@@ -178,7 +176,9 @@ def _create_dispatch_control_handler(
                 dispatch_action = "cancel"
             case AgentControlAction.RESUME:
                 logger.warning(
-                    "WS RESUME without option_id is a no-op; use POST /permissions/{id}/respond -- thread %s",
+                    "WS RESUME without option_id is a no-op;"
+                    " use POST /permissions/{id}/respond"
+                    " -- thread %s",
                     thread_id,
                 )
                 return
@@ -214,7 +214,7 @@ def _create_dispatch_control_handler(
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
 
-    ADR-019: The control surface no longer runs agent execution.  All
+    ADR-019: The gateway no longer runs agent execution.  All
     graph compilation and ingest calls are dispatched to the worker
     process.  The lifespan sets up:
     1. Database (SQLAlchemy)
@@ -223,11 +223,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     4. ConnectionManager
     5. Telemetry
     6. httpx.AsyncClient for worker dispatch
-    7. WorkerSupervisor (optional, auto_spawn_worker mode)
-    8. Task group for supervisor monitoring only
     """
     # --- Startup ---
-    logger.info("Starting control surface lifespan (ADR-019)")
+    logger.info("Starting gateway lifespan (ADR-019)")
 
     # Single source of truth for the database file path (Fix 4 / H7).
     db_path = settings.database_path
@@ -242,7 +240,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     # idempotent — fills missing keys with zero values, touches nothing else).
     backfill_teamstate_sdd_fields(db_path)
 
-    # LangGraph checkpointer -- READ-ONLY in the control surface (ADR-019).
+    # LangGraph checkpointer -- READ-ONLY in the gateway (ADR-019).
     # The worker owns the write path.  This connection is safe for concurrent
     # reads under SQLite WAL mode.  Used by GET /threads/{id}/state to read
     # checkpoint data for snapshot enrichment.
@@ -251,7 +249,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.checkpointer = checkpointer
         logger.info("LangGraph checkpointer initialised (read-only) at %s", db_path)
 
-        # Event aggregator -- lightweight in the control surface.
+        # Event aggregator -- lightweight in the gateway.
         # No graphs are registered here; the worker runs ingest.
         aggregator = EventAggregator()
         app.state.aggregator = aggregator
@@ -275,14 +273,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.worker_client = worker_client
         logger.info("Worker client configured: %s", settings.worker_url)
 
-        # Optional: auto-spawn the worker as a child process
-        supervisor: WorkerSupervisor | None = None
-        if settings.auto_spawn_worker:
-            supervisor = WorkerSupervisor(worker_port=settings.worker_port)
-            supervisor.start()
-            app.state.worker_supervisor = supervisor
-            logger.info("Worker supervisor started (auto_spawn_worker=True)")
-
         # Wire dispatch handlers for WebSocket commands
         msg_handler = _create_dispatch_message_handler(
             worker_client, get_session_factory()
@@ -292,34 +282,19 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         ctrl_handler = _create_dispatch_control_handler(worker_client)
         connection_manager.set_agent_control_handler(ctrl_handler)
 
-        # Task group for supervisor monitoring only (NOT for agent execution)
-        async with anyio.create_task_group() as tg:
-            if supervisor is not None:
-                tg.start_soon(supervisor.monitor)
+        logger.info("Gateway startup complete")
 
-            logger.info("Control surface startup complete")
+        yield
 
-            yield
+        # --- Shutdown ---
+        logger.info("Shutting down gateway")
 
-            # --- Shutdown ---
-            logger.info("Shutting down control surface")
+        await worker_client.aclose()
+        await connection_manager.shutdown()
+        await aggregator.shutdown()
+        await close_db()
 
-            # Cancel monitor task FIRST to prevent restart race: if the worker
-            # dies between stop() and cancel, monitor would immediately respawn it.
-            tg.cancel_scope.cancel()
-
-            # Close worker HTTP client
-            await worker_client.aclose()
-
-            # Stop worker supervisor (async since T29)
-            if supervisor is not None:
-                await supervisor.stop()
-
-            await connection_manager.shutdown()
-            await aggregator.shutdown()
-            await close_db()
-
-            logger.info("Control surface shutdown complete")
+        logger.info("Gateway shutdown complete")
 
 
 def main() -> None:
@@ -375,10 +350,6 @@ def create_app() -> FastAPI:
 
     # --- Internal Router (worker relay -- ADR-019) ---
     app.include_router(internal_router)
-
-    # --- MCP Server (SSE transport for IDE clients: Cursor, Windsurf) ---
-    # Mounted at /mcp; exposes team_create and team_status tools (ADR-006 S5)
-    app.mount("/mcp", mcp_server.sse_app())
 
     # --- WebSocket Route ---
     @app.websocket("/ws")

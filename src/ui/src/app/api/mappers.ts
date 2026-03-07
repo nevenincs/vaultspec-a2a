@@ -70,9 +70,9 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
     id: wire.request_id,
     thread_id: wire.thread_id,
     agent_id: wire.agent_id ?? '',
-    agent_name: wire.agent_id ?? '',
+    agent_name: wire.agent_id ?? 'Unknown',
     tool_name: wire.tool_call ?? '',
-    tool_kind: 'other',
+    tool_kind: wire.tool_kind ? mapToolKind(wire.tool_kind) : 'other',
     message: wire.description,
     options: wire.options.map((o) => ({
       id: o.option_id,
@@ -96,7 +96,7 @@ const FRONTEND_TOOL_KINDS = new Set<string>([
 ]);
 
 export function mapToolCallStatus(wire: WireToolCallStatus): ToolCallStatus {
-  return wire === 'in_progress' ? 'running' : wire;
+  return wire as ToolCallStatus;
 }
 
 export function mapToolKind(wire: WireToolKind): ToolKind {

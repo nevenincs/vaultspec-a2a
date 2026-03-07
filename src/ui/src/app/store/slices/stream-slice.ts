@@ -250,9 +250,9 @@ export const createStreamSlice: StateCreator<
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
               agent_name: resolveAgentName(event.agent_id),
-              entries: event.entries.map((e) => ({
-                id: `${e.content.slice(0, 20)}-${e.status}`,
-                title: e.content,
+              entries: event.entries.map((e, i) => ({
+                id: `plan-entry-${i}`,
+                content: e.content,
                 status: e.status,
                 priority: e.priority,
               })),

@@ -14,7 +14,7 @@ export function ToolCallCard({
   onInspect: (target: InspectorTarget) => void;
 }) {
   const statusIcon =
-    event.status === 'running' ? (
+    event.status === 'in_progress' ? (
       <Loader2 className="text-status-info/70 h-3.5 w-3.5 shrink-0 animate-spin" />
     ) : event.status === 'completed' ? (
       <Check className="text-status-success/70 h-3.5 w-3.5 shrink-0" />

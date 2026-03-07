@@ -68,12 +68,22 @@ export function initWsBridge(): () => void {
             return prev;
           },
         );
-        // Update thread's agent_state in the threads list cache
+        // Update thread's agent_state in the threads list cache.
+        // FE-24: When agent reaches terminal state, also update thread status
+        // so the thread list reflects completion without waiting for REST refetch.
+        const terminalStates = new Set(['completed', 'failed', 'cancelled']);
+        const isTerminal = terminalStates.has(event.state);
         queryClient.setQueryData<ThreadSummary[]>(
           queryKeys.threads.list(),
           (prev = []) =>
             prev.map((t) =>
-              t.thread_id === threadId ? { ...t, agent_state: event.state } : t,
+              t.thread_id === threadId
+                ? {
+                    ...t,
+                    agent_state: event.state,
+                    ...(isTerminal ? { status: event.state } : {}),
+                  }
+                : t,
             ),
         );
         break;

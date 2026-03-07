@@ -76,7 +76,7 @@ export function toolStatusColor(status: ToolCallStatus): string {
   switch (status) {
     case 'pending':
       return 'text-muted-foreground';
-    case 'running':
+    case 'in_progress':
       return 'text-status-info';
     case 'completed':
       return 'text-status-success';

@@ -27,6 +27,7 @@ def code_correctness_evaluator(run: Any, example: Any) -> dict:
         capture_output=True,
         text=True,
         timeout=120,
+        check=False,
     )
 
     passed = 0

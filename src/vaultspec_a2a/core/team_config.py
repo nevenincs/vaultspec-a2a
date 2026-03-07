@@ -79,7 +79,8 @@ _PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
 def discover_team_preset_ids() -> frozenset[str]:
     """Discover available team preset IDs by globbing the bundled TOML directory.
 
-    Returns a frozenset of TOML file stems from ``src/vaultspec_a2a/core/presets/teams/*.toml``.
+    Returns a frozenset of TOML file stems from
+    ``src/vaultspec_a2a/core/presets/teams/*.toml``.
     If the directory does not exist or is empty, returns an empty frozenset.
     """
     if _PRESET_TEAMS_DIR.is_dir():
@@ -155,7 +156,7 @@ class AgentConfig(BaseModel):
 
     @model_validator(mode="after")
     def validate_id_is_identifier(self) -> "AgentConfig":
-        """Ensure agent.id matches _SAFE_AGENT_ID_RE (alphanumeric, underscores, hyphens)."""
+        """Ensure agent.id matches _SAFE_AGENT_ID_RE."""
         if not _SAFE_AGENT_ID_RE.match(self.id):
             raise ValueError(
                 f"Invalid agent.id {self.id!r}: must match pattern "

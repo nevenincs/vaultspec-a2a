@@ -608,9 +608,9 @@ class TestTeamExtendedConfigDefaults:
         """recursion_limit must be between 1 and 500."""
         assert TeamGraphConfig(recursion_limit=1).recursion_limit == 1
         assert TeamGraphConfig(recursion_limit=500).recursion_limit == 500
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TeamGraphConfig(recursion_limit=0)
-        with pytest.raises(Exception):
+        with pytest.raises(ValidationError):
             TeamGraphConfig(recursion_limit=501)
 
     def test_team_config_has_new_blocks_with_defaults(self) -> None:

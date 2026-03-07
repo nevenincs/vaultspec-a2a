@@ -20,7 +20,8 @@ __all__ = ["ProviderFactory"]
 logger = logging.getLogger(__name__)
 
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
-# src/vaultspec_a2a/providers/factory.py -> providers -> vaultspec_a2a -> src -> project root
+# src/vaultspec_a2a/providers/factory.py -> providers ->
+# vaultspec_a2a -> src -> project root
 _PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _CLAUDE_ACP_JS = (
     _PROJECT_ROOT
@@ -74,7 +75,7 @@ class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
     @classmethod
-    def create(
+    def create(  # noqa: PLR0912
         cls,
         provider: Provider,
         model: "Model | str | None" = None,
@@ -98,7 +99,13 @@ class ProviderFactory:
 
         # Guard unsupported providers before model resolution to produce a clear error
         # (PROVIDER_DEFAULT_MODELS lookup raises KeyError for unknown providers).
-        supported = {Provider.CLAUDE, Provider.GEMINI, Provider.MOCK, Provider.ZHIPU, Provider.OPENAI}
+        supported = {
+            Provider.CLAUDE,
+            Provider.GEMINI,
+            Provider.MOCK,
+            Provider.ZHIPU,
+            Provider.OPENAI,
+        }
         if provider not in supported:
             logger.error("Failed to instantiate: Unsupported provider %s", provider)
             raise ValueError(f"Unsupported provider: {provider}")
@@ -139,6 +146,7 @@ class ProviderFactory:
 
         if provider == Provider.MOCK:
             from .mock_chat_model import MockChatModel  # noqa: PLC0415
+
             return MockChatModel(agent_config=agent_config)
 
         if provider == Provider.CLAUDE:

@@ -111,15 +111,14 @@ class AgentProcessError(VaultspecError):
 class WorkerExecutionError(VaultspecError):
     """Raised when a worker node's model invocation fails after all retries."""
 
-    __slots__ = ("worker", "model", "message_count")
+    __slots__ = ("message_count", "model", "worker")
 
     severity = ErrorSeverity.TRANSIENT
     recovery_action = RecoveryAction.ESCALATE_TO_USER
 
     def __init__(self, worker: str, model: str, message_count: int) -> None:
-        super().__init__(
-            f"worker={worker!r} model={model} messages={message_count}"
-        )
+        """Record worker, model and message count for context-window overflow."""
+        super().__init__(f"worker={worker!r} model={model} messages={message_count}")
         self.worker = worker
         self.model = model
         self.message_count = message_count
@@ -252,7 +251,8 @@ class AgentConfigNotFoundError(ConfigError):
         super().__init__(
             f"No agent config found for '{agent_id}'. "
             f"Expected workspace override at .vaultspec/agents/{agent_id}.toml "
-            f"or bundled preset at src/vaultspec_a2a/core/presets/agents/{agent_id}.toml."
+            "or bundled preset at "
+            f"src/vaultspec_a2a/core/presets/agents/{agent_id}.toml."
         )
         self.agent_id = agent_id
 
@@ -281,7 +281,6 @@ __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
     "ConfigError",
-    "WorkerExecutionError",
     "ContextOverflowError",
     "DatabaseError",
     "ErrorSeverity",
@@ -295,5 +294,6 @@ __all__ = [
     "TeamConfigNotFoundError",
     "TokenBudgetExceededError",
     "VaultspecError",
+    "WorkerExecutionError",
     "WorkspaceError",
 ]

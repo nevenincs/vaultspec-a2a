@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
-
 from pathlib import Path
+
+import pytest
 
 from ..mount import create_mount_node
 
@@ -95,7 +95,9 @@ async def test_queue_not_filtered_in_research_phase(tmp_path: Path) -> None:
     """In research phase, queue files are included unfiltered (all rows present)."""
     _make_queue_file(tmp_path)
     node = create_mount_node(tmp_path)
-    state = _make_state(workspace_root=tmp_path, phase="research", current_task_id="T-001")
+    state = _make_state(
+        workspace_root=tmp_path, phase="research", current_task_id="T-001"
+    )
     result = await node(state)
 
     ctx = result["mounted_context"]

@@ -8,6 +8,7 @@ References:
     - ADR-028: Universal Rule Propagation
 """
 
+import contextlib
 import logging
 
 from pathlib import Path
@@ -31,6 +32,7 @@ class RuleManager:
     """
 
     def __init__(self, workspace_root: Path, *, include_builtin: bool = False) -> None:
+        """Set up rule discovery rooted at *workspace_root*."""
         self._workspace_root = workspace_root.resolve()
         self._include_builtin = include_builtin
 
@@ -116,10 +118,8 @@ class RuleManager:
             self._cached_dir_mtime = 0.0
         self._cached_file_mtimes = {}
         for p in paths:
-            try:
+            with contextlib.suppress(OSError):
                 self._cached_file_mtimes[p] = p.stat().st_mtime
-            except OSError:
-                pass
 
         return result
 
@@ -203,12 +203,10 @@ class RuleManager:
             if stripped.startswith("@"):
                 include_ref = stripped[1:].strip()
                 # Skip URL includes — pass through as-is
-                if include_ref.startswith("http://") or include_ref.startswith("https://"):
+                if include_ref.startswith(("http://", "https://")):
                     result.append(line)
                 else:
-                    result.append(
-                        self._expand_include(include_ref, base_dir, seen)
-                    )
+                    result.append(self._expand_include(include_ref, base_dir, seen))
             else:
                 result.append(line)
 

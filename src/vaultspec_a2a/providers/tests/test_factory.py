@@ -10,7 +10,7 @@ from langchain_openai import ChatOpenAI
 
 from ...utils.enums import MODEL_MAP, Model, Provider
 from ..acp_chat_model import AcpChatModel
-from ..factory import ProviderFactory, _build_acp_command, _BIN_PATH, _CLAUDE_ACP_JS
+from ..factory import _BIN_PATH, ProviderFactory, _build_acp_command
 
 
 def get_model_attr(model_obj: BaseChatModel) -> str | None:

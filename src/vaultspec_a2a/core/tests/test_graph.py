@@ -560,7 +560,8 @@ def test_resolve_model_for_worker_falls_back_on_primary_failure() -> None:
         return fallback_model
 
     with patch(
-        "vaultspec_a2a.core.graph.ProviderFactory.create", side_effect=_create_side_effect
+        "vaultspec_a2a.core.graph.ProviderFactory.create",
+        side_effect=_create_side_effect,
     ):
         # Inject a fallback chain via agent model config
         agent_cfg = agent_cfg.model_copy(

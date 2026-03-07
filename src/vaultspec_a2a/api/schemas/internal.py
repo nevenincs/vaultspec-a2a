@@ -1,6 +1,8 @@
-"""Internal IPC message types between control surface and worker (ADR-019)."""
+"""Internal IPC message types between gateway and worker (ADR-019)."""
 
 from __future__ import annotations
+
+from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
@@ -14,14 +16,16 @@ __all__ = [
 
 
 class DispatchRequest(BaseModel):
-    """Work dispatch command from control surface to worker."""
+    """Work dispatch command from gateway to worker."""
 
+    dispatch_id: str = Field(default_factory=lambda: uuid4().hex)
     action: str = Field(description="'ingest' | 'resume' | 'cancel'")
     thread_id: str
     agent_id: str = "vaultspec-supervisor"
     # For ingest: user message content
     content: str | None = None
-    # For resume: permission response option (str for tool perms, dict for plan approval)
+    # For resume: permission response option
+    # (str for tool perms, dict for plan approval)
     option_id: str | dict | None = None
     # For initial thread creation
     team_preset: str | None = None
@@ -38,7 +42,7 @@ class DispatchRequest(BaseModel):
 
 
 class DispatchResponse(BaseModel):
-    """Acknowledgement from worker to control surface."""
+    """Acknowledgement from worker to gateway."""
 
     status: str = "dispatched"
     thread_id: str
@@ -54,7 +58,7 @@ class HeartbeatMessage(BaseModel):
 
 
 class WorkerEventEnvelope(BaseModel):
-    """Wrapper for events sent from worker to control surface via internal WS."""
+    """Wrapper for events sent from worker to gateway via internal WS."""
 
     type: str = "event"
     thread_id: str

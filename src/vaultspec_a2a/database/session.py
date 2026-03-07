@@ -22,8 +22,8 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ..core.config import settings
 from .models import Base
-from ..core.config import settings  # noqa: TID252
 
 
 logger = logging.getLogger(__name__)
@@ -41,7 +41,6 @@ __all__ = [
 # Module-level singletons (set via ``init_db``)
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
-
 
 
 def _set_wal_mode(dbapi_conn: object, _connection_record: object) -> None:

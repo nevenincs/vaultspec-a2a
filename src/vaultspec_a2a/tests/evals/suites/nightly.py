@@ -14,6 +14,7 @@ import asyncio
 import logging
 import sys
 
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,7 @@ async def run_nightly() -> None:
         "code_correctness, reviewer_completeness, e2e"
     )
 
-    # TODO: Wire aevaluate() calls once LangSmith datasets are populated.
+    # TODO(team): Wire aevaluate() once datasets exist.  # https://github.com/vaultspec/a2a/issues/1
     # Each dimension follows the pattern:
     #
     #   from langsmith import aevaluate

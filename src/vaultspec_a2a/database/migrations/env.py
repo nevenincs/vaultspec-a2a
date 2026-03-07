@@ -13,13 +13,14 @@ import asyncio
 
 from logging.config import fileConfig
 
+from alembic import context
 from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from alembic import context
-
-from vaultspec_a2a.database.models import Base  # noqa: TID252 — Alembic loads env.py outside package context
+from vaultspec_a2a.database.models import (
+    Base,
+)
 
 
 # -- Alembic config object ---------------------------------------------------
@@ -32,7 +33,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def include_name(name: str, type_: str, parent_names: dict) -> bool:  # noqa: ANN401, ARG001
+def include_name(name: str, type_: str, parent_names: dict) -> bool:
     """Scope autogenerate to app-owned tables only.
 
     Uses allowlist form: only tables declared in ``Base.metadata`` are

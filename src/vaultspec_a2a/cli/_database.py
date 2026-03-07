@@ -1,21 +1,24 @@
-"""database group: update, clear, snapshot, snapshots, restore."""
+"""database group: update, clear, snapshot (list), restore."""
 
 from __future__ import annotations
 
+
 __all__ = ["database"]
 
+from datetime import UTC
 from pathlib import Path
 
 import click
+
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
 
 
 def _alembic_cfg() -> tuple:
-    from alembic.config import Config as AlembicConfig
+    from alembic.config import Config as AlembicConfig  # noqa: PLC0415
 
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     cfg = AlembicConfig(str(_ALEMBIC_INI))
     cfg.set_main_option("sqlalchemy.url", settings.database_url)
@@ -23,7 +26,7 @@ def _alembic_cfg() -> tuple:
 
 
 def _get_db_path() -> Path:
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     db_path = settings.database_path
     if str(db_path) == ":memory:":
@@ -41,7 +44,7 @@ def database() -> None:
 @click.option("--target", default="head", help="Migration target (default: head).")
 def update(target: str) -> None:
     """Run pending database migrations."""
-    from alembic import command
+    from alembic import command  # noqa: PLC0415
 
     cfg, _ = _alembic_cfg()
     command.upgrade(cfg, target)
@@ -49,38 +52,46 @@ def update(target: str) -> None:
 
 
 @database.command()
-@click.option("--yes", is_flag=True, required=True, help="Confirm destructive operation.")
+@click.option(
+    "--yes", is_flag=True, required=True, help="Confirm destructive operation."
+)
 def clear(yes: bool) -> None:
     """Delete all application data (preserves schema)."""
-    from sqlalchemy import create_engine, text
+    from sqlalchemy import create_engine, text  # noqa: PLC0415
 
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     engine = create_engine(settings.database_url.replace("+aiosqlite", ""))
     tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]
     with engine.begin() as conn:
         for table in tables:
-            conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608
+            conn.execute(text(f"DELETE FROM {table}"))
     click.echo(f"Cleared {len(tables)} tables.")
 
 
-@database.command()
-def snapshot() -> None:
-    """Create a timestamped snapshot of the database."""
-    import sqlite3
-    from datetime import datetime, timezone
+@database.group(invoke_without_command=True)
+@click.pass_context
+def snapshot(ctx: click.Context) -> None:
+    """Create a timestamped snapshot, or manage snapshots (use 'snapshot list')."""
+    if ctx.invoked_subcommand is not None:
+        return
+
+    import sqlite3  # noqa: PLC0415
+
+    from datetime import datetime  # noqa: PLC0415
 
     db_path = _get_db_path()
     if not db_path.exists():
         click.echo(f"Database not found: {db_path}", err=True)
         raise SystemExit(1)
 
-    ts = datetime.now(tz=timezone.utc).strftime("%Y%m%d-%H%M%S")
+    ts = datetime.now(tz=UTC).strftime("%Y%m%d-%H%M%S")
     dest = db_path.with_suffix(f".snapshot.{ts}")
 
     src_conn = sqlite3.connect(str(db_path))
     dst_conn = sqlite3.connect(str(dest))
     try:
+        src_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         src_conn.backup(dst_conn)
     finally:
         dst_conn.close()
@@ -89,8 +100,8 @@ def snapshot() -> None:
     click.echo(f"Snapshot: {dest}")
 
 
-@database.command()
-def snapshots() -> None:
+@snapshot.command("list")
+def snapshot_list() -> None:
     """List available database snapshots."""
     db_path = _get_db_path()
 
@@ -106,18 +117,29 @@ def snapshots() -> None:
 
 @database.command()
 @click.option("--name", required=True, help="Snapshot filename to restore.")
-def restore(name: str) -> None:
+@click.option("--yes", is_flag=True, help="Confirm destructive operation.")
+def restore(name: str, yes: bool) -> None:
     """Restore database from a snapshot. Refuses if service is running."""
-    import sqlite3
+    if not yes:
+        click.echo("This will overwrite the current database. Pass --yes to confirm.")
+        raise SystemExit(1)
 
-    import httpx
+    import sqlite3  # noqa: PLC0415
 
-    from ..core.config import settings
+    import httpx  # noqa: PLC0415
 
-    for check_port in (settings.port, settings.worker_port):
+    from ..core.config import settings  # noqa: PLC0415
+
+    checks = [
+        (settings.port, "/internal/health"),
+        (settings.worker_port, "/health"),
+    ]
+    for check_port, path in checks:
         try:
-            httpx.get(f"http://127.0.0.1:{check_port}/health", timeout=2.0)
-            click.echo("Service is running. Stop it first: vaultspec service stop", err=True)
+            httpx.get(f"http://127.0.0.1:{check_port}{path}", timeout=2.0)
+            click.echo(
+                "Service is running. Stop it first: vaultspec service stop", err=True
+            )
             raise SystemExit(1)
         except (httpx.ConnectError, httpx.ConnectTimeout):
             pass

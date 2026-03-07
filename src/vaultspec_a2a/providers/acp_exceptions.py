@@ -36,7 +36,7 @@ class AcpErrorCode(IntEnum):
 class AcpError(Exception):
     """Base exception for all ACP-related errors."""
 
-    __slots__ = ("message", "code", "data", "request_id")
+    __slots__ = ("code", "data", "message", "request_id")
 
     def __init__(
         self,

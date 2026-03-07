@@ -5,9 +5,11 @@ retryable endpoints for operations that require guaranteed delivery
 (e.g., permission responses) and state queries (thread listing, snapshots).
 """
 
+import re
+
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...core.metadata import ThreadMetadata
 from ...utils.enums import Model, Provider
@@ -33,14 +35,7 @@ __all__ = [
 
 
 class CreateThreadRequest(BaseModel):
-    """Create a new orchestration thread.
-
-    **Model Selection Policy**: When ``team_preset`` is specified, the ``provider``
-    and ``model`` fields are ignored. Models are defined statically in the team
-    TOML configuration (per ADR-013 §2.3). Per-request model overrides are not
-    supported for team presets. To customize models for a team, create a custom
-    team preset in the workspace or modify bundled presets.
-    """
+    """Create a new orchestration thread."""
 
     title: str | None = Field(default=None, max_length=200)
     # 64 KB limit prevents excessive LLM token consumption and memory pressure
@@ -54,9 +49,18 @@ class CreateThreadRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=64)
     # None = use team preset default (auto_approve); False = always supervised
     autonomous: bool | None = None
-    # DEPRECATED: kept for backward compat, ignored if team_preset is set
-    provider: Provider | None = None
-    model: Model | None = None
+
+    @field_validator("nickname")
+    @classmethod
+    def _validate_nickname_slug(cls, v: str | None) -> str | None:
+        if v is not None and not re.match(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$", v):
+            msg = (
+                "nickname must be a lowercase slug "
+                "(3-64 chars, [a-z0-9-], "
+                "no leading/trailing hyphens)"
+            )
+            raise ValueError(msg)
+        return v
 
 
 class CreateThreadResponse(BaseModel):

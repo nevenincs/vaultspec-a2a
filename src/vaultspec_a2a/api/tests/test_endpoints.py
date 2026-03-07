@@ -4,7 +4,7 @@ Uses FastAPI TestClient with a real in-memory SQLite database and a real
 EventAggregator (no mocks).  Dispatch requests to the worker are captured
 by a test httpx transport and asserted on.
 
-ADR-019: Graph compilation and ingest no longer run in the control surface.
+ADR-019: Graph compilation and ingest no longer run in the gateway.
 All work is dispatched to the worker via HTTP POST to /dispatch.  Tests
 verify that the correct dispatch requests are sent.
 

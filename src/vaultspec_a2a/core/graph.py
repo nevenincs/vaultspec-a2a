@@ -191,7 +191,10 @@ def build_initial_vault_index(
     workspace_root: Path | None,
     feature_tag: str,
 ) -> dict[str, list[str]]:
-    """Scan .vault/ for files matching feature_tag. Returns empty dict when workspace_root is None."""
+    """Scan .vault/ for files matching feature_tag.
+
+    Returns empty dict when workspace_root is None.
+    """
     if workspace_root is None:
         return {}
     index: dict[str, list[str]] = {}
@@ -270,6 +273,8 @@ def compile_team_graph(
         step_timeout:            Per-step timeout in seconds.  When None the
                                  team TOML ``step_timeout_seconds`` value is
                                  used as fallback (TOML-05).
+        feature_tag:             Optional feature tag for task-queue scoping
+                                 (ADR-021).
 
     Returns:
         The compiled StateGraph runnable.

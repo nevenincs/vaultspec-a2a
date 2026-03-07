@@ -8,6 +8,7 @@ from .enums import Model as Model
 from .enums import Provider as Provider
 from .logging import setup_logging as setup_logging
 
+
 __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",

@@ -7,7 +7,7 @@ import pytest
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import BaseMessage, HumanMessage
-from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.outputs import ChatResult
 from langgraph.errors import GraphBubbleUp, GraphInterrupt
 from langgraph.types import Interrupt
 
@@ -30,7 +30,14 @@ class _GraphInterruptModel(BaseChatModel):
         **kwargs: Any,
     ) -> ChatResult:
         raise GraphInterrupt(
-            (Interrupt(value={"type": "permission_request"}, resumable=True, ns=(), when="during"),)
+            (
+                Interrupt(
+                    value={"type": "permission_request"},
+                    resumable=True,
+                    ns=(),
+                    when="during",
+                ),
+            )
         )
 
     @property
@@ -83,7 +90,9 @@ async def test_worker_exception_wraps_with_context() -> None:
     without inspecting the exception chain.
     """
     model = _AlwaysFailModel(error_message="boom")
-    node = create_worker_node(model=model, system_prompt="You are a worker.", name="coder")
+    node = create_worker_node(
+        model=model, system_prompt="You are a worker.", name="coder"
+    )
 
     with pytest.raises(WorkerExecutionError) as exc_info:
         await node(_make_state())
@@ -100,7 +109,9 @@ async def test_worker_exception_chains_original_cause() -> None:
     """WorkerExecutionError.__cause__ is the original exception (raise ... from exc)."""
     original_message = "network timeout"
     model = _AlwaysFailModel(error_message=original_message)
-    node = create_worker_node(model=model, system_prompt="You are a worker.", name="planner")
+    node = create_worker_node(
+        model=model, system_prompt="You are a worker.", name="planner"
+    )
 
     with pytest.raises(WorkerExecutionError) as exc_info:
         await node(_make_state())
@@ -121,7 +132,9 @@ async def test_worker_graphinterrupt_not_wrapped() -> None:
     rather than surfacing the interrupt to the client.
     """
     model = _GraphInterruptModel()
-    node = create_worker_node(model=model, system_prompt="You are a worker.", name="coder")
+    node = create_worker_node(
+        model=model, system_prompt="You are a worker.", name="coder"
+    )
 
     # GraphInterrupt must pass through unwrapped — NOT caught as WorkerExecutionError
     with pytest.raises(GraphBubbleUp) as exc_info:
@@ -138,6 +151,6 @@ async def test_worker_graphinterrupt_not_wrapped() -> None:
 @pytest.mark.asyncio
 async def test_worker_execution_error_is_importable_from_core() -> None:
     """WorkerExecutionError is exported from vaultspec_a2a.core (public API)."""
-    from vaultspec_a2a.core import WorkerExecutionError as WEE  # noqa: PLC0415
+    from vaultspec_a2a.core import WorkerExecutionError as WorkerExecErr
 
-    assert WEE is WorkerExecutionError
+    assert WorkerExecErr is WorkerExecutionError

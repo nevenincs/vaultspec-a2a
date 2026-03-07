@@ -17,7 +17,6 @@ Architecture:
 import asyncio
 import json
 import logging
-import os
 import re
 import shutil
 import subprocess
@@ -53,6 +52,8 @@ from pydantic import Field, PrivateAttr
 from ..core.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
+from ._subprocess import kill_process_tree as _kill_process_tree
+from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
     AcpAuthError,
     AcpError,
@@ -134,10 +135,6 @@ def _log_task_exception(task: asyncio.Task) -> None:
     """Log unhandled exceptions from fire-and-forget background RPC tasks."""
     if not task.cancelled() and (exc := task.exception()):
         logger.error("Background RPC task failed: %s", exc, exc_info=exc)
-
-
-from ._subprocess import kill_process_tree as _kill_process_tree
-from ._subprocess import spawn_acp_process as _spawn_acp_process
 
 
 @dataclass
@@ -244,7 +241,8 @@ class AcpChatModel(BaseChatModel):
         prompt_blocks: list[dict[str, str]] = []
         for msg in messages:
             if isinstance(
-                msg, (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk)
+                msg,
+                (HumanMessage, SystemMessage, ChatMessage, AIMessage, AIMessageChunk),
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
@@ -261,12 +259,14 @@ class AcpChatModel(BaseChatModel):
         # subscription, causing auth/billing failures.
         if "CLAUDE_CODE_OAUTH_TOKEN" in env:
             env.pop("ANTHROPIC_API_KEY", None)
-        # ADR-002 §5.1: bypass bundled cli.js — use system claude binary (native PE32+ Bun exe)
+        # ADR-002 §5.1: bypass bundled cli.js — use system
+        # claude binary (native PE32+ Bun exe)
         _system_claude = shutil.which("claude")
         if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
             env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
-        # ACP-ENV-006: suppress interactive prompts that stall non-interactive ACP subprocesses.
+        # ACP-ENV-006: suppress interactive prompts that
+        # stall non-interactive ACP subprocesses.
         env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
@@ -1168,7 +1168,9 @@ class AcpChatModel(BaseChatModel):
                 if isinstance(err, dict)
                 else AcpErrorCode.INTERNAL_ERROR
             )
-            err_msg = str(err.get("message", err)) if isinstance(err, dict) else str(err)
+            err_msg = (
+                str(err.get("message", err)) if isinstance(err, dict) else str(err)
+            )
             # ACP-AUTH-001: surface actionable guidance when the agent reports
             # authRequired so the operator knows exactly which command to run.
             if isinstance(err, dict) and (
@@ -1340,9 +1342,7 @@ class AcpChatModel(BaseChatModel):
         self._require_session()
         # Select methodId: prefer first available method from initialize response.
         method_id: str = (
-            self._auth_methods[0].get("id", "oauth")
-            if self._auth_methods
-            else "oauth"
+            self._auth_methods[0].get("id", "oauth") if self._auth_methods else "oauth"
         )
         rpc_id = AcpRequestId.AUTHENTICATE
         futures = self._require_response_futures()

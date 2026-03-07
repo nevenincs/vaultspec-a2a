@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 __all__ = ["service"]
 
 import click
@@ -20,7 +21,9 @@ def service() -> None:
     type=click.Choice(["backend", "worker"], case_sensitive=False),
 )
 @click.option("--host", default=None, help="Bind host (default: from settings).")
-@click.option("--port", default=None, type=int, help="Bind port (default: from settings).")
+@click.option(
+    "--port", default=None, type=int, help="Bind port (default: from settings)."
+)
 @click.option("--log-level", default=None, help="Uvicorn log level.")
 def start(
     target: str | None,
@@ -28,10 +31,13 @@ def start(
     port: int | None,
     log_level: str | None,
 ) -> None:
-    """Start backend or worker. Bare = start backend (worker auto-spawns via settings)."""
-    import uvicorn
+    """Start backend or worker.
 
-    from ..core.config import settings
+    Bare = start backend (worker auto-spawns via settings).
+    """
+    import uvicorn  # noqa: PLC0415
+
+    from ..core.config import settings  # noqa: PLC0415
 
     level = (log_level or settings.log_level.value).lower()
 
@@ -62,9 +68,9 @@ def start(
 )
 def stop(target: str | None) -> None:
     """Gracefully stop backend and/or worker. Bare = stop both."""
-    import httpx
+    import httpx  # noqa: PLC0415
 
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     # Backend shutdown is at /api/admin/shutdown (router prefix="/api").
     # Worker has no shutdown endpoint — use the same path as a best-effort.
@@ -84,36 +90,44 @@ def stop(target: str | None) -> None:
 
 
 @service.command()
-@click.argument("target", type=click.Choice(["backend", "worker"], case_sensitive=False))
+@click.argument(
+    "target", type=click.Choice(["backend", "worker"], case_sensitive=False)
+)
 def kill(target: str) -> None:
     """Force-kill a process by port."""
-    import subprocess
+    import subprocess  # noqa: PLC0415
 
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     port = settings.port if target == "backend" else settings.worker_port
     result = subprocess.run(
         [
-            "powershell", "-Command",
-            f"(Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue).OwningProcess",
+            "powershell",
+            "-Command",
+            f"(Get-NetTCPConnection -LocalPort {port}"
+            " -State Listen"
+            " -ErrorAction SilentlyContinue"
+            ").OwningProcess",
         ],
-        capture_output=True, text=True, check=False,
+        capture_output=True,
+        text=True,
+        check=False,
     )
     pids = set(result.stdout.strip().split("\n")) - {"", "0"}
     if not pids:
         click.echo(f"No process found on port {port}.")
         return
     for pid in pids:
-        subprocess.run(["taskkill", "/F", "/PID", pid.strip()], check=False)
+        subprocess.run(["taskkill", "/F", "/T", "/PID", pid.strip()], check=False)
     click.echo(f"{target.capitalize()} killed (port {port}).")
 
 
 @service.command()
 def status() -> None:
     """Check if backend and worker are running."""
-    import httpx
+    import httpx  # noqa: PLC0415
 
-    from ..core.config import settings
+    from ..core.config import settings  # noqa: PLC0415
 
     # Backend health is at /internal/health, worker at /health.
     checks = [
@@ -123,6 +137,8 @@ def status() -> None:
     for name, port, path in checks:
         try:
             resp = httpx.get(f"http://127.0.0.1:{port}{path}", timeout=2.0)
-            click.echo(f"{name.capitalize()}: running (port {port}, HTTP {resp.status_code})")
+            click.echo(
+                f"{name.capitalize()}: running (port {port}, HTTP {resp.status_code})"
+            )
         except (httpx.ConnectError, httpx.ConnectTimeout):
             click.echo(f"{name.capitalize()}: stopped (port {port})")

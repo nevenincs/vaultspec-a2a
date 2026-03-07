@@ -26,7 +26,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 # M19/DB-M1: database → core is the normal dependency direction (not circular).
 # NicknameConflictError is a domain exception that belongs in core; database
 # raises it when detecting UNIQUE constraint violations on nickname.
-# NOTE (DB-M1): This cross-module import (vaultspec_a2a/database → vaultspec_a2a/core) is intentional
+# NOTE (DB-M1): This cross-module import
+# (vaultspec_a2a/database → vaultspec_a2a/core) is intentional
 # and follows the layered dependency direction prescribed by ADR-009. Moving this
 # exception into vaultspec_a2a/database would create an orphan with no semantic home.
 from ..core.exceptions import NicknameConflictError
@@ -123,6 +124,7 @@ async def create_thread(
         metadata: JSON-serialised ThreadMetadata (ADR-014).
         nickname: Optional human-friendly nickname (unique).
         thread_id: Optional explicit ID; auto-generated if omitted.
+        team_preset: Optional team preset name used for this thread.
 
     Returns:
         The persisted ``ThreadModel`` instance.
@@ -241,14 +243,24 @@ class InvalidTransitionError(ValueError):
 # Terminal states — once a thread reaches one of these, it cannot regress
 # to a non-terminal state.
 _TERMINAL_STATES: frozenset[ThreadStatus] = frozenset(
-    {ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED, ThreadStatus.ARCHIVED}
+    {
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+        ThreadStatus.ARCHIVED,
+    }
 )
 
 # Valid transitions: current_status → set of allowed next statuses.
 # Any transition not listed here is rejected.
 _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
-        {ThreadStatus.CREATED, ThreadStatus.RUNNING, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+        {
+            ThreadStatus.CREATED,
+            ThreadStatus.RUNNING,
+            ThreadStatus.FAILED,
+            ThreadStatus.CANCELLED,
+        }
     ),
     ThreadStatus.CREATED: frozenset(
         {ThreadStatus.RUNNING, ThreadStatus.FAILED, ThreadStatus.CANCELLED}

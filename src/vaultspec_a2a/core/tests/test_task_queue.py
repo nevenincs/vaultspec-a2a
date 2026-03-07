@@ -88,7 +88,7 @@ def test_filter_unknown_current_task_still_shows_pending() -> None:
 @pytest.mark.asyncio
 async def test_mark_task_complete_updates_file(tmp_path: Path) -> None:
     workspace, queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
+    tool_fn, _drain_fn = create_mark_task_complete_tool(
         workspace, "sdd-blackboard-integration"
     )
 
@@ -103,7 +103,7 @@ async def test_mark_task_complete_updates_file(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_mark_task_complete_returns_next_task(tmp_path: Path) -> None:
     workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
+    tool_fn, _drain_fn = create_mark_task_complete_tool(
         workspace, "sdd-blackboard-integration"
     )
 
@@ -126,14 +126,14 @@ async def test_mark_task_complete_no_further_tasks(tmp_path: Path) -> None:
     (plan_dir / "sdd-blackboard-integration-queue.md").unlink(missing_ok=True)
     (plan_dir / "feat-queue.md").write_text(content, encoding="utf-8")
 
-    tool_fn, drain_fn = create_mark_task_complete_tool(workspace, "feat")
+    tool_fn, _drain_fn = create_mark_task_complete_tool(workspace, "feat")
     result = await tool_fn("F-001")
     assert "no further" in result.lower()
 
 
 @pytest.mark.asyncio
 async def test_mark_task_complete_missing_file(tmp_path: Path) -> None:
-    tool_fn, drain_fn = create_mark_task_complete_tool(tmp_path, "nonexistent-feature")
+    tool_fn, _drain_fn = create_mark_task_complete_tool(tmp_path, "nonexistent-feature")
     result = await tool_fn("NF-001")
     assert "not found" in result.lower()
 
@@ -141,7 +141,7 @@ async def test_mark_task_complete_missing_file(tmp_path: Path) -> None:
 @pytest.mark.asyncio
 async def test_mark_task_complete_task_not_found(tmp_path: Path) -> None:
     workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
+    tool_fn, _drain_fn = create_mark_task_complete_tool(
         workspace, "sdd-blackboard-integration"
     )
 
@@ -153,7 +153,7 @@ async def test_mark_task_complete_task_not_found(tmp_path: Path) -> None:
 async def test_mark_task_complete_wrong_status(tmp_path: Path) -> None:
     """Trying to complete a pending task (not in_progress) should fail."""
     workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
+    tool_fn, _drain_fn = create_mark_task_complete_tool(
         workspace, "sdd-blackboard-integration"
     )
 

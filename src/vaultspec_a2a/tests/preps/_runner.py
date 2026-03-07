@@ -2,9 +2,11 @@
 
 import os
 import tempfile
-from contextlib import asynccontextmanager
+
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
-from typing import Any, AsyncIterator
+from typing import Any
 
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -29,22 +31,19 @@ async def setup_graph(
     """
     team_config = load_team_config(team_id)
     agent_configs = {
-        w.agent_id: load_agent_config(w.agent_id)
-        for w in team_config.workers
+        w.agent_id: load_agent_config(w.agent_id) for w in team_config.workers
     }
 
     supervisor_agent_config = None
     if team_config.topology.type in ("star", "pipeline_loop"):
-        try:
+        with suppress(AgentConfigNotFoundError):
             supervisor_agent_config = load_agent_config("vaultspec-supervisor")
-        except AgentConfigNotFoundError:
-            pass
 
     # Temp-file checkpointer (not :memory: — allows post-mortem inspection)
-    tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-    tmp.close()
+    fd, tmp_path = tempfile.mkstemp(suffix=".db")
+    os.close(fd)
 
-    async with AsyncSqliteSaver.from_conn_string(tmp.name) as checkpointer:
+    async with AsyncSqliteSaver.from_conn_string(tmp_path) as checkpointer:
         await checkpointer.setup()
 
         graph = compile_team_graph(
@@ -104,6 +103,8 @@ def print_trace_url(thread_id: str = "preps-001") -> None:
     """Print LangSmith trace URL hint."""
     project = os.environ.get("LANGSMITH_PROJECT", "default")
     if os.environ.get("LANGSMITH_TRACING", "").lower() == "true":
-        print(f"\nLangSmith trace: check project '{project}' at https://smith.langchain.com")
+        print(
+            f"\nLangSmith trace: check project '{project}' at https://smith.langchain.com"
+        )
     else:
         print("\nLangSmith tracing disabled. Set LANGSMITH_TRACING=true to enable.")

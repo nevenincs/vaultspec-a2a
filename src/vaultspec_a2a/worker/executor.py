@@ -2,7 +2,7 @@
 
 Owns the graph registry (compiled ``CompiledStateGraph`` instances),
 ``EventAggregator``, and checkpointer.  Dispatches events to the
-control surface via ``WorkerBridge``.
+gateway via ``WorkerBridge``.
 
 The executor is the worker-process analogue of the monolith's
 ``GraphRegistry`` + endpoint ingest logic, restructured for the
@@ -32,8 +32,8 @@ from ..core import (
     TeamConfigNotFoundError,
     compile_team_graph,
     load_agent_config,
-    settings,
     load_team_config,
+    settings,
 )
 from .ipc import WorkerBridge
 
@@ -80,7 +80,7 @@ class Executor:
     Parameters
     ----------
     checkpointer:
-        ``AsyncSqliteSaver`` shared with the control surface (WAL mode).
+        ``AsyncSqliteSaver`` shared with the gateway (WAL mode).
     bridge:
         ``WorkerBridge`` for forwarding events and heartbeats.
     """
@@ -407,10 +407,8 @@ class Executor:
     # Terminal status relay
     # ------------------------------------------------------------------
 
-    async def _emit_terminal_status(
-        self, thread_id: str, outcome: str
-    ) -> None:
-        """Emit a ``thread_terminal`` event to the control surface.
+    async def _emit_terminal_status(self, thread_id: str, outcome: str) -> None:
+        """Emit a ``thread_terminal`` event to the gateway.
 
         Emits for ``"completed"``, ``"failed"``, and ``"cancelled"`` outcomes.
         ``"interrupted"`` means the graph is suspended (awaiting permission)

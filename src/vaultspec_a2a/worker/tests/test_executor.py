@@ -681,7 +681,11 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._thread_to_cache_key["t-1"] = ("vaultspec-adaptive-coder", None, False)
+                executor._thread_to_cache_key["t-1"] = (
+                    "vaultspec-adaptive-coder",
+                    None,
+                    False,
+                )
                 assert executor._thread_to_cache_key
 
                 await executor.shutdown()

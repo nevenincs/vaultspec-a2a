@@ -96,7 +96,6 @@ class ConnectionManager:
         """Initialise the manager with the shared EventAggregator."""
         self._aggregator = aggregator
         self._connections: dict[str, WebSocket] = {}
-        self._heartbeat_tasks: dict[str, asyncio.Task[None]] = {}
         self._writer_tasks: dict[str, asyncio.Task[None]] = {}
         self._start_time = time.monotonic()
         # Callback for SEND_MESSAGE: (thread_id, content, agent_id) -> None
@@ -160,31 +159,15 @@ class ConnectionManager:
             )
             await websocket.send_json(connected.model_dump(mode="json"))
 
-            # Start heartbeat and writer tasks.
-            # H10: cross-cancel so a crash in either task cleans up both.
-            # When the writer dies (e.g. broken pipe) the heartbeat should
-            # stop too, and vice versa.
+            # Start the unified writer loop (handles both events and heartbeats).
             #
             # Policy exception (API-H3): asyncio.create_task() is used here
-            # instead of anyio because these tasks must outlive connect().
+            # instead of anyio because this task must outlive connect().
             # An anyio.TaskGroup blocks until children complete, which would
             # prevent returning control to the listen() read loop.  The WS
-            # lifecycle (connect → listen → disconnect) is inherently
+            # lifecycle (connect -> listen -> disconnect) is inherently
             # asyncio-based via Starlette's WebSocket transport.
-            hb_task = asyncio.create_task(self._heartbeat_loop(client_id))
             wr_task = asyncio.create_task(self._writer_loop(client_id, queue))
-
-            def _cancel_partner(
-                done_task: asyncio.Task,
-                other_task: asyncio.Task,
-            ) -> None:
-                if not other_task.done():
-                    other_task.cancel()
-
-            hb_task.add_done_callback(lambda t: _cancel_partner(t, wr_task))
-            wr_task.add_done_callback(lambda t: _cancel_partner(t, hb_task))
-
-            self._heartbeat_tasks[client_id] = hb_task
             self._writer_tasks[client_id] = wr_task
 
         logger.info("WebSocket client %s connected", client_id)
@@ -193,12 +176,7 @@ class ConnectionManager:
     async def disconnect(self, client_id: str) -> None:
         """Clean up a disconnected client."""
         async with ws_span("ws.disconnect", client_id=client_id):
-            # Cancel heartbeat task
-            heartbeat_task = self._heartbeat_tasks.pop(client_id, None)
-            if heartbeat_task is not None:
-                heartbeat_task.cancel()
-
-            # Cancel writer task
+            # Cancel writer task (handles both events and heartbeats)
             writer_task = self._writer_tasks.pop(client_id, None)
             if writer_task is not None:
                 writer_task.cancel()
@@ -448,6 +426,10 @@ class ConnectionManager:
     ) -> None:
         """Drain the event queue and write to the WebSocket.
 
+        WS-ORD-01: heartbeats are sent inline when the queue is idle for
+        ``_HEARTBEAT_INTERVAL`` seconds, preventing interleaving between
+        a separate heartbeat task and the event writer.
+
         Each outgoing frame is enriched with a ``_trace`` dict containing
         W3C TraceContext (``traceparent`` / ``tracestate``) so that
         downstream consumers can reconstruct the distributed trace
@@ -459,9 +441,30 @@ class ConnectionManager:
 
         try:
             while True:
-                event = await queue.get()
                 if websocket.client_state != WebSocketState.CONNECTED:
                     break
+
+                # Wait for the next event or send a heartbeat on timeout.
+                try:
+                    event = await asyncio.wait_for(
+                        queue.get(), timeout=_HEARTBEAT_INTERVAL
+                    )
+                except TimeoutError:
+                    # No events for _HEARTBEAT_INTERVAL — send heartbeat.
+                    if websocket.client_state != WebSocketState.CONNECTED:
+                        break
+                    heartbeat = HeartbeatEvent(
+                        timestamp=datetime.now(UTC),
+                        server_uptime_seconds=time.monotonic() - self._start_time,
+                    )
+                    try:
+                        await websocket.send_json(heartbeat.model_dump(mode="json"))
+                        _ws_heartbeats_counter.add(1, {"client_id": client_id})
+                    except Exception:
+                        logger.warning("Heartbeat failed for client %s", client_id)
+                        break
+                    continue
+
                 try:
                     payload = (
                         event.model_dump(mode="json")
@@ -483,68 +486,47 @@ class ConnectionManager:
             pass
 
     # ------------------------------------------------------------------
-    # Heartbeat loop
-    # ------------------------------------------------------------------
-
-    async def _heartbeat_loop(self, client_id: str) -> None:
-        """Send periodic heartbeat events to keep the connection alive."""
-        websocket = self._connections.get(client_id)
-        if websocket is None:
-            return
-
-        try:
-            while True:
-                await asyncio.sleep(_HEARTBEAT_INTERVAL)
-                if websocket.client_state != WebSocketState.CONNECTED:
-                    break
-                heartbeat = HeartbeatEvent(
-                    timestamp=datetime.now(UTC),
-                    server_uptime_seconds=time.monotonic() - self._start_time,
-                )
-                try:
-                    await websocket.send_json(heartbeat.model_dump(mode="json"))
-                    _ws_heartbeats_counter.add(1, {"client_id": client_id})
-                except Exception:
-                    logger.warning("Heartbeat failed for client %s", client_id)
-                    break
-        except asyncio.CancelledError:
-            pass
-
-    # ------------------------------------------------------------------
     # Direct broadcast (internal relay path — ADR-019)
     # ------------------------------------------------------------------
 
     async def broadcast_to_thread(
         self, thread_id: str, payload: dict[str, Any]
     ) -> None:
-        """Send a pre-serialised event dict to all clients subscribed to *thread_id*.
+        """Enqueue a pre-serialised event dict for all subscribers.
+
+        Routes to all clients subscribed to *thread_id*.
 
         Used by the internal WebSocket relay (``vaultspec_a2a.api.internal``) to forward
-        worker events to browser clients without round-tripping through the
-        ``EventAggregator`` queue machinery.  The payload is a plain ``dict``
-        (already JSON-serialisable) produced by the worker's event pipeline.
+        worker events to browser clients.  Events are routed through per-client
+        queues (WS-MULTI-03) so a slow client cannot stall the relay for others.
+        Drop-oldest backpressure is applied when a client queue is full.
 
-        Clients whose WebSocket is no longer connected are silently skipped.
+        Clients without a registered queue are silently skipped.
         """
-        for client_id, websocket in list(self._connections.items()):
+        for client_id in list(self._connections):
             client_subs = self._aggregator.get_subscriptions(client_id)
             if thread_id not in client_subs:
                 continue
-            if websocket.client_state != WebSocketState.CONNECTED:
+            queue = self._aggregator.get_subscriber_queue(client_id)
+            if queue is None:
                 continue
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                    logger.warning(
+                        "Dropped oldest event for slow client %s "
+                        "(relay backpressure, maxsize=%d)",
+                        client_id,
+                        queue.maxsize,
+                    )
+                except asyncio.QueueEmpty:
+                    pass
             try:
-                await websocket.send_json(payload)
-                _ws_events_sent_counter.add(
-                    1, {"client_id": client_id, "relay": "internal"}
-                )
-            except Exception:
-                _ws_send_failures_counter.add(
-                    1, {"client_id": client_id, "relay": "internal"}
-                )
+                queue.put_nowait(payload)  # type: ignore[arg-type]
+            except asyncio.QueueFull:
                 logger.warning(
-                    "Failed to relay event to client %s for thread %s",
+                    "Relay event dropped for client %s — queue still full",
                     client_id,
-                    thread_id,
                 )
 
     # ------------------------------------------------------------------

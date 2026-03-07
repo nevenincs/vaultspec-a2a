@@ -48,7 +48,8 @@ class MockChatModel(BaseChatModel):
 
     _agent_config: AgentConfig | None = PrivateAttr(default=None)
 
-    def __init__(self, **kwargs: Any) -> None:
+    def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
+        """Route to the correct VidaiMock tape based on agent config."""
         agent_config = kwargs.pop("agent_config", None)
 
         # PROV-M2: Route to the right tape via URL path matching.
@@ -57,9 +58,7 @@ class MockChatModel(BaseChatModel):
             default_base_url = f"http://localhost:8100/{agent_config.id}/v1"
         else:
             kwargs.setdefault("model_name", "mock-success-single")
-            default_base_url = (
-                "http://localhost:8100/mock-success-single/v1"
-            )
+            default_base_url = "http://localhost:8100/mock-success-single/v1"
 
         # If MOCK_API_BASE is set (e.g. in Docker), append the agent id suffix.
         env_base = os.environ.get("MOCK_API_BASE")
@@ -82,7 +81,7 @@ class MockChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ANN401
     ) -> ChatResult:
         """Synchronous generation — not supported, use async."""
         raise NotImplementedError(
@@ -94,7 +93,7 @@ class MockChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ANN401
     ) -> ChatResult:
         """Accumulate streaming chunks into a single ChatResult."""
         generation = None
@@ -109,12 +108,12 @@ class MockChatModel(BaseChatModel):
         message = generation.message if generation else AIMessage(content="")
         return ChatResult(generations=[ChatGeneration(message=message)])
 
-    async def _astream(
+    async def _astream(  # noqa: PLR0912
         self,
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,
+        **kwargs: Any,  # noqa: ANN401
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Proxy to VidaiMock via native SSE streaming (ADR-032 §2).
 
@@ -152,12 +151,15 @@ class MockChatModel(BaseChatModel):
         }
 
         try:
-            async with httpx.AsyncClient() as client, client.stream(
-                "POST",
-                f"{url}/chat/completions",
-                json=payload,
-                timeout=30.0,
-            ) as resp:
+            async with (
+                httpx.AsyncClient() as client,
+                client.stream(
+                    "POST",
+                    f"{url}/chat/completions",
+                    json=payload,
+                    timeout=30.0,
+                ) as resp,
+            ):
                 resp.raise_for_status()
                 async for line in resp.aiter_lines():
                     if not line.startswith("data:"):
@@ -181,9 +183,7 @@ class MockChatModel(BaseChatModel):
 
                     text = delta.get("content")
                     if text:
-                        yield ChatGenerationChunk(
-                            message=AIMessageChunk(content=text)
-                        )
+                        yield ChatGenerationChunk(message=AIMessageChunk(content=text))
 
                     tool_calls = delta.get("tool_calls", [])
                     if tool_calls:

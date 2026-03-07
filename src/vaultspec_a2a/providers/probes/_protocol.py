@@ -205,7 +205,9 @@ class _ProbeSession:
         heartbeat_task = asyncio.create_task(self._heartbeat())
         try:
             while True:
-                line = await asyncio.wait_for(self.stdout.readline(), timeout=self.timeout)
+                line = await asyncio.wait_for(
+                    self.stdout.readline(), timeout=self.timeout
+                )
                 if not line:
                     self.result.error = "EOF on stdout"
                     return
@@ -251,17 +253,13 @@ class _ProbeSession:
             # Try to parse as JSON — rate_limit_event lines are JSON objects.
             parsed: dict | None = None
             if text.startswith("{"):
-                try:
+                with suppress(json.JSONDecodeError):
                     parsed = json.loads(text)
-                except json.JSONDecodeError:
-                    pass
             if parsed is not None and parsed.get("type") == "rate_limit_event":
                 self.result.rate_limit_events.append(parsed)
                 overage = parsed.get("overageStatus", "")
                 if overage == "blocked":
-                    logger.error(
-                        "ACP rate limit BLOCKED: quota exhausted — %s", parsed
-                    )
+                    logger.error("ACP rate limit BLOCKED: quota exhausted — %s", parsed)
                     if not self.result.error:
                         self.result.error = (
                             f"rate_limit_event: overageStatus=blocked — {parsed}"
@@ -312,7 +310,8 @@ async def run_probe(
     # claude-agent-acp from using pay-as-you-go billing.
     if "CLAUDE_CODE_OAUTH_TOKEN" in env:
         env.pop("ANTHROPIC_API_KEY", None)
-    # ADR-002 §5.1: bypass bundled cli.js — use system claude binary (native PE32+ Bun exe)
+    # ADR-002 §5.1: bypass bundled cli.js — use system
+    # claude binary (native PE32+ Bun exe)
     _system_claude = shutil.which("claude")
     if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
         env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
@@ -330,9 +329,14 @@ async def run_probe(
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         }
     )
-    for _k in [k for k in env if k.startswith("CLAUDE_CODE_") and k not in _claude_code_allowlist]:
+    for _k in [
+        k
+        for k in env
+        if k.startswith("CLAUDE_CODE_") and k not in _claude_code_allowlist
+    ]:
         del env[_k]
-    # ACP-ENV-006: suppress interactive prompts that stall non-interactive ACP subprocesses.
+    # ACP-ENV-006: suppress interactive prompts that stall
+    # non-interactive ACP subprocesses.
     env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 

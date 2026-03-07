@@ -126,7 +126,8 @@ def create_worker_node(
         system_prompt:  The system prompt defining the worker's behaviour.
         name:           The name of the worker, added to the generated message.
         autonomous:     When True, skip permission_callback wiring (headless).
-        workspace_root: Optional workspace root for task queue file resolution (ADR-021).
+        workspace_root: Optional workspace root for task queue
+                        file resolution (ADR-021).
         feature_tag:    Optional feature tag for task queue file resolution (ADR-021).
 
     Returns:
@@ -154,7 +155,11 @@ def create_worker_node(
         if _ws_root:
             _rules = RuleManager(Path(_ws_root)).compile()
             if _rules:
-                messages.append(SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{_rules}"))
+                messages.append(
+                    SystemMessage(
+                        content=f"## Project Coding Rules & Guidelines\n\n{_rules}"
+                    )
+                )
         if anchoring:
             messages.append(SystemMessage(content=anchoring))
         mounted = state.get("mounted_context")
@@ -197,7 +202,8 @@ def create_worker_node(
             if drain_fn is not None:
                 drain_fn()  # Prevent state update leaks (ADR-021 §5)
             _logger.exception(
-                "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
+                "worker[%s] model=%s raised during ainvoke"
+                " — wrapping as WorkerExecutionError",
                 name,
                 model_type,
             )

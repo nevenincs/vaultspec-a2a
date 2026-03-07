@@ -64,9 +64,7 @@ async def spawn_acp_process(
             creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
             **kwargs,
         )
-    return await asyncio.create_subprocess_exec(
-        command[0], *command[1:], **kwargs
-    )
+    return await asyncio.create_subprocess_exec(command[0], *command[1:], **kwargs)
 
 
 async def kill_process_tree(
@@ -107,8 +105,7 @@ async def kill_process_tree(
             await asyncio.wait_for(process.wait(), timeout=5.0)
         except TimeoutError:
             logger.warning(
-                "ACP process %s did not exit after SIGTERM; "
-                "escalating to SIGKILL",
+                "ACP process %s did not exit after SIGTERM; escalating to SIGKILL",
                 process.pid,
             )
             with suppress(OSError):

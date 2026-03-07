@@ -1,4 +1,4 @@
-"""initial_schema
+"""Initial schema.
 
 Baseline migration capturing the 4 app-owned tables as declared in
 ``src/vaultspec_a2a/database/models.py``.  LangGraph checkpoint tables (``checkpoints``,
@@ -12,6 +12,7 @@ Create Date: 2026-03-04
 from collections.abc import Sequence
 
 import sqlalchemy as sa
+
 from alembic import op
 
 
@@ -67,9 +68,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         sa.ForeignKeyConstraint(["thread_id"], ["threads.id"]),
     )
-    op.create_index(
-        "ix_permission_logs_thread_id", "permission_logs", ["thread_id"]
-    )
+    op.create_index("ix_permission_logs_thread_id", "permission_logs", ["thread_id"])
 
     # -- cost_tracking --
     op.create_table(

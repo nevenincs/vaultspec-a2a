@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+
 __all__ = ["run"]
 
 import subprocess
@@ -44,7 +45,8 @@ def mock(scenario: str | None) -> None:
     required=False,
     default=None,
     type=click.Choice(
-        ["claude", "gemini", "openai", "zhipu"], case_sensitive=False,
+        ["claude", "gemini", "openai", "zhipu"],
+        case_sensitive=False,
     ),
 )
 def probe(provider: str | None) -> None:

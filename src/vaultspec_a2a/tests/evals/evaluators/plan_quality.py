@@ -8,6 +8,7 @@ completeness, actionability, ADR compliance, and task granularity.
 
 from __future__ import annotations
 
+
 PLAN_QUALITY_RUBRIC = """\
 Given a feature request and a plan document, score the plan 0-1 on:
 - COMPLETENESS: all pipeline stages (research->adr->plan->exec->audit) addressed

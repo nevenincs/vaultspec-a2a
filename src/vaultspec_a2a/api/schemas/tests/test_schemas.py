@@ -375,16 +375,27 @@ class TestRESTModels:
     """REST models serialize and validate correctly."""
 
     def test_create_thread_request(self) -> None:
-        """CreateThreadRequest serializes with provider and model."""
+        """CreateThreadRequest round-trip with nickname validation."""
         req = CreateThreadRequest(
             initial_message="Hello",
-            provider=Provider.CLAUDE,
-            model=Model.MID,
+            team_preset="vaultspec-solo-coder",
+            nickname="my-thread-01",
         )
         data = req.model_dump()
         restored = CreateThreadRequest.model_validate(data)
         assert restored.initial_message == "Hello"
-        assert restored.provider == Provider.CLAUDE
+        assert restored.team_preset == "vaultspec-solo-coder"
+        assert restored.nickname == "my-thread-01"
+
+    def test_create_thread_request_nickname_validation(self) -> None:
+        """CreateThreadRequest rejects invalid nickname slugs."""
+        import pytest
+
+        with pytest.raises(Exception, match="lowercase slug"):
+            CreateThreadRequest(
+                initial_message="Hello",
+                nickname="Invalid Name!",
+            )
 
     def test_create_thread_response(self) -> None:
         """CreateThreadResponse validates thread_id and status."""

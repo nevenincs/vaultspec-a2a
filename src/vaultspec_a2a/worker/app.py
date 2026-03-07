@@ -1,6 +1,6 @@
 r"""Worker process -- standalone FastAPI application (ADR-019).
 
-Exposes an internal HTTP dispatch endpoint that the control surface
+Exposes an internal HTTP dispatch endpoint that the gateway
 calls to schedule graph execution.  Manages the ``Executor`` lifecycle
 and heartbeat loop.
 
@@ -47,7 +47,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     Startup sequence:
     1. Open the shared SQLite checkpointer (WAL mode, same path as the
-       control surface).
+       gateway).
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
@@ -57,7 +57,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     worker_id = uuid4().hex[:8]
     logger.info("Worker %s starting", worker_id)
 
-    # Database -- shared SQLite via WAL (same file as control surface).
+    # Database -- shared SQLite via WAL (same file as gateway).
     db_path = settings.database_path
     db_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -109,7 +109,7 @@ def create_worker_app() -> FastAPI:
 
     @app.post("/dispatch", response_model=DispatchResponse)
     async def dispatch_endpoint(req: DispatchRequest) -> DispatchResponse:
-        """Accept a work dispatch from the control surface.
+        """Accept a work dispatch from the gateway.
 
         The actual graph execution is scheduled as a background task inside
         the lifespan task group so that this endpoint returns immediately.

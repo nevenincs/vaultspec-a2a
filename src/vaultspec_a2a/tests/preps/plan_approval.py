@@ -20,11 +20,17 @@ async def main() -> None:
     async with setup_graph("vaultspec-adaptive-coder", autonomous=False) as graph:
         thread_id = "preps-plan-approval-001"
         config = {"configurable": {"thread_id": thread_id}}
-        input_state = {"messages": [HumanMessage(content="Implement a REST API for user authentication.")]}
+        input_state = {
+            "messages": [
+                HumanMessage(content="Implement a REST API for user authentication.")
+            ]
+        }
 
         try:
             print("--- Streaming until interrupt ---")
-            async for chunk in graph.astream(input_state, config, stream_mode=["updates"]):
+            async for chunk in graph.astream(
+                input_state, config, stream_mode=["updates"]
+            ):
                 if isinstance(chunk, tuple):
                     mode_name, data = chunk
                     print(f"\n[{mode_name}]")

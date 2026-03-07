@@ -24,6 +24,68 @@ _logger = logging.getLogger(__name__)
 __all__ = ["create_supervisor_node"]
 
 
+def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
+    """Parse the model response text into a route choice.
+
+    Returns (route, unparseable) where unparseable is True if no option matched.
+    """
+    if text in options:
+        return text, False
+    for option in sorted(options, key=len, reverse=True):
+        if option.lower() in text.lower():
+            return option, False
+    return "FINISH", True
+
+
+def _check_finish_blocked(
+    state: TeamState,
+    vault_index: dict[str, list[str]],
+    workers: list[str],
+    inferred_phase: str,
+) -> dict[str, Any] | None:
+    """Check if FINISH should be blocked due to validation errors or missing review.
+
+    Returns a routing dict if blocked, None if FINISH is allowed.
+    """
+    errors: list[str] = state.get("validation_errors") or []
+    if errors:
+        _logger.warning(
+            "supervisor blocked FINISH: %d validation error(s) active — "
+            "rerouting to first available worker",
+            len(errors),
+        )
+        next_route = workers[0] if workers else "FINISH"
+        return {
+            "next": next_route,
+            "pipeline_phase": inferred_phase,
+            "routing_error": (
+                f"FINISH blocked: {len(errors)}"
+                " validation error(s)"
+                " must be resolved first."
+            ),
+        }
+
+    active_feature = state.get("active_feature")
+    if active_feature and vault_index.get("exec") and not vault_index.get("audit"):
+        _logger.warning(
+            "supervisor blocked FINISH: no review"
+            " artifact in vault_index['audit']"
+            " — rerouting to first available worker",
+        )
+        next_route = workers[0] if workers else "FINISH"
+        return {
+            "next": next_route,
+            "pipeline_phase": inferred_phase,
+            "routing_error": (
+                'FINISH blocked: no review artifact in vault_index["audit"]. '
+                "A reviewer agent must produce an"
+                " audit artifact before completion."
+            ),
+        }
+
+    return None
+
+
 @dataclass(frozen=True, slots=True)
 class _GateResult:
     blocked: bool
@@ -76,7 +138,7 @@ class SupervisorNode(Protocol):
         ...
 
 
-def create_supervisor_node(
+def create_supervisor_node(  # noqa: PLR0915
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
@@ -95,6 +157,7 @@ def create_supervisor_node(
                           absent from the map are exempt from gating.
         autonomous:       When True, skip plan approval interrupt (headless
                           MCP-launched runs — no human present to approve).
+        workspace_root:   Optional workspace root for ACP CWD scoping.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -109,7 +172,7 @@ def create_supervisor_node(
     )
     full_prompt = system_prompt + routing_instructions
 
-    async def supervisor_node(state: TeamState) -> dict[str, Any]:
+    async def supervisor_node(state: TeamState) -> dict[str, Any]:  # noqa: PLR0911, PLR0912
         """Execute the supervisor's routing task."""
         vault_index: dict[str, list[str]] = state.get("vault_index") or {}
         inferred_phase = infer_phase_from_vault_index(vault_index)
@@ -125,7 +188,11 @@ def create_supervisor_node(
         if _ws_root:
             _rules = RuleManager(Path(_ws_root)).compile()
             if _rules:
-                messages.append(SystemMessage(content=f"## Project Coding Rules & Guidelines\n\n{_rules}"))
+                messages.append(
+                    SystemMessage(
+                        content=f"## Project Coding Rules & Guidelines\n\n{_rules}"
+                    )
+                )
         if anchoring:
             messages.append(SystemMessage(content=anchoring))
         messages.extend(working_state.get("messages", []))
@@ -148,25 +215,12 @@ def create_supervisor_node(
 
         # Parse text safely to derive next route
         text = str(response.content).strip()
-        next_route = "FINISH"
+        next_route, unparseable = _parse_route(text, options)
 
-        # Exact match preferred, fallback to substring
-        if text in options:
-            next_route = text
-        else:
-            for option in sorted(options, key=len, reverse=True):
-                if option.lower() in text.lower():
-                    next_route = option
-                    break
-
-        unparseable = (
-            next_route == "FINISH"
-            and text not in options
-            and not any(opt.lower() in text.lower() for opt in options)
-        )
         if unparseable:
             _logger.warning(
-                "supervisor could not parse route from response %r — defaulting to FINISH",
+                "supervisor could not parse route from"
+                " response %r — defaulting to FINISH",
                 text[:120],
             )
             return {
@@ -176,42 +230,9 @@ def create_supervisor_node(
             }
 
         if next_route == "FINISH":
-            errors: list[str] = state.get("validation_errors") or []
-            if errors:
-                _logger.warning(
-                    "supervisor blocked FINISH: %d validation error(s) active — "
-                    "rerouting to first available worker",
-                    len(errors),
-                )
-                next_route = workers[0] if workers else "FINISH"
-                return {
-                    "next": next_route,
-                    "pipeline_phase": inferred_phase,
-                    "routing_error": (
-                        f"FINISH blocked: {len(errors)} validation error(s) must be resolved first."
-                    ),
-                }
-
-            # ADR-025 gate: review artifact required when feature is active and exec phase reached
-            active_feature = state.get("active_feature")
-            if (
-                active_feature
-                and vault_index.get("exec")
-                and not vault_index.get("audit")
-            ):
-                _logger.warning(
-                    "supervisor blocked FINISH: no review artifact in vault_index['audit'] — "
-                    "rerouting to first available worker",
-                )
-                next_route = workers[0] if workers else "FINISH"
-                return {
-                    "next": next_route,
-                    "pipeline_phase": inferred_phase,
-                    "routing_error": (
-                        'FINISH blocked: no review artifact in vault_index["audit"]. '
-                        "A reviewer agent must produce an audit artifact before completion."
-                    ),
-                }
+            blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
+            if blocked is not None:
+                return blocked
 
         # ADR-023: phase artifact prerequisite gates
         if worker_phase_map and state.get("active_feature"):
@@ -292,7 +313,9 @@ def create_supervisor_node(
         # BE-28: write current_plan so the aggregator can emit PlanUpdateEvent.
         # Each supervisor cycle produces a plan entry for the routing decision.
         plan_entry: dict[str, str] = {
-            "content": f"Route to {next_route}" if next_route != "FINISH" else "Complete task",
+            "content": f"Route to {next_route}"
+            if next_route != "FINISH"
+            else "Complete task",
             "status": "in_progress" if next_route != "FINISH" else "completed",
         }
         return {

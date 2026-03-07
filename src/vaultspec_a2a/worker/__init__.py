@@ -1,6 +1,6 @@
 """Agent Worker -- LangGraph execution engine (ADR-019).
 
-Runs as a separate process from the control surface.
+Runs as a separate process from the gateway.
 Communicates via HTTP POST (events/heartbeats -> API) and HTTP
 (dispatch -> worker).
 

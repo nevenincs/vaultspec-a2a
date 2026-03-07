@@ -8,8 +8,6 @@ Requirements:
   - Gemini: `gemini --experimental-acp` on PATH + ~/.gemini/oauth_creds.json
 """
 
-from pathlib import Path
-
 import pytest
 
 from langchain_core.messages import HumanMessage
@@ -178,8 +176,10 @@ class TestAcpErrorCodeUnauthenticated:
 
     def test_unauthenticated_value(self) -> None:
         from ..acp_exceptions import AcpErrorCode
+
         assert AcpErrorCode.UNAUTHENTICATED == -32000
 
     def test_unauthenticated_is_int(self) -> None:
         from ..acp_exceptions import AcpErrorCode
+
         assert isinstance(AcpErrorCode.UNAUTHENTICATED, int)

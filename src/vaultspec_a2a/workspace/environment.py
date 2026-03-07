@@ -100,7 +100,8 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
         {
             "CLAUDE_CODE_OAUTH_TOKEN",
             "CLAUDE_CODE_EXECUTABLE",
-            # ACP-ENV-006: suppress interactive prompts in non-interactive ACP subprocesses.
+            # ACP-ENV-006: suppress interactive prompts in
+            # non-interactive ACP subprocesses.
             "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY",
             "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
         }
@@ -108,7 +109,8 @@ def resolve_env_vars(workspace_path: Path) -> dict[str, str]:
     env = {
         k: v
         for k, v in os.environ.items()
-        # Scrub explicit keys, VAULTSPEC_ secrets, and wildcard CLAUDE_CODE_* except allowlist
+        # Scrub explicit keys, VAULTSPEC_ secrets,
+        # and wildcard CLAUDE_CODE_* except allowlist
         if k not in scrub_keys
         and not k.startswith("VAULTSPEC_")
         and not (k.startswith("CLAUDE_CODE_") and k not in _claude_code_allowlist)

@@ -3,7 +3,7 @@
 Centralises engine, session_factory, session, and make_app so that all test
 modules use the same in-memory SQLite setup and dependency overrides.
 
-ADR-019: The control surface no longer runs agent execution locally.
+ADR-019: The gateway no longer runs agent execution locally.
 Tests override get_worker_client with a test httpx.AsyncClient that
 posts to a local test handler (or simply captures requests).  The
 GraphRegistry has moved to the worker process.
@@ -73,7 +73,7 @@ async def session(engine):
 
 
 class _CapturedDispatch:
-    """Records dispatch requests sent by the control surface to the worker."""
+    """Records dispatch requests sent by the gateway to the worker."""
 
     def __init__(self) -> None:
         self.requests: list[dict] = []

@@ -12,6 +12,8 @@ from typing import Any
 __all__ = ["create_mark_task_complete_tool"]
 
 _QUEUE_PHASES = frozenset({"plan", "exec"})
+_MIN_TABLE_COLUMNS = 2  # Minimum columns for a valid markdown table row
+_PENDING_HORIZON = 2  # Number of upcoming pending tasks to show
 
 
 def _filter_queue_content(
@@ -60,17 +62,19 @@ def _filter_queue_content(
                 selected.append(line)
                 break
 
-    # Collect up to 2 next pending rows
+    # Collect up to _PENDING_HORIZON next pending rows
     pending_count = 0
     for line in data_lines:
-        if pending_count >= 2:
+        if pending_count >= _PENDING_HORIZON:
             break
         parts = [p.strip() for p in line.split("|") if p.strip()]
-        if len(parts) >= 2 and parts[1] == "pending":
-            # Don't duplicate if it's already the current task row
-            if not (current_task_id and f"| {current_task_id} |" in line):
-                selected.append(line)
-                pending_count += 1
+        if (
+            len(parts) >= _MIN_TABLE_COLUMNS
+            and parts[1] == "pending"
+            and not (current_task_id and f"| {current_task_id} |" in line)
+        ):
+            selected.append(line)
+            pending_count += 1
 
     result_lines = header_lines + selected
     return "\n".join(result_lines)
@@ -115,11 +119,12 @@ def create_mark_task_complete_tool(
             found = False
             next_task_id: str | None = None
 
-            for line in lines:
-                if f"| {task_id} |" in line and "in_progress" in line:
-                    line = line.replace("in_progress", "completed", 1)
+            for raw_line in lines:
+                updated = raw_line
+                if f"| {task_id} |" in raw_line and "in_progress" in raw_line:
+                    updated = raw_line.replace("in_progress", "completed", 1)
                     found = True
-                updated_lines.append(line)
+                updated_lines.append(updated)
 
             if not found:
                 return f"Task {task_id} not found or not in_progress.", None
@@ -127,7 +132,7 @@ def create_mark_task_complete_tool(
             # Find next pending task
             for line in updated_lines:
                 parts = [p.strip() for p in line.split("|") if p.strip()]
-                if len(parts) >= 2 and parts[1] == "pending":
+                if len(parts) >= _MIN_TABLE_COLUMNS and parts[1] == "pending":
                     next_task_id = parts[0]
                     break
 

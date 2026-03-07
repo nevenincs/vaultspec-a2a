@@ -21,7 +21,9 @@ from ..migrate import run_migrations
 
 _APP_TABLES = {"threads", "artifacts", "permission_logs", "cost_tracking"}
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent.parent.parent.parent / "alembic.ini"
+_ALEMBIC_INI = (
+    Path(__file__).resolve().parent.parent.parent.parent.parent / "alembic.ini"
+)
 
 
 def _make_config(db_path: Path) -> Config:
@@ -48,7 +50,7 @@ class TestAlembicUpgradeDowngrade:
         command.upgrade(cfg, "head")
 
         tables = _get_tables(db)
-        assert _APP_TABLES <= tables
+        assert tables >= _APP_TABLES
         # alembic_version is also expected
         assert "alembic_version" in tables
 
@@ -73,9 +75,7 @@ class TestAlembicUpgradeDowngrade:
         conn.execute(
             "CREATE TABLE writes (thread_id TEXT, checkpoint_id TEXT, data BLOB)"
         )
-        conn.execute(
-            "INSERT INTO checkpoints VALUES ('t1', 'c1', X'DEADBEEF')"
-        )
+        conn.execute("INSERT INTO checkpoints VALUES ('t1', 'c1', X'DEADBEEF')")
         conn.commit()
         conn.close()
 
@@ -85,14 +85,16 @@ class TestAlembicUpgradeDowngrade:
 
         # Verify LangGraph tables still exist with data intact
         tables = _get_tables(db)
-        assert _LANGGRAPH_TABLES <= tables
-        assert _APP_TABLES <= tables
+        assert tables >= _LANGGRAPH_TABLES
+        assert tables >= _APP_TABLES
 
         conn = sqlite3.connect(str(db))
-        row = conn.execute("SELECT data FROM checkpoints WHERE thread_id='t1'").fetchone()
+        row = conn.execute(
+            "SELECT data FROM checkpoints WHERE thread_id='t1'"
+        ).fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == b"\xDE\xAD\xBE\xEF"
+        assert row[0] == b"\xde\xad\xbe\xef"
 
     def test_stamp_head_on_existing_db(self, tmp_path: Path) -> None:
         """Stamp an existing DB without running DDL."""
@@ -122,4 +124,4 @@ class TestRunMigrations:
         await run_migrations(url)
 
         tables = _get_tables(db)
-        assert _APP_TABLES <= tables
+        assert tables >= _APP_TABLES

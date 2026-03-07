@@ -18,9 +18,7 @@ from .conftest import make_app as _make_app_4
 
 def _make_app(session_factory, aggregator=None):
     """Shim: forwards to shared make_app(), dropping extra returns."""
-    app, agg, _captured, _cp = _make_app_4(
-        session_factory, aggregator=aggregator
-    )
+    app, agg, _captured, _cp = _make_app_4(session_factory, aggregator=aggregator)
     return app, agg
 
 

@@ -1,7 +1,7 @@
 """ACP Protocol Simulator for high-fidelity integration testing.
 
-This script implements a minimal ACP-compliant agent that communicates via 
-JSON-RPC over stdin/stdout. It is used by integration tests as a real 
+This script implements a minimal ACP-compliant agent that communicates via
+JSON-RPC over stdin/stdout. It is used by integration tests as a real
 subprocess to verify the full protocol lifecycle without hitting a live LLM.
 """
 
@@ -11,10 +11,17 @@ import sys
 
 
 def main() -> None:
+    """Run a minimal ACP protocol simulator for integration tests."""
     parser = argparse.ArgumentParser(description="ACP Protocol Simulator")
-    parser.add_argument("--response", default="FINISH", help="Text to return in agent_message_chunk")
-    parser.add_argument("--session-id", default="sim-sess-123", help="Session ID to return")
-    parser.add_argument("--error", help="If set, return this error message for session/prompt")
+    parser.add_argument(
+        "--response", default="FINISH", help="Text to return in agent_message_chunk"
+    )
+    parser.add_argument(
+        "--session-id", default="sim-sess-123", help="Session ID to return"
+    )
+    parser.add_argument(
+        "--error", help="If set, return this error message for session/prompt"
+    )
     args = parser.parse_args()
 
     for line in sys.stdin:
@@ -62,7 +69,7 @@ def main() -> None:
                         "sessionId": args.session_id,
                         "update": {
                             "sessionUpdate": "agent_message_chunk",
-                            "content": {"text": args.response}
+                            "content": {"text": args.response},
                         },
                     },
                 }
@@ -79,7 +86,10 @@ def main() -> None:
             resp = {
                 "jsonrpc": "2.0",
                 "id": msg_id,
-                "error": {"code": -32601, "message": f"Method {method} not implemented"},
+                "error": {
+                    "code": -32601,
+                    "message": f"Method {method} not implemented",
+                },
             }
 
         sys.stdout.write(json.dumps(resp) + "\n")

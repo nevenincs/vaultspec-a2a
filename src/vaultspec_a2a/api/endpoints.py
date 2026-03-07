@@ -1,6 +1,7 @@
 """REST API endpoints for the A2A Orchestrator (ADR-019 refactored).
 
-Implements the 6 REST routes from ADR-011 section 2.2:
+Implements the REST routes from ADR-011 section 2.2 plus health:
+- GET  /health             -> aggregated health (gateway, worker, database)
 - POST /threads            -> CreateThreadResponse
 - GET  /threads            -> ThreadListResponse (paginated)
 - GET  /threads/{id}/state -> ThreadStateSnapshot (reconnection)
@@ -9,7 +10,7 @@ Implements the 6 REST routes from ADR-011 section 2.2:
 - POST /permissions/{id}/respond -> PermissionResponseResult
 
 ADR-019: Graph compilation and ``aggregator.ingest()`` no longer run in
-the control surface.  All work is dispatched to the worker process via
+the gateway.  All work is dispatched to the worker process via
 HTTP POST to ``/dispatch``.  The ``GraphRegistry`` has been removed; the
 worker owns graph lifecycle.
 
@@ -34,6 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import StateSnapshot
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import (
@@ -49,6 +51,7 @@ from ..core import (
     generate_nickname,
     load_team_config,
 )
+from ..core.aggregator import _classify_tool_kind
 from ..database.crud import (
     ThreadStatus,
     create_thread,
@@ -59,7 +62,8 @@ from ..database.crud import (
     update_thread_status,
 )
 from ..database.session import get_db
-from .schemas.enums import AgentLifecycleState
+from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus
+from .schemas.events import PlanEntry
 from .schemas.internal import DispatchRequest
 from .schemas.rest import (
     AgentStatusEntry,
@@ -86,7 +90,6 @@ from .schemas.snapshots import (
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
-from .schemas.events import PlanEntry
 
 
 __all__ = [
@@ -143,9 +146,44 @@ async def get_services(
     """Dependency for bundling all required services into a single injection point.
 
     ADR-019: No longer includes GraphRegistry or TaskGroup -- the worker owns
-    graph lifecycle, and the control surface does not run background agent tasks.
+    graph lifecycle, and the gateway does not run background agent tasks.
     """
     return db, aggregator, checkpointer, worker_client
+
+
+# ---------------------------------------------------------------------------
+# GET /health -- Aggregated health check
+# ---------------------------------------------------------------------------
+
+
+@router.get("/health")
+async def health(
+    db: AsyncSession = Depends(get_db),
+    worker_client: httpx.AsyncClient = Depends(get_worker_client),
+) -> dict:
+    """Public health endpoint aggregating gateway, worker, and database status."""
+    checks: dict[str, dict[str, str]] = {}
+
+    # Gateway -- always ok if we're responding
+    checks["gateway"] = {"status": "ok"}
+
+    # Database -- execute a trivial query
+    try:
+        await db.execute(text("SELECT 1"))
+        checks["database"] = {"status": "ok"}
+    except Exception as exc:
+        checks["database"] = {"status": "error", "detail": str(exc)}
+
+    # Worker -- ping its /health endpoint
+    try:
+        resp = await worker_client.get("/health", timeout=5.0)
+        resp.raise_for_status()
+        checks["worker"] = {"status": "ok"}
+    except Exception as exc:
+        checks["worker"] = {"status": "error", "detail": str(exc)}
+
+    overall = "ok" if all(c["status"] == "ok" for c in checks.values()) else "degraded"
+    return {"status": overall, "checks": checks}
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +265,7 @@ async def create_thread_endpoint(
     - Sends context preamble content to the worker for injection
     - Threads ``workspace_root`` to the worker for config resolution
     """
-    db, aggregator, checkpointer, worker_client = services
+    db, _aggregator, _checkpointer, worker_client = services
     thread_id = uuid4().hex
 
     # --- ADR-014: Metadata processing ---
@@ -312,6 +350,11 @@ async def create_thread_endpoint(
             validation_errors=[],
         )
 
+        logger.info(
+            "Dispatching ingest dispatch_id=%s for thread %s",
+            dispatch.dispatch_id,
+            thread.id,
+        )
         try:
             await worker_client.post(
                 "/dispatch",
@@ -319,7 +362,8 @@ async def create_thread_endpoint(
             )
         except httpx.HTTPError:
             logger.warning(
-                "Failed to dispatch ingest to worker for thread %s",
+                "Failed to dispatch ingest dispatch_id=%s for thread %s",
+                dispatch.dispatch_id,
                 thread.id,
                 exc_info=True,
             )
@@ -363,7 +407,9 @@ async def list_threads_endpoint(
                 status_code=422,
                 detail=f"Invalid status filter: {status!r}",
             ) from None
-    threads, total = await list_threads(db, offset=offset, limit=limit, status=status_filter)
+    threads, total = await list_threads(
+        db, offset=offset, limit=limit, status=status_filter
+    )
     summaries: list[ThreadSummary] = []
     for t in threads:
         # Parse metadata JSON for summary fields (graceful fallback for legacy threads)
@@ -423,7 +469,7 @@ async def get_thread_metadata_endpoint(
 # ---------------------------------------------------------------------------
 
 
-def _enrich_snapshot_from_state(
+def _enrich_snapshot_from_state(  # noqa: PLR0912, PLR0915
     snapshot: ThreadStateSnapshot,
     state: StateSnapshot,
     aggregator: EventAggregator | None = None,
@@ -529,9 +575,7 @@ def _enrich_snapshot_from_state(
                 _AgentSnapshot(
                     agent_id=agent_id,
                     node_name=node.get("node_name", ""),
-                    state=agent_states.get(
-                        agent_id, AgentLifecycleState.IDLE
-                    ),
+                    state=agent_states.get(agent_id, AgentLifecycleState.IDLE),
                     role=node.get("role", ""),
                     display_name=node.get("display_name", ""),
                     description=node.get("description", ""),
@@ -559,6 +603,32 @@ def _enrich_snapshot_from_state(
                 )
             )
 
+    # Extract tool calls from AIMessage.tool_calls, cross-reference with
+    # ToolMessage to determine completion status.
+    answered_tool_ids: set[str] = {
+        m.tool_call_id
+        for m in state.values.get("messages", [])
+        if isinstance(m, ToolMessage) and hasattr(m, "tool_call_id")
+    }
+    tool_call_snapshots: list[ToolCallSnapshot] = []
+    for m in state.values.get("messages", []):
+        if isinstance(m, AIMessage) and m.tool_calls:
+            for tc in m.tool_calls:
+                tc_id = tc.get("id", "")
+                tc_name = tc.get("name", "unknown_tool")
+                tool_call_snapshots.append(
+                    ToolCallSnapshot(
+                        tool_call_id=tc_id,
+                        title=tc_name,
+                        kind=_classify_tool_kind(tc_name),
+                        status=(
+                            ToolCallStatus.COMPLETED
+                            if tc_id in answered_tool_ids
+                            else ToolCallStatus.PENDING
+                        ),
+                    )
+                )
+
     return snapshot.model_copy(
         update={
             "messages": msgs,
@@ -567,6 +637,7 @@ def _enrich_snapshot_from_state(
             "artifacts": artifact_snapshots,
             "agents": agent_snapshots,
             "pending_permissions": perm_snapshots,
+            "tool_calls": tool_call_snapshots,
         }
     )
 
@@ -586,7 +657,7 @@ async def get_thread_state_endpoint(
 
     ADR-019: The graph is no longer registered locally.  Snapshot enrichment
     reads directly from the shared SQLite checkpointer (read-only in the
-    control surface, safe under WAL mode).  If checkpointer data is not
+    gateway, safe under WAL mode).  If checkpointer data is not
     available (e.g. worker hasn't written yet), a basic snapshot is returned.
     """
     thread = await get_thread(db, thread_id)
@@ -619,17 +690,15 @@ async def get_thread_state_endpoint(
             class _MinimalState:
                 """Minimal adapter for _enrich_snapshot_from_state."""
 
-                def __init__(
-                    self, values: dict, cfg: dict | None = None
-                ) -> None:
+                def __init__(self, values: dict, cfg: dict | None = None) -> None:
                     self.values = values
                     self.config = cfg
 
             config_dict = {"configurable": {"thread_id": thread_id}}
             if checkpoint_tuple.config:
-                cp_id = checkpoint_tuple.config.get(
-                    "configurable", {}
-                ).get("checkpoint_id")
+                cp_id = checkpoint_tuple.config.get("configurable", {}).get(
+                    "checkpoint_id"
+                )
                 if cp_id:
                     config_dict["configurable"]["checkpoint_id"] = cp_id
 
@@ -685,7 +754,9 @@ async def send_message_endpoint(
         raise HTTPException(status_code=404, detail="Thread not found")
 
     if thread.status == ThreadStatus.ARCHIVED:
-        raise HTTPException(status_code=409, detail="Cannot send messages to archived thread")
+        raise HTTPException(
+            status_code=409, detail="Cannot send messages to archived thread"
+        )
 
     logger.info(
         "Message received for thread %s: %d chars",
@@ -722,6 +793,11 @@ async def send_message_endpoint(
         workspace_root=workspace_root,
     )
 
+    logger.info(
+        "Dispatching message dispatch_id=%s for thread %s",
+        dispatch.dispatch_id,
+        thread_id,
+    )
     try:
         await worker_client.post(
             "/dispatch",
@@ -729,7 +805,8 @@ async def send_message_endpoint(
         )
     except httpx.HTTPError:
         logger.warning(
-            "Failed to dispatch message to worker for thread %s",
+            "Failed to dispatch message dispatch_id=%s for thread %s",
+            dispatch.dispatch_id,
             thread_id,
             exc_info=True,
         )
@@ -757,7 +834,7 @@ async def get_team_status_endpoint(
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions.
 
-    ADR-019 NOTE: The control surface aggregator is lightweight.  Agent
+    ADR-019 NOTE: The gateway aggregator is lightweight.  Agent
     summaries come from node metadata registered via the worker relay.
     Pending permissions are tracked by the aggregator (MCP-R5).
     """
@@ -769,9 +846,7 @@ async def get_team_status_endpoint(
         AgentStatusEntry(
             agent_id=s["agent_id"],
             node_name=s["node_name"],
-            state=agent_states.get(
-                s["agent_id"], AgentLifecycleState.IDLE
-            ),
+            state=agent_states.get(s["agent_id"], AgentLifecycleState.IDLE),
             role=s.get("role", ""),
             display_name=s.get("display_name", ""),
             description=s.get("description", ""),
@@ -804,7 +879,8 @@ async def get_team_status_endpoint(
 async def list_team_presets_endpoint() -> TeamPresetsResponse:
     """Return all available team presets for the team picker UI.
 
-    Dynamically discovers presets by globbing ``src/vaultspec_a2a/core/presets/teams/*.toml``.
+    Dynamically discovers presets by globbing
+    ``src/vaultspec_a2a/core/presets/teams/*.toml``.
     Workspace-local overrides are not included in this listing (they
     shadow individual presets but are not auto-discovered in v1).
     """
@@ -890,8 +966,8 @@ async def respond_to_permission_endpoint(
         # translate "approve"/"reject" into {"approved": True/False}.
         # Tool permission resumes pass the option_id string through unchanged.
         resume_value: str | dict[str, bool] = body.option_id
-        perm_event = aggregator._pending_permissions.get(request_id)
-        if perm_event and perm_event.tool_call == "plan_approval":
+        perm_event = aggregator._pending_permissions.get(request_id)  # noqa: SLF001
+        if perm_event and perm_event.tool_call == PermissionType.PLAN_APPROVAL:
             resume_value = {"approved": body.option_id == "approve"}
 
         dispatch = DispatchRequest(
@@ -902,6 +978,12 @@ async def respond_to_permission_endpoint(
             workspace_root=workspace_root,
         )
 
+        logger.info(
+            "Dispatching resume dispatch_id=%s for thread %s (request_id=%s)",
+            dispatch.dispatch_id,
+            thread_id,
+            request_id,
+        )
         try:
             resp = await worker_client.post(
                 "/dispatch",
@@ -910,7 +992,8 @@ async def respond_to_permission_endpoint(
             dispatched = resp.is_success
         except httpx.HTTPError:
             logger.warning(
-                "Failed to dispatch resume to worker for thread %s",
+                "Failed to dispatch resume dispatch_id=%s for thread %s",
+                dispatch.dispatch_id,
                 thread_id,
                 exc_info=True,
             )
@@ -969,6 +1052,11 @@ async def cancel_thread_endpoint(
 
     dispatched = False
     dispatch = DispatchRequest(action="cancel", thread_id=thread_id)
+    logger.info(
+        "Dispatching cancel dispatch_id=%s for thread %s",
+        dispatch.dispatch_id,
+        thread_id,
+    )
     try:
         resp = await worker_client.post(
             "/dispatch",
@@ -977,20 +1065,25 @@ async def cancel_thread_endpoint(
         dispatched = resp.is_success
     except httpx.HTTPError:
         logger.warning(
-            "Failed to dispatch cancel to worker for thread %s",
+            "Failed to dispatch cancel dispatch_id=%s for thread %s",
+            dispatch.dispatch_id,
             thread_id,
             exc_info=True,
         )
 
-    # Update DB status regardless of dispatch success — the thread is
-    # considered cancelled from the control surface perspective.
-    await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
-    await db.commit()
+    if dispatched:
+        await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
+        await db.commit()
+    else:
+        logger.warning(
+            "Cancel dispatch failed for thread %s — leaving DB status unchanged",
+            thread_id,
+        )
 
     return CancelThreadResponse(
         thread_id=thread_id,
-        status=ThreadStatus.CANCELLED,
-        cancelled=True,
+        status=ThreadStatus.CANCELLED if dispatched else thread.status,
+        cancelled=dispatched,
     )
 
 
@@ -1026,7 +1119,15 @@ async def archive_thread_endpoint(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    if thread.status not in (ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED):
+    # Idempotent: already archived → return success without re-writing.
+    if thread.status == ThreadStatus.ARCHIVED:
+        return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
+
+    if thread.status not in (
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+    ):
         raise HTTPException(
             status_code=409,
             detail=f"Cannot archive thread in {thread.status!r} state",
@@ -1045,8 +1146,8 @@ async def archive_thread_endpoint(
 @router.post("/admin/shutdown", status_code=202)
 async def shutdown_endpoint() -> dict[str, str]:
     """Initiate graceful server shutdown."""
-    import os
-    import signal
+    import os  # noqa: PLC0415
+    import signal  # noqa: PLC0415
 
     os.kill(os.getpid(), signal.SIGINT)
     return {"status": "shutting_down"}

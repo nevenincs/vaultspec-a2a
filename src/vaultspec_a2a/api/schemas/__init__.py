@@ -4,7 +4,11 @@ Facade re-exporting all public types from the ``vaultspec_a2a.api.schemas`` subp
 Consumers should import from this module rather than reaching into
 sub-modules directly::
 
-    from vaultspec_a2a.api.schemas import ServerEvent, ClientMessage, ThreadStateSnapshot
+    from vaultspec_a2a.api.schemas import (
+        ServerEvent,
+        ClientMessage,
+        ThreadStateSnapshot,
+    )
 """
 
 from .base import ClientCommand as ClientCommand
@@ -20,6 +24,7 @@ from .enums import AgentControlAction as AgentControlAction
 from .enums import AgentLifecycleState as AgentLifecycleState
 from .enums import ClientCommandType as ClientCommandType
 from .enums import PermissionOptionKind as PermissionOptionKind
+from .enums import PermissionType as PermissionType
 from .enums import PlanEntryPriority as PlanEntryPriority
 from .enums import PlanEntryStatus as PlanEntryStatus
 from .enums import ServerEventType as ServerEventType
@@ -99,6 +104,7 @@ __all__ = [
     "PermissionResponseCommand",
     "PermissionResponseRequest",
     "PermissionResponseResult",
+    "PermissionType",
     "PingCommand",
     "PlanEntry",
     "PlanEntryPriority",

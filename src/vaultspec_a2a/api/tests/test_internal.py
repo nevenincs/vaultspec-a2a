@@ -8,8 +8,6 @@ Uses real ConnectionManager + EventAggregator (no fakes or mocks).
 
 from __future__ import annotations
 
-import asyncio
-
 import pytest
 
 from fastapi import FastAPI
@@ -168,7 +166,7 @@ class TestInternalEvents:
     """Verify the /internal/events endpoint.
 
     When no connection_manager is present, the endpoint returns 503 so the
-    worker can detect the unready control surface and retry or backoff.
+    worker can detect the unready gateway and retry or backoff.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -217,7 +215,7 @@ class TestInternalEvents:
         We verify that the endpoint completes successfully with a real CM.
         """
         app = _make_test_app(with_connection_manager=True)
-        cm: ConnectionManager = app.state.connection_manager
+        _cm: ConnectionManager = app.state.connection_manager
 
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"

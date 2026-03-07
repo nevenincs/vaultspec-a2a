@@ -25,6 +25,7 @@ from .crud import sum_cost_by_agent as sum_cost_by_agent
 from .crud import sum_cost_by_thread as sum_cost_by_thread
 from .crud import update_thread_metadata as update_thread_metadata
 from .crud import update_thread_status as update_thread_status
+from .migrate import run_migrations as run_migrations
 from .models import ArtifactModel as ArtifactModel
 from .models import Base as Base
 from .models import CostTrackingModel as CostTrackingModel
@@ -36,13 +37,13 @@ from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import verify_wal_mode as verify_wal_mode
-from .migrate import run_migrations as run_migrations
+
 
 __all__ = [
     "ArtifactModel",
     "Base",
-    "InvalidTransitionError",
     "CostTrackingModel",
+    "InvalidTransitionError",
     "PermissionLogModel",
     "ThreadModel",
     "ThreadStatus",

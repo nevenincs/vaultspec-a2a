@@ -18,7 +18,6 @@ Policy note on _WriteBuffer usage (PROV-L1):
 
 import asyncio
 import json
-import os
 
 import pytest
 
@@ -360,9 +359,11 @@ class TestReadStderrRateLimitParsing:
         """overageStatus=blocked sets result.error and success=False."""
         session = self._make_session()
         event = {"type": "rate_limit_event", "overageStatus": "blocked"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(event) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(event) + "\n").encode(),
+            ]
+        )
         await session.read_stderr()
         assert len(session.result.rate_limit_events) == 1
         assert session.result.rate_limit_events[0] == event
@@ -375,9 +376,11 @@ class TestReadStderrRateLimitParsing:
         """overageStatus=rejected warns but keeps success state unchanged."""
         session = self._make_session()
         event = {"type": "rate_limit_event", "overageStatus": "rejected"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(event) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(event) + "\n").encode(),
+            ]
+        )
         # success starts False; rejected should not change it
         await session.read_stderr()
         assert len(session.result.rate_limit_events) == 1
@@ -388,9 +391,11 @@ class TestReadStderrRateLimitParsing:
         """Any rate_limit_event is appended to result.rate_limit_events."""
         session = self._make_session()
         event = {"type": "rate_limit_event", "someField": "value"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(event) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(event) + "\n").encode(),
+            ]
+        )
         await session.read_stderr()
         assert session.result.rate_limit_events == [event]
 
@@ -399,9 +404,11 @@ class TestReadStderrRateLimitParsing:
         """JSON lines that are not rate_limit_event are not collected."""
         session = self._make_session()
         other = {"type": "other_event", "data": "x"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(other) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(other) + "\n").encode(),
+            ]
+        )
         await session.read_stderr()
         assert session.result.rate_limit_events == []
 
@@ -409,9 +416,11 @@ class TestReadStderrRateLimitParsing:
     async def test_plain_text_stderr_ignored(self) -> None:
         """Non-JSON stderr lines are logged but do not affect rate_limit_events."""
         session = self._make_session()
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            b"Some plain text log line\n",
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                b"Some plain text log line\n",
+            ]
+        )
         await session.read_stderr()
         assert session.result.rate_limit_events == []
 
@@ -421,10 +430,12 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         ev1 = {"type": "rate_limit_event", "overageStatus": "rejected"}
         ev2 = {"type": "rate_limit_event", "overageStatus": "rejected"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(ev1) + "\n").encode(),
-            (json.dumps(ev2) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(ev1) + "\n").encode(),
+                (json.dumps(ev2) + "\n").encode(),
+            ]
+        )
         await session.read_stderr()
         assert len(session.result.rate_limit_events) == 2
 
@@ -434,9 +445,11 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         session.result.error = "prior error"
         event = {"type": "rate_limit_event", "overageStatus": "blocked"}
-        session.stderr = _ReadBuffer([  # type: ignore[assignment]
-            (json.dumps(event) + "\n").encode(),
-        ])
+        session.stderr = _ReadBuffer(
+            [  # type: ignore[assignment]
+                (json.dumps(event) + "\n").encode(),
+            ]
+        )
         await session.read_stderr()
         assert session.result.error == "prior error"
 
@@ -543,7 +556,9 @@ class TestDisableVarsInjection:
                 "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC",
             }
         )
-        for k in [k for k in env if k.startswith("CLAUDE_CODE_") and k not in _allowlist]:
+        for k in [
+            k for k in env if k.startswith("CLAUDE_CODE_") and k not in _allowlist
+        ]:
             del env[k]
         # ACP-ENV-006 injection
         env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"

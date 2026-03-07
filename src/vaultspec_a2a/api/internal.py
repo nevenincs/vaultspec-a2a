@@ -1,6 +1,6 @@
-"""Internal endpoints for worker <-> control surface communication (ADR-031).
+"""Internal endpoints for worker <-> gateway communication (ADR-031).
 
-The worker process communicates with the control surface via two channels:
+The worker process communicates with the gateway via two channels:
 
 1. **WebSocket** (``/internal/ws``) -- legacy streaming path where the worker
    pushes ``WorkerEventEnvelope`` and ``HeartbeatMessage`` JSON frames.
@@ -8,7 +8,7 @@ The worker process communicates with the control surface via two channels:
    path that avoids the need for a WebSocket client library in the worker.
    The ``WorkerBridge`` in ``vaultspec_a2a.worker.ipc`` uses this approach.
 
-The control surface exposes ``/internal/health`` for readiness probes.
+The gateway exposes ``/internal/health`` for readiness probes.
 """
 
 from __future__ import annotations
@@ -43,12 +43,18 @@ _TERMINAL_STATUS_MAP: dict[str, str] = {
 
 
 async def _handle_terminal_event(
-    thread_id: str, payload: dict[str, Any]
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    aggregator: Any | None = None,  # noqa: ANN401
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
 
     Called from both the WS and HTTP POST relay paths.  Imports are kept
     local to avoid circular dependencies at module level.
+
+    When *aggregator* is provided, prune stale permissions and sequence
+    counters for the terminated thread (AGG-01/05).
     """
     if payload.get("event_type") != "thread_terminal":
         return
@@ -67,9 +73,7 @@ async def _handle_terminal_event(
         async with factory() as db:
             await update_thread_status(db, thread_id, ThreadStatus(status_str))
             await db.commit()
-        logger.info(
-            "Thread %s status updated to %s", thread_id, status_str
-        )
+        logger.info("Thread %s status updated to %s", thread_id, status_str)
     except InvalidTransitionError:
         # BE-37: race condition — cancel endpoint already set terminal status.
         # This is expected and not an error.
@@ -85,9 +89,25 @@ async def _handle_terminal_event(
             status_str,
         )
 
+    # AGG-01/05: GC aggregator state for the terminated thread.
+    if aggregator is not None:
+        try:
+            aggregator.prune_stale_permissions()
+            # Remove the sequence counter for the now-terminal thread.
+            active: set[str] = set(getattr(aggregator, "_sequences", {}).keys()) - {
+                thread_id
+            }
+            aggregator.prune_sequences(active)
+        except Exception:
+            logger.warning(
+                "Aggregator GC failed for thread %s", thread_id, exc_info=True
+            )
+
+
 # Shared size limit for internal IPC payloads (1 MB).
 _MAX_WS_FRAME_BYTES = 1_048_576
 _MAX_HTTP_BODY_BYTES = 1_048_576
+
 
 async def _verify_internal_token(
     authorization: str | None = Header(None),
@@ -96,7 +116,9 @@ async def _verify_internal_token(
 
     Skipped when settings.internal_token is None (dev mode).
     """
-    from ..core import settings  # local import avoids circular dep at module level
+    from ..core import (  # noqa: PLC0415
+        settings,
+    )
 
     token = settings.internal_token
     if token is None:
@@ -112,9 +134,43 @@ internal_router = APIRouter(
 )
 
 
+async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None:
+    """Relay a single worker event to WS clients and update aggregator/DB."""
+    thread_id = msg.get("thread_id", "")
+    payload = msg.get("payload", {})
+    if not thread_id or not payload:
+        logger.warning("Malformed worker event envelope: %s", raw[:200])
+        return
+
+    cm = getattr(websocket.app.state, "connection_manager", None)
+    if cm is not None:
+        await cm.broadcast_to_thread(thread_id, payload)
+    else:
+        logger.warning(
+            "ConnectionManager not available -- dropping event for %s",
+            thread_id,
+        )
+    # P8-01: sync into API aggregator state.
+    agg = getattr(websocket.app.state, "aggregator", None)
+    if agg is not None:
+        agg.sync_worker_event(thread_id, payload)
+    # DB-CRIT-01: terminal status update + AGG-01/05 GC.
+    await _handle_terminal_event(thread_id, payload, aggregator=agg)
+
+
 @internal_router.websocket("/ws")
 async def worker_ws_endpoint(websocket: WebSocket) -> None:
     """Internal WebSocket -- receives events and heartbeats from the worker."""
+    # AUTH-02: WebSocket routes bypass router-level Depends(), so verify
+    # the bearer token manually before accepting the connection.
+    from ..core import settings as _settings  # noqa: PLC0415
+
+    if _settings.internal_token is not None:
+        token = websocket.headers.get("authorization", "").removeprefix("Bearer ")
+        if token != _settings.internal_token:
+            await websocket.close(code=1008, reason="Unauthorized")
+            return
+
     await websocket.accept()
     logger.info("Worker connected to internal WS")
 
@@ -146,26 +202,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
                     )
 
                 case "event":
-                    thread_id = msg.get("thread_id", "")
-                    payload = msg.get("payload", {})
-                    if thread_id and payload:
-                        cm = getattr(websocket.app.state, "connection_manager", None)
-                        if cm is not None:
-                            await cm.broadcast_to_thread(thread_id, payload)
-                        else:
-                            logger.warning(
-                                "ConnectionManager not available"
-                                " -- dropping event for %s",
-                                thread_id,
-                            )
-                        # P8-01: sync into API aggregator state.
-                        agg = getattr(websocket.app.state, "aggregator", None)
-                        if agg is not None:
-                            agg.sync_worker_event(thread_id, payload)
-                        # DB-CRIT-01: terminal status update.
-                        await _handle_terminal_event(thread_id, payload)
-                    else:
-                        logger.warning("Malformed worker event envelope: %s", raw[:200])
+                    await _relay_worker_event(websocket, msg, raw)
 
                 case _:
                     logger.warning("Unknown internal WS message type: %s", msg_type)
@@ -178,7 +215,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
 @internal_router.get("/health")
 async def internal_health() -> dict[str, str]:
     """Readiness probe -- confirms the internal API is accepting connections."""
-    return {"status": "ok", "service": "control-surface"}
+    return {"status": "ok", "service": "gateway"}
 
 
 # ---------------------------------------------------------------------------
@@ -207,7 +244,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     if cm is None:
         raise HTTPException(
             status_code=503,
-            detail="ConnectionManager not available -- control surface not ready",
+            detail="ConnectionManager not available -- gateway not ready",
         )
 
     if thread_id and payload:
@@ -216,8 +253,8 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
         agg = getattr(request.app.state, "aggregator", None)
         if agg is not None:
             agg.sync_worker_event(thread_id, payload)
-        # DB-CRIT-01: translate thread_terminal events into DB status updates.
-        await _handle_terminal_event(thread_id, payload)
+        # DB-CRIT-01: terminal status update + AGG-01/05 GC.
+        await _handle_terminal_event(thread_id, payload, aggregator=agg)
     else:
         logger.warning("Malformed worker event POST: missing thread_id or payload")
 
@@ -241,11 +278,15 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     body: dict[str, Any] = await request.json()
     events: list[dict[str, Any]] = body.get("events", [])
 
+    # Sort events by worker-side monotonic timestamp to preserve causal order
+    # even if the batch was assembled out of order.
+    events.sort(key=lambda e: e.get("ts", 0.0))
+
     cm = getattr(request.app.state, "connection_manager", None)
     if cm is None:
         raise HTTPException(
             status_code=503,
-            detail="ConnectionManager not available -- control surface not ready",
+            detail="ConnectionManager not available -- gateway not ready",
         )
 
     agg = getattr(request.app.state, "aggregator", None)
@@ -258,7 +299,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         await cm.broadcast_to_thread(thread_id, payload)
         if agg is not None:
             agg.sync_worker_event(thread_id, payload)
-        await _handle_terminal_event(thread_id, payload)
+        await _handle_terminal_event(thread_id, payload, aggregator=agg)
 
     return {"status": "ok"}
 
@@ -267,7 +308,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
 async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     """Receive a heartbeat from the worker.
 
-    Updates ``app.state`` so the control surface can monitor worker
+    Updates ``app.state`` so the gateway can monitor worker
     liveness without a persistent WebSocket connection.
     """
     body: dict[str, Any] = await request.json()

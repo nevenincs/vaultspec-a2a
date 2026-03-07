@@ -2,7 +2,7 @@
 
 These enums define the discriminators and status types used in WebSocket
 messages and REST payloads between the backend orchestrator and the
-React control surface.
+React gateway.
 
 Note: ``Provider`` and ``Model`` live in ``vaultspec_a2a.utils.enums`` and are
 imported (not duplicated) where needed.
@@ -16,6 +16,7 @@ __all__ = [
     "AgentLifecycleState",
     "ClientCommandType",
     "PermissionOptionKind",
+    "PermissionType",
     "PlanEntryPriority",
     "PlanEntryStatus",
     "ServerEventType",
@@ -109,6 +110,17 @@ class PermissionOptionKind(StrEnum):
     ALLOW_ALWAYS = "allow_always"
     REJECT_ONCE = "reject_once"
     REJECT_ALWAYS = "reject_always"
+
+
+class PermissionType(StrEnum):
+    """Discriminator for permission request categories.
+
+    TOOL_PERMISSION: Standard ACP tool call approval.
+    PLAN_APPROVAL: Supervisor plan approval before routing to exec worker.
+    """
+
+    TOOL_PERMISSION = "tool_permission"
+    PLAN_APPROVAL = "plan_approval"
 
 
 class AgentControlAction(StrEnum):

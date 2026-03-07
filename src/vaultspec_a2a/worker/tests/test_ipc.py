@@ -177,7 +177,9 @@ class TestSendEvent:
                 await bridge.send_event("thread-fail", {"x": 1})
                 await bridge.flush_events()
 
-            assert any("Batch event relay failed" in rec.message for rec in caplog.records)
+            assert any(
+                "Batch event relay failed" in rec.message for rec in caplog.records
+            )
         finally:
             await bridge.close()
 

@@ -6,7 +6,7 @@ from typing import Literal
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ..utils.enums import Environment, LogLevel, Model, Provider
+from ..utils.enums import Environment, LogLevel
 
 
 class Settings(BaseSettings):
@@ -23,14 +23,8 @@ class Settings(BaseSettings):
     log_level: LogLevel = Field(default=LogLevel.INFO)
     database_url: str = Field(default="sqlite+aiosqlite:///vaultspec.db")
     workspace_root: Path = Field(default=Path("./workspaces"))
-    default_provider: Provider = Field(default=Provider.CLAUDE)
-    default_model: Model | None = Field(default=None)
     provider_timeout_seconds: int = Field(
         default=300, description="Global timeout for LLM provider API calls."
-    )
-    graph_node_timeout_seconds: int = Field(
-        default=300,
-        description="Per-node step timeout for LangGraph Pregel execution (seconds).",
     )
     # API Keys & Auth (bare ecosystem names take precedence over VAULTSPEC_ prefix)
     anthropic_api_key: str | None = Field(
@@ -99,20 +93,12 @@ class Settings(BaseSettings):
         description="Worker base URL for dispatch calls",
         alias="VAULTSPEC_WORKER_URL",
     )
-    auto_spawn_worker: bool = Field(
-        default=True,
-        description=(
-            "Auto-spawn worker as child process (pip install mode). "
-            "Set False for Docker/systemd where worker runs independently."
-        ),
-        alias="VAULTSPEC_AUTO_SPAWN_WORKER",
-    )
     internal_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "VAULTSPEC_INTERNAL_TOKEN", "INTERNAL_TOKEN"
+        validation_alias=AliasChoices("VAULTSPEC_INTERNAL_TOKEN", "INTERNAL_TOKEN"),
+        description=(
+            "Bearer token for worker<->control IPC. None disables auth (dev mode)."
         ),
-        description="Bearer token for worker<->control IPC. None disables auth (dev mode).",
     )
     max_concurrent_threads: int = Field(
         default=5,
@@ -135,7 +121,10 @@ class Settings(BaseSettings):
     langsmith_tracing: bool = Field(
         default=False,
         validation_alias=AliasChoices("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"),
-        description="Enable LangSmith tracing. Defaults OFF to avoid unexpected quota consumption.",
+        description=(
+            "Enable LangSmith tracing. Defaults OFF"
+            " to avoid unexpected quota consumption."
+        ),
     )
     langsmith_api_key: str | None = Field(
         default=None,

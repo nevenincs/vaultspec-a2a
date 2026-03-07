@@ -22,7 +22,7 @@ import sys
 from ...core.config import settings
 from ...core.exceptions import ConfigError
 from ...utils.logging import setup_logging
-from ..factory import _BIN_PATH, _CLAUDE_ACP_JS, _build_acp_command
+from ..factory import _build_acp_command
 from ._protocol import ProbeResult, run_probe
 
 
@@ -79,7 +79,9 @@ async def main(backend: str | None = None, *, debug: bool = False) -> ProbeResul
             )
             return ProbeResult(
                 success=False,
-                error="System claude binary not found — required for binary ACP backend",
+                error=(
+                    "System claude binary not found — required for binary ACP backend"
+                ),
             )
         env_overrides["CLAUDE_CODE_EXECUTABLE"] = _system_claude
         logger.debug("Binary mode: CLAUDE_CODE_EXECUTABLE=%s", _system_claude)

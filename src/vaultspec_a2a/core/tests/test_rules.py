@@ -8,8 +8,6 @@ import time
 
 from pathlib import Path
 
-import pytest
-
 from ..rules import RuleManager
 
 
@@ -86,7 +84,9 @@ class TestCompile:
 
     def test_compile_strips_frontmatter(self, tmp_path: Path) -> None:
         d = _rules_dir(tmp_path)
-        (d / "rules.md").write_text("---\ntitle: My Rules\nauthor: dev\n---\nactual content")
+        (d / "rules.md").write_text(
+            "---\ntitle: My Rules\nauthor: dev\n---\nactual content"
+        )
 
         result = RuleManager(tmp_path).compile()
 
@@ -132,7 +132,9 @@ class TestCompile:
 
     def test_compile_skips_url_includes(self, tmp_path: Path) -> None:
         d = _rules_dir(tmp_path)
-        (d / "main.md").write_text("before\n@https://example.com/rules.md\n@http://example.com/other.md\nafter")
+        (d / "main.md").write_text(
+            "before\n@https://example.com/rules.md\n@http://example.com/other.md\nafter"
+        )
 
         result = RuleManager(tmp_path).compile()
 
@@ -154,7 +156,9 @@ class TestCompile:
         assert result is not None
         assert "helper content" in result
 
-    def test_compile_wraps_included_content_in_html_comments(self, tmp_path: Path) -> None:
+    def test_compile_wraps_included_content_in_html_comments(
+        self, tmp_path: Path
+    ) -> None:
         d = _rules_dir(tmp_path)
         (tmp_path / "shared.md").write_text("shared content")
         (d / "main.md").write_text("@shared.md")

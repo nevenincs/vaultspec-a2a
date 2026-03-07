@@ -5,15 +5,16 @@ tests that use a real AcpChatModel pointing to a local simulator process.
 """
 
 import sys
+
 from pathlib import Path
 
 import pytest
 
 from langchain_core.messages import HumanMessage
 
-from ..worker import create_worker_node
-from ...state import TeamState
 from ....providers.acp_chat_model import AcpChatModel
+from ...state import TeamState
+from ..worker import create_worker_node
 
 
 SIMULATOR_PATH = Path(__file__).parent.parent.parent / "tests" / "acp_simulator.py"
@@ -89,10 +90,10 @@ async def test_worker_error_handling_integration() -> None:
 
     with pytest.raises(Exception) as excinfo:
         await node(_make_state())
-    
+
     # AcpChatModel raises AcpPromptError, which is wrapped in WorkerExecutionError
     error_str = str(excinfo.value)
     if excinfo.value.__cause__:
         error_str += " " + str(excinfo.value.__cause__)
-    
+
     assert "Internal agent failure" in error_str

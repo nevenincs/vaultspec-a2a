@@ -14,6 +14,7 @@ import asyncio
 import logging
 import sys
 
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -23,7 +24,7 @@ async def run_smoke() -> None:
     logger.info("Smoke evaluation suite starting...")
     logger.info("Dimensions: routing, gate_compliance")
 
-    # TODO: Wire aevaluate() calls once LangSmith datasets are populated.
+    # TODO(team): Wire aevaluate() calls once datasets are populated.  # https://github.com/vaultspec/a2a/issues/1
 
     logger.info(
         "Smoke suite scaffold complete. "

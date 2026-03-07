@@ -36,7 +36,10 @@ async def run_migrations(database_url: str) -> None:
         FileNotFoundError: If ``alembic.ini`` is not found at the repo root.
     """
     if not _ALEMBIC_INI.exists():
-        msg = f"alembic.ini not found at {_ALEMBIC_INI}; ensure it exists at the repo root"
+        msg = (
+            f"alembic.ini not found at {_ALEMBIC_INI};"
+            " ensure it exists at the repo root"
+        )
         raise FileNotFoundError(msg)
 
     cfg = Config(str(_ALEMBIC_INI))

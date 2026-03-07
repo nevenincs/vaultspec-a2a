@@ -1,6 +1,6 @@
 """Worker-to-control-surface IPC bridge (ADR-031).
 
-Uses HTTP POST to push events and heartbeats to the control surface.
+Uses HTTP POST to push events and heartbeats to the gateway.
 Avoids introducing a WebSocket client dependency by using httpx
 (already in the project's dependency set).
 
@@ -27,9 +27,14 @@ logger = logging.getLogger(__name__)
 # CRIT-02: batch flush interval in seconds.
 _FLUSH_INTERVAL = 0.05
 
+# IPC-03: retry and buffer limits for event relay.
+_MAX_FLUSH_RETRIES = 3
+_RETRY_BACKOFF_BASE = 0.1  # seconds; doubles each retry (0.1, 0.2, 0.4)
+_MAX_EVENT_BUFFER = 10_000
+
 
 class WorkerBridge:
-    """Pushes events and heartbeats to the control surface via HTTP.
+    """Pushes events and heartbeats to the gateway via HTTP.
 
     The bridge maintains an ``httpx.AsyncClient`` pointed at the control
     surface's ``/internal/`` endpoints.  It tracks which thread IDs are
@@ -41,7 +46,7 @@ class WorkerBridge:
     Parameters
     ----------
     api_url:
-        Base URL of the control surface (e.g. ``http://localhost:8000``).
+        Base URL of the gateway (e.g. ``http://localhost:8000``).
     worker_id:
         Unique identifier for this worker instance (hex string).
     """
@@ -103,14 +108,22 @@ class WorkerBridge:
     # ------------------------------------------------------------------
 
     async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
-        """Buffer an event for batched relay to the control surface.
+        """Buffer an event for batched relay to the gateway.
 
         Events are accumulated and flushed as a single HTTP POST after
         ``_FLUSH_INTERVAL`` seconds of inactivity or when ``flush_events``
         is called explicitly.
         """
+        # IPC-03: cap buffer to prevent unbounded memory growth.
+        if len(self._event_buffer) >= _MAX_EVENT_BUFFER:
+            logger.warning(
+                "Event buffer full (%d events), dropping oldest event",
+                _MAX_EVENT_BUFFER,
+            )
+            self._event_buffer.pop(0)
+
         self._event_buffer.append(
-            {"thread_id": thread_id, "payload": payload}
+            {"thread_id": thread_id, "payload": payload, "ts": time.monotonic()}
         )
         # Schedule a flush if one isn't already pending.
         if self._flush_task is None or self._flush_task.done():
@@ -124,8 +137,12 @@ class WorkerBridge:
     async def flush_events(self) -> None:
         """Immediately send all buffered events as a single batch POST.
 
+        IPC-03: retries up to ``_MAX_FLUSH_RETRIES`` times with exponential
+        backoff on failure.  Events are re-queued on final failure so they
+        are not silently lost (subject to the buffer cap).
+
         Failures are logged at WARNING level but never raised -- the worker
-        must not crash because the control surface is temporarily unavailable.
+        must not crash because the gateway is temporarily unavailable.
         """
         if not self._event_buffer:
             return
@@ -133,22 +150,43 @@ class WorkerBridge:
         batch = self._event_buffer[:]
         self._event_buffer.clear()
 
-        try:
-            resp = await self._client.post(
-                "/internal/events/batch",
-                json={"events": batch},
-            )
-            if resp.status_code != 200:
-                logger.warning(
-                    "Batch event relay failed (HTTP %d), %d events dropped",
-                    resp.status_code,
-                    len(batch),
+        for attempt in range(_MAX_FLUSH_RETRIES):
+            try:
+                resp = await self._client.post(
+                    "/internal/events/batch",
+                    json={"events": batch},
                 )
-        except httpx.HTTPError:
+                if resp.status_code == 200:
+                    return  # success
+                logger.warning(
+                    "Batch event relay failed (HTTP %d), attempt %d/%d",
+                    resp.status_code,
+                    attempt + 1,
+                    _MAX_FLUSH_RETRIES,
+                )
+            except httpx.HTTPError:
+                logger.warning(
+                    "Failed to send %d events (attempt %d/%d)",
+                    len(batch),
+                    attempt + 1,
+                    _MAX_FLUSH_RETRIES,
+                    exc_info=True,
+                )
+
+            # Exponential backoff before retry.
+            if attempt < _MAX_FLUSH_RETRIES - 1:
+                await asyncio.sleep(_RETRY_BACKOFF_BASE * (2**attempt))
+
+        # All retries exhausted -- re-queue events (respecting buffer cap).
+        space = _MAX_EVENT_BUFFER - len(self._event_buffer)
+        if space > 0:
+            self._event_buffer[:0] = batch[:space]
+        dropped = len(batch) - max(space, 0)
+        if dropped > 0:
             logger.warning(
-                "Failed to send %d events to control surface",
-                len(batch),
-                exc_info=True,
+                "Dropped %d events after %d failed flush attempts",
+                dropped,
+                _MAX_FLUSH_RETRIES,
             )
 
     # ------------------------------------------------------------------
@@ -156,7 +194,7 @@ class WorkerBridge:
     # ------------------------------------------------------------------
 
     async def send_heartbeat(self) -> None:
-        """Send a single heartbeat POST to the control surface."""
+        """Send a single heartbeat POST to the gateway."""
         try:
             await self._client.post(
                 "/internal/heartbeat",

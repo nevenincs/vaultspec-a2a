@@ -20,7 +20,7 @@ related:
 
 ## 1. Context and Problem Statement
 
-The VaultSpec Control Surface frontend (React / React 5 / shadcn-React /
+The VaultSpec Gateway frontend (React / React 5 / shadcn-React /
 Tailwind
 CSS v4) is authored against a Figma design file. The CLAUDE.md workflow mandate
 already

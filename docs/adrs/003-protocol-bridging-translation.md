@@ -95,7 +95,7 @@ We will handle Protocol Bridging via the following mechanisms:
 - **Loss of Graph Granularity:** The CLI view will abstract away the
   complex internal state of the LangGraph (e.g., memory arrays,
   specific tool kwargs). This detailed telemetry will only be visible
-  in the rich web Control Surface or via separate tracing tools like
+  in the rich web Gateway or via separate tracing tools like
   LangSmith.
 
 ## 7. References

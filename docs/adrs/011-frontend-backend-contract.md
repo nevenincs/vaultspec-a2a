@@ -20,7 +20,7 @@ related:
 
 ## 1. Context and Problem Statement
 
-The backend (LangGraph orchestrator) and frontend (React control surface)
+The backend (LangGraph orchestrator) and frontend (React gateway)
 have no formal wire contract. ADR-004, ADR-005, and ADR-009 describe the
 architectural intent---multiplexed WebSocket, REST state replay, structured
 events---but no concrete Pydantic models or endpoint signatures exist.

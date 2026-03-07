@@ -17,7 +17,7 @@ related:
 
 The orchestrator must handle a high volume of diverse event streams
 originating from multiple concurrent LangGraph agent executions. The
-frontend Control Surface requires a single, multiplexed WebSocket
+frontend Gateway requires a single, multiplexed WebSocket
 connection to display these events in real-time. Crucially, because
 LangGraph executions are highly stateful, the frontend needs to be able
 to reliably reconstruct the current state of an agent (including its
@@ -39,13 +39,13 @@ mechanisms:
     universally formatted timestamps, grouping `run_id`s, structuring
     message arrays).
   - Broadcasting these unified JSON events over a single, multiplexed
-    WebSocket connection to the Control Surface frontend.
+    WebSocket connection to the Gateway frontend.
 - **SQLite Checkpoint Sourcing:** Rather than reinventing a custom
   event-sourcing database, all graph state transitions and checkpoints
   are inherently persisted by LangGraph's `checkpointer` (via
   `langgraph-checkpoint-sqlite`).
 - **Server-Side State Replay:** Upon a frontend reconnect or refresh,
-  the Control Surface will request the latest persisted Graph State for
+  the Gateway will request the latest persisted Graph State for
   a given `thread_id` via a dedicated REST endpoint.
   - The server will retrieve the state using `graph.get_state(config)`.
   - This state object (containing the entire message history and
@@ -98,7 +98,7 @@ mechanisms:
 ## 6. Negative Consequences
 
 - **Loss of "Terminal" View:** Because we are no longer piping raw ANSI
-  stdout, the "Terminal" view concept in the Control Surface is
+  stdout, the "Terminal" view concept in the Gateway is
   deprecated. It must be replaced with structured UI components (e.g.,
   Chat Bubbles, Tool Call components, Markdown renderers) that
   visualize the structured LangGraph JSON payloads. While this is
@@ -108,4 +108,4 @@ mechanisms:
 ## 7. References
 
 - [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
-- [Control Surface Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)
+- [Gateway Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)

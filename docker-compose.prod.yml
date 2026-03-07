@@ -15,7 +15,6 @@ services:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
       VAULTSPEC_WORKER_URL: 'http://worker:8001'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'

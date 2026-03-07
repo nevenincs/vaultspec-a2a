@@ -137,7 +137,7 @@ The `GET /threads/{id}/state` endpoint is the sole mechanism for the UI to recov
 
 ### B. Worker Dispatch Ignores Blackboard Fields (ADR-019 Broken) [CRITICAL]
 
-The control surface sends a `DispatchRequest` to the worker process containing `active_feature`, `pipeline_phase`, and `vault_index`.
+The gateway sends a `DispatchRequest` to the worker process containing `active_feature`, `pipeline_phase`, and `vault_index`.
 **The Bug:** In `src/vaultspec_a2a/worker/executor.py`, the `_handle_ingest()` method completely ignores these fields when constructing the initial `graph_input` for a new thread. The checkpointer starts with an empty state for the 4 mandatory ADR-019 blackboard fields, fundamentally breaking the SDD blackboard capabilities for the entire lifecycle of the thread.
 
 ### C. Missing Artifact Retrieval Endpoints [HIGH]
@@ -191,8 +191,8 @@ The backend defines a `PlanUpdateEvent` and `src/vaultspec_a2a/core/aggregator.p
 
 ### B. Worker Liveness Opacity [HIGH]
 
-Following ADR-019, the worker process sends HTTP POST heartbeats to the control surface (`/internal/heartbeat`), which tracks the timestamp in `app.state.worker_last_heartbeat_ts`.
-**The Gap:** The frontend has no visibility into this. The `TeamStatusResponse` and WebSocket events do not report if the backend worker process is actually alive or dead. If the worker crashes, the frontend will happily accept `SEND_MESSAGE` commands (which 202 Accept and drop into the void) because the control surface API is up, even though the execution engine is dead.
+Following ADR-019, the worker process sends HTTP POST heartbeats to the gateway (`/internal/heartbeat`), which tracks the timestamp in `app.state.worker_last_heartbeat_ts`.
+**The Gap:** The frontend has no visibility into this. The `TeamStatusResponse` and WebSocket events do not report if the backend worker process is actually alive or dead. If the worker crashes, the frontend will happily accept `SEND_MESSAGE` commands (which 202 Accept and drop into the void) because the gateway API is up, even though the execution engine is dead.
 
 ### C. Trace Context Injection Format Mismatch [MEDIUM]
 
@@ -261,12 +261,12 @@ The `src/vaultspec_a2a/protocols/a2a/` directory exists but contains only an emp
 ### B. MCP Server Skews Thread Metadata (ADR-014 Violation) [MEDIUM]
 
 The `start_thread` MCP tool (`src/vaultspec_a2a/protocols/mcp/server.py`) accepts `initial_message`, `team_preset`, `autonomous`, and `workspace_root`. It passes these to the `POST /api/threads` REST endpoint.
-**The Gap:** It completely omits the `metadata: ThreadMetadata` payload structure (ADR-014) from the POST request. This means threads created via the MCP server (e.g., from Cursor or Windsurf) will never have `feature_tag`, `context_refs`, or provenance tracking attached to them. This creates a two-tier system where the UI control surface can launch fully contextualized threads, but external IDEs cannot.
+**The Gap:** It completely omits the `metadata: ThreadMetadata` payload structure (ADR-014) from the POST request. This means threads created via the MCP server (e.g., from Cursor or Windsurf) will never have `feature_tag`, `context_refs`, or provenance tracking attached to them. This creates a two-tier system where the UI gateway can launch fully contextualized threads, but external IDEs cannot.
 
 ### C. MCP Output Missing Cost/Token Telemetry [LOW]
 
 The `get_thread_status` MCP tool returns a human-readable text block summarizing the thread's status, messages, agents, and plan.
-**The Gap:** It does not expose the token usage or cost tracking. If an IDE user runs a long autonomous task, they have no visibility into the cost incurred until they open the UI control surface.
+**The Gap:** It does not expose the token usage or cost tracking. If an IDE user runs a long autonomous task, they have no visibility into the cost incurred until they open the UI gateway.
 
 ### D. Required Next Steps for the Backend Edge (Cycle 8)
 
@@ -344,7 +344,7 @@ Cycle 12 audited the team topology state tracking, specifically focusing on the 
 
 ### A. REST Endpoint Hardcodes All Agents to IDLE [CRITICAL]
 
-The control surface provides a `GET /team/status` endpoint (`src/vaultspec_a2a/api/endpoints.py`) that the frontend polls to build the "Agent Dashboard" view.
+The gateway provides a `GET /team/status` endpoint (`src/vaultspec_a2a/api/endpoints.py`) that the frontend polls to build the "Agent Dashboard" view.
 **The Bug:** In `get_team_status_endpoint()`, the response constructor loops over `node_summaries` and explicitly hardcodes `state=AgentLifecycleState.IDLE` for every single agent. The backend aggregator completely fails to track the actual running state (working, blocked, failed) of the agents in memory. If the frontend relies on this endpoint, it will forever show all agents as sleeping, even when a thread is actively spinning at 100% CPU.
 
 ### B. Dead Code Path: TeamStatusEvent is Never Emitted [CRITICAL]
@@ -467,11 +467,11 @@ The UI receives a `ToolCallUpdateEvent` that only says `status="completed"`. It 
 
 ## 20. Gaps & Missing Information (Cycle 18 Audit)
 
-Cycle 18 audited the concurrency control mechanisms between the control surface and the worker process, specifically focusing on how the system handles simultaneous `ingest` (new message) and `resume` (permission response) requests.
+Cycle 18 audited the concurrency control mechanisms between the gateway and the worker process, specifically focusing on how the system handles simultaneous `ingest` (new message) and `resume` (permission response) requests.
 
 ### A. Concurrent Dispatch Collision [HIGH]
 The worker's `Executor` uses `_mark_ingest_active(thread_id)` to ensure only one LangGraph execution runs per thread.
-**The Bug:** When a thread is suspended at a LangGraph `interrupt` (awaiting user permission), it is considered "not ingesting". If a user types a new message into the UI *while* a permission request is pending, the control surface will dispatch an `ingest` action. The worker will accept this, effectively "forking" the thread's future or overwriting the current suspended state in the checkpointer.
+**The Bug:** When a thread is suspended at a LangGraph `interrupt` (awaiting user permission), it is considered "not ingesting". If a user types a new message into the UI *while* a permission request is pending, the gateway will dispatch an `ingest` action. The worker will accept this, effectively "forking" the thread's future or overwriting the current suspended state in the checkpointer.
 **The UI Impact:** The user might respond to a permission request *after* they've already sent a new message, causing the graph to resume in a corrupted or stale state. The backend does not lock the thread for `resume` while an `ingest` is pending, or vice versa.
 
 ### B. Opaque State Versioning / Checkpoint Pins [MEDIUM]

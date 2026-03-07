@@ -1,5 +1,5 @@
 ---
-name: 'Control Surface Gaps Research'
+name: 'Gateway Gaps Research'
 date: 2026-25-02
 type: research
 summary: 'Rigorous technical decisions for React agent rendering, replacing experimental tech with robust Server-Side Replay, @humanspeak token caching, and resolving Tailwind v4 styling conflicts.'
@@ -7,10 +7,10 @@ maturity: 65
 feature: control-surface-gaps
 ---
 
-# Control Surface Gaps Research
+# Gateway Gaps Research
 
 **Date**: 2026-02-25
-**Domain**: Control Surface & Rendering
+**Domain**: Gateway & Rendering
 
 ## 1. Streaming Markdown: `@humanspeak/React-markdown` over Incremark (Gap G2)
 

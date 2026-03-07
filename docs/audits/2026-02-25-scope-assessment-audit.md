@@ -9,7 +9,7 @@ related:
   - docs/adrs/2026-02-26-008-orchestration-topology-pipeline-adr.md
 ---
 
-# Scope Assessment: Agent Team Control Surface
+# Scope Assessment: Agent Team Gateway
 
 **Date**: 2026-02-25
 **Status**: Assessment (no commitments)
@@ -21,7 +21,7 @@ related:
 A system with two faces:
 
 1. **CLI bridge** — MCP tools that let any CLI delegate work to a coding team
-2. **Control surface** — Web app for monitoring, messaging, and managing agents
+2. **Gateway** — Web app for monitoring, messaging, and managing agents
 
 Both backed by the same orchestrator process that coordinates A2A agents.
 
@@ -101,7 +101,7 @@ MCP Tool Surface (CLI bridge)
 └── Tool registration with mcp-python-sdk
 ```
 
-### Must be built — Web Control Surface
+### Must be built — Web Gateway
 
 ```text
 Backend (FastAPI)

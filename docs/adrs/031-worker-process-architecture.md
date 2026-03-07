@@ -20,17 +20,17 @@ related:
 The VaultSpec backend has two distinct runtime concerns that benefit from
 process-level separation:
 
-- **Control surface** (`src/vaultspec_a2a/api/`): Handles REST and WebSocket connections,
+- **Gateway** (`src/vaultspec_a2a/api/`): Handles REST and WebSocket connections,
   thread lifecycle, permission responses, and SSE event streaming to the
   frontend. Latency-sensitive; must stay responsive even during long LLM calls.
 - **Graph execution** (`src/vaultspec_a2a/worker/`): Runs LangGraph agent graphs, invokes LLM
-  providers, streams events back to the control surface. CPU- and I/O-bound;
+  providers, streams events back to the gateway. CPU- and I/O-bound;
   a single run can last minutes and spawn multiple async tasks.
 
 Running both in a single process risks LLM execution saturating the event loop
 and causing connection handler latency spikes. Process-level isolation also
 enables independent scaling: the worker can be scaled horizontally while the
-control surface remains a singleton (SQLite WAL limitation).
+gateway remains a singleton (SQLite WAL limitation).
 
 This ADR ratifies the implemented worker process design that was not covered by
 an existing ADR (referenced in `src/vaultspec_a2a/worker/app.py` and `src/vaultspec_a2a/worker/executor.py`
@@ -42,7 +42,7 @@ as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
 
 ```
 ┌──────────────────────────────────────┐      ┌────────────────────────┐
-│  Control Surface (src/vaultspec_a2a/api/)          │      │  Worker (src/vaultspec_a2a/worker/)  │
+│  Gateway (src/vaultspec_a2a/api/)          │      │  Worker (src/vaultspec_a2a/worker/)  │
 │  FastAPI app  :8000                  │ HTTP │  FastAPI app  :8001     │
 │  REST + WebSocket endpoints          │─────▶│  /dispatch endpoint    │
 │  Permission response handling        │      │  /health endpoint      │
@@ -53,9 +53,9 @@ as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
          └─────────────────────────────────────────────┘
 ```
 
-The control surface dispatches a graph run by POSTing a `DispatchRequest` to
+The gateway dispatches a graph run by POSTing a `DispatchRequest` to
 the worker's `/dispatch` endpoint. The worker executes the graph and forwards
-`ServerEvent` payloads back to the control surface via `WorkerBridge`.
+`ServerEvent` payloads back to the gateway via `WorkerBridge`.
 
 ### 2.2 IPC Protocol — HTTP over loopback
 
@@ -76,10 +76,10 @@ This design was chosen over alternatives (see §4) because:
 
 ### 2.3 Shared SQLite Checkpointer (WAL Mode)
 
-Both the control surface and the worker open the **same SQLite database file**
+Both the gateway and the worker open the **same SQLite database file**
 (`settings.database_path`) using `AsyncSqliteSaver` with WAL mode enabled.
 
-WAL mode allows one writer and multiple concurrent readers — the control surface
+WAL mode allows one writer and multiple concurrent readers — the gateway
 reads checkpoint state for `/api/threads/{id}/state` queries while the worker
 writes checkpoints during graph execution.
 
@@ -89,18 +89,18 @@ This is consistent with the single-container production constraint in ADR-017.
 
 ### 2.4 Auto-Spawn vs. Standalone Modes
 
-The control surface supports two worker deployment modes:
+The gateway supports two worker deployment modes:
 
 **Auto-spawn** (`VAULTSPEC_AUTO_SPAWN_WORKER=true`, default):
-- Control surface spawns the worker as a child process via `subprocess.Popen`
+- Gateway spawns the worker as a child process via `subprocess.Popen`
   on startup.
-- Worker inherits environment variables from the control surface process.
-- Worker stdout/stderr is piped to the control surface logs.
+- Worker inherits environment variables from the gateway process.
+- Worker stdout/stderr is piped to the gateway logs.
 - Suitable for development and single-host production.
 
 **Standalone** (`VAULTSPEC_AUTO_SPAWN_WORKER=false`):
 - Worker is started independently (e.g., Docker service, systemd unit).
-- Control surface connects via `VAULTSPEC_WORKER_URL`.
+- Gateway connects via `VAULTSPEC_WORKER_URL`.
 - Suitable for Docker Compose multi-container deployments (ADR-017) and
   horizontal scaling.
 
@@ -135,8 +135,8 @@ src/vaultspec_a2a/worker/
 ### 2.7 Heartbeat Protocol
 
 The worker sends a heartbeat `POST /api/internal/heartbeat` to the control
-surface every 30 seconds. The control surface tracks the last-seen timestamp
-per worker ID. If the heartbeat is missed for 90 seconds, the control surface
+surface every 30 seconds. The gateway tracks the last-seen timestamp
+per worker ID. If the heartbeat is missed for 90 seconds, the gateway
 logs a warning (future: circuit-break new dispatches until the worker reconnects).
 
 The heartbeat payload includes:
@@ -172,7 +172,7 @@ The heartbeat payload includes:
 
 ### In-process execution (single FastAPI app)
 
-The original implementation ran graph execution directly in the control surface
+The original implementation ran graph execution directly in the gateway
 process via `asyncio.create_task()`. Rejected: long LLM calls saturated the
 event loop, causing 10–30s latency spikes on unrelated REST calls during active
 runs.
@@ -201,9 +201,9 @@ existing `ServerEvent`/`DispatchRequest` schemas without code generation.
   `src/vaultspec_a2a/api/websocket`, or `src/vaultspec_a2a/api/app`. The dependency arrow is:
   `src/vaultspec_a2a/api/` → `src/vaultspec_a2a/worker/` (for spawn), `src/vaultspec_a2a/worker/` → `src/vaultspec_a2a/api/schemas/`.
 - The worker's internal HTTP port (`VAULTSPEC_WORKER_PORT=8001`) must not
-  conflict with the control surface port (`VAULTSPEC_PORT=8000`).
+  conflict with the gateway port (`VAULTSPEC_PORT=8000`).
 - `VAULTSPEC_INTERNAL_TOKEN` must be set to a non-empty value in production.
-  The control surface and worker must share the same token value.
+  The gateway and worker must share the same token value.
 - `Executor.ingest()` must use `asyncio.Lock` per thread to prevent concurrent
   graph execution on the same checkpointer thread_id.
 - The `_DEFAULT_MAX_CONCURRENT_THREADS` cap must be enforced before accepting

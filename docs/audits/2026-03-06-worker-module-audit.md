@@ -35,7 +35,7 @@ async def _relay_event(event: Any) -> None:
         await _bridge_ref.send_event(thread_id, event.model_dump())
 ```
 
-Every single event emitted by the aggregator (message chunks, tool updates, heartbeats, status changes) is sent as an individual HTTP POST to the control surface. For a typical LLM response with 100+ streaming chunks, this generates 100+ HTTP requests per response turn. This is extremely inefficient — it should batch events or use a WebSocket/SSE connection for the relay.
+Every single event emitted by the aggregator (message chunks, tool updates, heartbeats, status changes) is sent as an individual HTTP POST to the gateway. For a typical LLM response with 100+ streaming chunks, this generates 100+ HTTP requests per response turn. This is extremely inefficient — it should batch events or use a WebSocket/SSE connection for the relay.
 
 Additionally, `event.model_dump()` is called inside the hook but the return of `model_dump()` produces a `dict`. If `event` is already a `dict` (which can happen from raw aggregator broadcasts), `model_dump()` will raise `AttributeError`.
 
@@ -100,13 +100,13 @@ So the actual runtime behavior is 10s, but the signature default of 30s is misle
 
 **File:** `ipc.py:88-114`
 
-`send_event()` performs a blocking HTTP POST for every event. If the control surface is slow or unresponsive, events will queue up in the asyncio event loop. There's no:
+`send_event()` performs a blocking HTTP POST for every event. If the gateway is slow or unresponsive, events will queue up in the asyncio event loop. There's no:
 - Rate limiting
 - Queue with bounded size
 - Batching window
 - Circuit breaker for repeated failures
 
-Combined with CRIT-02, this means a slow control surface can cause the worker's event loop to accumulate thousands of pending HTTP requests.
+Combined with CRIT-02, this means a slow gateway can cause the worker's event loop to accumulate thousands of pending HTTP requests.
 
 #### HIGH-06: Worker shutdown cancels task group AFTER executor shutdown
 
@@ -133,7 +133,7 @@ The `tg.cancel_scope.cancel()` is called last, but the task group's heartbeat ta
 
 The `DispatchRequest` schema has `active_feature`, `pipeline_phase`, `vault_index`, and `validation_errors` fields, but `_handle_ingest` only passes `messages` and `thread_id` to `graph_input` (plus `active_agent`, `artifacts`, `current_plan`, `token_usage` for first ingest). The SDD blackboard fields are silently dropped.
 
-This means the control surface endpoint at `endpoints.py:272-294` carefully builds `vault_index` and `active_feature`, dispatches them to the worker, and the worker ignores them.
+This means the gateway endpoint at `endpoints.py:272-294` carefully builds `vault_index` and `active_feature`, dispatches them to the worker, and the worker ignores them.
 
 #### MED-02: `_handle_resume` re-resolves `preset_info` twice
 

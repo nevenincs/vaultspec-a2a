@@ -15,7 +15,7 @@ related:
 
 ## 1. Context & Problem Statement
 
-The Control Surface frontend must provide a highly performant,
+The Gateway frontend must provide a highly performant,
 responsive, and largely stateless projection of the backend's data streams.
 It needs to display massive volumes of streaming JSON from the LangGraph
 Event Aggregator (LLM outputs, tool call JSON) without freezing the UI,
@@ -106,4 +106,4 @@ high-volume event bursts. The core framework is React (React 5).
 ## 7. References
 
 - [LangGraph Gap Audit Research](../research/2026-02-26-langgraph-gap-audit-research.md)
-- [Control Surface Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)
+- [Gateway Domain - Distilled](../research/2026-02-25-control-surface-distilled-research.md)

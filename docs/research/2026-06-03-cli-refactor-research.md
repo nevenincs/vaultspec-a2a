@@ -109,7 +109,7 @@ any existing CHECK constraints) + endpoint to transition.
 
 - **Backend**: FastAPI app via `uvicorn.run()` in CLI `serve` command.
 - **Worker**: Separate FastAPI app via `uvicorn.run()` in CLI `worker` command.
-- **Auto-spawn**: `settings.auto_spawn_worker = True` — control surface spawns
+- **Auto-spawn**: `settings.auto_spawn_worker = True` — gateway spawns
   worker as child process.
 - **No PID tracking**, no signal handling, no process registry.
 - **Docker**: `docker-compose.dev.yml` (5 services) and

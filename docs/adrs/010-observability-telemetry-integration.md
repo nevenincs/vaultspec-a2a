@@ -35,7 +35,7 @@ the v1 architecture.
 2. **FastAPI & Uvicorn Instrumentation:** The REST API and WebSocket
    interfaces will be instrumented using standard
    `opentelemetry-instrumentation-fastapi`.
-3. **Exporting vs. Dashboarding:** The bespoke React control surface is
+3. **Exporting vs. Dashboarding:** The bespoke React gateway is
    restricted strictly to _real-time control_ (agent lifecycles, streaming
    state). We will not build complex historical time-travel or cost-matrix
    widgets in v1. Instead, all spans and token metrics will be exported via

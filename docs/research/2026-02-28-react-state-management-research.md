@@ -8,7 +8,7 @@ description: 'Research into React state management patterns for the frontend piv
 # React State Management & Data Fetching Library Research
 
 **Date:** 2026-02-28
-**Context:** VaultSpec A2A Control Surface — React 18 SPA with FastAPI backend
+**Context:** VaultSpec A2A Gateway — React 18 SPA with FastAPI backend
 **Decision:** TanStack Query v5 + Zustand v5 (adopted in ADR-018 amendment)
 
 ## 1. Problem Statement

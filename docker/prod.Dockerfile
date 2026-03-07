@@ -42,9 +42,8 @@ FROM python-base AS api
 
 COPY --from=frontend-build /app/src/ui/build ./src/vaultspec_a2a/api/static/
 
-# Control surface: auto_spawn_worker=False (worker is a separate container)
-ENV VAULTSPEC_AUTO_SPAWN_WORKER=false \
-    VAULTSPEC_WORKER_URL=http://worker:8001
+# Worker runs as a separate container
+ENV VAULTSPEC_WORKER_URL=http://worker:8001
 
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]

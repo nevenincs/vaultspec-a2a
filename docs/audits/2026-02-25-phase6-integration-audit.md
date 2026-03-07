@@ -155,7 +155,7 @@ These components have **no protocol support and no library coverage**:
                    │ WebSocket (JSON)              │ HTTP (static)
                    ▼                               ▼
 ┌──────────────────────────────────────────────────────────────┐
-│ CONTROL SURFACE SERVER (FastAPI + Uvicorn)                    │
+│ GATEWAY SERVER (FastAPI + Uvicorn)                    │
 │                                                                │
 │  ┌─────────────┐ ┌──────────────┐ ┌────────────────────────┐│
 │  │ WebSocket   │ │ REST API     │ │ Static File Server     ││
@@ -205,7 +205,7 @@ These components have **no protocol support and no library coverage**:
 
 ---
 
-## 4. Minimum Viable Control Surface (v1 Scope)
+## 4. Minimum Viable Gateway (v1 Scope)
 
 ### 4.1 v1 Features
 
@@ -285,7 +285,7 @@ Adopt SessionAccumulator, ToolCallTracker, and PermissionBroker concepts
 but implement them against A2A event types, not ACP session updates.
 
 **Why**: ACP's abstractions are superior for UI state management, but
-agents speak A2A. The control surface translates A2A events into
+agents speak A2A. The gateway translates A2A events into
 accumulator-friendly state updates.
 
 ### 6.4 Stable MCP Tools as CLI Bridge

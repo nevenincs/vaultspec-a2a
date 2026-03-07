@@ -8,7 +8,7 @@ maturity: 30
 summary: 'Backend and frontend framework comparison covering FastAPI vs Starlette, React evaluation, state management strategies, and deployment model.'
 ---
 
-# Phase 3 Research: Web Application Architecture for Agent Team Control Surface
+# Phase 3 Research: Web Application Architecture for Agent Team Gateway
 
 **Date**: 2026-02-25
 **Status**: Research

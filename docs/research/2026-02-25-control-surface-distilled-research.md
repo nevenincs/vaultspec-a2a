@@ -1,5 +1,5 @@
 ---
-name: 'Control Surface Domain - Distilled'
+name: 'Gateway Domain - Distilled'
 date: 2026-25-02
 type: distilled
 summary: 'Consolidated rendering stack decisions: Tailwind v4 + shadcn-React, terminal emulation (xterm.js), syntax highlighting (Shiki + CodeMirror 6), streaming markdown (Incremark), diff rendering (diff2html). Memory budgets and architecture patterns from survey of 17 reference projects.'
@@ -10,7 +10,7 @@ sources:
 feature: control-surface-distilled
 ---
 
-# Control Surface Domain — Distilled
+# Gateway Domain — Distilled
 
 **Date**: 2026-02-25
 **Status**: Distilled from agent UI survey + rendering stack research
@@ -201,7 +201,7 @@ Agent Backend (A2A protocol)
     | WebSocket (multiplexed streams)
     |
     v
-Control Surface Frontend
+Gateway Frontend
     |
     +-- Agent Message Renderer
     |     +-- Streaming Markdown (@humanspeak/React-markdown)

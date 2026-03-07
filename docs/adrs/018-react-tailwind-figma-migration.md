@@ -19,13 +19,13 @@ related:
 
 ## 1. Context & Problem Statement
 
-The Control Surface frontend was implemented in React 5 (Runes) with
+The Gateway frontend was implemented in React 5 (Runes) with
 shadcn-React, as prescribed by ADR-005. While functional, this stack
 creates a permanent translation layer between the authoritative design
 source (Figma Make, which outputs React + Tailwind) and the codebase.
 
 The Figma Make project (`EAs7Eh1lxKVzBqzke5HASU`) is the single source
-of truth for the Control Surface UI. It outputs React + Tailwind v4 code
+of truth for the Gateway UI. It outputs React + Tailwind v4 code
 natively. Every design iteration in Figma Make produces React components
 that must then be manually translated into React 5 — a lossy,
 time-consuming process that introduces drift between design and code.

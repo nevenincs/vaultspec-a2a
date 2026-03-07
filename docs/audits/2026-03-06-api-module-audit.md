@@ -10,7 +10,7 @@
 
 ### CRITICAL Findings
 
-*None identified.* The ADR-019 service separation refactor is well-structured. The API module acts purely as a control surface forwarding to the worker, which eliminates many classes of bugs.
+*None identified.* The ADR-019 service separation refactor is well-structured. The API module acts purely as a gateway forwarding to the worker, which eliminates many classes of bugs.
 
 ---
 
@@ -229,7 +229,7 @@ status: str
 
 ### Assessment
 
-The API module is well-structured after the ADR-019 service separation. The control surface pattern is clean — no graph execution runs locally, all work dispatches to the worker via HTTP. The schemas subpackage is comprehensive with proper discriminated unions and Pydantic models.
+The API module is well-structured after the ADR-019 service separation. The gateway pattern is clean — no graph execution runs locally, all work dispatches to the worker via HTTP. The schemas subpackage is comprehensive with proper discriminated unions and Pydantic models.
 
 The main concerns are:
 1. **HIGH-06**: The dual dispatch paths (WS vs REST) construct payloads differently, with the WS path bypassing `DispatchRequest` validation entirely. This will cause silent divergence as `DispatchRequest` evolves.

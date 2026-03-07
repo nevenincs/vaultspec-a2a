@@ -8,7 +8,7 @@ description: 'Catalog of Figma Make resources, templates, and reference implemen
 # Figma Make Resource Catalog
 
 **Date**: 2026-03-01
-**Make Project**: VaultSpec A2A Control Surface
+**Make Project**: VaultSpec A2A Gateway
 **File Key**: `EAs7Eh1lxKVzBqzke5HASU`
 **URL**:
 `https://www.figma.com/make/EAs7Eh1lxKVzBqzke5HASU/VaultSpec-A2A-Control-Surface`

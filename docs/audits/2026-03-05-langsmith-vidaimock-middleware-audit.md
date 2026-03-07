@@ -138,7 +138,7 @@
 
 ## Cycle Fourteen — Findings (Deep Audit)
 
-1) **Critical** — Internal IPC endpoints are unauthenticated despite ADR‑031 requiring `VAULTSPEC_INTERNAL_TOKEN` in production. The control surface exposes `/internal/events` and `/internal/heartbeat` without any auth dependency, and the only auth module is a no‑op stub.  
+1) **Critical** — Internal IPC endpoints are unauthenticated despite ADR‑031 requiring `VAULTSPEC_INTERNAL_TOKEN` in production. The gateway exposes `/internal/events` and `/internal/heartbeat` without any auth dependency, and the only auth module is a no‑op stub.  
    **Evidence:** `lib/api/internal.py` defines the `/internal/*` routes without auth; `lib/api/auth.py` explicitly states it is a no‑op stub.  
    **Doc ground (internal):** ADR‑031 mandates the bearer token for internal IPC.
 

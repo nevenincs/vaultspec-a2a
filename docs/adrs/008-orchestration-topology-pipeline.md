@@ -44,7 +44,7 @@ orchestrating independent processes too brittle for v1.
    two simultaneous interfaces:
    - **Interface 1 (CLI Bridge):** An MCP server providing stable tools for
      upstream CLIs.
-   - **Interface 2 (Control Surface):** A WebSocket server providing
+   - **Interface 2 (Gateway):** A WebSocket server providing
      real-time UI updates to the React dashboard.
 
 ## 3. Rationale

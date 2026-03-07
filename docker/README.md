@@ -41,7 +41,7 @@ This directory contains all Docker build definitions for the project. Compose fi
 
 **Targets:**
 - `api`  
-  Builds the production API (control surface). Includes the compiled frontend assets.
+  Builds the production API (gateway). Includes the compiled frontend assets.
 
 - `worker`  
   Builds the production worker (agent executor). No frontend assets included.

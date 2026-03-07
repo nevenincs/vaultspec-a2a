@@ -383,14 +383,14 @@ The draining pattern lets an agent finish current work before shutting down:
 State: DRAINING
   - Agent is still running and processing current tasks
   - New task requests are routed to the replacement agent (or queued)
-  - Control surface polls agent's task list or waits for task completion events
+  - Gateway polls agent's task list or waits for task completion events
   - After all tasks complete (or drain timeout expires):
     → transition to STOPPING
 ```
 
 **Drain timeout is essential:** A misbehaving agent could hold tasks
 indefinitely. The
-control surface must enforce a maximum drain time, after which it force-stops
+gateway must enforce a maximum drain time, after which it force-stops
 the agent
 and marks remaining tasks as `failed`.
 
@@ -406,7 +406,7 @@ Adapted from infrastructure-level blue-green to agent-level:
 5. **Drain Blue:** Let in-flight tasks on port 8001 complete
 6. **Kill Blue:** Terminate the old process after drain
 
-### For our control surface this translates to
+### For our gateway this translates to
 
 ```sql
 Current agent "coder" at port 8001 (RUNNING)

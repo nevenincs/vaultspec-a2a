@@ -19,7 +19,7 @@ The LangGraph orchestrator must manage highly concurrent, async-heavy
 workloads (managing native LangGraph execution threads, multiplexing
 WebSockets, parsing LangChain streams) while remaining simple to install and
 run for end-users. It must provide both a REST API (for CLI tools) and a rich
-real-time UI (Control Surface) without requiring users to configure complex
+real-time UI (Gateway) without requiring users to configure complex
 infrastructure like Postgres, Redis, or Docker.
 
 ## 2. The Decision
@@ -82,7 +82,7 @@ We formalize the following technology stack and deployment architecture:
 - **Static Asset Caching:** When FastAPI serves the React `build/`
   directory, it must be configured with proper Cache-Control headers,
   otherwise, the browser will continuously re-download the JS bundles,
-  degrading the initial load time of the Control Surface.
+  degrading the initial load time of the Gateway.
 - **Lifespan Management:** Long-running background tasks (like the Process
   Manager and Event Aggregator) must be carefully tied to FastAPI's
   `@asynccontextmanager` lifespan events using `anyio.create_task_group()`

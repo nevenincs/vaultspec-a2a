@@ -7,7 +7,7 @@ maturity: 45
 feature: protocol-foundations
 ---
 
-# Phase 1 Deliverable: Protocol Foundations for Control Surface
+# Phase 1 Deliverable: Protocol Foundations for Gateway
 
 **Date**: 2026-02-25
 **Phase**: 1 (Protocol Foundations)
@@ -55,7 +55,7 @@ Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n
 
 **One SSE connection per task.** No multiplexing.
 
-For a multi-agent control surface, this means:
+For a multi-agent gateway, this means:
 
 - N agents with M concurrent tasks = up to M SSE connections
 - Each connection must be independently managed
@@ -153,7 +153,7 @@ SessionSnapshot:
 Snapshots are frozen (immutable). Each `apply()`returns a new snapshot.
 Subscribers receive`(snapshot, notification)`pairs.
 
-**For multi-agent control surface**: One`SessionAccumulator`per agent.
+**For multi-agent gateway**: One`SessionAccumulator`per agent.
 Each produces canonical UI state. The web client subscribes to all
 accumulators. No manual state merging needed.
 
@@ -175,7 +175,7 @@ browser sends response via WebSocket, adapter routes response back to the
 ### 3.1 Architecture
 
 ```text
-Browser ←—WebSocket—→ Control Surface Server ←—SSE/stdio—→ Agents
+Browser ←—WebSocket—→ Gateway Server ←—SSE/stdio—→ Agents
           (single)                              (per-agent)
 ```
 
@@ -244,16 +244,16 @@ dispatcher routes to per-agent UI components.
 
 ## 4. Key Architectural Insight
 
-**ACP is the richer protocol for control surface purposes.** Its 11 update
+**ACP is the richer protocol for gateway purposes.** Its 11 update
 types, SessionAccumulator, PermissionBroker, and ToolCallTracker provide
-exactly the abstractions a control surface needs. A2A's SSE streaming is
+exactly the abstractions a gateway needs. A2A's SSE streaming is
 simpler but less structured.
 
 The recommended approach:
 
 - **Agent processes**: Speak ACP (for rich streaming) or A2A (for protocol
-  compliance). The control surface server adapts both.
-- **Control surface server**: Maintains per-agent connections, runs
+  compliance). The gateway server adapts both.
+- **Gateway server**: Maintains per-agent connections, runs
   SessionAccumulator per agent, multiplexes onto WebSocket.
 - **Browser client**: Receives typed events, renders per-agent panels from
   SessionSnapshot state, sends commands/permissions back.

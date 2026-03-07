@@ -2,7 +2,7 @@
 date: 2026-02-26
 type: plan
 feature: frontend-ui-spec
-description: 'Binding UI specification for the VaultSpec Control Surface frontend, defining all component layouts, interaction behaviors, and event-to-UI mappings.'
+description: 'Binding UI specification for the VaultSpec Gateway frontend, defining all component layouts, interaction behaviors, and event-to-UI mappings.'
 related_adrs:
   - docs/adrs/2026-02-26-005-frontend-rendering-stack-adr.md
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
@@ -12,12 +12,12 @@ related_research:
   - docs/research/2026-02-25-architecture-distilled-research.md
 ---
 
-# Frontend UI Specification — VaultSpec Control Surface
+# Frontend UI Specification — VaultSpec Gateway
 
 ## 1. Overview
 
 This document defines the complete user interface specification for the
-VaultSpec Control Surface frontend. It is the binding reference for all
+VaultSpec Gateway frontend. It is the binding reference for all
 component implementation, layout decisions, and interaction behavior.
 
 ### Companion documents
@@ -36,7 +36,7 @@ and **Inspector** (on-demand).
 
 ```text
 ┌──────────────────────────────────────────────────────────────────┐
-│  VaultSpec Control Surface                                       │
+│  VaultSpec Gateway                                       │
 ├───────────────┬──────────────────────────────────────────────────┤
 │               │                                                  │
 │   SIDEBAR     │            MESSAGE STREAM                        │

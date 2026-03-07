@@ -361,7 +361,7 @@ integration. The translation layer is the cost of CLI compatibility.
 ### C1: Should Agents Speak ACP or A2A?
 
 Protocol Foundations §4 recommends: "Agent processes speak ACP (for rich
-streaming) or A2A (for protocol compliance). The control surface server adapts
+streaming) or A2A (for protocol compliance). The gateway server adapts
 both."
 
 The settled architecture (see architecture distilled doc) says: "A2A + MCP are
@@ -374,7 +374,7 @@ etc.), mapped directly to the UI.
 
 ### C2: ACP Richness Gap Is Acknowledged but Not Addressed
 
-Protocol Foundations explicitly states ACP is "far richer" for control surface
+Protocol Foundations explicitly states ACP is "far richer" for gateway
 purposes. The architecture then adopts A2A events without addressing how the
 richness gap will be bridged. The SessionAccumulator port to A2A event types
 will lose the typed discrimination between thoughts, messages, tool calls, and

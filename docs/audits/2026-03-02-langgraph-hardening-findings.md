@@ -618,7 +618,7 @@ with `asyncio.get_running_loop()` in `supervisor.py`.
 **File:** `src/vaultspec_a2a/api/internal.py:94-135`
 **Issue:** The `/internal/events` and `/internal/heartbeat` HTTP POST endpoints
 accept any unauthenticated request. Any process with network access to the
-control surface can:
+gateway can:
 
 1. POST arbitrary payloads to `/internal/events`, which are broadcast directly
    to browser clients via `cm.broadcast_to_thread()` — enabling spoofed agent
@@ -1650,7 +1650,7 @@ are lost with no retry or alerting at the worker side.
 
 **Fix direction:** Return HTTP 503 (or a non-200 body field) when `connection_manager`
 is None so the worker bridge can log a proper warning (currently already logged at
-WARNING level on the control surface side — the gap is the worker side has no signal):
+WARNING level on the gateway side — the gap is the worker side has no signal):
 
 ```python
 if cm is None:
@@ -1665,7 +1665,7 @@ if cm is None:
 **Reported:** Cycle 20
 **File:** `src/vaultspec_a2a/api/internal.py:94,121`
 **Issue:** Both `/internal/events` and `/internal/heartbeat` POST endpoints accept
-requests from any caller that can reach the control surface port. Since the control
+requests from any caller that can reach the gateway port. Since the control
 surface also accepts external browser WS connections, a process on the same machine
 (or on the LAN if the bind address is not strictly loopback) could POST fabricated
 events into any thread's event stream, or spoof heartbeats to mask worker death.
@@ -2607,11 +2607,11 @@ Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only se
 
 **Files read:** `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, `src/vaultspec_a2a/worker/executor.py:1-100,320-352`, `src/vaultspec_a2a/core/aggregator.py:408-452` (subscriber/broadcast path)
 
-### Finding 1: [CRITICAL] Worker EventAggregator never relays events to control surface
+### Finding 1: [CRITICAL] Worker EventAggregator never relays events to gateway
 
 **Files:** `src/vaultspec_a2a/worker/executor.py:77`, `src/vaultspec_a2a/core/aggregator.py:408-452`
 
-`Executor.__init__` creates `self._aggregator = EventAggregator()` with an empty `_subscribers` dict. The aggregator's `_broadcast` method iterates `self._subscribers.items()` — which is always empty in the worker process. **No events (message chunks, agent status, tool calls, permissions, errors) ever reach the control surface or browser clients.**
+`Executor.__init__` creates `self._aggregator = EventAggregator()` with an empty `_subscribers` dict. The aggregator's `_broadcast` method iterates `self._subscribers.items()` — which is always empty in the worker process. **No events (message chunks, agent status, tool calls, permissions, errors) ever reach the gateway or browser clients.**
 
 `WorkerBridge.send_event()` (ipc.py:75) is implemented and tested, but it is never called from within the executor or aggregator. The bridge is only used for `track_thread`, `untrack_thread`, `send_heartbeat`, and `heartbeat_loop`.
 
@@ -2654,7 +2654,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 | Severity | Finding                                                                                        | File                                  | Status            |
 | -------- | ---------------------------------------------------------------------------------------------- | ------------------------------------- | ----------------- |
-| CRITICAL | Worker EventAggregator never relays events to control surface — bridge.send_event never called | `executor.py:77`, `aggregator.py:408` | open — needs task |
+| CRITICAL | Worker EventAggregator never relays events to gateway — bridge.send_event never called | `executor.py:77`, `aggregator.py:408` | open — needs task |
 | MEDIUM   | heartbeat_loop uses asyncio.sleep inside anyio TaskGroup (portability)                         | `ipc.py:132`                          | open              |
 | INFO     | Shutdown ordering: bridge.close before tg.cancel_scope.cancel                                  | `app.py:87-91`                        | benign            |
 
@@ -2668,7 +2668,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 **File:** `src/vaultspec_a2a/api/supervisor.py:70`
 
-`subprocess.Popen.wait(timeout=30)` is a **synchronous** blocking call. It is called from `stop()` which is called from the control surface's async lifespan shutdown handler. If the worker is slow to exit, this blocks the entire asyncio event loop for up to 30 seconds during API shutdown, preventing any other coroutines (including Starlette's WebSocket close handshakes) from running.
+`subprocess.Popen.wait(timeout=30)` is a **synchronous** blocking call. It is called from `stop()` which is called from the gateway's async lifespan shutdown handler. If the worker is slow to exit, this blocks the entire asyncio event loop for up to 30 seconds during API shutdown, preventing any other coroutines (including Starlette's WebSocket close handshakes) from running.
 
 **Fix direction:** Either:
 
@@ -2706,7 +2706,7 @@ The chain: worker → `bridge.send_event` → `POST /internal/events` → `recei
 - Skips disconnected WebSocket states
 - Sends pre-serialized `payload` dict directly (correct — no need to re-serialize through aggregator)
 
-CLEAN — delivery chain from control surface to browser is correct. The only gap is the upstream worker not calling `bridge.send_event` (T27).
+CLEAN — delivery chain from gateway to browser is correct. The only gap is the upstream worker not calling `bridge.send_event` (T27).
 
 ### Finding 5: [INFO] broadcast_to_thread accesses aggregator.\_subscriptions private attribute
 
@@ -2903,7 +2903,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 ### API-02 — MEDIUM: `internal.py` WS path has no size limit on incoming frames
 
 **File:** `src/vaultspec_a2a/api/internal.py:44`
-**Issue:** `worker_ws_endpoint` calls `await websocket.receive_text()` with no size guard. The `ConnectionManager` client WS path has `_MAX_WS_MESSAGE_BYTES = 1 MiB` enforcement (websocket.py:81, 239-247). The internal WS endpoint (worker→control surface) has no equivalent cap. A misbehaving or compromised worker could push arbitrarily large frames.
+**Issue:** `worker_ws_endpoint` calls `await websocket.receive_text()` with no size guard. The `ConnectionManager` client WS path has `_MAX_WS_MESSAGE_BYTES = 1 MiB` enforcement (websocket.py:81, 239-247). The internal WS endpoint (worker→gateway) has no equivalent cap. A misbehaving or compromised worker could push arbitrarily large frames.
 **Fix direction:** Apply same `len(raw.encode()) > MAX_INTERNAL_WS_MESSAGE_BYTES` check before `json.loads(raw)`. A reasonable limit (e.g. 4 MiB) would accommodate large event payloads.
 **Severity:** MEDIUM
 **Status:** open
@@ -3722,7 +3722,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 ### WRK-07 — INFO: Worker lifespan shutdown order correct
 
 **File:** `src/vaultspec_a2a/worker/app.py:87-91`
-**Issue:** None. `executor.shutdown()` → `bridge.close()` → `tg.cancel_scope.cancel()` — drains aggregator before closing HTTP client, cancels heartbeat last. Contrast with API-06 (control surface app.py where cancel order was inverted) — worker gets this right.
+**Issue:** None. `executor.shutdown()` → `bridge.close()` → `tg.cancel_scope.cancel()` — drains aggregator before closing HTTP client, cancels heartbeat last. Contrast with API-06 (gateway app.py where cancel order was inverted) — worker gets this right.
 **Status:** CLEAN
 
 ---
@@ -3763,7 +3763,7 @@ except AgentConfigNotFoundError:
 ### WRK-11 — LOW: Non-200 event relay responses silently dropped with no retry
 
 **File:** `src/vaultspec_a2a/worker/ipc.py:90-95`
-**Issue:** `if resp.status_code != 200: logger.warning(...)` — the event is permanently lost on 503/429/etc. In deployments where the control surface restarts briefly, events generated during the gap are unrecoverable. Retrying risks ordering issues given the sequence numbering in `EventEnvelope`.
+**Issue:** `if resp.status_code != 200: logger.warning(...)` — the event is permanently lost on 503/429/etc. In deployments where the gateway restarts briefly, events generated during the gap are unrecoverable. Retrying risks ordering issues given the sequence numbering in `EventEnvelope`.
 **Severity:** LOW — known architectural trade-off for fire-and-forget relay. Acceptable but worth noting.
 **Status:** OPEN (known limitation)
 

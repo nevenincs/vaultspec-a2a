@@ -8,7 +8,7 @@ maturity: 40
 
 # Coding Teams Documentation
 
-Research and analysis supporting the A2A agent orchestration control surface.
+Research and analysis supporting the A2A agent orchestration gateway.
 All documents here are **supporting research** — none have reached ADR status
 yet. Maturity scores indicate how close each document is to informing a formal
 architecture decision.
@@ -46,7 +46,7 @@ Protocol compliance analysis and bridging strategies.
 | [protocol-foundations](research/2026-02-25-phase1-protocol-foundations-research.md) |    45    | A2A SSE mapping, ACP web host, WebSocket design       |
 | [mcp-a2a-compliance](research/2026-02-25-mcp-tasks-a2a-compliance-research.md)      |    40    | Async tasks, state mapping, stable MCP recommendation |
 
-## Control Surface
+## Gateway
 
 UI rendering, terminal emulation, and dashboard research.
 

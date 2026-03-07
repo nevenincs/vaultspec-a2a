@@ -437,4 +437,4 @@ async def send_message(thread_id: str, message: str) -> str:
 
 1.`.venv/Scripts/python -m pytest lib/ -x`— full suite must pass 2. Start server → use MCP Inspector to call`start_thread`→ confirm real
 thread_id returned, graph runs 3. Interactive UI: create thread with`autonomous=False`, confirm permission
-popup appears in control surface when coder writes a file 4. Autonomous thread: no popup, completes without interruption
+popup appears in gateway when coder writes a file 4. Autonomous thread: no popup, completes without interruption

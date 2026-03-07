@@ -13,7 +13,7 @@ related_research:
   - docs/research/2026-02-25-architecture-distilled-research.md
 ---
 
-# Frontend Scaffolding Plan — VaultSpec Control Surface
+# Frontend Scaffolding Plan — VaultSpec Gateway
 
 ## Context
 
@@ -58,7 +58,7 @@ This sets up:
 - Bits UI (headless primitives underneath shadcn-React)
 - `src/ui/src/src/vaultspec_a2a/components/ui/` directory for shadcn components
 
-Add initial shadcn components needed for the control surface:
+Add initial shadcn components needed for the gateway:
 
 ```bash
 npx shadcn-React@latest add button card badge separator scroll-area dialog alert

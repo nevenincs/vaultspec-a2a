@@ -61,7 +61,7 @@ must be formally resolved.
   but the architectural decision defaults to A2A without formally addressing how
   the lost UI context will be recovered.
 
-### Process & Control Surface
+### Process & Gateway
 
 - **C1: Monitoring Scope.** Research demands rich Cost & Latency matrices
   tracking, while the V1 scope explicitly defers them.

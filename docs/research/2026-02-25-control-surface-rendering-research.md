@@ -3,7 +3,7 @@ date: 2026-02-25
 type: research
 feature: control-surface-rendering
 description: 'Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output.'
-name: 'Control Surface Rendering'
+name: 'Gateway Rendering'
 maturity: 25
 summary: 'Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output.'
 ---
@@ -12,7 +12,7 @@ summary: 'Deep analysis of xterm.js terminal emulation, syntax highlighting opti
 
 **Date**: 2026-02-25
 **Status**: Research Complete
-**Scope**: Web-based control surface rendering stack
+**Scope**: Web-based gateway rendering stack
 
 ---
 
@@ -150,7 +150,7 @@ VS Code uses natively.
 | **Serialization speed**                 | ~25MB/s                              |
 | **Infinite scrollback**                 | Not supported; must set explicit max |
 
-**Key concern for control surface**: Running multiple terminal instances (one
+**Key concern for gateway**: Running multiple terminal instances (one
 per
 agent) with large scrollback buffers will consume significant memory. A 5-agent
 setup with 5K scrollback each would consume ~170MB just for terminal buffers.
@@ -267,7 +267,7 @@ possible code editing and viewing experience, but at significant cost:
 
 **Verdict for dashboard use**: Too heavyweight. Sourcegraph reduced their JS
 bundle by 43% (from 5.8MB to 3.4MB) just by replacing Monaco with CodeMirror.
-Monaco is appropriate only if the control surface needs full editor capabilities
+Monaco is appropriate only if the gateway needs full editor capabilities
 (e.g., editing agent prompts). For read-only code display, use CodeMirror 6 or
 Shiki.
 
@@ -403,10 +403,10 @@ traditional CLIs that manage output imperatively.
 - **Code blocks**: Rendered as terminal text with syntax highlighting via ANSI
   codes.
 
-#### Implications for Web Control Surface
+#### Implications for Web Gateway
 
 Since Claude Code renders to terminal via Ink/React, the raw terminal output
-stream is ANSI-encoded text. A web control surface could:
+stream is ANSI-encoded text. A web gateway could:
 
 1. **Option A**: Capture the raw PTY output and render it in xterm.js (faithful
    terminal reproduction).
@@ -665,7 +665,7 @@ persistence-to-storage for historical output.
 | **Bundle size**       | Small (core is framework-agnostic) | Smaller in v2                      |
 | **Custom components** | Supported                          | Supported (plugin architecture)    |
 
-If the control surface uses **React** (like Open WebUI), choose **Incremark**
+If the gateway uses **React** (like Open WebUI), choose **Incremark**
 for its React support and O(n) performance. If using **React**, either works,
 but Streamdown has stronger production backing.
 
@@ -687,7 +687,7 @@ Agent Backend (A2A protocol)
     | WebSocket (multiplexed streams)
     |
     v
-Control Surface Frontend
+Gateway Frontend
     |
     +-- Agent Message Renderer
     |     +-- Streaming Markdown (Incremark/Streamdown)

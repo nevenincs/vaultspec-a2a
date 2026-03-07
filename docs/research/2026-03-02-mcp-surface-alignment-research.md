@@ -56,7 +56,7 @@ coding CLI/IDE consumers, LangGraph protocol, and A2A protocol.
 
 ---
 
-## 2. REST Endpoint Inventory (full control surface)
+## 2. REST Endpoint Inventory (full gateway)
 
 The following REST endpoints exist in `src/vaultspec_a2a/api/endpoints.py`. Only 3 are currently MCP-wrapped.
 

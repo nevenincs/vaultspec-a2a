@@ -1,24 +1,24 @@
 ---
-name: 'Control Surface Research Plan'
+name: 'Gateway Research Plan'
 date: 2026-25-02
 type: plan
-summary: 'Eight-phase research roadmap from protocol foundations through architecture decision records for the agent team control surface.'
+summary: 'Eight-phase research roadmap from protocol foundations through architecture decision records for the agent team gateway.'
 maturity: 30
 ---
 
-# Research Plan: Agent Team Control Surface
+# Research Plan: Agent Team Gateway
 
 **Date**: 2026-02-25
 **Status**: Research Plan (not findings — this defines the work to be done)
 **Goal**: Build a comprehensive knowledge library to back architectural
-decisions for a web-based control surface capable of monitoring, managing,
+decisions for a web-based gateway capable of monitoring, managing,
 and interacting with coding agent teams.
 
 ---
 
 ## Scope Definition
 
-The control surface is a **deployable web application** that provides:
+The gateway is a **deployable web application** that provides:
 
 1. **Monitoring**: Real-time visibility into what each agent is doing
 2. **Listing**: See all active agents, tasks, artifacts, sessions
@@ -398,7 +398,7 @@ failure point.
 
 ### 6.2 Complexity Inventory
 
-**Research task**: For each control surface feature, estimate:
+**Research task**: For each gateway feature, estimate:
 
 - Protocol support (does A2A/ACP/MCP provide it natively?)
 - Custom code required (what must we build from scratch?)
@@ -501,7 +501,7 @@ Based on all preceding research, write ADRs for:
 
 ### 8.2 Prototype Scope Definition
 
-Define the minimum viable control surface:
+Define the minimum viable gateway:
 
 - Which features are v1 vs. v2?
 - What can be stubbed vs. must be real?

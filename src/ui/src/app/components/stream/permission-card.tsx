@@ -62,7 +62,8 @@ export function PermissionCard({
           <div className="flex items-center gap-2 pt-0.5">
             {request.options.map((option) => {
               const isAllow = option.kind === 'allow_once';
-              const isDeny = option.kind === 'reject_once' || option.kind === 'reject_always';
+              const isDeny =
+                option.kind === 'reject_once' || option.kind === 'reject_always';
               const isAlwaysAllow = option.kind === 'allow_always';
 
               let variant: 'default' | 'outline' | 'secondary' | 'ghost' = 'ghost';

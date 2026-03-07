@@ -45,9 +45,9 @@ def main() -> None:
     if args.transport == "stdio":
         asyncio.run(mcp.run_stdio_async())
     else:
-        host = args.host or _mcp_settings.mcp_host
-        port = args.port or _mcp_settings.mcp_port
-        asyncio.run(mcp.run_streamable_http_async(host=host, port=port))
+        mcp.settings.host = args.host or _mcp_settings.mcp_host
+        mcp.settings.port = args.port or _mcp_settings.mcp_port
+        asyncio.run(mcp.run_streamable_http_async())
 
 
 if __name__ == "__main__":

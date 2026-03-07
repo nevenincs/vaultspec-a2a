@@ -44,11 +44,14 @@ import pytest_asyncio
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.graph.state import CompiledStateGraph
 
 from ...utils.enums import Model, Provider
 from ..graph import compile_team_graph
 from ..team_config import (
+    AgentConfig,
     AgentModelConfig,
+    TeamConfig,
     TeamDefaultsConfig,
     load_agent_config,
     load_team_config,
@@ -75,7 +78,7 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 
 def _team_and_agents_with_provider(
     team_id: str, provider: Provider
-) -> tuple[object, dict[str, object]]:
+) -> tuple[TeamConfig, dict[str, AgentConfig]]:
     """Load a preset and override provider at both team and agent-config level.
 
     Agent TOMLs carry their own provider settings (planner=claude, coder=claude,
@@ -96,7 +99,7 @@ def _team_and_agents_with_provider(
 
 
 async def _run_and_collect_nodes(
-    graph: object,
+    graph: CompiledStateGraph,
     initial_state: dict,
     config: RunnableConfig,
     agent_ids: set[str],

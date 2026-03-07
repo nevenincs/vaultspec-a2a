@@ -240,7 +240,9 @@ class TestWorkerContextCompaction:
             system_prompt="You are a coder.",
             name="coder",
         )
-        msgs = [HumanMessage(content=f"Message {i}") for i in range(5)]
+        msgs: list[BaseMessage] = [
+            HumanMessage(content=f"Message {i}") for i in range(5)
+        ]
         state: TeamState = {
             "active_agent": "coder",
             "artifacts": [],

@@ -354,7 +354,7 @@ class TestGraphInputInitialisation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._aggregator = _CapturingAggregator()
                 # Patch _compile_graph to avoid needing real team config files.
                 executor._compile_graph = lambda req: sentinel_graph  # type: ignore[method-assign]
 
@@ -413,7 +413,7 @@ class TestGraphInputInitialisation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._aggregator = _CapturingAggregator()
                 # Pre-populate cache to simulate a follow-up message (graph exists).
                 _inject_graph(executor, "t-followup")
 
@@ -463,7 +463,7 @@ class TestGraphInputInitialisation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._aggregator = _CapturingAggregator()
                 _inject_graph(executor, "thread-xyz")
 
                 req = DispatchRequest(
@@ -503,7 +503,7 @@ class TestGraphInputInitialisation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._aggregator = _CapturingAggregator()
                 executor._compile_graph = lambda req: sentinel_graph  # type: ignore[method-assign]
 
                 req = DispatchRequest(
@@ -553,7 +553,7 @@ class TestGraphInputInitialisation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = _CapturingAggregator()  # type: ignore[assignment]
+                executor._aggregator = _CapturingAggregator()
                 executor._compile_graph = lambda req: sentinel_graph  # type: ignore[method-assign]
 
                 req = DispatchRequest(
@@ -656,7 +656,7 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                executor._aggregator = self._make_capturing_aggregator(captured)  # type: ignore[assignment]
+                executor._aggregator = self._make_capturing_aggregator(captured)
                 cache_key = ("vaultspec-adaptive-coder", "/some/path", False)
                 executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
                 executor._thread_to_cache_key["t-preset"] = cache_key

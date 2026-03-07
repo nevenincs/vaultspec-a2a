@@ -17,7 +17,9 @@ export interface StreamSlice {
   _agentDisplayNames: Record<string, string>;
 
   handleWireEvent: (threadId: string, event: ServerEvent) => void;
-  updateAgentDisplayNames: (agents: Array<{ agent_id: string; display_name: string }>) => void;
+  updateAgentDisplayNames: (
+    agents: Array<{ agent_id: string; display_name: string }>,
+  ) => void;
   hydrateThreadEvents: (
     threadId: string,
     events: StreamEvent[],

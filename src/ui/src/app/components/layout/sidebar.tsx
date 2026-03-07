@@ -43,7 +43,6 @@ interface SidebarProps {
   onFocusSearchRef?: MutableRefObject<(() => void) | null>;
 }
 
-
 /** Relative time label */
 function timeAgo(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime();
@@ -114,12 +113,7 @@ export function Sidebar({
     if (!taskFilter) return threads;
     const q = taskFilter.toLowerCase();
     return threads.filter((t) => {
-      const searchable = [
-        t.nickname,
-        t.title,
-        t.feature_tag,
-        t.source_branch,
-      ]
+      const searchable = [t.nickname, t.title, t.feature_tag, t.source_branch]
         .filter(Boolean)
         .join(' ')
         .toLowerCase();

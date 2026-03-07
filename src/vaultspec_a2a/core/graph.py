@@ -352,8 +352,8 @@ def compile_team_graph(
     if effective_timeout is not None:
         graph.step_timeout = effective_timeout
 
-    # recursion_limit: sourced from team TOML (default 25).
-    graph.recursion_limit = team_config.graph.recursion_limit
+    # recursion_limit: LangGraph runtime attribute not in stubs.
+    graph.recursion_limit = team_config.graph.recursion_limit  # type: ignore[assignment]
 
     return graph
 

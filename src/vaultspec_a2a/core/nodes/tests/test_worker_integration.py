@@ -10,7 +10,7 @@ from pathlib import Path
 
 import pytest
 
-from langchain_core.messages import HumanMessage
+from langchain_core.messages import BaseMessage, HumanMessage
 
 from ....providers.acp_chat_model import AcpChatModel
 from ...state import TeamState
@@ -66,9 +66,9 @@ async def test_worker_context_compaction_integration() -> None:
     )
 
     # Large content to trigger compaction (120k tokens threshold)
-    big_message = HumanMessage(content="x" * 500_000)
+    big_messages: list[BaseMessage] = [HumanMessage(content="x" * 500_000)]
     state = _make_state()
-    state["messages"] = [big_message]
+    state["messages"] = big_messages
 
     result = await node(state)
     assert result["messages"][0].content == "Compacted"

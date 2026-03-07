@@ -8,6 +8,7 @@ from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.constants import END, START, TAG_NOSTREAM
 from langgraph.graph import StateGraph
@@ -48,7 +49,7 @@ class _StubChatModel(BaseChatModel):
 
 
 def _make_state() -> TeamState:
-    return {  # type: ignore[return-value]
+    return {
         "messages": [HumanMessage(content="do something")],
         "active_agent": "",
         "artifacts": [],
@@ -196,7 +197,7 @@ async def test_supervisor_compacts_on_large_state() -> None:
     # CONTEXT_LIMIT = 120_000 tokens; threshold = 96_000 tokens.
     # estimate_tokens uses 4 chars/token, so we need > 96_000 * 4 = 384_000 chars.
     large_content = "x" * 400_000  # ~100_000 tokens — above threshold
-    large_state: TeamState = {  # type: ignore[assignment]
+    large_state: TeamState = {
         "messages": [HumanMessage(content=large_content)],
         "active_agent": "",
         "artifacts": [],
@@ -257,7 +258,7 @@ async def test_supervisor_routing_uses_tag_nostream() -> None:
 
 def _make_state_with_errors(errors: list[str]) -> TeamState:
     state = _make_state()
-    state["validation_errors"] = errors  # type: ignore[typeddict-unknown-key]
+    state["validation_errors"] = errors
     return state
 
 
@@ -336,13 +337,13 @@ def _make_state_with_vault(
 ) -> TeamState:
     state = _make_state()
     if active_feature is not None:
-        state["active_feature"] = active_feature  # type: ignore[typeddict-unknown-key]
+        state["active_feature"] = active_feature
     vault_index: dict[str, list[str]] = {}
     if exec_paths:
         vault_index["exec"] = exec_paths
     if audit_paths:
         vault_index["audit"] = audit_paths
-    state["vault_index"] = vault_index  # type: ignore[typeddict-unknown-key]
+    state["vault_index"] = vault_index
     return state
 
 
@@ -457,8 +458,8 @@ def _make_state_for_phase_gate(
 ) -> "TeamState":
     state = _make_state()
     if active_feature is not None:
-        state["active_feature"] = active_feature  # type: ignore[typeddict-unknown-key]
-    state["vault_index"] = vault_index  # type: ignore[typeddict-unknown-key]
+        state["active_feature"] = active_feature
+    state["vault_index"] = vault_index
     return state
 
 
@@ -660,7 +661,7 @@ async def test_plan_approval_interrupt_fires_for_exec_worker() -> None:
     async def _noop_worker(state: TeamState) -> dict:
         return {}
 
-    builder: StateGraph = StateGraph(TeamState)
+    builder: StateGraph = StateGraph(TeamState)  # type: ignore[type-var]
     builder.add_node("supervisor", supervisor)
     builder.add_node("vaultspec-coder", _noop_worker)
     builder.add_edge(START, "supervisor")
@@ -673,7 +674,9 @@ async def test_plan_approval_interrupt_fires_for_exec_worker() -> None:
     graph = builder.compile(checkpointer=MemorySaver())
 
     state = _make_state_for_plan_approval()
-    config = {"configurable": {"thread_id": "test-plan-approval-interrupt"}}
+    config: RunnableConfig = {
+        "configurable": {"thread_id": "test-plan-approval-interrupt"}
+    }
 
     result = await graph.ainvoke(state, config)
 

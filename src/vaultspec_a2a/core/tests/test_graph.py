@@ -529,7 +529,7 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
         )
-    assert graph.recursion_limit == 10
+    assert graph.recursion_limit == 10  # type: ignore[attr-defined]
 
 
 # ---------------------------------------------------------------------------

@@ -2,6 +2,15 @@
 
 import importlib
 
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from .aggregator import EventAggregator as EventAggregator
+    from .aggregator import StreamableGraph as StreamableGraph
+    from .graph import build_initial_vault_index as build_initial_vault_index
+    from .graph import compile_team_graph as compile_team_graph
+
 from .anchoring import build_anchoring_context as build_anchoring_context
 from .config import Settings, settings
 from .context import (

@@ -43,6 +43,7 @@ from ..api.schemas.events import (
     ServerEvent,
     TeamStatusEvent,
     ThoughtChunkEvent,
+    ToolCallContent,
     ToolCallContentText,
     ToolCallStartEvent,
     ToolCallUpdateEvent,
@@ -825,7 +826,7 @@ class EventAggregator:
         input_args: dict[str, Any] | None = None,
     ) -> None:
         """Emit a tool invocation start event."""
-        content: list[ToolCallContentText] = []
+        content: list[ToolCallContent] = []
         if input_args:
             # Summarise input args as a text content block (truncate large values)
             try:
@@ -855,7 +856,7 @@ class EventAggregator:
         tool_call_id: str,
         status: ToolCallStatus | None = None,
         title: str | None = None,
-        content: list[ToolCallContentText] | None = None,
+        content: list[ToolCallContent] | None = None,
     ) -> None:
         """Emit a tool call update event (debounced per ADR-011 §5).
 
@@ -1333,7 +1334,7 @@ class EventAggregator:
                 # BE-30: extract tool output for content enrichment
                 tool_name = event_data.get("name", "")
                 output = event_data.get("data", {}).get("output")
-                output_content: list[ToolCallContentText] | None = None
+                output_content: list[ToolCallContent] | None = None
                 if output is not None:
                     output_str = ""
                     if hasattr(output, "content"):
@@ -1405,7 +1406,7 @@ class EventAggregator:
                     node,
                     error_msg,
                 )
-                error_content = (
+                error_content: list[ToolCallContent] | None = (
                     [ToolCallContentText(text=error_msg)] if error_msg else None
                 )
                 await self.emit_tool_call_update(

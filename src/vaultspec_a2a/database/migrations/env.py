@@ -11,7 +11,9 @@ References:
 
 import asyncio
 
+from collections.abc import MutableMapping
 from logging.config import fileConfig
+from typing import Literal
 
 from alembic import context
 from sqlalchemy import pool
@@ -33,7 +35,23 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 
-def include_name(name: str, type_: str, parent_names: dict) -> bool:
+_AlembicParentNames = MutableMapping[
+    Literal["schema_name", "table_name", "schema_qualified_table_name"], str | None
+]
+
+
+def include_name(
+    name: str | None,
+    type_: Literal[
+        "schema",
+        "table",
+        "column",
+        "index",
+        "unique_constraint",
+        "foreign_key_constraint",
+    ],
+    parent_names: _AlembicParentNames,
+) -> bool:
     """Scope autogenerate to app-owned tables only.
 
     Uses allowlist form: only tables declared in ``Base.metadata`` are

@@ -4,6 +4,7 @@ import asyncio
 import logging
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
 
@@ -19,7 +20,7 @@ async def main() -> None:
 
     async with setup_graph("vaultspec-adaptive-coder", autonomous=False) as graph:
         thread_id = "preps-plan-approval-001"
-        config = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         input_state = {
             "messages": [
                 HumanMessage(content="Implement a REST API for user authentication.")

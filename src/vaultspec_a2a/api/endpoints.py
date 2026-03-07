@@ -33,6 +33,7 @@ import httpx
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import StateSnapshot
 from sqlalchemy import text
@@ -676,7 +677,7 @@ async def get_thread_state_endpoint(
     # aget_tuple() returns a CheckpointTuple with the checkpoint dict
     # containing channel_values (messages, plan, artifacts, etc.).
     try:
-        config = {"configurable": {"thread_id": thread_id}}
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
         checkpoint_tuple = await asyncio.wait_for(
             checkpointer.aget_tuple(config),
             timeout=10.0,
@@ -966,7 +967,8 @@ async def respond_to_permission_endpoint(
         # translate "approve"/"reject" into {"approved": True/False}.
         # Tool permission resumes pass the option_id string through unchanged.
         resume_value: str | dict[str, bool] = body.option_id
-        perm_event = aggregator._pending_permissions.get(request_id)  # noqa: SLF001
+        perm_entry = aggregator._pending_permissions.get(request_id)  # noqa: SLF001
+        perm_event = perm_entry[0] if perm_entry else None
         if perm_event and perm_event.tool_call == PermissionType.PLAN_APPROVAL:
             resume_value = {"approved": body.option_id == "approve"}
 

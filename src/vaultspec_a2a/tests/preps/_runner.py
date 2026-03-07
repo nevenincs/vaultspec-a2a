@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from langchain_core.messages import HumanMessage
+from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 
@@ -69,11 +70,11 @@ async def run_scenario(
 
     Uses stream_mode=["updates"] by default. Prints each node update.
     """
-    config = {"configurable": {"thread_id": thread_id}}
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
     input_state = {"messages": [HumanMessage(content=user_message)]}
     mode = stream_mode or ["updates"]
 
-    async for chunk in graph.astream(input_state, config, stream_mode=mode):
+    async for chunk in graph.astream(input_state, config, stream_mode=mode):  # type: ignore[call-overload]
         if isinstance(chunk, tuple):
             mode_name, data = chunk
             print(f"\n{'=' * 60}")

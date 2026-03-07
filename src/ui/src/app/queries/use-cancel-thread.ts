@@ -11,7 +11,9 @@ export function useCancelThread() {
 
     onMutate: async (threadId) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.threads.list() });
-      const previous = queryClient.getQueryData<ThreadSummary[]>(queryKeys.threads.list());
+      const previous = queryClient.getQueryData<ThreadSummary[]>(
+        queryKeys.threads.list(),
+      );
 
       // Optimistically set agent_state to cancelled
       queryClient.setQueryData<ThreadSummary[]>(queryKeys.threads.list(), (prev = []) =>

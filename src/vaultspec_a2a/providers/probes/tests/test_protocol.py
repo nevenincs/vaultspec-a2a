@@ -331,10 +331,11 @@ class TestProbeSessionSend:
 # ---------------------------------------------------------------------------
 
 
-class _ReadBuffer:
-    """Minimal asyncio.StreamReader-like buffer for testing read_stderr."""
+class _ReadBuffer(asyncio.StreamReader):
+    """Minimal asyncio.StreamReader subclass for testing read_stderr."""
 
     def __init__(self, lines: list[bytes]) -> None:
+        super().__init__()
         self._lines = list(lines)
 
     async def readline(self) -> bytes:
@@ -360,7 +361,7 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         event = {"type": "rate_limit_event", "overageStatus": "blocked"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(event) + "\n").encode(),
             ]
         )
@@ -377,7 +378,7 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         event = {"type": "rate_limit_event", "overageStatus": "rejected"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(event) + "\n").encode(),
             ]
         )
@@ -392,7 +393,7 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         event = {"type": "rate_limit_event", "someField": "value"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(event) + "\n").encode(),
             ]
         )
@@ -405,7 +406,7 @@ class TestReadStderrRateLimitParsing:
         session = self._make_session()
         other = {"type": "other_event", "data": "x"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(other) + "\n").encode(),
             ]
         )
@@ -417,7 +418,7 @@ class TestReadStderrRateLimitParsing:
         """Non-JSON stderr lines are logged but do not affect rate_limit_events."""
         session = self._make_session()
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 b"Some plain text log line\n",
             ]
         )
@@ -431,7 +432,7 @@ class TestReadStderrRateLimitParsing:
         ev1 = {"type": "rate_limit_event", "overageStatus": "rejected"}
         ev2 = {"type": "rate_limit_event", "overageStatus": "rejected"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(ev1) + "\n").encode(),
                 (json.dumps(ev2) + "\n").encode(),
             ]
@@ -446,7 +447,7 @@ class TestReadStderrRateLimitParsing:
         session.result.error = "prior error"
         event = {"type": "rate_limit_event", "overageStatus": "blocked"}
         session.stderr = _ReadBuffer(
-            [  # type: ignore[assignment]
+            [
                 (json.dumps(event) + "\n").encode(),
             ]
         )

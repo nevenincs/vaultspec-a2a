@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..context import (
     compact_context,
@@ -132,7 +132,7 @@ class TestCompactContext:
     def test_preserves_system_prefix(self) -> None:
         """After compaction the first message is still the original system message."""
         sys_msg = SystemMessage(content="You are a helpful assistant.")
-        messages = [sys_msg]
+        messages: list[BaseMessage] = [sys_msg]
         # Add many messages to exceed the budget
         for i in range(20):
             messages.append(HumanMessage(content=f"Message {i} " + "x" * 200))

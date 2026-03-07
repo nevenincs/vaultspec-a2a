@@ -5,6 +5,8 @@ preparation as mandated by ADR-002 (context management) and ADR-008
 (state serialization).
 """
 
+from collections.abc import Sequence
+
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
 from .state import TeamState
@@ -27,7 +29,7 @@ CONTEXT_LIMIT = 120_000
 _CHARS_PER_TOKEN = 4
 
 
-def estimate_tokens(messages: list[BaseMessage]) -> int:
+def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
     """Rough token count for a list of LangChain messages.
 
     Uses the widely-accepted ~4 chars/token heuristic. This is intentionally

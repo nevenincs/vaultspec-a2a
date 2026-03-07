@@ -451,7 +451,7 @@ export function InputBar({
                   description: p.description,
                   isSelected: selectedPreset?.id === p.id,
                   extra: p.worker_count ? (
-                    <div className="mt-1 text-muted-foreground text-[0.5625rem]">
+                    <div className="text-muted-foreground mt-1 text-[0.5625rem]">
                       {p.worker_count} worker{p.worker_count !== 1 ? 's' : ''}
                     </div>
                   ) : undefined,

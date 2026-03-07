@@ -347,7 +347,7 @@ class TestTeamStatus:
             description="Allow file write?",
             options=[],
         )
-        agg._pending_permissions["thread-abc:perm-001"] = event
+        agg._pending_permissions["thread-abc:perm-001"] = (event, 0.0)
 
         app, _agg, _captured, _cp = make_app(session_factory, aggregator=agg)
 

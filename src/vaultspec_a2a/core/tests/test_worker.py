@@ -65,7 +65,7 @@ class _AlwaysFailModel(BaseChatModel):
 
 
 def _make_state() -> TeamState:
-    return {  # type: ignore[return-value]
+    return {
         "messages": [HumanMessage(content="do something")],
         "active_agent": "",
         "artifacts": [],

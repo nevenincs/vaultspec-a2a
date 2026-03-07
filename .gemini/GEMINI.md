@@ -81,7 +81,9 @@ steps is not permitted.
 
 ### Workflow Rules
 
-- Use the Figma Code Connect mapping if applicable and / or the MCP server to fetch figma designs. UI tanstack query msut be implemented manually based on the backend edge shape.
+- Use the Figma Code Connect mapping if applicable and / or the MCP server
+  to fetch figma designs. UI tanstack query must be implemented manually
+  based on the backend edge shape.
 - MCP server responses override training knowledge. When there is a conflict,
   the MCP response is authoritative.
 - Never approximate a Figma design from memory; always fetch fresh data.

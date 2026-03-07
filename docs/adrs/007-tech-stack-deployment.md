@@ -133,7 +133,7 @@ We formalize the following technology stack and deployment architecture:
   [SQLite.org WAL Documentation](https://www.sqlite.org/wal.html) (referenced
   for concurrent read/write benefits).
 - **React Deployment:**
-  [React.dev Deployment](https://React.dev/docs/kit/adapter-static)
+  [React.dev Deployment](https://react.dev/learn/start-a-new-react-project)
   (referenced for static site generation and build process).
 - **uv Package Manager:** [astral.sh/uv](https://astral.sh/uv) (referenced
   for modern Python dependency management).

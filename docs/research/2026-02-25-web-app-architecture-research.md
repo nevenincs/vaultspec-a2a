@@ -675,12 +675,7 @@ FastAPI (uvicorn)
   (DeepWiki)](https://deepwiki.com/open-webui/open-webui/2.1-frontend-structure)
 - [Building a Real-time Dashboard with FastAPI and
   React](https://testdriven.io/blog/fastapi-React/)
-- [React + FastAPI Interactive UIs
-  2025](https://johal.in/next-gen-frontend-architectures-React-with-python-fastapi-backend-for-interactive-uis-2025/)
-- [xterm-React](https://github.com/BattlefieldDuck/xterm-React)
 - [xterm-react](https://github.com/PabloLION/xterm-react/)
-- [React 5 Runes: Fine-Grained
-  Reactivity](https://leapcell.io/blog/React-5-and-the-granular-reactivity-revolution-with-runes)
 - [SolidJS Creator on Fine-Grained
   Reactivity](https://thenewstack.io/solidjs-creator-on-fine-grained-reactivity-as-next-frontier/)
 - [Frontend Framework Benchmarks

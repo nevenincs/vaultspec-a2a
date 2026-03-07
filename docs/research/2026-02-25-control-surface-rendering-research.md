@@ -543,7 +543,7 @@ Source: <https://developer.chrome.com/docs/ai/render-llm-responses>
 
 #### React-markdown
 
-**Repository**: <https://github.com/pablo-abc/React-markdown>
+**Repository**: <https://github.com/remarkjs/react-markdown>
 
 - Inspired by react-markdown.
 - Accepts`source`prop (string or pre-parsed tokens).

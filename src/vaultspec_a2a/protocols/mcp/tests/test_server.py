@@ -5,25 +5,31 @@ triggers the app lifespan) to verify MCP tool error paths and the API
 contract expected by the MCP tools.
 
 Per CLAUDE.md: no mocks, no monkeypatching.  The TestClient path runs
-the full lifespan using real in-memory SQLite and a MemorySaver
+the full lifespan using real in-memory SQLite and a real AsyncSqliteSaver
 checkpointer so the production vaultspec.db is never created.
 
-ADR-019: GraphRegistry has moved to the worker process.  The control
-surface test app uses a test httpx client for worker dispatch.
+ADR-019: GraphRegistry has moved to the worker process.  The gateway
+test app uses a real in-process FastAPI ASGI app (via ASGITransport)
+for worker dispatch — no MockTransport, no fake responses.
 
 Error-path tests (unknown preset, connection error) call MCP tool
 functions directly and rely on the known unreachable ``localhost:8000``
 default to exercise the ``httpx.RequestError`` branch.
 """
 
+import asyncio
+
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
 
 import httpx
 import pytest
 import pytest_asyncio
 
+from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
-from langgraph.checkpoint.memory import MemorySaver
+from httpx import ASGITransport
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from mcp.server.fastmcp.exceptions import ToolError
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
@@ -31,20 +37,25 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ....api.app import create_app
+from ....api.app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
 from ....api.endpoints import (
     get_aggregator,
     get_checkpointer,
+    get_circuit_breaker,
     get_worker_client,
+    get_worker_spawner,
 )
 from ....core.aggregator import EventAggregator
+from ....database.crud import record_permission_request
 from ....database.models import Base
 from ....database.session import get_db
 from ..server import (
     _reset_client,
     _reset_known_presets,
     _ws_url_from_api_base,
+    archive_thread,
     cancel_thread,
+    delete_thread,
     get_pending_permissions,
     get_team_status,
     get_thread_status,
@@ -91,37 +102,98 @@ async def session_factory(engine):
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
-def _make_test_client(session_factory, aggregator=None) -> TestClient:
-    """Create a TestClient backed by a real app lifespan.
+@pytest_asyncio.fixture
+async def checkpointer(tmp_path):
+    """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
 
-    ADR-019: overrides get_worker_client with a test httpx client.
-    GraphRegistry and TaskGroup are no longer needed.
+    Replaces MemorySaver so the real checkpointer implementation is exercised.
     """
-    import json as _json
+    db_file = tmp_path / "test_checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
+        yield cp
 
+
+class _InProcessWorker:
+    """Minimal in-process worker that accepts /dispatch and /health requests.
+
+    Uses a real FastAPI ASGI app served via ``httpx.ASGITransport`` — real
+    HTTP serialisation and routing are exercised on every request.
+    Not a mock, not a fake transport handler.
+    """
+
+    def __init__(self) -> None:
+        self.dispatches: list[dict] = []
+
+        _app = FastAPI()
+
+        @_app.post("/dispatch")
+        async def _dispatch(request: Request) -> dict:
+            body = await request.json()
+            self.dispatches.append(body)
+            return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
+
+        @_app.get("/health")
+        async def _health() -> dict:
+            return {"status": "ok"}
+
+        self._client = httpx.AsyncClient(
+            transport=ASGITransport(app=_app),
+            base_url="http://test-worker:8001",
+        )
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Return the httpx client backed by the in-process worker app."""
+        return self._client
+
+    def clear(self) -> None:
+        """Clear all recorded dispatch requests."""
+        self.dispatches.clear()
+
+
+def _make_test_client(
+    session_factory, checkpointer: AsyncSqliteSaver, aggregator=None
+) -> TestClient:
+    """Create a TestClient with the real lifespan bypassed.
+
+    ADR-019: wires a real in-process dispatch receiver (ASGITransport over a
+    minimal FastAPI app) for the worker client, and injects the real
+    AsyncSqliteSaver checkpointer from the calling fixture.
+
+    The production lifespan is replaced with a no-op so that tests never
+    touch the on-disk ``vaultspec.db`` or run Alembic migrations.  All
+    required app state is set directly on ``app.state`` before the client
+    context manager is entered.
+    """
     app = create_app()
+
+    @asynccontextmanager
+    async def _test_lifespan(_app):
+        yield
+
+    app.router.lifespan_context = _test_lifespan
+
     if aggregator is None:
         aggregator = EventAggregator()
 
-    # In-memory checkpointer -- never touches vaultspec.db
-    checkpointer = MemorySaver()
+    # Real in-process worker — real ASGI, no mock
+    worker = _InProcessWorker()
     app.state.checkpointer = checkpointer
+    app.state.aggregator = aggregator
+    app.state.worker_client = worker.client
 
-    # Test worker client that accepts all dispatch requests
-    def _handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/dispatch" and request.method == "POST":
-            body = _json.loads(request.content)
-            return httpx.Response(
-                200,
-                json={"status": "dispatched", "thread_id": body.get("thread_id", "")},
-            )
-        return httpx.Response(404, json={"detail": "Not found"})
+    # Circuit breaker starts CLOSED — dispatch succeeds with in-process worker
+    cb = WorkerCircuitBreaker()
+    app.state.circuit_breaker = cb
 
-    transport = httpx.MockTransport(_handler)
-    worker_client = httpx.AsyncClient(
-        transport=transport, base_url="http://test-worker:8001"
+    # Lazy spawner pre-marked as spawned — no subprocess needed in tests
+    spawner = LazyWorkerSpawner(
+        worker_url="http://test-worker:8001",
+        worker_port=8001,
+        auto_spawn=False,
     )
-    app.state.worker_client = worker_client
+    spawner._spawned = True
+    app.state.worker_spawner = spawner
 
     # Override the DB session so tests use in-memory SQLite
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
@@ -131,7 +203,9 @@ def _make_test_client(session_factory, aggregator=None) -> TestClient:
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
     app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_worker_client] = lambda: worker_client
+    app.dependency_overrides[get_worker_client] = lambda: worker.client
+    app.dependency_overrides[get_circuit_breaker] = lambda: cb
+    app.dependency_overrides[get_worker_spawner] = lambda: spawner
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -172,9 +246,11 @@ async def test_start_thread_default_preset_not_unknown() -> None:
 class TestCreateThreadViaApp:
     """Tests that exercise the real FastAPI app the MCP tools talk to."""
 
-    def test_post_threads_without_autonomous_returns_201(self, session_factory) -> None:
+    def test_post_threads_without_autonomous_returns_201(
+        self, session_factory, checkpointer
+    ) -> None:
         """POST /api/threads without autonomous field returns 201."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
                 "/api/threads",
                 json={"initial_message": "Hello from MCP test"},
@@ -184,10 +260,10 @@ class TestCreateThreadViaApp:
         assert "thread_id" in data
 
     def test_post_threads_with_autonomous_true_returns_201(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """POST /api/threads with autonomous=True returns 201."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
                 "/api/threads",
                 json={
@@ -200,15 +276,19 @@ class TestCreateThreadViaApp:
         assert "thread_id" in data
         assert data["status"] == "submitted"
 
-    def test_get_thread_state_404_for_unknown(self, session_factory) -> None:
+    def test_get_thread_state_404_for_unknown(
+        self, session_factory, checkpointer
+    ) -> None:
         """GET /api/threads/{id}/state returns 404 for unknown thread."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/threads/nonexistent-id/state")
         assert resp.status_code == 404
 
-    def test_get_thread_state_200_for_existing(self, session_factory) -> None:
+    def test_get_thread_state_200_for_existing(
+        self, session_factory, checkpointer
+    ) -> None:
         """GET /api/threads/{id}/state returns 200 with thread data."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
                 json={"initial_message": "Hello"},
@@ -222,10 +302,10 @@ class TestCreateThreadViaApp:
         assert data["thread_id"] == thread_id
 
     def test_post_threads_with_workspace_root_returns_201(
-        self, session_factory, tmp_path
+        self, session_factory, checkpointer, tmp_path
     ) -> None:
         """POST /api/threads with workspace_root in metadata passes through to 201."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
                 "/api/threads",
                 json={
@@ -238,9 +318,11 @@ class TestCreateThreadViaApp:
         data = resp.json()
         assert "thread_id" in data
 
-    def test_send_message_returns_404_for_unknown_thread(self, session_factory) -> None:
+    def test_send_message_returns_404_for_unknown_thread(
+        self, session_factory, checkpointer
+    ) -> None:
         """POST /api/threads/{id}/messages returns 404 for unknown thread."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
                 "/api/threads/nonexistent/messages",
                 json={"content": "hello"},
@@ -248,10 +330,10 @@ class TestCreateThreadViaApp:
         assert resp.status_code == 404
 
     def test_send_message_returns_202_for_existing_thread(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """POST /api/threads/{id}/messages returns 202 for an existing thread."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
                 json={"initial_message": "Hello"},
@@ -287,7 +369,14 @@ async def test_start_thread_raises_when_server_unavailable() -> None:
             team_preset="vaultspec-adaptive-coder",
         )
     msg = str(exc_info.value).lower()
-    _expected_keywords = ("error", "connection", "network", "timeout")
+    _expected_keywords = (
+        "error",
+        "connection",
+        "connected",
+        "network",
+        "timeout",
+        "gateway",
+    )
     assert any(kw in msg for kw in _expected_keywords)
 
 
@@ -300,7 +389,15 @@ async def test_get_thread_status_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await get_thread_status(thread_id="some-thread-id")
     msg = str(exc_info.value).lower()
-    _expected_keywords = ("error", "connection", "network", "timeout", "not found")
+    _expected_keywords = (
+        "error",
+        "connection",
+        "connected",
+        "network",
+        "timeout",
+        "not found",
+        "gateway",
+    )
     assert any(kw in msg for kw in _expected_keywords)
 
 
@@ -313,7 +410,15 @@ async def test_send_message_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await send_message(thread_id="some-thread-id", message="hello")
     msg = str(exc_info.value).lower()
-    _expected_keywords = ("error", "connection", "network", "timeout", "not found")
+    _expected_keywords = (
+        "error",
+        "connection",
+        "connected",
+        "network",
+        "timeout",
+        "not found",
+        "gateway",
+    )
     assert any(kw in msg for kw in _expected_keywords)
 
 
@@ -369,25 +474,34 @@ async def test_list_threads_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await list_threads()
     msg = str(exc_info.value).lower()
-    _expected_keywords = ("error", "connection", "network", "timeout")
+    _expected_keywords = (
+        "error",
+        "connection",
+        "connected",
+        "network",
+        "timeout",
+        "gateway",
+    )
     assert any(kw in msg for kw in _expected_keywords)
 
 
 class TestListThreadsViaApp:
     """Tests that exercise list_threads via the real FastAPI app."""
 
-    def test_list_threads_empty(self, session_factory) -> None:
+    def test_list_threads_empty(self, session_factory, checkpointer) -> None:
         """GET /api/threads returns empty list when no threads exist."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/threads")
         assert resp.status_code == 200
         data = resp.json()
         assert data["threads"] == []
         assert data["total"] == 0
 
-    def test_list_threads_returns_created_thread(self, session_factory) -> None:
+    def test_list_threads_returns_created_thread(
+        self, session_factory, checkpointer
+    ) -> None:
         """GET /api/threads includes a thread created via POST /api/threads."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
                 json={
@@ -408,9 +522,9 @@ class TestListThreadsViaApp:
         matching = [t for t in data["threads"] if t["thread_id"] == thread_id]
         assert matching[0]["team_preset"] == "vaultspec-solo-coder"
 
-    def test_list_threads_pagination(self, session_factory) -> None:
+    def test_list_threads_pagination(self, session_factory, checkpointer) -> None:
         """GET /api/threads respects limit and offset params."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             for i in range(3):
                 client.post(
                     "/api/threads",
@@ -437,7 +551,7 @@ async def test_respond_to_permission_raises_when_server_unavailable() -> None:
             option_id="allow",
         )
     msg = str(exc_info.value).lower()
-    _expected = ("error", "connection", "network", "timeout")
+    _expected = ("error", "connection", "connected", "network", "timeout", "gateway")
     assert any(kw in msg for kw in _expected)
 
 
@@ -445,10 +559,10 @@ class TestRespondToPermissionViaApp:
     """Tests exercising respond_to_permission through the real FastAPI app."""
 
     def test_respond_to_permission_404_for_unknown_thread(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """POST /api/permissions/{id}/respond returns 404 when thread not found."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post(
                 "/api/permissions/nonexistent:some-uuid/respond",
                 json={"option_id": "allow"},
@@ -456,10 +570,15 @@ class TestRespondToPermissionViaApp:
         assert resp.status_code == 404
 
     def test_respond_to_permission_dispatches_for_existing_thread(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
-        """POST /api/permissions/{thread_id}:{uuid}/respond dispatches to worker."""
-        with _make_test_client(session_factory) as client:
+        """POST /api/permissions/{thread_id}:{uuid}/respond dispatches to worker.
+
+        The endpoint now requires a durably-pending PermissionRequestModel row
+        (added in the 0002 migration hardening sprint).  We seed one directly
+        via the CRUD layer before calling the endpoint.
+        """
+        with _make_test_client(session_factory, checkpointer) as client:
             # Create a thread first so the permission endpoint can find it
             create_resp = client.post(
                 "/api/threads",
@@ -468,13 +587,34 @@ class TestRespondToPermissionViaApp:
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["thread_id"]
 
+            request_id = f"{thread_id}:fake-uuid"
+
+            # Seed a durable pending permission request so the endpoint can
+            # validate it exists (required since the 0002 hardening sprint).
+            async def _seed_permission() -> None:
+                async with session_factory() as session:
+                    await record_permission_request(
+                        session,
+                        request_id=request_id,
+                        thread_id=thread_id,
+                        pause_reason_type="tool_call",
+                        description="Approve running dangerous-tool?",
+                        allowed_options=[
+                            {"option_id": "allow", "name": "Allow"},
+                            {"option_id": "deny", "name": "Deny"},
+                        ],
+                    )
+                    await session.commit()
+
+            asyncio.run(_seed_permission())
+
             resp = client.post(
-                f"/api/permissions/{thread_id}:fake-uuid/respond",
+                f"/api/permissions/{request_id}/respond",
                 json={"option_id": "allow"},
             )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["request_id"] == f"{thread_id}:fake-uuid"
+        assert data["request_id"] == request_id
         assert data["accepted"] is True
 
 
@@ -489,16 +629,16 @@ async def test_get_team_status_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await get_team_status()
     msg = str(exc_info.value).lower()
-    _expected = ("error", "connection", "network", "timeout")
+    _expected = ("error", "connection", "connected", "network", "timeout", "gateway")
     assert any(kw in msg for kw in _expected)
 
 
 class TestGetTeamStatusViaApp:
     """Tests exercising get_team_status through the real FastAPI app."""
 
-    def test_get_team_status_returns_200(self, session_factory) -> None:
+    def test_get_team_status_returns_200(self, session_factory, checkpointer) -> None:
         """GET /api/team/status returns 200 with valid structure."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/team/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -518,16 +658,16 @@ async def test_get_pending_permissions_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await get_pending_permissions()
     msg = str(exc_info.value).lower()
-    _expected = ("error", "connection", "network", "timeout")
+    _expected = ("error", "connection", "connected", "network", "timeout", "gateway")
     assert any(kw in msg for kw in _expected)
 
 
 class TestGetPendingPermissionsViaApp:
     """Tests exercising get_pending_permissions through the real FastAPI app."""
 
-    def test_get_pending_permissions_empty(self, session_factory) -> None:
+    def test_get_pending_permissions_empty(self, session_factory, checkpointer) -> None:
         """When no permissions are pending, the endpoint returns an empty list."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/team/status")
         assert resp.status_code == 200
         data = resp.json()
@@ -545,25 +685,27 @@ async def test_list_team_presets_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await list_team_presets()
     msg = str(exc_info.value).lower()
-    _expected = ("error", "connection", "network", "timeout")
+    _expected = ("error", "connection", "connected", "network", "timeout", "gateway")
     assert any(kw in msg for kw in _expected)
 
 
 class TestListTeamPresetsViaApp:
     """Tests exercising list_team_presets through the real FastAPI app."""
 
-    def test_list_team_presets_returns_200(self, session_factory) -> None:
+    def test_list_team_presets_returns_200(self, session_factory, checkpointer) -> None:
         """GET /api/teams returns 200 with presets."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/teams")
         assert resp.status_code == 200
         data = resp.json()
         assert "presets" in data
         assert len(data["presets"]) > 0
 
-    def test_list_team_presets_contains_expected_fields(self, session_factory) -> None:
+    def test_list_team_presets_contains_expected_fields(
+        self, session_factory, checkpointer
+    ) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/teams")
         data = resp.json()
         preset = data["presets"][0]
@@ -585,22 +727,32 @@ async def test_cancel_thread_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await cancel_thread(thread_id="some-thread-id")
     msg = str(exc_info.value).lower()
-    _expected = ("error", "connection", "network", "timeout", "not found")
+    _expected = (
+        "error",
+        "connection",
+        "connected",
+        "network",
+        "timeout",
+        "not found",
+        "gateway",
+    )
     assert any(kw in msg for kw in _expected)
 
 
 class TestCancelThreadViaApp:
     """Tests exercising cancel_thread through the real FastAPI app."""
 
-    def test_cancel_thread_404_for_unknown(self, session_factory) -> None:
+    def test_cancel_thread_404_for_unknown(self, session_factory, checkpointer) -> None:
         """POST /api/threads/{id}/cancel returns 404 for unknown thread."""
-        with _make_test_client(session_factory) as client:
+        with _make_test_client(session_factory, checkpointer) as client:
             resp = client.post("/api/threads/nonexistent/cancel")
         assert resp.status_code == 404
 
-    def test_cancel_thread_cancels_running_thread(self, session_factory) -> None:
-        """POST /api/threads/{id}/cancel sets status to cancelled."""
-        with _make_test_client(session_factory) as client:
+    def test_cancel_thread_cancels_running_thread(
+        self, session_factory, checkpointer
+    ) -> None:
+        """POST /api/threads/{id}/cancel returns an accepted cancelling state."""
+        with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
                 json={"initial_message": "Cancel me"},
@@ -613,13 +765,13 @@ class TestCancelThreadViaApp:
         data = cancel_resp.json()
         assert data["thread_id"] == thread_id
         assert data["cancelled"] is True
-        assert data["status"] == "cancelled"
+        assert data["status"] == "cancelling"
 
-    def test_cancel_thread_already_cancelled_returns_not_cancelled(
-        self, session_factory
+    def test_cancel_thread_repeat_request_stays_accepting_until_terminal_event(
+        self, session_factory, checkpointer
     ) -> None:
-        """Cancelling an already-cancelled thread returns cancelled=False."""
-        with _make_test_client(session_factory) as client:
+        """Repeated cancel requests stay accepted until the worker confirms terminal state."""
+        with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
                 json={"initial_message": "Cancel twice"},
@@ -632,4 +784,58 @@ class TestCancelThreadViaApp:
             cancel_resp = client.post(f"/api/threads/{thread_id}/cancel")
         assert cancel_resp.status_code == 200
         data = cancel_resp.json()
-        assert data["cancelled"] is False
+        assert data["cancelled"] is True
+        assert data["status"] == "cancelling"
+
+
+# ---------------------------------------------------------------------------
+# TESTING-04: delete_thread / archive_thread error paths + preset cache
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteArchiveThreadErrorPaths:
+    """delete_thread and archive_thread raise ToolError when gateway is unreachable."""
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_delete_thread_raises_tool_error_when_server_unavailable(
+        self,
+    ) -> None:
+        """delete_thread wraps ConnectError into ToolError."""
+        with pytest.raises(ToolError):
+            await delete_thread("00000000-0000-0000-0000-000000000001")
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_archive_thread_raises_tool_error_when_server_unavailable(
+        self,
+    ) -> None:
+        """archive_thread wraps ConnectError into ToolError."""
+        with pytest.raises(ToolError):
+            await archive_thread("00000000-0000-0000-0000-000000000002")
+
+
+class TestKnownPresetsCache:
+    """_known_presets_cache is populated on first call and cleared by _reset_known_presets."""
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_reset_known_presets_clears_cache_after_population(self) -> None:
+        """_reset_known_presets() sets _known_presets_cache back to None after it was set."""
+        import sys
+
+        from ..server import _get_known_presets
+
+        # Locate the already-imported server module via sys.modules
+        srv_mod = next(
+            m for k, m in sys.modules.items() if k.endswith("protocols.mcp.server")
+        )
+
+        # After autouse fixture, cache is already None
+        assert srv_mod._known_presets_cache is None
+
+        # Trigger population — gateway unreachable results in empty frozenset
+        result = await _get_known_presets()
+        assert isinstance(result, frozenset)
+        assert srv_mod._known_presets_cache is not None
+
+        # Reset clears it
+        _reset_known_presets()
+        assert srv_mod._known_presets_cache is None

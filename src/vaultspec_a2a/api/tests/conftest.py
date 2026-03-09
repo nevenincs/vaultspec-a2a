@@ -1,23 +1,30 @@
 """Shared fixtures for src/vaultspec_a2a/api/tests/.
 
-Centralises engine, session_factory, session, and make_app so that all test
-modules use the same in-memory SQLite setup and dependency overrides.
+Centralises engine, session_factory, session, checkpointer, and make_app so
+that all test modules use the same isolated SQLite setup and dependency
+overrides.
 
-ADR-019: The gateway no longer runs agent execution locally.
-Tests override get_worker_client with a test httpx.AsyncClient that
-posts to a local test handler (or simply captures requests).  The
-GraphRegistry has moved to the worker process.
+ADR-019: The gateway no longer runs agent execution locally.  Tests wire a
+real in-process dispatch receiver (a minimal FastAPI ASGI app served via
+``httpx.ASGITransport``) so that HTTP serialisation and routing are exercised
+without a live worker process.  No ``MockTransport``, no ``unittest.mock``.
 
-API-M7 fix: shared fixtures eliminate duplicate engine/session_factory
-definitions across test files.
+The ``checkpointer`` fixture uses ``AsyncSqliteSaver`` backed by a per-test
+SQLite file so that gateway read-path enrichment exercises the real
+checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
 from collections.abc import AsyncGenerator
+from contextlib import asynccontextmanager
+from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import pytest_asyncio
 
-from langgraph.checkpoint.memory import MemorySaver
+from fastapi import FastAPI, Request
+from httpx import ASGITransport
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
     AsyncSession,
     async_sessionmaker,
@@ -27,11 +34,13 @@ from sqlalchemy.ext.asyncio import (
 from ...core.aggregator import EventAggregator
 from ...database.models import Base
 from ...database.session import get_db
-from ..app import create_app
+from ..app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
 from ..endpoints import (
     get_aggregator,
     get_checkpointer,
+    get_circuit_breaker,
     get_worker_client,
+    get_worker_spawner,
 )
 
 
@@ -68,41 +77,68 @@ async def session(engine):
 
 
 # ---------------------------------------------------------------------------
-# Test worker transport -- captures dispatch requests
+# Real checkpointer fixture — AsyncSqliteSaver backed by a per-test file
 # ---------------------------------------------------------------------------
 
 
-class _CapturedDispatch:
-    """Records dispatch requests sent by the gateway to the worker."""
+@pytest_asyncio.fixture
+async def checkpointer():
+    """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
+
+    Replaces the former MemorySaver stub so that gateway read-path enrichment
+    exercises the real checkpointer implementation (AsyncSqliteSaver).
+    """
+    case_dir = Path.cwd() / ".tmp" / "api-test-checkpoints" / uuid4().hex
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test_checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
+        yield cp
+
+
+# ---------------------------------------------------------------------------
+# In-process dispatch receiver — real FastAPI ASGI, no mock
+# ---------------------------------------------------------------------------
+
+
+class _InProcessWorker:
+    """Minimal in-process worker that accepts /dispatch and /health requests.
+
+    Uses a real FastAPI ASGI app served via ``httpx.ASGITransport`` — real
+    HTTP serialisation and Pydantic validation are exercised on every request.
+    Not a mock, not a fake transport handler, not ``unittest.mock``.
+
+    Attributes:
+        dispatches: All dispatch request bodies received so far.
+    """
 
     def __init__(self) -> None:
-        self.requests: list[dict] = []
+        self.dispatches: list[dict] = []
+
+        _app = FastAPI()
+
+        @_app.post("/dispatch")
+        async def _dispatch(request: Request) -> dict:
+            body = await request.json()
+            self.dispatches.append(body)
+            return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
+
+        @_app.get("/health")
+        async def _health() -> dict:
+            return {"status": "ok"}
+
+        self._client = httpx.AsyncClient(
+            transport=ASGITransport(app=_app),
+            base_url="http://test-worker:8001",
+        )
+
+    @property
+    def client(self) -> httpx.AsyncClient:
+        """Return the httpx client backed by the in-process worker app."""
+        return self._client
 
     def clear(self) -> None:
-        self.requests.clear()
-
-
-def _make_test_worker_transport(
-    captured: _CapturedDispatch,
-) -> httpx.MockTransport:
-    """Create an httpx transport that captures /dispatch POSTs.
-
-    Returns 200 with ``{"status": "dispatched", "thread_id": "..."}`` for
-    all POST /dispatch requests, recording the request body in *captured*.
-    """
-    import json as _json
-
-    def _handler(request: httpx.Request) -> httpx.Response:
-        if request.url.path == "/dispatch" and request.method == "POST":
-            body = _json.loads(request.content)
-            captured.requests.append(body)
-            return httpx.Response(
-                200,
-                json={"status": "dispatched", "thread_id": body.get("thread_id", "")},
-            )
-        return httpx.Response(404, json={"detail": "Not found"})
-
-    return httpx.MockTransport(_handler)
+        """Clear all recorded dispatch requests."""
+        self.dispatches.clear()
 
 
 # ---------------------------------------------------------------------------
@@ -110,36 +146,52 @@ def _make_test_worker_transport(
 # ---------------------------------------------------------------------------
 
 
-def make_app(session_factory, aggregator=None, captured_dispatch=None):
+def make_app(
+    session_factory,
+    checkpointer: AsyncSqliteSaver,
+    aggregator: EventAggregator | None = None,
+) -> tuple:
     """Create a test FastAPI app with all dependency overrides applied.
 
-    ADR-019: overrides get_worker_client with a test httpx client that
-    captures dispatch requests.  GraphRegistry and TaskGroup are no longer
-    needed -- the worker owns graph lifecycle.
+    ADR-019: wires a real in-process dispatch receiver (ASGITransport over a
+    minimal FastAPI app) for the worker client, and injects the real
+    AsyncSqliteSaver checkpointer from the calling fixture.
 
     Returns:
-        Tuple of (app, aggregator, captured_dispatch, checkpointer).
+        Tuple of (app, aggregator, worker, checkpointer).
     """
     app = create_app()
 
+    @asynccontextmanager
+    async def _test_lifespan(_app):
+        yield
+
+    app.router.lifespan_context = _test_lifespan
+
     if aggregator is None:
         aggregator = EventAggregator()
-    if captured_dispatch is None:
-        captured_dispatch = _CapturedDispatch()
+
+    worker = _InProcessWorker()
 
     # Store singletons in app.state so WebSocket handlers can read them
     app.state.aggregator = aggregator
-
-    # In-memory checkpointer -- never touches vaultspec.db
-    checkpointer = MemorySaver()
     app.state.checkpointer = checkpointer
 
-    # Test worker client -- captures dispatch POST requests
-    transport = _make_test_worker_transport(captured_dispatch)
-    worker_client = httpx.AsyncClient(
-        transport=transport, base_url="http://test-worker:8001"
+    # In-process worker client — real ASGI, no mock
+    app.state.worker_client = worker.client
+
+    # PROD-028: circuit breaker for dispatch calls
+    cb = WorkerCircuitBreaker()
+    app.state.circuit_breaker = cb
+
+    # PHASE-1a: lazy worker spawner — pre-marked as spawned for tests
+    spawner = LazyWorkerSpawner(
+        worker_url="http://test-worker:8001",
+        worker_port=8001,
+        auto_spawn=False,
     )
-    app.state.worker_client = worker_client
+    spawner._spawned = True  # noqa: SLF001
+    app.state.worker_spawner = spawner
 
     async def _override_get_db() -> AsyncGenerator[AsyncSession]:
         async with session_factory() as session:
@@ -148,6 +200,8 @@ def make_app(session_factory, aggregator=None, captured_dispatch=None):
     app.dependency_overrides[get_db] = _override_get_db
     app.dependency_overrides[get_aggregator] = lambda: aggregator
     app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_worker_client] = lambda: worker_client
+    app.dependency_overrides[get_worker_client] = lambda: worker.client
+    app.dependency_overrides[get_circuit_breaker] = lambda: cb
+    app.dependency_overrides[get_worker_spawner] = lambda: spawner
 
-    return app, aggregator, captured_dispatch, checkpointer
+    return app, aggregator, worker, checkpointer

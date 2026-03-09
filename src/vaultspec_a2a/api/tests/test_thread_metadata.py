@@ -16,9 +16,11 @@ from fastapi.testclient import TestClient
 from .conftest import make_app as _make_app_4
 
 
-def _make_app(session_factory, aggregator=None):
+def _make_app(session_factory, checkpointer, aggregator=None):
     """Shim: forwards to shared make_app(), dropping extra returns."""
-    app, agg, _captured, _cp = _make_app_4(session_factory, aggregator=aggregator)
+    app, agg, _worker, _cp = _make_app_4(
+        session_factory, checkpointer, aggregator=aggregator
+    )
     return app, agg
 
 
@@ -30,10 +32,12 @@ def _make_app(session_factory, aggregator=None):
 class TestCreateThreadWithMetadata:
     """Tests for POST /api/threads with metadata (ADR-014)."""
 
-    def test_create_thread_with_metadata_stores_in_db(self, session_factory) -> None:
+    def test_create_thread_with_metadata_stores_in_db(
+        self, session_factory, checkpointer
+    ) -> None:
         """Thread created with metadata stores it in the DB."""
         with tempfile.TemporaryDirectory() as ws:
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "feature_tag": "auth-flow",
@@ -56,9 +60,11 @@ class TestCreateThreadWithMetadata:
             assert "thread_id" in data
             assert data["nickname"] is not None
 
-    def test_create_thread_invalid_workspace_422(self, session_factory) -> None:
+    def test_create_thread_invalid_workspace_422(
+        self, session_factory, checkpointer
+    ) -> None:
         """Non-existent workspace_root returns 422."""
-        app, _agg = _make_app(session_factory)
+        app, _agg = _make_app(session_factory, checkpointer)
         metadata = {
             "workspace_root": "Y:/nonexistent/path/that/does/not/exist",
         }
@@ -73,10 +79,12 @@ class TestCreateThreadWithMetadata:
             )
         assert resp.status_code == 422
 
-    def test_create_thread_auto_generates_nickname(self, session_factory) -> None:
+    def test_create_thread_auto_generates_nickname(
+        self, session_factory, checkpointer
+    ) -> None:
         """When no nickname is provided, one is auto-generated."""
         with tempfile.TemporaryDirectory() as ws:
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "feature_tag": "auth-flow",
@@ -96,10 +104,10 @@ class TestCreateThreadWithMetadata:
             assert nick is not None
             assert "auth-flow" in nick
 
-    def test_nickname_conflict_409(self, session_factory) -> None:
+    def test_nickname_conflict_409(self, session_factory, checkpointer) -> None:
         """Duplicate nicknames return 409."""
         with tempfile.TemporaryDirectory() as ws:
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "nickname": "unique-test-nick",
@@ -124,9 +132,9 @@ class TestCreateThreadWithMetadata:
                 )
                 assert resp2.status_code == 409
 
-    def test_legacy_thread_backward_compat(self, session_factory) -> None:
+    def test_legacy_thread_backward_compat(self, session_factory, checkpointer) -> None:
         """Threads without metadata work exactly as before."""
-        app, _agg = _make_app(session_factory)
+        app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -147,10 +155,12 @@ class TestCreateThreadWithMetadata:
 class TestListThreadsWithMetadata:
     """Tests for GET /api/threads with ADR-014 metadata fields."""
 
-    def test_list_threads_includes_metadata_fields(self, session_factory) -> None:
+    def test_list_threads_includes_metadata_fields(
+        self, session_factory, checkpointer
+    ) -> None:
         """Thread list includes nickname, feature_tag, etc. from metadata."""
         with tempfile.TemporaryDirectory() as ws:
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "feature_tag": "auth-flow",
@@ -177,9 +187,11 @@ class TestListThreadsWithMetadata:
             assert t["source_branch"] == "feat/auth"
             assert t["callee"] == "claude-cli"
 
-    def test_list_threads_legacy_without_metadata(self, session_factory) -> None:
+    def test_list_threads_legacy_without_metadata(
+        self, session_factory, checkpointer
+    ) -> None:
         """Legacy threads without metadata omit metadata fields gracefully."""
-        app, _agg = _make_app(session_factory)
+        app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             client.post(
@@ -205,10 +217,10 @@ class TestListThreadsWithMetadata:
 class TestGetMetadataEndpoint:
     """Tests for GET /api/threads/{id}/metadata."""
 
-    def test_get_metadata_endpoint(self, session_factory) -> None:
+    def test_get_metadata_endpoint(self, session_factory, checkpointer) -> None:
         """Returns full ThreadMetadata for a thread with metadata."""
         with tempfile.TemporaryDirectory() as ws:
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "feature_tag": "auth-flow",
@@ -232,9 +244,9 @@ class TestGetMetadataEndpoint:
             assert data["feature_tag"] == "auth-flow"
             assert data["source_repo"] == "github.com/org/repo"
 
-    def test_get_metadata_404_no_metadata(self, session_factory) -> None:
+    def test_get_metadata_404_no_metadata(self, session_factory, checkpointer) -> None:
         """Returns 404 for a thread without metadata."""
-        app, _agg = _make_app(session_factory)
+        app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -246,9 +258,11 @@ class TestGetMetadataEndpoint:
 
         assert resp.status_code == 404
 
-    def test_get_metadata_404_nonexistent_thread(self, session_factory) -> None:
+    def test_get_metadata_404_nonexistent_thread(
+        self, session_factory, checkpointer
+    ) -> None:
         """Returns 404 for a nonexistent thread."""
-        app, _agg = _make_app(session_factory)
+        app, _agg = _make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads/nonexistent-id/metadata")
@@ -264,7 +278,9 @@ class TestGetMetadataEndpoint:
 class TestAutoDiscovery:
     """Tests for .vault/ auto-discovery via metadata."""
 
-    def test_auto_discovery_populates_context_refs(self, session_factory) -> None:
+    def test_auto_discovery_populates_context_refs(
+        self, session_factory, checkpointer
+    ) -> None:
         """Auto-discovery populates context_refs when feature_tag is set."""
         with tempfile.TemporaryDirectory() as ws:
             # Create matching .vault/ documents
@@ -276,7 +292,7 @@ class TestAutoDiscovery:
             plan_dir.mkdir(parents=True)
             (plan_dir / "2026-02-28-auth-flow-plan.md").write_text("# Plan")
 
-            app, _agg = _make_app(session_factory)
+            app, _agg = _make_app(session_factory, checkpointer)
             metadata = {
                 "workspace_root": ws,
                 "feature_tag": "auth-flow",

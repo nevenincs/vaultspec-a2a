@@ -8,7 +8,33 @@ __all__ = ["test"]
 import subprocess
 import sys
 
+from pathlib import Path
+
 import click
+
+
+def _pytest_env() -> dict[str, str]:
+    """Build a repo-local pytest environment to avoid temp-dir permission drift."""
+    import os  # noqa: PLC0415
+
+    base_dir = Path.home() / ".codex" / "memories" / "vaultspec-pytest"
+    tmp_root = base_dir / "tmp"
+    cache_dir = base_dir / "cache"
+    tmp_root.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    tmp_value = str(tmp_root.resolve())
+    env["TMP"] = tmp_value
+    env["TEMP"] = tmp_value
+    env["TMPDIR"] = tmp_value
+    env["PYTEST_DEBUG_TEMPROOT"] = tmp_value
+    env["LANGSMITH_TRACING"] = "false"
+    env["OTEL_SDK_DISABLED"] = "true"
+    env["PYTEST_ADDOPTS"] = (
+        f"{env.get('PYTEST_ADDOPTS', '').strip()} "
+        f"-o cache_dir={cache_dir.resolve()} --basetemp={tmp_root.resolve()}"
+    ).strip()
+    return env
 
 
 @click.group(invoke_without_command=True)
@@ -41,14 +67,14 @@ def unit(path: str, extra: tuple[str, ...]) -> None:
         ]
 
     cmd.extend(extra)
-    sys.exit(subprocess.run(cmd, check=False).returncode)
+    sys.exit(subprocess.run(cmd, check=False, env=_pytest_env()).returncode)
 
 
 @test.command()
 def smoke() -> None:
     """Run smoke tests (pytest -m smoke)."""
     cmd = [sys.executable, "-m", "pytest", "-m", "smoke"]
-    sys.exit(subprocess.run(cmd, check=False).returncode)
+    sys.exit(subprocess.run(cmd, check=False, env=_pytest_env()).returncode)
 
 
 @test.command()

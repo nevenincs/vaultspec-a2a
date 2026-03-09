@@ -19,11 +19,55 @@ agents. We're aiming to implement two modes:
 - **Implement robust abstractions layers** to support Claude, Gemini and Codex
   agents.
 
-## Implementation
+## Frontend Development Workflows
 
-To be researched. We're aiming to implement local orchestration servers. The
-tech stack is not certain yet. Not certain how gemini, codex, claude integrate.
-Online, local, sdk based solutions are all possible.
+Use one of these three workflows depending on what you need:
+
+1. Local split-terminal development
+   Run the gateway, worker, and Vite UI in separate terminals:
+   - `just dev-gateway`
+   - `just dev-worker`
+   - `just dev-ui`
+   Or run `just dev` to print the recommended commands and start the UI.
+2. Frontend-ready Docker stack
+   Run `just up` or `just dev-stack` to start `gateway`, `worker`, and `frontend`.
+   This is the lowest-friction shared stack for frontend work.
+3. Full integration Docker stack
+   Run `just up-integration` or `just dev-integration` to add `vidaimock`,
+   `mock-seeder`, and Jaeger tracing.
+
+Expected URLs:
+
+- Gateway: `http://localhost:8000`
+- UI: `http://localhost:5173`
+- Worker health: `http://localhost:8001/health`
+- Jaeger UI: `http://localhost:16686` when using the integration or prod stack
+
+## Service Management
+
+`vaultspec service ...` is a local process manager only. It tracks gateway and
+worker processes that were started by the CLI itself and does not manage Docker
+containers.
+
+Examples:
+
+- `uv run vaultspec service start gateway`
+- `uv run vaultspec service start worker`
+- `uv run vaultspec service start all`
+- `uv run vaultspec service status`
+- `uv run vaultspec service stop all`
+
+## Verification
+
+Use these targets to validate the backend surface the frontend depends on:
+
+- `just verify-frontend-backend`
+  Runs the gateway, schema, and worker unit tests most relevant to frontend work
+  with repo-local pytest temp/cache directories.
+- `just smoke-backend`
+  Runs the live smoke suite against a real gateway + worker stack.
+- `just check-secrets`
+  Verifies checked-in compose/env files do not contain obvious live secrets.
 
 ## References
 

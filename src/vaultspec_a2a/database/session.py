@@ -1,8 +1,8 @@
 """Async database session management and engine configuration.
 
-Provides the ``create_async_engine`` factory with SQLite WAL mode (ADR-007),
-``async_sessionmaker`` for FastAPI dependency injection, table initialisation,
-and a connection to ``langgraph-checkpoint-sqlite``'s ``AsyncSqliteSaver``.
+Provides backend-selectable ``create_async_engine`` wiring,
+``async_sessionmaker`` for FastAPI dependency injection, and schema
+initialisation through Alembic.
 
 References:
     - ADR-007: SQLite WAL mode, aiosqlite
@@ -62,69 +62,58 @@ def _set_wal_mode(dbapi_conn: object, _connection_record: object) -> None:
             "SQLite may be on a network or read-only filesystem.",
             actual_mode,
         )
+    cursor.execute(f"PRAGMA busy_timeout={settings.sqlite_busy_timeout_ms}")
     cursor.execute("PRAGMA foreign_keys=ON")
     cursor.close()
 
 
+def _resolve_database_url(database: Path | str | None) -> str:
+    """Resolve a database path or URL into a SQLAlchemy async URL."""
+    if database is None:
+        return settings.database_url
+
+    raw = str(database)
+    if "://" in raw:
+        return raw
+    if raw == ":memory:":
+        return "sqlite+aiosqlite:///:memory:"
+
+    resolved = Path(raw).resolve()
+    resolved.parent.mkdir(parents=True, exist_ok=True)
+    return f"sqlite+aiosqlite:///{resolved}"
+
+
 def get_engine(
-    db_path: Path | str | None = None,
+    database: Path | str | None = None,
     *,
     echo: bool = False,
 ) -> AsyncEngine:
     """Create or return the async SQLAlchemy engine.
 
     Args:
-        db_path: Path to the SQLite database file.
-                 Use ``:memory:`` for in-memory databases.
+        database: Database URL or a SQLite path.
         echo: Enable SQL statement logging.
 
     Returns:
         The ``AsyncEngine`` instance.
     """
-    if db_path is None:
-        db_path = settings.database_path
+    url = _resolve_database_url(database)
     global _engine
     if _engine is not None:
-        # H19: warn if called with a different path than the existing singleton,
-        # since the caller will silently get the original engine back.
-        requested = str(db_path)
         existing_url = str(_engine.url)
-        if requested != ":memory:":
-            # Compare resolved absolute paths to avoid false positives from
-            # differing relative-path representations of the same file.
-            resolved_requested = Path(requested).resolve()
-            resolved_default = settings.database_path.resolve()
-            if resolved_requested != resolved_default:
-                # Extract the path component from the existing engine URL for
-                # a proper resolved comparison (not a substring check).
-                existing_path_str = (
-                    existing_url.split("///", 1)[1] if "///" in existing_url else ""
-                )
-                existing_resolved = (
-                    Path(existing_path_str).resolve() if existing_path_str else None
-                )
-                if existing_resolved != resolved_requested:
-                    logger.warning(
-                        "get_engine() called with path %r but the engine singleton "
-                        "was already created with a different path (%r). "
-                        "Returning existing engine.",
-                        requested,
-                        existing_url,
-                    )
+        if existing_url != url:
+            logger.warning(
+                "get_engine() called with URL %r but the engine singleton was "
+                "already created with %r. Returning the existing engine.",
+                url,
+                existing_url,
+            )
         return _engine
-
-    db_path_str = str(db_path)
-    if db_path_str == ":memory:":
-        url = "sqlite+aiosqlite:///:memory:"
-    else:
-        resolved = Path(db_path_str).resolve()
-        resolved.parent.mkdir(parents=True, exist_ok=True)
-        url = f"sqlite+aiosqlite:///{resolved}"
 
     _engine = create_async_engine(url, echo=echo)
 
-    # Attach WAL pragma to the synchronous engine underneath
-    event.listen(_engine.sync_engine, "connect", _set_wal_mode)
+    if url.startswith("sqlite"):
+        event.listen(_engine.sync_engine, "connect", _set_wal_mode)
 
     return _engine
 
@@ -158,7 +147,7 @@ def get_session_factory(
 
 
 async def init_db(
-    db_path: Path | str | None = None,
+    database: Path | str | None = None,
     *,
     echo: bool = False,
 ) -> AsyncEngine:
@@ -170,25 +159,22 @@ async def init_db(
     target ``:memory:``.
 
     Args:
-        db_path: Path to the SQLite database file.
+        database: Database URL or a SQLite path.
         echo: Enable SQL statement logging.
 
     Returns:
         The initialised ``AsyncEngine``.
     """
-    if db_path is None:
-        db_path = settings.database_path
-    engine = get_engine(db_path, echo=echo)
+    url = _resolve_database_url(database)
+    engine = get_engine(url, echo=echo)
     get_session_factory(engine)
 
-    str_path = str(db_path)
-    if str_path in (":memory:", ""):
+    if url == "sqlite+aiosqlite:///:memory:":
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
         from .migrate import run_migrations  # noqa: PLC0415
 
-        url = f"sqlite+aiosqlite:///{str_path}"
         await run_migrations(url)
 
     return engine
@@ -221,6 +207,9 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
     Returns:
         The current journal mode string (should be ``'wal'``).
     """
+    if engine.dialect.name != "sqlite":
+        msg = "verify_wal_mode() is only valid for SQLite engines."
+        raise ValueError(msg)
     async with engine.connect() as conn:
         result = await conn.execute(text("PRAGMA journal_mode"))
         row = result.scalar_one()

@@ -6,32 +6,59 @@ setup: _check-uv _check-node
     uv sync --all-groups
     npm install
     cd src/ui && npm install
-    @echo "Setup complete. Run 'just dev' to start."
+    @echo "Setup complete. Run 'just dev' for the recommended frontend workflow."
 
-# Development: API + worker + vite frontend (local, no Docker)
-# NOTE: Uses & for backgrounding — requires bash, not PowerShell.
+# Frontend-ready local development guide (split terminals, no Docker)
 dev:
-    just _dev-worker &
-    uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --port 8000 &
+    @echo "Frontend-ready local workflow:"
+    @echo "  Terminal 1: just dev-gateway"
+    @echo "  Terminal 2: just dev-worker"
+    @echo "  Terminal 3: just dev-ui"
+    @echo ""
+    @echo "Starting the Vite UI in this terminal now..."
     cd src/ui && npm run dev
 
-# Start just the worker process (for split-terminal development)
-worker:
-    uv run vaultspec service start worker
+# Frontend-ready local gateway process (foreground)
+dev-gateway:
+    uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
 
-# Docker: start dev environment (vite + mocks + Jaeger)
+# Frontend-ready local worker process (foreground)
+dev-worker:
+    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+
+# Frontend-ready local UI process (foreground)
+dev-ui:
+    cd src/ui && npm run dev
+
+# Frontend-ready Docker stack (gateway + worker + Vite)
 up:
     docker compose -f docker-compose.dev.yml up --build
 
-# Docker: start production environment (API + worker + Jaeger)
+# Alias for the frontend-ready Docker stack
+dev-stack:
+    docker compose -f docker-compose.dev.yml up --build
+
+# Full integration Docker stack (frontend + mocks + tracing)
+up-integration:
+    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml up --build
+
+# Alias for the full integration stack
+dev-integration:
+    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml up --build
+
+# Production-like Docker stack (gateway + worker + Jaeger)
 up-prod:
     docker compose -f docker-compose.prod.yml up --build
 
-# Docker: stop dev environment
+# Stop the frontend-ready Docker stack
 down:
     docker compose -f docker-compose.dev.yml down
 
-# Docker: stop production environment
+# Stop the full integration Docker stack
+down-integration:
+    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml down
+
+# Stop the production-like Docker stack
 down-prod:
     docker compose -f docker-compose.prod.yml down
 
@@ -46,6 +73,23 @@ test-unit *ARGS:
 # Run live tests only (requires live ACP backend)
 test-live *ARGS:
     uv run pytest -m live {{ARGS}}
+
+# Run requires_jaeger tests against a live local Jaeger instance (start with just jaeger-up)
+test-tracing *ARGS:
+    uv run pytest -m requires_jaeger {{ARGS}}
+
+# Start a local Jaeger container for tracing development and test-tracing
+jaeger-up:
+    docker run -d --name jaeger-local -p 4317:4317 -p 4318:4318 -p 16686:16686 -p 14269:14269 -e COLLECTOR_OTLP_ENABLED=true jaegertracing/jaeger:2; Write-Host "Jaeger UI: http://localhost:16686  Admin: http://localhost:14269"
+
+# Stop and remove the local Jaeger container
+jaeger-down:
+    -docker stop jaeger-local
+    -docker rm jaeger-local
+
+# Check local Jaeger health (admin port 14269 must return 204)
+jaeger-health:
+    $code = (Invoke-WebRequest -Uri "http://localhost:14269/" -UseBasicParsing -ErrorAction SilentlyContinue).StatusCode; if ($code -eq 204) { Write-Host "Jaeger healthy (204)" } else { Write-Host "Jaeger not ready (got: $code)"; exit 1 }
 
 # Run tests with coverage report
 test-cov *ARGS:
@@ -95,7 +139,7 @@ clean:
 
 # Build production Docker images
 docker-build:
-    docker build -t vaultspec-a2a-api -f docker/prod.Dockerfile --target api .
+    docker build -t vaultspec-a2a-gateway -f docker/prod.Dockerfile --target gateway .
     docker build -t vaultspec-a2a-worker -f docker/prod.Dockerfile --target worker .
 
 # Run a preps scenario (solo_coder | pipeline_team | plan_approval | autonomous)
@@ -122,11 +166,11 @@ probe PROVIDER:
 teams *STATUS:
     uv run vaultspec team list {{STATUS}}
 
-# Check service health
+# Check tracked local service health
 service-status:
     uv run vaultspec service status
 
-# Stop running services
+# Stop tracked local services
 service-stop:
     uv run vaultspec service stop
 
@@ -134,10 +178,17 @@ service-stop:
 mcp TRANSPORT="stdio" *ARGS:
     uv run vaultspec-mcp --transport {{TRANSPORT}} {{ARGS}}
 
-# ── Internal recipes ─────────────────────────────────────────────────────────
+# Frontend-critical backend verification (repo-local temp/cache dirs)
+verify-frontend-backend:
+    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_internal.py src\vaultspec_a2a\api\schemas\tests\test_schemas.py src\vaultspec_a2a\worker\tests\test_executor.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_internal.py src\vaultspec_a2a\api\schemas\tests\test_schemas.py src\vaultspec_a2a\worker\tests\test_executor.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
 
-_dev-worker:
-    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+# Live backend smoke checks against the local gateway + worker stack
+smoke-backend:
+    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\tests\test_smoke.py -m live --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\tests\test_smoke.py -m live --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
+
+# Check checked-in compose/env files for obvious secret material
+check-secrets:
+    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\tests\test_repo_hygiene.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\tests\test_repo_hygiene.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
 
 _check-uv:
     @uv --version || (echo "Install uv: https://docs.astral.sh/uv/" && exit 1)

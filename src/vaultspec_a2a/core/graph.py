@@ -11,18 +11,19 @@ map.  Three topology types are supported (ADR-013 §2.5):
 """
 
 import functools
+import glob as _glob
 import logging
 
 from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.language_models import BaseChatModel
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.pregel._retry import RetryPolicy
 
+from ..database.checkpoints import Checkpointer
 from ..providers.acp_exceptions import AcpSessionError
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
@@ -199,7 +200,7 @@ def build_initial_vault_index(
         return {}
     index: dict[str, list[str]] = {}
     for stage, pattern in _VAULT_STAGE_PATTERNS.items():
-        resolved = pattern.replace("{tag}", feature_tag)
+        resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
         matches = sorted(workspace_root.glob(resolved))[:_VAULT_INDEX_CAP]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
@@ -242,7 +243,7 @@ def _build_supervisor_prompt(
 def compile_team_graph(
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
-    checkpointer: AsyncSqliteSaver | None = None,
+    checkpointer: Checkpointer | None = None,
     supervisor_agent_config: AgentConfig | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
@@ -261,7 +262,7 @@ def compile_team_graph(
         team_config:             Validated team preset (loaded from TOML).
         agent_configs:           Mapping of agent_id -> AgentConfig for all
                                  workers referenced in the team.
-        checkpointer:            Optional SQLite checkpointer for state
+        checkpointer:            Optional LangGraph checkpointer for state
                                  persistence.
         supervisor_agent_config: Optional AgentConfig for the supervisor node.
                                  Only used for star/pipeline_loop topologies.
@@ -334,7 +335,7 @@ def compile_team_graph(
         )
 
     graph = builder.compile(
-        checkpointer=checkpointer,
+        checkpointer=checkpointer,  # type: ignore[arg-type]
         interrupt_before=interrupt_nodes,
     )
 

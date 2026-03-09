@@ -104,3 +104,8 @@ class ThreadStateSnapshot(BaseModel):
     agents: list[_AgentSnapshot] = Field(default_factory=list)
     last_sequence: int
     checkpoint_id: str | None = None
+    snapshot_complete: bool = True
+    degraded_reasons: list[str] = Field(default_factory=list)
+    replay_status: str = "unknown"
+    repair_status: str | None = None
+    execution_readiness: str | None = None

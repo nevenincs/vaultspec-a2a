@@ -27,15 +27,16 @@ import logging
 
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import httpx
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.types import StateSnapshot
+from opentelemetry import propagate as _otel_propagate
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -53,16 +54,28 @@ from ..core import (
     load_team_config,
 )
 from ..core.aggregator import _classify_tool_kind
+from ..database.checkpoints import Checkpointer
 from ..database.crud import (
+    ControlActionResultStatus,
+    ControlActionType,
+    PermissionRequestStatus,
+    RepairStatus,
     ThreadStatus,
+    create_control_action,
     create_thread,
     delete_thread,
+    get_control_action_by_idempotency_key,
+    get_pending_permission_requests,
+    get_permission_request,
     get_thread,
     get_thread_metadata,
     list_threads,
+    record_permission_response_submission,
+    set_thread_repair_state,
     update_thread_status,
 )
 from ..database.session import get_db
+from .projection import enrich_snapshot_from_durable_state
 from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus
 from .schemas.events import PlanEntry
 from .schemas.internal import DispatchRequest
@@ -96,7 +109,9 @@ from .schemas.snapshots import (
 __all__ = [
     "get_aggregator",
     "get_checkpointer",
+    "get_circuit_breaker",
     "get_worker_client",
+    "get_worker_spawner",
     "router",
 ]
 
@@ -104,6 +119,18 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _trace_headers() -> dict[str, str]:
+    """Build W3C trace context headers for gateway-to-worker HTTP calls (TEL-03).
+
+    Injects the current OTel span context (``traceparent`` / ``tracestate``)
+    into a headers dict so distributed traces continue from gateway to worker.
+    Returns an empty dict when no active span is present (no-op mode).
+    """
+    carrier: dict[str, str] = {}
+    _otel_propagate.inject(carrier)
+    return carrier
 
 
 # ---------------------------------------------------------------------------
@@ -120,13 +147,11 @@ def get_aggregator(request: Request) -> EventAggregator:
     return aggregator
 
 
-def get_checkpointer(request: Request) -> AsyncSqliteSaver:
+def get_checkpointer(request: Request) -> Checkpointer:
     """FastAPI dependency for the LangGraph checkpointer (read-only, ADR-019)."""
-    checkpointer: AsyncSqliteSaver | None = getattr(
-        request.app.state, "checkpointer", None
-    )
+    checkpointer: Checkpointer | None = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
-        raise RuntimeError("AsyncSqliteSaver checkpointer not initialised in app state")
+        raise RuntimeError("LangGraph checkpointer not initialised in app state")
     return checkpointer
 
 
@@ -138,12 +163,28 @@ def get_worker_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
+def get_circuit_breaker(request: Request) -> Any:  # noqa: ANN401
+    """FastAPI dependency for the WorkerCircuitBreaker (PROD-028)."""
+    cb = getattr(request.app.state, "circuit_breaker", None)
+    if cb is None:
+        raise RuntimeError("WorkerCircuitBreaker not initialised in app state")
+    return cb
+
+
+def get_worker_spawner(request: Request) -> Any:  # noqa: ANN401
+    """FastAPI dependency for the LazyWorkerSpawner (PHASE-1a)."""
+    spawner = getattr(request.app.state, "worker_spawner", None)
+    if spawner is None:
+        raise RuntimeError("LazyWorkerSpawner not initialised in app state")
+    return spawner
+
+
 async def get_services(
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
-    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-) -> tuple[AsyncSession, EventAggregator, AsyncSqliteSaver, httpx.AsyncClient]:
+) -> tuple[AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient]:
     """Dependency for bundling all required services into a single injection point.
 
     ADR-019: No longer includes GraphRegistry or TaskGroup -- the worker owns
@@ -159,8 +200,11 @@ async def get_services(
 
 @router.get("/health")
 async def health(
+    request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
+    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
 ) -> dict:
     """Public health endpoint aggregating gateway, worker, and database status."""
     checks: dict[str, dict[str, str]] = {}
@@ -172,19 +216,36 @@ async def health(
     try:
         await db.execute(text("SELECT 1"))
         checks["database"] = {"status": "ok"}
-    except Exception as exc:
-        checks["database"] = {"status": "error", "detail": str(exc)}
+    except Exception:
+        logger.exception("Health check: database probe failed")
+        checks["database"] = {"status": "error", "detail": "database probe failed"}
 
     # Worker -- ping its /health endpoint
     try:
         resp = await worker_client.get("/health", timeout=5.0)
         resp.raise_for_status()
         checks["worker"] = {"status": "ok"}
-    except Exception as exc:
-        checks["worker"] = {"status": "error", "detail": str(exc)}
+    except Exception:
+        logger.exception("Health check: worker probe failed")
+        checks["worker"] = {"status": "error", "detail": "worker probe failed"}
 
-    overall = "ok" if all(c["status"] == "ok" for c in checks.values()) else "degraded"
-    return {"status": overall, "checks": checks}
+    # Circuit breaker + lazy spawner state (informational)
+    checks["circuit_breaker"] = {"status": circuit_breaker.state}
+    checks["worker_spawned"] = {"status": "yes" if worker_spawner.spawned else "no"}
+
+    overall = (
+        "ok"
+        if all(c["status"] in ("ok", "closed", "yes") for c in checks.values())
+        else "degraded"
+    )
+    repair_summary = getattr(request.app.state, "repair_summary", {})
+    return {
+        "status": overall,
+        "checks": checks,
+        "repair_backlog": repair_summary.get("repair_backlog", 0),
+        "paused_resumable": repair_summary.get("paused_resumable", 0),
+        "checkpoint_unavailable": repair_summary.get("checkpoint_unavailable", 0),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -244,14 +305,16 @@ _GRAPH_RECURSION_LIMIT = 100
 
 
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
-async def create_thread_endpoint(
+async def create_thread_endpoint(  # noqa: PLR0915
     body: CreateThreadRequest,
     services: tuple[
         AsyncSession,
         EventAggregator,
-        AsyncSqliteSaver,
+        Checkpointer,
         httpx.AsyncClient,
     ] = Depends(get_services),
+    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
+    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
 ) -> CreateThreadResponse:
     """Create a new orchestration thread and dispatch to the worker.
 
@@ -266,120 +329,162 @@ async def create_thread_endpoint(
     - Sends context preamble content to the worker for injection
     - Threads ``workspace_root`` to the worker for config resolution
     """
-    db, _aggregator, _checkpointer, worker_client = services
-    thread_id = uuid4().hex
-
-    # --- ADR-014: Metadata processing ---
-    ws_root, nickname, metadata_json = _process_metadata(body, thread_id)
-
-    # ADR-034: top-level nickname overrides metadata-derived nickname when
-    # metadata is absent (CLI users without full metadata can still name threads).
-    if nickname is None and body.nickname is not None:
-        nickname = body.nickname
-
-    # Create thread in DB
     try:
-        thread = await create_thread(
-            db,
-            title=body.title,
-            status=ThreadStatus.SUBMITTED,
-            metadata=metadata_json,
-            nickname=nickname,
-            thread_id=thread_id,
-            team_preset=body.team_preset,
-        )
-    except NicknameConflictError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Thread nickname already exists: {exc.nickname!r}",
-        ) from exc
+        db, _aggregator, _checkpointer, worker_client = services
+        thread_id = uuid4().hex
 
-    logger.info(
-        "Created thread %s (title=%s, preset=%s, nickname=%s)",
-        thread.id,
-        body.title,
-        body.team_preset,
-        nickname,
-    )
+        # --- ADR-014: Metadata processing ---
+        ws_root, nickname, metadata_json = _process_metadata(body, thread_id)
 
-    # Dispatch to worker if a team preset was requested (ADR-019)
-    if body.team_preset:
-        # Build context preamble content if metadata provided (ADR-014 S2.3)
-        context_preamble: str | None = None
-        if body.metadata is not None:
-            preamble_msg = build_context_preamble(body.metadata)
-            context_preamble = (
-                preamble_msg.content
-                if isinstance(preamble_msg.content, str)
-                else str(preamble_msg.content)
+        # ADR-034: top-level nickname overrides metadata-derived nickname when
+        # metadata is absent (CLI users without full metadata can still name threads).
+        if nickname is None and body.nickname is not None:
+            nickname = body.nickname
+
+        # Create thread in DB
+        try:
+            thread = await create_thread(
+                db,
+                title=body.title,
+                status=ThreadStatus.SUBMITTED,
+                metadata=metadata_json,
+                nickname=nickname,
+                thread_id=thread_id,
+                team_preset=body.team_preset,
             )
-
-        # Resolve autonomous: explicit request value overrides team default.
-        # None = defer to team preset's auto_approve setting (TOML-04).
-        effective_autonomous: bool = False
-        if body.autonomous is not None:
-            effective_autonomous = body.autonomous
-        else:
-            try:
-                _tc = load_team_config(body.team_preset, workspace_root=ws_root)
-                effective_autonomous = _tc.permissions.auto_approve
-            except (ConfigError, TeamConfigNotFoundError):
-                pass  # fall back to False (supervised)
-
-        # ADR-019: SDD blackboard fields
-        metadata = body.metadata
-        feature_tag = metadata.feature_tag if metadata else None
-        vault_index = (
-            build_initial_vault_index(ws_root, metadata.feature_tag)
-            if (metadata and metadata.feature_tag)
-            else {}
-        )
-
-        dispatch = DispatchRequest(
-            action="ingest",
-            thread_id=thread.id,
-            team_preset=body.team_preset,
-            workspace_root=str(ws_root) if ws_root else None,
-            autonomous=effective_autonomous,
-            metadata_json=metadata_json,
-            content=body.initial_message,
-            context_preamble=context_preamble,
-            recursion_limit=_GRAPH_RECURSION_LIMIT,
-            active_feature=feature_tag,
-            pipeline_phase=None,
-            vault_index=vault_index,
-            validation_errors=[],
-        )
+        except NicknameConflictError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Thread nickname already exists: {exc.nickname!r}",
+            ) from exc
 
         logger.info(
-            "Dispatching ingest dispatch_id=%s for thread %s",
-            dispatch.dispatch_id,
+            "Created thread %s (title=%s, preset=%s, nickname=%s)",
             thread.id,
+            body.title,
+            body.team_preset,
+            nickname,
         )
-        try:
-            await worker_client.post(
-                "/dispatch",
-                json=dispatch.model_dump(),
+        await create_control_action(
+            db,
+            thread_id=thread.id,
+            action_type=ControlActionType.INGEST,
+            idempotency_key=f"thread-create:{thread.id}",
+            payload={
+                "title": body.title,
+                "team_preset": body.team_preset,
+                "autonomous": body.autonomous,
+            },
+        )
+        await set_thread_repair_state(
+            db,
+            thread.id,
+            repair_status=RepairStatus.HEALTHY,
+            execution_readiness=RepairStatus.HEALTHY.value,
+            last_requested_action=ControlActionType.INGEST,
+        )
+
+        # Dispatch to worker if a team preset was requested (ADR-019)
+        if body.team_preset:
+            # Build context preamble content if metadata provided (ADR-014 S2.3)
+            context_preamble: str | None = None
+            if body.metadata is not None:
+                preamble_msg = build_context_preamble(body.metadata)
+                context_preamble = (
+                    preamble_msg.content
+                    if isinstance(preamble_msg.content, str)
+                    else str(preamble_msg.content)
+                )
+
+            # Resolve autonomous: explicit request value overrides team default.
+            # None = defer to team preset's auto_approve setting (TOML-04).
+            effective_autonomous: bool = False
+            if body.autonomous is not None:
+                effective_autonomous = body.autonomous
+            else:
+                try:
+                    _tc = load_team_config(body.team_preset, workspace_root=ws_root)
+                    effective_autonomous = _tc.permissions.auto_approve
+                except (ConfigError, TeamConfigNotFoundError):
+                    pass  # fall back to False (supervised)
+
+            # ADR-019: SDD blackboard fields
+            metadata = body.metadata
+            feature_tag = metadata.feature_tag if metadata else None
+            vault_index = (
+                build_initial_vault_index(ws_root, metadata.feature_tag)
+                if (metadata and metadata.feature_tag)
+                else {}
             )
-        except httpx.HTTPError:
-            logger.warning(
-                "Failed to dispatch ingest dispatch_id=%s for thread %s",
+
+            dispatch = DispatchRequest(
+                action="ingest",
+                thread_id=thread.id,
+                team_preset=body.team_preset,
+                workspace_root=str(ws_root) if ws_root else None,
+                autonomous=effective_autonomous,
+                metadata_json=metadata_json,
+                content=body.initial_message,
+                context_preamble=context_preamble,
+                recursion_limit=_GRAPH_RECURSION_LIMIT,
+                active_feature=feature_tag,
+                pipeline_phase=None,
+                vault_index=vault_index,
+                validation_errors=[],
+            )
+
+            logger.info(
+                "Dispatching ingest dispatch_id=%s for thread %s",
                 dispatch.dispatch_id,
                 thread.id,
-                exc_info=True,
             )
-            # Thread is still created in DB -- the worker can pick it up
-            # when it comes online, or the user can retry via send_message.
+            await worker_spawner.ensure_worker()
+            circuit_breaker.pre_dispatch()
+            try:
+                await worker_client.post(
+                    "/dispatch",
+                    json=dispatch.model_dump(),
+                    headers=_trace_headers(),
+                )
+                circuit_breaker.record_success()
+            except httpx.HTTPError:
+                circuit_breaker.record_failure()
+                logger.warning(
+                    "Failed to dispatch ingest dispatch_id=%s for thread %s",
+                    dispatch.dispatch_id,
+                    thread.id,
+                    exc_info=True,
+                )
+                # PROD-012: Mark thread as FAILED so it doesn't stay SUBMITTED
+                # forever when the worker is unreachable.
+                await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+                await db.commit()
+                raise HTTPException(
+                    status_code=502,
+                    detail="Worker unreachable — thread marked as failed",
+                ) from None
+            await set_thread_repair_state(
+                db,
+                thread.id,
+                repair_status=RepairStatus.HEALTHY,
+                execution_readiness=RepairStatus.HEALTHY.value,
+                last_applied_action=ControlActionType.INGEST,
+            )
 
-    # Commit only after all synchronous setup succeeds -- prevents orphaned
-    # thread rows when metadata processing fails (H9 fix).
-    await db.commit()
+        # Commit only after all synchronous setup succeeds -- prevents orphaned
+        # thread rows when metadata processing fails (H9 fix).
+        await db.commit()
 
-    return CreateThreadResponse(
-        thread_id=thread.id,
-        status=thread.status,
-        nickname=nickname,
-    )
+        return CreateThreadResponse(
+            thread_id=thread.id,
+            status=thread.status,
+            nickname=nickname,
+        )
+    except HTTPException:
+        raise
+    except Exception:
+        logger.exception("Unhandled exception while creating thread")
+        raise
 
 
 # ---------------------------------------------------------------------------
@@ -432,6 +537,8 @@ async def list_threads_endpoint(
                 thread_id=t.id,
                 title=t.title,
                 status=t.status,
+                repair_status=t.repair_status,
+                execution_readiness=t.execution_readiness,
                 team_preset=t.team_preset,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
@@ -644,11 +751,11 @@ def _enrich_snapshot_from_state(  # noqa: PLR0912, PLR0915
 
 
 @router.get("/threads/{thread_id}/state", response_model=ThreadStateSnapshot)
-async def get_thread_state_endpoint(
+async def get_thread_state_endpoint(  # noqa: PLR0915
     thread_id: str,
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
-    checkpointer: AsyncSqliteSaver = Depends(get_checkpointer),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> ThreadStateSnapshot:
     """Return a complete thread state snapshot for client reconnection.
 
@@ -671,7 +778,14 @@ async def get_thread_state_endpoint(
         thread_id=thread.id,
         status=thread.status,
         last_sequence=last_seq,
+        repair_status=thread.repair_status,
+        execution_readiness=thread.execution_readiness,
     )
+    snapshot = await enrich_snapshot_from_durable_state(
+        db, thread=thread, snapshot=snapshot
+    )
+    checkpoint_loaded = False
+    checkpoint_present = False
 
     # ADR-019: Try to enrich from checkpointer directly.
     # aget_tuple() returns a CheckpointTuple with the checkpoint dict
@@ -683,6 +797,7 @@ async def get_thread_state_endpoint(
             timeout=10.0,
         )
         if checkpoint_tuple is not None:
+            checkpoint_present = True
             checkpoint = checkpoint_tuple.checkpoint
             channel_values = checkpoint.get("channel_values", {})
 
@@ -712,18 +827,45 @@ async def get_thread_state_endpoint(
                 minimal_state,  # type: ignore[arg-type]
                 aggregator=aggregator,
             )
+            checkpoint_loaded = True
     except TimeoutError:
         logger.warning(
             "Timed out loading checkpoint for thread %s after 10s; "
             "returning partial snapshot",
             thread_id,
         )
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append("checkpoint_timeout")
+        snapshot.replay_status = "unknown"
+        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
     except Exception:
         logger.warning(
             "Could not load checkpoint for thread %s; returning partial snapshot",
             thread_id,
             exc_info=True,
         )
+        snapshot.snapshot_complete = False
+        snapshot.degraded_reasons.append("checkpoint_unavailable")
+        snapshot.replay_status = "unknown"
+        snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+
+    if checkpoint_loaded:
+        snapshot.snapshot_complete = True
+        snapshot.replay_status = "durable"
+    elif checkpoint_present:
+        snapshot.snapshot_complete = False
+        snapshot.replay_status = "best_effort"
+    elif thread.status in (
+        ThreadStatus.SUBMITTED.value,
+        ThreadStatus.CREATED.value,
+    ):
+        snapshot.snapshot_complete = True
+        snapshot.replay_status = "unknown"
+    else:
+        snapshot.snapshot_complete = False
+        if "checkpoint_missing" not in snapshot.degraded_reasons:
+            snapshot.degraded_reasons.append("checkpoint_missing")
+        snapshot.replay_status = "gap_detected"
 
     return snapshot
 
@@ -744,6 +886,9 @@ async def send_message_endpoint(
     db: AsyncSession = Depends(get_db),
     aggregator: EventAggregator = Depends(get_aggregator),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
+    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> SendMessageResponse:
     """Send a user message into an existing thread.
 
@@ -754,9 +899,24 @@ async def send_message_endpoint(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    if thread.status == ThreadStatus.ARCHIVED:
+    if thread.status == ThreadStatus.INPUT_REQUIRED.value:
         raise HTTPException(
-            status_code=409, detail="Cannot send messages to archived thread"
+            status_code=409,
+            detail=(
+                "Cannot send a follow-up message while the thread is paused for input"
+            ),
+        )
+
+    terminal_statuses = (
+        ThreadStatus.ARCHIVED,
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+    )
+    if thread.status in terminal_statuses:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Cannot send messages to thread in {thread.status!r} state",
         )
 
     logger.info(
@@ -765,11 +925,41 @@ async def send_message_endpoint(
         len(body.content),
     )
 
-    # Update thread status -- DB-C1: use ThreadStatus enum (DB-HIGH-02)
-    await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
-    await db.commit()
-
     agent_id = body.agent_id or "vaultspec-supervisor"
+    resolved_idempotency_key = (
+        idempotency_key
+        or hashlib.sha256(
+            f"{thread_id}:message:{agent_id}:{body.content}".encode()
+        ).hexdigest()
+    )
+    existing_action = await get_control_action_by_idempotency_key(
+        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
+    )
+    if existing_action is not None:
+        return SendMessageResponse(
+            status="accepted",
+            thread_id=thread_id,
+            accepted=True,
+            applied=existing_action.applied_at is not None,
+            action_status=existing_action.result_status,
+            action_id=existing_action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
+
+    action = await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        idempotency_key=resolved_idempotency_key,
+        payload={"content": body.content, "agent_id": agent_id},
+    )
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.HEALTHY,
+        execution_readiness=RepairStatus.HEALTHY.value,
+        last_requested_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+    )
 
     # Look up team_preset and workspace_root from DB for lazy recompile
     # (same pattern as respond_to_permission_endpoint, T22).
@@ -799,29 +989,52 @@ async def send_message_endpoint(
         dispatch.dispatch_id,
         thread_id,
     )
+    await worker_spawner.ensure_worker()
+    circuit_breaker.pre_dispatch()
     try:
         await worker_client.post(
             "/dispatch",
             json=dispatch.model_dump(),
+            headers=_trace_headers(),
         )
+        circuit_breaker.record_success()
     except httpx.HTTPError:
+        circuit_breaker.record_failure()
         logger.warning(
             "Failed to dispatch message dispatch_id=%s for thread %s",
             dispatch.dispatch_id,
             thread_id,
             exc_info=True,
         )
-        # Still return accepted -- the worker may pick it up when available,
-        # or the message handler can retry.
-        await aggregator.emit_agent_status(
-            thread_id=thread_id,
-            agent_id=agent_id,
-            node_name="supervisor",
-            state=AgentLifecycleState.SUBMITTED,
-            detail="Message received, awaiting worker",
-        )
+        # PROD-015: Set thread to FAILED on dispatch error instead of
+        # leaving it in a stale RUNNING state.
+        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        await db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail="Worker unreachable — thread marked as failed",
+        ) from None
 
-    return SendMessageResponse(status="accepted", thread_id=thread_id)
+    # PROD-015: Only set RUNNING after successful dispatch.
+    await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.HEALTHY,
+        execution_readiness=RepairStatus.HEALTHY.value,
+        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+    )
+    await db.commit()
+
+    return SendMessageResponse(
+        status="accepted",
+        thread_id=thread_id,
+        accepted=True,
+        applied=False,
+        action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
+        action_id=action.id,
+        idempotency_key=resolved_idempotency_key,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -832,6 +1045,7 @@ async def send_message_endpoint(
 @router.get("/team/status", response_model=TeamStatusResponse)
 async def get_team_status_endpoint(
     aggregator: EventAggregator = Depends(get_aggregator),
+    db: AsyncSession = Depends(get_db),
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions.
 
@@ -855,14 +1069,26 @@ async def get_team_status_endpoint(
         for s in node_summaries
     ]
 
+    durable_pending = await get_pending_permission_requests(db)
     pending = [
         PendingPermission(
-            request_id=ev.request_id,
-            thread_id=ev.thread_id,
-            description=ev.description,
+            request_id=permission.request_id,
+            thread_id=permission.thread_id,
+            description=permission.description,
+            request_status=permission.request_status,
         )
-        for ev in aggregator.get_pending_permissions()
+        for permission in durable_pending
     ]
+    known_request_ids = {permission.request_id for permission in pending}
+    pending.extend(
+        PendingPermission(
+            request_id=event.request_id,
+            thread_id=event.thread_id,
+            description=event.description,
+        )
+        for event in aggregator.get_pending_permissions()
+        if event.request_id not in known_request_ids
+    )
 
     return TeamStatusResponse(
         agents=agents,
@@ -915,12 +1141,15 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
     "/permissions/{request_id}/respond",
     response_model=PermissionResponseResult,
 )
-async def respond_to_permission_endpoint(
+async def respond_to_permission_endpoint(  # noqa: PLR0912, PLR0915
     request_id: str,
     body: PermissionResponseRequest,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
     aggregator: EventAggregator = Depends(get_aggregator),
+    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
+    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
 
@@ -946,73 +1175,201 @@ async def respond_to_permission_endpoint(
     if ":" in request_id:
         thread_id, _ = request_id.split(":", 1)
 
-    dispatched = False
-    if thread_id:
-        # Look up team_preset and workspace_root from DB for lazy recompile.
-        team_preset: str | None = None
-        workspace_root: str | None = None
-        thread_record = await get_thread(db, thread_id)
-        if thread_record is None:
-            raise HTTPException(status_code=404, detail="Thread not found")
-        team_preset = thread_record.team_preset
-        if thread_record.thread_metadata:
-            try:
-                meta = json.loads(thread_record.thread_metadata)
-                workspace_root = meta.get("workspace_root")
-            except (json.JSONDecodeError, AttributeError):
-                pass
-
-        # BE-19: plan approval interrupt expects a dict, not a bare string.
-        # The supervisor node calls `resume_value.get("approved")`, so we
-        # translate "approve"/"reject" into {"approved": True/False}.
-        # Tool permission resumes pass the option_id string through unchanged.
-        resume_value: str | dict[str, bool] = body.option_id
-        perm_entry = aggregator._pending_permissions.get(request_id)  # noqa: SLF001
-        perm_event = perm_entry[0] if perm_entry else None
-        if perm_event and perm_event.tool_call == PermissionType.PLAN_APPROVAL:
-            resume_value = {"approved": body.option_id == "approve"}
-
-        dispatch = DispatchRequest(
-            action="resume",
-            thread_id=thread_id,
-            option_id=resume_value,
-            team_preset=team_preset,
-            workspace_root=workspace_root,
+    if not thread_id:
+        return PermissionResponseResult(
+            request_id=request_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            thread_id="",
         )
 
-        logger.info(
-            "Dispatching resume dispatch_id=%s for thread %s (request_id=%s)",
+    permission = await get_permission_request(db, request_id)
+    thread_record = await get_thread(db, thread_id)
+    if thread_record is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if permission is None:
+        raise HTTPException(
+            status_code=409,
+            detail="Permission request is not durably pending",
+        )
+
+    resolved_idempotency_key = (
+        idempotency_key
+        or hashlib.sha256(f"{request_id}:{body.option_id}".encode()).hexdigest()
+    )
+    existing_action = await get_control_action_by_idempotency_key(
+        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
+    )
+    if existing_action is not None:
+        return PermissionResponseResult(
+            request_id=request_id,
+            accepted=True,
+            applied=existing_action.applied_at is not None,
+            action_status=existing_action.result_status,
+            thread_id=thread_id,
+            action_id=existing_action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
+
+    if permission.request_status == PermissionRequestStatus.APPLIED.value:
+        action = await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            request_id=request_id,
+            idempotency_key=resolved_idempotency_key,
+            payload={"option_id": body.option_id},
+            result_status=ControlActionResultStatus.DUPLICATE,
+        )
+        await db.commit()
+        return PermissionResponseResult(
+            request_id=request_id,
+            accepted=True,
+            applied=True,
+            action_status=ControlActionResultStatus.DUPLICATE.value,
+            thread_id=thread_id,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
+
+    if permission.request_status != PermissionRequestStatus.PENDING.value:
+        action = await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            request_id=request_id,
+            idempotency_key=resolved_idempotency_key,
+            payload={"option_id": body.option_id},
+            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+        )
+        await db.commit()
+        return PermissionResponseResult(
+            request_id=request_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            thread_id=thread_id,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
+
+    permission_terminal_statuses = {
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+    }
+    if thread_record.status in permission_terminal_statuses:
+        logger.warning(
+            "Permission respond rejected: thread %s is no longer active (status=%r)",
+            thread_id,
+            thread_record.status,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="thread is no longer active",
+        )
+
+    team_preset: str | None = thread_record.team_preset
+    workspace_root: str | None = None
+    if thread_record.thread_metadata:
+        try:
+            meta = json.loads(thread_record.thread_metadata)
+            workspace_root = meta.get("workspace_root")
+        except (json.JSONDecodeError, AttributeError):
+            pass
+
+    resume_value: str | dict[str, bool] = body.option_id
+    if permission.pause_reason_type == PermissionType.PLAN_APPROVAL.value:
+        resume_value = {"approved": body.option_id == "approve"}
+
+    action = await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        request_id=request_id,
+        idempotency_key=resolved_idempotency_key,
+        payload={"option_id": body.option_id},
+    )
+    await record_permission_response_submission(
+        db,
+        request_id=request_id,
+        option_id=body.option_id,
+        idempotency_key=resolved_idempotency_key,
+    )
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.PAUSED_RESUMABLE,
+        execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
+        last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+    )
+
+    dispatch = DispatchRequest(
+        action="resume",
+        thread_id=thread_id,
+        option_id=resume_value,
+        team_preset=team_preset,
+        workspace_root=workspace_root,
+    )
+
+    logger.info(
+        "Dispatching resume dispatch_id=%s for thread %s (request_id=%s)",
+        dispatch.dispatch_id,
+        thread_id,
+        request_id,
+    )
+    await worker_spawner.ensure_worker()
+    circuit_breaker.pre_dispatch()
+    dispatched = False
+    try:
+        resp = await worker_client.post(
+            "/dispatch",
+            json=dispatch.model_dump(),
+            headers=_trace_headers(),
+        )
+        dispatched = resp.is_success
+        circuit_breaker.record_success()
+    except httpx.HTTPError:
+        circuit_breaker.record_failure()
+        logger.warning(
+            "Failed to dispatch resume dispatch_id=%s for thread %s",
             dispatch.dispatch_id,
             thread_id,
-            request_id,
-        )
-        try:
-            resp = await worker_client.post(
-                "/dispatch",
-                json=dispatch.model_dump(),
-            )
-            dispatched = resp.is_success
-        except httpx.HTTPError:
-            logger.warning(
-                "Failed to dispatch resume dispatch_id=%s for thread %s",
-                dispatch.dispatch_id,
-                thread_id,
-                exc_info=True,
-            )
-    else:
-        logger.warning(
-            "No thread_id found in request_id=%s -- cannot dispatch resume",
-            request_id,
+            exc_info=True,
         )
 
-    # MCP-R5: clear from aggregator's pending set on successful dispatch.
     if dispatched:
         aggregator.resolve_permission(request_id)
+        await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+        await set_thread_repair_state(
+            db,
+            thread_id,
+            repair_status=RepairStatus.HEALTHY,
+            execution_readiness=RepairStatus.HEALTHY.value,
+            last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        )
+        await db.commit()
+        return PermissionResponseResult(
+            request_id=request_id,
+            accepted=True,
+            applied=False,
+            action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
+            thread_id=thread_id,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
 
+    action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+    await db.commit()
     return PermissionResponseResult(
         request_id=request_id,
-        accepted=dispatched,
+        accepted=False,
+        applied=False,
+        action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
         thread_id=thread_id,
+        action_id=action.id,
+        idempotency_key=resolved_idempotency_key,
     )
 
 
@@ -1029,11 +1386,15 @@ async def cancel_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
+    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
+    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> CancelThreadResponse:
     """Cancel a running thread by dispatching a cancel action to the worker.
 
-    Sets the thread status to ``cancelled`` in the database and sends a
-    cancel dispatch to the worker process (MCP-R3, ADR-019).
+    Sends a cancel dispatch to the worker process. The thread is only
+    transitioned to terminal ``cancelled`` when the worker later emits
+    its terminal event.
     """
     thread = await get_thread(db, thread_id)
     if thread is None:
@@ -1050,22 +1411,62 @@ async def cancel_thread_endpoint(
             thread_id=thread_id,
             status=thread.status,
             cancelled=False,
+            accepted=False,
+            applied=thread.status == ThreadStatus.CANCELLED.value,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+        )
+
+    resolved_idempotency_key = (
+        idempotency_key or hashlib.sha256(f"{thread_id}:cancel".encode()).hexdigest()
+    )
+    existing_action = await get_control_action_by_idempotency_key(
+        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
+    )
+    if existing_action is not None:
+        return CancelThreadResponse(
+            thread_id=thread_id,
+            status=ThreadStatus.CANCELLING.value,
+            cancelled=True,
+            accepted=True,
+            applied=existing_action.applied_at is not None,
+            action_status=existing_action.result_status,
+            action_id=existing_action.id,
+            idempotency_key=resolved_idempotency_key,
         )
 
     dispatched = False
+    action = await create_control_action(
+        db,
+        thread_id=thread_id,
+        action_type=ControlActionType.CANCEL,
+        idempotency_key=resolved_idempotency_key,
+        payload={"thread_status": thread.status},
+    )
+    await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.CANCEL_PENDING,
+        execution_readiness=RepairStatus.CANCEL_PENDING.value,
+        last_requested_action=ControlActionType.CANCEL,
+    )
     dispatch = DispatchRequest(action="cancel", thread_id=thread_id)
     logger.info(
         "Dispatching cancel dispatch_id=%s for thread %s",
         dispatch.dispatch_id,
         thread_id,
     )
+    await worker_spawner.ensure_worker()
+    circuit_breaker.pre_dispatch()
     try:
         resp = await worker_client.post(
             "/dispatch",
             json=dispatch.model_dump(),
+            headers=_trace_headers(),
         )
         dispatched = resp.is_success
+        circuit_breaker.record_success()
     except httpx.HTTPError:
+        circuit_breaker.record_failure()
         logger.warning(
             "Failed to dispatch cancel dispatch_id=%s for thread %s",
             dispatch.dispatch_id,
@@ -1073,19 +1474,36 @@ async def cancel_thread_endpoint(
             exc_info=True,
         )
 
-    if dispatched:
-        await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
-        await db.commit()
-    else:
+    if not dispatched:
         logger.warning(
             "Cancel dispatch failed for thread %s — leaving DB status unchanged",
             thread_id,
         )
+        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        await db.commit()
+        return CancelThreadResponse(
+            thread_id=thread_id,
+            status=thread.status,
+            cancelled=False,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+        )
+
+    await update_thread_status(db, thread_id, ThreadStatus.CANCELLING)
+    await db.commit()
 
     return CancelThreadResponse(
         thread_id=thread_id,
-        status=ThreadStatus.CANCELLED if dispatched else thread.status,
-        cancelled=dispatched,
+        status=ThreadStatus.CANCELLING.value,
+        cancelled=True,
+        accepted=True,
+        applied=False,
+        action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
+        action_id=action.id,
+        idempotency_key=resolved_idempotency_key,
     )
 
 

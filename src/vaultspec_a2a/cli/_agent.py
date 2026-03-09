@@ -5,6 +5,8 @@ from __future__ import annotations
 
 __all__ = ["agent"]
 
+import secrets
+
 from pathlib import Path
 
 import click
@@ -41,12 +43,16 @@ def ask(agent_name: str, message: str) -> None:
     from ._util import _api_client, _handle_response  # noqa: PLC0415
 
     with _api_client() as client:
+        # CLI-I01: append a 6-char hex suffix so each invocation gets a unique
+        # nickname — calling `agent ask` twice with the same agent would otherwise
+        # cause a NicknameConflictError on the second request.
+        unique_nickname = f"{agent_name}-{secrets.token_hex(3)}"
         resp = client.post(
             "/threads",
             json={
                 "team_preset": agent_name,
                 "initial_message": message,
-                "nickname": agent_name,
+                "nickname": unique_nickname,
             },
         )
         _handle_response(resp)

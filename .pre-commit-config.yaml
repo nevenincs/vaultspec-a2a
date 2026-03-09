@@ -36,6 +36,12 @@ repos:
         types: [python]
         pass_filenames: false
 
+      - id: repo-hygiene
+        name: Check compose/env files for obvious secrets
+        entry: uv run python -m pytest src/vaultspec_a2a/tests/test_repo_hygiene.py --capture=sys
+        language: system
+        pass_filenames: false
+
       - id: lychee
         name: Check documentation links (Lychee)
         entry: lychee

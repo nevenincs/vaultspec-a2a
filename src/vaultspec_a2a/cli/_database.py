@@ -28,6 +28,15 @@ def _alembic_cfg() -> tuple:
 def _get_db_path() -> Path:
     from ..core.config import settings  # noqa: PLC0415
 
+    if settings.resolved_database_backend != "sqlite":
+        click.echo(
+            (
+                "File-based database operations are only supported "
+                "for SQLite fallback mode."
+            ),
+            err=True,
+        )
+        raise SystemExit(1)
     db_path = settings.database_path
     if str(db_path) == ":memory:":
         click.echo("Cannot operate on in-memory database.", err=True)
@@ -61,7 +70,7 @@ def clear(yes: bool) -> None:
 
     from ..core.config import settings  # noqa: PLC0415
 
-    engine = create_engine(settings.database_url.replace("+aiosqlite", ""))
+    engine = create_engine(settings.database_sync_url)
     tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]
     with engine.begin() as conn:
         for table in tables:

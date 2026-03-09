@@ -26,11 +26,13 @@ from sqlalchemy.ext.asyncio import (
 from ...core.exceptions import NicknameConflictError
 from .. import session as _session_module
 from ..crud import (
+    InvalidTransitionError,
     ThreadStatus,
     append_cost_record,
     append_permission_log,
     create_artifact,
     create_thread,
+    delete_thread,
     get_artifact,
     get_artifacts_by_thread,
     get_permission_logs_by_thread,
@@ -805,3 +807,135 @@ class TestCascadeDelete:
 
         logs = await get_permission_logs_by_thread(session, thread.id)
         assert len(logs) == 0, "Permission logs should be deleted with the thread"
+
+
+# ---------------------------------------------------------------------------
+# Thread Status State Machine Tests (DB-H / BE-37)
+# ---------------------------------------------------------------------------
+
+
+class TestInvalidTransitionError:
+    """BE-37: _VALID_TRANSITIONS state machine — allowed and forbidden paths."""
+
+    @pytest.mark.asyncio
+    async def test_submitted_to_running_is_allowed(self, session: AsyncSession) -> None:
+        """submitted → running is a valid forward transition."""
+        thread = await create_thread(session, title="SM-01", status="submitted")
+        updated = await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+        assert updated is not None
+        assert updated.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_running_to_completed_is_allowed(self, session: AsyncSession) -> None:
+        """running → completed is a valid terminal transition."""
+        thread = await create_thread(session, title="SM-02", status="running")
+        updated = await update_thread_status(session, thread.id, ThreadStatus.COMPLETED)
+        assert updated is not None
+        assert updated.status == "completed"
+
+    @pytest.mark.asyncio
+    async def test_running_to_failed_is_allowed(self, session: AsyncSession) -> None:
+        """running → failed is valid (error path)."""
+        thread = await create_thread(session, title="SM-03", status="running")
+        updated = await update_thread_status(session, thread.id, ThreadStatus.FAILED)
+        assert updated is not None
+        assert updated.status == "failed"
+
+    @pytest.mark.asyncio
+    async def test_terminal_to_archived_is_allowed(self, session: AsyncSession) -> None:
+        """completed → archived is allowed (soft-delete path)."""
+        thread = await create_thread(session, title="SM-04", status="completed")
+        updated = await update_thread_status(session, thread.id, ThreadStatus.ARCHIVED)
+        assert updated is not None
+        assert updated.status == "archived"
+
+    @pytest.mark.asyncio
+    async def test_running_to_submitted_raises(self, session: AsyncSession) -> None:
+        """running → submitted is a backward transition — must raise."""
+        thread = await create_thread(session, title="SM-05", status="running")
+        with pytest.raises(InvalidTransitionError, match=r"running.*submitted"):
+            await update_thread_status(session, thread.id, ThreadStatus.SUBMITTED)
+
+    @pytest.mark.asyncio
+    async def test_completed_to_running_raises(self, session: AsyncSession) -> None:
+        """completed → running is a terminal regression — must raise."""
+        thread = await create_thread(session, title="SM-06", status="completed")
+        with pytest.raises(InvalidTransitionError, match=r"completed.*running"):
+            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+
+    @pytest.mark.asyncio
+    async def test_failed_to_running_raises(self, session: AsyncSession) -> None:
+        """failed → running is a terminal regression — must raise."""
+        thread = await create_thread(session, title="SM-07", status="failed")
+        with pytest.raises(InvalidTransitionError, match=r"failed.*running"):
+            await update_thread_status(session, thread.id, ThreadStatus.RUNNING)
+
+    @pytest.mark.asyncio
+    async def test_archived_to_any_raises(self, session: AsyncSession) -> None:
+        """archived → any is forbidden (truly terminal state)."""
+        thread = await create_thread(session, title="SM-08", status="archived")
+        for target in (
+            ThreadStatus.SUBMITTED,
+            ThreadStatus.RUNNING,
+            ThreadStatus.COMPLETED,
+            ThreadStatus.FAILED,
+        ):
+            with pytest.raises(InvalidTransitionError):
+                await update_thread_status(session, thread.id, target)
+
+    @pytest.mark.asyncio
+    async def test_invalid_transition_error_is_value_error(
+        self, session: AsyncSession
+    ) -> None:
+        """InvalidTransitionError is a subclass of ValueError for broad catching."""
+        thread = await create_thread(session, title="SM-09", status="completed")
+        with pytest.raises(ValueError):
+            await update_thread_status(session, thread.id, ThreadStatus.SUBMITTED)
+
+
+# ---------------------------------------------------------------------------
+# delete_thread CRUD Tests (DB-H)
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteThread:
+    """Tests for the delete_thread() CRUD function."""
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_returns_true(self, session: AsyncSession) -> None:
+        """delete_thread() returns True when the thread exists and is deleted."""
+        thread = await create_thread(session, title="Delete Me")
+        result = await delete_thread(session, thread.id)
+        assert result is True
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_removes_from_db(self, session: AsyncSession) -> None:
+        """After delete_thread(), get_thread() returns None."""
+        thread = await create_thread(session, title="Gone")
+        tid = thread.id
+        await delete_thread(session, tid)
+        await session.commit()
+        found = await get_thread(session, tid)
+        assert found is None
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_nonexistent_returns_false(
+        self, session: AsyncSession
+    ) -> None:
+        """delete_thread() returns False for a thread ID that does not exist."""
+        result = await delete_thread(session, "completely-nonexistent-id")
+        assert result is False
+
+    @pytest.mark.asyncio
+    async def test_delete_thread_cascades_artifacts(
+        self, session: AsyncSession
+    ) -> None:
+        """delete_thread() removes cascading artifact records via CRUD function."""
+        thread = await create_thread(session, title="With Artifacts")
+        artifact = await create_artifact(
+            session, thread_id=thread.id, artifact_type="file", path="/x.py"
+        )
+        artifact_id = artifact.id
+        await delete_thread(session, thread.id)
+        await session.commit()
+        assert await get_artifact(session, artifact_id) is None

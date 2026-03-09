@@ -161,12 +161,12 @@ class TestRefreshGeminiTokenLive:
         then refreshes. Verifies the new access_token is different and
         expiry is in the future.
         """
-        if not _CREDS_PATH.exists():
-            pytest.skip("No ~/.gemini/oauth_creds.json found")
-
         real_creds = json.loads(_CREDS_PATH.read_text(encoding="utf-8"))
-        if not real_creds.get("refresh_token"):
-            pytest.skip("No refresh_token in credentials")
+        refresh_token = real_creds.get("refresh_token")
+        assert refresh_token, (
+            f"No refresh_token in {_CREDS_PATH} — "
+            "ensure real Gemini OAuth credentials are present"
+        )
 
         # Copy to tmp and force expiry
         test_path = tmp_path / "oauth_creds.json"

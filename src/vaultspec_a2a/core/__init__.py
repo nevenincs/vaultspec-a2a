@@ -8,23 +8,19 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .aggregator import EventAggregator as EventAggregator
     from .aggregator import StreamableGraph as StreamableGraph
+    from .context import compact_context as compact_context
+    from .context import estimate_tokens as estimate_tokens
+    from .context import prepare_handoff as prepare_handoff
+    from .context import should_compact as should_compact
     from .graph import build_initial_vault_index as build_initial_vault_index
     from .graph import compile_team_graph as compile_team_graph
+    from .nodes.supervisor import create_supervisor_node as create_supervisor_node
+    from .nodes.worker import create_worker_node as create_worker_node
+    from .preamble import build_context_preamble as build_context_preamble
+    from .state import TeamState as TeamState
 
 from .anchoring import build_anchoring_context as build_anchoring_context
 from .config import Settings, settings
-from .context import (
-    compact_context as compact_context,
-)
-from .context import (
-    estimate_tokens as estimate_tokens,
-)
-from .context import (
-    prepare_handoff as prepare_handoff,
-)
-from .context import (
-    should_compact as should_compact,
-)
 from .exceptions import (
     AgentConfigNotFoundError,
     AgentProcessError,
@@ -66,13 +62,7 @@ from .models import (
 from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
-from .nodes.supervisor import create_supervisor_node as create_supervisor_node
-from .nodes.worker import create_worker_node as create_worker_node
 from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
-from .preamble import (
-    build_context_preamble as build_context_preamble,
-)
-from .state import TeamState
 from .task_queue import create_mark_task_complete_tool as create_mark_task_complete_tool
 from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
@@ -130,15 +120,34 @@ from .team_config import (
 )
 
 
-# Lazy imports to break circular dependencies:
-# - core.aggregator <-> api.websocket
-# - core.graph -> providers.factory -> acp_chat_model -> team_config
-# -> core.__init__
+# Lazy imports for two reasons:
+# 1. Break circular dependencies:
+#    - core.aggregator <-> api.websocket
+#    - core.graph -> providers.factory -> acp_chat_model -> team_config -> core.__init__
+# 2. CFG-J06: Defer heavy LangGraph/LangChain imports until first use to
+#    reduce gateway/MCP cold-start time.  TeamState, create_supervisor_node,
+#    and create_worker_node each pull in langgraph.graph machinery.
+#    context.py and preamble.py import langchain_core.messages (+ state.py
+#    which imports langgraph.graph.message), so they are also lazy.
 _LAZY_IMPORTS = {
+    # aggregator — LangGraph machinery + websocket (circular dep)
     "EventAggregator": ".aggregator",
     "StreamableGraph": ".aggregator",
+    # context — langchain_core.messages + state (langgraph.graph.message)
+    "compact_context": ".context",
+    "estimate_tokens": ".context",
+    "prepare_handoff": ".context",
+    "should_compact": ".context",
+    # graph — full LangGraph compilation (circular dep)
     "build_initial_vault_index": ".graph",
     "compile_team_graph": ".graph",
+    # nodes — LangGraph node factories (circular dep)
+    "create_supervisor_node": ".nodes.supervisor",
+    "create_worker_node": ".nodes.worker",
+    # preamble — langchain_core.messages
+    "build_context_preamble": ".preamble",
+    # state — langchain_core.messages + langgraph.graph.message
+    "TeamState": ".state",
 }
 
 

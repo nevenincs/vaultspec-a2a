@@ -3,39 +3,88 @@
 Validates thread tracking, event relay, heartbeat sending, and the
 resilient error-swallowing behaviour of the bridge.
 
-Uses ``httpx.MockTransport`` (httpx's built-in test transport) to
-intercept HTTP calls without any mock libraries.
+Uses a real FastAPI ASGI app served via ``httpx.ASGITransport`` so real
+HTTP serialisation and routing are exercised.  No MockTransport, no mock
+libraries.  Connection-error swallowing is tested by pointing the bridge
+at an address that refuses connections (localhost:1).
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
 
 import httpx
 import pytest
 
+from fastapi import FastAPI, Request
+from fastapi.responses import Response
+from httpx import ASGITransport
+
 from ..ipc import WorkerBridge
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# In-process gateway — real ASGI, no mock transport
 # ---------------------------------------------------------------------------
 
 
-def _make_bridge_with_transport(
-    handler,
-    *,
-    api_url: str = "http://control:8000",
-    worker_id: str = "test-worker-001",
-) -> WorkerBridge:
-    """Create a WorkerBridge and replace its internal client with a mock transport."""
-    bridge = WorkerBridge(api_url=api_url, worker_id=worker_id)
-    # Replace the real client with one backed by the test transport.
+class _InProcessGateway:
+    """Minimal real FastAPI ASGI gateway that accepts IPC requests.
+
+    Records all batches and heartbeats received.  The ``batch_status``
+    parameter controls the HTTP status returned by the batch endpoint,
+    allowing error-path tests to exercise non-200 responses.
+    """
+
+    def __init__(self, *, batch_status: int = 200) -> None:
+        self.batches: list[dict] = []
+        self.heartbeats: list[dict] = []
+        self.paths: list[str] = []
+
+        _app = FastAPI()
+        _self = self
+        _batch_status = batch_status
+
+        @_app.post("/internal/events/batch")
+        async def _batch(request: Request) -> Response:
+            _self.paths.append(request.url.path)
+            if _batch_status != 200:
+                return Response(status_code=_batch_status)
+            body = await request.json()
+            _self.batches.append(body)
+            return Response(content='{"status":"ok"}', media_type="application/json")
+
+        @_app.post("/internal/heartbeat")
+        async def _heartbeat(request: Request) -> Response:
+            _self.paths.append(request.url.path)
+            body = await request.json()
+            _self.heartbeats.append(body)
+            return Response(content='{"status":"ok"}', media_type="application/json")
+
+        self._transport = ASGITransport(app=_app)
+
+    def make_bridge(self, *, worker_id: str = "test-worker-001") -> WorkerBridge:
+        """Return a WorkerBridge backed by this in-process gateway."""
+        bridge = WorkerBridge(api_url="http://control:8000", worker_id=worker_id)
+        bridge._client = httpx.AsyncClient(
+            transport=self._transport,
+            base_url="http://control:8000",
+        )
+        return bridge
+
+
+def _make_unreachable_bridge(*, worker_id: str = "test-worker-001") -> WorkerBridge:
+    """Return a WorkerBridge pointed at a port that refuses connections.
+
+    Port 1 (tcpmux) is reserved and never in use — the OS returns an
+    immediate connection-refused error, exercising the error-swallowing
+    paths without needing a mock transport.
+    """
+    bridge = WorkerBridge(api_url="http://localhost:1", worker_id=worker_id)
     bridge._client = httpx.AsyncClient(
-        transport=httpx.MockTransport(handler),
-        base_url=bridge._api_url,
+        base_url="http://localhost:1",
+        timeout=httpx.Timeout(2.0),
     )
     return bridge
 
@@ -101,13 +150,8 @@ class TestSendEvent:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_sends_correct_json_via_batch(self) -> None:
-        captured: list[dict] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            captured.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.send_event("thread-42", {"key": "value"})
             # Explicit flush to avoid waiting for deferred flush task
@@ -115,8 +159,8 @@ class TestSendEvent:
         finally:
             await bridge.close()
 
-        assert len(captured) == 1
-        body = captured[0]
+        assert len(gw.batches) == 1
+        body = gw.batches[0]
         assert "events" in body
         assert len(body["events"]) == 1
         evt = body["events"][0]
@@ -125,13 +169,8 @@ class TestSendEvent:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_batches_multiple_events(self) -> None:
-        captured: list[dict] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            captured.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.send_event("t1", {"a": 1})
             await bridge.send_event("t2", {"b": 2})
@@ -140,8 +179,8 @@ class TestSendEvent:
         finally:
             await bridge.close()
 
-        assert len(captured) == 1
-        events = captured[0]["events"]
+        assert len(gw.batches) == 1
+        events = gw.batches[0]["events"]
         assert len(events) == 3
         assert events[0]["thread_id"] == "t1"
         assert events[1]["thread_id"] == "t2"
@@ -149,29 +188,22 @@ class TestSendEvent:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_posts_to_batch_events_path(self) -> None:
-        paths: list[str] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            paths.append(request.url.path)
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.send_event("t1", {"a": 1})
             await bridge.flush_events()
         finally:
             await bridge.close()
 
-        assert "/internal/events/batch" in paths
+        assert "/internal/events/batch" in gw.paths
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_non_200_response_logs_warning_but_does_not_raise(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(503, text="Service Unavailable")
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway(batch_status=503)
+        bridge = gw.make_bridge()
         try:
             with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.ipc"):
                 await bridge.send_event("thread-fail", {"x": 1})
@@ -187,10 +219,7 @@ class TestSendEvent:
     async def test_http_error_is_swallowed(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("connection refused")
-
-        bridge = _make_bridge_with_transport(handler)
+        bridge = _make_unreachable_bridge()
         try:
             with caplog.at_level(logging.WARNING, logger="vaultspec_a2a.worker.ipc"):
                 await bridge.send_event("t-err", {"data": True})
@@ -202,35 +231,24 @@ class TestSendEvent:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_close_flushes_pending_events(self) -> None:
-        captured: list[dict] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            captured.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         await bridge.send_event("t1", {"flush": "on_close"})
         await bridge.close()
 
-        assert len(captured) == 1
-        assert captured[0]["events"][0]["thread_id"] == "t1"
+        assert len(gw.batches) == 1
+        assert gw.batches[0]["events"][0]["thread_id"] == "t1"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_flush_empty_buffer_is_noop(self) -> None:
-        call_count = 0
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            nonlocal call_count
-            call_count += 1
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.flush_events()
         finally:
             await bridge.close()
 
-        assert call_count == 0
+        assert len(gw.batches) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -243,13 +261,8 @@ class TestSendHeartbeat:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_sends_correct_json(self) -> None:
-        captured: list[dict] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            captured.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler, worker_id="worker-xyz")
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge(worker_id="worker-xyz")
         bridge.track_thread("t-1")
         bridge.track_thread("t-2")
         try:
@@ -257,8 +270,8 @@ class TestSendHeartbeat:
         finally:
             await bridge.close()
 
-        assert len(captured) == 1
-        body = captured[0]
+        assert len(gw.heartbeats) == 1
+        body = gw.heartbeats[0]
         assert body["type"] == "heartbeat"
         assert body["worker_id"] == "worker-xyz"
         # active_threads must be sorted
@@ -269,26 +282,18 @@ class TestSendHeartbeat:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_posts_to_internal_heartbeat_path(self) -> None:
-        paths: list[str] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            paths.append(request.url.path)
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.send_heartbeat()
         finally:
             await bridge.close()
 
-        assert paths == ["/internal/heartbeat"]
+        assert "/internal/heartbeat" in gw.paths
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_http_error_is_swallowed(self) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            raise httpx.ConnectError("connection refused")
-
-        bridge = _make_bridge_with_transport(handler)
+        bridge = _make_unreachable_bridge()
         try:
             # Must not raise
             await bridge.send_heartbeat()
@@ -297,19 +302,14 @@ class TestSendHeartbeat:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_empty_active_threads(self) -> None:
-        captured: list[dict] = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            captured.append(json.loads(request.content))
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             await bridge.send_heartbeat()
         finally:
             await bridge.close()
 
-        assert captured[0]["active_threads"] == []
+        assert gw.heartbeats[0]["active_threads"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -322,14 +322,8 @@ class TestHeartbeatLoop:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_loop_sends_multiple_heartbeats(self) -> None:
-        call_count = 0
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            nonlocal call_count
-            call_count += 1
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         try:
             # Run the loop for a short window with a tiny interval
             async def run_loop() -> None:
@@ -344,7 +338,7 @@ class TestHeartbeatLoop:
                 pass
 
             # Should have fired at least 2 heartbeats in 0.2s with 0.05s interval
-            assert call_count >= 2
+            assert len(gw.heartbeats) >= 2
         finally:
             await bridge.close()
 
@@ -359,10 +353,8 @@ class TestClose:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_close_shuts_down_client(self) -> None:
-        def handler(request: httpx.Request) -> httpx.Response:
-            return httpx.Response(200, json={"status": "ok"})
-
-        bridge = _make_bridge_with_transport(handler)
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
         await bridge.close()
 
         # After close, the client should be closed

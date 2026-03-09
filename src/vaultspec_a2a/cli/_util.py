@@ -56,7 +56,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
 
 @contextmanager
 def _api_client() -> Generator[httpx.Client]:
-    """Yield a sync httpx client pointed at the backend API.
+    """Yield a sync httpx client pointed at the gateway API.
 
     Catches network-level errors (connect failures, timeouts) and prints
     a clean message instead of a raw traceback.
@@ -68,7 +68,10 @@ def _api_client() -> Generator[httpx.Client]:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             yield client
     except (httpx.ConnectError, httpx.ConnectTimeout):
-        click.echo("Backend not running. Start with: vaultspec service start", err=True)
+        click.echo(
+            "Gateway not running. Start with: vaultspec service start gateway",
+            err=True,
+        )
         raise SystemExit(1) from None
     except httpx.ReadTimeout:
         click.echo("Request timed out. The backend may be overloaded.", err=True)

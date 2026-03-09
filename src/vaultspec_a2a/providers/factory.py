@@ -1,6 +1,7 @@
 """LLM Provider factory."""
 
 import logging
+import os
 
 from pathlib import Path
 from typing import Any
@@ -22,7 +23,13 @@ logger = logging.getLogger(__name__)
 # Resolve the claude-agent-acp entry point from the project-level node_modules.
 # src/vaultspec_a2a/providers/factory.py -> providers ->
 # vaultspec_a2a -> src -> project root
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent.parent.parent
+# In Docker non-editable installs __file__ resolves inside site-packages, so
+# the path traversal is wrong.  Set VAULTSPEC_PROJECT_ROOT to override.
+_PROJECT_ROOT = (
+    Path(os.environ["VAULTSPEC_PROJECT_ROOT"])
+    if "VAULTSPEC_PROJECT_ROOT" in os.environ
+    else Path(__file__).resolve().parent.parent.parent.parent
+)
 _CLAUDE_ACP_JS = (
     _PROJECT_ROOT
     / "node_modules"
@@ -81,6 +88,7 @@ class ProviderFactory:
         model: "Model | str | None" = None,
         agent_config: AgentConfig | None = None,
         workspace_root: Path | None = None,
+        backend: "str | None" = None,
         **kwargs: Any,
     ) -> BaseChatModel:
         """Create a configured BaseChatModel for the given provider.
@@ -90,6 +98,11 @@ class ProviderFactory:
             model: Optional explicit model string or Model enum.
             agent_config: Optional agent configuration for provider initialization.
             workspace_root: Optional workspace root for ACP sandbox scoping.
+            backend: ACP backend override (``"node"`` or ``"binary"``). When
+                ``None`` the value from ``settings.acp_backend`` is used. Pass
+                an explicit value to select a backend without mutating global
+                settings (useful in tests and factory call sites that need
+                non-default behaviour).
             kwargs: Additional overrides for the specific provider.
 
         Returns:
@@ -151,7 +164,7 @@ class ProviderFactory:
 
         if provider == Provider.CLAUDE:
             oauth_token = settings.claude_code_oauth_token
-            backend = settings.acp_backend
+            backend = backend if backend is not None else settings.acp_backend
             logger.debug(
                 "[%s] Instantiating ACP Wrapper. OAuth Token present: %s, backend=%s",
                 provider,

@@ -72,7 +72,7 @@ class TestInternalHealth:
             resp = await client.get("/internal/health")
             data = resp.json()
             assert data["status"] == "ok"
-            assert data["service"] == "control-surface"
+            assert data["service"] == "gateway"
 
 
 # ---------------------------------------------------------------------------
@@ -235,7 +235,7 @@ class TestInternalEvents:
     async def test_missing_thread_id_is_malformed(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """A malformed event without thread_id still returns ok (resilient)."""
+        """A malformed event without thread_id is rejected."""
         app = _make_test_app(with_connection_manager=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -247,12 +247,11 @@ class TestInternalEvents:
                     "payload": {"data": "hello"},
                 },
             )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
+            assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_missing_payload_is_malformed(self) -> None:
-        """A malformed event without payload still returns ok (resilient)."""
+        """A malformed event without payload is rejected."""
         app = _make_test_app(with_connection_manager=True)
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
@@ -264,8 +263,7 @@ class TestInternalEvents:
                     "thread_id": "t-42",
                 },
             )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
+            assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_empty_thread_id_is_treated_as_malformed(self) -> None:
@@ -282,8 +280,7 @@ class TestInternalEvents:
                     "payload": {"data": "hello"},
                 },
             )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
+            assert resp.status_code == 422
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_empty_payload_is_treated_as_malformed(self) -> None:
@@ -300,5 +297,125 @@ class TestInternalEvents:
                     "payload": {},
                 },
             )
-            assert resp.status_code == 200
-            assert resp.json() == {"status": "ok"}
+            assert resp.status_code == 422
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_batch_with_malformed_event_is_rejected(self) -> None:
+        """Malformed entries in /internal/events/batch fail the whole batch."""
+        app = _make_test_app(with_connection_manager=True)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/internal/events/batch",
+                json={
+                    "events": [
+                        {"thread_id": "t-1", "payload": {"event_type": "chunk"}},
+                        {"thread_id": "", "payload": {"event_type": "chunk"}},
+                    ]
+                },
+            )
+            assert resp.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# WorkerBridge IPC reliability (TESTING-03)
+# ---------------------------------------------------------------------------
+
+
+class TestWorkerBridgeRetry:
+    """WorkerBridge retries batch flush on gateway failures (IPC-03)."""
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_flush_retries_on_http_500_then_succeeds(self) -> None:
+        """flush_events retries on 500; succeeds when the gateway recovers."""
+        import httpx as _httpx
+
+        from fastapi import FastAPI as _FastAPI
+        from fastapi.responses import JSONResponse as _JSONResponse
+        from httpx import ASGITransport as _ASGITransport
+
+        from ...worker.ipc import WorkerBridge
+
+        fail_count = 0
+        retry_app = _FastAPI()
+
+        @retry_app.post("/internal/events/batch")
+        async def batch_endpoint():
+            nonlocal fail_count
+            if fail_count < 2:
+                fail_count += 1
+                return _JSONResponse({"error": "temporary"}, status_code=500)
+            return _JSONResponse({"status": "ok"})
+
+        bridge = WorkerBridge(api_url="http://test", worker_id="w-retry")
+        bridge._client = _httpx.AsyncClient(
+            transport=_ASGITransport(app=retry_app),
+            base_url="http://test",
+        )
+        try:
+            await bridge.send_event("t-1", {"event_type": "chunk"})
+            if bridge._flush_task and not bridge._flush_task.done():
+                bridge._flush_task.cancel()
+            await bridge.flush_events()
+        finally:
+            await bridge._client.aclose()
+
+        # Successful flush clears the buffer
+        assert bridge._event_buffer == []
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_buffer_cap_drops_oldest_event(self) -> None:
+        """send_event drops the oldest entry when the buffer reaches _MAX_EVENT_BUFFER."""
+        import httpx as _httpx
+
+        from fastapi import FastAPI as _FastAPI
+        from fastapi.responses import JSONResponse as _JSONResponse
+        from httpx import ASGITransport as _ASGITransport
+
+        from ...worker.ipc import _MAX_EVENT_BUFFER, WorkerBridge
+
+        noop_app = _FastAPI()
+
+        @noop_app.post("/internal/events/batch")
+        async def noop_batch():
+            return _JSONResponse({"status": "ok"})
+
+        bridge = WorkerBridge(api_url="http://test", worker_id="w-cap")
+        bridge._client = _httpx.AsyncClient(
+            transport=_ASGITransport(app=noop_app),
+            base_url="http://test",
+        )
+        try:
+            for i in range(_MAX_EVENT_BUFFER + 1):
+                await bridge.send_event("t-cap", {"event_type": "chunk", "seq": i})
+                if bridge._flush_task and not bridge._flush_task.done():
+                    bridge._flush_task.cancel()
+        finally:
+            await bridge._client.aclose()
+
+        assert len(bridge._event_buffer) <= _MAX_EVENT_BUFFER
+
+
+class TestAggregatorGCOnTerminal:
+    """Aggregator sequence counters are pruned on thread_terminal events (AGG-01/05)."""
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_terminal_event_prunes_thread_from_aggregator_sequences(
+        self,
+    ) -> None:
+        """_handle_terminal_event removes the terminated thread from aggregator _sequences."""
+        from ..internal import _handle_terminal_event
+
+        aggregator = EventAggregator()
+        aggregator._sequences["t-pruned"] = 5
+        aggregator._sequences["t-active"] = 3
+
+        await _handle_terminal_event(
+            "t-pruned",
+            {"event_type": "thread_terminal", "status": "completed"},
+            aggregator=aggregator,
+        )
+
+        assert "t-pruned" not in aggregator._sequences
+        assert "t-active" in aggregator._sequences

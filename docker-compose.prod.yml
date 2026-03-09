@@ -1,34 +1,38 @@
-# Production: API (control surface) + Worker (agent executor) + Jaeger.
+# Production: gateway (control surface) + worker (agent executor) + Jaeger.
 # Usage: docker compose -f docker-compose.prod.yml up --build
-# App: http://localhost:8000 (FastAPI serves React SPA)
+# Gateway: http://localhost:8000 (FastAPI serves React SPA)
 # Jaeger UI: http://localhost:16686
 
 services:
-  api:
+  gateway:
     build:
       context: .
       dockerfile: docker/prod.Dockerfile
-      target: api
+      target: gateway
+    restart: unless-stopped
     ports:
       - '8000:8000'
     volumes:
       - db-data:/app/data
     environment:
+      VAULTSPEC_ENVIRONMENT: 'production'
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
-    env_file: .env
     depends_on:
-      - jaeger
-      - worker
+      jaeger:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
     healthcheck:
       test:
         [
           'CMD',
           'python',
           '-c',
-          "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')",
+          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:8000/api/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
         ]
       interval: 10s
       timeout: 5s
@@ -40,16 +44,19 @@ services:
       context: .
       dockerfile: docker/prod.Dockerfile
       target: worker
+    restart: unless-stopped
     volumes:
       - db-data:/app/data
     environment:
+      VAULTSPEC_ENVIRONMENT: 'production'
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
-      VAULTSPEC_MCP_API_BASE_URL: 'http://api:8000'
+      VAULTSPEC_MCP_API_BASE_URL: 'http://gateway:8000'
+      VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?VAULTSPEC_INTERNAL_TOKEN is required}'
       OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
       OTEL_EXPORTER_OTLP_INSECURE: 'true'
-    env_file: .env
     depends_on:
-      - jaeger
+      jaeger:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -64,13 +71,21 @@ services:
       start_period: 15s
 
   jaeger:
-    image: jaegertracing/jaeger:latest
+    image: jaegertracing/jaeger:2
+    restart: unless-stopped
     ports:
       - '4317:4317'
       - '4318:4318'
       - '16686:16686'
+      - '14269:14269'
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:14269/']
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
 
 volumes:
   db-data:

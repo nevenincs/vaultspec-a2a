@@ -3,13 +3,14 @@
 from typing import Any
 
 import pytest
+import pytest_asyncio
 
 from langchain_core.callbacks import CallbackManagerForLLMRun
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langchain_core.outputs import ChatGeneration, ChatResult
 from langchain_core.runnables import RunnableConfig
-from langgraph.checkpoint.memory import MemorySaver
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.constants import END, START, TAG_NOSTREAM
 from langgraph.graph import StateGraph
 
@@ -614,6 +615,15 @@ async def test_phase_gate_skipped_when_no_worker_phase_map() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest_asyncio.fixture
+async def checkpointer(tmp_path):
+    """Provide a real AsyncSqliteSaver backed by a per-test file (MOCK-06)."""
+    db_file = tmp_path / "test_checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
+        await cp.setup()
+        yield cp
+
+
 def _make_state_for_plan_approval(
     *,
     active_feature: str | None = "my-feature",
@@ -640,7 +650,9 @@ def _make_state_for_plan_approval(
 
 
 @pytest.mark.asyncio
-async def test_plan_approval_interrupt_fires_for_exec_worker() -> None:
+async def test_plan_approval_interrupt_fires_for_exec_worker(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
     """Plan approval interrupt raises GraphInterrupt when routing to exec worker.
 
     ADR-024 §2.2: fires when all conditions hold — routing to exec worker,
@@ -671,7 +683,7 @@ async def test_plan_approval_interrupt_fires_for_exec_worker() -> None:
         {"vaultspec-coder": "vaultspec-coder", "FINISH": END},
     )
     builder.add_edge("vaultspec-coder", END)
-    graph = builder.compile(checkpointer=MemorySaver())
+    graph = builder.compile(checkpointer=checkpointer)
 
     state = _make_state_for_plan_approval()
     config: RunnableConfig = {

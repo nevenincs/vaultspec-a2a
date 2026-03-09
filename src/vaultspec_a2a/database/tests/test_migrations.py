@@ -113,7 +113,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0001"
+        assert row[0] == "0002"
 
 
 class TestRunMigrations:

@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command
 
@@ -35,14 +34,20 @@ from ..core import (
     load_team_config,
     settings,
 )
+from ..database.checkpoints import Checkpointer
+from ..telemetry import ws_span
 from .ipc import WorkerBridge
 
 
-__all__ = ["ConcurrentCapError", "Executor"]
+__all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
 
 
 class ConcurrentCapError(RuntimeError):
     """Raised when the worker concurrent thread cap is reached (WPA-001)."""
+
+
+class GraphCompilationError(RuntimeError):
+    """Raised when a team graph fails to compile (WRK-K03)."""
 
 
 logger = logging.getLogger(__name__)
@@ -80,14 +85,14 @@ class Executor:
     Parameters
     ----------
     checkpointer:
-        ``AsyncSqliteSaver`` shared with the gateway (WAL mode).
+        Shared LangGraph checkpointer opened by the worker lifespan.
     bridge:
         ``WorkerBridge`` for forwarding events and heartbeats.
     """
 
     def __init__(
         self,
-        checkpointer: AsyncSqliteSaver,
+        checkpointer: Checkpointer,
         bridge: WorkerBridge,
     ) -> None:
         self._checkpointer = checkpointer
@@ -153,33 +158,43 @@ class Executor:
             return True
 
     async def _mark_ingest_done(self, thread_id: str) -> None:
-        """Release the ingest slot and untrack the thread in the bridge."""
+        """Release the ingest slot, untrack in the bridge, and prune aggregator.
+
+        WRK-K02: prune stale permissions and inactive-thread sequences after
+        each ingest to prevent unbounded memory growth in long-running workers.
+        """
         async with self._ingest_lock:
             self._active_ingests.discard(thread_id)
+            active_snapshot = set(self._active_ingests)
         self._bridge.untrack_thread(thread_id)
+        # Prune sequences for threads that are no longer actively executing.
+        self._aggregator.prune_sequences(active_snapshot)
+        # Prune permissions older than 5 minutes regardless of thread state.
+        self._aggregator.prune_stale_permissions()
 
     # ------------------------------------------------------------------
     # Dispatch routing
     # ------------------------------------------------------------------
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
-        """Route a ``DispatchRequest`` to the appropriate handler.
-
-        Supported actions:
-
-        * ``ingest``  -- compile graph (if needed) and run a new user turn.
-        * ``resume``  -- resume a suspended graph from a LangGraph interrupt.
-        * ``cancel``  -- signal cancellation for a running ingest.
-        """
-        match req.action:
-            case "ingest":
-                await self._handle_ingest(req)
-            case "resume":
-                await self._handle_resume(req)
-            case "cancel":
-                self._aggregator.cancel_thread(req.thread_id)
-            case _:
-                logger.warning("Unknown dispatch action: %s", req.action)
+        """Route a ``DispatchRequest`` to the appropriate handler."""
+        async with ws_span(
+            f"executor.{req.action}",
+            thread_id=req.thread_id,
+            agent_id=req.agent_id or "supervisor",
+        ) as span:
+            match req.action:
+                case "ingest":
+                    await self._handle_ingest(req)
+                case "resume":
+                    await self._handle_resume(req)
+                case "cancel":
+                    span.add_event("thread_cancelled")
+                    self._aggregator.cancel_thread(req.thread_id)
+                case _:
+                    logger.warning("Unknown dispatch action: %s", req.action)
+                    span.set_attribute("error", True)
+                    span.set_attribute("error.message", f"Unknown action: {req.action}")
 
     # ------------------------------------------------------------------
     # Ingest handler
@@ -221,15 +236,20 @@ class Executor:
             return self._graph_cache[new_key]
 
         # Compile fresh.
-        try:
-            graph = self._compile_graph(req)
-        except Exception:
-            logger.exception(
-                "Failed to compile graph for thread %s (preset=%s)",
-                req.thread_id,
-                team_preset,
-            )
-            return None
+        async with ws_span("executor.compile_graph", thread_id=req.thread_id) as span:
+            span.set_attribute("team_preset", team_preset)
+            try:
+                graph = self._compile_graph(req)
+                span.add_event("graph_compiled")
+            except Exception as exc:
+                logger.exception(
+                    "Failed to compile graph for thread %s (preset=%s)",
+                    req.thread_id,
+                    team_preset,
+                )
+                span.record_exception(exc)
+                span.set_attribute("error", True)
+                raise GraphCompilationError(str(exc)) from exc
 
         # Evict LRU if at capacity.
         while len(self._graph_cache) >= _MAX_CACHED_GRAPHS:
@@ -269,35 +289,225 @@ class Executor:
 
     async def _handle_ingest(self, req: DispatchRequest) -> None:
         """Compile graph on first use and execute a new user turn."""
-        is_first_ingest = req.thread_id not in self._thread_to_cache_key
+        async with ws_span("executor.ingest", thread_id=req.thread_id) as span:
+            is_first_ingest = req.thread_id not in self._thread_to_cache_key
+            span.set_attribute("is_first_ingest", is_first_ingest)
 
-        graph = await self._get_or_compile_graph(req)
-        if graph is None:
-            logger.warning("No graph for thread %s -- cannot ingest", req.thread_id)
-            return
+            try:
+                graph = await self._get_or_compile_graph(req)
+            except GraphCompilationError as exc:
+                logger.warning(
+                    "Graph compilation failed for thread %s: %s", req.thread_id, exc
+                )
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(exc))
+                await self._emit_terminal_status(
+                    req.thread_id, "failed", error_detail=str(exc)
+                )
+                return
 
-        if not await self._mark_ingest_active(req.thread_id):
-            logger.warning(
-                "Ingest already active for thread %s -- dropping", req.thread_id
+            if graph is None:
+                logger.warning(
+                    "No graph for thread %s -- no team preset provided", req.thread_id
+                )
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", "No team preset")
+                await self._emit_terminal_status(req.thread_id, "failed")
+                return
+
+            if not await self._mark_ingest_active(req.thread_id):
+                logger.warning(
+                    "Ingest already active for thread %s -- dropping", req.thread_id
+                )
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", "Ingest already active")
+                return
+
+            self._bridge.track_thread(req.thread_id)
+
+            graph_input = self._build_graph_input(req, is_first_ingest=is_first_ingest)
+            config = {
+                "configurable": {"thread_id": req.thread_id},
+                "recursion_limit": req.recursion_limit or _GRAPH_RECURSION_LIMIT,
+            }
+
+            agent_id = req.agent_id or "vaultspec-supervisor"
+
+            try:
+                span.add_event("starting_graph_execution")
+                outcome = await self._aggregator.ingest(
+                    req.thread_id,
+                    agent_id,
+                    cast(StreamableGraph, graph),
+                    graph_input,
+                    config,
+                )
+                span.set_attribute("outcome", outcome)
+            except Exception:
+                outcome = "failed"
+                logger.exception("Ingest failed for thread %s", req.thread_id)
+                span.record_exception(Exception("Graph execution failed"))
+            finally:
+                await self._emit_terminal_status(req.thread_id, outcome)
+                await self._mark_ingest_done(req.thread_id)
+
+    # ------------------------------------------------------------------
+    # Resume handler (permission response)
+    # ------------------------------------------------------------------
+
+    async def _handle_resume(self, req: DispatchRequest) -> None:
+        """Resume a graph from a LangGraph interrupt.
+
+        Uses ``Command(resume=option_id)`` as graph input, which causes the
+        ``interrupt()`` call in the worker node to return the chosen option.
+        """
+        async with ws_span("executor.resume", thread_id=req.thread_id) as span:
+            # ADR-010: record resume option (cast to str for span attribute)
+            val = str(req.option_id) if req.option_id else "none"
+            span.set_attribute("option_id", val)
+            try:
+                graph = await self._get_or_compile_graph(req)
+            except GraphCompilationError as exc:
+                logger.warning(
+                    "Graph recompile failed for thread %s: %s", req.thread_id, exc
+                )
+                span.set_attribute("error", True)
+                span.set_attribute("error.message", str(exc))
+                await self._emit_terminal_status(
+                    req.thread_id, "failed", error_detail=str(exc)
+                )
+                return
+
+            if graph is None:
+                logger.warning("No graph for thread %s -- cannot resume", req.thread_id)
+                await self._emit_terminal_status(req.thread_id, "failed")
+                return
+
+            if not await self._mark_ingest_active(req.thread_id):
+                logger.warning(
+                    "Ingest already active for thread %s -- cannot resume",
+                    req.thread_id,
+                )
+                return
+
+            self._bridge.track_thread(req.thread_id)
+
+            # Resolve recursion_limit: explicit request > team TOML > global default.
+            cache_key = self._thread_to_cache_key.get(req.thread_id)
+            team_preset = cache_key[0] if cache_key else req.team_preset
+
+            # Resolve workspace_root from cache or request.
+            ws_root_path = cache_key[1] if cache_key else req.workspace_root
+            ws_root = Path(ws_root_path).resolve() if ws_root_path else None
+
+            team_recursion_limit: int | None = None
+            if team_preset:
+                try:
+                    team_cfg = load_team_config(team_preset, workspace_root=ws_root)
+                    team_recursion_limit = team_cfg.graph.recursion_limit
+                except Exception:
+                    logger.debug(
+                        "Could not load team config for recursion_limit fallback"
+                    )
+            effective_recursion_limit = (
+                req.recursion_limit or team_recursion_limit or _GRAPH_RECURSION_LIMIT
             )
+            config = {
+                "configurable": {"thread_id": req.thread_id},
+                "recursion_limit": effective_recursion_limit,
+            }
+            agent_id = req.agent_id or "vaultspec-supervisor"
+
+            try:
+                span.add_event("resuming_graph_execution")
+                # Command(resume=...) is accepted by astream_events in place of
+                # a dict graph_input -- LangGraph handles the type internally.
+                outcome = await self._aggregator.ingest(
+                    req.thread_id,
+                    agent_id,
+                    cast(StreamableGraph, graph),
+                    Command(resume=req.option_id),
+                    config,
+                )
+                span.set_attribute("outcome", outcome)
+            except Exception:
+                outcome = "failed"
+                logger.exception("Resume failed for thread %s", req.thread_id)
+                span.record_exception(Exception("Graph resume failed"))
+            finally:
+                await self._emit_terminal_status(req.thread_id, outcome)
+                await self._mark_ingest_done(req.thread_id)
+
+    # ------------------------------------------------------------------
+    # Terminal status relay
+    # ------------------------------------------------------------------
+
+    async def _emit_terminal_status(
+        self,
+        thread_id: str,
+        outcome: str,
+        error_detail: str | None = None,
+    ) -> None:
+        """Emit a ``thread_terminal`` event to the gateway.
+
+        Emits for ``"completed"``, ``"failed"``, and ``"cancelled"`` outcomes.
+        ``"interrupted"`` means the graph is suspended (awaiting permission)
+        and the thread should remain ``RUNNING``.
+
+        *error_detail* is forwarded in the event payload when set, allowing
+        the gateway to surface compilation/execution error messages to clients
+        (WRK-K03).
+        """
+        if outcome not in ("completed", "failed", "cancelled"):
             return
+        payload: dict[str, str] = {
+            "event_type": "thread_terminal",
+            "thread_id": thread_id,
+            "status": outcome,
+        }
+        if error_detail:
+            payload["error_detail"] = error_detail
+        await self._bridge.send_event(thread_id, payload)
 
-        self._bridge.track_thread(req.thread_id)
+    # ------------------------------------------------------------------
+    # Graph input construction
+    # ------------------------------------------------------------------
 
-        # Build graph input
+    def _build_graph_input(
+        self, req: DispatchRequest, *, is_first_ingest: bool
+    ) -> dict[str, Any]:
+        """Build the ``graph_input`` dict for a new user turn.
+
+        For the *initial* ingest on a thread, all required ``TeamState``
+        fields are supplied so the checkpointer starts with a clean state.
+        For follow-up messages, the plan/agent/artifact/token fields are
+        omitted so LangGraph preserves checkpoint values (supplying
+        ``current_plan=[]`` would trigger the ``_replace_plan`` reducer's
+        "clear" sentinel and wipe the supervisor's execution plan).
+
+        SDD blackboard fields (ADR-019 MED-01) are passed through on the
+        first ingest only and only when non-empty.
+
+        Args:
+            req: The incoming ``DispatchRequest``.
+            is_first_ingest: ``True`` when the thread has no prior
+                checkpoint (i.e., the thread_id was not in
+                ``_thread_to_cache_key`` before this call).
+
+        Returns:
+            A ``dict`` suitable for passing directly to
+            ``EventAggregator.ingest()`` as *graph_input*.
+        """
         messages: list[SystemMessage | HumanMessage] = []
         if req.context_preamble:
             messages.append(SystemMessage(content=req.context_preamble))
         if req.content:
             messages.append(HumanMessage(content=req.content))
 
-        # For initial thread creation, supply all required TeamState fields so
-        # the checkpointer has a clean starting state.  For follow-up messages,
-        # omit current_plan, active_agent, artifacts and token_usage so
-        # LangGraph preserves the checkpoint values — supplying current_plan=[]
-        # would trigger the _replace_plan reducer's "clear" sentinel and wipe
-        # the supervisor's execution plan.
-        graph_input: dict[str, Any] = {"messages": messages, "thread_id": req.thread_id}
+        graph_input: dict[str, Any] = {
+            "messages": messages,
+            "thread_id": req.thread_id,
+        }
         if is_first_ingest:
             graph_input.update(
                 {
@@ -317,113 +527,7 @@ class Executor:
                 graph_input["vault_index"] = req.vault_index
             if req.validation_errors:
                 graph_input["validation_errors"] = req.validation_errors
-        config = {
-            "configurable": {"thread_id": req.thread_id},
-            "recursion_limit": req.recursion_limit or _GRAPH_RECURSION_LIMIT,
-        }
-
-        agent_id = req.agent_id or "vaultspec-supervisor"
-
-        try:
-            outcome = await self._aggregator.ingest(
-                req.thread_id,
-                agent_id,
-                cast(StreamableGraph, graph),
-                graph_input,
-                config,
-            )
-        except Exception:
-            outcome = "failed"
-            logger.exception("Ingest failed for thread %s", req.thread_id)
-        finally:
-            await self._emit_terminal_status(req.thread_id, outcome)
-            await self._mark_ingest_done(req.thread_id)
-
-    # ------------------------------------------------------------------
-    # Resume handler (permission response)
-    # ------------------------------------------------------------------
-
-    async def _handle_resume(self, req: DispatchRequest) -> None:
-        """Resume a graph from a LangGraph interrupt.
-
-        Uses ``Command(resume=option_id)`` as graph input, which causes the
-        ``interrupt()`` call in the worker node to return the chosen option.
-        """
-        graph = await self._get_or_compile_graph(req)
-        if graph is None:
-            logger.warning("No graph for thread %s -- cannot resume", req.thread_id)
-            return
-
-        if not await self._mark_ingest_active(req.thread_id):
-            logger.warning(
-                "Ingest already active for thread %s -- cannot resume", req.thread_id
-            )
-            return
-
-        self._bridge.track_thread(req.thread_id)
-
-        # Resolve recursion_limit: explicit request > team TOML > global default.
-        cache_key = self._thread_to_cache_key.get(req.thread_id)
-        team_preset = cache_key[0] if cache_key else req.team_preset
-        ws_root = (
-            Path(cache_key[1]).resolve()
-            if cache_key and cache_key[1]
-            else (Path(req.workspace_root).resolve() if req.workspace_root else None)
-        )
-        team_recursion_limit: int | None = None
-        if team_preset:
-            try:
-                team_cfg = load_team_config(team_preset, workspace_root=ws_root)
-                team_recursion_limit = team_cfg.graph.recursion_limit
-            except Exception:
-                logger.debug("Could not load team config for recursion_limit fallback")
-        effective_recursion_limit = (
-            req.recursion_limit or team_recursion_limit or _GRAPH_RECURSION_LIMIT
-        )
-        config = {
-            "configurable": {"thread_id": req.thread_id},
-            "recursion_limit": effective_recursion_limit,
-        }
-        agent_id = req.agent_id or "vaultspec-supervisor"
-
-        try:
-            # Command(resume=...) is accepted by astream_events in place of
-            # a dict graph_input -- LangGraph handles the type internally.
-            outcome = await self._aggregator.ingest(
-                req.thread_id,
-                agent_id,
-                cast(StreamableGraph, graph),
-                Command(resume=req.option_id),
-                config,
-            )
-        except Exception:
-            outcome = "failed"
-            logger.exception("Resume failed for thread %s", req.thread_id)
-        finally:
-            await self._emit_terminal_status(req.thread_id, outcome)
-            await self._mark_ingest_done(req.thread_id)
-
-    # ------------------------------------------------------------------
-    # Terminal status relay
-    # ------------------------------------------------------------------
-
-    async def _emit_terminal_status(self, thread_id: str, outcome: str) -> None:
-        """Emit a ``thread_terminal`` event to the gateway.
-
-        Emits for ``"completed"``, ``"failed"``, and ``"cancelled"`` outcomes.
-        ``"interrupted"`` means the graph is suspended (awaiting permission)
-        and the thread should remain ``RUNNING``.
-        """
-        if outcome not in ("completed", "failed", "cancelled"):
-            return
-        await self._bridge.send_event(
-            thread_id,
-            {
-                "event_type": "thread_terminal",
-                "thread_id": thread_id,
-                "status": outcome,
-            },
-        )
+        return graph_input
 
     # ------------------------------------------------------------------
     # Graph compilation

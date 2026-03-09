@@ -77,6 +77,11 @@ class CancelThreadResponse(BaseModel):
     thread_id: str
     status: str
     cancelled: bool
+    accepted: bool = False
+    applied: bool = False
+    action_status: str = "rejected_invalid_state"
+    action_id: str | None = None
+    idempotency_key: str | None = None
 
 
 class SendMessageRequest(BaseModel):
@@ -92,6 +97,11 @@ class SendMessageResponse(BaseModel):
 
     status: str
     thread_id: str
+    accepted: bool = True
+    applied: bool = False
+    action_status: str = "accepted_not_applied"
+    action_id: str | None = None
+    idempotency_key: str | None = None
 
 
 class ThreadSummary(BaseModel):
@@ -100,6 +110,8 @@ class ThreadSummary(BaseModel):
     thread_id: str
     title: str | None = None
     status: str
+    repair_status: str | None = None
+    execution_readiness: str | None = None
     agent_state: AgentLifecycleState | None = None
     team_preset: str | None = None
     created_at: datetime
@@ -137,6 +149,7 @@ class PendingPermission(BaseModel):
     request_id: str
     thread_id: str
     description: str
+    request_status: str = "pending"
 
 
 class TeamStatusResponse(BaseModel):
@@ -163,7 +176,11 @@ class PermissionResponseResult(BaseModel):
 
     request_id: str
     accepted: bool
+    applied: bool = False
+    action_status: str = "rejected_invalid_state"
     thread_id: str
+    action_id: str | None = None
+    idempotency_key: str | None = None
 
 
 class TeamPresetSummary(BaseModel):

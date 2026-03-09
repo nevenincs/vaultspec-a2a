@@ -9,6 +9,7 @@ Implements the multiplexed WebSocket protocol from ADR-004 and ADR-011:
 """
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
@@ -176,10 +177,12 @@ class ConnectionManager:
     async def disconnect(self, client_id: str) -> None:
         """Clean up a disconnected client."""
         async with ws_span("ws.disconnect", client_id=client_id):
-            # Cancel writer task (handles both events and heartbeats)
+            # Cancel writer task and await it to prevent shutdown race (WS-G03)
             writer_task = self._writer_tasks.pop(client_id, None)
             if writer_task is not None:
                 writer_task.cancel()
+                with contextlib.suppress(asyncio.CancelledError):
+                    await writer_task
 
             # Remove from aggregator
             self._aggregator.remove_subscriber(client_id)

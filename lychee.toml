@@ -14,4 +14,6 @@ exclude = [
   "https://developers.figma.com/docs/$",
   # Blog has intermittent connectivity issues under automated checks
   "https://tkdodo.eu/",
+  # localhost URLs are only valid in a running dev environment
+  "http://localhost",
 ]

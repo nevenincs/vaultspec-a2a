@@ -49,9 +49,25 @@ def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
         try:
             cursor.execute("SELECT rowid, channel_values FROM checkpoints")
             rows = cursor.fetchall()
-        except sqlite3.OperationalError:
-            # Table does not exist yet (fresh database).
-            return 0
+        except sqlite3.OperationalError as exc:
+            msg = str(exc).lower()
+            if "no such table" in msg:
+                # Table does not exist yet (fresh database).
+                return 0
+            if "no such column" in msg:
+                # LangGraph schema version does not use channel_values column.
+                # Backfill not applicable — skip silently.
+                logger.debug(
+                    "Checkpoint backfill skipped at %s: "
+                    "schema has no channel_values column",
+                    db_path,
+                )
+                return 0
+            logger.exception(
+                "Checkpoint backfill could not read checkpoints table at %s",
+                db_path,
+            )
+            raise
 
         for rowid, channel_values_raw in rows:
             if not channel_values_raw:

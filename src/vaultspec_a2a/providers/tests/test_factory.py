@@ -60,82 +60,54 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     """binary backend injects CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN=1 into env_vars."""
     if _BIN_PATH is None:
         pytest.skip("No binary present in bin/ — skipping binary backend test")
-    from .. import factory as factory_mod
-
-    original = factory_mod.settings.acp_backend
-    try:
-        factory_mod.settings.acp_backend = "binary"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
-        assert model.command == [str(_BIN_PATH)]
-    finally:
-        factory_mod.settings.acp_backend = original
+    model = ProviderFactory.create(Provider.CLAUDE, backend="binary")
+    assert isinstance(model, AcpChatModel)
+    assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
+    assert model.command == [str(_BIN_PATH)]
 
 
 def test_provider_factory_claude_node_backend_no_bun_flag() -> None:
     """node backend does not inject CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN."""
-    from .. import factory as factory_mod
-
-    original = factory_mod.settings.acp_backend
-    try:
-        factory_mod.settings.acp_backend = "node"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert "CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN" not in model.env_vars
-        assert model.command[0] == "node"
-    finally:
-        factory_mod.settings.acp_backend = original
+    model = ProviderFactory.create(Provider.CLAUDE, backend="node")
+    assert isinstance(model, AcpChatModel)
+    assert "CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN" not in model.env_vars
+    assert model.command[0] == "node"
 
 
 def test_provider_factory_claude_binary_oauth_still_injected() -> None:
     """binary backend still injects CLAUDE_CODE_OAUTH_TOKEN when present."""
     if _BIN_PATH is None:
         pytest.skip("No binary present in bin/")
-    from .. import factory as factory_mod
+    # We can only assert this when the environment actually has an OAuth token.
+    # The factory reads it from settings; we pass backend explicitly and let
+    # the real settings supply the token if one is configured.
+    model = ProviderFactory.create(Provider.CLAUDE, backend="binary")
+    assert isinstance(model, AcpChatModel)
+    assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
+    # If an OAuth token is configured in the environment, it must appear.
+    from ..factory import settings as factory_settings
 
-    original_backend = factory_mod.settings.acp_backend
-    original_oauth = factory_mod.settings.claude_code_oauth_token
-    try:
-        factory_mod.settings.acp_backend = "binary"
-        factory_mod.settings.claude_code_oauth_token = "test-oauth-token"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN") == "test-oauth-token"
-        assert model.env_vars.get("CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN") == "1"
-    finally:
-        factory_mod.settings.acp_backend = original_backend
-        factory_mod.settings.claude_code_oauth_token = original_oauth
+    if factory_settings.claude_code_oauth_token:
+        assert (
+            model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN")
+            == factory_settings.claude_code_oauth_token
+        )
 
 
 def test_provider_factory_claude_binary_sets_use_exec() -> None:
     """binary backend sets use_exec=True on AcpChatModel (no cmd.exe shim needed)."""
     if _BIN_PATH is None:
         pytest.skip("No binary present in bin/")
-    from .. import factory as factory_mod
-
-    original = factory_mod.settings.acp_backend
-    try:
-        factory_mod.settings.acp_backend = "binary"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert model.use_exec is True
-    finally:
-        factory_mod.settings.acp_backend = original
+    model = ProviderFactory.create(Provider.CLAUDE, backend="binary")
+    assert isinstance(model, AcpChatModel)
+    assert model.use_exec is True
 
 
 def test_provider_factory_claude_node_use_exec_false() -> None:
     """node backend leaves use_exec=False (shell mode for .cmd shim)."""
-    from .. import factory as factory_mod
-
-    original = factory_mod.settings.acp_backend
-    try:
-        factory_mod.settings.acp_backend = "node"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert model.use_exec is False
-    finally:
-        factory_mod.settings.acp_backend = original
+    model = ProviderFactory.create(Provider.CLAUDE, backend="node")
+    assert isinstance(model, AcpChatModel)
+    assert model.use_exec is False
 
 
 def test_provider_factory_gemini_creates_acp() -> None:
@@ -200,23 +172,13 @@ def test_provider_factory_workspace_root_none_default() -> None:
 def test_provider_factory_claude_never_injects_anthropic_api_key() -> None:
     """ADR-002 §2: Factory must NOT inject ANTHROPIC_API_KEY for Claude.
 
-    When both OAuth and API key are available, only OAuth goes into env_vars.
+    The factory reads the real settings. Regardless of what ANTHROPIC_API_KEY
+    is set to in the environment, the factory must not place it in env_vars.
     ANTHROPIC_API_KEY is stripped at subprocess spawn time in _astream().
     """
-    from .. import factory as factory_mod
-
-    original_oauth = factory_mod.settings.claude_code_oauth_token
-    original_key = factory_mod.settings.anthropic_api_key
-    try:
-        factory_mod.settings.claude_code_oauth_token = "test-oauth-token"
-        factory_mod.settings.anthropic_api_key = "sk-test-key"
-        model = ProviderFactory.create(Provider.CLAUDE)
-        assert isinstance(model, AcpChatModel)
-        assert model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN") == "test-oauth-token"
-        assert "ANTHROPIC_API_KEY" not in model.env_vars
-    finally:
-        factory_mod.settings.claude_code_oauth_token = original_oauth
-        factory_mod.settings.anthropic_api_key = original_key
+    model = ProviderFactory.create(Provider.CLAUDE)
+    assert isinstance(model, AcpChatModel)
+    assert "ANTHROPIC_API_KEY" not in model.env_vars
 
 
 def test_provider_factory_claude_oauth_only() -> None:

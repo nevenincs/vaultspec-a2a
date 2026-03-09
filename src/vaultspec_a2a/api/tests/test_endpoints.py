@@ -2,7 +2,8 @@
 
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
 EventAggregator (no mocks).  Dispatch requests to the worker are captured
-by a test httpx transport and asserted on.
+by a real in-process FastAPI ASGI app (ASGITransport) — no MockTransport,
+no unittest.mock.
 
 ADR-019: Graph compilation and ingest no longer run in the gateway.
 All work is dispatched to the worker via HTTP POST to /dispatch.  Tests
@@ -12,9 +13,12 @@ API-C1: all dependency overrides are applied via the shared make_app()
 helper in conftest.py so tests never touch the production vaultspec.db.
 """
 
+import asyncio
+
 from fastapi.testclient import TestClient
 
 from ...core.aggregator import EventAggregator
+from ...database.crud import record_permission_request
 from .conftest import make_app
 
 
@@ -26,9 +30,9 @@ from .conftest import make_app
 class TestCreateThread:
     """Tests for POST /api/threads."""
 
-    def test_creates_thread_without_preset(self, session_factory) -> None:
+    def test_creates_thread_without_preset(self, session_factory, checkpointer) -> None:
         """Creating a thread without team_preset returns 201 with thread_id."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -41,13 +45,10 @@ class TestCreateThread:
         assert data["status"] == "submitted"
 
     def test_creates_thread_with_preset_dispatches_to_worker(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """Creating a thread with a valid preset dispatches ingest to worker."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -61,16 +62,16 @@ class TestCreateThread:
         thread_id = resp.json()["thread_id"]
 
         # Verify dispatch was sent to worker
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["team_preset"] == "vaultspec-structured-coder"
         assert dispatch["content"] == "Hello"
 
-    def test_initial_message_length_limit(self, session_factory) -> None:
+    def test_initial_message_length_limit(self, session_factory, checkpointer) -> None:
         """initial_message exceeding 64KB is rejected with validation error."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         oversized = "x" * (65536 + 1)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -89,9 +90,9 @@ class TestCreateThread:
 class TestListThreads:
     """Tests for GET /api/threads."""
 
-    def test_empty_list(self, session_factory) -> None:
+    def test_empty_list(self, session_factory, checkpointer) -> None:
         """Returns an empty list when no threads exist."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads")
@@ -100,9 +101,9 @@ class TestListThreads:
         assert data["threads"] == []
         assert data["total"] == 0
 
-    def test_lists_created_threads(self, session_factory) -> None:
+    def test_lists_created_threads(self, session_factory, checkpointer) -> None:
         """Returns threads that were created."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             client.post(
@@ -129,17 +130,19 @@ class TestListThreads:
 class TestThreadState:
     """Tests for GET /api/threads/{id}/state."""
 
-    def test_404_for_unknown_thread(self, session_factory) -> None:
+    def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
         """Returns 404 for a thread that does not exist."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/threads/nonexistent/state")
         assert resp.status_code == 404
 
-    def test_returns_snapshot_for_existing_thread(self, session_factory) -> None:
+    def test_returns_snapshot_for_existing_thread(
+        self, session_factory, checkpointer
+    ) -> None:
         """Returns a ThreadStateSnapshot for a known thread."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -164,9 +167,9 @@ class TestThreadState:
 class TestSendMessage:
     """Tests for POST /api/threads/{id}/messages."""
 
-    def test_404_for_unknown_thread(self, session_factory) -> None:
+    def test_404_for_unknown_thread(self, session_factory, checkpointer) -> None:
         """Returns 404 when the thread does not exist."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -175,12 +178,11 @@ class TestSendMessage:
             )
         assert resp.status_code == 404
 
-    def test_202_accepted_dispatches_to_worker(self, session_factory) -> None:
+    def test_202_accepted_dispatches_to_worker(
+        self, session_factory, checkpointer
+    ) -> None:
         """Returns 202 and dispatches ingest to worker."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -188,7 +190,7 @@ class TestSendMessage:
                 json={"initial_message": "Hello"},
             )
             thread_id = create_resp.json()["thread_id"]
-            captured.clear()  # Clear the create dispatch if any
+            worker.clear()  # Clear the create dispatch if any
 
             resp = client.post(
                 f"/api/threads/{thread_id}/messages",
@@ -200,19 +202,16 @@ class TestSendMessage:
         assert data["thread_id"] == thread_id
 
         # Verify dispatch was sent to worker
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["content"] == "Follow-up message"
         assert dispatch["agent_id"] == "vaultspec-supervisor"
 
-    def test_dispatch_includes_team_preset(self, session_factory) -> None:
+    def test_dispatch_includes_team_preset(self, session_factory, checkpointer) -> None:
         """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             create_resp = client.post(
@@ -224,7 +223,7 @@ class TestSendMessage:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["thread_id"]
-            captured.requests.clear()
+            worker.dispatches.clear()
 
             resp = client.post(
                 f"/api/threads/{thread_id}/messages",
@@ -232,14 +231,14 @@ class TestSendMessage:
             )
 
         assert resp.status_code == 202
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["team_preset"] == "vaultspec-structured-coder"
 
-    def test_content_length_limit(self, session_factory) -> None:
+    def test_content_length_limit(self, session_factory, checkpointer) -> None:
         """content exceeding 64KB is rejected with 422."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
         oversized = "x" * (65536 + 1)
 
         with TestClient(app, raise_server_exceptions=True) as client:
@@ -263,9 +262,9 @@ class TestSendMessage:
 class TestListTeamPresets:
     """Tests for GET /api/teams."""
 
-    def test_returns_bundled_presets(self, session_factory) -> None:
+    def test_returns_bundled_presets(self, session_factory, checkpointer) -> None:
         """Returns all bundled team presets."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -277,9 +276,9 @@ class TestListTeamPresets:
         # At minimum the bundled pipeline preset should be present
         assert "vaultspec-structured-coder" in preset_ids
 
-    def test_preset_has_required_fields(self, session_factory) -> None:
+    def test_preset_has_required_fields(self, session_factory, checkpointer) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/teams")
@@ -300,9 +299,9 @@ class TestListTeamPresets:
 class TestTeamStatus:
     """Tests for GET /api/team/status."""
 
-    def test_returns_team_status(self, session_factory) -> None:
+    def test_returns_team_status(self, session_factory, checkpointer) -> None:
         """Returns a TeamStatusResponse with agents and active_threads."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -316,9 +315,11 @@ class TestTeamStatus:
         assert isinstance(data["active_threads"], list)
         assert isinstance(data["pending_permissions"], list)
 
-    def test_returns_empty_lists_when_no_activity(self, session_factory) -> None:
+    def test_returns_empty_lists_when_no_activity(
+        self, session_factory, checkpointer
+    ) -> None:
         """All lists are empty when no agents registered and no threads active."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -329,7 +330,9 @@ class TestTeamStatus:
         assert data["active_threads"] == []
         assert data["pending_permissions"] == []
 
-    def test_pending_permissions_surface_from_aggregator(self, session_factory) -> None:
+    def test_pending_permissions_surface_from_aggregator(
+        self, session_factory, checkpointer
+    ) -> None:
         """Pending permissions stored in aggregator appear in team status."""
         from datetime import UTC, datetime
 
@@ -349,7 +352,9 @@ class TestTeamStatus:
         )
         agg._pending_permissions["thread-abc:perm-001"] = (event, 0.0)
 
-        app, _agg, _captured, _cp = make_app(session_factory, aggregator=agg)
+        app, _agg, _worker, _cp = make_app(
+            session_factory, checkpointer, aggregator=agg
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -362,7 +367,9 @@ class TestTeamStatus:
         assert perm["thread_id"] == "thread-abc"
         assert perm["description"] == "Allow file write?"
 
-    def test_node_summaries_surface_as_agents(self, session_factory) -> None:
+    def test_node_summaries_surface_as_agents(
+        self, session_factory, checkpointer
+    ) -> None:
         """Agents registered via aggregator node metadata appear in response."""
         agg = EventAggregator()
         agg._node_metadata["vaultspec-coder"] = {
@@ -371,7 +378,9 @@ class TestTeamStatus:
             "description": "Writes code",
         }
 
-        app, _agg, _captured, _cp = make_app(session_factory, aggregator=agg)
+        app, _agg, _worker, _cp = make_app(
+            session_factory, checkpointer, aggregator=agg
+        )
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.get("/api/team/status")
@@ -395,12 +404,36 @@ class TestTeamStatus:
 class TestPermissionRespond:
     """Tests for POST /api/permissions/{request_id}/respond."""
 
-    def test_responds_dispatches_resume_to_worker(self, session_factory) -> None:
-        """Dispatches a resume to the worker and returns accepted=True."""
-        from .conftest import _CapturedDispatch
+    @staticmethod
+    def _seed_permission(
+        session_factory, *, thread_id: str, request_id: str, tool_call: str = "bash"
+    ) -> None:
+        async def _run() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type=tool_call,
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call=tool_call,
+                )
+                await session.commit()
 
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        asyncio.run(_run())
+
+    def test_responds_dispatches_resume_to_worker(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Dispatches a resume to the worker and returns accepted=True."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             # Create a thread first so the permission endpoint can find it.
@@ -410,34 +443,37 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-456"
+            self._seed_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
 
             # The create dispatch is captured; clear it so we only check resume.
-            captured.requests.clear()
+            worker.dispatches.clear()
 
             resp = client.post(
-                f"/api/permissions/{thread_id}:req-456/respond",
+                f"/api/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["request_id"] == f"{thread_id}:req-456"
+        assert data["request_id"] == request_id
         assert data["accepted"] is True
         assert data["thread_id"] == thread_id
 
         # Verify resume dispatch was sent to worker
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
 
-    def test_resume_dispatch_includes_team_preset(self, session_factory) -> None:
+    def test_resume_dispatch_includes_team_preset(
+        self, session_factory, checkpointer
+    ) -> None:
         """Resume DispatchRequest includes team_preset from DB for lazy recompile."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             # First create a thread with a team_preset so it's stored in DB.
@@ -450,11 +486,15 @@ class TestPermissionRespond:
             )
             assert create_resp.status_code == 201
             thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-001"
+            self._seed_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
 
             # Now respond to a permission for that thread.
-            captured.requests.clear()
+            worker.dispatches.clear()
             resp = client.post(
-                f"/api/permissions/{thread_id}:req-001/respond",
+                f"/api/permissions/{request_id}/respond",
                 json={"option_id": "allow_once"},
             )
 
@@ -462,16 +502,16 @@ class TestPermissionRespond:
         assert resp.json()["accepted"] is True
 
         # The resume dispatch must carry team_preset for lazy recompile.
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
         assert dispatch["team_preset"] == "vaultspec-structured-coder"
 
     def test_responds_without_thread_id_returns_not_accepted(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """Returns accepted=False when request_id has no thread_id component."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -492,9 +532,11 @@ class TestPermissionRespond:
 class TestCreateThreadAutonomous:
     """Tests for the autonomous field on POST /api/threads."""
 
-    def test_create_thread_autonomous_defaults_false(self, session_factory) -> None:
+    def test_create_thread_autonomous_defaults_false(
+        self, session_factory, checkpointer
+    ) -> None:
         """Creating a thread without autonomous field defaults to False (supervised)."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -506,9 +548,11 @@ class TestCreateThreadAutonomous:
         assert "thread_id" in data
         # No crash = autonomous=False default accepted correctly
 
-    def test_create_thread_autonomous_true_accepted(self, session_factory) -> None:
+    def test_create_thread_autonomous_true_accepted(
+        self, session_factory, checkpointer
+    ) -> None:
         """Creating a thread with autonomous=True returns 201 successfully."""
-        app, _agg, _captured, _cp = make_app(session_factory)
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -524,13 +568,10 @@ class TestCreateThreadAutonomous:
         assert data["status"] == "submitted"
 
     def test_create_thread_with_preset_autonomous_dispatches(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """Creating a thread with a preset and autonomous=True dispatches to worker."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -544,20 +585,17 @@ class TestCreateThreadAutonomous:
         assert resp.status_code == 201
 
         # Verify dispatch was sent with autonomous flag
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["team_preset"] == "vaultspec-structured-coder"
         assert dispatch["autonomous"] is True
 
     def test_create_thread_autonomous_inherits_team_auto_approve(
-        self, session_factory
+        self, session_factory, checkpointer
     ) -> None:
         """When autonomous is not set, team auto_approve=True makes dispatch autonomous."""
-        from .conftest import _CapturedDispatch
-
-        captured = _CapturedDispatch()
-        app, _agg, captured, _cp = make_app(session_factory, captured_dispatch=captured)
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:
             resp = client.post(
@@ -570,6 +608,6 @@ class TestCreateThreadAutonomous:
             )
         assert resp.status_code == 201
 
-        assert len(captured.requests) == 1
-        dispatch = captured.requests[0]
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
         assert dispatch["autonomous"] is True

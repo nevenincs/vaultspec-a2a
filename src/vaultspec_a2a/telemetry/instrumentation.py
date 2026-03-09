@@ -133,11 +133,15 @@ def _check_otlp() -> bool:
     )
 
 
-def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
+def _build_sdk_provider(
+    *, otlp_available: bool, service_name: str | None = None
+) -> trace.TracerProvider:
     """Construct a real SDK TracerProvider with resource and optional OTLP export.
 
     Args:
         otlp_available: Whether the OTLP gRPC exporter package is installed.
+        service_name: Override ``service.name`` in the OTel Resource. Defaults
+            to ``_SERVICE_NAME`` (resolved from ``OTEL_SERVICE_NAME`` env var).
 
     Returns:
         A configured SDK ``TracerProvider``.
@@ -155,7 +159,7 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
 
     resource = Resource.create(
         {
-            "service.name": _SERVICE_NAME,
+            "service.name": service_name or _SERVICE_NAME,
             "service.version": _SERVICE_VERSION,
         }
     )
@@ -179,13 +183,17 @@ def _build_sdk_provider(*, otlp_available: bool) -> trace.TracerProvider:
     return provider
 
 
-def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
+def _build_sdk_meter_provider(
+    *, otlp_available: bool, service_name: str | None = None
+) -> None:
     """Configure the global MeterProvider when SDK is available.
 
     ADR-015: opentelemetry-sdk is a mandatory dependency — no ImportError guard.
 
     Args:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
+        service_name: Override ``service.name`` in the OTel Resource. Defaults
+            to ``_SERVICE_NAME`` (resolved from ``OTEL_SERVICE_NAME`` env var).
     """
     from opentelemetry.sdk.metrics import (
         MeterProvider,
@@ -199,7 +207,7 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
 
     resource = Resource.create(
         {
-            "service.name": _SERVICE_NAME,
+            "service.name": service_name or _SERVICE_NAME,
             "service.version": _SERVICE_VERSION,
         }
     )
@@ -217,12 +225,19 @@ def _build_sdk_meter_provider(*, otlp_available: bool) -> None:
     metrics.set_meter_provider(meter_provider)
 
 
-def configure_telemetry() -> TelemetryConfig:
+def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
     """Set up the global OTel TracerProvider and MeterProvider.
 
     This function is idempotent — calling it multiple times is safe because
     ``set_tracer_provider`` is a no-op if a non-proxy provider is already set.
     Call once during FastAPI lifespan startup (ADR-007).
+
+    Args:
+        service_name: Override the OTel ``service.name`` resource attribute.
+            Useful when multiple services share the same codebase (e.g. the
+            worker calls ``configure_telemetry(service_name="vaultspec-worker")``
+            so its spans are attributed separately from the gateway in Jaeger).
+            Defaults to the ``OTEL_SERVICE_NAME`` env var (or ``"vaultspec-a2a"``).
 
     Returns:
         A ``TelemetryConfig`` snapshot describing what was configured.
@@ -244,13 +259,19 @@ def configure_telemetry() -> TelemetryConfig:
     otlp_available = _check_otlp() if sdk_available else False
     sdk_enabled = sdk_available and not _SDK_DISABLED
 
+    effective_service = service_name or _SERVICE_NAME
+
     if sdk_enabled:
-        provider = _build_sdk_provider(otlp_available=otlp_available)
+        provider = _build_sdk_provider(
+            otlp_available=otlp_available, service_name=effective_service
+        )
         trace.set_tracer_provider(provider)
-        _build_sdk_meter_provider(otlp_available=otlp_available)
+        _build_sdk_meter_provider(
+            otlp_available=otlp_available, service_name=effective_service
+        )
         logger.info(
             "OTel SDK TracerProvider configured service=%s otlp=%s langsmith=%s",
-            _SERVICE_NAME,
+            effective_service,
             otlp_available,
             _LANGSMITH_ENABLED,
         )
@@ -279,7 +300,7 @@ def configure_telemetry() -> TelemetryConfig:
         sdk_available=sdk_available,
         otlp_available=otlp_available,
         sdk_enabled=sdk_enabled,
-        service_name=_SERVICE_NAME,
+        service_name=effective_service,
         otlp_endpoint=_OTLP_ENDPOINT,
         langsmith_enabled=_LANGSMITH_ENABLED,
     )

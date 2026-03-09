@@ -38,12 +38,9 @@ async def test_acp_claude_streaming() -> None:
       - At least one `agent_message_chunk` is received and yielded as an AIMessageChunk
       - The assembled response contains the expected word
     """
-    if not settings.claude_code_oauth_token:
-        pytest.skip("CLAUDE_CODE_OAUTH_TOKEN not set — Claude ACP unavailable.")
-
     model = AcpChatModel(
         command=["node", str(_CLAUDE_ACP_JS)],
-        env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
+        env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token or ""},
     )
 
     messages = [
@@ -101,12 +98,9 @@ async def test_acp_claude_ainvoke() -> None:
     `ainvoke` goes through BaseChatModel._agenerate which collects _astream chunks.
     Verifies the aggregated AIMessage content is non-empty and correct.
     """
-    if not settings.claude_code_oauth_token:
-        pytest.skip("CLAUDE_CODE_OAUTH_TOKEN not set — Claude ACP unavailable.")
-
     model = AcpChatModel(
         command=["node", str(_CLAUDE_ACP_JS)],
-        env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token},
+        env_vars={"CLAUDE_CODE_OAUTH_TOKEN": settings.claude_code_oauth_token or ""},
     )
 
     response = await model.ainvoke(

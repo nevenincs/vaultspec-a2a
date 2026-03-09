@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from typing import Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -19,7 +20,9 @@ class DispatchRequest(BaseModel):
     """Work dispatch command from gateway to worker."""
 
     dispatch_id: str = Field(default_factory=lambda: uuid4().hex)
-    action: str = Field(description="'ingest' | 'resume' | 'cancel'")
+    action: Literal["ingest", "resume", "cancel"] = Field(
+        description="'ingest' | 'resume' | 'cancel'"
+    )
     thread_id: str
     agent_id: str = "vaultspec-supervisor"
     # For ingest: user message content

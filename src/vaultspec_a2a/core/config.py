@@ -21,7 +21,36 @@ class Settings(BaseSettings):
 
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     log_level: LogLevel = Field(default=LogLevel.INFO)
-    database_url: str = Field(default="sqlite+aiosqlite:///vaultspec.db")
+    database_backend: Literal["sqlite", "postgres"] = Field(
+        default="postgres",
+        alias="VAULTSPEC_DATABASE_BACKEND",
+        description="Primary application database backend.",
+    )
+    checkpoint_backend: Literal["sqlite", "postgres"] = Field(
+        default="postgres",
+        alias="VAULTSPEC_CHECKPOINT_BACKEND",
+        description="LangGraph checkpointer persistence backend.",
+    )
+    database_url: str = Field(
+        default="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec"
+    )
+    checkpoint_database_url: str | None = Field(
+        default=None,
+        alias="VAULTSPEC_CHECKPOINT_DATABASE_URL",
+        description="Optional dedicated checkpoint database URL/DSN.",
+    )
+    sqlite_busy_timeout_ms: int = Field(
+        default=5000,
+        description="Busy timeout applied to SQLite connections.",
+        alias="VAULTSPEC_SQLITE_BUSY_TIMEOUT_MS",
+    )
+    postgres_required: bool = Field(
+        default=False,
+        alias="VAULTSPEC_POSTGRES_REQUIRED",
+        description=(
+            "Fail startup loudly when Postgres-backed dependencies are required."
+        ),
+    )
     workspace_root: Path = Field(default=Path("./workspaces"))
     provider_timeout_seconds: int = Field(
         default=300, description="Global timeout for LLM provider API calls."
@@ -88,6 +117,11 @@ class Settings(BaseSettings):
         description="Internal worker HTTP port",
         alias="VAULTSPEC_WORKER_PORT",
     )
+    worker_host: str = Field(
+        default="127.0.0.1",
+        description="Bind host for locally managed worker processes.",
+        alias="VAULTSPEC_WORKER_HOST",
+    )
     worker_url: str = Field(
         default="http://127.0.0.1:8001",
         description="Worker base URL for dispatch calls",
@@ -104,6 +138,23 @@ class Settings(BaseSettings):
         default=5,
         description="Max concurrent graph executions per worker (WPA-001).",
         alias="VAULTSPEC_MAX_CONCURRENT_THREADS",
+    )
+    auto_spawn_worker: bool = Field(
+        default=True,
+        description=(
+            "Auto-spawn worker as child process on gateway startup (ADR-031 §2.4)."
+        ),
+        alias="VAULTSPEC_AUTO_SPAWN_WORKER",
+    )
+    repair_on_startup: bool = Field(
+        default=True,
+        description="Run durable thread reconciliation during gateway startup.",
+        alias="VAULTSPEC_REPAIR_ON_STARTUP",
+    )
+    repair_strategy: Literal["conservative", "mark_repair_needed"] = Field(
+        default="conservative",
+        description="Startup reconciliation strategy for non-terminal threads.",
+        alias="VAULTSPEC_REPAIR_STRATEGY",
     )
 
     # ACP backend selection (ADR-002 §5.1)
@@ -151,17 +202,92 @@ class Settings(BaseSettings):
         return self.environment == Environment.DEVELOPMENT
 
     @property
+    def resolved_database_backend(self) -> Literal["sqlite", "postgres"]:
+        """Validate the configured application database backend against the URL."""
+        url = self.database_url
+        if self.database_backend == "sqlite" and not url.startswith("sqlite"):
+            msg = (
+                "VAULTSPEC_DATABASE_BACKEND=sqlite requires "
+                "VAULTSPEC_DATABASE_URL to use a sqlite SQLAlchemy URL."
+            )
+            raise ValueError(msg)
+        if self.database_backend == "postgres" and not url.startswith("postgresql"):
+            msg = (
+                "VAULTSPEC_DATABASE_BACKEND=postgres requires "
+                "VAULTSPEC_DATABASE_URL to use a postgresql SQLAlchemy URL."
+            )
+            raise ValueError(msg)
+        return self.database_backend
+
+    @property
+    def resolved_checkpoint_backend(self) -> Literal["sqlite", "postgres"]:
+        """Validate the configured checkpoint backend against the configured DSN."""
+        url = self.checkpoint_database_url or self.database_url
+        if self.checkpoint_backend == "sqlite" and not url.startswith("sqlite"):
+            msg = (
+                "VAULTSPEC_CHECKPOINT_BACKEND=sqlite requires the checkpoint URL "
+                "to use a sqlite-compatible scheme."
+            )
+            raise ValueError(msg)
+        if self.checkpoint_backend == "postgres" and not url.startswith("postgresql"):
+            msg = (
+                "VAULTSPEC_CHECKPOINT_BACKEND=postgres requires the checkpoint URL "
+                "to use a postgresql-compatible scheme."
+            )
+            raise ValueError(msg)
+        return self.checkpoint_backend
+
+    @property
     def database_path(self) -> Path:
         """Extract the plain file path from the SQLAlchemy database URL.
 
         Parses ``sqlite+aiosqlite:///path/to/db.sqlite`` to ``Path(...)``.
         Returns ``:memory:`` for in-memory databases.
         """
+        if self.resolved_database_backend != "sqlite":
+            msg = "database_path is only valid when the database backend is SQLite."
+            raise ValueError(msg)
         url = self.database_url
         raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
         if raw == ":memory:":
             return Path(":memory:")
         return Path(raw).resolve()
+
+    @property
+    def checkpoint_path(self) -> Path:
+        """Return the SQLite checkpoint path when the checkpoint backend is SQLite."""
+        if self.resolved_checkpoint_backend != "sqlite":
+            msg = "checkpoint_path is only valid when the checkpoint backend is SQLite."
+            raise ValueError(msg)
+        url = self.checkpoint_database_url or self.database_url
+        raw = url.split("///", 1)[1] if ":///" in url else "vaultspec.db"
+        if raw == ":memory:":
+            return Path(":memory:")
+        return Path(raw).resolve()
+
+    @property
+    def checkpoint_connection_string(self) -> str:
+        """Return the backend-specific DSN expected by the LangGraph saver."""
+        url = self.checkpoint_database_url or self.database_url
+        if self.resolved_checkpoint_backend == "sqlite":
+            if ":///" not in url:
+                msg = f"Unsupported SQLite checkpoint URL: {url!r}"
+                raise ValueError(msg)
+            raw = url.split("///", 1)[1]
+            if raw == ":memory:":
+                return ":memory:"
+            return str(Path(raw).resolve())
+
+        return url.replace("postgresql+asyncpg://", "postgresql://", 1).replace(
+            "postgresql+psycopg://", "postgresql://", 1
+        )
+
+    @property
+    def database_sync_url(self) -> str:
+        """Return a synchronous SQLAlchemy URL for admin/CLI operations."""
+        if self.resolved_database_backend == "sqlite":
+            return self.database_url.replace("+aiosqlite", "", 1)
+        return self.database_url.replace("+asyncpg", "+psycopg", 1)
 
 
 # Global settings instance

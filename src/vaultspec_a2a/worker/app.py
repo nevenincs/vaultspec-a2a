@@ -16,9 +16,11 @@ Or via the ``vaultspec-worker`` console script (once registered in
 from __future__ import annotations
 
 import logging
+import sys
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any, cast
 from uuid import uuid4
 
 import anyio
@@ -28,6 +30,9 @@ from fastapi import FastAPI, HTTPException
 
 from ..api.schemas.internal import DispatchRequest, DispatchResponse
 from ..core import settings
+from ..core.asyncio_compat import configure_asyncio_runtime
+from ..database.checkpoints import open_checkpointer
+from ..telemetry import TelemetryMiddleware, configure_telemetry
 from .executor import Executor
 from .ipc import WorkerBridge
 
@@ -57,17 +62,12 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     worker_id = uuid4().hex[:8]
     logger.info("Worker %s starting", worker_id)
 
-    # Database -- shared SQLite via WAL (same file as gateway).
-    db_path = settings.database_path
-    db_path.parent.mkdir(parents=True, exist_ok=True)
+    # TEL-01: Configure OTel with the worker service name so spans are
+    # attributed separately from the gateway in Jaeger/OTLP backends.
+    configure_telemetry(service_name="vaultspec-worker")
+    logger.info("Telemetry configured (service=vaultspec-worker)")
 
-    # Import here to keep the top-level import footprint small and avoid
-    # circular dependency chains through the langgraph checkpoint package.
-    from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-
-    async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
-        await checkpointer.setup()
-
+    async with open_checkpointer() as checkpointer:
         bridge = WorkerBridge(
             settings.mcp_api_base_url,
             worker_id,
@@ -90,9 +90,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             # Shutdown path
             logger.info("Worker %s shutting down", worker_id)
-            await executor.shutdown()
-            await bridge.close()
             tg.cancel_scope.cancel()
+
+        await executor.shutdown()
+        await bridge.close()
 
 
 def create_worker_app() -> FastAPI:
@@ -106,6 +107,10 @@ def create_worker_app() -> FastAPI:
         version="0.1.0",
         lifespan=_lifespan,
     )
+
+    # TEL-01: Instrument incoming requests so the worker's spans participate
+    # in distributed traces started by the gateway (W3C traceparent extraction).
+    app.add_middleware(cast(Any, TelemetryMiddleware))
 
     @app.post("/dispatch", response_model=DispatchResponse)
     async def dispatch_endpoint(req: DispatchRequest) -> DispatchResponse:
@@ -143,10 +148,33 @@ def create_worker_app() -> FastAPI:
 
 def main() -> None:
     """Entry point for the ``vaultspec-worker`` console script."""
+    configure_asyncio_runtime()
+    logger.info(
+        "Worker main config: gateway_port=%d worker_host=%s"
+        " worker_port=%d worker_url=%s",
+        settings.port,
+        settings.worker_host,
+        settings.worker_port,
+        settings.worker_url,
+    )
+    loop = (
+        "vaultspec_a2a.core.asyncio_compat:psycopg_compatible_loop"
+        if sys.platform == "win32"
+        and (
+            settings.resolved_database_backend == "postgres"
+            or settings.resolved_checkpoint_backend == "postgres"
+        )
+        else "auto"
+    )
     uvicorn.run(
         "vaultspec_a2a.worker.app:create_worker_app",
         factory=True,
-        host="127.0.0.1",
+        host=settings.worker_host,
         port=settings.worker_port,
         log_level="info",
+        loop=loop,
     )
+
+
+if __name__ == "__main__":
+    main()

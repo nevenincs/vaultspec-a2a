@@ -1,18 +1,10 @@
-"""Async CRUD operations for the database layer.
+"""Async CRUD operations for durable orchestration state."""
 
-Provides typed create/read/update functions for all models.
-All functions accept an ``AsyncSession`` for composability with
-FastAPI's dependency injection.
+# ruff: noqa: D103, PLR0913
 
-For create operations, callers construct model instances directly and
-pass them to the ``save_*`` functions. Convenience ``create_*`` functions
-are provided for common cases with fewer parameters.
+from __future__ import annotations
 
-References:
-    - ADR-007: SQLite persistence
-    - ADR-009: Module hierarchy
-    - ADR-011: Wire contract data models
-"""
+import json
 
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -23,44 +15,113 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-# M19/DB-M1: database → core is the normal dependency direction (not circular).
-# NicknameConflictError is a domain exception that belongs in core; database
-# raises it when detecting UNIQUE constraint violations on nickname.
-# NOTE (DB-M1): This cross-module import
-# (vaultspec_a2a/database → vaultspec_a2a/core) is intentional
-# and follows the layered dependency direction prescribed by ADR-009. Moving this
-# exception into vaultspec_a2a/database would create an orphan with no semantic home.
 from ..core.exceptions import NicknameConflictError
-from .models import ArtifactModel, CostTrackingModel, PermissionLogModel, ThreadModel
+from .models import (
+    ArtifactModel,
+    ControlActionModel,
+    CostTrackingModel,
+    PermissionLogModel,
+    PermissionRequestModel,
+    ThreadModel,
+)
 
 
 class ThreadStatus(StrEnum):
-    """M25: constrained thread status values to prevent invalid status strings."""
+    """Durable lifecycle states for orchestration threads."""
 
     SUBMITTED = "submitted"
     CREATED = "created"
     RUNNING = "running"
+    INPUT_REQUIRED = "input_required"
+    CANCELLING = "cancelling"
+    CANCELLED = "cancelled"
     COMPLETED = "completed"
     FAILED = "failed"
-    CANCELLED = "cancelled"
     ARCHIVED = "archived"
+    REPAIR_NEEDED = "repair_needed"
+    RECONCILING = "reconciling"
+
+
+class RepairStatus(StrEnum):
+    """Repair and readiness classification distinct from lifecycle."""
+
+    HEALTHY = "healthy"
+    PAUSED_RESUMABLE = "paused_resumable"
+    CANCEL_PENDING = "cancel_pending"
+    REPLAY_GAP = "replay_gap"
+    CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
+    NEEDS_RECONCILIATION = "needs_reconciliation"
+    OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
+
+
+class ControlActionType(StrEnum):
+    """Durable journaled control action types."""
+
+    INGEST = "ingest"
+    RESUME = "resume"
+    CANCEL = "cancel"
+    PERMISSION_REQUEST_CREATED = "permission_request_created"
+    PERMISSION_RESPONSE_SUBMITTED = "permission_response_submitted"
+    PERMISSION_RESPONSE_APPLIED = "permission_response_applied"
+    MESSAGE_FOLLOWUP_REQUESTED = "message_followup_requested"
+    MESSAGE_FOLLOWUP_APPLIED = "message_followup_applied"
+    REPAIR_STARTED = "repair_started"
+    REPAIR_FINISHED = "repair_finished"
+
+
+class ControlActionResultStatus(StrEnum):
+    """Journaled outcome states for control actions."""
+
+    ACCEPTED_NOT_APPLIED = "accepted_not_applied"
+    APPLIED = "applied"
+    REJECTED_INVALID_STATE = "rejected_invalid_state"
+    SUPERSEDED = "superseded"
+    DUPLICATE = "duplicate"
+
+
+class PermissionRequestStatus(StrEnum):
+    """Durable lifecycle for permission requests."""
+
+    PENDING = "pending"
+    ANSWERED_PENDING_APPLY = "answered_pending_apply"
+    APPLIED = "applied"
+    REJECTED = "rejected"
+    EXPIRED_BY_TERMINAL_STATE = "expired_by_terminal_state"
 
 
 __all__ = [
+    "ControlActionResultStatus",
+    "ControlActionType",
     "InvalidTransitionError",
+    "PermissionRequestStatus",
+    "RepairStatus",
     "ThreadStatus",
     "append_cost_record",
     "append_permission_log",
     "create_artifact",
+    "create_control_action",
     "create_thread",
     "delete_thread",
+    "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
+    "get_control_action_by_idempotency_key",
+    "get_latest_control_action",
+    "get_pending_permission_requests",
     "get_permission_logs_by_thread",
+    "get_permission_request",
     "get_thread",
     "get_thread_metadata",
+    "list_non_terminal_threads",
     "list_threads",
+    "mark_control_action_applied",
+    "mark_control_action_duplicate",
+    "mark_control_action_superseded",
+    "mark_permission_request_applied",
+    "record_permission_request",
+    "record_permission_response_submission",
     "save_model",
+    "set_thread_repair_state",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
     "update_thread_metadata",
@@ -69,29 +130,26 @@ __all__ = [
 
 
 async def save_model[
-    M: (ThreadModel, ArtifactModel, PermissionLogModel, CostTrackingModel)
+    M: (
+        ThreadModel,
+        ArtifactModel,
+        PermissionLogModel,
+        PermissionRequestModel,
+        ControlActionModel,
+        CostTrackingModel,
+    )
 ](session: AsyncSession, model: M) -> M:
-    """Persist any database model instance.
-
-    Args:
-        session: Active async session.
-        model: The model instance to persist.
-
-    Returns:
-        The persisted model instance (same object, flushed).
-    """
+    """Persist any database model instance."""
     session.add(model)
     await session.flush()
     return model
 
 
-# ---------------------------------------------------------------------------
-# Thread CRUD
-# ---------------------------------------------------------------------------
+def _utcnow() -> datetime:
+    return datetime.now(UTC)
 
 
-def _coerce_status(status: "ThreadStatus | str") -> ThreadStatus:
-    """Coerce a raw string to ``ThreadStatus``, raising ``ValueError`` if invalid."""
+def _coerce_status(status: ThreadStatus | str) -> ThreadStatus:
     if isinstance(status, ThreadStatus):
         return status
     try:
@@ -102,38 +160,58 @@ def _coerce_status(status: "ThreadStatus | str") -> ThreadStatus:
         raise ValueError(msg) from None
 
 
+def _coerce_repair_status(status: RepairStatus | str) -> RepairStatus:
+    if isinstance(status, RepairStatus):
+        return status
+    try:
+        return RepairStatus(status)
+    except ValueError:
+        valid = ", ".join(s.value for s in RepairStatus)
+        msg = f"Invalid repair status: {status!r}. Must be one of: {valid}"
+        raise ValueError(msg) from None
+
+
+def _coerce_control_action_type(
+    action_type: ControlActionType | str,
+) -> ControlActionType:
+    if isinstance(action_type, ControlActionType):
+        return action_type
+    return ControlActionType(action_type)
+
+
+def _coerce_control_result(
+    status: ControlActionResultStatus | str,
+) -> ControlActionResultStatus:
+    if isinstance(status, ControlActionResultStatus):
+        return status
+    return ControlActionResultStatus(status)
+
+
+def _coerce_permission_request_status(
+    status: PermissionRequestStatus | str,
+) -> PermissionRequestStatus:
+    if isinstance(status, PermissionRequestStatus):
+        return status
+    return PermissionRequestStatus(status)
+
+
 async def create_thread(
     session: AsyncSession,
     *,
     title: str | None = None,
-    status: "ThreadStatus | str" = ThreadStatus.SUBMITTED,
+    status: ThreadStatus | str = ThreadStatus.SUBMITTED,
     metadata: str | None = None,
     nickname: str | None = None,
     thread_id: str | None = None,
     team_preset: str | None = None,
+    repair_status: RepairStatus | str = RepairStatus.HEALTHY,
+    repair_reason: str | None = None,
+    execution_readiness: str = "healthy",
 ) -> ThreadModel:
-    """Create a new orchestration thread.
-
-    Args:
-        session: Active async session.
-        title: Optional human-readable thread title.
-        status: Initial status (default ``ThreadStatus.SUBMITTED``). Raw strings
-            are accepted for backward compatibility but must be a valid
-            ``ThreadStatus`` value — ``ValueError`` is raised otherwise
-            (DB-HIGH-02).
-        metadata: JSON-serialised ThreadMetadata (ADR-014).
-        nickname: Optional human-friendly nickname (unique).
-        thread_id: Optional explicit ID; auto-generated if omitted.
-        team_preset: Optional team preset name used for this thread.
-
-    Returns:
-        The persisted ``ThreadModel`` instance.
-
-    Raises:
-        NicknameConflictError: If a thread with the given nickname already exists.
-        ValueError: If *status* is not a valid ``ThreadStatus`` value.
-    """
+    """Create a new orchestration thread."""
     coerced_status = _coerce_status(status)
+    coerced_repair_status = _coerce_repair_status(repair_status)
+
     if nickname is not None:
         existing = (
             await session.execute(
@@ -146,7 +224,10 @@ async def create_thread(
     thread = ThreadModel(
         id=thread_id or uuid4().hex,
         title=title,
-        status=coerced_status,
+        status=coerced_status.value,
+        repair_status=coerced_repair_status.value,
+        repair_reason=repair_reason,
+        execution_readiness=execution_readiness,
         thread_metadata=metadata,
         nickname=nickname,
         team_preset=team_preset,
@@ -154,29 +235,12 @@ async def create_thread(
     try:
         return await save_model(session, thread)
     except IntegrityError as exc:
-        # Safety net for H12/H17 TOCTOU race: two concurrent requests may both
-        # pass the SELECT pre-check above and then race on the INSERT.
-        # The unique index on ThreadModel.nickname fires an IntegrityError
-        # on the loser — convert it to NicknameConflictError so callers get a
-        # consistent exception type regardless of which check caught the conflict.
         if nickname is not None and "nickname" in str(exc).lower():
             raise NicknameConflictError(nickname) from exc
         raise
 
 
-async def get_thread(
-    session: AsyncSession,
-    thread_id: str,
-) -> ThreadModel | None:
-    """Fetch a thread by its ID.
-
-    Args:
-        session: Active async session.
-        thread_id: The thread's primary key.
-
-    Returns:
-        The ``ThreadModel`` or ``None`` if not found.
-    """
+async def get_thread(session: AsyncSession, thread_id: str) -> ThreadModel | None:
     return await session.get(ThreadModel, thread_id)
 
 
@@ -187,17 +251,6 @@ async def list_threads(
     limit: int = 50,
     status: ThreadStatus | None = None,
 ) -> tuple[Sequence[ThreadModel], int]:
-    """List threads with pagination and optional status filter.
-
-    Args:
-        session: Active async session.
-        offset: Number of rows to skip.
-        limit: Maximum number of rows to return.
-        status: Optional status filter.
-
-    Returns:
-        A tuple of ``(threads, total_count)``.
-    """
     count_stmt = select(func.count()).select_from(ThreadModel)
     if status is not None:
         count_stmt = count_stmt.where(ThreadModel.status == status.value)
@@ -215,19 +268,27 @@ async def list_threads(
     return result.scalars().all(), total
 
 
-async def delete_thread(
-    session: AsyncSession,
-    thread_id: str,
-) -> bool:
-    """Hard-delete a thread and all cascading artifacts.
+async def list_non_terminal_threads(session: AsyncSession) -> Sequence[ThreadModel]:
+    """Return all threads that still require orchestration attention."""
+    stmt = (
+        select(ThreadModel)
+        .where(
+            ThreadModel.status.not_in(
+                [
+                    ThreadStatus.COMPLETED.value,
+                    ThreadStatus.FAILED.value,
+                    ThreadStatus.CANCELLED.value,
+                    ThreadStatus.ARCHIVED.value,
+                ]
+            )
+        )
+        .order_by(ThreadModel.created_at.asc())
+    )
+    result = await session.execute(stmt)
+    return result.scalars().all()
 
-    Args:
-        session: Active async session.
-        thread_id: The thread's primary key.
 
-    Returns:
-        True if the thread was found and deleted, False otherwise.
-    """
+async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return False
@@ -240,38 +301,86 @@ class InvalidTransitionError(ValueError):
     """Raised when a thread status transition is not allowed."""
 
 
-# Terminal states — once a thread reaches one of these, it cannot regress
-# to a non-terminal state.
-_TERMINAL_STATES: frozenset[ThreadStatus] = frozenset(
-    {
-        ThreadStatus.COMPLETED,
-        ThreadStatus.FAILED,
-        ThreadStatus.CANCELLED,
-        ThreadStatus.ARCHIVED,
-    }
-)
-
-# Valid transitions: current_status → set of allowed next statuses.
-# Any transition not listed here is rejected.
 _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
         {
             ThreadStatus.CREATED,
             ThreadStatus.RUNNING,
-            ThreadStatus.FAILED,
+            ThreadStatus.INPUT_REQUIRED,
+            ThreadStatus.CANCELLING,
             ThreadStatus.CANCELLED,
+            ThreadStatus.FAILED,
+            ThreadStatus.RECONCILING,
+            ThreadStatus.REPAIR_NEEDED,
         }
     ),
     ThreadStatus.CREATED: frozenset(
-        {ThreadStatus.RUNNING, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+        {
+            ThreadStatus.RUNNING,
+            ThreadStatus.INPUT_REQUIRED,
+            ThreadStatus.CANCELLING,
+            ThreadStatus.CANCELLED,
+            ThreadStatus.FAILED,
+            ThreadStatus.RECONCILING,
+            ThreadStatus.REPAIR_NEEDED,
+        }
     ),
     ThreadStatus.RUNNING: frozenset(
-        {ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
+        {
+            ThreadStatus.INPUT_REQUIRED,
+            ThreadStatus.CANCELLING,
+            ThreadStatus.CANCELLED,
+            ThreadStatus.COMPLETED,
+            ThreadStatus.FAILED,
+            ThreadStatus.RECONCILING,
+            ThreadStatus.REPAIR_NEEDED,
+        }
+    ),
+    ThreadStatus.INPUT_REQUIRED: frozenset(
+        {
+            ThreadStatus.RUNNING,
+            ThreadStatus.CANCELLING,
+            ThreadStatus.CANCELLED,
+            ThreadStatus.COMPLETED,
+            ThreadStatus.FAILED,
+            ThreadStatus.RECONCILING,
+            ThreadStatus.REPAIR_NEEDED,
+        }
+    ),
+    ThreadStatus.CANCELLING: frozenset(
+        {
+            ThreadStatus.CANCELLED,
+            ThreadStatus.FAILED,
+            ThreadStatus.RECONCILING,
+            ThreadStatus.REPAIR_NEEDED,
+        }
+    ),
+    ThreadStatus.RECONCILING: frozenset(
+        {
+            ThreadStatus.SUBMITTED,
+            ThreadStatus.RUNNING,
+            ThreadStatus.INPUT_REQUIRED,
+            ThreadStatus.CANCELLING,
+            ThreadStatus.CANCELLED,
+            ThreadStatus.COMPLETED,
+            ThreadStatus.FAILED,
+            ThreadStatus.REPAIR_NEEDED,
+        }
+    ),
+    ThreadStatus.REPAIR_NEEDED: frozenset(
+        {
+            ThreadStatus.RECONCILING,
+            ThreadStatus.RUNNING,
+            ThreadStatus.INPUT_REQUIRED,
+            ThreadStatus.CANCELLING,
+            ThreadStatus.CANCELLED,
+            ThreadStatus.FAILED,
+        }
     ),
     ThreadStatus.COMPLETED: frozenset({ThreadStatus.ARCHIVED}),
     ThreadStatus.FAILED: frozenset({ThreadStatus.ARCHIVED}),
     ThreadStatus.CANCELLED: frozenset({ThreadStatus.ARCHIVED}),
-    ThreadStatus.ARCHIVED: frozenset(),  # truly terminal
+    ThreadStatus.ARCHIVED: frozenset(),
 }
 
 
@@ -280,29 +389,18 @@ async def update_thread_status(
     thread_id: str,
     status: ThreadStatus | str,
 ) -> ThreadModel | None:
-    """Update a thread's status with transition validation.
-
-    Args:
-        session: Active async session.
-        thread_id: The thread's primary key.
-        status: New status — ``ThreadStatus`` enum or equivalent string value.
-            Invalid strings raise ``ValueError`` (DB-HIGH-02).
-
-    Returns:
-        The updated ``ThreadModel`` or ``None`` if not found.
-
-    Raises:
-        ValueError: If *status* is not a valid ``ThreadStatus`` value.
-        InvalidTransitionError: If the transition from current to new status
-            is not allowed (BE-37).
-    """
+    """Update a thread's status with transition validation."""
     coerced_status = _coerce_status(status)
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
 
-    # BE-37: validate transition
     current = _coerce_status(thread.status)
+    if current == coerced_status:
+        thread.updated_at = _utcnow()
+        await session.flush()
+        return thread
+
     allowed = _VALID_TRANSITIONS.get(current, frozenset())
     if coerced_status not in allowed:
         raise InvalidTransitionError(
@@ -310,11 +408,46 @@ async def update_thread_status(
             f"{current.value!r} to {coerced_status.value!r}"
         )
 
-    thread.status = coerced_status
-    # DB-H2: onupdate=_utcnow only fires at the DB level; the in-memory object
-    # has a stale updated_at after flush when expire_on_commit=False.  Set it
-    # explicitly so callers always receive the current timestamp.
-    thread.updated_at = datetime.now(UTC)
+    thread.status = coerced_status.value
+    thread.updated_at = _utcnow()
+    await session.flush()
+    return thread
+
+
+async def set_thread_repair_state(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    repair_status: RepairStatus | str,
+    repair_reason: str | None = None,
+    execution_readiness: str | None = None,
+    last_requested_action: ControlActionType | str | None = None,
+    last_applied_action: ControlActionType | str | None = None,
+    increment_generation: bool = False,
+    increment_recovery_epoch: bool = False,
+) -> ThreadModel | None:
+    """Persist thread repair metadata used by restart reconciliation."""
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+
+    thread.repair_status = _coerce_repair_status(repair_status).value
+    thread.repair_reason = repair_reason
+    if execution_readiness is not None:
+        thread.execution_readiness = execution_readiness
+    if last_requested_action is not None:
+        thread.last_requested_action = _coerce_control_action_type(
+            last_requested_action
+        ).value
+    if last_applied_action is not None:
+        thread.last_applied_action = _coerce_control_action_type(
+            last_applied_action
+        ).value
+    if increment_generation:
+        thread.repair_generation += 1
+    if increment_recovery_epoch:
+        thread.recovery_epoch += 1
+    thread.updated_at = _utcnow()
     await session.flush()
     return thread
 
@@ -324,49 +457,243 @@ async def update_thread_metadata(
     thread_id: str,
     metadata: str | None,
 ) -> ThreadModel | None:
-    """Update a thread's serialised metadata JSON.
-
-    Args:
-        session: Active async session.
-        thread_id: The thread's primary key.
-        metadata: New metadata JSON string (ADR-014), or ``None`` to clear.
-
-    Returns:
-        The updated ``ThreadModel`` or ``None`` if not found.
-    """
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
     thread.thread_metadata = metadata
-    # DB-H2: keep updated_at consistent — set explicitly to avoid stale value.
-    thread.updated_at = datetime.now(UTC)
+    thread.updated_at = _utcnow()
     await session.flush()
     return thread
 
 
-async def get_thread_metadata(
-    session: AsyncSession,
-    thread_id: str,
-) -> str | None:
-    """Fetch the serialised metadata JSON for a thread.
-
-    Args:
-        session: Active async session.
-        thread_id: The thread's primary key.
-
-    Returns:
-        The metadata JSON string, or ``None`` if the thread is missing
-        or has no metadata.
-    """
+async def get_thread_metadata(session: AsyncSession, thread_id: str) -> str | None:
     thread = await session.get(ThreadModel, thread_id)
     if thread is None:
         return None
     return thread.thread_metadata
 
 
-# ---------------------------------------------------------------------------
-# Artifact CRUD
-# ---------------------------------------------------------------------------
+async def create_control_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    action_type: ControlActionType | str,
+    idempotency_key: str,
+    request_id: str | None = None,
+    payload: dict[str, object] | None = None,
+    worker_generation: int = 0,
+    result_status: ControlActionResultStatus | str = (
+        ControlActionResultStatus.ACCEPTED_NOT_APPLIED
+    ),
+) -> ControlActionModel:
+    """Append a durable control journal record."""
+    model = ControlActionModel(
+        id=uuid4().hex,
+        thread_id=thread_id,
+        action_type=_coerce_control_action_type(action_type).value,
+        request_id=request_id,
+        idempotency_key=idempotency_key,
+        payload_json=json.dumps(payload) if payload is not None else None,
+        worker_generation=worker_generation,
+        result_status=_coerce_control_result(result_status).value,
+    )
+    return await save_model(session, model)
+
+
+async def get_control_action_by_idempotency_key(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    idempotency_key: str,
+) -> ControlActionModel | None:
+    stmt = select(ControlActionModel).where(
+        ControlActionModel.thread_id == thread_id,
+        ControlActionModel.idempotency_key == idempotency_key,
+    )
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def get_latest_control_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    action_type: ControlActionType | str | None = None,
+) -> ControlActionModel | None:
+    stmt = (
+        select(ControlActionModel)
+        .where(ControlActionModel.thread_id == thread_id)
+        .order_by(ControlActionModel.requested_at.desc())
+    )
+    if action_type is not None:
+        stmt = stmt.where(
+            ControlActionModel.action_type
+            == _coerce_control_action_type(action_type).value
+        )
+    return (await session.execute(stmt.limit(1))).scalar_one_or_none()
+
+
+async def mark_control_action_applied(
+    session: AsyncSession,
+    action_id: str,
+    *,
+    applied_at: datetime | None = None,
+    result_status: ControlActionResultStatus | str = ControlActionResultStatus.APPLIED,
+) -> ControlActionModel | None:
+    action = await session.get(ControlActionModel, action_id)
+    if action is None:
+        return None
+    action.applied_at = applied_at or _utcnow()
+    action.result_status = _coerce_control_result(result_status).value
+    await session.flush()
+    return action
+
+
+async def mark_control_action_duplicate(
+    session: AsyncSession,
+    action_id: str,
+) -> ControlActionModel | None:
+    action = await session.get(ControlActionModel, action_id)
+    if action is None:
+        return None
+    action.result_status = ControlActionResultStatus.DUPLICATE.value
+    await session.flush()
+    return action
+
+
+async def mark_control_action_superseded(
+    session: AsyncSession,
+    action_id: str,
+) -> ControlActionModel | None:
+    action = await session.get(ControlActionModel, action_id)
+    if action is None:
+        return None
+    action.result_status = ControlActionResultStatus.SUPERSEDED.value
+    action.superseded_at = _utcnow()
+    await session.flush()
+    return action
+
+
+async def record_permission_request(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    thread_id: str,
+    pause_reason_type: str,
+    description: str,
+    allowed_options: list[dict[str, object]],
+    tool_call: str | None = None,
+    worker_generation: int = 0,
+) -> PermissionRequestModel:
+    """Create or refresh a durable permission request."""
+    existing = await session.get(PermissionRequestModel, request_id)
+    allowed_options_json = json.dumps(allowed_options)
+    if existing is not None:
+        existing.pause_reason_type = pause_reason_type
+        existing.description = description
+        existing.allowed_options_json = allowed_options_json
+        existing.tool_call = tool_call
+        existing.worker_generation = worker_generation
+        existing.request_status = PermissionRequestStatus.PENDING.value
+        existing.response_option_id = None
+        existing.idempotency_key = None
+        existing.responded_at = None
+        existing.applied_at = None
+        await session.flush()
+        return existing
+
+    model = PermissionRequestModel(
+        request_id=request_id,
+        thread_id=thread_id,
+        pause_reason_type=pause_reason_type,
+        tool_call=tool_call,
+        description=description,
+        allowed_options_json=allowed_options_json,
+        request_status=PermissionRequestStatus.PENDING.value,
+        worker_generation=worker_generation,
+    )
+    return await save_model(session, model)
+
+
+async def get_permission_request(
+    session: AsyncSession, request_id: str
+) -> PermissionRequestModel | None:
+    return await session.get(PermissionRequestModel, request_id)
+
+
+async def get_pending_permission_requests(
+    session: AsyncSession,
+    *,
+    thread_id: str | None = None,
+) -> Sequence[PermissionRequestModel]:
+    stmt = select(PermissionRequestModel).where(
+        PermissionRequestModel.request_status.in_(
+            [
+                PermissionRequestStatus.PENDING.value,
+                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
+            ]
+        )
+    )
+    if thread_id is not None:
+        stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
+    stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
+    return (await session.execute(stmt)).scalars().all()
+
+
+async def record_permission_response_submission(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    option_id: str,
+    idempotency_key: str,
+) -> PermissionRequestModel | None:
+    permission = await session.get(PermissionRequestModel, request_id)
+    if permission is None:
+        return None
+    permission.response_option_id = option_id
+    permission.idempotency_key = idempotency_key
+    permission.request_status = PermissionRequestStatus.ANSWERED_PENDING_APPLY.value
+    permission.responded_at = _utcnow()
+    await session.flush()
+    return permission
+
+
+async def mark_permission_request_applied(
+    session: AsyncSession,
+    *,
+    request_id: str,
+    status: PermissionRequestStatus | str = PermissionRequestStatus.APPLIED,
+) -> PermissionRequestModel | None:
+    permission = await session.get(PermissionRequestModel, request_id)
+    if permission is None:
+        return None
+    permission.request_status = _coerce_permission_request_status(status).value
+    permission.applied_at = _utcnow()
+    await session.flush()
+    return permission
+
+
+async def expire_pending_permission_requests(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+) -> int:
+    stmt = select(PermissionRequestModel).where(
+        PermissionRequestModel.thread_id == thread_id,
+        PermissionRequestModel.request_status.in_(
+            [
+                PermissionRequestStatus.PENDING.value,
+                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
+            ]
+        ),
+    )
+    permissions = (await session.execute(stmt)).scalars().all()
+    for permission in permissions:
+        permission.request_status = (
+            PermissionRequestStatus.EXPIRED_BY_TERMINAL_STATE.value
+        )
+        permission.applied_at = permission.applied_at or _utcnow()
+    await session.flush()
+    return len(permissions)
 
 
 async def create_artifact(
@@ -377,21 +704,6 @@ async def create_artifact(
     path: str,
     artifact_id: str | None = None,
 ) -> ArtifactModel:
-    """Create a new file artifact record.
-
-    For additional fields (``content_hash``, ``agent_id``), construct an
-    ``ArtifactModel`` directly and use ``save_model``.
-
-    Args:
-        session: Active async session.
-        thread_id: Parent thread ID.
-        artifact_type: Type classifier (e.g. ``"file"``, ``"diff"``).
-        path: Filesystem path of the artifact.
-        artifact_id: Optional explicit ID; auto-generated if omitted.
-
-    Returns:
-        The persisted ``ArtifactModel`` instance.
-    """
     artifact = ArtifactModel(
         id=artifact_id or uuid4().hex,
         thread_id=thread_id,
@@ -401,47 +713,19 @@ async def create_artifact(
     return await save_model(session, artifact)
 
 
-async def get_artifact(
-    session: AsyncSession,
-    artifact_id: str,
-) -> ArtifactModel | None:
-    """Fetch an artifact by its ID.
-
-    Args:
-        session: Active async session.
-        artifact_id: The artifact's primary key.
-
-    Returns:
-        The ``ArtifactModel`` or ``None`` if not found.
-    """
+async def get_artifact(session: AsyncSession, artifact_id: str) -> ArtifactModel | None:
     return await session.get(ArtifactModel, artifact_id)
 
 
 async def get_artifacts_by_thread(
-    session: AsyncSession,
-    thread_id: str,
+    session: AsyncSession, thread_id: str
 ) -> Sequence[ArtifactModel]:
-    """Fetch all artifacts belonging to a thread.
-
-    Args:
-        session: Active async session.
-        thread_id: The parent thread ID.
-
-    Returns:
-        A sequence of ``ArtifactModel`` instances.
-    """
     stmt = (
         select(ArtifactModel)
         .where(ArtifactModel.thread_id == thread_id)
         .order_by(ArtifactModel.created_at)
     )
-    result = await session.execute(stmt)
-    return result.scalars().all()
-
-
-# ---------------------------------------------------------------------------
-# Permission Log CRUD
-# ---------------------------------------------------------------------------
+    return (await session.execute(stmt)).scalars().all()
 
 
 async def append_permission_log(
@@ -452,21 +736,6 @@ async def append_permission_log(
     tool_name: str,
     action: str,
 ) -> PermissionLogModel:
-    """Append a permission decision to the audit log.
-
-    For additional fields (``option_id``), construct a
-    ``PermissionLogModel`` directly and use ``save_model``.
-
-    Args:
-        session: Active async session.
-        thread_id: Parent thread ID.
-        agent_id: ID of the agent that requested permission.
-        tool_name: Name of the tool requiring permission.
-        action: The action taken (e.g. ``"allow_once"``).
-
-    Returns:
-        The persisted ``PermissionLogModel`` instance.
-    """
     log_entry = PermissionLogModel(
         id=uuid4().hex,
         thread_id=thread_id,
@@ -478,71 +747,30 @@ async def append_permission_log(
 
 
 async def get_permission_logs_by_thread(
-    session: AsyncSession,
-    thread_id: str,
+    session: AsyncSession, thread_id: str
 ) -> Sequence[PermissionLogModel]:
-    """Fetch all permission log entries for a thread.
-
-    Args:
-        session: Active async session.
-        thread_id: The parent thread ID.
-
-    Returns:
-        A sequence of ``PermissionLogModel`` instances ordered by response time.
-    """
     stmt = (
         select(PermissionLogModel)
         .where(PermissionLogModel.thread_id == thread_id)
         .order_by(PermissionLogModel.responded_at)
     )
-    result = await session.execute(stmt)
-    return result.scalars().all()
-
-
-# ---------------------------------------------------------------------------
-# Cost Tracking CRUD
-# ---------------------------------------------------------------------------
+    return (await session.execute(stmt)).scalars().all()
 
 
 async def append_cost_record(
-    session: AsyncSession,
-    record: CostTrackingModel,
+    session: AsyncSession, record: CostTrackingModel
 ) -> CostTrackingModel:
-    """Persist a cost tracking record for an LLM invocation.
-
-    Callers construct a ``CostTrackingModel`` with all fields and pass
-    it here for persistence.
-
-    Args:
-        session: Active async session.
-        record: The cost tracking model instance to persist.
-
-    Returns:
-        The persisted ``CostTrackingModel`` instance.
-    """
     return await save_model(session, record)
 
 
 async def sum_cost_by_thread(
-    session: AsyncSession,
-    thread_id: str,
+    session: AsyncSession, thread_id: str
 ) -> dict[str, int | float]:
-    """Sum token usage and cost for an entire thread.
-
-    Args:
-        session: Active async session.
-        thread_id: The thread to aggregate.
-
-    Returns:
-        A dict with ``input_tokens``, ``output_tokens``, and
-        ``estimated_cost`` totals.
-    """
     stmt = select(
         func.coalesce(func.sum(CostTrackingModel.input_tokens), 0),
         func.coalesce(func.sum(CostTrackingModel.output_tokens), 0),
         func.coalesce(func.sum(CostTrackingModel.estimated_cost), 0.0),
     ).where(CostTrackingModel.thread_id == thread_id)
-
     row = (await session.execute(stmt)).one()
     return {
         "input_tokens": row[0],
@@ -552,25 +780,13 @@ async def sum_cost_by_thread(
 
 
 async def sum_cost_by_agent(
-    session: AsyncSession,
-    agent_id: str,
+    session: AsyncSession, agent_id: str
 ) -> dict[str, int | float]:
-    """Sum token usage and cost for a specific agent across all threads.
-
-    Args:
-        session: Active async session.
-        agent_id: The agent to aggregate.
-
-    Returns:
-        A dict with ``input_tokens``, ``output_tokens``, and
-        ``estimated_cost`` totals.
-    """
     stmt = select(
         func.coalesce(func.sum(CostTrackingModel.input_tokens), 0),
         func.coalesce(func.sum(CostTrackingModel.output_tokens), 0),
         func.coalesce(func.sum(CostTrackingModel.estimated_cost), 0.0),
     ).where(CostTrackingModel.agent_id == agent_id)
-
     row = (await session.execute(stmt)).one()
     return {
         "input_tokens": row[0],

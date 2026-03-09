@@ -12,15 +12,24 @@ References:
 
 from datetime import UTC, datetime
 
-from sqlalchemy import ForeignKey, Index, Text
+from sqlalchemy import (
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    TypeDecorator,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 
 __all__ = [
     "ArtifactModel",
     "Base",
+    "ControlActionModel",
     "CostTrackingModel",
     "PermissionLogModel",
+    "PermissionRequestModel",
     "ThreadModel",
 ]
 
@@ -28,6 +37,36 @@ __all__ = [
 def _utcnow() -> datetime:
     """Return timezone-aware UTC now."""
     return datetime.now(UTC)
+
+
+class UTCDateTime(TypeDecorator[datetime]):
+    """Persist timezone-aware timestamps as naive UTC and restore UTC on read.
+
+    This keeps one portable schema across SQLite and Postgres while preserving
+    UTC-aware datetimes at the application boundary.
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def process_bind_param(
+        self, value: datetime | None, dialect: object
+    ) -> datetime | None:
+        """Normalize inbound values to naive UTC for storage."""
+        if value is None:
+            return None
+        if value.tzinfo is None or value.tzinfo.utcoffset(value) is None:
+            msg = "UTCDateTime requires timezone-aware datetime values."
+            raise TypeError(msg)
+        return value.astimezone(UTC).replace(tzinfo=None)
+
+    def process_result_value(
+        self, value: datetime | None, dialect: object
+    ) -> datetime | None:
+        """Restore UTC timezone info on loaded datetime values."""
+        if value is None:
+            return None
+        return value.replace(tzinfo=UTC)
 
 
 class Base(DeclarativeBase):
@@ -43,9 +82,18 @@ class ThreadModel(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     title: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
-    updated_at: Mapped[datetime] = mapped_column(default=_utcnow, onupdate=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
     status: Mapped[str] = mapped_column(default="submitted")
+    repair_status: Mapped[str] = mapped_column(default="healthy")
+    repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    execution_readiness: Mapped[str] = mapped_column(default="healthy")
+    last_requested_action: Mapped[str | None] = mapped_column(default=None)
+    last_applied_action: Mapped[str | None] = mapped_column(default=None)
+    repair_generation: Mapped[int] = mapped_column(default=0)
+    recovery_epoch: Mapped[int] = mapped_column(default=0)
     thread_metadata: Mapped[str | None] = mapped_column(Text, default=None)
     nickname: Mapped[str | None] = mapped_column(default=None)
     team_preset: Mapped[str | None] = mapped_column(default=None)
@@ -54,6 +102,12 @@ class ThreadModel(Base):
         back_populates="thread", cascade="all, delete-orphan"
     )
     permission_logs: Mapped[list["PermissionLogModel"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan"
+    )
+    permission_requests: Mapped[list["PermissionRequestModel"]] = relationship(
+        back_populates="thread", cascade="all, delete-orphan"
+    )
+    control_actions: Mapped[list["ControlActionModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan"
     )
     cost_records: Mapped[list["CostTrackingModel"]] = relationship(
@@ -78,7 +132,7 @@ class ArtifactModel(Base):
     type: Mapped[str] = mapped_column()
     path: Mapped[str] = mapped_column()
     content_hash: Mapped[str | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     agent_id: Mapped[str | None] = mapped_column(default=None)
 
     thread: Mapped["ThreadModel"] = relationship(back_populates="artifacts")
@@ -104,11 +158,68 @@ class PermissionLogModel(Base):
     tool_name: Mapped[str] = mapped_column()
     action: Mapped[str] = mapped_column()
     option_id: Mapped[str | None] = mapped_column(default=None)
-    responded_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    responded_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     thread: Mapped["ThreadModel"] = relationship(back_populates="permission_logs")
 
     __table_args__ = (Index("ix_permission_logs_thread_id", "thread_id"),)
+
+
+class PermissionRequestModel(Base):
+    """Durable record of a pending or resolved permission request."""
+
+    __tablename__ = "permission_requests"
+
+    request_id: Mapped[str] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
+    pause_reason_type: Mapped[str] = mapped_column()
+    tool_call: Mapped[str | None] = mapped_column(default=None)
+    description: Mapped[str] = mapped_column(Text)
+    allowed_options_json: Mapped[str] = mapped_column(Text)
+    request_status: Mapped[str] = mapped_column(default="pending")
+    response_option_id: Mapped[str | None] = mapped_column(default=None)
+    idempotency_key: Mapped[str | None] = mapped_column(default=None)
+    worker_generation: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+
+    thread: Mapped["ThreadModel"] = relationship(back_populates="permission_requests")
+
+    __table_args__ = (
+        Index("ix_permission_requests_thread_id", "thread_id"),
+        Index("ix_permission_requests_status", "request_status"),
+    )
+
+
+class ControlActionModel(Base):
+    """Durable control and repair journal for thread orchestration actions."""
+
+    __tablename__ = "control_actions"
+
+    __table_args__ = (
+        Index("ix_control_actions_thread_id", "thread_id"),
+        Index("ix_control_actions_request_id", "request_id"),
+        UniqueConstraint(
+            "thread_id",
+            "idempotency_key",
+            name="uq_control_actions_thread_id_idempotency_key",
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"))
+    action_type: Mapped[str] = mapped_column()
+    request_id: Mapped[str | None] = mapped_column(default=None)
+    idempotency_key: Mapped[str] = mapped_column()
+    requested_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    superseded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
+    result_status: Mapped[str] = mapped_column(default="accepted_not_applied")
+    payload_json: Mapped[str | None] = mapped_column(Text, default=None)
+    worker_generation: Mapped[int] = mapped_column(default=0)
+
+    thread: Mapped["ThreadModel"] = relationship(back_populates="control_actions")
 
 
 class CostTrackingModel(Base):
@@ -124,7 +235,7 @@ class CostTrackingModel(Base):
     input_tokens: Mapped[int] = mapped_column(default=0)
     output_tokens: Mapped[int] = mapped_column(default=0)
     estimated_cost: Mapped[float] = mapped_column(default=0.0)
-    created_at: Mapped[datetime] = mapped_column(default=_utcnow)
+    created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
     thread: Mapped["ThreadModel"] = relationship(back_populates="cost_records")
 

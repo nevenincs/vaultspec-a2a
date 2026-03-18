@@ -3,10 +3,16 @@
 from pathlib import Path
 from typing import Literal
 
-from pydantic import AliasChoices, Field
+from pydantic import AliasChoices, Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..utils.enums import Environment, LogLevel
+
+
+# Defaults for path-override fields.  Computed once at module import relative to
+# this file: core/config.py → core → vaultspec_a2a → src → project-root.
+_DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
+_DEFAULT_UI_BUILD_DIR: Path = _DEFAULT_PROJECT_ROOT / "src" / "ui" / "dist"
 
 
 class Settings(BaseSettings):
@@ -51,38 +57,91 @@ class Settings(BaseSettings):
             "Fail startup loudly when Postgres-backed dependencies are required."
         ),
     )
+    db_pool_size: int = Field(
+        default=5,
+        alias="VAULTSPEC_DB_POOL_SIZE",
+        description="SQLAlchemy QueuePool pool_size for Postgres engine.",
+    )
+    db_pool_max_overflow: int = Field(
+        default=10,
+        alias="VAULTSPEC_DB_POOL_MAX_OVERFLOW",
+        description="SQLAlchemy QueuePool max_overflow for Postgres engine.",
+    )
     workspace_root: Path = Field(default=Path("./workspaces"))
+    project_root: Path = Field(
+        default_factory=lambda: _DEFAULT_PROJECT_ROOT,
+        alias="VAULTSPEC_PROJECT_ROOT",
+        description=(
+            "Absolute path to the repository root.  Computed from __file__ by "
+            "default; override in Docker non-editable installs where __file__ "
+            "resolves inside site-packages."
+        ),
+    )
+    ui_build_dir: Path = Field(
+        default_factory=lambda: _DEFAULT_UI_BUILD_DIR,
+        alias="VAULTSPEC_UI_BUILD_DIR",
+        description=(
+            "Absolute path to the React SPA build output (src/ui/dist).  "
+            "Computed from project_root by default; override in Docker "
+            "non-editable installs."
+        ),
+    )
+    mock_api_base: str | None = Field(
+        default=None,
+        alias="MOCK_API_BASE",
+        description=(
+            "Base URL for the VidaiMock tape-replay server.  Used by "
+            "MockChatModel when Provider.MOCK is selected.  "
+            "Example: http://vidaimock:8100"
+        ),
+    )
     provider_timeout_seconds: int = Field(
         default=300, description="Global timeout for LLM provider API calls."
     )
-    # API Keys & Auth (bare ecosystem names take precedence over VAULTSPEC_ prefix)
+    # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
+    # These are the canonical names used by every external tool and SDK.
     anthropic_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "ANTHROPIC_API_KEY", "VAULTSPEC_ANTHROPIC_API_KEY"
-        ),
+        validation_alias="ANTHROPIC_API_KEY",
     )
     gemini_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("GEMINI_API_KEY", "VAULTSPEC_GEMINI_API_KEY"),
+        validation_alias="GEMINI_API_KEY",
     )
     google_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("GOOGLE_API_KEY", "VAULTSPEC_GOOGLE_API_KEY"),
+        validation_alias="GOOGLE_API_KEY",
+    )
+    google_application_credentials: str | None = Field(
+        default=None,
+        validation_alias="GOOGLE_APPLICATION_CREDENTIALS",
+    )
+    google_cloud_project: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices(
+            "GOOGLE_CLOUD_PROJECT",
+            "GOOGLE_CLOUD_PROJECT_ID",
+        ),
+    )
+    google_cloud_location: str | None = Field(
+        default=None,
+        validation_alias="GOOGLE_CLOUD_LOCATION",
+    )
+    gemini_cli_home: str | None = Field(
+        default=None,
+        validation_alias="GEMINI_CLI_HOME",
     )
     openai_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("OPENAI_API_KEY", "VAULTSPEC_OPENAI_API_KEY"),
+        validation_alias="OPENAI_API_KEY",
     )
     zhipu_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("ZHIPU_API_KEY", "VAULTSPEC_ZHIPU_API_KEY"),
+        validation_alias="ZHIPU_API_KEY",
     )
     claude_code_oauth_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices(
-            "CLAUDE_CODE_OAUTH_TOKEN", "VAULTSPEC_CLAUDE_CODE_OAUTH_TOKEN"
-        ),
+        validation_alias="CLAUDE_CODE_OAUTH_TOKEN",
     )
 
     host: str = Field(
@@ -97,6 +156,16 @@ class Settings(BaseSettings):
     mcp_api_base_url: str = Field(
         default="http://localhost:8000",
         description="Base URL for MCP tool loopback calls.",
+    )
+    mcp_host: str = Field(
+        default="0.0.0.0",
+        alias="VAULTSPEC_MCP_HOST",
+        description="Bind host for MCP streamable-http transport.",
+    )
+    mcp_port: int = Field(
+        default=8100,
+        alias="VAULTSPEC_MCP_PORT",
+        description="Bind port for MCP streamable-http transport.",
     )
 
     cors_allowed_origins: list[str] = Field(
@@ -129,7 +198,7 @@ class Settings(BaseSettings):
     )
     internal_token: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("VAULTSPEC_INTERNAL_TOKEN", "INTERNAL_TOKEN"),
+        alias="VAULTSPEC_INTERNAL_TOKEN",
         description=(
             "Bearer token for worker<->control IPC. None disables auth (dev mode)."
         ),
@@ -168,10 +237,10 @@ class Settings(BaseSettings):
         alias="VAULTSPEC_ACP_BACKEND",
     )
 
-    # LangSmith tracing (bare ecosystem names, no VAULTSPEC_ prefix)
+    # LangSmith tracing — bare ecosystem names only; LANGCHAIN_* aliases removed.
     langsmith_tracing: bool = Field(
         default=False,
-        validation_alias=AliasChoices("LANGSMITH_TRACING", "LANGCHAIN_TRACING_V2"),
+        validation_alias="LANGSMITH_TRACING",
         description=(
             "Enable LangSmith tracing. Defaults OFF"
             " to avoid unexpected quota consumption."
@@ -179,15 +248,319 @@ class Settings(BaseSettings):
     )
     langsmith_api_key: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("LANGSMITH_API_KEY", "LANGCHAIN_API_KEY"),
+        validation_alias="LANGSMITH_API_KEY",
     )
     langsmith_project: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("LANGSMITH_PROJECT", "LANGCHAIN_PROJECT"),
+        validation_alias="LANGSMITH_PROJECT",
     )
     langsmith_endpoint: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("LANGSMITH_ENDPOINT", "LANGCHAIN_ENDPOINT"),
+        validation_alias="LANGSMITH_ENDPOINT",
+    )
+
+    # Worker gateway — heartbeat & circuit-breaker (D-10, D-11)
+    worker_heartbeat_timeout_seconds: float = Field(
+        default=90.0,
+        alias="VAULTSPEC_WORKER_HEARTBEAT_TIMEOUT_SECONDS",
+        description=(
+            "Seconds without a heartbeat before the worker is considered disconnected."
+        ),
+    )
+    cb_failure_threshold: int = Field(
+        default=3,
+        alias="VAULTSPEC_CB_FAILURE_THRESHOLD",
+        description="Consecutive dispatch failures before the circuit breaker opens.",
+    )
+    cb_recovery_timeout_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_CB_RECOVERY_TIMEOUT_SECONDS",
+        description="Seconds before a OPEN circuit breaker probes the worker again.",
+    )
+
+    # Worker health-poll adaptive back-off (D-12)
+    worker_poll_initial_interval_seconds: float = Field(
+        default=0.1,
+        alias="VAULTSPEC_WORKER_POLL_INITIAL_INTERVAL_SECONDS",
+        description=(
+            "Initial poll interval when waiting for the worker to become ready."
+        ),
+    )
+    worker_poll_max_interval_seconds: float = Field(
+        default=2.0,
+        alias="VAULTSPEC_WORKER_POLL_MAX_INTERVAL_SECONDS",
+        description="Maximum back-off poll interval when waiting for the worker.",
+    )
+    worker_poll_backoff_factor: float = Field(
+        default=1.5,
+        alias="VAULTSPEC_WORKER_POLL_BACKOFF_FACTOR",
+        description="Multiplicative back-off factor for worker health polling.",
+    )
+    worker_poll_log_interval_seconds: float = Field(
+        default=5.0,
+        alias="VAULTSPEC_WORKER_POLL_LOG_INTERVAL_SECONDS",
+        description="Seconds between 'still waiting for worker' log messages.",
+    )
+
+    # Worker watchdog (D-13)
+    watchdog_poll_interval_seconds: float = Field(
+        default=5.0,
+        alias="VAULTSPEC_WATCHDOG_POLL_INTERVAL_SECONDS",
+        description="How often the watchdog checks worker liveness (seconds).",
+    )
+    watchdog_max_retries: int = Field(
+        default=3,
+        alias="VAULTSPEC_WATCHDOG_MAX_RETRIES",
+        description="Maximum restart attempts before the watchdog gives up.",
+    )
+    watchdog_backoff_base_seconds: float = Field(
+        default=2.0,
+        alias="VAULTSPEC_WATCHDOG_BACKOFF_BASE_SECONDS",
+        description=(
+            "Exponential back-off base (seconds) between watchdog restart attempts."
+        ),
+    )
+
+    # WebSocket (D-14)
+    ws_heartbeat_interval_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_WS_HEARTBEAT_INTERVAL_SECONDS",
+        description="ADR-011 §5: WebSocket heartbeat cadence (seconds).",
+    )
+    ws_dead_client_timeout_seconds: float = Field(
+        default=90.0,
+        alias="VAULTSPEC_WS_DEAD_CLIENT_TIMEOUT_SECONDS",
+        description="ADR-011 §5: disconnect WebSocket clients silent for this long.",
+    )
+    ws_max_message_bytes: int = Field(
+        default=1_048_576,
+        alias="VAULTSPEC_WS_MAX_MESSAGE_BYTES",
+        description=(
+            "M14: maximum WebSocket frame size (bytes) to prevent memory exhaustion."
+        ),
+    )
+
+    # Internal IPC frame/body limits (D-15)
+    internal_max_frame_bytes: int = Field(
+        default=1_048_576,
+        alias="VAULTSPEC_INTERNAL_MAX_FRAME_BYTES",
+        description="Maximum worker→gateway WebSocket frame size (bytes).",
+    )
+    internal_max_http_body_bytes: int = Field(
+        default=1_048_576,
+        alias="VAULTSPEC_INTERNAL_MAX_HTTP_BODY_BYTES",
+        description=(
+            "Maximum HTTP body accepted on internal /dispatch and /events endpoints."
+        ),
+    )
+
+    # LangGraph execution (D-16)
+    graph_recursion_limit: int = Field(
+        default=100,
+        alias="VAULTSPEC_GRAPH_RECURSION_LIMIT",
+        description="LangGraph recursion limit passed to every graph invocation.",
+    )
+
+    # Worker executor (D-18)
+    max_cached_graphs: int = Field(
+        default=32,
+        alias="VAULTSPEC_MAX_CACHED_GRAPHS",
+        description=(
+            "Maximum compiled LangGraph objects held in the executor LRU cache."
+        ),
+    )
+
+    # Worker IPC bridge (D-19)
+    ipc_flush_interval_seconds: float = Field(
+        default=0.05,
+        alias="VAULTSPEC_IPC_FLUSH_INTERVAL_SECONDS",
+        description="CRIT-02: batch flush cadence for the worker→gateway event bridge.",
+    )
+    ipc_max_flush_retries: int = Field(
+        default=3,
+        alias="VAULTSPEC_IPC_MAX_FLUSH_RETRIES",
+        description="IPC-03: maximum relay retry attempts per event batch.",
+    )
+    ipc_retry_backoff_base_seconds: float = Field(
+        default=0.1,
+        alias="VAULTSPEC_IPC_RETRY_BACKOFF_BASE_SECONDS",
+        description=(
+            "IPC-03: back-off base (seconds) between relay retries"
+            " (doubles each attempt)."
+        ),
+    )
+    ipc_max_event_buffer: int = Field(
+        default=10_000,
+        alias="VAULTSPEC_IPC_MAX_EVENT_BUFFER",
+        description="IPC-03: drop-oldest cap on the in-memory event buffer.",
+    )
+
+    # Event aggregator debounce / buffer (D-20)
+    tool_call_debounce_seconds: float = Field(
+        default=0.100,
+        alias="VAULTSPEC_TOOL_CALL_DEBOUNCE_SECONDS",
+        description="Aggregator: debounce window for ToolCallUpdateEvents (seconds).",
+    )
+    plan_update_debounce_seconds: float = Field(
+        default=0.250,
+        alias="VAULTSPEC_PLAN_UPDATE_DEBOUNCE_SECONDS",
+        description="Aggregator: debounce window for PlanUpdateEvents (seconds).",
+    )
+    chunk_flush_interval_seconds: float = Field(
+        default=0.050,
+        alias="VAULTSPEC_CHUNK_FLUSH_INTERVAL_SECONDS",
+        description="Aggregator: interval between streaming chunk flushes (seconds).",
+    )
+    debounce_map_max_entries: int = Field(
+        default=1000,
+        alias="VAULTSPEC_DEBOUNCE_MAP_MAX_ENTRIES",
+        description=(
+            "Aggregator: maximum debounce-map entries before oldest are evicted."
+        ),
+    )
+    chunk_buffer_max_bytes: int = Field(
+        default=4096,
+        alias="VAULTSPEC_CHUNK_BUFFER_MAX_BYTES",
+        description=(
+            "Aggregator: maximum bytes buffered per streaming chunk before flush."
+        ),
+    )
+    tool_arg_truncate_len: int = Field(
+        default=1000,
+        alias="VAULTSPEC_TOOL_ARG_TRUNCATE_LEN",
+        description=(
+            "Aggregator: maximum length of tool argument strings before truncation."
+        ),
+    )
+    event_queue_maxsize: int = Field(
+        default=512,
+        alias="VAULTSPEC_EVENT_QUEUE_MAXSIZE",
+        description="Aggregator: asyncio queue depth for outgoing events.",
+    )
+    aget_state_timeout_seconds: float = Field(
+        default=10.0,
+        alias="VAULTSPEC_AGET_STATE_TIMEOUT_SECONDS",
+        description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",
+    )
+
+    # Context window sizing (D-21)
+    context_limit_tokens: int = Field(
+        default=120_000,
+        alias="VAULTSPEC_CONTEXT_LIMIT_TOKENS",
+        description="Estimated token budget for the context window.",
+    )
+    chars_per_token: int = Field(
+        default=4,
+        alias="VAULTSPEC_CHARS_PER_TOKEN",
+        description=(
+            "Characters-per-token approximation used for context size estimates."
+        ),
+    )
+
+    # Workspace / context reference caps (D-22)
+    anchor_path_cap: int = Field(
+        default=10,
+        alias="VAULTSPEC_ANCHOR_PATH_CAP",
+        description="Maximum anchor paths returned by the workspace anchoring module.",
+    )
+    max_context_refs: int = Field(
+        default=50,
+        alias="VAULTSPEC_MAX_CONTEXT_REFS",
+        description="Maximum context references included in a single graph invocation.",
+    )
+    vault_index_cap: int = Field(
+        default=50,
+        alias="VAULTSPEC_VAULT_INDEX_CAP",
+        description="Maximum vault index entries surfaced to the agent per turn.",
+    )
+    mount_token_ceiling: int = Field(
+        default=20_000,
+        alias="VAULTSPEC_MOUNT_TOKEN_CEILING",
+        description="Maximum tokens consumed by mounted documents per turn.",
+    )
+    min_remaining_tokens_for_mount: int = Field(
+        default=100,
+        alias="VAULTSPEC_MIN_REMAINING_TOKENS_FOR_MOUNT",
+        description=(
+            "Minimum remaining token budget required before mounting any document."
+        ),
+    )
+    task_queue_pending_horizon: int = Field(
+        default=2,
+        alias="VAULTSPEC_TASK_QUEUE_PENDING_HORIZON",
+        description=(
+            "Number of upcoming task-queue entries to include in the agent prompt."
+        ),
+    )
+
+    # ACP provider (D-23, D-24)
+    acp_startup_timeout_seconds: float = Field(
+        default=300.0,
+        alias="VAULTSPEC_ACP_STARTUP_TIMEOUT_SECONDS",
+        description="Seconds to wait for the ACP subprocess to become ready.",
+    )
+    acp_fs_read_max_bytes: int = Field(
+        default=10_485_760,
+        alias="VAULTSPEC_ACP_FS_READ_MAX_BYTES",
+        description="Maximum file read size (bytes) surfaced through ACP tool calls.",
+    )
+    acp_rpc_timeout_seconds: float = Field(
+        default=15.0,
+        alias="VAULTSPEC_ACP_RPC_TIMEOUT_SECONDS",
+        description=(
+            "Seconds to wait for a quick ACP management RPC response"
+            " (list_sessions, set_mode, set_model, set_config_option, authenticate)."
+        ),
+    )
+    acp_interactive_auth_timeout_seconds: float = Field(
+        default=900.0,
+        alias="VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS",
+        description=(
+            "Watchdog timeout (seconds) for interactive ACP browser auth flows."
+            " This is a backstop for authenticate/login prompts, not the normal"
+            " success path."
+        ),
+    )
+    acp_chunk_queue_maxsize: int = Field(
+        default=1024,
+        alias="VAULTSPEC_ACP_CHUNK_QUEUE_MAXSIZE",
+        description=(
+            "Bound on the per-session chunk queue used to buffer ACP streaming"
+            " output before it is consumed by the model invocation loop."
+        ),
+    )
+
+    # Gemini OAuth (D-25)
+    oauth_expiry_buffer_seconds: int = Field(
+        default=120,
+        alias="VAULTSPEC_OAUTH_EXPIRY_BUFFER_SECONDS",
+        description="Seconds before OAuth token expiry to trigger a proactive refresh.",
+    )
+
+    # MCP server (D-26)
+    mcp_create_timeout_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_MCP_CREATE_TIMEOUT_SECONDS",
+        description="MCP tool: timeout (seconds) for thread-create operations.",
+    )
+    mcp_query_timeout_seconds: float = Field(
+        default=15.0,
+        alias="VAULTSPEC_MCP_QUERY_TIMEOUT_SECONDS",
+        description=(
+            "MCP tool: timeout (seconds) for thread-query and status operations."
+        ),
+    )
+    mcp_max_initial_message_chars: int = Field(
+        default=32_000,
+        alias="VAULTSPEC_MCP_MAX_INITIAL_MESSAGE_CHARS",
+        description=(
+            "MCP tool: maximum characters in the initial message before truncation."
+        ),
+    )
+    mcp_preview_truncate_len: int = Field(
+        default=200,
+        alias="VAULTSPEC_MCP_PREVIEW_TRUNCATE_LEN",
+        description="MCP tool: character limit for inline message previews.",
     )
 
     # Environment Flags
@@ -195,6 +568,14 @@ class Settings(BaseSettings):
     no_color: bool = Field(
         default=False, validation_alias=AliasChoices("VAULTSPEC_NO_COLOR", "NO_COLOR")
     )
+
+    @field_validator("internal_token", mode="before")
+    @classmethod
+    def _normalize_blank_internal_token(cls, value: object) -> object:
+        """Treat blank env-var tokens as auth-disabled in dev/test stacks."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @property
     def is_dev(self) -> bool:
@@ -288,6 +669,25 @@ class Settings(BaseSettings):
         if self.resolved_database_backend == "sqlite":
             return self.database_url.replace("+aiosqlite", "", 1)
         return self.database_url.replace("+asyncpg", "+psycopg", 1)
+
+    def validate_postgres_requirement(self) -> None:
+        """Fail fast when Postgres-backed dependencies are required but absent."""
+        if not self.postgres_required:
+            return
+
+        problems: list[str] = []
+        if self.resolved_database_backend != "postgres":
+            problems.append(
+                "VAULTSPEC_POSTGRES_REQUIRED=true requires "
+                "VAULTSPEC_DATABASE_BACKEND=postgres"
+            )
+        if self.resolved_checkpoint_backend != "postgres":
+            problems.append(
+                "VAULTSPEC_POSTGRES_REQUIRED=true requires "
+                "VAULTSPEC_CHECKPOINT_BACKEND=postgres"
+            )
+        if problems:
+            raise ValueError("; ".join(problems))
 
 
 # Global settings instance

@@ -58,6 +58,7 @@ dev = [
   "tenacity>=9.0.0",
   "testcontainers[generic]>=4.12.0",
   "ty>=0.0.15",
+  "websockets>=16.0",
 ]
 
 [build-system]
@@ -71,7 +72,7 @@ packages = ["src/vaultspec_a2a"]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live and not requires_jaeger"]
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live"]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
@@ -84,7 +85,9 @@ asyncio_default_fixture_loop_scope = "function"
 timeout = "300"
 markers = [
   "live: marks tests requiring live ACP backend processes (deselect with '-m not live')",
-  "requires_jaeger: marks tests that verify real OTel span export to a live Jaeger instance (fails if Jaeger unreachable at localhost:14269)",
+  "requires_jaeger: marks tests that verify real OTel span export to the persistent local Jaeger instance (health at localhost:13133/status, OTLP at localhost:4317, UI/query at localhost:16686)",
+  "requires_postgres: marks tests that require a live Postgres instance (fails if Postgres unreachable)",
+  "requires_vidaimock: marks tests that require a running VidaiMock tape server (fails if unreachable at MOCK_API_BASE or localhost:8100)",
 ]
 
 [tool.ruff]

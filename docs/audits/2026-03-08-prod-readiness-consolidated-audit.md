@@ -340,8 +340,8 @@ compose hardening (Phase 2).
 | 4 | #59 | MOCK-04: Worker tests MockTransport | CRIT (user mandate) |
 | 5 | #64 | TEST-STUB-01: test_executor.py stubs | CRIT (user mandate) |
 | 6 | #66 | MOCK-06: test_supervisor.py MemorySaver | LOW (user mandate) |
-| 8 | #42 | WS-G01+APP-N03: WS dispatch errors + phantom thread | MED |
-| 9 | #41 | DOCKER-01: docker-compose restart/healthcheck | HIGH |
+| 8 | #42 | WS-G01+APP-N03: WS dispatch errors + phantom thread | MED | FIXED |
+| 9 | #41 | DOCKER-01: docker-compose restart/healthcheck | HIGH | FIXED |
 | 10 | #52 | APP-N01: Worker stderr DEVNULL | MED |
 | 11 | #48 | CLI-I03: service stop wrong endpoint | MED |
 | 12 | #47 | CLI-I01: agent ask nickname collision | MED |
@@ -375,20 +375,23 @@ compose hardening (Phase 2).
 
 ### Deferred Findings (no task yet — noted for future)
 
-- **CLI-I06** (LOW): Hardcoded MCP tools list in CLI will go stale. Address
-  when MCP tools change.
-- **WRK-K06** (LOW): Worker dispatch endpoint (`/dispatch`) has no auth.
-  Consistent gap — both gateway and worker need internal token on the dispatch
-  path. Create task when auth story is finalized.
-- **WRK-K01** (LOW): `worker/health.py` contains dead code. Bundle with a
-  cleanup pass.
-- **DCK-L04** (MED): `docker-compose.prod.yml` does not set
-  `VAULTSPEC_INTERNAL_TOKEN`. Production Docker deployments will fail the
-  internal token check at startup (PROD-017). Either add a placeholder env var
-  with a comment in the compose file, or document as a required manual step in
-  deployment docs.
+- **CLI-I06** (LOW): closed. `vaultspec mcp tools` and `vaultspec mcp status`
+  now derive their tool list and count from the live FastMCP registration
+  surface via `mcp.list_tools()` instead of a hardcoded duplicate table.
+- **WRK-K06** (LOW): closed. Worker `/dispatch` now enforces the same internal
+  bearer-token contract as gateway `/internal/*`, the gateway-owned worker
+  client sends the token by default, and direct tests cover `401` invalid/missing
+  auth plus loud `500` non-development misconfiguration.
+- **WRK-K01** (LOW): closed. The empty `worker/health.py` placeholder was
+  removed; the real worker health contract remains in `worker/app.py` and
+  `worker/ipc.py`.
+- **DCK-L04** (MED): closed as stale. `docker-compose.prod.yml` already
+  requires `VAULTSPEC_INTERNAL_TOKEN` via required-variable interpolation, and
+  `docker/README.md` now documents it explicitly as a required production env.
 - **APP-N03** (MED): WS dispatch proceeds with phantom/null thread — no 404
-  guard. Bundled into #42 (WS-G01).
+  guard. Fixed via #42: WebSocket command rejection is now repair-aware and
+  distinguishes `THREAD_STATE_DRIFT`, `THREAD_STATE_UNVERIFIED`, and
+  `THREAD_NOT_FOUND` instead of assuming the thread is fully gone.
 
 ### Pass M+N Findings Summary (Endpoints + App)
 
@@ -400,15 +403,15 @@ All findings from Passes M (endpoints.py) and N (app.py) have tasks:
 | EP-M01+M08: Terminal thread 500 | HIGH | #51 | FIXED (uncommitted) |
 | EP-M02: Health leaks exceptions | MED | #53 | FIXED (uncommitted) |
 | EP-M04: Permission on terminal thread | MED | #54 | FIXED (uncommitted) |
-| APP-N01: stderr DEVNULL + read | MED | #52 | Pending |
-| APP-N03: WS phantom thread | MED | #42 | Pending (bundled with WS-G01) |
+| APP-N01: stderr DEVNULL + read | MED | #52 | FIXED — gateway-managed worker stderr now goes to a deterministic runtime log, `/health` and `/api/health` expose the log path, and live crash-recovery verification proves restart records carry actionable diagnostics |
+| APP-N03: WS phantom thread | MED | #42 | FIXED — accepted WebSocket connections now receive structured recoverable error events, and missing thread rows are classified against durable checkpoint residue instead of being treated as safe absence |
 
 ### Pass O Findings (Providers + Docker)
 
 | Finding | Severity | Task | Status |
 |---------|----------|------|--------|
 | PROV-O02: _PROJECT_ROOT wrong in Docker non-editable install | HIGH | #55 | FIXED (uncommitted) |
-| PROV-O01: Docker worker has no Node.js/ACP runtime | HIGH | #55 | Known limitation — Docker worker supports OpenAI/Zhipu only |
+| PROV-O01: Docker worker does not yet certify the full Claude/Gemini ACP provider matrix | HIGH | #55 | PARTIAL — worker image now includes Node.js + `claude-agent-acp` plus a pinned Gemini CLI runtime; remaining gap is explicit credential-backed Docker provider certification |
 
 **Root cause pattern**: Both #50 and #55 share the same root cause — `Path(__file__)`
 4-parent traversal resolves into `site-packages/` in non-editable installs
@@ -426,9 +429,9 @@ All findings from Passes M (endpoints.py) and N (app.py) have tasks:
 | Issue | Severity | Task | Fixed? |
 |-------|----------|------|--------|
 | SPA 404 (wrong COPY + wrong _UI_BUILD_DIR) | CRIT | #50 | YES (uncommitted) |
-| Claude/Gemini crash (no ACP + wrong _PROJECT_ROOT) | HIGH | #55 | PARTIAL — _PROJECT_ROOT fixed, ACP missing is known limitation |
-| No restart policies, no healthcheck deps | HIGH | #41 | Pending |
-| No VAULTSPEC_INTERNAL_TOKEN in compose | MED | DCK-L04 | Deferred |
+| Claude/Gemini Docker provider path incomplete | HIGH | #55 | PARTIAL — `_PROJECT_ROOT`, Claude Node ACP runtime, and Gemini CLI runtime are fixed; remaining gap is credential-backed Docker provider certification and auth-material verification |
+| No restart policies, no healthcheck deps | HIGH | #41 | FIXED — current prod/dev/integration compose paths already use service restart policies and `service_healthy` dependency ordering where required |
+| No VAULTSPEC_INTERNAL_TOKEN in compose | MED | DCK-L04 | FIXED — prod compose already hard-fails without the token, and Docker docs now call out the requirement explicitly |
 | VAULTSPEC_AUTO_SPAWN_WORKER not disabled | HIGH | #50 | YES — added to API stage ENV |
 
 ---
@@ -443,31 +446,45 @@ the active queue rather than leaving those items implicit.
 
 | ID | Subject | Severity | Status |
 |----|---------|----------|--------|
-| #56 | MANDATE: Replace mock API test conftest | CRIT | PARTIAL — module conftest now uses real SQLite + AsyncSqliteSaver + in-process ASGI worker, but the broader mock-removal/testing mandate is still open |
-| #57 | MOCK-02: MCP server tests mock removal | CRIT | Pending |
-| #58 | MOCK-03: core/test_graph.py unittest.mock removal | CRIT | Pending |
-| #59 | MOCK-04: worker tests MockTransport removal | CRIT | Pending |
-| #60 | SKIP-01: pytest.skip → hard fails | MED | PARTIAL — some sites were removed, but skip-based policy drift remains and must be audited back into the suite |
-| #64 | TEST-STUB-01: test_executor.py stubs | CRIT | Pending |
-| #66 | MOCK-06: test_supervisor.py MemorySaver removal | LOW | Pending |
-| #35 | TESTING-03: IPC + heartbeat integration | HIGH | Pending |
-| #36 | TESTING-04: MCP E2E integration | HIGH | Pending |
+| #56 | MANDATE: Replace mock API test conftest | CRIT | FIXED — API harness now uses real file-backed SQLite + AsyncSqliteSaver + in-process ASGI worker via `app.state` injection, with no `dependency_overrides` or `:memory:` DBs |
+| #57 | MOCK-02: MCP server tests mock removal | CRIT | FIXED — MCP/API in-process fixtures now inject real DB/checkpointer/worker state through `app.state`, `get_db(request)` honors `app.state.db_session_factory`, and the MCP suite passes without `dependency_overrides` |
+| #58 | MOCK-03: core/test_graph.py unittest.mock removal | CRIT | FIXED — graph tests now validate provider/capability/fallback precedence through a pure production helper instead of the old `Provider.MOCK` path |
+| #59 | MOCK-04: worker tests MockTransport removal | CRIT | FIXED — worker IPC tests no longer use `MockTransport`; requests go through real ASGI wiring |
+| #60 | SKIP-01: pytest.skip → hard fails | MED | FIXED — no remaining `pytest.skip`/`skipif`/`xfail` usage remains under `src/vaultspec_a2a`; provider and CLI skip paths were rewritten around truthful runtime contracts |
+| #64 | TEST-STUB-01: test_executor.py stubs | CRIT | FIXED — `MockTransport`/stub patterns are gone and `_build_graph_input` is now a static production helper, removing the old `object.__new__(Executor)` bypass |
+| #66 | TEST-STUB-01b: test_supervisor.py model-double removal | LOW | FIXED — `_StubChatModel` is gone, the supervisor suite now hits deterministic production helpers directly, and `just verify-core` proves the slice on the repo-safe temp/cache path |
+| #35 | TESTING-03: IPC + heartbeat integration | HIGH | FIXED — live Postgres suite now proves worker heartbeat truth, `/api/team/status` active-thread visibility, real cancel semantics, and eventual active-thread clearing |
+| #36 | TESTING-04: MCP E2E integration | HIGH | FIXED — live MCP stdio suite now launches the real server, lists tools, starts a real thread, and queries live thread state through the gateway |
 
 ### New Tasks From Orchestration Durability Review
 
 | ID | Subject | Severity | Status |
 |----|---------|----------|--------|
-| #67 | REPAIR-VERIFY-01: Add live recovery tests for pre-existing running/input_required/cancelling threads across restart | HIGH | Pending |
-| #68 | REPAIR-PROJ-01: Expand checkpoint projection beyond `channel_values` into interrupt/control-aware repair projection | HIGH | Pending |
-| #69 | REPAIR-STATE-01: Remove or formally redefine orphaned `created` lifecycle state across DB, API, tests, and docs | MED | Pending |
-| #70 | REPAIR-APPROVAL-01: Replace `plan_approved` boolean with durable approval-state/request linkage | HIGH | Pending |
+| #67 | REPAIR-VERIFY-01: Add live recovery tests for pre-existing running/input_required/cancelling threads across restart | HIGH | FIXED — live Postgres suites now prove durable `input_required` restart recovery plus deterministic restart classification for pre-existing `running` (`reconciling/needs_reconciliation`) and `cancelling` (`cancelling/cancel_pending`) threads |
+| #68 | REPAIR-PROJ-01: Expand checkpoint projection beyond `channel_values` into interrupt/control-aware repair projection | HIGH | FIXED — gateway now projects checkpoint parent/source/step metadata, updated channels, pending-write channels/count, bounded history depth, and persisted interrupts; the remaining `tasks/next` gap is closed by the worker-owned `execution_state_projection` path and live Postgres restart verification |
+| #69 | REPAIR-STATE-01: Remove or formally redefine orphaned `created` lifecycle state across DB, API, tests, and docs | MED | FIXED — runtime enum/transition support removed, snapshot/CLI/schema references cleaned up, and migration `0003` rewrites legacy `threads.status='created'` rows to `submitted` |
+| #70 | REPAIR-APPROVAL-01: Replace `plan_approved` boolean with durable approval-state/request linkage | HIGH | FIXED — thread-level approval state, stable request identity, DB/API surfaces, supervisor runtime routing, and live Postgres restart verification now all pass; duplicate approval responses remain idempotent across gateway restart |
 | #71 | AUDIT-LOOP-01: Re-run code review after each implementation slice and sync findings back into audit queue/docs | HIGH | Pending |
 
 ### New Tasks For Phased Postgres Production Path
 
 | ID | Subject | Severity | Status |
 |----|---------|----------|--------|
-| #72 | PG-ARCH-01: Introduce database/checkpointer backend abstraction and SQLite hardening for phased Postgres rollout | HIGH | Pending |
-| #73 | PG-ARCH-02: Add Postgres-backed app DB + checkpoint factories, startup fail-fast, readiness, and dependency diagnostics | HIGH | Pending |
-| #74 | PG-VERIFY-01: Add prod-like Docker/Postgres verification matrix and staged CI targets | HIGH | Pending |
-| #75 | PLAN-REWRITE-01: Rewrite the backend production-readiness execution plan around open repair, test, Docker, and Postgres tracks | MED | Pending |
+| #72 | PG-ARCH-01: Introduce database/checkpointer backend abstraction and SQLite hardening for phased Postgres rollout | HIGH | FIXED — backend-selectable DB/checkpointer factories shipped, the repo keeps SQLite as fallback-only, and health now exposes explicit `sqlite_fallback` diagnostics (real file existence + WAL visibility + non-certifying limitations) instead of implying correctness from backend names alone |
+| #73 | PG-ARCH-02: Add Postgres-backed app DB + checkpoint factories, startup fail-fast, readiness, and dependency diagnostics | HIGH | FIXED — prod-like Docker now boots on Postgres with explicit backend/checkpoint settings, `VAULTSPEC_POSTGRES_REQUIRED=true`, direct runtime startup, stable Alembic config resolution from `settings.project_root`, corrected Jaeger v2 health probes, and successful `/api/health` + real thread create/state verification |
+| #74 | PG-VERIFY-01: Add prod-like Docker/Postgres verification matrix and staged CI targets | HIGH | FIXED — prod-like Docker/Postgres verification now has a shared repo-owned CLI verifier (`uv run vaultspec test prodlike-docker`), local entry points (`just verify-prodlike-docker`, `just verify-claude-docker`, `just verify-gemini-docker`), and a GitHub Actions PR gate/workflow target in `.github/workflows/prodlike-docker.yml` |
+| #75 | PLAN-REWRITE-01: Rewrite the backend production-readiness execution plan around open repair, test, Docker, and Postgres tracks | MED | FIXED — the active execution plan now reflects the actual remaining queue after repair, live verification, and Postgres/Docker closeout; only the still-open tracks remain in scope |
+| #76 | PG-VERIFY-02: Make live crash-recovery restart-state verification deterministic instead of warning-based | MED | FIXED — `/health` now exposes latched restart metadata and owned worker PID; live suite kills the exact worker process and asserts hard-fail restart recovery semantics |
+| #77 | LIVE-PROVIDER-01: Wire live provider credential readiness for production-certifying Postgres recovery suites | HIGH | FIXED — provider readiness is now certifying-provider aware via `src/vaultspec_a2a/providers/probes/certifying.py`; `just verify-live-provider-certifying` passes in this environment and selects a healthy real provider (`claude`) for the live Postgres recovery path |
+| #78 | LIVE-APPROVAL-01: Fix the live Postgres approval path that remains durably `submitted` with no progress or interrupt evidence | HIGH | FIXED — interrupt outcome classification now derives from durable checkpoint state, the gateway preserves `tool_call` and `plan_approval_request` pause cause, and the live Postgres paused-thread restart test passes |
+| #79 | REPAIR-SNAPSHOT-01: Prove explicit degraded snapshot behavior when the checkpoint backend is unavailable | HIGH | FIXED — a live two-Postgres test now kills only the checkpoint backend and verifies that `/api/threads/{id}/state` returns explicit degradation while preserving durable paused-thread truth from the app DB |
+| #80 | REPLAY-VERIFY-02: Add live WebSocket reconnect/replay verification for actual disconnect and resubscribe behavior | HIGH | FIXED — a live Postgres `/ws` suite now proves snapshot-based reconnect recovery using a real WebSocket client and confirms there is no implicit replay of already-accounted-for thread events |
+| #81 | TEST-STUB-02: remove remaining core fake-model/model-double usage in node and worker suites | CRIT | FIXED — the targeted core suites now validate deterministic supervisor/worker behavior through production helpers and real model types; `verify-core` and the real ACP worker integration suite both pass |
+| #82 | SKIP-CLI-01: remove stale-PID `pytest.skip()` usage from CLI service tests | MED | FIXED — stale-PID tests now use a real exited child-process PID instead of a hard-coded PID plus skip |
+| #83 | TEST-RUNNER-03: pytest tmp-path cleanup fails for CLI service module in current Windows environment | MED | FIXED — CLI service tests now use a repo-local runtime-dir fixture instead of pytest temp-root paths, and the stale-PID setup was corrected to use a dynamically discovered non-running PID |
+| #84 | REPAIR-PROJ-02: Add a worker-owned higher-fidelity execution-state projection path for truthful `tasks/next` repair reconstruction | HIGH | FIXED — worker-owned `graph.aget_state(...)` inspection emits normalized `execution_state_projection` events, the gateway persists a latest-row `thread_execution_state` model, reconnect snapshots expose normalized `next_nodes` / task truth, degraded-only updates preserve the last good durable payload, and live Postgres paused-thread restart verification now passes. Sequential live-test contamination was fixed by isolating each test to a fresh logical Postgres database. |
+| #85 | PROV-DOCKER-01: Add supported Gemini CLI provisioning path for the Docker worker image if Gemini is meant to be Docker-supported | HIGH | FIXED — worker image now installs pinned `@google/gemini-cli@0.3.3`; real worker-image build and in-container `--help` smoke passed against the package `dist/index.js` entrypoint |
+| #86 | PROV-DOCKER-02: Add explicit supported Docker auth-material path and certifying verification for Claude/Gemini ACP providers | HIGH | PARTIAL — explicit provider-auth overlay, CLI verifier, `COMPOSE_DISABLE_ENV_FILE=1` hardening, and `#89` Phase 1 runtime-authority evidence are in place; a real Docker-backed Claude certification run on March 11, 2026 reached ACP `initialize` + `session/new` and then failed at `session/prompt` with provider error `Internal error: You've hit your limit · resets Mar 13, 4am (UTC)` in `.vaultspec/runtime/verify-prodlike-docker/20260311T205100Z`, so the Claude path is now narrowed to provider quota/account state rather than packaging or Docker runtime breakage. Gemini is fixed and verified on the Docker OAuth-backed path: aligning subprocess/container `HOME` with the mounted `GEMINI_CLI_HOME` restored `security.auth.selectedType=oauth-personal` inside the worker-owned Gemini CLI process, and `uv run vaultspec test prodlike-provider gemini` passed on March 11, 2026 with the success bundle at `.vault/runtime/verify-prodlike-docker/20260311T230801Z`. On March 12, 2026, the verifier path was further hardened so the Docker Gemini cert now runs from `/tmp`, mounts an auth-only temp-backed Gemini CLI home, no longer inherits workspace/user MCP noise, and still passes with the clean bundle at `.vault/runtime/verify-prodlike-docker/20260312T084628Z`. `#86` therefore remains partial only because Claude is still provider-quota blocked, and it is explicitly pending pickup on Friday, March 13, 2026 for the post-reset Claude rerun |
+| #87 | PG-VERIFY-03: Prod-like Docker CLI verifier can still fail with gateway readiness timeout and too-thin startup diagnostics | HIGH | FIXED AND VERIFIED — the verifier evidence gap was fixed in `src/vaultspec_a2a/cli/_verify.py`, the gateway startup permission regression was fixed in `src/vaultspec_a2a/api/app.py`, and a fresh elevated `uv run vaultspec test prodlike-docker` rerun passed on March 11, 2026. The certifying success bundle at `.vaultspec/runtime/verify-prodlike-docker/20260311T154053Z` records healthy Postgres-backed status, `thread_id: b594e0ce071b4a36aa89e7911ea86fb9`, `readiness_probe_count: 3`, and `trace-manifest.json` reporting `vaultspec-a2a` `trace_count: 4` after the bounded verifier Jaeger query-contract fix |
+| #88 | OBS-ARCH-01: Add formal log/trace correlation architecture and implementation for multi-service debugging | HIGH | IMPLEMENTATION COMPLETE FOR RUNTIME EMISSION AND VERIFIER CONSUMPTION — architecture is grounded by `docs/research/2026-03-11-observability-debug-correlation-grounding.md` and `docs/adrs/036-debug-evidence-surface.md`; `src/vaultspec_a2a/utils/logging.py` now injects automatic `trace_id` / `span_id` / `trace_sampled` / `service_name` correlation via a shared filter, the top-priority service-path logs in `src/vaultspec_a2a/api/endpoints.py`, `src/vaultspec_a2a/api/websocket.py`, and `src/vaultspec_a2a/worker/ipc.py` now carry bounded runtime-owned fields such as `thread_id`, `dispatch_id`, `request_id`, `client_id`, and `worker_id`, the same model was extended into `src/vaultspec_a2a/api/internal.py` and `src/vaultspec_a2a/worker/executor.py`, and the verifier in `src/vaultspec_a2a/cli/_verify.py` now consumes that model via correlation-aware evidence manifests; the baseline prod-like Docker verifier is now recertified via `.vaultspec/runtime/verify-prodlike-docker/20260311T154053Z`, while ACP/runtime evidence hardening remains under `#89` |
+| #89 | ACP-ARCH-01: Add ADR-backed authority model for local ACP vs Dockerized provider runtime and observability boundaries | HIGH | PHASE 1 COMPLETE WITH FOLLOW-ON AUTH-EVIDENCE HARDENING — `docs/research/2026-03-11-observability-debug-correlation-grounding.md` and `docs/adrs/037-acp-runtime-authority.md` are now backed by a bounded implementation in `src/vaultspec_a2a/providers/factory.py`, `src/vaultspec_a2a/providers/_subprocess.py`, and `src/vaultspec_a2a/providers/acp_chat_model.py`: worker-owned ACP evidence now classifies runtime authority (`project_local`, `docker_bundled`, `package_bin`, `system_cli`, `explicit_executable` where applicable), emits bounded command provenance and auth-mode metadata, records subprocess spawn/termination lifecycle evidence, adds narrow initialize/session handshake context, and now also captures browser-auth handoff URLs from Gemini ACP stderr so timeout / early-exit auth failures no longer collapse into generic low-context errors. Focused auth-wait coverage in `src/vaultspec_a2a/providers/tests/test_acp_chat_model.py` passes, and a fresh host-local `uv run python -m vaultspec_a2a.providers.probes.gemini` rerun on March 12, 2026 still passed through `initialize`, `session/new`, and `session/prompt`. `AcpAuthError` now carries bounded machine-readable auth outcome classification (`watchdog_expired`, `operator_cancelled`, `auth_rejected`, `subprocess_exited_before_auth`, with `auth_failed` fallback), and `ruff` passed on the touched auth files; the remaining follow-up under `#89` is now limited to focused async verification once the host-level Windows interpreter failure importing `asyncio` (`OSError: [WinError 10106] ... _overlapped`) is cleared, while live Docker provider certification remains under `#86` |

@@ -12,7 +12,8 @@ from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import interrupt
 
 from ..anchoring import build_anchoring_context
-from ..context import CONTEXT_LIMIT, compact_context, should_compact
+from ..config import settings
+from ..context import compact_context, should_compact
 from ..phase import infer_phase_from_vault_index
 from ..rules import RuleManager
 from ..state import TeamState
@@ -93,6 +94,14 @@ class _GateResult:
     message: str
 
 
+@dataclass(frozen=True, slots=True)
+class _SupervisorDecision:
+    next_route: str
+    inferred_phase: str
+    routing_error: str | None = None
+    plan_approval_request: dict[str, Any] | None = None
+
+
 # Maps target phase → (required vault_index key, is_hard_gate)
 _PHASE_PREREQUISITES: dict[str, tuple[str, bool]] = {
     "adr": ("research", False),  # SOFT — warn only
@@ -128,6 +137,122 @@ def _check_phase_prerequisites(
     return _GateResult(blocked=False, warning=True, message=msg)
 
 
+def _evaluate_supervisor_response(
+    *,
+    state: TeamState,
+    response_text: str,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+    autonomous: bool,
+) -> _SupervisorDecision:
+    """Apply deterministic routing/gating logic after the model response exists."""
+    vault_index: dict[str, list[str]] = state.get("vault_index") or {}
+    inferred_phase = infer_phase_from_vault_index(vault_index)
+    options = [*workers, "FINISH"]
+
+    next_route, unparseable = _parse_route(response_text, options)
+    if unparseable:
+        _logger.warning(
+            "supervisor could not parse route from"
+            " response %r — defaulting to FINISH",
+            response_text[:120],
+        )
+        return _SupervisorDecision(
+            next_route="FINISH",
+            inferred_phase=inferred_phase,
+            routing_error=(
+                f"supervisor could not parse route from: {response_text!r}"
+            ),
+        )
+
+    if next_route == "FINISH":
+        blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
+        if blocked is not None:
+            return _SupervisorDecision(
+                next_route=cast(str, blocked["next"]),
+                inferred_phase=cast(str, blocked["pipeline_phase"]),
+                routing_error=cast(str, blocked["routing_error"]),
+            )
+
+    if worker_phase_map and state.get("active_feature"):
+        target_phase = worker_phase_map.get(next_route)
+        if target_phase:
+            gate_result = _check_phase_prerequisites(target_phase, vault_index)
+            if gate_result.blocked or gate_result.warning:
+                _logger.warning(
+                    "supervisor phase gate %s: %s",
+                    "blocked" if gate_result.blocked else "warning",
+                    gate_result.message,
+                )
+                return _SupervisorDecision(
+                    next_route=next_route,
+                    inferred_phase=inferred_phase,
+                    routing_error=gate_result.message,
+                )
+
+    approval_granted = state.get("approval_status") == "approved" or bool(
+        state.get("plan_approved")
+    )
+    if (
+        not autonomous
+        and worker_phase_map
+        and worker_phase_map.get(next_route) == "exec"
+        and state.get("active_feature")
+        and vault_index.get("plan")
+        and not approval_granted
+    ):
+        payload = {
+            "type": "plan_approval_request",
+            "feature": state.get("active_feature"),
+            "plan_paths": vault_index.get("plan", []),
+            "exec_worker": next_route,
+        }
+        _logger.info(
+            "supervisor plan approval interrupt: feature=%r exec_worker=%r",
+            state.get("active_feature"),
+            next_route,
+        )
+        return _SupervisorDecision(
+            next_route=next_route,
+            inferred_phase=inferred_phase,
+            plan_approval_request=payload,
+        )
+
+    _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
+    return _SupervisorDecision(
+        next_route=next_route,
+        inferred_phase=inferred_phase,
+    )
+
+
+def _build_supervisor_messages(
+    *,
+    state: TeamState,
+    full_prompt: str,
+    workspace_root: Path | None,
+) -> list[BaseMessage]:
+    """Build the supervisor prompt/message list before model invocation."""
+    working_state = (
+        compact_context(state, settings.context_limit_tokens)
+        if should_compact(state, settings.context_limit_tokens)
+        else state
+    )
+    anchoring = build_anchoring_context(state)
+    messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
+    if workspace_root:
+        rules = RuleManager(Path(workspace_root)).compile()
+        if rules:
+            messages.append(
+                SystemMessage(
+                    content=f"## Project Coding Rules & Guidelines\n\n{rules}"
+                )
+            )
+    if anchoring:
+        messages.append(SystemMessage(content=anchoring))
+    messages.extend(working_state.get("messages", []))
+    return messages
+
+
 class SupervisorNode(Protocol):
     """Protocol for the supervisor node callable with __name__ attribute."""
 
@@ -138,7 +263,7 @@ class SupervisorNode(Protocol):
         ...
 
 
-def create_supervisor_node(  # noqa: PLR0915
+def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
     workers: list[str],
@@ -172,30 +297,13 @@ def create_supervisor_node(  # noqa: PLR0915
     )
     full_prompt = system_prompt + routing_instructions
 
-    async def supervisor_node(state: TeamState) -> dict[str, Any]:  # noqa: PLR0911, PLR0912
+    async def supervisor_node(state: TeamState) -> dict[str, Any]:
         """Execute the supervisor's routing task."""
-        vault_index: dict[str, list[str]] = state.get("vault_index") or {}
-        inferred_phase = infer_phase_from_vault_index(vault_index)
-
-        working_state = (
-            compact_context(state, CONTEXT_LIMIT)
-            if should_compact(state, CONTEXT_LIMIT)
-            else state
+        messages = _build_supervisor_messages(
+            state=state,
+            full_prompt=full_prompt,
+            workspace_root=workspace_root,
         )
-        anchoring = build_anchoring_context(state)
-        messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
-        _ws_root = workspace_root
-        if _ws_root:
-            _rules = RuleManager(Path(_ws_root)).compile()
-            if _rules:
-                messages.append(
-                    SystemMessage(
-                        content=f"## Project Coding Rules & Guidelines\n\n{_rules}"
-                    )
-                )
-        if anchoring:
-            messages.append(SystemMessage(content=anchoring))
-        messages.extend(working_state.get("messages", []))
         model_type = type(model).__name__
         _logger.debug(
             "supervisor invoking model=%s messages=%d options=%s",
@@ -215,73 +323,22 @@ def create_supervisor_node(  # noqa: PLR0915
 
         # Parse text safely to derive next route
         text = str(response.content).strip()
-        next_route, unparseable = _parse_route(text, options)
-
-        if unparseable:
-            _logger.warning(
-                "supervisor could not parse route from"
-                " response %r — defaulting to FINISH",
-                text[:120],
-            )
+        decision = _evaluate_supervisor_response(
+            state=state,
+            response_text=text,
+            workers=workers,
+            worker_phase_map=worker_phase_map,
+            autonomous=autonomous,
+        )
+        if decision.routing_error:
             return {
-                "next": "FINISH",
-                "pipeline_phase": inferred_phase,
-                "routing_error": f"supervisor could not parse route from: {text!r}",
+                "next": decision.next_route,
+                "pipeline_phase": decision.inferred_phase,
+                "routing_error": decision.routing_error,
             }
 
-        if next_route == "FINISH":
-            blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
-            if blocked is not None:
-                return blocked
-
-        # ADR-023: phase artifact prerequisite gates
-        if worker_phase_map and state.get("active_feature"):
-            target_phase = worker_phase_map.get(next_route)
-            if target_phase:
-                gate_result = _check_phase_prerequisites(target_phase, vault_index)
-                if gate_result.blocked:
-                    _logger.warning(
-                        "supervisor phase gate blocked: %s", gate_result.message
-                    )
-                    return {
-                        "next": next_route,
-                        "pipeline_phase": inferred_phase,
-                        "routing_error": gate_result.message,
-                    }
-                if gate_result.warning:
-                    _logger.warning(
-                        "supervisor phase gate warning: %s", gate_result.message
-                    )
-                    return {
-                        "next": next_route,
-                        "pipeline_phase": inferred_phase,
-                        "routing_error": gate_result.message,
-                    }
-
-        # ADR-024: plan approval interrupt — fires when routing to an exec worker,
-        # a plan artifact exists, the feature is active, and the plan has not yet
-        # been approved.  Skipped in autonomous mode (no human present).
-        if (
-            not autonomous
-            and worker_phase_map
-            and worker_phase_map.get(next_route) == "exec"
-            and state.get("active_feature")
-            and vault_index.get("plan")
-            and not state.get("plan_approved")
-        ):
-            _logger.info(
-                "supervisor plan approval interrupt: feature=%r exec_worker=%r",
-                state.get("active_feature"),
-                next_route,
-            )
-            resume_value = interrupt(
-                {
-                    "type": "plan_approval_request",
-                    "feature": state.get("active_feature"),
-                    "plan_paths": vault_index.get("plan", []),
-                    "exec_worker": next_route,
-                }
-            )
+        if decision.plan_approval_request is not None:
+            resume_value = interrupt(decision.plan_approval_request)
             # BE-19: resume_value may be a dict (from test preps) or a bare
             # string like "approve" (from the real permission endpoint).
             approved = (
@@ -291,36 +348,38 @@ def create_supervisor_node(  # noqa: PLR0915
             )
             if approved:
                 _logger.info(
-                    "plan approved by user — routing to exec_worker=%r", next_route
+                    "plan approved by user — routing to exec_worker=%r",
+                    decision.next_route,
                 )
                 return {
-                    "next": next_route,
-                    "pipeline_phase": inferred_phase,
-                    "plan_approved": True,
+                    "next": decision.next_route,
+                    "pipeline_phase": decision.inferred_phase,
+                    "approval_status": "approved",
                 }
             _logger.info(
                 "plan rejected by user — rerouting to first worker for revision"
             )
             return {
                 "next": workers[0] if workers else "FINISH",
-                "pipeline_phase": inferred_phase,
+                "pipeline_phase": decision.inferred_phase,
+                "approval_status": "rejected",
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."
                 ),
             }
-
-        _logger.debug("supervisor routed to %r (raw=%r)", next_route, text[:80])
         # BE-28: write current_plan so the aggregator can emit PlanUpdateEvent.
         # Each supervisor cycle produces a plan entry for the routing decision.
         plan_entry: dict[str, str] = {
-            "content": f"Route to {next_route}"
-            if next_route != "FINISH"
+            "content": f"Route to {decision.next_route}"
+            if decision.next_route != "FINISH"
             else "Complete task",
-            "status": "in_progress" if next_route != "FINISH" else "completed",
+            "status": (
+                "in_progress" if decision.next_route != "FINISH" else "completed"
+            ),
         }
         return {
-            "next": next_route,
-            "pipeline_phase": inferred_phase,
+            "next": decision.next_route,
+            "pipeline_phase": decision.inferred_phase,
             "current_plan": [plan_entry],
         }
 

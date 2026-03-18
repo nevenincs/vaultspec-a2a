@@ -9,24 +9,16 @@ from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from .config import settings
 from .state import TeamState
 
 
 __all__ = [
-    "CONTEXT_LIMIT",
     "compact_context",
     "estimate_tokens",
     "prepare_handoff",
     "should_compact",
 ]
-
-# Conservative context limit that fits all supported models
-# (Claude 200k, GPT-4 Turbo 128k, Gemini 1M). Compaction triggers at 80%
-# (100k tokens) to leave headroom for the generation cycle.
-CONTEXT_LIMIT = 120_000
-
-# Rough approximation: ~4 characters per token (GPT / Claude ballpark).
-_CHARS_PER_TOKEN = 4
 
 
 def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
@@ -48,7 +40,7 @@ def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
                     total_chars += len(part)
                 elif isinstance(part, dict):
                     total_chars += len(part.get("text", ""))
-    return total_chars // _CHARS_PER_TOKEN
+    return total_chars // settings.chars_per_token
 
 
 def should_compact(state: TeamState, max_tokens: int) -> bool:

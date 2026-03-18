@@ -49,6 +49,7 @@ from ..api.schemas.events import (
     ToolCallUpdateEvent,
 )
 from ..telemetry.instrumentation import get_meter, get_tracer
+from .config import settings
 from .exceptions import EventAggregatorError
 
 
@@ -94,21 +95,6 @@ _ingest_duration_histogram = _meter.create_histogram(
 )
 
 
-# ---------------------------------------------------------------------------
-# Debounce intervals (seconds) — ADR-011 §5
-# ---------------------------------------------------------------------------
-_TOOL_CALL_UPDATE_DEBOUNCE = 0.100  # max 1 per 100ms per tool call
-_PLAN_UPDATE_DEBOUNCE = 0.250  # max 1 per 250ms per thread
-
-# ---------------------------------------------------------------------------
-# Token chunk batching — research §1.3
-# ---------------------------------------------------------------------------
-_CHUNK_FLUSH_INTERVAL = 0.050  # 50ms flush window
-
-# AGG-03: safety cap for debounce timestamp maps to prevent unbounded growth.
-_DEBOUNCE_MAP_MAX_ENTRIES = 1000
-
-
 def _evict_oldest(d: dict, max_entries: int) -> None:
     """Remove oldest entries (by value = timestamp) until at max_entries."""
     to_remove = len(d) - max_entries
@@ -118,19 +104,6 @@ def _evict_oldest(d: dict, max_entries: int) -> None:
     for key in sorted(d, key=d.__getitem__)[:to_remove]:
         del d[key]
 
-
-_CHUNK_BUFFER_MAX_BYTES = 4096  # 4KB buffer threshold
-_TOOL_ARG_TRUNCATE_LEN = 1000  # Max chars for tool input/output preview
-
-# ---------------------------------------------------------------------------
-# Backpressure boundary — research §1.5
-# ---------------------------------------------------------------------------
-_QUEUE_MAXSIZE = 512
-
-# ---------------------------------------------------------------------------
-# aget_state timeout — M3: was hardcoded 10s; now configurable constant
-# ---------------------------------------------------------------------------
-_AGET_STATE_TIMEOUT = 10.0
 
 # ---------------------------------------------------------------------------
 # LangGraph event filtering — research §1.2
@@ -469,9 +442,11 @@ class EventAggregator:
     def add_subscriber(self, client_id: str) -> asyncio.Queue[ServerEvent]:
         """Register a new subscriber and return its bounded event queue.
 
-        Uses ``maxsize=512`` for backpressure (research §1.5).
+        Uses ``event_queue_maxsize`` for backpressure (research §1.5).
         """
-        queue: asyncio.Queue[ServerEvent] = asyncio.Queue(maxsize=_QUEUE_MAXSIZE)
+        queue: asyncio.Queue[ServerEvent] = asyncio.Queue(
+            maxsize=settings.event_queue_maxsize
+        )
         self._subscribers[client_id] = queue
         self._subscriptions[client_id] = set()
         return queue
@@ -607,7 +582,7 @@ class EventAggregator:
         key: tuple[str, str],
     ) -> None:
         """Flush a pending debounced tool call update after the interval."""
-        await asyncio.sleep(_TOOL_CALL_UPDATE_DEBOUNCE)
+        await asyncio.sleep(settings.tool_call_debounce_seconds)
         async with self._lock:
             event = self._tool_update_pending.pop(key, None)
         if event is not None:
@@ -618,7 +593,7 @@ class EventAggregator:
         thread_id: str,
     ) -> None:
         """Flush a pending debounced plan update after the interval."""
-        await asyncio.sleep(_PLAN_UPDATE_DEBOUNCE)
+        await asyncio.sleep(settings.plan_update_debounce_seconds)
         async with self._lock:
             event = self._plan_update_pending.pop(thread_id, None)
         if event is not None:
@@ -660,7 +635,7 @@ class EventAggregator:
 
     async def _scheduled_chunk_flush(self, thread_id: str) -> None:
         """Timer-based flush: waits 50ms then flushes."""
-        await asyncio.sleep(_CHUNK_FLUSH_INTERVAL)
+        await asyncio.sleep(settings.chunk_flush_interval_seconds)
         await self._flush_chunk_buffer(thread_id)
 
     async def _buffer_message_chunk(
@@ -696,7 +671,7 @@ class EventAggregator:
 
         buffer_size = sum(len(c) for c in self._chunk_buffers[thread_id])
 
-        if buffer_size >= _CHUNK_BUFFER_MAX_BYTES:
+        if buffer_size >= settings.chunk_buffer_max_bytes:
             # 4KB threshold reached: flush immediately
             existing_task = self._chunk_flush_tasks.pop(thread_id, None)
             if existing_task is not None:
@@ -833,8 +808,8 @@ class EventAggregator:
                 args_str = json.dumps(input_args, default=str, ensure_ascii=False)
             except (TypeError, ValueError):
                 args_str = str(input_args)
-            if len(args_str) > _TOOL_ARG_TRUNCATE_LEN:
-                args_str = args_str[:_TOOL_ARG_TRUNCATE_LEN] + "..."
+            if len(args_str) > settings.tool_arg_truncate_len:
+                args_str = args_str[:settings.tool_arg_truncate_len] + "..."
             content.append(ToolCallContentText(text=args_str))
         event = ToolCallStartEvent(
             thread_id=thread_id,
@@ -876,12 +851,14 @@ class EventAggregator:
         )
 
         last_emit = self._tool_update_last_emit.get(key, 0.0)
-        if now - last_emit >= _TOOL_CALL_UPDATE_DEBOUNCE:
+        if now - last_emit >= settings.tool_call_debounce_seconds:
             # Enough time has passed, emit immediately
             self._tool_update_last_emit[key] = now
             # AGG-03: cap map size to prevent unbounded growth across threads.
-            if len(self._tool_update_last_emit) > _DEBOUNCE_MAP_MAX_ENTRIES:
-                _evict_oldest(self._tool_update_last_emit, _DEBOUNCE_MAP_MAX_ENTRIES)
+            if len(self._tool_update_last_emit) > settings.debounce_map_max_entries:
+                _evict_oldest(
+                    self._tool_update_last_emit, settings.debounce_map_max_entries
+                )
             await self._broadcast(event)
         else:
             # Debounce: store pending and schedule flush
@@ -1007,6 +984,7 @@ class EventAggregator:
             if request_id:
                 description = payload.get("description", "")
                 options = payload.get("options", [])
+                tool_call = payload.get("tool_call")
                 perm_options = []
                 for opt in options:
                     perm_options.append(
@@ -1023,6 +1001,7 @@ class EventAggregator:
                         request_id=request_id,
                         description=description,
                         options=perm_options,
+                        tool_call=str(tool_call) if tool_call is not None else None,
                         timestamp=datetime.now(UTC),
                         sequence=self._next_sequence(thread_id),
                     ),
@@ -1117,7 +1096,7 @@ class EventAggregator:
         )
         now = time.monotonic()
         last = self._plan_update_last_emit.get(thread_id, 0.0)
-        if now - last >= _PLAN_UPDATE_DEBOUNCE:
+        if now - last >= settings.plan_update_debounce_seconds:
             self._plan_update_last_emit[thread_id] = now
             await self._broadcast(event)
         else:
@@ -1344,8 +1323,10 @@ class EventAggregator:
                     else:
                         output_str = str(output)
                     if output_str:
-                        if len(output_str) > _TOOL_ARG_TRUNCATE_LEN:
-                            output_str = output_str[:_TOOL_ARG_TRUNCATE_LEN] + "..."
+                        if len(output_str) > settings.tool_arg_truncate_len:
+                            output_str = (
+                                output_str[:settings.tool_arg_truncate_len] + "..."
+                            )
                         output_content = [ToolCallContentText(text=output_str)]
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
@@ -1515,7 +1496,7 @@ class EventAggregator:
         agent_id: str,
         graph: StreamableGraph,
         config: dict[str, Any],
-    ) -> None:
+    ) -> bool:
         """Inspect graph state after astream_events ends; emit PermissionRequestEvents.
 
         Called from the ``ingest()`` ``finally`` block after every graph run.
@@ -1530,17 +1511,19 @@ class EventAggregator:
             graph:     Compiled LangGraph graph; must expose ``aget_state``.
             config:    LangGraph config dict with ``configurable.thread_id``.
         """
-        # M3: aget_state timeout is configurable via _AGET_STATE_TIMEOUT
+        # M3: aget_state timeout is configurable via settings.aget_state_timeout_seconds
+        interrupt_detected = False
+
         try:
             state = await asyncio.wait_for(
-                graph.aget_state(config), timeout=_AGET_STATE_TIMEOUT
+                graph.aget_state(config), timeout=settings.aget_state_timeout_seconds
             )
         except TimeoutError:
             logger.warning(
                 "Timed out inspecting state for interrupt detection on thread %s",
                 thread_id,
             )
-            return
+            return False
         except Exception:
             # H3: log as error (not silent swallow) but do NOT re-raise because
             # this method is called from the ``ingest()`` finally block — a raise
@@ -1549,12 +1532,13 @@ class EventAggregator:
                 "Failed to inspect state for interrupt detection on thread %s",
                 thread_id,
             )
-            return
+            return False
 
         tasks = getattr(state, "tasks", None)
         if not state or not tasks or not any(t.interrupts for t in tasks):
-            return  # Normal completion — no pending interrupts
+            return False  # Normal completion — no pending interrupts
 
+        interrupt_detected = True
         for task in tasks:
             if not task.interrupts:
                 continue
@@ -1570,7 +1554,11 @@ class EventAggregator:
                 ):
                     continue
 
-                request_id = f"{thread_id}:{uuid4().hex}"
+                request_id = str(
+                    payload.get("request_id")
+                    or getattr(interrupt_obj, "id", None)
+                    or f"{thread_id}:{uuid4().hex}"
+                )
 
                 if interrupt_type == "plan_approval_request":
                     feature: str = payload.get("feature") or "unknown"
@@ -1660,6 +1648,7 @@ class EventAggregator:
                         state=AgentLifecycleState.INPUT_REQUIRED,
                         detail=f"Awaiting approval for {tool_name}",
                     )
+        return interrupt_detected
 
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
@@ -1692,8 +1681,11 @@ class EventAggregator:
         """
         start = time.monotonic()
         cancel_event = self._get_cancel_event(thread_id)
-        # H4: track whether an interrupt occurred so _emit_interrupt_events is
-        # only called when needed (avoids aget_state I/O on normal completion).
+        # A real suspended interrupt is durably visible in graph state/checkpoints,
+        # but it is not guaranteed to surface only as a GraphInterrupt exception
+        # on every streaming path. Keep the exception signal for outcome
+        # classification, but do not use it as the sole gate for interrupt
+        # projection/persistence.
         _is_interrupt = False
         _outcome = "completed"
         with _tracer.start_as_current_span(
@@ -1800,12 +1792,12 @@ class EventAggregator:
                 for k in stale_tool_keys:
                     del self._tool_update_last_emit[k]
                 self._plan_update_last_emit.pop(thread_id, None)
-                # H4: only call _emit_interrupt_events when an actual interrupt
-                # occurred — skips the aget_state I/O on normal completion.
-                if _is_interrupt:
-                    await self._emit_interrupt_events(
-                        thread_id, agent_id, graph, config
-                    )
+                interrupt_emitted = await self._emit_interrupt_events(
+                    thread_id, agent_id, graph, config
+                )
+                if _outcome == "completed" and interrupt_emitted:
+                    _outcome = "interrupted"
+                    span.set_attribute("interrupted_via_state", True)
                 _ingest_duration_histogram.record(
                     time.monotonic() - start,
                     {"thread_id": thread_id},

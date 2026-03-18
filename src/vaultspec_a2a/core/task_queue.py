@@ -8,12 +8,13 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from .config import settings
+
 
 __all__ = ["create_mark_task_complete_tool"]
 
 _QUEUE_PHASES = frozenset({"plan", "exec"})
 _MIN_TABLE_COLUMNS = 2  # Minimum columns for a valid markdown table row
-_PENDING_HORIZON = 2  # Number of upcoming pending tasks to show
 
 
 def _filter_queue_content(
@@ -62,10 +63,10 @@ def _filter_queue_content(
                 selected.append(line)
                 break
 
-    # Collect up to _PENDING_HORIZON next pending rows
+    # Collect up to task_queue_pending_horizon next pending rows
     pending_count = 0
     for line in data_lines:
-        if pending_count >= _PENDING_HORIZON:
+        if pending_count >= settings.task_queue_pending_horizon:
             break
         parts = [p.strip() for p in line.split("|") if p.strip()]
         if (

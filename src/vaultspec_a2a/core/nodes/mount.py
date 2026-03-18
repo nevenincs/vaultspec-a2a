@@ -10,17 +10,16 @@ from typing import Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
+from ..config import settings
 from ..state import TeamState
 from ..task_queue import _filter_queue_content
 
 
 __all__ = ["create_mount_node"]
 
-_MOUNT_TOKEN_CEILING = 20_000
 _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
 _QUEUE_PHASES = frozenset({"plan", "exec"})
-_MIN_REMAINING_TOKENS = 100  # Minimum remaining budget to attempt truncated mount
 
 
 def _select_paths(state: TeamState, workspace_root: Path) -> list[Path]:
@@ -104,11 +103,11 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
             block = f"{header}\n{content}\n{_DOC_FOOTER}"
             block_tokens = count_tokens_approximately(block)
 
-            remaining = _MOUNT_TOKEN_CEILING - tokens_used
+            remaining = settings.mount_token_ceiling - tokens_used
             if block_tokens <= remaining:
                 blocks.append(block)
                 tokens_used += block_tokens
-            elif remaining > _MIN_REMAINING_TOKENS:
+            elif remaining > settings.min_remaining_tokens_for_mount:
                 # Truncate to fit remaining budget (10% safety margin)
                 ratio = remaining / block_tokens
                 truncate_at = int(len(content) * ratio * 0.9)

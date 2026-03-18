@@ -16,6 +16,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
+from .config import settings
+
 
 __all__ = [
     "ContextRef",
@@ -26,9 +28,6 @@ __all__ = [
 
 # Nickname slug: lowercase alphanumeric + hyphens, 3-64 characters.
 _NICKNAME_PATTERN = re.compile(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$")
-
-# Hard cap on auto-discovered context refs to prevent pathological workspaces.
-_MAX_CONTEXT_REFS = 50
 
 
 class ContextRef(BaseModel):
@@ -93,7 +92,7 @@ def discover_context_refs(
     """Scan .vault/ for documents matching the feature tag.
 
     Uses filename-based glob discovery (O(1) filesystem calls per stage
-    pattern). Returns at most ``_MAX_CONTEXT_REFS`` results.
+    pattern). Returns at most ``settings.max_context_refs`` results.
 
     Args:
         workspace_root: Absolute path to the workspace directory.
@@ -130,7 +129,7 @@ def discover_context_refs(
             except ValueError:
                 continue
             refs.append(ContextRef(path=rel_path, stage=stage))
-            if len(refs) >= _MAX_CONTEXT_REFS:
+            if len(refs) >= settings.max_context_refs:
                 return refs
     return refs
 

@@ -147,10 +147,12 @@ class TeamState(TypedDict):
     current_task_id: NotRequired[str | None]
 
     # --- plan approval gate (ADR-024) ---
-    # Set to True once the user approves the plan for execution.
-    # NotRequired: absent on legacy threads — defaults to
-    # False (unapproved) at read time.
-    plan_approved: NotRequired[bool]
+    # Durable approval-state linkage for execution approval. Legacy
+    # checkpoints may still carry ``plan_approved``; consuming code should
+    # treat that as a backward-compatibility alias for ``approval_status ==
+    # "approved"`` during migration.
+    approval_status: NotRequired[str | None]
+    approval_request_id: NotRequired[str | None]
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str]

@@ -15,9 +15,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .state import TeamState
 
-__all__ = ["build_anchoring_context"]
+from .config import settings
 
-_ANCHOR_PATH_CAP = 10  # max vault paths per doc-type in the summary
+
+__all__ = ["build_anchoring_context"]
 
 
 def build_anchoring_context(state: TeamState) -> str | None:
@@ -48,7 +49,7 @@ def build_anchoring_context(state: TeamState) -> str | None:
         )
         for doc_type, paths in vault_index.items():
             lines.append(f"\n**{doc_type.upper()}**")
-            visible = paths[:_ANCHOR_PATH_CAP]
+            visible = paths[:settings.anchor_path_cap]
             for p in visible:
                 lines.append(f"  - `{p}`")
             remainder = len(paths) - len(visible)

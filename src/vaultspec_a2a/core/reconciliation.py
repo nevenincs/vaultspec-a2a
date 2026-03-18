@@ -23,8 +23,20 @@ from ..database.crud import (
 async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
+    *,
+    strategy: str = "conservative",
 ) -> dict[str, int]:
-    """Classify non-terminal threads after a gateway restart."""
+    """Classify non-terminal threads after a gateway restart.
+
+    Args:
+        session: Active database session.
+        checkpointer: LangGraph checkpoint backend.
+        strategy: Reconciliation strategy.
+            ``"conservative"`` (default) moves threads with available checkpoints
+            into ``reconciling`` so the worker can resume them.
+            ``"mark_repair_needed"`` immediately marks all non-terminal threads as
+            ``repair_needed``, requiring explicit operator intervention.
+    """
     threads = await list_non_terminal_threads(session)
     backlog = 0
     paused = 0
@@ -73,7 +85,6 @@ async def reconcile_threads_on_startup(
                 repair_reason="Pending permission request survived restart",
                 execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
                 last_applied_action=ControlActionType.PERMISSION_REQUEST_CREATED,
-                increment_recovery_epoch=True,
             )
         elif thread.status == ThreadStatus.CANCELLING.value:
             await set_thread_repair_state(
@@ -92,6 +103,17 @@ async def reconcile_threads_on_startup(
                 thread.id,
                 repair_status=RepairStatus.CHECKPOINT_UNAVAILABLE,
                 repair_reason=checkpoint_error or "checkpoint_unavailable",
+                execution_readiness=RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+                increment_generation=True,
+                increment_recovery_epoch=True,
+            )
+        elif strategy == "mark_repair_needed":
+            await update_thread_status(session, thread.id, ThreadStatus.REPAIR_NEEDED)
+            await set_thread_repair_state(
+                session,
+                thread.id,
+                repair_status=RepairStatus.CHECKPOINT_UNAVAILABLE,
+                repair_reason="Marked repair_needed by startup strategy",
                 execution_readiness=RepairStatus.CHECKPOINT_UNAVAILABLE.value,
                 increment_generation=True,
                 increment_recovery_epoch=True,

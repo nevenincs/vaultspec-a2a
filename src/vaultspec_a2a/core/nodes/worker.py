@@ -2,6 +2,7 @@
 
 import logging
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
@@ -11,7 +12,8 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
 from ..anchoring import build_anchoring_context
-from ..context import CONTEXT_LIMIT, compact_context, should_compact
+from ..config import settings
+from ..context import compact_context, should_compact
 from ..exceptions import WorkerExecutionError
 from ..rules import RuleManager
 from ..state import TeamState
@@ -32,6 +34,91 @@ class WorkerNode(Protocol):
     async def __call__(self, state: TeamState) -> dict[str, Any]:
         """Execute the worker's task."""
         ...
+
+
+def _build_worker_messages(
+    *,
+    state: TeamState,
+    system_prompt: str,
+    workspace_root: Path | None,
+) -> list[BaseMessage]:
+    """Build the worker prompt/message list before model invocation."""
+    working_state = (
+        compact_context(state, settings.context_limit_tokens)
+        if should_compact(state, settings.context_limit_tokens)
+        else state
+    )
+    anchoring = build_anchoring_context(state)
+    messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
+    effective_workspace_root = workspace_root or state.get("workspace_root")
+    if effective_workspace_root:
+        rules = RuleManager(Path(effective_workspace_root)).compile()
+        if rules:
+            messages.append(
+                SystemMessage(
+                    content=f"## Project Coding Rules & Guidelines\n\n{rules}"
+                )
+            )
+    if anchoring:
+        messages.append(SystemMessage(content=anchoring))
+    mounted = state.get("mounted_context")
+    if mounted:
+        messages.append(SystemMessage(content=mounted))
+    messages.extend(working_state["messages"])
+    return messages
+
+
+def _resolve_effective_worker_model(
+    *,
+    model: BaseChatModel,
+    autonomous: bool,
+) -> BaseChatModel:
+    """Return the invocation model after supervised permission wiring logic."""
+    if autonomous or not hasattr(model, "permission_callback"):
+        return model
+    return model.model_copy(
+        update={"permission_callback": _interrupt_permission_callback}
+    )
+
+
+def _wrap_worker_exception(
+    *,
+    exc: Exception,
+    worker: str,
+    model_type: str,
+    message_count: int,
+) -> WorkerExecutionError:
+    """Convert a non-interrupt worker failure into WorkerExecutionError."""
+    _logger.exception(
+        "worker[%s] model=%s raised during ainvoke"
+        " — wrapping as WorkerExecutionError",
+        worker,
+        model_type,
+        exc_info=exc,
+    )
+    return WorkerExecutionError(
+        worker=worker,
+        model=model_type,
+        message_count=message_count,
+    )
+
+
+def _drain_worker_state_updates(
+    drain_fn: Callable[[], dict[str, Any]] | None,
+) -> dict[str, Any]:
+    """Drain side-channel task updates if ADR-021 wiring is active."""
+    return drain_fn() if drain_fn is not None else {}
+
+
+def _finalize_worker_response(
+    *,
+    response: BaseMessage,
+    worker_name: str,
+    state_updates: dict[str, Any],
+) -> dict[str, Any]:
+    """Attach worker attribution and merge any side-channel state updates."""
+    response.name = worker_name
+    return {"messages": [response], "mounted_context": None, **state_updates}
 
 
 def _first_option_id(options: list[dict[str, Any]]) -> str:
@@ -140,32 +227,12 @@ def create_worker_node(
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
-        # Compact the conversation history for this LLM call if it is
-        # approaching the model's context limit. The full history is
-        # preserved in the LangGraph checkpointer — compaction only affects
-        # the messages passed to the model, not what is stored.
-        working_state = (
-            compact_context(state, CONTEXT_LIMIT)
-            if should_compact(state, CONTEXT_LIMIT)
-            else state
+        messages = _build_worker_messages(
+            state=state,
+            system_prompt=system_prompt,
+            workspace_root=workspace_root,
         )
-        anchoring = build_anchoring_context(state)
-        messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
-        _ws_root = workspace_root or state.get("workspace_root")
-        if _ws_root:
-            _rules = RuleManager(Path(_ws_root)).compile()
-            if _rules:
-                messages.append(
-                    SystemMessage(
-                        content=f"## Project Coding Rules & Guidelines\n\n{_rules}"
-                    )
-                )
-        if anchoring:
-            messages.append(SystemMessage(content=anchoring))
-        mounted = state.get("mounted_context")
-        if mounted:
-            messages.append(SystemMessage(content=mounted))
-        messages.extend(working_state["messages"])
+        compacted = should_compact(state, settings.context_limit_tokens)
         # In supervised mode: wire interrupt-based approval for ACP-backed models.
         # Use model_copy() to avoid mutating the shared model instance — the same
         # AcpChatModel may be reused across concurrent graph invocations, and
@@ -174,16 +241,12 @@ def create_worker_node(
         # but isolates the callback reference on this invocation's copy.
         # In autonomous mode: leave permission_callback unwired; AcpChatModel's
         # else-branch auto-approves with the first option.
-        effective_model = model
-        if not autonomous and hasattr(model, "permission_callback"):
-            # Type checker can't narrow after hasattr, but model_copy is
-            # a Pydantic BaseModel method
-            effective_model = model.model_copy(
-                update={"permission_callback": _interrupt_permission_callback}
-            )
+        effective_model = _resolve_effective_worker_model(
+            model=model,
+            autonomous=autonomous,
+        )
 
         model_type = type(effective_model).__name__
-        compacted = working_state is not state
         _logger.debug(
             "worker[%s] invoking model=%s messages=%d compacted=%s autonomous=%s",
             name,
@@ -201,24 +264,21 @@ def create_worker_node(
         except Exception as exc:
             if drain_fn is not None:
                 drain_fn()  # Prevent state update leaks (ADR-021 §5)
-            _logger.exception(
-                "worker[%s] model=%s raised during ainvoke"
-                " — wrapping as WorkerExecutionError",
-                name,
-                model_type,
-            )
-            raise WorkerExecutionError(
+            raise _wrap_worker_exception(
+                exc=exc,
                 worker=name,
-                model=model_type,
+                model_type=model_type,
                 message_count=len(messages),
             ) from exc
 
         # ADR-021: drain side-channel state updates (current_task_id advance, etc.)
-        state_updates: dict[str, Any] = drain_fn() if drain_fn is not None else {}
+        state_updates = _drain_worker_state_updates(drain_fn)
 
         _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))
-        # Attribute the message to the worker so the supervisor can route correctly.
-        response.name = name
-        return {"messages": [response], "mounted_context": None, **state_updates}
+        return _finalize_worker_response(
+            response=response,
+            worker_name=name,
+            state_updates=state_updates,
+        )
 
     return worker_node

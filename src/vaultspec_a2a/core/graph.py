@@ -27,6 +27,7 @@ from ..database.checkpoints import Checkpointer
 from ..providers.acp_exceptions import AcpSessionError
 from ..providers.factory import ProviderFactory
 from ..utils.enums import Model, Provider
+from .config import settings
 from .exceptions import ConfigError, WorkerExecutionError
 from .nodes.mount import create_mount_node
 from .nodes.supervisor import create_supervisor_node
@@ -48,8 +49,6 @@ _VAULT_STAGE_PATTERNS: dict[str, str] = {
     "exec": ".vault/exec/*{tag}*/**/*.md",
     "audit": ".vault/audit/*{tag}*.md",
 }
-_VAULT_INDEX_CAP = 50
-
 # ADR-023: maps AgentConfig.role → pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
 _ROLE_TO_PHASE: dict[str, str] = {
@@ -112,33 +111,11 @@ def _resolve_model_for_worker(
     team_config: TeamConfig,
     workspace_root: Path | None = None,
 ) -> BaseChatModel:
-    """Resolve provider + capability following ADR-013 §2.3 precedence.
-
-    Priority (highest to lowest):
-    1. [[team.workers]] model.* override
-    2. agent TOML [agent.model].*
-    3. [team.defaults].*
-
-    If the primary provider fails, the provider_fallback chain is tried in
-    order (TOML-05 Scope 2).  provider_fallback is resolved with the same
-    priority as the primary provider.
-    """
-    primary_provider: Provider = (
-        worker_ref.model.provider
-        or agent_config.model.provider
-        or team_config.defaults.provider
-        or Provider.CLAUDE
-    )
-    capability: Model | None = (
-        worker_ref.model.capability
-        or agent_config.model.capability
-        or team_config.defaults.capability
-    )
-    fallback_chain: list[Provider] = (
-        worker_ref.model.provider_fallback
-        or agent_config.model.provider_fallback
-        or team_config.defaults.provider_fallback
-        or []
+    """Resolve provider + capability following ADR-013 §2.3 precedence."""
+    primary_provider, capability, fallback_chain = _resolve_worker_model_preferences(
+        worker_ref,
+        agent_config,
+        team_config,
     )
     providers_to_try = [primary_provider, *fallback_chain]
     last_exc: Exception | None = None
@@ -172,6 +149,42 @@ def _resolve_model_for_worker(
     ) from last_exc
 
 
+def _resolve_worker_model_preferences(
+    worker_ref: WorkerRef,
+    agent_config: AgentConfig,
+    team_config: TeamConfig,
+) -> tuple[Provider, Model | None, list[Provider]]:
+    """Resolve provider + capability following ADR-013 §2.3 precedence.
+
+    Priority (highest to lowest):
+    1. [[team.workers]] model.* override
+    2. agent TOML [agent.model].*
+    3. [team.defaults].*
+
+    If the primary provider fails, the provider_fallback chain is tried in
+    order (TOML-05 Scope 2).  provider_fallback is resolved with the same
+    priority as the primary provider.
+    """
+    primary_provider: Provider = (
+        worker_ref.model.provider
+        or agent_config.model.provider
+        or team_config.defaults.provider
+        or Provider.CLAUDE
+    )
+    capability: Model | None = (
+        worker_ref.model.capability
+        or agent_config.model.capability
+        or team_config.defaults.capability
+    )
+    fallback_chain: list[Provider] = (
+        worker_ref.model.provider_fallback
+        or agent_config.model.provider_fallback
+        or team_config.defaults.provider_fallback
+        or []
+    )
+    return primary_provider, capability, fallback_chain
+
+
 def _resolve_supervisor_model(
     team_config: TeamConfig,
     workspace_root: Path | None = None,
@@ -201,7 +214,7 @@ def build_initial_vault_index(
     index: dict[str, list[str]] = {}
     for stage, pattern in _VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[:_VAULT_INDEX_CAP]
+        matches = sorted(workspace_root.glob(resolved))[:settings.vault_index_cap]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index
@@ -335,7 +348,7 @@ def compile_team_graph(
         )
 
     graph = builder.compile(
-        checkpointer=checkpointer,  # type: ignore[arg-type]
+        checkpointer=checkpointer,
         interrupt_before=interrupt_nodes,
     )
 

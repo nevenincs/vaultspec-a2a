@@ -57,3 +57,11 @@ out.txt
 
 build/
 data/
+
+# Runtime artifacts
+.vault/runtime/
+.vaultspec/runtime/
+.tmp-*/
+
+# Stray Python installations
+Python/

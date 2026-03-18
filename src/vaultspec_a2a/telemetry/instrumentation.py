@@ -8,7 +8,7 @@ no-op implementation is used, so all instrumented code remains functional
 with zero overhead.
 
 LangSmith tracing is configured separately via environment variables
-(``LANGCHAIN_TRACING_V2`` / ``LANGCHAIN_API_KEY``) and does not require
+(``LANGSMITH_TRACING`` / ``LANGSMITH_API_KEY``) and does not require
 any code here — LangChain reads those variables automatically on import.
 
 Credential safety (ADR-002): this module never reads, logs, or forwards
@@ -16,16 +16,15 @@ Credential safety (ADR-002): this module never reads, logs, or forwards
 The only env vars consumed are the standard OTel and LangSmith vars listed
 below.
 
-Environment variables consumed:
+Environment variables consumed (TEL-M5: all read at import time):
     OTEL_SERVICE_NAME: Service name emitted in every span (default: vaultspec-a2a).
     OTEL_SERVICE_VERSION: Version string (default: 0.1.0).
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
     OTEL_EXPORTER_OTLP_INSECURE: Set to "true" to disable TLS (default: true).
     OTEL_SDK_DISABLED: Set to "true" to force no-op mode.
     OTEL_EXPORTER_CONSOLE: Set to "true" to log spans to stdout (dev only).
-    LANGCHAIN_TRACING_V2: Set to "true" to enable LangSmith tracing.
-    LANGCHAIN_API_KEY: LangSmith API key (read by LangChain — never logged here).
-    LANGCHAIN_PROJECT: LangSmith project name.
+    LANGSMITH_TRACING: Set to "true" to enable LangSmith tracing.
+    LANGSMITH_PROJECT: LangSmith project name.
 """
 
 from __future__ import annotations
@@ -75,12 +74,12 @@ _CONSOLE_EXPORT = os.environ.get("OTEL_EXPORTER_CONSOLE", "").lower() in (
     "true",
     "yes",
 )
-_LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in (
+_LANGSMITH_ENABLED = os.environ.get("LANGSMITH_TRACING", "").lower() in (
     "1",
     "true",
     "yes",
 )
-_LANGSMITH_PROJECT = os.environ.get("LANGCHAIN_PROJECT", "default")
+_LANGSMITH_PROJECT = os.environ.get("LANGSMITH_PROJECT", "default")
 
 
 @dataclasses.dataclass(frozen=True)

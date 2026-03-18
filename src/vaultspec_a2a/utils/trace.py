@@ -12,7 +12,6 @@ returns gracefully.
 from __future__ import annotations
 
 import logging
-import os
 import time
 
 from datetime import UTC, datetime
@@ -39,18 +38,15 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
 
     Args:
         thread_id:    The LangGraph thread_id used as configurable["thread_id"].
-        project_name: LangSmith project name. Defaults to LANGSMITH_PROJECT env
-                      var, then LANGCHAIN_PROJECT, then "default".
+        project_name: LangSmith project name. Defaults to settings.langsmith_project,
+                      then "default".
     """
-    api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
-    tracing_on = os.environ.get("LANGSMITH_TRACING") or os.environ.get(
-        "LANGCHAIN_TRACING_V2"
-    )
+    from ..core.config import settings  # noqa: PLC0415
 
-    if not api_key:
+    if not settings.langsmith_api_key:
         _trace_print("[trace] LANGSMITH_API_KEY not set — skipping trace query.")
         return
-    if not tracing_on or tracing_on.lower() not in ("1", "true", "yes"):
+    if not settings.langsmith_tracing:
         _trace_print("[trace] LangSmith tracing not enabled — skipping trace query.")
         return
 
@@ -60,14 +56,11 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
         _trace_print("[trace] langsmith package not installed — skipping trace query.")
         return
 
-    resolved_project = (
-        project_name
-        or os.environ.get("LANGSMITH_PROJECT")
-        or os.environ.get("LANGCHAIN_PROJECT")
-        or "default"
-    )
+    resolved_project = project_name or settings.langsmith_project or "default"
 
-    client = Client()
+    client = Client(
+        api_url=settings.langsmith_endpoint or None,
+    )
 
     # Allow up to 10s for the trace to propagate to LangSmith.
     _trace_print(
@@ -89,8 +82,11 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
                 )
             )
         except Exception:
-            # Older SDK versions don't support metadata
-            # filter — fall back to name search
+            # Older SDK versions don't support metadata filter — fall back.
+            _logger.debug(
+                "[trace] metadata filter unsupported; falling back to scan",
+                exc_info=True,
+            )
             runs = []
 
         if not runs:
@@ -110,7 +106,11 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
                         runs = [r]
                         break
             except Exception:
-                pass
+                _logger.debug(
+                    "[trace] fallback run scan failed for thread_id=%s",
+                    thread_id,
+                    exc_info=True,
+                )
 
         if runs:
             root_run = runs[0]
@@ -122,8 +122,15 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
     if root_run is None:
         return
 
+    root_latency_ms: float | None = None
     if root_run.start_time and root_run.end_time:
-        (root_run.end_time - root_run.start_time).total_seconds() * 1000
+        root_latency_ms = (
+            (root_run.end_time - root_run.start_time).total_seconds() * 1000
+        )
+    header = f"[trace] root run id={root_run.id} status={root_run.status}"
+    if root_latency_ms is not None:
+        header += f" total_latency={root_latency_ms:.0f}ms"
+    _trace_print(header)
 
     # Fetch all child runs (nodes) under the root trace.
     try:
@@ -134,6 +141,11 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
             key=lambda r: r.start_time or datetime.min.replace(tzinfo=UTC),
         )
     except Exception:
+        _logger.debug(
+            "[trace] failed to fetch child runs for trace %s",
+            root_run.id,
+            exc_info=True,
+        )
         return
 
     for run in child_runs:
@@ -155,10 +167,13 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
             parts.append(f"tokens(in={tokens_in} out={tokens_out})")
         if run.error:
             parts.append(f"ERROR={run.error[:120]!r}")
+        _trace_print("  ".join(parts))
 
     # Summarise errors
     errors = [r for r in child_runs if r.error]
     if errors:
-        pass
+        _trace_print(f"[trace] {len(errors)} node(s) errored:")
+        for r in errors:
+            _trace_print(f"  {r.name!r}: {str(r.error)[:200]}")
     else:
-        pass
+        _trace_print("[trace] no errors")

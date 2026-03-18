@@ -9,16 +9,16 @@ Run independently of the gateway via stdio or Streamable HTTP transport::
     python -m vaultspec_a2a.protocols.mcp --transport streamable-http
 
 Environment variables:
-    VAULTSPEC_MCP_API_BASE_URL          Gateway API base URL (default: http://localhost:8000)
-    VAULTSPEC_MCP_AUTO_START_GATEWAY    Auto-start gateway subprocess (default: true)
-    VAULTSPEC_MCP_HOST                  Bind host for streamable-http (default: 0.0.0.0)
-    VAULTSPEC_MCP_PORT                  Bind port for streamable-http (default: 8100)
+    VAULTSPEC_MCP_API_BASE_URL    Gateway API base URL (default: http://localhost:8000)
+    VAULTSPEC_MCP_HOST            Bind host for streamable-http (default: 0.0.0.0)
+    VAULTSPEC_MCP_PORT            Bind port for streamable-http (default: 8100)
 """
 
 import argparse
 import asyncio
 
-from .server import _mcp_settings, mcp
+from ...core.config import settings
+from .server import mcp
 
 
 def main() -> None:
@@ -33,21 +33,21 @@ def main() -> None:
     parser.add_argument(
         "--host",
         default=None,
-        help=f"Bind host for streamable-http (default: {_mcp_settings.mcp_host})",
+        help=f"Bind host for streamable-http (default: {settings.mcp_host})",
     )
     parser.add_argument(
         "--port",
         type=int,
         default=None,
-        help=f"Bind port for streamable-http (default: {_mcp_settings.mcp_port})",
+        help=f"Bind port for streamable-http (default: {settings.mcp_port})",
     )
     args = parser.parse_args()
 
     if args.transport == "stdio":
         asyncio.run(mcp.run_stdio_async())
     else:
-        mcp.settings.host = args.host or _mcp_settings.mcp_host
-        mcp.settings.port = args.port or _mcp_settings.mcp_port
+        mcp.settings.host = args.host or settings.mcp_host
+        mcp.settings.port = args.port or settings.mcp_port
         asyncio.run(mcp.run_streamable_http_async())
 
 

@@ -6,10 +6,13 @@ import sys
 
 from typing import TYPE_CHECKING, Any
 
+from opentelemetry import trace
+from opentelemetry.trace.span import format_span_id, format_trace_id
+
 from .enums import LogLevel
 
 
-__all__ = ["JSONFormatter", "setup_logging"]
+__all__ = ["JSONFormatter", "OTelCorrelationFilter", "setup_logging"]
 
 
 if TYPE_CHECKING:
@@ -43,6 +46,34 @@ _STANDARD_LOG_ATTRS: frozenset[str] = frozenset(
         "taskName",
     }
 )
+
+
+class OTelCorrelationFilter(logging.Filter):
+    """Inject OTel correlation fields into log records when a span is active."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        """Populate correlation fields without overwriting caller-provided values."""
+        span = trace.get_current_span()
+        context = span.get_span_context()
+        if not context.is_valid:
+            return True
+
+        if "trace_id" not in record.__dict__:
+            record.trace_id = format_trace_id(context.trace_id)
+        if "span_id" not in record.__dict__:
+            record.span_id = format_span_id(context.span_id)
+        if "trace_sampled" not in record.__dict__:
+            record.trace_sampled = bool(context.trace_flags.sampled)
+
+        if "service_name" not in record.__dict__:
+            resource = getattr(span, "resource", None)
+            attributes = getattr(resource, "attributes", None)
+            if attributes is not None:
+                service_name = attributes.get("service.name")
+                if isinstance(service_name, str) and service_name:
+                    record.service_name = service_name
+
+        return True
 
 
 class JSONFormatter(logging.Formatter):
@@ -119,6 +150,7 @@ def setup_logging(
         log_handler = logging.StreamHandler(sys.stdout)
         log_handler.setFormatter(JSONFormatter())
 
+    log_handler.addFilter(OTelCorrelationFilter())
     root_logger.addHandler(log_handler)
 
     # Override library loggers to use the same handler and disable propagation

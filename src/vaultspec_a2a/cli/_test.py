@@ -12,6 +12,8 @@ from pathlib import Path
 
 import click
 
+from ._verify import verify_prodlike_docker, verify_prodlike_docker_provider
+
 
 def _pytest_env() -> dict[str, str]:
     """Build a repo-local pytest environment to avoid temp-dir permission drift."""
@@ -96,3 +98,31 @@ def benchmark(suite: str | None) -> None:
         returncode = subprocess.run(cmd, check=False).returncode
         if returncode != 0:
             sys.exit(returncode)
+
+
+@test.command("prodlike-docker")
+def prodlike_docker() -> None:
+    """Run prod-like Docker/Postgres verification with Jaeger evidence."""
+    sys.exit(verify_prodlike_docker())
+
+
+@test.command("prodlike-provider")
+@click.argument(
+    "provider",
+    type=click.Choice(["claude", "gemini"], case_sensitive=False),
+)
+def prodlike_provider(provider: str) -> None:
+    """Run a provider probe inside the prod-like Docker worker."""
+    sys.exit(verify_prodlike_docker_provider(provider.lower()))
+
+
+@test.command("claude-docker")
+def claude_docker() -> None:
+    """Run Claude provider verification in the prod-like Docker worker."""
+    sys.exit(verify_prodlike_docker_provider("claude"))
+
+
+@test.command("gemini-docker")
+def gemini_docker() -> None:
+    """Run Gemini provider verification in the prod-like Docker worker."""
+    sys.exit(verify_prodlike_docker_provider("gemini"))

@@ -26,7 +26,7 @@ _WINDOWS_DETACHED_FLAGS = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
 
 def _runtime_dir() -> Path:
     """Return the repo-local runtime directory used for local service tracking."""
-    runtime_dir = Path.cwd() / ".vaultspec" / "runtime"
+    runtime_dir = Path.cwd() / ".vault" / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir
 

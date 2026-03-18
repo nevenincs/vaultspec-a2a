@@ -138,12 +138,15 @@ def archive(thread_id: str) -> None:
     type=click.Choice(
         [
             "submitted",
-            "created",
             "running",
+            "input_required",
+            "cancelling",
+            "cancelled",
             "completed",
             "failed",
-            "cancelled",
             "archived",
+            "repair_needed",
+            "reconciling",
         ],
         case_sensitive=False,
     ),

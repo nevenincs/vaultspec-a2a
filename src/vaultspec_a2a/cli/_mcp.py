@@ -5,7 +5,21 @@ from __future__ import annotations
 
 __all__ = ["mcp_group"]
 
+import anyio
 import click
+
+from ..protocols.mcp.server import mcp
+
+
+def _tool_rows() -> list[tuple[str, str]]:
+    """Return MCP tool names and concise descriptions from the live registry."""
+    tools = anyio.run(mcp.list_tools)
+    rows: list[tuple[str, str]] = []
+    for tool in tools:
+        description = (tool.description or "").strip().splitlines()[0]
+        rows.append((tool.name, description))
+    rows.sort(key=lambda row: row[0])
+    return rows
 
 
 @click.group("mcp")
@@ -32,29 +46,15 @@ def status() -> None:
     click.echo("  VAULTSPEC_MCP_HOST          Bind host (default: 0.0.0.0)")
     click.echo("  VAULTSPEC_MCP_PORT          Bind port (default: 8100)")
     click.echo("")
-    click.echo(f"Tools: {len(_TOOLS)}")
-
-
-_TOOLS: list[tuple[str, str]] = [
-    ("start_thread", "Start a new agent team workflow (non-blocking)"),
-    ("list_threads", "List existing orchestration threads"),
-    ("get_thread_status", "Query the status of a specific thread"),
-    ("send_message", "Send a follow-up message into an existing thread"),
-    ("respond_to_permission", "Respond to a pending permission request"),
-    ("get_team_status", "Get agent lifecycle states and active threads"),
-    ("get_pending_permissions", "List outstanding permission requests"),
-    ("list_team_presets", "List available team presets with details"),
-    ("delete_thread", "Permanently delete a thread and its data"),
-    ("archive_thread", "Archive a completed/failed/cancelled thread"),
-    ("cancel_thread", "Cancel a running thread"),
-]
+    click.echo(f"Tools: {len(_tool_rows())}")
 
 
 @mcp_group.command("tools")
 def tools_cmd() -> None:
     """List available MCP tools."""
-    max_name = max(len(name) for name, _ in _TOOLS)
-    for name, desc in _TOOLS:
+    tool_rows = _tool_rows()
+    max_name = max(len(name) for name, _ in tool_rows)
+    for name, desc in tool_rows:
         click.echo(f"  {name:<{max_name}}  -- {desc}")
 
 

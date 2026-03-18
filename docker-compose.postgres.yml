@@ -1,0 +1,54 @@
+# Postgres backend overlay for production deployments.
+# Usage: docker compose -f docker-compose.prod.yml -f docker-compose.postgres.yml up --build
+#
+# This overlay:
+#   1. Adds a postgres:16-alpine service with a healthcheck.
+#   2. Overrides gateway and worker environment to use the Postgres backend.
+#   3. Removes the SQLite db-data volume dependency for gateway/worker.
+#
+# Required env vars (set in .env or shell):
+#   POSTGRES_PASSWORD   - Postgres superuser password (no default)
+#   VAULTSPEC_INTERNAL_TOKEN - must also be set (inherited from prod compose)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: vaultspec
+      POSTGRES_USER: vaultspec
+      POSTGRES_PASSWORD: '${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}'
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U vaultspec -d vaultspec']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+  gateway:
+    environment:
+      VAULTSPEC_DATABASE_URL: 'postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec'
+      VAULTSPEC_DATABASE_BACKEND: postgres
+      VAULTSPEC_CHECKPOINT_BACKEND: postgres
+      VAULTSPEC_POSTGRES_REQUIRED: 'true'
+      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: []
+
+  worker:
+    environment:
+      VAULTSPEC_DATABASE_URL: 'postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec'
+      VAULTSPEC_DATABASE_BACKEND: postgres
+      VAULTSPEC_CHECKPOINT_BACKEND: postgres
+      VAULTSPEC_POSTGRES_REQUIRED: 'true'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes: []
+
+volumes:
+  pg-data:

@@ -32,6 +32,7 @@ ENV UV_COMPILE_BYTECODE=1 \
 
 # Two-phase uv sync: deps first (cached), then app
 COPY pyproject.toml uv.lock ./
+COPY alembic.ini ./
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --no-install-project --no-dev --locked
 
@@ -55,12 +56,18 @@ COPY --from=frontend-build /app/src/ui/dist ./src/ui/dist/
 # Worker runs as a separate container — never auto-spawn inside Docker.
 ENV VAULTSPEC_WORKER_URL=http://worker:8001 \
     VAULTSPEC_UI_BUILD_DIR=/app/src/ui/dist \
+    VAULTSPEC_PROJECT_ROOT=/app \
     VAULTSPEC_AUTO_SPAWN_WORKER=false
 
 EXPOSE 8000
-CMD ["uv", "run", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.api.app:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
 
 # ── Stage 2c: Worker (agent executor) ───────────────────────────────────────
+FROM node:22-slim AS gemini-cli
+ARG GEMINI_CLI_NPM_SPEC=@google/gemini-cli@0.3.3
+RUN npm install -g ${GEMINI_CLI_NPM_SPEC}
+
+# ── Stage 2d: Worker (agent executor) ───────────────────────────────────────
 FROM python-base AS worker
 
 # PROV-O01: ACP runtime — Claude/Gemini providers spawn claude-agent-acp as a
@@ -69,6 +76,10 @@ FROM python-base AS worker
 # node_modules are pure JavaScript from the Alpine frontend-build stage — portable.
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=frontend-build /app/node_modules ./node_modules/
+# PROV-DOCKER-01: Gemini CLI is the official ACP entry point for Gemini. Install
+# it in a dedicated Node stage and copy the package runtime into the worker so
+# Docker support does not depend on a host-level gemini binary.
+COPY --from=gemini-cli /usr/local/lib/node_modules/@google /usr/local/lib/node_modules/@google
 
 # PROV-O02: VAULTSPEC_PROJECT_ROOT prevents path traversal resolving into
 # site-packages in non-editable installs (factory.py _PROJECT_ROOT).
@@ -76,4 +87,4 @@ ENV VAULTSPEC_MCP_API_BASE_URL=http://gateway:8000 \
     VAULTSPEC_PROJECT_ROOT=/app
 
 EXPOSE 8001
-CMD ["uv", "run", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["/app/.venv/bin/python", "-m", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", "--factory", "--host", "0.0.0.0", "--port", "8001"]

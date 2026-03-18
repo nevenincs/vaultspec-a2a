@@ -1,0 +1,54 @@
+name: Prod-like Docker
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: prodlike-docker-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  prodlike-docker-postgres:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v7
+        with:
+          python-version: "3.13"
+          enable-cache: true
+
+      - name: Show Docker versions
+        run: |
+          docker version
+          docker compose version
+
+      - name: Install dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Render prod-like Docker configs
+        env:
+          VAULTSPEC_INTERNAL_TOKEN: vaultspec-internal-ci-token
+        run: |
+          docker compose -f docker-compose.integration.yml config
+          docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml config
+
+      - name: Run repo hygiene guard
+        run: uv run pytest src/vaultspec_a2a/tests/test_repo_hygiene.py -q
+
+      - name: Run prod-like Docker/Postgres verification
+        env:
+          VAULTSPEC_INTERNAL_TOKEN: vaultspec-internal-ci-token
+        run: uv run vaultspec test prodlike-docker
+
+      - name: Upload prod-like diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: prodlike-docker-diagnostics
+          path: .vaultspec/runtime/verify-prodlike-docker
+          if-no-files-found: ignore

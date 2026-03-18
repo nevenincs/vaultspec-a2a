@@ -21,6 +21,10 @@ agents. We're aiming to implement two modes:
 
 ## Frontend Development Workflows
 
+Postgres is the default backend posture for development and production-facing
+verification. SQLite remains a fallback convenience mode only and does not
+certify production readiness.
+
 Use one of these three workflows depending on what you need:
 
 1. Local split-terminal development

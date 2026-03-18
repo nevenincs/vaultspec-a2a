@@ -15,9 +15,13 @@ services:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
       VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
     depends_on:
-      - worker
+      worker:
+        condition: service_healthy
     healthcheck:
       test:
         [
@@ -40,6 +44,8 @@ services:
       - db-data:/app/data
     environment:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
       VAULTSPEC_MCP_API_BASE_URL: 'http://gateway:8000'
     healthcheck:
       test:

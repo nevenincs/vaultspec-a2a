@@ -1,0 +1,12 @@
+services:
+  worker:
+    environment:
+      CLAUDE_CODE_OAUTH_TOKEN: "${CLAUDE_CODE_OAUTH_TOKEN:-}"
+      GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
+      GOOGLE_API_KEY: "${GOOGLE_API_KEY:-}"
+      GEMINI_CLI_HOME: "${GEMINI_CLI_HOME:-/gemini-cli-home}"
+      HOME: "${GEMINI_CLI_HOME:-/gemini-cli-home}"
+    volumes:
+      - type: bind
+        source: ${GEMINI_HOST_CLI_HOME:-.}
+        target: ${GEMINI_CLI_HOME:-/gemini-cli-home}

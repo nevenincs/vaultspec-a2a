@@ -112,6 +112,8 @@ class ThreadSummary(BaseModel):
     status: str
     repair_status: str | None = None
     execution_readiness: str | None = None
+    approval_status: str | None = None
+    approval_request_id: str | None = None
     agent_state: AgentLifecycleState | None = None
     team_preset: str | None = None
     created_at: datetime
@@ -181,6 +183,7 @@ class PermissionResponseResult(BaseModel):
     thread_id: str
     action_id: str | None = None
     idempotency_key: str | None = None
+    approval_status: str | None = None
 
 
 class TeamPresetSummary(BaseModel):

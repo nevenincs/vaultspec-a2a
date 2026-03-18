@@ -7,10 +7,14 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from ...core.config import settings
+
 
 __all__ = [
     "DispatchRequest",
     "DispatchResponse",
+    "ExecutionStateProjectionPayload",
+    "ExecutionTaskProjectionPayload",
     "HeartbeatMessage",
     "WorkerEventEnvelope",
 ]
@@ -36,7 +40,9 @@ class DispatchRequest(BaseModel):
     autonomous: bool = False
     metadata_json: str | None = None
     context_preamble: str | None = None
-    recursion_limit: int = 100
+    recursion_limit: int = Field(
+        default_factory=lambda: settings.graph_recursion_limit
+    )
     # ADR-019: SDD blackboard fields
     active_feature: str | None = None
     pipeline_phase: str | None = None
@@ -58,6 +64,35 @@ class HeartbeatMessage(BaseModel):
     worker_id: str
     active_threads: list[str] = Field(default_factory=list)
     timestamp: str
+
+
+class ExecutionTaskProjectionPayload(BaseModel):
+    """Normalized task summary emitted internally by the worker."""
+
+    task_id: str
+    name: str
+    path: list[str] = Field(default_factory=list)
+    has_error: bool = False
+    error_type: str | None = None
+    interrupt_ids: list[str] = Field(default_factory=list)
+    interrupt_types: list[str] = Field(default_factory=list)
+    has_nested_state: bool = False
+    has_result: bool = False
+
+
+class ExecutionStateProjectionPayload(BaseModel):
+    """Normalized execution-state snapshot emitted by the worker."""
+
+    type: str = "execution_state_projection"
+    checkpoint_id: str | None = None
+    parent_checkpoint_id: str | None = None
+    snapshot_created_at: str | None = None
+    next_nodes: list[str] = Field(default_factory=list)
+    interrupt_types: list[str] = Field(default_factory=list)
+    interrupt_count: int = 0
+    task_count: int = 0
+    tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
+    degraded_reasons: list[str] = Field(default_factory=list)
 
 
 class WorkerEventEnvelope(BaseModel):

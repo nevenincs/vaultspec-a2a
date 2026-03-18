@@ -21,7 +21,6 @@ import asyncio
 import contextlib
 import json
 import logging
-import os
 import re
 import subprocess
 import sys
@@ -29,6 +28,7 @@ import time
 
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
@@ -48,15 +48,20 @@ from ..core import EventAggregator, settings
 from ..core.asyncio_compat import configure_asyncio_runtime
 from ..core.reconciliation import reconcile_threads_on_startup
 from ..database.checkpoints import open_checkpointer
-from ..database.crud import get_thread
+from ..database.crud import ThreadStatus, get_thread, update_thread_status
 from ..database.migrations import backfill_teamstate_sdd_fields
-from ..database.session import close_db, get_session_factory, init_db
+from ..database.session import (
+    close_db,
+    get_session_factory,
+    init_db,
+    inspect_sqlite_database,
+)
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from .endpoints import router
 from .internal import internal_router
 from .schemas.enums import AgentControlAction
 from .schemas.internal import DispatchRequest
-from .websocket import ConnectionManager
+from .websocket import ConnectionManager, WebSocketCommandRejectedError
 
 
 __all__ = [
@@ -69,25 +74,86 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# Path to the React SPA build output (ADR-007 / ADR-018).
-# In Docker non-editable installs __file__ resolves inside site-packages, so
-# the path traversal is wrong.  Set VAULTSPEC_UI_BUILD_DIR to override.
-_UI_BUILD_DIR = (
-    Path(os.environ["VAULTSPEC_UI_BUILD_DIR"])
-    if "VAULTSPEC_UI_BUILD_DIR" in os.environ
-    else Path(__file__).resolve().parent.parent.parent.parent / "src" / "ui" / "dist"
-)
+_WORKER_STDERR_TAIL_BYTES = 4096
 
-# Worker heartbeat staleness threshold (seconds).  If no heartbeat has
-# been received within this window, the worker is considered disconnected.
-_WORKER_HEARTBEAT_TIMEOUT = 90.0
+
+def _runtime_dir() -> Path:
+    """Return the repo-local runtime directory for gateway-managed process logs."""
+    runtime_dir = settings.project_root / ".vault" / "runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    return runtime_dir
+
+
+def _worker_stderr_log_path(worker_port: int) -> Path:
+    """Return the deterministic stderr log path for the auto-spawned worker."""
+    return _runtime_dir() / f"worker-autospawn-{worker_port}.stderr.log"
+
+
+def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -> str:
+    """Read and decode the tail of a worker stderr log file."""
+    if max_bytes <= 0 or not log_path.exists():
+        return ""
+    with log_path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        handle.seek(max(size - max_bytes, 0))
+        return handle.read(max_bytes).decode(errors="replace").strip()
+
+
+def _build_worker_restart_detail(
+    *,
+    returncode: int | None,
+    stderr_log_path: Path,
+) -> str:
+    """Build a compact diagnostic string for health/readiness surfaces."""
+    detail = f"returncode={returncode}"
+    stderr_tail = _read_log_tail(stderr_log_path)
+    if stderr_tail:
+        compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
+        detail += f"; stderr_tail={compact_tail}"
+    detail += f"; stderr_log={stderr_log_path}"
+    return detail
+
+
+def _build_sqlite_fallback_diagnostics(
+    *,
+    database_backend: str | None = None,
+    checkpoint_backend: str | None = None,
+    database_path: Path | None = None,
+    checkpoint_path: Path | None = None,
+    busy_timeout_ms: int | None = None,
+) -> dict[str, object] | None:
+    """Build explicit diagnostics for the SQLite fallback path."""
+    resolved_database_backend = database_backend or settings.resolved_database_backend
+    resolved_checkpoint_backend = (
+        checkpoint_backend or settings.resolved_checkpoint_backend
+    )
+    if (
+        resolved_database_backend != "sqlite"
+        and resolved_checkpoint_backend != "sqlite"
+    ):
+        return None
+
+    diagnostics: dict[str, object] = {
+        "active": True,
+        "busy_timeout_ms": busy_timeout_ms or settings.sqlite_busy_timeout_ms,
+        "production_certifying": False,
+        "limitations": ["sqlite_fallback_not_production_certifying"],
+    }
+    if resolved_database_backend == "sqlite":
+        diagnostics["database"] = inspect_sqlite_database(
+            database_path or settings.database_path
+        )
+    if resolved_checkpoint_backend == "sqlite":
+        diagnostics["checkpoint"] = inspect_sqlite_database(
+            checkpoint_path or settings.checkpoint_path
+        )
+    return diagnostics
+
 
 # ---------------------------------------------------------------------------
 # Worker circuit breaker (PROD-028)
 # ---------------------------------------------------------------------------
-
-_CB_FAILURE_THRESHOLD = 3  # consecutive failures to open circuit
-_CB_RECOVERY_TIMEOUT = 30.0  # seconds before attempting a probe
 
 
 class WorkerCircuitBreaker:
@@ -103,8 +169,8 @@ class WorkerCircuitBreaker:
 
     def __init__(
         self,
-        failure_threshold: int = _CB_FAILURE_THRESHOLD,
-        recovery_timeout: float = _CB_RECOVERY_TIMEOUT,
+        failure_threshold: int,
+        recovery_timeout: float,
     ) -> None:
         """Initialise circuit breaker with failure threshold and recovery timeout."""
         self._failure_threshold = failure_threshold
@@ -206,9 +272,124 @@ def _trace_headers() -> dict[str, str]:
     return carrier
 
 
+async def _classify_missing_ws_thread(
+    *,
+    thread_id: str,
+    session_factory: Any,  # noqa: ANN401
+    checkpointer: Any,  # noqa: ANN401
+) -> WebSocketCommandRejectedError:
+    """Classify a missing-thread WebSocket command without assuming total absence."""
+    from ..database.crud import get_thread_execution_state  # noqa: PLC0415
+
+    execution_state_present = False
+    try:
+        async with session_factory() as db:
+            execution_state_present = (
+                await get_thread_execution_state(db, thread_id)
+            ) is not None
+    except Exception:
+        logger.warning(
+            "Could not inspect execution-state projection for websocket thread %s",
+            thread_id,
+            exc_info=True,
+        )
+
+    checkpoint_present = False
+    checkpoint_unverified = False
+    try:
+        config = {"configurable": {"thread_id": thread_id}}
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config),
+            timeout=2.0,
+        )
+        checkpoint_present = checkpoint_tuple is not None
+    except TimeoutError:
+        checkpoint_unverified = True
+    except Exception:
+        logger.debug(
+            "Could not verify checkpoint for missing thread %s",
+            thread_id,
+            exc_info=True,
+        )
+        checkpoint_unverified = True
+
+    metadata = {
+        "execution_state_present": execution_state_present,
+        "checkpoint_present": checkpoint_present,
+        "checkpoint_unverified": checkpoint_unverified,
+    }
+    if execution_state_present or checkpoint_present:
+        return WebSocketCommandRejectedError(
+            thread_id=thread_id,
+            code="THREAD_STATE_DRIFT",
+            message=(
+                "Thread is missing from the gateway database, but durable backend "
+                "state still exists. Refresh thread state or trigger repair before "
+                "sending follow-up commands."
+            ),
+            recoverable=True,
+            metadata=metadata,
+        )
+    if checkpoint_unverified:
+        return WebSocketCommandRejectedError(
+            thread_id=thread_id,
+            code="THREAD_STATE_UNVERIFIED",
+            message=(
+                "Thread is missing from the gateway database and checkpoint truth "
+                "could not be verified. Retry after the backend is healthy."
+            ),
+            recoverable=True,
+            metadata=metadata,
+        )
+    return WebSocketCommandRejectedError(
+        thread_id=thread_id,
+        code="THREAD_NOT_FOUND",
+        message="Thread not found.",
+        recoverable=True,
+        metadata=metadata,
+    )
+
+
+async def _ws_mark_failed_and_broadcast(
+    thread_id: str,
+    session_factory: Any,  # noqa: ANN401
+    connection_manager: Any,  # noqa: ANN401
+    error_detail: str,
+) -> None:
+    """Mark a thread FAILED and broadcast a terminal WS event.
+
+    Shared by WS dispatch handlers when the worker is unreachable.
+    """
+    try:
+        async with session_factory() as db:
+            await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await db.commit()
+    except Exception:
+        logger.warning(
+            "Could not set thread %s to FAILED after WS dispatch error",
+            thread_id,
+            exc_info=True,
+        )
+    terminal_payload = {
+        "event_type": "thread_terminal",
+        "thread_id": thread_id,
+        "status": "failed",
+        "error_detail": error_detail,
+    }
+    try:
+        await connection_manager.broadcast_to_thread(thread_id, terminal_payload)
+    except Exception:
+        logger.warning(
+            "Could not broadcast terminal event for thread %s",
+            thread_id,
+            exc_info=True,
+        )
+
+
 def _create_dispatch_message_handler(
     worker_client: httpx.AsyncClient,
     session_factory: Any,  # noqa: ANN401
+    checkpointer: Any,  # noqa: ANN401
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
     connection_manager: Any,  # noqa: ANN401
@@ -241,14 +422,49 @@ def _create_dispatch_message_handler(
         try:
             async with session_factory() as db:
                 thread = await get_thread(db, thread_id)
-                if thread is not None:
-                    team_preset = thread.team_preset
-                    if thread.thread_metadata:
-                        try:
-                            meta = json.loads(thread.thread_metadata)
-                            workspace_root = meta.get("workspace_root")
-                        except (ValueError, AttributeError):
-                            pass
+                if thread is None:
+                    raise await _classify_missing_ws_thread(
+                        thread_id=thread_id,
+                        session_factory=session_factory,
+                        checkpointer=checkpointer,
+                    )
+                # WS-G01: Mirror REST 409 guards — reject dispatch to
+                # terminal or input-paused threads.
+                _terminal_values = (
+                    ThreadStatus.COMPLETED.value,
+                    ThreadStatus.FAILED.value,
+                    ThreadStatus.CANCELLED.value,
+                    ThreadStatus.ARCHIVED.value,
+                )
+                if thread.status in _terminal_values:
+                    raise WebSocketCommandRejectedError(
+                        thread_id=thread_id,
+                        code="THREAD_TERMINAL",
+                        message=(
+                            f"Cannot send messages to thread in"
+                            f" {thread.status!r} state"
+                        ),
+                        recoverable=False,
+                    )
+                if thread.status == ThreadStatus.INPUT_REQUIRED.value:
+                    raise WebSocketCommandRejectedError(
+                        thread_id=thread_id,
+                        code="THREAD_INPUT_REQUIRED",
+                        message=(
+                            "Cannot send a follow-up message while the"
+                            " thread is paused for input"
+                        ),
+                        recoverable=True,
+                    )
+                team_preset = thread.team_preset
+                if thread.thread_metadata:
+                    try:
+                        meta = json.loads(thread.thread_metadata)
+                        workspace_root = meta.get("workspace_root")
+                    except (ValueError, AttributeError):
+                        pass
+        except WebSocketCommandRejectedError:
+            raise
         except Exception:
             logger.warning(
                 "Could not look up thread %s for WS dispatch — "
@@ -267,12 +483,27 @@ def _create_dispatch_message_handler(
         )
 
         try:
-            await worker_client.post(
+            resp = await worker_client.post(
                 "/dispatch",
                 json=dispatch.model_dump(),
                 headers=_trace_headers(),
             )
+            # PROD-068: worker 429 means alive but at capacity — message dropped.
+            if resp.status_code == httpx.codes.TOO_MANY_REQUESTS:
+                logger.warning(
+                    "Worker at capacity (429) for WS dispatch thread %s"
+                    " — message not delivered",
+                    thread_id,
+                )
+                raise WebSocketCommandRejectedError(
+                    thread_id=thread_id,
+                    code="WORKER_AT_CAPACITY",
+                    message="Worker at capacity — try again later",
+                    recoverable=True,
+                )
             circuit_breaker.record_success()
+        except WebSocketCommandRejectedError:
+            raise
         except httpx.HTTPError:
             circuit_breaker.record_failure()
             logger.warning(
@@ -280,45 +511,21 @@ def _create_dispatch_message_handler(
                 thread_id,
                 exc_info=True,
             )
-            # WS-G01: Mirror REST path — mark thread FAILED so it doesn't
-            # stay SUBMITTED forever, and broadcast terminal event to clients.
-            try:
-                from ..database.crud import (  # noqa: PLC0415
-                    ThreadStatus,
-                    update_thread_status,
-                )
-
-                async with session_factory() as db:
-                    await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-                    await db.commit()
-            except Exception:
-                logger.warning(
-                    "Could not set thread %s to FAILED after WS dispatch error",
-                    thread_id,
-                    exc_info=True,
-                )
-            terminal_payload = {
-                "event_type": "thread_terminal",
-                "thread_id": thread_id,
-                "status": "failed",
-                "error_detail": "Worker unreachable — message not delivered",
-            }
-            try:
-                await connection_manager.broadcast_to_thread(
-                    thread_id, terminal_payload
-                )
-            except Exception:
-                logger.warning(
-                    "Could not broadcast terminal event for thread %s",
-                    thread_id,
-                    exc_info=True,
-                )
+            # WS-G01: Mirror REST path — mark thread FAILED and broadcast.
+            await _ws_mark_failed_and_broadcast(
+                thread_id,
+                session_factory,
+                connection_manager,
+                "Worker unreachable — message not delivered",
+            )
 
     return _dispatch_message
 
 
 def _create_dispatch_control_handler(
     worker_client: httpx.AsyncClient,
+    session_factory: Any,  # noqa: ANN401
+    checkpointer: Any,  # noqa: ANN401
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
 ) -> Callable:
@@ -349,10 +556,20 @@ def _create_dispatch_control_handler(
                 logger.info("Pause not supported -- ignoring for thread %s", thread_id)
                 return
 
+        async with session_factory() as db:
+            thread = await get_thread(db, thread_id)
+            if thread is None:
+                raise await _classify_missing_ws_thread(
+                    thread_id=thread_id,
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                )
+
         await worker_spawner.ensure_worker()
-        circuit_breaker.pre_dispatch()
+        # PROD-066: Cancel control must bypass circuit breaker so users can
+        # always stop a running agent even when the breaker is OPEN.
         try:
-            await worker_client.post(
+            resp = await worker_client.post(
                 "/dispatch",
                 json={
                     "action": dispatch_action,
@@ -361,7 +578,8 @@ def _create_dispatch_control_handler(
                 },
                 headers=_trace_headers(),
             )
-            circuit_breaker.record_success()
+            if resp.is_success:
+                circuit_breaker.record_success()
         except httpx.HTTPError:
             circuit_breaker.record_failure()
             logger.warning(
@@ -376,13 +594,6 @@ def _create_dispatch_control_handler(
 # ---------------------------------------------------------------------------
 # Worker auto-spawn helpers (ADR-031 §2.4)
 # ---------------------------------------------------------------------------
-
-# Adaptive polling constants (PHASE-1e)
-_POLL_INITIAL_INTERVAL = 0.1  # seconds — fast first probes
-_POLL_MAX_INTERVAL = 2.0  # seconds — cap for later probes
-_POLL_BACKOFF_FACTOR = 1.5  # exponential growth per iteration
-_POLL_LOG_INTERVAL = 5.0  # seconds between progress log messages
-
 
 async def _tcp_port_ready(host: str, port: int) -> bool:
     """Fast-path: check if a TCP port is accepting connections.
@@ -440,33 +651,37 @@ async def _spawn_worker(
     )
     logger.info(
         "Worker spawn env snapshot: gateway_port=%s worker_port=%s worker_url=%s",
-        os.environ.get("VAULTSPEC_PORT"),
-        os.environ.get("VAULTSPEC_WORKER_PORT"),
-        os.environ.get("VAULTSPEC_WORKER_URL"),
+        settings.port,
+        settings.worker_port,
+        settings.worker_url,
     )
-
-    process = subprocess.Popen(
-        [
-            sys.executable,
-            "-c",
-            "from vaultspec_a2a.worker.app import main; main()",
-        ],
-        stdout=subprocess.DEVNULL,
-        stdin=subprocess.DEVNULL,
-        stderr=subprocess.PIPE,
-    )
+    stderr_log_path = _worker_stderr_log_path(worker_port)
+    stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
+    with stderr_log_path.open("wb") as stderr_handle:
+        process = subprocess.Popen(
+            [
+                sys.executable,
+                "-c",
+                "from vaultspec_a2a.worker.app import main; main()",
+            ],
+            stdout=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+            stderr=stderr_handle,
+        )
     logger.info(
         "Worker process spawned (PID %d) via"
-        " `%s -c from vaultspec_a2a.worker.app import main; main()`",
+        " `%s -c from vaultspec_a2a.worker.app import main; main()`"
+        " with stderr at %s",
         process.pid,
         sys.executable,
+        stderr_log_path,
     )
 
     # Adaptive health polling (PHASE-1e): fast initial probes, exponential
     # backoff to cap.  TCP fast-path skips expensive HTTP checks while the
     # process is still binding its port.
     deadline = asyncio.get_event_loop().time() + 30.0
-    interval = _POLL_INITIAL_INTERVAL
+    interval = settings.worker_poll_initial_interval_seconds
     last_log = 0.0  # elapsed seconds at last progress log
 
     while asyncio.get_event_loop().time() < deadline:
@@ -484,32 +699,30 @@ async def _spawn_worker(
             return process
 
         elapsed = 30.0 - (deadline - asyncio.get_event_loop().time())
-        if elapsed - last_log >= _POLL_LOG_INTERVAL:
+        if elapsed - last_log >= settings.worker_poll_log_interval_seconds:
             logger.info("Waiting for worker... (%.0fs elapsed)", elapsed)
             last_log = elapsed
 
         if process.poll() is not None:
-            stderr_bytes = b""
-            if process.stderr:
-                with contextlib.suppress(
-                    subprocess.TimeoutExpired, TimeoutError, OSError
-                ):
-                    stderr_bytes = await asyncio.to_thread(
-                        process.stderr.read,
-                        4096,
-                    )
+            detail = _build_worker_restart_detail(
+                returncode=process.returncode,
+                stderr_log_path=stderr_log_path,
+            )
             logger.error(
-                "Worker exited prematurely (code %d): %s",
-                process.returncode,
-                stderr_bytes.decode(errors="replace")[:500],
+                "Worker exited prematurely: %s",
+                detail,
             )
             return None
 
         await asyncio.sleep(interval)
-        interval = min(interval * _POLL_BACKOFF_FACTOR, _POLL_MAX_INTERVAL)
+        interval = min(
+            interval * settings.worker_poll_backoff_factor,
+            settings.worker_poll_max_interval_seconds,
+        )
 
     logger.error(
-        "Worker failed to become ready within 30 seconds",
+        "Worker failed to become ready within 30 seconds; stderr_log=%s",
+        stderr_log_path,
     )
     process.terminate()
     return None
@@ -587,6 +800,9 @@ class LazyWorkerSpawner:
         self._worker_port = worker_port
         self._auto_spawn = auto_spawn
         self._process: subprocess.Popen[bytes] | None = None
+        self._stderr_log_path = (
+            _worker_stderr_log_path(worker_port) if auto_spawn else None
+        )
         self._spawned = False
         self._lock = asyncio.Lock()
 
@@ -599,6 +815,11 @@ class LazyWorkerSpawner:
     def process(self) -> subprocess.Popen[bytes] | None:
         """The worker subprocess handle, if we spawned it."""
         return self._process
+
+    @property
+    def stderr_log_path(self) -> Path | None:
+        """The worker stderr log path used for gateway-managed spawns."""
+        return self._stderr_log_path
 
     async def ensure_worker(self) -> None:
         """Spawn the worker if not already running.  No-op after first call."""
@@ -667,11 +888,6 @@ class LazyWorkerSpawner:
 # Worker watchdog (PROD-002)
 # ---------------------------------------------------------------------------
 
-_WATCHDOG_POLL_INTERVAL = 5.0  # seconds between health checks
-_WATCHDOG_MAX_RETRIES = 3  # restart attempts before giving up
-_WATCHDOG_BACKOFF_BASE = 2.0  # seconds — doubles each retry
-
-
 class WorkerWatchdog:
     """Background task monitoring worker health and auto-restarting on crash.
 
@@ -696,13 +912,43 @@ class WorkerWatchdog:
         self._app_state = app_state
         # State machine: pending → up → restarting → up | down
         self._app_state.worker_status = "pending"
+        self._app_state.worker_restart_count = 0
+        self._app_state.worker_last_restart_reason = None
+        self._app_state.worker_last_restart_detail = None
+        self._app_state.worker_last_restart_started_at = None
+        self._app_state.worker_last_restart_completed_at = None
+        self._app_state.worker_last_restart_succeeded = None
+        self._app_state.worker_last_restart_attempts = 0
+        self._app_state.worker_stderr_log_path = (
+            str(spawner.stderr_log_path)
+            if spawner.stderr_log_path is not None
+            else None
+        )
+
+    def _mark_restart_started(self, reason: str, detail: str | None) -> None:
+        """Latch restart metadata so callers can observe repair deterministically."""
+        self._app_state.worker_restart_count += 1
+        self._app_state.worker_last_restart_reason = reason
+        self._app_state.worker_last_restart_detail = detail
+        self._app_state.worker_last_restart_started_at = datetime.now(UTC).isoformat()
+        self._app_state.worker_last_restart_completed_at = None
+        self._app_state.worker_last_restart_succeeded = None
+        self._app_state.worker_last_restart_attempts = 0
+
+    def _mark_restart_finished(self, succeeded: bool, attempts: int) -> None:
+        """Record the terminal outcome of the most recent restart cycle."""
+        self._app_state.worker_last_restart_completed_at = (
+            datetime.now(UTC).isoformat()
+        )
+        self._app_state.worker_last_restart_succeeded = succeeded
+        self._app_state.worker_last_restart_attempts = attempts
 
     def _heartbeat_stale(self) -> bool:
         """Check if the last heartbeat is older than the timeout threshold."""
         last_hb = getattr(self._app_state, "worker_last_heartbeat_ts", None)
         if last_hb is None:
             return False  # No heartbeat yet — not stale, just not started
-        return (time.monotonic() - last_hb) > _WORKER_HEARTBEAT_TIMEOUT
+        return (time.monotonic() - last_hb) > settings.worker_heartbeat_timeout_seconds
 
     def _process_crashed(self) -> bool:
         """Check if the worker process has exited unexpectedly."""
@@ -717,7 +963,7 @@ class WorkerWatchdog:
         """Main watchdog loop — runs until cancelled."""
         try:
             while True:
-                await asyncio.sleep(_WATCHDOG_POLL_INTERVAL)
+                await asyncio.sleep(settings.watchdog_poll_interval_seconds)
 
                 # Don't monitor before first dispatch triggers a spawn.
                 if not self._spawner.spawned:
@@ -730,9 +976,11 @@ class WorkerWatchdog:
 
                 # Promote to "up" only after a positive worker health probe.
                 if self._app_state.worker_status == "pending":
-                    if http_ready and not stale:
+                    if http_ready and not stale and not crashed:
                         self._app_state.worker_status = "up"
-                    continue
+                        continue
+                    if not crashed and not stale:
+                        continue
 
                 if not crashed and not stale:
                     # Healthy — ensure status reflects it.
@@ -744,23 +992,28 @@ class WorkerWatchdog:
                     continue
 
                 # --- Crash detected ---
-                reason = "process exited" if crashed else "heartbeat stale"
+                reason = "process_exited" if crashed else "heartbeat_stale"
                 proc = self._spawner.process
-                detail = ""
+                detail = None
                 if crashed and proc is not None:
-                    detail = f" (returncode={proc.returncode})"
+                    detail = _build_worker_restart_detail(
+                        returncode=proc.returncode,
+                        stderr_log_path=self._spawner.stderr_log_path,
+                    )
                 logger.error(
                     "Worker crash detected: %s%s — initiating restart",
                     reason,
-                    detail,
+                    f" ({detail})" if detail else "",
                 )
                 self._app_state.worker_status = "restarting"
+                self._mark_restart_started(reason, detail)
 
                 # Force circuit breaker open so dispatches return 503.
                 self._cb.force_open()
 
                 # --- Restart with exponential backoff ---
-                restarted = await self._attempt_restart()
+                restarted, attempts = await self._attempt_restart()
+                self._mark_restart_finished(restarted, attempts)
                 if restarted:
                     self._cb.record_success()
                     self._app_state.worker_status = "up"
@@ -771,22 +1024,23 @@ class WorkerWatchdog:
                         "Worker restart failed after %d attempts — "
                         "manual intervention required. "
                         "Run: uv run vaultspec service start",
-                        _WATCHDOG_MAX_RETRIES,
+                        settings.watchdog_max_retries,
                     )
         except asyncio.CancelledError:
             logger.info("Worker watchdog stopped")
 
-    async def _attempt_restart(self) -> bool:
+    async def _attempt_restart(self) -> tuple[bool, int]:
         """Try to restart the worker with exponential backoff.
 
-        Returns True if the worker was successfully restarted.
+        Returns ``(succeeded, attempts)`` for the current restart cycle.
         """
-        for attempt in range(_WATCHDOG_MAX_RETRIES):
-            delay = _WATCHDOG_BACKOFF_BASE * (2**attempt)
+        for attempt in range(settings.watchdog_max_retries):
+            self._app_state.worker_last_restart_attempts = attempt + 1
+            delay = settings.watchdog_backoff_base_seconds * (2**attempt)
             logger.info(
                 "Restart attempt %d/%d — waiting %.0fs...",
                 attempt + 1,
-                _WATCHDOG_MAX_RETRIES,
+                settings.watchdog_max_retries,
                 delay,
             )
             await asyncio.sleep(delay)
@@ -803,14 +1057,14 @@ class WorkerWatchdog:
             )
             if new_proc is not None:
                 self._spawner.replace_process(new_proc)
-                return True
+                return True, attempt + 1
 
             # Check if an external worker came up.
             if await _check_worker_health(self._spawner.worker_url):
                 self._spawner.replace_process(None)
-                return True
+                return True, attempt + 1
 
-        return False
+        return False, settings.watchdog_max_retries
 
 
 # ---------------------------------------------------------------------------
@@ -834,12 +1088,14 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     # --- Startup ---
     logger.info("Starting gateway lifespan (ADR-019)")
+    settings.validate_postgres_requirement()
 
     engine = await init_db(settings.database_url)
     logger.info(
         "Database initialised (%s, migrations applied)",
         settings.resolved_database_backend,
     )
+    app.state.sqlite_fallback_diagnostics = _build_sqlite_fallback_diagnostics()
 
     if settings.resolved_checkpoint_backend == "sqlite":
         backfill_teamstate_sdd_fields(settings.checkpoint_path)
@@ -856,7 +1112,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             session_factory = get_session_factory()
             async with session_factory() as db:
                 app.state.repair_summary = await reconcile_threads_on_startup(
-                    db, checkpointer
+                    db, checkpointer, strategy=settings.repair_strategy
                 )
                 await db.commit()
         else:
@@ -886,6 +1142,11 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         worker_client = httpx.AsyncClient(
             base_url=settings.worker_url,
             timeout=httpx.Timeout(30.0, connect=5.0),
+            headers=(
+                {"Authorization": f"Bearer {settings.internal_token}"}
+                if settings.internal_token is not None
+                else None
+            ),
         )
         app.state.worker_client = worker_client
         logger.info("Worker client configured: %s", settings.worker_url)
@@ -901,7 +1162,10 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.worker_spawner = worker_spawner
 
         # PROD-028: Circuit breaker for worker dispatch
-        circuit_breaker = WorkerCircuitBreaker()
+        circuit_breaker = WorkerCircuitBreaker(
+            failure_threshold=settings.cb_failure_threshold,
+            recovery_timeout=settings.cb_recovery_timeout_seconds,
+        )
         app.state.circuit_breaker = circuit_breaker
 
         # PROD-002: Worker watchdog — auto-restart on crash
@@ -912,6 +1176,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         msg_handler = _create_dispatch_message_handler(
             worker_client,
             get_session_factory(),
+            checkpointer,
             circuit_breaker,
             worker_spawner,
             connection_manager,
@@ -920,6 +1185,8 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         ctrl_handler = _create_dispatch_control_handler(
             worker_client,
+            get_session_factory(),
+            checkpointer,
             circuit_breaker,
             worker_spawner,
         )
@@ -951,22 +1218,13 @@ def main() -> None:
     ``[project.scripts]`` (ADR-015).
     """
     configure_asyncio_runtime()
-    loop = (
-        "vaultspec_a2a.core.asyncio_compat:psycopg_compatible_loop"
-        if sys.platform == "win32"
-        and (
-            settings.resolved_database_backend == "postgres"
-            or settings.resolved_checkpoint_backend == "postgres"
-        )
-        else "auto"
-    )
     uvicorn.run(
         "vaultspec_a2a.api.app:create_app",
         factory=True,
         host=settings.host,
         port=settings.port,
         log_level="info",
-        loop=loop,
+        loop="auto",
     )
 
 
@@ -1012,15 +1270,17 @@ def create_app() -> FastAPI:
     # --- Gateway Health (CRIT-03 — MCP startup probe target) ---
     @app.get("/health")
     async def health_endpoint() -> dict[str, object]:
-        """Top-level health check for external probes (MCP, Docker, etc.).
+        """Top-level liveness check for external probes.
 
-        Reports liveness plus a lightweight readiness summary derived from
-        worker heartbeat/connectivity and circuit-breaker state.
+        `/health` stays green when the gateway process is alive. Aggregate
+        dependency readiness is exposed separately via `/api/health`.
         """
         worker_connected = False
         last_hb = getattr(app.state, "worker_last_heartbeat_ts", None)
         if last_hb is not None:
-            worker_connected = (time.monotonic() - last_hb) < _WORKER_HEARTBEAT_TIMEOUT
+            worker_connected = (
+                (time.monotonic() - last_hb) < settings.worker_heartbeat_timeout_seconds
+            )
         cb: WorkerCircuitBreaker | None = getattr(
             app.state,
             "circuit_breaker",
@@ -1033,7 +1293,46 @@ def create_app() -> FastAPI:
             None,
         )
         worker_spawned = spawner.spawned if spawner is not None else False
+        worker_pid = (
+            spawner.process.pid if spawner is not None and spawner.process else None
+        )
         worker_status = getattr(app.state, "worker_status", "unknown")
+        worker_restart_count = getattr(app.state, "worker_restart_count", 0)
+        worker_last_restart_reason = getattr(
+            app.state,
+            "worker_last_restart_reason",
+            None,
+        )
+        worker_last_restart_detail = getattr(
+            app.state,
+            "worker_last_restart_detail",
+            None,
+        )
+        worker_last_restart_started_at = getattr(
+            app.state,
+            "worker_last_restart_started_at",
+            None,
+        )
+        worker_last_restart_completed_at = getattr(
+            app.state,
+            "worker_last_restart_completed_at",
+            None,
+        )
+        worker_last_restart_succeeded = getattr(
+            app.state,
+            "worker_last_restart_succeeded",
+            None,
+        )
+        worker_last_restart_attempts = getattr(
+            app.state,
+            "worker_last_restart_attempts",
+            0,
+        )
+        worker_stderr_log_path = getattr(
+            app.state,
+            "worker_stderr_log_path",
+            None,
+        )
         repair_summary = getattr(
             app.state,
             "repair_summary",
@@ -1043,22 +1342,47 @@ def create_app() -> FastAPI:
                 "checkpoint_unavailable": 0,
             },
         )
+        sqlite_fallback_diagnostics = getattr(
+            app.state, "sqlite_fallback_diagnostics", None
+        )
         ready = not (
             cb_state == "open"
             or worker_status in {"down", "restarting"}
             or (worker_spawned and not worker_connected)
         )
         return {
-            "status": "ok" if ready else "degraded",
+            "status": "ok",
             "service": "gateway",
             "ready": ready,
             "worker_connected": worker_connected,
             "worker_spawned": worker_spawned,
+            "worker_pid": worker_pid,
             "worker_status": worker_status,
+            "worker_restart_count": worker_restart_count,
+            "worker_last_restart_reason": worker_last_restart_reason,
+            "worker_last_restart_detail": worker_last_restart_detail,
+            "worker_last_restart_started_at": worker_last_restart_started_at,
+            "worker_last_restart_completed_at": worker_last_restart_completed_at,
+            "worker_last_restart_succeeded": worker_last_restart_succeeded,
+            "worker_last_restart_attempts": worker_last_restart_attempts,
+            "worker_stderr_log_path": worker_stderr_log_path,
             "circuit_breaker": cb_state,
+            "database_backend": settings.resolved_database_backend,
+            "checkpoint_backend": settings.resolved_checkpoint_backend,
+            "postgres_required": settings.postgres_required,
+            # production_certifying is true only when BOTH the application DB
+            # and the checkpoint backend resolve to Postgres.  SQLite is a
+            # supported fallback for local/CI use but is not the certifying
+            # production backend.  Operators should monitor this field and
+            # alert when it is false in a production deployment.
+            "production_certifying": (
+                settings.resolved_database_backend == "postgres"
+                and settings.resolved_checkpoint_backend == "postgres"
+            ),
             "repair_backlog": repair_summary.get("repair_backlog", 0),
             "paused_resumable": repair_summary.get("paused_resumable", 0),
             "checkpoint_unavailable": repair_summary.get("checkpoint_unavailable", 0),
+            "sqlite_fallback": sqlite_fallback_diagnostics,
         }
 
     # --- WebSocket Route ---
@@ -1070,17 +1394,17 @@ def create_app() -> FastAPI:
         await cm.listen(client_id)
 
     # --- Static Files (React SPA) ---
-    if _UI_BUILD_DIR.is_dir():
+    if settings.ui_build_dir.is_dir():
         app.mount(
             "/",
-            StaticFiles(directory=str(_UI_BUILD_DIR), html=True),
+            StaticFiles(directory=str(settings.ui_build_dir), html=True),
             name="ui",
         )
-        logger.info("Mounted React SPA from %s", _UI_BUILD_DIR)
+        logger.info("Mounted React SPA from %s", settings.ui_build_dir)
     else:
         logger.warning(
             "SPA build not found at %s -- UI will not be served",
-            _UI_BUILD_DIR,
+            settings.ui_build_dir,
         )
 
     return app

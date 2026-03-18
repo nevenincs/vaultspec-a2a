@@ -21,6 +21,7 @@ from .events import PlanEntry, ToolCallContent, ToolCallLocation
 
 __all__ = [
     "ArtifactSnapshot",
+    "ExecutionTaskSnapshot",
     "MessageSnapshot",
     "ThreadStateSnapshot",
     "ToolCallSnapshot",
@@ -87,6 +88,20 @@ class _AgentSnapshot(BaseModel):
     description: str = ""
 
 
+class ExecutionTaskSnapshot(BaseModel):
+    """Normalized execution task used in reconnect snapshots."""
+
+    task_id: str
+    name: str
+    path: list[str] = Field(default_factory=list)
+    has_error: bool = False
+    error_type: str | None = None
+    interrupt_ids: list[str] = Field(default_factory=list)
+    interrupt_types: list[str] = Field(default_factory=list)
+    has_nested_state: bool = False
+    has_result: bool = False
+
+
 class ThreadStateSnapshot(BaseModel):
     """Complete thread state for reconnection replay.
 
@@ -104,8 +119,23 @@ class ThreadStateSnapshot(BaseModel):
     agents: list[_AgentSnapshot] = Field(default_factory=list)
     last_sequence: int
     checkpoint_id: str | None = None
+    checkpoint_created_at: datetime | None = None
+    checkpoint_parent_id: str | None = None
+    checkpoint_source: str | None = None
+    checkpoint_step: int | None = None
+    checkpoint_updated_channels: list[str] = Field(default_factory=list)
+    pending_write_channels: list[str] = Field(default_factory=list)
+    pending_write_count: int = 0
+    history_depth: int | None = None
+    next_nodes: list[str] = Field(default_factory=list)
+    task_count: int = 0
+    pending_interrupt_count: int = 0
+    execution_tasks: list[ExecutionTaskSnapshot] = Field(default_factory=list)
     snapshot_complete: bool = True
     degraded_reasons: list[str] = Field(default_factory=list)
     replay_status: str = "unknown"
     repair_status: str | None = None
     execution_readiness: str | None = None
+    pause_cause: str | None = None
+    approval_status: str | None = None
+    approval_request_id: str | None = None

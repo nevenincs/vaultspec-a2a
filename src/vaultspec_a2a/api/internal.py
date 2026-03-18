@@ -18,6 +18,7 @@ import json
 import logging
 import time
 
+from datetime import datetime
 from typing import Any
 
 from fastapi import (
@@ -30,10 +31,18 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
+from ..core import settings
+from .schemas.internal import ExecutionStateProjectionPayload
+
 
 __all__ = ["internal_router"]
 
 logger = logging.getLogger(__name__)
+
+_PLAN_APPROVAL_PAUSE_CAUSES = {
+    "plan_approval_request",
+    "plan_approval",
+}
 
 # DB-CRIT-01: map aggregator outcome strings to ThreadStatus enum values.
 _TERMINAL_STATUS_MAP: dict[str, str] = {
@@ -48,6 +57,7 @@ async def _handle_terminal_event(
     payload: dict[str, Any],
     *,
     aggregator: Any | None = None,  # noqa: ANN401
+    session_factory: Any | None = None,  # noqa: ANN401
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
 
@@ -73,9 +83,12 @@ async def _handle_terminal_event(
             set_thread_repair_state,
             update_thread_status,
         )
-        from ..database.session import get_session_factory  # noqa: PLC0415
+        if session_factory is None:
+            from ..database.session import get_session_factory  # noqa: PLC0415
 
-        factory = get_session_factory()
+            factory = get_session_factory()
+        else:
+            factory = session_factory
         async with factory() as db:
             await update_thread_status(db, thread_id, ThreadStatus(status_str))
             await expire_pending_permission_requests(db, thread_id=thread_id)
@@ -98,7 +111,17 @@ async def _handle_terminal_event(
                 ),
             )
             await db.commit()
-        logger.info("Thread %s status updated to %s", thread_id, status_str)
+        logger.info(
+            "Thread %s status updated to %s",
+            thread_id,
+            status_str,
+            extra={
+                "thread_id": thread_id,
+                "status": status_str,
+                "event_type": payload.get("event_type", ""),
+                "action": "thread_terminal_status_updated",
+            },
+        )
     except InvalidTransitionError:
         # BE-37: race condition — cancel endpoint already set terminal status.
         # This is expected and not an error.
@@ -106,12 +129,24 @@ async def _handle_terminal_event(
             "Thread %s transition to %s skipped (already terminal)",
             thread_id,
             status_str,
+            extra={
+                "thread_id": thread_id,
+                "status": status_str,
+                "event_type": payload.get("event_type", ""),
+                "action": "thread_terminal_status_skipped",
+            },
         )
     except Exception:
         logger.exception(
             "Failed to update thread %s status to %s",
             thread_id,
             status_str,
+            extra={
+                "thread_id": thread_id,
+                "status": status_str,
+                "event_type": payload.get("event_type", ""),
+                "action": "thread_terminal_status_update_failed",
+            },
         )
 
     # AGG-01/05: GC aggregator state for the terminated thread.
@@ -125,7 +160,14 @@ async def _handle_terminal_event(
             aggregator.prune_sequences(active)
         except Exception:
             logger.warning(
-                "Aggregator GC failed for thread %s", thread_id, exc_info=True
+                "Aggregator GC failed for thread %s",
+                thread_id,
+                extra={
+                    "thread_id": thread_id,
+                    "action": "aggregator_gc_failed",
+                    "event_type": payload.get("event_type", ""),
+                },
+                exc_info=True,
             )
 
 
@@ -136,13 +178,19 @@ def time_now_utc() -> Any:  # noqa: ANN401
     return datetime.now(UTC)
 
 
-async def _handle_permission_event(thread_id: str, payload: dict[str, Any]) -> None:
+async def _handle_permission_event(
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    session_factory: Any | None = None,  # noqa: ANN401
+) -> None:
     """Persist worker permission events into the durable journal."""
     event_type = payload.get("type", "")
     if event_type not in {"permission_request", "permission_resolved"}:
         return
 
     from ..database.crud import (  # noqa: PLC0415
+        ApprovalStatus,
         ControlActionResultStatus,
         ControlActionType,
         PermissionRequestStatus,
@@ -152,25 +200,43 @@ async def _handle_permission_event(thread_id: str, payload: dict[str, Any]) -> N
         get_permission_request,
         mark_permission_request_applied,
         record_permission_request,
+        set_thread_approval_state,
         set_thread_repair_state,
+        supersede_permission_requests,
         update_thread_status,
     )
-    from ..database.session import get_session_factory  # noqa: PLC0415
+    if session_factory is None:
+        from ..database.session import get_session_factory  # noqa: PLC0415
 
-    factory = get_session_factory()
+        factory = get_session_factory()
+    else:
+        factory = session_factory
     async with factory() as db:
         if event_type == "permission_request":
             request_id = str(payload.get("request_id", ""))
             if not request_id:
                 return
+            tool_call = payload.get("tool_call")
+            pause_reason_type = (
+                "plan_approval_request"
+                if tool_call == "plan_approval"
+                else str(tool_call or "permission_request")
+            )
+            if pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                await supersede_permission_requests(
+                    db,
+                    thread_id=thread_id,
+                    pause_reason_type=pause_reason_type,
+                    except_request_id=request_id,
+                )
             await record_permission_request(
                 db,
                 request_id=request_id,
                 thread_id=thread_id,
-                pause_reason_type=str(payload.get("tool_call") or "permission_request"),
+                pause_reason_type=pause_reason_type,
                 description=str(payload.get("description", "")),
                 allowed_options=list(payload.get("options", [])),
-                tool_call=payload.get("tool_call"),
+                tool_call=tool_call,
             )
             await create_control_action(
                 db,
@@ -190,6 +256,15 @@ async def _handle_permission_event(thread_id: str, payload: dict[str, Any]) -> N
                 execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
                 last_applied_action=ControlActionType.PERMISSION_REQUEST_CREATED,
             )
+            if pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                await set_thread_approval_state(
+                    db,
+                    thread_id,
+                    approval_status=ApprovalStatus.PENDING,
+                    approval_request_id=request_id,
+                    approval_reason=str(payload.get("description", "")),
+                    approval_response_action_id=None,
+                )
         else:
             request_id = str(payload.get("request_id", ""))
             permission = await get_permission_request(db, request_id)
@@ -220,10 +295,27 @@ async def _handle_permission_event(thread_id: str, payload: dict[str, Any]) -> N
                     execution_readiness=RepairStatus.HEALTHY.value,
                     last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
                 )
+                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                    await set_thread_approval_state(
+                        db,
+                        thread_id,
+                        approval_status=(
+                            ApprovalStatus.REJECTED
+                            if target_status == PermissionRequestStatus.REJECTED
+                            else ApprovalStatus.APPROVED
+                        ),
+                        approval_request_id=request_id,
+                        approval_reason=permission.description,
+                    )
         await db.commit()
 
 
-async def _handle_progress_event(thread_id: str, payload: dict[str, Any]) -> None:
+async def _handle_progress_event(
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    session_factory: Any | None = None,  # noqa: ANN401
+) -> None:
     """Infer permission application from post-resume worker progress."""
     event_type = payload.get("type", "")
     if event_type not in {
@@ -237,6 +329,7 @@ async def _handle_progress_event(thread_id: str, payload: dict[str, Any]) -> Non
         return
 
     from ..database.crud import (  # noqa: PLC0415
+        ApprovalStatus,
         ControlActionResultStatus,
         ControlActionType,
         RepairStatus,
@@ -244,12 +337,16 @@ async def _handle_progress_event(thread_id: str, payload: dict[str, Any]) -> Non
         create_control_action,
         get_pending_permission_requests,
         mark_permission_request_applied,
+        set_thread_approval_state,
         set_thread_repair_state,
         update_thread_status,
     )
-    from ..database.session import get_session_factory  # noqa: PLC0415
+    if session_factory is None:
+        from ..database.session import get_session_factory  # noqa: PLC0415
 
-    factory = get_session_factory()
+        factory = get_session_factory()
+    else:
+        factory = session_factory
     async with factory() as db:
         pending = await get_pending_permission_requests(db, thread_id=thread_id)
         answered = [
@@ -270,6 +367,18 @@ async def _handle_progress_event(thread_id: str, payload: dict[str, Any]) -> Non
                 payload={"event_type": event_type},
                 result_status=ControlActionResultStatus.APPLIED,
             )
+            if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                await set_thread_approval_state(
+                    db,
+                    thread_id,
+                    approval_status=(
+                        ApprovalStatus.REJECTED
+                        if permission.response_option_id == "reject"
+                        else ApprovalStatus.APPROVED
+                    ),
+                    approval_request_id=permission.request_id,
+                    approval_reason=permission.description,
+                )
         if answered:
             with contextlib.suppress(Exception):
                 await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
@@ -284,9 +393,46 @@ async def _handle_progress_event(thread_id: str, payload: dict[str, Any]) -> Non
             await db.commit()
 
 
-# Shared size limit for internal IPC payloads (1 MB).
-_MAX_WS_FRAME_BYTES = 1_048_576
-_MAX_HTTP_BODY_BYTES = 1_048_576
+async def _handle_execution_state_event(
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    session_factory: Any | None = None,  # noqa: ANN401
+) -> None:
+    """Persist worker-owned execution-state projection events."""
+    if payload.get("type") != "execution_state_projection":
+        return
+
+    from ..database.crud import record_thread_execution_state  # noqa: PLC0415
+    projection = ExecutionStateProjectionPayload.model_validate(payload)
+    snapshot_created_at: datetime | None = None
+    if projection.snapshot_created_at is not None:
+        with contextlib.suppress(ValueError):
+            snapshot_created_at = datetime.fromisoformat(
+                projection.snapshot_created_at
+            )
+
+    if session_factory is None:
+        from ..database.session import get_session_factory  # noqa: PLC0415
+
+        factory = get_session_factory()
+    else:
+        factory = session_factory
+    async with factory() as db:
+        await record_thread_execution_state(
+            db,
+            thread_id=thread_id,
+            checkpoint_id=projection.checkpoint_id,
+            parent_checkpoint_id=projection.parent_checkpoint_id,
+            snapshot_created_at=snapshot_created_at,
+            task_count=projection.task_count,
+            interrupt_count=projection.interrupt_count,
+            next_nodes=list(projection.next_nodes),
+            interrupt_types=list(projection.interrupt_types),
+            tasks=[task.model_dump(mode="json") for task in projection.tasks],
+            degraded_reasons=list(projection.degraded_reasons),
+        )
+        await db.commit()
 
 
 def _validate_event_envelope(
@@ -312,9 +458,6 @@ async def _verify_internal_token(
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
     configuration error (PROD-017).
     """
-    from ..core import (  # noqa: PLC0415
-        settings,
-    )
     from ..utils.enums import Environment  # noqa: PLC0415
 
     token = settings.internal_token
@@ -344,8 +487,26 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
     thread_id = msg.get("thread_id", "")
     payload = msg.get("payload", {})
     if not thread_id or not payload:
-        logger.warning("Malformed worker event envelope: %s", raw[:200])
+        logger.warning(
+            "Malformed worker event envelope: %s",
+            raw[:200],
+            extra={
+                "thread_id": thread_id,
+                "event_type": "",
+                "message_type": str(msg.get("type", "")),
+                "transport": "ws",
+                "frame_size": len(raw),
+            },
+        )
         return
+    if payload.get("type") == "execution_state_projection":
+        await _handle_execution_state_event(
+            thread_id,
+            payload,
+            session_factory=getattr(websocket.app.state, "db_session_factory", None),
+        )
+        return
+    session_factory = getattr(websocket.app.state, "db_session_factory", None)
 
     cm = getattr(websocket.app.state, "connection_manager", None)
     if cm is not None:
@@ -354,15 +515,41 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
         logger.warning(
             "ConnectionManager not available -- dropping event for %s",
             thread_id,
+            extra={
+                "thread_id": thread_id,
+                "event_type": str(
+                    payload.get("event_type", payload.get("type", ""))
+                ),
+                "transport": "ws",
+                "action": "relay_drop_event",
+            },
         )
     # P8-01: sync into API aggregator state.
     agg = getattr(websocket.app.state, "aggregator", None)
     if agg is not None:
         agg.sync_worker_event(thread_id, payload)
-    await _handle_permission_event(thread_id, payload)
-    await _handle_progress_event(thread_id, payload)
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+    await _handle_execution_state_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+    await _handle_progress_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
     # DB-CRIT-01: terminal status update + AGG-01/05 GC.
-    await _handle_terminal_event(thread_id, payload, aggregator=agg)
+    await _handle_terminal_event(
+        thread_id,
+        payload,
+        aggregator=agg,
+        session_factory=session_factory,
+    )
 
 
 @internal_router.websocket("/ws")
@@ -370,11 +557,9 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
     """Internal WebSocket -- receives events and heartbeats from the worker."""
     # AUTH-02: WebSocket routes bypass router-level Depends(), so verify
     # the bearer token manually before accepting the connection.
-    from ..core import settings as _settings  # noqa: PLC0415
-
-    if _settings.internal_token is not None:
+    if settings.internal_token is not None:
         token = websocket.headers.get("authorization", "").removeprefix("Bearer ")
-        if token != _settings.internal_token:
+        if token != settings.internal_token:
             await websocket.close(code=1008, reason="Unauthorized")
             return
 
@@ -389,7 +574,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
         while True:
             raw = await websocket.receive_text()
             # API-02: reject oversized frames (1 MB) to prevent memory exhaustion.
-            if len(raw) > _MAX_WS_FRAME_BYTES:
+            if len(raw) > settings.internal_max_frame_bytes:
                 logger.warning(
                     "Dropping oversized internal WS frame (%d bytes)", len(raw)
                 )
@@ -406,13 +591,28 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
                     logger.debug(
                         "Worker heartbeat: %d active threads",
                         len(msg.get("active_threads", [])),
+                        extra={
+                            "message_type": msg_type,
+                            "active_thread_count": len(
+                                msg.get("active_threads", [])
+                            ),
+                            "transport": "ws",
+                        },
                     )
 
                 case "event":
                     await _relay_worker_event(websocket, msg, raw)
 
                 case _:
-                    logger.warning("Unknown internal WS message type: %s", msg_type)
+                    logger.warning(
+                        "Unknown internal WS message type: %s",
+                        msg_type,
+                        extra={
+                            "message_type": msg_type,
+                            "transport": "ws",
+                            "frame_size": len(raw),
+                        },
+                    )
 
     except WebSocketDisconnect:
         logger.warning("Worker disconnected from internal WS")
@@ -441,7 +641,10 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     # API-03: reject oversized payloads (1 MB) on internal HTTP path.
     content_length = request.headers.get("content-length")
     try:
-        if content_length is not None and int(content_length) > _MAX_HTTP_BODY_BYTES:
+        if (
+            content_length is not None
+            and int(content_length) > settings.internal_max_http_body_bytes
+        ):
             raise HTTPException(status_code=413, detail="Payload too large (max 1 MB)")
     except ValueError:
         raise HTTPException(  # noqa: B904
@@ -453,6 +656,14 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     thread_id: str = body.get("thread_id", "")
     payload: dict[str, Any] = body.get("payload", {})
     _validate_event_envelope(thread_id, payload, context="worker event POST")
+    session_factory = getattr(request.app.state, "db_session_factory", None)
+    if payload.get("type") == "execution_state_projection":
+        await _handle_execution_state_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+        )
+        return {"status": "ok"}
 
     cm = getattr(request.app.state, "connection_manager", None)
     if cm is None:
@@ -466,10 +677,28 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     agg = getattr(request.app.state, "aggregator", None)
     if agg is not None:
         agg.sync_worker_event(thread_id, payload)
-    await _handle_permission_event(thread_id, payload)
-    await _handle_progress_event(thread_id, payload)
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+    await _handle_execution_state_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+    await _handle_progress_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
     # DB-CRIT-01: terminal status update + AGG-01/05 GC.
-    await _handle_terminal_event(thread_id, payload, aggregator=agg)
+    await _handle_terminal_event(
+        thread_id,
+        payload,
+        aggregator=agg,
+        session_factory=session_factory,
+    )
 
     return {"status": "ok"}
 
@@ -488,7 +717,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     try:
         if (
             content_length is not None
-            and int(content_length) > _MAX_HTTP_BODY_BYTES * 4
+            and int(content_length) > settings.internal_max_http_body_bytes * 4
         ):
             raise HTTPException(
                 status_code=413,
@@ -515,6 +744,7 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
         )
 
     agg = getattr(request.app.state, "aggregator", None)
+    session_factory = getattr(request.app.state, "db_session_factory", None)
 
     for idx, evt in enumerate(events):
         thread_id = evt.get("thread_id", "")
@@ -529,12 +759,37 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     for evt in events:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
+        if payload.get("type") == "execution_state_projection":
+            await _handle_execution_state_event(
+                thread_id,
+                payload,
+                session_factory=session_factory,
+            )
+            continue
         await cm.broadcast_to_thread(thread_id, payload)
         if agg is not None:
             agg.sync_worker_event(thread_id, payload)
-        await _handle_permission_event(thread_id, payload)
-        await _handle_progress_event(thread_id, payload)
-        await _handle_terminal_event(thread_id, payload, aggregator=agg)
+        await _handle_permission_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+        )
+        await _handle_execution_state_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+        )
+        await _handle_progress_event(
+            thread_id,
+            payload,
+            session_factory=session_factory,
+        )
+        await _handle_terminal_event(
+            thread_id,
+            payload,
+            aggregator=agg,
+            session_factory=session_factory,
+        )
 
     return {"status": "ok"}
 
@@ -552,5 +807,10 @@ async def receive_worker_heartbeat(request: Request) -> dict[str, str]:
     logger.debug(
         "Worker heartbeat (HTTP): %d active threads",
         len(body.get("active_threads", [])),
+        extra={
+            "message_type": str(body.get("type", "")),
+            "active_thread_count": len(body.get("active_threads", [])),
+            "transport": "http",
+        },
     )
     return {"status": "ok"}

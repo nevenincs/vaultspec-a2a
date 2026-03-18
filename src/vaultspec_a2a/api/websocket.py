@@ -22,7 +22,7 @@ from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from ..core import EventAggregator
+from ..core import EventAggregator, settings
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from .schemas.commands import (
@@ -62,7 +62,7 @@ _ws_heartbeats_counter = _meter.create_counter(
     description="Number of heartbeat events sent to WebSocket clients",
 )
 
-__all__ = ["ConnectionManager"]
+__all__ = ["ConnectionManager", "WebSocketCommandRejectedError"]
 
 # Type alias for the message handler callback
 MessageHandler = Callable[[str, str, str | None], Awaitable[None]]
@@ -71,19 +71,30 @@ MessageHandler = Callable[[str, str, str | None], Awaitable[None]]
 # (thread_id, agent_id, action) -> None
 AgentControlHandler = Callable[[str, str, AgentControlAction], Awaitable[None]]
 
-# ADR-011 §5: heartbeat every 30 seconds
-_HEARTBEAT_INTERVAL = 30.0
-
-# ADR-011 §5: disconnect unresponsive clients after 90 seconds (3 missed heartbeats)
-_DEAD_CLIENT_TIMEOUT = 90.0
-
-# M14: maximum incoming WebSocket frame size (bytes) — reject oversized messages
-# to prevent memory exhaustion from malicious or buggy clients.
-_MAX_WS_MESSAGE_BYTES = 1 * 1024 * 1024  # 1 MiB
-
 _SERVER_VERSION = "0.1.0"
 
 _client_message_adapter: TypeAdapter[ClientMessage] = TypeAdapter(ClientMessage)
+
+
+class WebSocketCommandRejectedError(Exception):
+    """Structured rejection for accepted WebSocket connections."""
+
+    def __init__(
+        self,
+        *,
+        thread_id: str,
+        code: str,
+        message: str,
+        recoverable: bool = True,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Initialise a structured rejection payload for websocket clients."""
+        super().__init__(message)
+        self.thread_id = thread_id
+        self.code = code
+        self.message = message
+        self.recoverable = recoverable
+        self.metadata = metadata
 
 
 class ConnectionManager:
@@ -171,7 +182,11 @@ class ConnectionManager:
             wr_task = asyncio.create_task(self._writer_loop(client_id, queue))
             self._writer_tasks[client_id] = wr_task
 
-        logger.info("WebSocket client %s connected", client_id)
+        logger.info(
+            "WebSocket client %s connected",
+            client_id,
+            extra={"client_id": client_id, "action": "ws_connect"},
+        )
         return client_id
 
     async def disconnect(self, client_id: str) -> None:
@@ -191,7 +206,11 @@ class ConnectionManager:
             self._connections.pop(client_id, None)
             self._error_sequences.pop(client_id, None)
 
-        logger.info("WebSocket client %s disconnected", client_id)
+        logger.info(
+            "WebSocket client %s disconnected",
+            client_id,
+            extra={"client_id": client_id, "action": "ws_disconnect"},
+        )
 
     # ------------------------------------------------------------------
     # Message reading loop (run from endpoint handler)
@@ -201,7 +220,8 @@ class ConnectionManager:
         """Read and dispatch incoming client commands until disconnect.
 
         This should be called from the WebSocket endpoint handler.
-        Disconnects unresponsive clients after 90 seconds of silence
+        Disconnects unresponsive clients after
+        ``settings.ws_dead_client_timeout_seconds`` of silence
         (ADR-011 §5: 3 missed heartbeats).
         """
         websocket = self._connections.get(client_id)
@@ -218,30 +238,46 @@ class ConnectionManager:
                     # an async callable, not an awaitable.
                     raw_text = await asyncio.wait_for(
                         websocket.receive_text(),
-                        timeout=_DEAD_CLIENT_TIMEOUT,
+                        timeout=settings.ws_dead_client_timeout_seconds,
                     )
                 except TimeoutError:
                     logger.warning(
                         "Client %s timed out (%.0fs), disconnecting",
                         client_id,
-                        _DEAD_CLIENT_TIMEOUT,
+                        settings.ws_dead_client_timeout_seconds,
+                        extra={
+                            "client_id": client_id,
+                            "action": "timeout_disconnect",
+                            "timeout_seconds": settings.ws_dead_client_timeout_seconds,
+                        },
                     )
                     break
                 # M14: reject oversized messages to prevent memory exhaustion
                 msg_bytes = len(raw_text.encode())
-                if msg_bytes > _MAX_WS_MESSAGE_BYTES:
+                if msg_bytes > settings.ws_max_message_bytes:
                     logger.warning(
                         "Client %s sent oversized message (%d bytes > %d limit)",
                         client_id,
                         msg_bytes,
-                        _MAX_WS_MESSAGE_BYTES,
+                        settings.ws_max_message_bytes,
+                        extra={
+                            "client_id": client_id,
+                            "action": "oversized_message",
+                            "message_bytes": msg_bytes,
+                            "message_bytes_limit": settings.ws_max_message_bytes,
+                        },
                     )
                     continue
                 try:
                     raw = json.loads(raw_text)
                 except (ValueError, TypeError):
                     logger.warning(
-                        "Client %s sent non-JSON text message, dropping", client_id
+                        "Client %s sent non-JSON text message, dropping",
+                        client_id,
+                        extra={
+                            "client_id": client_id,
+                            "action": "invalid_json_message",
+                        },
                     )
                     continue
                 await self._handle_client_message(client_id, raw)
@@ -261,6 +297,12 @@ class ConnectionManager:
             "Client %s subscribed to threads: %s",
             client_id,
             cmd.thread_ids,
+            extra={
+                "client_id": client_id,
+                "action": "subscribe",
+                "thread_ids": cmd.thread_ids,
+                "thread_count": len(cmd.thread_ids),
+            },
         )
 
     async def _handle_unsubscribe(
@@ -272,6 +314,12 @@ class ConnectionManager:
             "Client %s unsubscribed from threads: %s",
             client_id,
             cmd.thread_ids,
+            extra={
+                "client_id": client_id,
+                "action": "unsubscribe",
+                "thread_ids": cmd.thread_ids,
+                "thread_count": len(cmd.thread_ids),
+            },
         )
 
     async def _handle_send_message(
@@ -282,6 +330,13 @@ class ConnectionManager:
             "Client %s sent message to thread %s",
             client_id,
             cmd.thread_id,
+            extra={
+                "client_id": client_id,
+                "thread_id": cmd.thread_id,
+                "agent_id": cmd.agent_id,
+                "action": "send_message",
+                "command_type": str(cmd.type.value),
+            },
         )
         if self._message_handler is not None:
             await self._message_handler(
@@ -310,6 +365,13 @@ class ConnectionManager:
             cmd.action,
             cmd.agent_id,
             cmd.thread_id,
+            extra={
+                "client_id": client_id,
+                "thread_id": cmd.thread_id,
+                "agent_id": cmd.agent_id,
+                "action": str(cmd.action.value),
+                "command_type": str(cmd.type.value),
+            },
         )
         if self._agent_control_handler is not None:
             await self._agent_control_handler(
@@ -322,6 +384,13 @@ class ConnectionManager:
                 "No agent control handler registered — ignoring %s for thread %s",
                 cmd.action,
                 cmd.thread_id,
+                extra={
+                    "client_id": client_id,
+                    "thread_id": cmd.thread_id,
+                    "agent_id": cmd.agent_id,
+                    "action": str(cmd.action.value),
+                    "command_type": str(cmd.type.value),
+                },
             )
 
     async def _handle_permission_response(
@@ -333,39 +402,41 @@ class ConnectionManager:
             "(request=%s) — rejecting; use REST endpoint",
             client_id,
             cmd.request_id,
+            extra={
+                "client_id": client_id,
+                "thread_id": cmd.request_id.split(":", 1)[0]
+                if ":" in cmd.request_id
+                else "",
+                "request_id": cmd.request_id,
+                "action": "permission_response",
+                "command_type": str(cmd.type.value),
+            },
         )
         # Extract thread_id from request_id ("{thread_id}:{uuid}")
         _req_id = cmd.request_id or ""
         _thread_id = _req_id.split(":", 1)[0] if ":" in _req_id else ""
-        websocket = self._connections.get(client_id)
-        if websocket is not None:
-            try:
-                # API-H2: use a connection-scoped counter so sequences start at 1
-                self._error_sequences[client_id] = (
-                    self._error_sequences.get(client_id, 0) + 1
-                )
-                error = ErrorEvent(
-                    thread_id=_thread_id,
-                    agent_id=None,
-                    code="PERMISSION_RESPONSE_WS_FORBIDDEN",
-                    message=(
-                        "Permission responses must be submitted via "
-                        "REST: POST /api/permissions/{id}/respond"
-                    ),
-                    recoverable=True,
-                    timestamp=datetime.now(UTC),
-                    sequence=self._error_sequences[client_id],
-                )
-                await websocket.send_json(error.model_dump(mode="json"))
-            except Exception:
-                logger.warning(
-                    "Could not send permission_response rejection to client %s",
-                    client_id,
-                )
+        await self._send_error_event(
+            client_id,
+            thread_id=_thread_id,
+            code="PERMISSION_RESPONSE_WS_FORBIDDEN",
+            message=(
+                "Permission responses must be submitted via "
+                "REST: POST /api/permissions/{id}/respond"
+            ),
+            recoverable=True,
+        )
 
     async def _handle_ping(self, client_id: str) -> None:
         """Handle PING command by sending an immediate PONG-style heartbeat."""
-        logger.debug("Client %s ping", client_id)
+        logger.debug(
+            "Client %s ping",
+            client_id,
+            extra={
+                "client_id": client_id,
+                "action": "ping",
+                "command_type": str(ClientCommandType.PING.value),
+            },
+        )
         websocket = self._connections.get(client_id)
         if websocket is not None and websocket.client_state == WebSocketState.CONNECTED:
             pong = HeartbeatEvent(
@@ -375,7 +446,54 @@ class ConnectionManager:
             try:
                 await websocket.send_json(pong.model_dump(mode="json"))
             except Exception:
-                logger.warning("Failed to send pong to client %s", client_id)
+                logger.warning(
+                    "Failed to send pong to client %s",
+                    client_id,
+                    extra={"client_id": client_id, "action": "send_pong"},
+                    exc_info=True,
+                )
+
+    async def _send_error_event(
+        self,
+        client_id: str,
+        *,
+        thread_id: str,
+        code: str,
+        message: str,
+        recoverable: bool,
+        metadata: dict[str, Any] | None = None,
+    ) -> None:
+        """Send a structured error event over an accepted WebSocket."""
+        websocket = self._connections.get(client_id)
+        if websocket is None:
+            return
+        try:
+            self._error_sequences[client_id] = (
+                self._error_sequences.get(client_id, 0) + 1
+            )
+            error = ErrorEvent(
+                thread_id=thread_id,
+                agent_id=None,
+                code=code,
+                message=message,
+                recoverable=recoverable,
+                timestamp=datetime.now(UTC),
+                sequence=self._error_sequences[client_id],
+                metadata=metadata,
+            )
+            await websocket.send_json(error.model_dump(mode="json"))
+        except Exception:
+            logger.warning(
+                "Could not send websocket error %s to client %s",
+                code,
+                client_id,
+                extra={
+                    "client_id": client_id,
+                    "thread_id": thread_id,
+                    "error_code": code,
+                    "action": "send_error_event",
+                },
+            )
 
     async def _handle_client_message(
         self,
@@ -386,7 +504,16 @@ class ConnectionManager:
         try:
             command = _client_message_adapter.validate_python(raw)
         except ValidationError:
-            logger.warning("Invalid client command from %s: %s", client_id, raw)
+            logger.warning(
+                "Invalid client command from %s: %s",
+                client_id,
+                raw,
+                extra={
+                    "client_id": client_id,
+                    "action": "invalid_command",
+                    "command_payload": raw,
+                },
+            )
             return
 
         async with ws_span(
@@ -394,29 +521,52 @@ class ConnectionManager:
             client_id=client_id,
             command_type=str(command.type.value),
         ):
-            match command.type:
-                case ClientCommandType.SUBSCRIBE:
-                    await self._handle_subscribe(
-                        client_id, cast(SubscribeCommand, command)
-                    )
-                case ClientCommandType.UNSUBSCRIBE:
-                    await self._handle_unsubscribe(
-                        client_id, cast(UnsubscribeCommand, command)
-                    )
-                case ClientCommandType.SEND_MESSAGE:
-                    await self._handle_send_message(
-                        client_id, cast(SendMessageCommand, command)
-                    )
-                case ClientCommandType.AGENT_CONTROL:
-                    await self._handle_agent_control(
-                        client_id, cast(AgentControlCommand, command)
-                    )
-                case ClientCommandType.PERMISSION_RESPONSE:
-                    await self._handle_permission_response(
-                        client_id, cast(PermissionResponseCommand, command)
-                    )
-                case ClientCommandType.PING:
-                    await self._handle_ping(client_id)
+            try:
+                match command.type:
+                    case ClientCommandType.SUBSCRIBE:
+                        await self._handle_subscribe(
+                            client_id, cast(SubscribeCommand, command)
+                        )
+                    case ClientCommandType.UNSUBSCRIBE:
+                        await self._handle_unsubscribe(
+                            client_id, cast(UnsubscribeCommand, command)
+                        )
+                    case ClientCommandType.SEND_MESSAGE:
+                        await self._handle_send_message(
+                            client_id, cast(SendMessageCommand, command)
+                        )
+                    case ClientCommandType.AGENT_CONTROL:
+                        await self._handle_agent_control(
+                            client_id, cast(AgentControlCommand, command)
+                        )
+                    case ClientCommandType.PERMISSION_RESPONSE:
+                        await self._handle_permission_response(
+                            client_id, cast(PermissionResponseCommand, command)
+                        )
+                    case ClientCommandType.PING:
+                        await self._handle_ping(client_id)
+            except WebSocketCommandRejectedError as exc:
+                logger.warning(
+                    "Rejected websocket command from %s for thread %s: %s",
+                    client_id,
+                    exc.thread_id,
+                    exc.code,
+                    extra={
+                        "client_id": client_id,
+                        "thread_id": exc.thread_id,
+                        "error_code": exc.code,
+                        "action": "command_rejected",
+                        "recoverable": exc.recoverable,
+                    },
+                )
+                await self._send_error_event(
+                    client_id,
+                    thread_id=exc.thread_id,
+                    code=exc.code,
+                    message=exc.message,
+                    recoverable=exc.recoverable,
+                    metadata=exc.metadata,
+                )
 
     # ------------------------------------------------------------------
     # Writer loop (event queue -> WebSocket)
@@ -430,7 +580,7 @@ class ConnectionManager:
         """Drain the event queue and write to the WebSocket.
 
         WS-ORD-01: heartbeats are sent inline when the queue is idle for
-        ``_HEARTBEAT_INTERVAL`` seconds, preventing interleaving between
+        ``settings.ws_heartbeat_interval_seconds``, preventing interleaving between
         a separate heartbeat task and the event writer.
 
         Each outgoing frame is enriched with a ``_trace`` dict containing
@@ -450,7 +600,7 @@ class ConnectionManager:
                 # Wait for the next event or send a heartbeat on timeout.
                 try:
                     event = await asyncio.wait_for(
-                        queue.get(), timeout=_HEARTBEAT_INTERVAL
+                        queue.get(), timeout=settings.ws_heartbeat_interval_seconds
                     )
                 except TimeoutError:
                     # No events for _HEARTBEAT_INTERVAL — send heartbeat.
@@ -464,7 +614,12 @@ class ConnectionManager:
                         await websocket.send_json(heartbeat.model_dump(mode="json"))
                         _ws_heartbeats_counter.add(1, {"client_id": client_id})
                     except Exception:
-                        logger.warning("Heartbeat failed for client %s", client_id)
+                        logger.warning(
+                            "Heartbeat failed for client %s",
+                            client_id,
+                            extra={"client_id": client_id, "action": "send_heartbeat"},
+                            exc_info=True,
+                        )
                         break
                     continue
 
@@ -483,7 +638,11 @@ class ConnectionManager:
                     _ws_events_sent_counter.add(1, {"client_id": client_id})
                 except Exception:
                     _ws_send_failures_counter.add(1, {"client_id": client_id})
-                    logger.warning("Failed to send event to client %s", client_id)
+                    logger.warning(
+                        "Failed to send event to client %s",
+                        client_id,
+                        extra={"client_id": client_id, "action": "send_event"},
+                    )
                     break
         except asyncio.CancelledError:
             pass
@@ -521,6 +680,12 @@ class ConnectionManager:
                         "(relay backpressure, maxsize=%d)",
                         client_id,
                         queue.maxsize,
+                        extra={
+                            "client_id": client_id,
+                            "thread_id": thread_id,
+                            "action": "relay_drop_oldest",
+                            "queue_maxsize": queue.maxsize,
+                        },
                     )
                 except asyncio.QueueEmpty:
                     pass
@@ -530,6 +695,12 @@ class ConnectionManager:
                 logger.warning(
                     "Relay event dropped for client %s — queue still full",
                     client_id,
+                    extra={
+                        "client_id": client_id,
+                        "thread_id": thread_id,
+                        "action": "relay_drop_event",
+                        "queue_maxsize": queue.maxsize,
+                    },
                 )
 
     # ------------------------------------------------------------------

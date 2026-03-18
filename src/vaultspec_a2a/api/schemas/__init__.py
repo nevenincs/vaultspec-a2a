@@ -53,6 +53,8 @@ from .events import ToolCallStartEvent as ToolCallStartEvent
 from .events import ToolCallUpdateEvent as ToolCallUpdateEvent
 from .internal import DispatchRequest as DispatchRequest
 from .internal import DispatchResponse as DispatchResponse
+from .internal import ExecutionStateProjectionPayload as ExecutionStateProjectionPayload
+from .internal import ExecutionTaskProjectionPayload as ExecutionTaskProjectionPayload
 from .internal import HeartbeatMessage as HeartbeatMessage
 from .internal import WorkerEventEnvelope as WorkerEventEnvelope
 from .rest import AgentStatusEntry as AgentStatusEntry
@@ -69,6 +71,7 @@ from .rest import TeamStatusResponse as TeamStatusResponse
 from .rest import ThreadListResponse as ThreadListResponse
 from .rest import ThreadSummary as ThreadSummary
 from .snapshots import ArtifactSnapshot as ArtifactSnapshot
+from .snapshots import ExecutionTaskSnapshot as ExecutionTaskSnapshot
 from .snapshots import MessageSnapshot as MessageSnapshot
 from .snapshots import ThreadStateSnapshot as ThreadStateSnapshot
 from .snapshots import ToolCallSnapshot as ToolCallSnapshot
@@ -93,6 +96,9 @@ __all__ = [
     "DispatchResponse",
     "ErrorEvent",
     "EventEnvelope",
+    "ExecutionStateProjectionPayload",
+    "ExecutionTaskProjectionPayload",
+    "ExecutionTaskSnapshot",
     "HeartbeatEvent",
     "HeartbeatMessage",
     "MessageChunkEvent",

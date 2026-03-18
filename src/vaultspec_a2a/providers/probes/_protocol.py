@@ -26,6 +26,7 @@ from .._subprocess import spawn_acp_process as _spawn_acp_process
 __all__ = ["ProbeResult", "run_probe"]
 
 logger = logging.getLogger(__name__)
+_ACP_UNAUTHENTICATED_CODE = -32000
 
 
 @dataclass
@@ -54,14 +55,17 @@ class _ProbeSession:
         env: dict[str, str],
         timeout: float,
         prompt: str,
+        auth_timeout: float = 900.0,
     ) -> None:
         self.command = command
         self.env = env
         self.timeout = timeout
+        self.auth_timeout = auth_timeout
         self.prompt = prompt
         self.result = ProbeResult(success=False)
         self.request_id = 0
         self.pending: dict[int, str] = {}
+        self.auth_methods: list[str] = []
         self.session_id: str | None = None
         self.step = "initialize"
         self.t0 = time.monotonic()
@@ -72,6 +76,12 @@ class _ProbeSession:
         # PROV-H4: serialise stdin writes so concurrent handle_server_rpc()
         # and run_loop() calls cannot interleave JSON-RPC frames.
         self.stdin_lock = asyncio.Lock()
+
+    def _current_step_timeout(self) -> float:
+        """Return the watchdog timeout for the current ACP step."""
+        if self.step == "authenticate":
+            return self.auth_timeout
+        return self.timeout
 
     async def send(self, method: str, params: dict) -> int:
         """Send a JSON-RPC request and drain the write buffer.
@@ -95,10 +105,81 @@ class _ProbeSession:
         logger.debug("ACP TX [%d] -> %s", self.request_id, method)
         return self.request_id
 
+    def _select_auth_method_id(self) -> str:
+        """Select the best advertised ACP auth method for the current env."""
+        if not self.auth_methods:
+            return "oauth"
+        if self.env.get("GEMINI_API_KEY") and "gemini-api-key" in self.auth_methods:
+            return "gemini-api-key"
+        if (
+            self.env.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"
+            or self.env.get("GOOGLE_APPLICATION_CREDENTIALS")
+            or self.env.get("GOOGLE_API_KEY")
+        ) and "vertex-ai" in self.auth_methods:
+            return "vertex-ai"
+        if (
+            self.env.get("GOOGLE_GENAI_USE_GCA") == "true"
+            or self.env.get("GEMINI_CLI_HOME")
+        ) and "oauth-personal" in self.auth_methods:
+            return "oauth-personal"
+        return self.auth_methods[0]
+
+    @staticmethod
+    def _is_auth_required_error(error: object) -> bool:
+        """Return True when the ACP error indicates auth is required."""
+        if not isinstance(error, dict):
+            return False
+        message = str(error.get("message", "")).lower()
+        return bool(
+            error.get("code") == _ACP_UNAUTHENTICATED_CODE
+            or "authrequired" in message
+            or "authentication required" in message
+            or "unauthenticated" in message
+            or "not authenticated" in message
+        )
+
+    async def authenticate(self) -> int:
+        """Send an ACP authenticate request using the advertised method."""
+        method_id = self._select_auth_method_id()
+        params: dict[str, object] = {"methodId": method_id}
+        request_id = self.request_id + 1
+        req: dict[str, object] = {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "method": "authenticate",
+            "params": params,
+        }
+        api_key = self.env.get("GEMINI_API_KEY") or self.env.get("GOOGLE_API_KEY")
+        if api_key and method_id in {"gemini-api-key", "vertex-ai"}:
+            req["_meta"] = {"api-key": api_key}
+        self.request_id = request_id
+        if self.stdin is None:
+            raise RuntimeError(
+                "authenticate() called before process stdin was initialised"
+            )
+        async with self.stdin_lock:
+            self.stdin.write(f"{json.dumps(req)}\n".encode())
+            await self.stdin.drain()
+        logger.debug("ACP TX [%d] -> authenticate", self.request_id)
+        return request_id
+
     async def handle_response(self, rid: int, src: str, msg: dict) -> bool:
         """Handle JSON-RPC response; return True if session complete."""
         error = msg.get("error")
         if error:
+            if (
+                src == "session/new"
+                and self.auth_methods
+                and self._is_auth_required_error(error)
+            ):
+                logger.info(
+                    "ACP session/new requires authenticate; retrying with %s",
+                    self._select_auth_method_id(),
+                )
+                self.step = "authenticate"
+                aid = await self.authenticate()
+                self.pending[aid] = "authenticate"
+                return False
             self.result.error = f"[{rid}] {src}: {json.dumps(error)}"
             logger.error("ACP RX [%s] <- error from '%s': %s", rid, src, error)
             return True
@@ -107,11 +188,23 @@ class _ProbeSession:
         logger.debug("ACP RX [%s] <- response ok from '%s'", rid, src)
 
         if self.step == "initialize":
+            self.auth_methods = [
+                auth_method.get("id")
+                for auth_method in res.get("authMethods", [])
+                if isinstance(auth_method, dict)
+                and isinstance(auth_method.get("id"), str)
+            ]
             logger.info(
                 "ACP initialized: caps=%s auth=%s",
                 res.get("agentCapabilities", {}),
-                [a.get("id") for a in res.get("authMethods", [])],
+                self.auth_methods,
             )
+            self.step = "session/new"
+            sid = await self.send(
+                "session/new", {"cwd": str(Path.cwd()), "mcpServers": []}
+            )
+            self.pending[sid] = "session/new"
+        elif self.step == "authenticate":
             self.step = "session/new"
             sid = await self.send(
                 "session/new", {"cwd": str(Path.cwd()), "mcpServers": []}
@@ -205,9 +298,17 @@ class _ProbeSession:
         heartbeat_task = asyncio.create_task(self._heartbeat())
         try:
             while True:
-                line = await asyncio.wait_for(
-                    self.stdout.readline(), timeout=self.timeout
-                )
+                try:
+                    line = await asyncio.wait_for(
+                        self.stdout.readline(),
+                        timeout=self._current_step_timeout(),
+                    )
+                except TimeoutError:
+                    current_timeout = self._current_step_timeout()
+                    self.result.error = (
+                        f"Timed out after {current_timeout}s during {self.step}"
+                    )
+                    return
                 if not line:
                     self.result.error = "EOF on stdout"
                     return
@@ -280,6 +381,7 @@ async def run_probe(
     env_overrides: dict[str, str] | None = None,
     prompt: str = "Reply with only the single word 'Hello'.",
     timeout: float = 120.0,
+    auth_timeout: float = 900.0,
     *,
     debug: bool = False,
 ) -> ProbeResult:
@@ -289,7 +391,8 @@ async def run_probe(
         command: Subprocess command to spawn (the ACP gateway binary).
         env_overrides: Additional environment variables to overlay.
         prompt: Prompt text to send to the agent.
-        timeout: Per-readline timeout in seconds.
+        timeout: Step watchdog timeout in seconds for non-auth ACP steps.
+        auth_timeout: Backstop timeout in seconds for interactive auth steps.
         debug: When True, sets ``ANTHROPIC_LOG=debug`` in the subprocess
             environment to enable verbose SDK output on stderr.  Useful for
             diagnosing the cold-start black hole during ``session/new``.
@@ -340,7 +443,7 @@ async def run_probe(
     env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
     env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
-    session = _ProbeSession(command, env, timeout, prompt)
+    session = _ProbeSession(command, env, timeout, prompt, auth_timeout)
     session.process = await _spawn_acp_process(command, env, str(Path.cwd()))
     proc = session.process
     if proc.stdin is None or proc.stdout is None or proc.stderr is None:
@@ -351,9 +454,7 @@ async def run_probe(
 
     stderr_task = asyncio.create_task(session.read_stderr())
     try:
-        await asyncio.wait_for(session.run_loop(), timeout=timeout)
-    except TimeoutError:
-        session.result.error = f"Timed out after {timeout}s"
+        await session.run_loop()
     finally:
         stderr_task.cancel()
         await _kill_process_tree(session.process)

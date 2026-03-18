@@ -12,6 +12,7 @@ import logging
 import subprocess
 import sys
 
+from collections.abc import Mapping
 from contextlib import suppress
 from typing import Any
 
@@ -21,12 +22,20 @@ __all__ = ["kill_process_tree", "spawn_acp_process"]
 logger = logging.getLogger(__name__)
 
 
+def _metadata_extra(metadata: Mapping[str, object] | None) -> dict[str, object]:
+    """Return bounded subprocess metadata for structured logging."""
+    if not metadata:
+        return {}
+    return {key: value for key, value in metadata.items() if value is not None}
+
+
 async def spawn_acp_process(
     command: list[str],
     env: dict[str, str],
     cwd: str,
     *,
     use_exec: bool = False,
+    metadata: Mapping[str, object] | None = None,
 ) -> asyncio.subprocess.Process:
     """Spawn an ACP subprocess with platform-appropriate isolation.
 
@@ -51,24 +60,59 @@ async def spawn_acp_process(
         "cwd": cwd,
         "limit": 10 * 1024 * 1024,
     }
+    spawn_mode = "exec" if sys.platform != "win32" or use_exec else "shell"
+    log_extra = _metadata_extra(metadata)
+    log_extra.update(
+        {
+            "cwd": cwd,
+            "use_exec": use_exec,
+            "spawn_mode": spawn_mode,
+        }
+    )
+    logger.info("ACP subprocess spawn starting", extra=log_extra)
+    process: asyncio.subprocess.Process
     if sys.platform == "win32":
         if use_exec:
-            return await asyncio.create_subprocess_exec(
+            try:
+                process = await asyncio.create_subprocess_exec(
+                    command[0],
+                    *command[1:],
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    **kwargs,
+                )
+            except Exception as exc:
+                logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
+                raise
+        else:
+            try:
+                process = await asyncio.create_subprocess_shell(
+                    subprocess.list2cmdline(command),
+                    creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
+                    **kwargs,
+                )
+            except Exception as exc:
+                logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
+                raise
+    else:
+        try:
+            process = await asyncio.create_subprocess_exec(
                 command[0],
                 *command[1:],
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
                 **kwargs,
             )
-        return await asyncio.create_subprocess_shell(
-            subprocess.list2cmdline(command),
-            creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
-            **kwargs,
-        )
-    return await asyncio.create_subprocess_exec(command[0], *command[1:], **kwargs)
+        except Exception as exc:
+            logger.error("ACP subprocess spawn failed: %s", exc, extra=log_extra)
+            raise
+    logger.info(
+        "ACP subprocess spawned",
+        extra={**log_extra, "process_pid": process.pid},
+    )
+    return process
 
 
 async def kill_process_tree(
     process: asyncio.subprocess.Process,
+    metadata: Mapping[str, object] | None = None,
 ) -> None:
     """Terminate an ACP subprocess and its entire process tree.
 
@@ -81,6 +125,18 @@ async def kill_process_tree(
     The asyncio transport handle is closed last to prevent OS handle leaks
     when the event loop finalizer runs (cpython#114177).
     """
+    kill_strategy = (
+        "taskkill_tree" if sys.platform == "win32" else "sigterm_then_sigkill"
+    )
+    log_extra = _metadata_extra(metadata)
+    log_extra.update(
+        {
+            "process_pid": process.pid,
+            "kill_strategy": kill_strategy,
+            "returncode": process.returncode,
+        }
+    )
+    logger.info("ACP subprocess termination starting", extra=log_extra)
     if sys.platform == "win32":
         try:
             killer = await asyncio.create_subprocess_exec(
@@ -107,6 +163,7 @@ async def kill_process_tree(
             logger.warning(
                 "ACP process %s did not exit after SIGTERM; escalating to SIGKILL",
                 process.pid,
+                extra=log_extra,
             )
             with suppress(OSError):
                 process.kill()
@@ -115,3 +172,11 @@ async def kill_process_tree(
     transport = getattr(process, "_transport", None)
     if transport is not None:
         transport.close()
+    logger.info(
+        "ACP subprocess terminated",
+        extra={
+            **log_extra,
+            "exit_code": process.returncode,
+            "returncode": process.returncode,
+        },
+    )

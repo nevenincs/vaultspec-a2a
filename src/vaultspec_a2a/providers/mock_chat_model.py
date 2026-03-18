@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 
 from collections.abc import AsyncIterator
 from typing import Any
@@ -25,6 +24,7 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
+from ..core.config import settings
 from ..core.team_config import AgentConfig
 
 
@@ -61,7 +61,7 @@ class MockChatModel(BaseChatModel):
             default_base_url = "http://localhost:8100/mock-success-single/v1"
 
         # If MOCK_API_BASE is set (e.g. in Docker), append the agent id suffix.
-        env_base = os.environ.get("MOCK_API_BASE")
+        env_base = settings.mock_api_base
         if env_base:
             env_base = env_base.rstrip("/").removesuffix("/v1")
             agent_id = agent_config.id if agent_config else "mock-success-single"

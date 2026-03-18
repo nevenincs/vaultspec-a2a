@@ -43,8 +43,10 @@ from pathlib import Path
 
 import httpx
 
+from ..core.config import settings
 
-__all__ = ["refresh_gemini_token"]
+
+__all__ = ["gemini_uses_env_auth", "refresh_gemini_token"]
 
 logger = logging.getLogger(__name__)
 
@@ -57,11 +59,8 @@ _CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleuserconte
 _CLIENT_SECRET = "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"
 _TOKEN_URI = "https://oauth2.googleapis.com/token"
 
-# Refresh this many seconds before the actual expiry to absorb clock skew and
-# subprocess startup latency.
-_EXPIRY_BUFFER_S = 120
-
-_CREDS_PATH = Path.home() / ".gemini" / "oauth_creds.json"
+_GEMINI_DIR_NAME = ".gemini"
+_CREDS_FILE_NAME = "oauth_creds.json"
 
 # HTTP status code for success.
 _HTTP_OK = 200
@@ -71,12 +70,34 @@ _HTTP_OK = 200
 _refresh_lock = asyncio.Lock()
 
 
+def gemini_uses_env_auth(env: dict[str, str] | None = None) -> bool:
+    """Return True when Gemini is configured for non-interactive env auth."""
+    source = env or os.environ
+    return any(
+        source.get(key)
+        for key in (
+            "GEMINI_API_KEY",
+            "GOOGLE_API_KEY",
+            "GOOGLE_APPLICATION_CREDENTIALS",
+        )
+    )
+
+
+def _default_creds_path(env: dict[str, str] | None = None) -> Path:
+    """Return the Gemini OAuth credential path for the effective CLI home."""
+    source = env or os.environ
+    cli_home = source.get("GEMINI_CLI_HOME")
+    if cli_home and cli_home.strip():
+        return Path(cli_home) / _GEMINI_DIR_NAME / _CREDS_FILE_NAME
+    return Path.home() / _GEMINI_DIR_NAME / _CREDS_FILE_NAME
+
+
 def _is_expired(creds: dict) -> bool:
     """Return True if the access token is missing or about to expire."""
     expiry_ms = creds.get("expiry_date")
     if expiry_ms is None:
         return True
-    return time.time() >= (expiry_ms / 1000.0) - _EXPIRY_BUFFER_S
+    return time.time() >= (expiry_ms / 1000.0) - settings.oauth_expiry_buffer_seconds
 
 
 def _fsync_file(path: Path) -> None:
@@ -93,7 +114,11 @@ def _fsync_file(path: Path) -> None:
         os.close(fd)
 
 
-async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
+async def refresh_gemini_token(
+    creds_path: Path | None = None,
+    *,
+    env: dict[str, str] | None = None,
+) -> None:
     """Ensure ``~/.gemini/oauth_creds.json`` contains a valid access token.
 
     If the token is still valid this is a no-op.  If it is expired (or will
@@ -104,9 +129,15 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
     This is an async function using ``httpx.AsyncClient`` to avoid blocking
     the event loop (H16 fix).
 
+    If an official non-interactive auth path is already configured via
+    ``GEMINI_API_KEY``, ``GOOGLE_API_KEY``, or
+    ``GOOGLE_APPLICATION_CREDENTIALS``, this becomes a no-op.
+
     Args:
-        creds_path: Path to the credentials file.  Defaults to
-            ``~/.gemini/oauth_creds.json``.
+        creds_path: Path to the credentials file. Defaults to the effective
+            Gemini CLI home, respecting ``GEMINI_CLI_HOME`` when set and
+            otherwise using ``~/.gemini/oauth_creds.json``.
+        env: Optional environment mapping used to detect env-based auth.
 
     Raises:
         FileNotFoundError: If the credentials file does not exist (i.e. the
@@ -116,6 +147,12 @@ async def refresh_gemini_token(creds_path: Path = _CREDS_PATH) -> None:
         httpx.TimeoutException: If the token endpoint does not respond within
             the configured timeout.
     """
+    if gemini_uses_env_auth(env):
+        logger.debug("Gemini env-based auth is configured; skipping OAuth refresh.")
+        return
+
+    creds_path = creds_path or _default_creds_path(env)
+
     if not creds_path.exists():
         raise FileNotFoundError(
             f"Gemini credentials not found at {creds_path}. "

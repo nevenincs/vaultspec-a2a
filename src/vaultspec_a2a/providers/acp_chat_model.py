@@ -49,6 +49,7 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langgraph.errors import GraphBubbleUp
 from pydantic import Field, PrivateAttr
 
+from ..core.config import settings
 from ..core.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
@@ -83,11 +84,6 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
     # server→client RPC initiated by the agent, not a capability-gated
     # client→server request.  No clientCapability flag governs it.
 }
-
-# M18: ACP subprocess startup timeout in seconds.
-# Named constant so it can be adjusted without hunting for magic numbers.
-# Set to 300s: Claude Code CLI cold-start can take ~60s; 300s gives 5x headroom.
-_ACP_STARTUP_TIMEOUT = 300.0
 
 # Allowlist of permitted executable names for terminal/create.
 # Only the base name (no path component) is checked so that full paths like
@@ -125,16 +121,16 @@ _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 # Valid POSIX environment variable name pattern (PROV-M3).
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
-# ACP-03: hard cap on fs/read_text_file response size (10 MiB).
-# Prevents agents from loading binary blobs or huge log files into the
-# LLM context window, which would exhaust token budgets silently.
-_FS_READ_MAX_BYTES = 10 * 1024 * 1024  # 10 MiB
 
 
 def _log_task_exception(task: asyncio.Task) -> None:
     """Log unhandled exceptions from fire-and-forget background RPC tasks."""
     if not task.cancelled() and (exc := task.exception()):
         logger.error("Background RPC task failed: %s", exc, exc_info=exc)
+
+
+class _AuthResponseCancelledError(RuntimeError):
+    """Raised when the authenticate response future is cancelled in-band."""
 
 
 @dataclass
@@ -151,6 +147,9 @@ class _AcpSessionContext:
     interrupt_exc: list[BaseException]
     background_tasks: set[asyncio.Task] = field(default_factory=set)
     terminals: dict[str, asyncio.subprocess.Process] = field(default_factory=dict)
+    stderr_event_count: int = 0
+    auth_prompt_active: bool = False
+    auth_url: str | None = None
     # Serialises all ctx.stdin.write() + drain() calls so concurrent background
     # RPC tasks cannot interleave writes and produce malformed JSON-RPC frames.
     stdin_lock: asyncio.Lock = field(default_factory=asyncio.Lock)
@@ -204,6 +203,38 @@ class AcpChatModel(BaseChatModel):
             "precompiled Bun executable) that do not need a .cmd shim."
         ),
     )
+    provider: str | None = Field(
+        default=None,
+        description="Bounded provider identity for ACP runtime evidence.",
+    )
+    runtime_authority: str | None = Field(
+        default=None,
+        description="Bounded runtime authority classification for the ACP command.",
+    )
+    acp_backend: str | None = Field(
+        default=None,
+        description="ACP backend classification such as node, binary, or gemini-cli.",
+    )
+    command_origin: str | None = Field(
+        default=None,
+        description="Bounded origin of the resolved ACP command.",
+    )
+    command_kind: str | None = Field(
+        default=None,
+        description="Bounded command kind such as node_entry or bun_binary.",
+    )
+    command_executable: str | None = Field(
+        default=None,
+        description="Resolved ACP executable basename for evidence logs.",
+    )
+    command_target: str | None = Field(
+        default=None,
+        description="Resolved ACP entrypoint or executable target for evidence logs.",
+    )
+    auth_mode: str | None = Field(
+        default=None,
+        description="Bounded authentication mode classification for the ACP runtime.",
+    )
 
     # --- Runtime state (private, not model fields) ---
     _process: asyncio.subprocess.Process | None = PrivateAttr(default=None)
@@ -218,6 +249,7 @@ class AcpChatModel(BaseChatModel):
     _auth_methods: list[dict[str, Any]] = PrivateAttr(default_factory=list)
     _agent_modes: dict[str, Any] = PrivateAttr(default_factory=dict)
     _tool_calls: dict[str, Any] = PrivateAttr(default_factory=dict)
+    _last_auth_url: str | None = PrivateAttr(default=None)
 
     def model_post_init(self, __context: object) -> None:
         """Initialize mutable instance attributes after Pydantic validation."""
@@ -225,6 +257,7 @@ class AcpChatModel(BaseChatModel):
         self._auth_methods = []
         self._agent_modes = {}
         self._tool_calls = {}
+        self._last_auth_url = None
 
     @property
     def _llm_type(self) -> str:
@@ -271,13 +304,17 @@ class AcpChatModel(BaseChatModel):
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
-            await refresh_gemini_token()
+            await refresh_gemini_token(env=env)
 
         process = await _spawn_acp_process(
             self.command,
             env,
             self.workspace_root or self.cwd or str(Path.cwd()),
             use_exec=self.use_exec,
+            metadata=self._runtime_log_extra(
+                handshake_step="spawn",
+                timeout_seconds=settings.acp_startup_timeout_seconds,
+            ),
         )
 
         if process.stdin is None or process.stdout is None:
@@ -287,13 +324,13 @@ class AcpChatModel(BaseChatModel):
             stdin=process.stdin,
             stdout=process.stdout,
             response_futures={},
-            chunk_queue=asyncio.Queue(maxsize=1024),
+            chunk_queue=asyncio.Queue(maxsize=settings.acp_chunk_queue_maxsize),
             prompt_done=asyncio.Event(),
             prompt_id_ref=[],
             interrupt_exc=[],
         )
 
-        stderr_task = asyncio.create_task(self._read_stderr_loop(process))
+        stderr_task = asyncio.create_task(self._read_stderr_loop(ctx))
         stdout_task = asyncio.create_task(self._process_stdout_loop(ctx))
 
         try:
@@ -328,6 +365,15 @@ class AcpChatModel(BaseChatModel):
                                 code=err.get("code", AcpErrorCode.INTERNAL_ERROR),
                                 data=err.get("data"),
                             )
+                    logger.warning(
+                        "ACP subprocess exited before end_turn",
+                        extra=self._runtime_log_extra(
+                            process=ctx.process,
+                            handshake_step="session/prompt",
+                            stderr_event_count=ctx.stderr_event_count,
+                            exit_code=ctx.process.returncode,
+                        ),
+                    )
                     raise AcpError("ACP subprocess exited before end_turn")
                 if run_manager:
                     token = chunk.message.content
@@ -403,7 +449,17 @@ class AcpChatModel(BaseChatModel):
         stdout_task.cancel()
         stderr_task.cancel()
         await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
-        await _kill_process_tree(ctx.process)
+        await _kill_process_tree(
+            ctx.process,
+            metadata=self._runtime_log_extra(
+                process=ctx.process,
+                handshake_step="cleanup",
+                stderr_event_count=ctx.stderr_event_count,
+                kill_strategy="taskkill_tree"
+                if sys.platform == "win32"
+                else "sigterm_then_sigkill",
+            ),
+        )
 
         self._process = None
         self._response_futures = None
@@ -454,13 +510,141 @@ class AcpChatModel(BaseChatModel):
             raise RuntimeError("No active session response futures.")
         return self._response_futures
 
-    async def _read_stderr_loop(self, process: asyncio.subprocess.Process) -> None:
-        if process.stderr is None:
+    def _runtime_log_extra(
+        self,
+        *,
+        process: asyncio.subprocess.Process | None = None,
+        handshake_step: str | None = None,
+        timeout_seconds: float | None = None,
+        session_id: str | None = None,
+        stderr_event_count: int | None = None,
+        exit_code: int | None = None,
+        kill_strategy: str | None = None,
+    ) -> dict[str, object]:
+        """Build bounded ACP runtime metadata for structured logs."""
+        extra: dict[str, object] = {
+            "provider": self.provider,
+            "runtime_authority": self.runtime_authority,
+            "acp_backend": self.acp_backend,
+            "command_origin": self.command_origin,
+            "command_kind": self.command_kind,
+            "command_executable": self.command_executable,
+            "command_target": self.command_target,
+            "auth_mode": self.auth_mode,
+            "use_exec": self.use_exec,
+            "workspace_root_present": bool(self.workspace_root),
+            "cwd": self.workspace_root or self.cwd or str(Path.cwd()),
+        }
+        if process is not None:
+            extra["process_pid"] = process.pid
+            extra["returncode"] = process.returncode
+        if handshake_step is not None:
+            extra["handshake_step"] = handshake_step
+        if timeout_seconds is not None:
+            extra["timeout_seconds"] = timeout_seconds
+        if session_id is not None:
+            extra["session_id"] = session_id
+        elif self._active_session_id is not None:
+            extra["session_id"] = self._active_session_id
+        if stderr_event_count is not None:
+            extra["stderr_event_count"] = stderr_event_count
+        if exit_code is not None:
+            extra["exit_code"] = exit_code
+        if kill_strategy is not None:
+            extra["kill_strategy"] = kill_strategy
+        return {key: value for key, value in extra.items() if value is not None}
+
+    async def _read_stderr_loop(self, ctx: _AcpSessionContext) -> None:
+        if ctx.process.stderr is None:
             return
-        while line := await process.stderr.readline():
+        while line := await ctx.process.stderr.readline():
             text = line.decode("utf-8", errors="replace").rstrip()
             if text:
-                logger.debug("ACP STDERR: %s", text)
+                self._capture_auth_progress(text, ctx)
+                ctx.stderr_event_count += 1
+                logger.debug(
+                    "ACP STDERR: %s",
+                    text,
+                    extra=self._runtime_log_extra(
+                        process=ctx.process,
+                        stderr_event_count=ctx.stderr_event_count,
+                    ),
+                )
+
+    def _capture_auth_progress(self, text: str, ctx: _AcpSessionContext) -> None:
+        """Capture browser-auth progress from ACP stderr lines."""
+        if "Please visit the following URL to authorize the application" in text:
+            ctx.auth_prompt_active = True
+            logger.info(
+                "ACP browser authentication prompt detected",
+                extra=self._runtime_log_extra(
+                    process=ctx.process,
+                    handshake_step="authenticate",
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
+            return
+        if ctx.auth_prompt_active and text.startswith(("http://", "https://")):
+            ctx.auth_url = text
+            ctx.auth_prompt_active = False
+            self._last_auth_url = text
+            logger.info(
+                "ACP browser authentication URL captured",
+                extra=self._runtime_log_extra(
+                    process=ctx.process,
+                    handshake_step="authenticate",
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
+
+    def _auth_url_hint(self, auth_url: str | None = None) -> str:
+        """Return a short browser-auth hint when an auth URL is available."""
+        url = auth_url or self._last_auth_url
+        if not url:
+            return ""
+        return f" Browser auth URL: {url}"
+
+    @staticmethod
+    def _is_auth_cancelled_error(error: object) -> bool:
+        """Return True when an auth error indicates operator cancellation."""
+        if not isinstance(error, dict):
+            return False
+        message = str(error.get("message", "")).lower()
+        return bool(
+            "cancelled" in message
+            or "canceled" in message
+            or "aborted" in message
+            or "closed by user" in message
+        )
+
+    @staticmethod
+    def _is_auth_rejected_error(error: object) -> bool:
+        """Return True when an auth error indicates explicit auth rejection."""
+        if not isinstance(error, dict):
+            return False
+        message = str(error.get("message", "")).lower()
+        return bool(
+            "access_denied" in message
+            or "access denied" in message
+            or "denied" in message
+            or "rejected" in message
+            or "declined" in message
+        )
+
+    def _raise_auth_outcome_error(
+        self,
+        *,
+        message: str,
+        code: int,
+        auth_outcome: str,
+        auth_url: str | None = None,
+    ) -> None:
+        """Raise AcpAuthError with a bounded machine-readable auth outcome."""
+        raise AcpAuthError(
+            f"{message}{self._auth_url_hint(auth_url)}",
+            code=code,
+            data={"auth_outcome": auth_outcome},
+        )
 
     async def _process_stdout_loop(self, ctx: _AcpSessionContext) -> None:
         try:
@@ -474,6 +658,10 @@ class AcpChatModel(BaseChatModel):
                         "ACP stdout: malformed line skipped: %s | raw=%r",
                         exc,
                         line[:200],
+                        extra=self._runtime_log_extra(
+                            process=ctx.process,
+                            stderr_event_count=ctx.stderr_event_count,
+                        ),
                     )
                     continue
                 # Handle batch JSON-RPC (array of messages)
@@ -700,9 +888,9 @@ class AcpChatModel(BaseChatModel):
 
             # ACP-03: cap reads at _FS_READ_MAX_BYTES.  When the caller also
             # supplies a limit, honour whichever is smaller.
-            effective_limit = _FS_READ_MAX_BYTES
+            effective_limit = settings.acp_fs_read_max_bytes
             if limit is not None:
-                effective_limit = min(limit, _FS_READ_MAX_BYTES)
+                effective_limit = min(limit, settings.acp_fs_read_max_bytes)
 
             def _read() -> str:
                 with file_path.open(encoding="utf-8", errors="ignore") as fh:
@@ -1110,11 +1298,33 @@ class AcpChatModel(BaseChatModel):
         async with ctx.stdin_lock:
             ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await ctx.stdin.drain()
-        resp = await asyncio.wait_for(
-            ctx.response_futures[rpc_id], timeout=_ACP_STARTUP_TIMEOUT
-        )
+        try:
+            resp = await asyncio.wait_for(
+                ctx.response_futures[rpc_id],
+                timeout=settings.acp_startup_timeout_seconds,
+            )
+        except TimeoutError:
+            logger.error(
+                "ACP initialize timed out",
+                extra=self._runtime_log_extra(
+                    process=ctx.process,
+                    handshake_step="initialize",
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
+            raise
         if "error" in resp:
             # M22: use domain exception with explicit cause information
+            logger.error(
+                "ACP initialize returned an error",
+                extra=self._runtime_log_extra(
+                    process=ctx.process,
+                    handshake_step="initialize",
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
             raise AcpSessionError(
                 f"ACP initialize failed: {resp['error']}",
                 code=resp["error"].get("code", AcpErrorCode.INTERNAL_ERROR)
@@ -1124,9 +1334,8 @@ class AcpChatModel(BaseChatModel):
         res = resp.get("result", {})
         self._agent_capabilities = res.get("agentCapabilities", {})
         # _auth_methods stores the authMethods list from the initialize response
-        # so that authenticate() can select the correct methodId per spec.
-        # In practice no known ACP agent (as of 2026-03) calls authenticate()
-        # at runtime — auth is handled out-of-band via env vars.
+        # so session setup can execute the ACP authenticate handshake when an
+        # agent requires it before session/new.
         self._auth_methods = res.get("authMethods", [])
 
     def _auth_hint(self) -> str:
@@ -1134,14 +1343,217 @@ class AcpChatModel(BaseChatModel):
         exe = self.command[0] if self.command else ""
         if "gemini" in exe:
             return (
-                "To authenticate: run `gemini` interactively and complete the "
-                "OAuth flow, or set GEMINI_API_KEY in your environment."
+                "To authenticate: set GEMINI_API_KEY or GOOGLE_API_KEY, provide "
+                "GOOGLE_APPLICATION_CREDENTIALS for Vertex AI, or run `gemini` "
+                "interactively and complete the OAuth flow."
             )
         # Default: Claude / node-based ACP
         return (
             "To authenticate: run `claude login` in your terminal, or set "
             "CLAUDE_CODE_OAUTH_TOKEN in your environment."
         )
+
+    def _select_auth_method_id(self, env: Mapping[str, str]) -> str:
+        """Select the best advertised ACP auth method for the current env."""
+        method_ids = [
+            method.get("id")
+            for method in self._auth_methods
+            if isinstance(method, dict) and isinstance(method.get("id"), str)
+        ]
+        if not method_ids:
+            return "oauth"
+        if env.get("GEMINI_API_KEY") and "gemini-api-key" in method_ids:
+            return "gemini-api-key"
+        if (
+            env.get("GOOGLE_GENAI_USE_VERTEXAI") == "true"
+            or env.get("GOOGLE_APPLICATION_CREDENTIALS")
+            or env.get("GOOGLE_API_KEY")
+        ) and "vertex-ai" in method_ids:
+            return "vertex-ai"
+        if (
+            env.get("GOOGLE_GENAI_USE_GCA") == "true"
+            or env.get("GEMINI_CLI_HOME")
+            or self.auth_mode in {"local_oauth_mount", "local_oauth_refresh"}
+        ) and "oauth-personal" in method_ids:
+            return "oauth-personal"
+        return method_ids[0]
+
+    @staticmethod
+    def _is_auth_required_error(error: object) -> bool:
+        """Return True when an ACP error indicates authentication is required."""
+        if not isinstance(error, dict):
+            return False
+        message = str(error.get("message", "")).lower()
+        return bool(
+            error.get("code") == AcpErrorCode.UNAUTHENTICATED
+            or "authrequired" in message
+            or "authentication required" in message
+            or "unauthenticated" in message
+            or "not authenticated" in message
+        )
+
+    async def _authenticate_rpc(
+        self,
+        *,
+        stdin: asyncio.StreamWriter,
+        stdin_lock: asyncio.Lock,
+        response_futures: dict[int, asyncio.Future],
+        env: Mapping[str, str],
+        process: asyncio.subprocess.Process | None = None,
+        stderr_event_count: int | None = None,
+        auth_url: str | None = None,
+    ) -> dict[str, object]:
+        """Send the ACP authenticate RPC using the advertised method."""
+        self._last_auth_url = auth_url
+        method_id = self._select_auth_method_id(env)
+        rpc_id = AcpRequestId.AUTHENTICATE
+        response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+        req: dict[str, object] = {
+            "jsonrpc": "2.0",
+            "id": rpc_id,
+            "method": "authenticate",
+            "params": {"methodId": method_id},
+        }
+        api_key = env.get("GEMINI_API_KEY") or env.get("GOOGLE_API_KEY")
+        if api_key and method_id in {"gemini-api-key", "vertex-ai"}:
+            req["_meta"] = {"api-key": api_key}
+        logger.info(
+            "Attempting ACP authenticate handshake",
+            extra=self._runtime_log_extra(handshake_step="authenticate"),
+        )
+        async with stdin_lock:
+            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+            await stdin.drain()
+        try:
+            resp = await self._wait_for_authenticate_response(
+                response_future=response_futures[rpc_id],
+                process=process,
+                timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
+            )
+        except TimeoutError:
+            logger.error(
+                "ACP authenticate timed out",
+                extra=self._runtime_log_extra(
+                    process=process,
+                    handshake_step="authenticate",
+                    timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
+                    stderr_event_count=stderr_event_count,
+                ),
+            )
+            self._raise_auth_outcome_error(
+                message=(
+                    "Authentication did not complete before the interactive auth "
+                    f"watchdog expired after "
+                    f"{settings.acp_interactive_auth_timeout_seconds:.0f}s. "
+                    f"{self._auth_hint()}"
+                ),
+                code=AcpErrorCode.INTERNAL_ERROR,
+                auth_outcome="watchdog_expired",
+                auth_url=auth_url,
+            )
+        except _AuthResponseCancelledError:
+            logger.warning(
+                "ACP authenticate was cancelled",
+                extra=self._runtime_log_extra(
+                    process=process,
+                    handshake_step="authenticate",
+                    timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
+                    stderr_event_count=stderr_event_count,
+                ),
+            )
+            self._raise_auth_outcome_error(
+                message="Authentication was cancelled before completion.",
+                code=AcpErrorCode.INTERNAL_ERROR,
+                auth_outcome="operator_cancelled",
+                auth_url=auth_url,
+            )
+        except RuntimeError as exc:
+            logger.error(
+                "ACP authenticate ended before completion",
+                extra=self._runtime_log_extra(
+                    process=process,
+                    handshake_step="authenticate",
+                    timeout_seconds=settings.acp_interactive_auth_timeout_seconds,
+                    stderr_event_count=stderr_event_count,
+                ),
+            )
+            self._raise_auth_outcome_error(
+                message=(
+                    "Authentication ended before completion: "
+                    f"{exc}. {self._auth_hint()}"
+                ),
+                code=AcpErrorCode.INTERNAL_ERROR,
+                auth_outcome="subprocess_exited_before_auth",
+                auth_url=auth_url,
+            )
+        if "error" in resp:
+            err = resp["error"]
+            err_msg = str(err.get("message", "")) if isinstance(err, dict) else str(err)
+            err_code = (
+                err.get("code", AcpErrorCode.INTERNAL_ERROR)
+                if isinstance(err, dict)
+                else AcpErrorCode.INTERNAL_ERROR
+            )
+            if self._is_auth_cancelled_error(err):
+                self._raise_auth_outcome_error(
+                    message=(
+                        "Authentication was cancelled before completion: "
+                        f"{err_msg}"
+                    ),
+                    code=err_code,
+                    auth_outcome="operator_cancelled",
+                    auth_url=auth_url,
+                )
+            if self._is_auth_rejected_error(err):
+                self._raise_auth_outcome_error(
+                    message=f"Authentication was explicitly rejected: {err_msg}",
+                    code=err_code,
+                    auth_outcome="auth_rejected",
+                    auth_url=auth_url,
+                )
+            self._raise_auth_outcome_error(
+                message=f"Authentication failed: {err_msg}",
+                code=err_code,
+                auth_outcome="auth_failed",
+                auth_url=auth_url,
+            )
+        return resp.get("result", {})
+
+    async def _wait_for_authenticate_response(
+        self,
+        *,
+        response_future: asyncio.Future,
+        process: asyncio.subprocess.Process | None,
+        timeout_seconds: float,
+    ) -> dict[str, object]:
+        """Wait for auth completion, subprocess exit, or watchdog expiry."""
+        if process is None:
+            return await asyncio.wait_for(response_future, timeout=timeout_seconds)
+
+        process_wait_task = asyncio.create_task(process.wait())
+        try:
+            done, _ = await asyncio.wait(
+                {response_future, process_wait_task},
+                timeout=timeout_seconds,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if response_future in done:
+                if response_future.cancelled():
+                    raise _AuthResponseCancelledError
+                return await response_future
+            if process_wait_task in done:
+                exit_code = process_wait_task.result()
+                if not response_future.done():
+                    response_future.cancel()
+                raise RuntimeError(f"ACP subprocess exited with code {exit_code}")
+            if not response_future.done():
+                response_future.cancel()
+            raise TimeoutError
+        finally:
+            if not process_wait_task.done():
+                process_wait_task.cancel()
+                with suppress(asyncio.CancelledError):
+                    await process_wait_task
 
     async def _setup_session(self, ctx: _AcpSessionContext) -> None:
         """Create or load an ACP session."""
@@ -1152,16 +1564,34 @@ class AcpChatModel(BaseChatModel):
             method = "session/load"
             params["sessionId"] = self.session_id
 
-        rpc_id = AcpRequestId.SESSION_SETUP
-        ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
-        async with ctx.stdin_lock:
-            ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await ctx.stdin.drain()
-        resp = await asyncio.wait_for(
-            ctx.response_futures[rpc_id], timeout=_ACP_STARTUP_TIMEOUT
-        )
-        if "error" in resp:
+        env = resolve_env_vars(Path(working_dir))
+        env.update(self.env_vars)
+        attempted_auth = False
+        while True:
+            rpc_id = AcpRequestId.SESSION_SETUP
+            ctx.response_futures[rpc_id] = asyncio.get_running_loop().create_future()
+            req = {"jsonrpc": "2.0", "id": rpc_id, "method": method, "params": params}
+            async with ctx.stdin_lock:
+                ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
+                await ctx.stdin.drain()
+            try:
+                resp = await asyncio.wait_for(
+                    ctx.response_futures[rpc_id],
+                    timeout=settings.acp_startup_timeout_seconds,
+                )
+            except TimeoutError:
+                logger.error(
+                    "ACP session setup timed out",
+                    extra=self._runtime_log_extra(
+                        process=ctx.process,
+                        handshake_step=method,
+                        timeout_seconds=settings.acp_startup_timeout_seconds,
+                        stderr_event_count=ctx.stderr_event_count,
+                    ),
+                )
+                raise
+            if "error" not in resp:
+                break
             err = resp["error"]
             err_code = (
                 err.get("code", AcpErrorCode.INTERNAL_ERROR)
@@ -1171,21 +1601,48 @@ class AcpChatModel(BaseChatModel):
             err_msg = (
                 str(err.get("message", err)) if isinstance(err, dict) else str(err)
             )
-            # ACP-AUTH-001: surface actionable guidance when the agent reports
-            # authRequired so the operator knows exactly which command to run.
-            if isinstance(err, dict) and (
-                err_code == AcpErrorCode.UNAUTHENTICATED
-                or "authRequired" in err_msg
-                or "unauthenticated" in err_msg.lower()
-                or "not authenticated" in err_msg.lower()
+            if (
+                not attempted_auth
+                and self._auth_methods
+                and self._is_auth_required_error(err)
             ):
+                attempted_auth = True
+                await self._authenticate_rpc(
+                    stdin=ctx.stdin,
+                    stdin_lock=ctx.stdin_lock,
+                    response_futures=ctx.response_futures,
+                    env=env,
+                    process=ctx.process,
+                    stderr_event_count=ctx.stderr_event_count,
+                    auth_url=ctx.auth_url,
+                )
+                continue
+            if self._is_auth_required_error(err):
+                logger.error(
+                    "ACP session setup requires authentication",
+                    extra=self._runtime_log_extra(
+                        process=ctx.process,
+                        handshake_step=method,
+                        timeout_seconds=settings.acp_startup_timeout_seconds,
+                        stderr_event_count=ctx.stderr_event_count,
+                    ),
+                )
                 hint = self._auth_hint()
                 raise AcpSessionError(
                     f"ACP {method} failed — authentication required. {hint}",
                     code=err_code,
                 )
+            logger.error(
+                "ACP session setup returned an error",
+                extra=self._runtime_log_extra(
+                    process=ctx.process,
+                    handshake_step=method,
+                    timeout_seconds=settings.acp_startup_timeout_seconds,
+                    stderr_event_count=ctx.stderr_event_count,
+                ),
+            )
             raise AcpSessionError(
-                f"ACP {method} failed: {err}",
+                f"ACP {method} failed: {err_msg}",
                 code=err_code,
             )
         res = resp["result"]
@@ -1246,7 +1703,9 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=300)
+        resp = await asyncio.wait_for(
+            futures[rpc_id], timeout=settings.acp_startup_timeout_seconds
+        )
         return resp["result"]["sessionId"]
 
     async def list_sessions(self) -> list[dict[str, object]]:
@@ -1265,7 +1724,9 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(
+            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        )
         return resp["result"].get("sessions", [])
 
     async def set_mode(self, mode_id: str) -> dict[str, object]:
@@ -1284,7 +1745,9 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(
+            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        )
         return resp.get("result", {})
 
     async def set_model(self, model_id: str) -> dict[str, object]:
@@ -1303,7 +1766,9 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(
+            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        )
         return resp.get("result", {})
 
     async def set_config_option(self, key: str, value: object) -> dict[str, object]:
@@ -1322,7 +1787,9 @@ class AcpChatModel(BaseChatModel):
         async with self._stdin_lock:
             stdin.write(json.dumps(req).encode("utf-8") + b"\n")
             await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
+        resp = await asyncio.wait_for(
+            futures[rpc_id], timeout=settings.acp_rpc_timeout_seconds
+        )
         return resp.get("result", {})
 
     async def authenticate(self, token: str) -> dict[str, object]:
@@ -1330,46 +1797,21 @@ class AcpChatModel(BaseChatModel):
 
         Sends the ACP ``authenticate`` RPC per spec (§3.4). The ``methodId``
         is selected from the auth methods advertised by the agent during
-        ``initialize``; ``token`` is used for debug-length logging only and is
-        NOT transmitted in the params (the spec uses ``methodId``, not a raw
-        token bearer field).
-
-        NOTE: as of 2026-03, no known ACP agent implements an
-        ``authenticate`` handler — session auth is handled out-of-band via
-        env vars (CLAUDE_CODE_OAUTH_TOKEN, GEMINI_API_KEY).  This method is a
-        protocol stub retained for forward-compatibility.
+        ``initialize``. ``token`` is retained for API compatibility; Gemini's
+        ACP implementation expects ``api-key`` in ``_meta`` for key-based auth
+        and no raw token in params.
         """
-        self._require_session()
-        # Select methodId: prefer first available method from initialize response.
-        method_id: str = (
-            self._auth_methods[0].get("id", "oauth") if self._auth_methods else "oauth"
-        )
-        rpc_id = AcpRequestId.AUTHENTICATE
-        futures = self._require_response_futures()
-        futures[rpc_id] = asyncio.get_running_loop().create_future()
-        req = {
-            "jsonrpc": "2.0",
-            "id": rpc_id,
-            "method": "authenticate",
-            "params": {"methodId": method_id},
-        }
         logger.debug(
-            "Sending authenticate RPC methodId=%r (token redacted, length=%d)",
-            method_id,
+            "Sending authenticate RPC (token redacted, length=%d)",
             len(token),
         )
-        stdin = self._require_stdin()
-        async with self._stdin_lock:
-            stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-            await stdin.drain()
-        resp = await asyncio.wait_for(futures[rpc_id], timeout=15)
-        if "error" in resp:
-            err = resp["error"]
-            err_msg = str(err.get("message", "")) if isinstance(err, dict) else str(err)
-            raise AcpAuthError(
-                f"Authentication failed: {err_msg}",
-                code=err.get("code", AcpErrorCode.INTERNAL_ERROR)
-                if isinstance(err, dict)
-                else AcpErrorCode.INTERNAL_ERROR,
-            )
-        return resp.get("result", {})
+        env = resolve_env_vars(Path(self.workspace_root or self.cwd or str(Path.cwd())))
+        env.update(self.env_vars)
+        return await self._authenticate_rpc(
+            stdin=self._require_stdin(),
+            stdin_lock=self._stdin_lock,
+            response_futures=self._require_response_futures(),
+            env=env,
+            process=self._process,
+            auth_url=self._last_auth_url,
+        )

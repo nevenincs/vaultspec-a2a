@@ -16,7 +16,8 @@ Or via the ``vaultspec-worker`` console script (once registered in
 from __future__ import annotations
 
 import logging
-import sys
+import os
+import signal
 
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -26,13 +27,14 @@ from uuid import uuid4
 import anyio
 import uvicorn
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Header
 
 from ..api.schemas.internal import DispatchRequest, DispatchResponse
 from ..core import settings
 from ..core.asyncio_compat import configure_asyncio_runtime
 from ..database.checkpoints import open_checkpointer
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..utils.enums import Environment
 from .executor import Executor
 from .ipc import WorkerBridge
 
@@ -46,13 +48,36 @@ logger = logging.getLogger(__name__)
 WorkerApp = FastAPI
 
 
+async def _verify_dispatch_token(
+    authorization: str | None = Header(None),
+) -> None:
+    """Verify bearer token for gateway->worker dispatch requests."""
+    token = settings.internal_token
+    if token is None:
+        if settings.environment != Environment.DEVELOPMENT:
+            raise HTTPException(
+                status_code=500,
+                detail=(
+                    "VAULTSPEC_INTERNAL_TOKEN required in "
+                    f"{settings.environment.value} environment"
+                ),
+            )
+        return
+    if authorization != f"Bearer {token}":
+        raise HTTPException(
+            status_code=401,
+            detail="Invalid internal token",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+
 @asynccontextmanager
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Worker lifespan: initialise checkpointer, bridge, executor, heartbeat.
 
     Startup sequence:
-    1. Open the shared SQLite checkpointer (WAL mode, same path as the
-       gateway).
+    1. Open the configured backend-selectable checkpointer (SQLite or Postgres) via
+       ``open_checkpointer()``.
     2. Create the ``WorkerBridge`` HTTP client.
     3. Instantiate the ``Executor`` with checkpointer + bridge.
     4. Launch the heartbeat loop as a background task.
@@ -61,6 +86,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """
     worker_id = uuid4().hex[:8]
     logger.info("Worker %s starting", worker_id)
+    settings.validate_postgres_requirement()
 
     # TEL-01: Configure OTel with the worker service name so spans are
     # attributed separately from the gateway in Jaeger/OTLP backends.
@@ -112,7 +138,11 @@ def create_worker_app() -> FastAPI:
     # in distributed traces started by the gateway (W3C traceparent extraction).
     app.add_middleware(cast(Any, TelemetryMiddleware))
 
-    @app.post("/dispatch", response_model=DispatchResponse)
+    @app.post(
+        "/dispatch",
+        response_model=DispatchResponse,
+        dependencies=[Depends(_verify_dispatch_token)],
+    )
     async def dispatch_endpoint(req: DispatchRequest) -> DispatchResponse:
         """Accept a work dispatch from the gateway.
 
@@ -139,9 +169,21 @@ def create_worker_app() -> FastAPI:
         )
 
     @app.get("/health")
-    async def health_endpoint() -> dict[str, str]:
+    async def health_endpoint() -> dict[str, object]:
         """Worker health check."""
-        return {"status": "ok", "service": "worker"}
+        return {
+            "status": "ok",
+            "service": "worker",
+            "database_backend": settings.resolved_database_backend,
+            "checkpoint_backend": settings.resolved_checkpoint_backend,
+            "postgres_required": settings.postgres_required,
+        }
+
+    @app.post("/admin/shutdown", status_code=202)
+    async def shutdown_endpoint() -> dict[str, str]:
+        """Initiate graceful worker shutdown (PROD-038)."""
+        os.kill(os.getpid(), signal.SIGTERM)
+        return {"detail": "shutdown initiated"}
 
     return app
 
@@ -157,22 +199,13 @@ def main() -> None:
         settings.worker_port,
         settings.worker_url,
     )
-    loop = (
-        "vaultspec_a2a.core.asyncio_compat:psycopg_compatible_loop"
-        if sys.platform == "win32"
-        and (
-            settings.resolved_database_backend == "postgres"
-            or settings.resolved_checkpoint_backend == "postgres"
-        )
-        else "auto"
-    )
     uvicorn.run(
         "vaultspec_a2a.worker.app:create_worker_app",
         factory=True,
         host=settings.worker_host,
         port=settings.worker_port,
         log_level="info",
-        loop=loop,
+        loop="auto",
     )
 
 

@@ -22,11 +22,15 @@ from sqlalchemy.ext.asyncio import (
     async_sessionmaker,
     create_async_engine,
 )
+from starlette.datastructures import State
+from starlette.requests import Request
 
 from ...core.exceptions import NicknameConflictError
 from .. import session as _session_module
 from ..crud import (
+    ApprovalStatus,
     InvalidTransitionError,
+    PermissionRequestStatus,
     ThreadStatus,
     append_cost_record,
     append_permission_log,
@@ -36,12 +40,16 @@ from ..crud import (
     get_artifact,
     get_artifacts_by_thread,
     get_permission_logs_by_thread,
+    get_permission_request,
     get_thread,
     get_thread_metadata,
     list_threads,
+    record_permission_request,
     save_model,
+    set_thread_approval_state,
     sum_cost_by_agent,
     sum_cost_by_thread,
+    supersede_permission_requests,
     update_thread_metadata,
     update_thread_status,
 )
@@ -146,12 +154,22 @@ class TestThreadCRUD:
         assert thread.title == "Test Thread"
         assert thread.status == "submitted"
         assert thread.created_at is not None
+        assert thread.approval_status is None
+        assert thread.approval_request_id is None
 
     @pytest.mark.asyncio
     async def test_create_thread_explicit_id(self, session: AsyncSession) -> None:
         """Creating a thread with an explicit ID should use that ID."""
         thread = await create_thread(session, thread_id="custom-id", title="Custom")
         assert thread.id == "custom-id"
+
+    @pytest.mark.asyncio
+    async def test_create_thread_rejects_removed_created_status(
+        self, session: AsyncSession
+    ) -> None:
+        """The orphaned created status is no longer accepted for new threads."""
+        with pytest.raises(ValueError, match="created"):
+            await create_thread(session, title="Legacy", status="created")
 
     @pytest.mark.asyncio
     async def test_create_thread_with_metadata(self, session: AsyncSession) -> None:
@@ -252,6 +270,65 @@ class TestThreadCRUD:
         updated = await update_thread_status(session, thread.id, "running")
         assert updated is not None
         assert updated.status == "running"
+
+    @pytest.mark.asyncio
+    async def test_set_thread_approval_state(self, session: AsyncSession) -> None:
+        """Thread approval state should persist durable plan-approval truth."""
+        thread = await create_thread(session, title="Approval State")
+
+        updated = await set_thread_approval_state(
+            session,
+            thread.id,
+            approval_status=ApprovalStatus.PENDING,
+            approval_request_id="approval-1",
+            approval_reason="Approve plan before exec",
+            approval_response_action_id="action-1",
+        )
+
+        assert updated is not None
+        assert updated.approval_status == "pending"
+        assert updated.approval_request_id == "approval-1"
+        assert updated.approval_reason == "Approve plan before exec"
+        assert updated.approval_response_action_id == "action-1"
+        assert updated.approval_updated_at is not None
+
+    @pytest.mark.asyncio
+    async def test_supersede_permission_requests(self, session: AsyncSession) -> None:
+        """Earlier plan-approval requests should be markable as superseded."""
+        thread = await create_thread(session, title="Supersede Approval")
+        await record_permission_request(
+            session,
+            request_id="approval-old",
+            thread_id=thread.id,
+            pause_reason_type="plan_approval",
+            description="Old approval",
+            allowed_options=[],
+            tool_call="plan_approval",
+        )
+        await record_permission_request(
+            session,
+            request_id="approval-new",
+            thread_id=thread.id,
+            pause_reason_type="plan_approval",
+            description="New approval",
+            allowed_options=[],
+            tool_call="plan_approval",
+        )
+
+        updated = await supersede_permission_requests(
+            session,
+            thread_id=thread.id,
+            pause_reason_type="plan_approval",
+            except_request_id="approval-new",
+        )
+        old_request = await get_permission_request(session, "approval-old")
+        new_request = await get_permission_request(session, "approval-new")
+
+        assert updated == 1
+        assert old_request is not None
+        assert old_request.request_status == PermissionRequestStatus.SUPERSEDED.value
+        assert new_request is not None
+        assert new_request.request_status == PermissionRequestStatus.PENDING.value
 
     @pytest.mark.asyncio
     async def test_update_thread_status_not_found(self, session: AsyncSession) -> None:
@@ -674,9 +751,9 @@ class TestWALMode:
     """M17: verify WAL mode on a file-backed SQLite database."""
 
     @pytest.mark.asyncio
-    async def test_wal_mode_on_file_db(self, tmp_path: Path) -> None:
+    async def test_wal_mode_on_file_db(self, runtime_dir: Path) -> None:
         """verify_wal_mode returns 'wal' on a file-backed SQLite DB."""
-        db_path = tmp_path / "test_wal.db"
+        db_path = runtime_dir / "test_wal.db"
         eng = create_async_engine(f"sqlite+aiosqlite:///{db_path}", echo=False)
 
         # WAL mode is set via the connect event listener in session.py;
@@ -748,7 +825,9 @@ class TestSessionFunctions:
     async def test_get_db_yields_session(self) -> None:
         """get_db() yields an AsyncSession suitable for dependency injection."""
         await init_db(":memory:")
-        gen = get_db()
+        app_cls = type("_App", (), {"state": State()})
+        request = Request({"type": "http", "app": app_cls()})
+        gen = get_db(request)
         session = await gen.__anext__()
         assert isinstance(session, AsyncSession)
         # aclose() triggers the finally block and is safe to call unconditionally

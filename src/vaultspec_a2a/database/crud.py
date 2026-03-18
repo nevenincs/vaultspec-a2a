@@ -22,6 +22,7 @@ from .models import (
     CostTrackingModel,
     PermissionLogModel,
     PermissionRequestModel,
+    ThreadExecutionStateModel,
     ThreadModel,
 )
 
@@ -30,7 +31,6 @@ class ThreadStatus(StrEnum):
     """Durable lifecycle states for orchestration threads."""
 
     SUBMITTED = "submitted"
-    CREATED = "created"
     RUNNING = "running"
     INPUT_REQUIRED = "input_required"
     CANCELLING = "cancelling"
@@ -86,10 +86,21 @@ class PermissionRequestStatus(StrEnum):
     ANSWERED_PENDING_APPLY = "answered_pending_apply"
     APPLIED = "applied"
     REJECTED = "rejected"
+    SUPERSEDED = "superseded"
     EXPIRED_BY_TERMINAL_STATE = "expired_by_terminal_state"
 
 
+class ApprovalStatus(StrEnum):
+    """Durable lifecycle for plan approval state on a thread."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SUPERSEDED = "superseded"
+
+
 __all__ = [
+    "ApprovalStatus",
     "ControlActionResultStatus",
     "ControlActionType",
     "InvalidTransitionError",
@@ -102,6 +113,7 @@ __all__ = [
     "create_control_action",
     "create_thread",
     "delete_thread",
+    "delete_thread_execution_state",
     "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
@@ -111,6 +123,7 @@ __all__ = [
     "get_permission_logs_by_thread",
     "get_permission_request",
     "get_thread",
+    "get_thread_execution_state",
     "get_thread_metadata",
     "list_non_terminal_threads",
     "list_threads",
@@ -120,10 +133,13 @@ __all__ = [
     "mark_permission_request_applied",
     "record_permission_request",
     "record_permission_response_submission",
+    "record_thread_execution_state",
     "save_model",
+    "set_thread_approval_state",
     "set_thread_repair_state",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
+    "supersede_permission_requests",
     "update_thread_metadata",
     "update_thread_status",
 ]
@@ -137,6 +153,7 @@ async def save_model[
         PermissionRequestModel,
         ControlActionModel,
         CostTrackingModel,
+        ThreadExecutionStateModel,
     )
 ](session: AsyncSession, model: M) -> M:
     """Persist any database model instance."""
@@ -147,6 +164,23 @@ async def save_model[
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+class _UnsetType:
+    """Typed sentinel for distinguishing 'not provided' from ``None``."""
+
+    _instance: _UnsetType | None = None
+
+    def __new__(cls) -> _UnsetType:
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
+
+    def __repr__(self) -> str:
+        return "<UNSET>"
+
+
+_UNSET = _UnsetType()
 
 
 def _coerce_status(status: ThreadStatus | str) -> ThreadStatus:
@@ -193,6 +227,12 @@ def _coerce_permission_request_status(
     if isinstance(status, PermissionRequestStatus):
         return status
     return PermissionRequestStatus(status)
+
+
+def _coerce_approval_status(status: ApprovalStatus | str) -> ApprovalStatus:
+    if isinstance(status, ApprovalStatus):
+        return status
+    return ApprovalStatus(status)
 
 
 async def create_thread(
@@ -303,18 +343,6 @@ class InvalidTransitionError(ValueError):
 
 _VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
     ThreadStatus.SUBMITTED: frozenset(
-        {
-            ThreadStatus.CREATED,
-            ThreadStatus.RUNNING,
-            ThreadStatus.INPUT_REQUIRED,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.FAILED,
-            ThreadStatus.RECONCILING,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.CREATED: frozenset(
         {
             ThreadStatus.RUNNING,
             ThreadStatus.INPUT_REQUIRED,
@@ -450,6 +478,127 @@ async def set_thread_repair_state(
     thread.updated_at = _utcnow()
     await session.flush()
     return thread
+
+
+async def set_thread_approval_state(
+    session: AsyncSession,
+    thread_id: str,
+    *,
+    approval_status: ApprovalStatus | str | None | _UnsetType = _UNSET,
+    approval_request_id: str | None | _UnsetType = _UNSET,
+    approval_reason: str | None | _UnsetType = _UNSET,
+    approval_response_action_id: str | None | _UnsetType = _UNSET,
+    approval_updated_at: datetime | None = None,
+) -> ThreadModel | None:
+    """Persist durable plan-approval state on the thread row."""
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+    if not isinstance(approval_status, _UnsetType):
+        thread.approval_status = (
+            _coerce_approval_status(approval_status).value
+            if approval_status is not None
+            else None
+        )
+    if not isinstance(approval_request_id, _UnsetType):
+        thread.approval_request_id = approval_request_id
+    if not isinstance(approval_reason, _UnsetType):
+        thread.approval_reason = approval_reason
+    if not isinstance(approval_response_action_id, _UnsetType):
+        thread.approval_response_action_id = approval_response_action_id
+    thread.approval_updated_at = approval_updated_at or _utcnow()
+    await session.flush()
+    return thread
+
+
+async def record_thread_execution_state(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    checkpoint_id: str | None,
+    parent_checkpoint_id: str | None,
+    snapshot_created_at: datetime | None,
+    task_count: int,
+    interrupt_count: int,
+    next_nodes: list[str],
+    interrupt_types: list[str],
+    tasks: list[dict[str, object]],
+    degraded_reasons: list[str],
+) -> ThreadExecutionStateModel | None:
+    """Create or refresh the latest execution-state projection for a thread."""
+    thread = await session.get(ThreadModel, thread_id)
+    if thread is None:
+        return None
+
+    existing = await session.get(ThreadExecutionStateModel, thread_id)
+    degraded_only = (
+        checkpoint_id is None
+        and parent_checkpoint_id is None
+        and snapshot_created_at is None
+        and task_count == 0
+        and interrupt_count == 0
+        and not next_nodes
+        and not interrupt_types
+        and not tasks
+        and bool(degraded_reasons)
+    )
+    next_nodes_json = json.dumps(next_nodes)
+    interrupt_types_json = json.dumps(interrupt_types)
+    tasks_json = json.dumps(tasks)
+    degraded_reasons_json = json.dumps(degraded_reasons)
+
+    if existing is not None:
+        if not degraded_only:
+            existing.checkpoint_id = checkpoint_id
+            existing.parent_checkpoint_id = parent_checkpoint_id
+            existing.snapshot_created_at = snapshot_created_at
+            existing.task_count = task_count
+            existing.interrupt_count = interrupt_count
+            existing.next_nodes_json = next_nodes_json
+            existing.interrupt_types_json = interrupt_types_json
+            existing.tasks_json = tasks_json
+        existing.recorded_at = _utcnow()
+        existing.recovery_epoch = thread.recovery_epoch
+        existing.degraded_reasons_json = degraded_reasons_json
+        await session.flush()
+        return existing
+
+    model = ThreadExecutionStateModel(
+        thread_id=thread_id,
+        checkpoint_id=checkpoint_id,
+        parent_checkpoint_id=parent_checkpoint_id,
+        snapshot_created_at=snapshot_created_at,
+        recorded_at=_utcnow(),
+        recovery_epoch=thread.recovery_epoch,
+        task_count=task_count,
+        interrupt_count=interrupt_count,
+        next_nodes_json=next_nodes_json,
+        interrupt_types_json=interrupt_types_json,
+        tasks_json=tasks_json,
+        degraded_reasons_json=degraded_reasons_json,
+    )
+    return await save_model(session, model)
+
+
+async def get_thread_execution_state(
+    session: AsyncSession,
+    thread_id: str,
+) -> ThreadExecutionStateModel | None:
+    """Return the latest execution-state projection for a thread."""
+    return await session.get(ThreadExecutionStateModel, thread_id)
+
+
+async def delete_thread_execution_state(
+    session: AsyncSession,
+    thread_id: str,
+) -> bool:
+    """Delete the latest execution-state projection for a thread."""
+    model = await session.get(ThreadExecutionStateModel, thread_id)
+    if model is None:
+        return False
+    await session.delete(model)
+    await session.flush()
+    return True
 
 
 async def update_thread_metadata(
@@ -637,6 +786,37 @@ async def get_pending_permission_requests(
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
     stmt = stmt.order_by(PermissionRequestModel.created_at.asc())
     return (await session.execute(stmt)).scalars().all()
+
+
+async def supersede_permission_requests(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    pause_reason_type: str | None = None,
+    except_request_id: str | None = None,
+) -> int:
+    """Mark earlier pending permission requests as superseded."""
+    stmt = select(PermissionRequestModel).where(
+        PermissionRequestModel.thread_id == thread_id,
+        PermissionRequestModel.request_status.in_(
+            [
+                PermissionRequestStatus.PENDING.value,
+                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
+            ]
+        ),
+    )
+    if pause_reason_type is not None:
+        stmt = stmt.where(PermissionRequestModel.pause_reason_type == pause_reason_type)
+    permissions = (await session.execute(stmt)).scalars().all()
+    updated = 0
+    for permission in permissions:
+        if permission.request_id == except_request_id:
+            continue
+        permission.request_status = PermissionRequestStatus.SUPERSEDED.value
+        permission.applied_at = permission.applied_at or _utcnow()
+        updated += 1
+    await session.flush()
+    return updated
 
 
 async def record_permission_response_submission(

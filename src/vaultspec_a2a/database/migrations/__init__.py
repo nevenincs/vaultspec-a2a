@@ -41,7 +41,11 @@ def backfill_teamstate_sdd_fields(db_path: Path | str) -> int:
     try:
         conn = sqlite3.connect(str(db_path))
     except Exception:
-        logger.warning("Could not open checkpoint DB at %s; skipping backfill", db_path)
+        logger.warning(
+            "Could not open checkpoint DB at %s; skipping backfill",
+            db_path,
+            exc_info=True,
+        )
         return 0
 
     try:

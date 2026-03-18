@@ -30,6 +30,7 @@ __all__ = [
     "CostTrackingModel",
     "PermissionLogModel",
     "PermissionRequestModel",
+    "ThreadExecutionStateModel",
     "ThreadModel",
 ]
 
@@ -90,6 +91,13 @@ class ThreadModel(Base):
     repair_status: Mapped[str] = mapped_column(default="healthy")
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
+    approval_status: Mapped[str | None] = mapped_column(default=None)
+    approval_request_id: Mapped[str | None] = mapped_column(default=None)
+    approval_reason: Mapped[str | None] = mapped_column(Text, default=None)
+    approval_response_action_id: Mapped[str | None] = mapped_column(default=None)
+    approval_updated_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), default=None
+    )
     last_requested_action: Mapped[str | None] = mapped_column(default=None)
     last_applied_action: Mapped[str | None] = mapped_column(default=None)
     repair_generation: Mapped[int] = mapped_column(default=0)
@@ -109,6 +117,11 @@ class ThreadModel(Base):
     )
     control_actions: Mapped[list["ControlActionModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan"
+    )
+    execution_state: Mapped["ThreadExecutionStateModel | None"] = relationship(
+        back_populates="thread",
+        cascade="all, delete-orphan",
+        uselist=False,
     )
     cost_records: Mapped[list["CostTrackingModel"]] = relationship(
         back_populates="thread", cascade="all, delete-orphan"
@@ -220,6 +233,33 @@ class ControlActionModel(Base):
     worker_generation: Mapped[int] = mapped_column(default=0)
 
     thread: Mapped["ThreadModel"] = relationship(back_populates="control_actions")
+
+
+class ThreadExecutionStateModel(Base):
+    """Latest normalized execution-state projection for a thread."""
+
+    __tablename__ = "thread_execution_state"
+
+    __table_args__ = (
+        Index("ix_thread_execution_state_checkpoint_id", "checkpoint_id"),
+    )
+
+    thread_id: Mapped[str] = mapped_column(ForeignKey("threads.id"), primary_key=True)
+    checkpoint_id: Mapped[str | None] = mapped_column(default=None)
+    parent_checkpoint_id: Mapped[str | None] = mapped_column(default=None)
+    snapshot_created_at: Mapped[datetime | None] = mapped_column(
+        UTCDateTime(), default=None
+    )
+    recorded_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
+    recovery_epoch: Mapped[int] = mapped_column(default=0)
+    task_count: Mapped[int] = mapped_column(default=0)
+    interrupt_count: Mapped[int] = mapped_column(default=0)
+    next_nodes_json: Mapped[str] = mapped_column(Text, default="[]")
+    interrupt_types_json: Mapped[str] = mapped_column(Text, default="[]")
+    tasks_json: Mapped[str] = mapped_column(Text, default="[]")
+    degraded_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
+
+    thread: Mapped["ThreadModel"] = relationship(back_populates="execution_state")
 
 
 class CostTrackingModel(Base):

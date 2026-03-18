@@ -14,6 +14,7 @@ import logging
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
+from fastapi import Request
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -35,6 +36,7 @@ __all__ = [
     "get_engine",
     "get_session_factory",
     "init_db",
+    "inspect_sqlite_database",
     "verify_wal_mode",
 ]
 
@@ -110,7 +112,13 @@ def get_engine(
             )
         return _engine
 
-    _engine = create_async_engine(url, echo=echo)
+    engine_kwargs: dict[str, object] = {"echo": echo}
+    if url.startswith("postgresql"):
+        engine_kwargs["pool_pre_ping"] = True
+        engine_kwargs["pool_size"] = settings.db_pool_size
+        engine_kwargs["max_overflow"] = settings.db_pool_max_overflow
+
+    _engine = create_async_engine(url, **engine_kwargs)
 
     if url.startswith("sqlite"):
         event.listen(_engine.sync_engine, "connect", _set_wal_mode)
@@ -180,7 +188,9 @@ async def init_db(
     return engine
 
 
-async def get_db() -> AsyncGenerator[AsyncSession]:
+async def get_db(
+    request: Request,
+) -> AsyncGenerator[AsyncSession]:
     """Async generator yielding a database session for FastAPI DI.
 
     Usage::
@@ -193,7 +203,9 @@ async def get_db() -> AsyncGenerator[AsyncSession]:
     to ensure ``session.close()`` is called even if the generator is abandoned
     mid-stream (e.g. client disconnect before the generator resumes).
     """
-    factory = get_session_factory()
+    factory = (
+        getattr(request.app.state, "db_session_factory", None) or get_session_factory()
+    )
     async with factory() as session:
         try:
             yield session
@@ -214,6 +226,40 @@ async def verify_wal_mode(engine: AsyncEngine) -> str:
         result = await conn.execute(text("PRAGMA journal_mode"))
         row = result.scalar_one()
         return str(row)
+
+
+def inspect_sqlite_database(path: Path) -> dict[str, object]:
+    """Inspect a SQLite file for fallback-mode diagnostics."""
+    diagnostics: dict[str, object] = {
+        "path": str(path),
+        "exists": path.exists(),
+        "journal_mode": None,
+        "wal_enabled": False,
+    }
+    if not path.exists():
+        diagnostics["detail"] = "sqlite file missing"
+        return diagnostics
+
+    import sqlite3  # noqa: PLC0415
+
+    try:
+        conn = sqlite3.connect(str(path))
+        try:
+            row = conn.execute("PRAGMA journal_mode").fetchone()
+        finally:
+            conn.close()
+    except sqlite3.Error as exc:
+        diagnostics["detail"] = str(exc)
+        return diagnostics
+
+    journal_mode = str(row[0]) if row else ""
+    diagnostics["journal_mode"] = journal_mode
+    diagnostics["wal_enabled"] = journal_mode.lower() == "wal"
+    if not diagnostics["wal_enabled"]:
+        diagnostics["detail"] = (
+            "WAL unavailable; SQLite may be on a read-only or unsupported filesystem."
+        )
+    return diagnostics
 
 
 async def close_db() -> None:

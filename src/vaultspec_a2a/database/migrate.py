@@ -16,13 +16,12 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
+from ..core.config import settings
+
 
 __all__ = ["run_migrations"]
 
 logger = logging.getLogger(__name__)
-
-# alembic.ini lives at the repo root (team-lead decision)
-_ALEMBIC_INI = Path(__file__).resolve().parent.parent.parent.parent / "alembic.ini"
 
 
 async def run_migrations(database_url: str) -> None:
@@ -35,14 +34,14 @@ async def run_migrations(database_url: str) -> None:
     Raises:
         FileNotFoundError: If ``alembic.ini`` is not found at the repo root.
     """
-    if not _ALEMBIC_INI.exists():
+    alembic_ini = Path(settings.project_root) / "alembic.ini"
+    if not alembic_ini.exists():
         msg = (
-            f"alembic.ini not found at {_ALEMBIC_INI};"
-            " ensure it exists at the repo root"
+            f"alembic.ini not found at {alembic_ini}; ensure it exists at the repo root"
         )
         raise FileNotFoundError(msg)
 
-    cfg = Config(str(_ALEMBIC_INI))
+    cfg = Config(str(alembic_ini))
     cfg.set_main_option("sqlalchemy.url", database_url)
 
     logger.info("Running Alembic migrations (upgrade head)...")

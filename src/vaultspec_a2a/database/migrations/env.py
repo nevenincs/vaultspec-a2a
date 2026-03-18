@@ -94,7 +94,7 @@ def do_run_migrations(connection: Connection) -> None:
         connection=connection,
         target_metadata=target_metadata,
         include_name=include_name,
-        render_as_batch=True,
+        render_as_batch=connection.dialect.name == "sqlite",
     )
     with context.begin_transaction():
         context.run_migrations()

@@ -4,9 +4,9 @@ MANDATE: InMemorySpanExporter is BANNED. It is a fake that intercepts spans
 before they reach a real OTLP backend, allowing tests to "pass" while the
 actual export pipeline is never exercised.
 
-Tests that need to verify span attributes MUST use a live Jaeger instance
-(via the jaeger_container/jaeger_query_url fixtures) and are marked
-@pytest.mark.requires_jaeger. Run them with: just test-tracing
+Tests that need to verify span attributes MUST use the persistent local Jaeger
+instance (via the local_jaeger_otlp_endpoint/local_jaeger_query_url fixtures)
+and are marked @pytest.mark.requires_jaeger. Run them with: just test-tracing
 """
 
 from __future__ import annotations
@@ -443,14 +443,14 @@ def test_trace_headers_produces_traceparent_under_real_span() -> None:
 @pytest.mark.requires_jaeger
 @pytest.mark.asyncio(loop_scope="function")
 async def test_worker_middleware_extracts_incoming_traceparent(
-    jaeger_otlp_endpoint: str,
-    jaeger_query_url: str,
+    local_jaeger_otlp_endpoint: str,
+    local_jaeger_query_url: str,
 ) -> None:
     """TelemetryMiddleware on the worker app creates a child span from gateway traceparent.
 
     Simulates the gateway injecting a W3C traceparent into a dispatch POST.
-    Verifies the worker's TelemetryMiddleware exports the child span to a live
-    Jaeger instance via the real OTLP gRPC pipeline.
+    Verifies the worker's TelemetryMiddleware exports the child span to the
+    persistent local Jaeger instance via the real OTLP gRPC pipeline.
 
     Run with: just test-tracing (requires `just jaeger-up` first)
     """
@@ -466,9 +466,9 @@ async def test_worker_middleware_extracts_incoming_traceparent(
     parent_span_id = "00f067aa0ba902b7"
     traceparent = f"00-{trace_id}-{parent_span_id}-01"
 
-    # Build a real OTLPSpanExporter pointed at the Jaeger testcontainer.
+    # Build a real OTLPSpanExporter pointed at the persistent local Jaeger.
     # BatchSpanProcessor exports asynchronously; force_flush() drains the buffer.
-    exporter = OTLPSpanExporter(endpoint=jaeger_otlp_endpoint, insecure=True)
+    exporter = OTLPSpanExporter(endpoint=local_jaeger_otlp_endpoint, insecure=True)
     provider = SdkTracerProvider(
         resource=Resource.create({"service.name": service_name})
     )
@@ -518,7 +518,7 @@ async def test_worker_middleware_extracts_incoming_traceparent(
     while time.monotonic() < deadline:
         async with httpx.AsyncClient() as jc:
             r = await jc.get(
-                f"{jaeger_query_url}/api/traces",
+                f"{local_jaeger_query_url}/api/traces",
                 params={
                     "service": service_name,
                     "lookback": "1m",

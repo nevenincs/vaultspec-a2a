@@ -29,12 +29,8 @@ from ...api.schemas.events import (
 )
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
-from ..aggregator import (
-    _CHUNK_BUFFER_MAX_BYTES,
-    _CHUNK_FLUSH_INTERVAL,
-    _QUEUE_MAXSIZE,
-    EventAggregator,
-)
+from ..aggregator import EventAggregator
+from ..config import settings
 from ..exceptions import EventAggregatorError
 
 
@@ -92,10 +88,10 @@ class TestSubscriberManagement:
     def test_add_subscriber_returns_bounded_queue(
         self, aggregator: EventAggregator
     ) -> None:
-        """add_subscriber returns an asyncio.Queue with maxsize=_QUEUE_MAXSIZE."""
+        """add_subscriber returns an asyncio.Queue with maxsize=settings.event_queue_maxsize."""
         queue = aggregator.add_subscriber("client-1")
         assert isinstance(queue, asyncio.Queue)
-        assert queue.maxsize == _QUEUE_MAXSIZE
+        assert queue.maxsize == settings.event_queue_maxsize
 
     def test_remove_subscriber(self, aggregator: EventAggregator) -> None:
         """remove_subscriber is idempotent — double-remove does not raise."""
@@ -500,7 +496,7 @@ class TestLangGraphEventProcessing:
         assert queue.empty()
 
         # Wait for the 50ms flush timer
-        await asyncio.sleep(_CHUNK_FLUSH_INTERVAL + 0.02)
+        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
 
         event = queue.get_nowait()
         assert isinstance(event, MessageChunkEvent)
@@ -516,7 +512,7 @@ class TestLangGraphEventProcessing:
         aggregator.subscribe("client-1", ["thread-1"])
 
         # Build a chunk larger than 4KB
-        large_content = "x" * (_CHUNK_BUFFER_MAX_BYTES + 100)
+        large_content = "x" * (settings.chunk_buffer_max_bytes + 100)
 
         await aggregator.process_langgraph_event(
             event_data={
@@ -532,7 +528,7 @@ class TestLangGraphEventProcessing:
         # Should flush immediately (4KB threshold exceeded)
         event = queue.get_nowait()
         assert isinstance(event, MessageChunkEvent)
-        assert len(event.content) > _CHUNK_BUFFER_MAX_BYTES
+        assert len(event.content) > settings.chunk_buffer_max_bytes
 
     @pytest.mark.asyncio
     async def test_on_tool_start_with_node_metadata(
@@ -752,7 +748,7 @@ class TestLangGraphEventProcessing:
         )
 
         # Wait for potential flush
-        await asyncio.sleep(_CHUNK_FLUSH_INTERVAL + 0.02)
+        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
         assert queue.empty()
 
 
@@ -788,7 +784,7 @@ class TestTokenChunkBatching:
         assert queue.empty()
 
         # Wait for flush
-        await asyncio.sleep(_CHUNK_FLUSH_INTERVAL + 0.02)
+        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
 
         event = queue.get_nowait()
         assert isinstance(event, MessageChunkEvent)
@@ -865,7 +861,7 @@ class TestBackpressure:
         aggregator.subscribe("client-1", ["thread-1"])
 
         # Fill the queue to capacity with distinct content
-        for i in range(_QUEUE_MAXSIZE):
+        for i in range(settings.event_queue_maxsize):
             await aggregator.emit_message_chunk(
                 thread_id="thread-1",
                 agent_id="agent-1",
@@ -884,7 +880,7 @@ class TestBackpressure:
         )
 
         # Queue remains at capacity (not exceeding maxsize)
-        assert queue.qsize() == _QUEUE_MAXSIZE
+        assert queue.qsize() == settings.event_queue_maxsize
 
         # First event dequeued is msg-1 (msg-0 was dropped)
         first = queue.get_nowait()
@@ -908,7 +904,7 @@ class TestBackpressure:
         aggregator.subscribe("slow", ["thread-1"])
 
         # Pre-fill the slow queue to capacity
-        for i in range(_QUEUE_MAXSIZE):
+        for i in range(settings.event_queue_maxsize):
             q_slow.put_nowait(await _make_chunk_event(aggregator, f"pre-{i}"))
 
         assert q_slow.full()
@@ -928,7 +924,7 @@ class TestBackpressure:
         assert fast_event.content == "new-event"
 
         # Slow client still at capacity (oldest was dropped, newest inserted)
-        assert q_slow.qsize() == _QUEUE_MAXSIZE
+        assert q_slow.qsize() == settings.event_queue_maxsize
 
 
 async def _make_chunk_event(

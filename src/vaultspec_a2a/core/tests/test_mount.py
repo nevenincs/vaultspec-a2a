@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from ..nodes.mount import _MOUNT_TOKEN_CEILING, create_mount_node
+from ..config import settings
+from ..nodes.mount import create_mount_node
 
 
 def _make_state(
@@ -152,7 +153,7 @@ async def test_large_file_truncated(tmp_path: Path) -> None:
     adr_dir = tmp_path / ".vault" / "adr"
     adr_dir.mkdir(parents=True)
     # Write a very large file (well over 20k tokens worth)
-    big_content = "A" * (_MOUNT_TOKEN_CEILING * 6)
+    big_content = "A" * (settings.mount_token_ceiling * 6)
     (adr_dir / "big.md").write_text(big_content, encoding="utf-8")
 
     node = create_mount_node(tmp_path)
@@ -170,7 +171,7 @@ async def test_second_file_skipped_when_no_budget(tmp_path: Path) -> None:
     adr_dir = tmp_path / ".vault" / "adr"
     adr_dir.mkdir(parents=True)
     # First file fills the whole budget; second should be skipped
-    big_content = "B" * (_MOUNT_TOKEN_CEILING * 6)
+    big_content = "B" * (settings.mount_token_ceiling * 6)
     small_content = "SMALL FILE"
     (adr_dir / "big.md").write_text(big_content, encoding="utf-8")
     (adr_dir / "small.md").write_text(small_content, encoding="utf-8")

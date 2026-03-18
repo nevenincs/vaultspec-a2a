@@ -28,6 +28,7 @@ from .. import (
     CreateThreadRequest,
     CreateThreadResponse,
     ErrorEvent,
+    ExecutionTaskSnapshot,
     HeartbeatEvent,
     MessageChunkEvent,
     MessageSnapshot,
@@ -399,7 +400,7 @@ class TestRESTModels:
 
     def test_create_thread_response(self) -> None:
         """CreateThreadResponse validates thread_id and status."""
-        resp = CreateThreadResponse(thread_id="t-1", status="created")
+        resp = CreateThreadResponse(thread_id="t-1", status="submitted")
         assert resp.thread_id == "t-1"
 
     def test_thread_list_response(self) -> None:
@@ -409,6 +410,8 @@ class TestRESTModels:
                 ThreadSummary(
                     thread_id="t-1",
                     status="active",
+                    approval_status="pending",
+                    approval_request_id="approval-1",
                     created_at=NOW,
                     updated_at=NOW,
                 ),
@@ -440,11 +443,15 @@ class TestRESTModels:
     def test_permission_response_result(self) -> None:
         """PermissionResponseResult round-trip preserves accepted flag."""
         result = PermissionResponseResult(
-            request_id="perm-1", accepted=True, thread_id="t-1"
+            request_id="perm-1",
+            accepted=True,
+            thread_id="t-1",
+            approval_status="pending",
         )
         json_bytes = result.model_dump_json()
         restored = PermissionResponseResult.model_validate_json(json_bytes)
         assert restored.accepted is True
+        assert restored.approval_status == "pending"
 
 
 class TestSnapshotModels:
@@ -482,6 +489,32 @@ class TestSnapshotModels:
             ],
             last_sequence=expected_seq,
             checkpoint_id="cp-1",
+            checkpoint_created_at=NOW,
+            checkpoint_parent_id="cp-0",
+            checkpoint_source="loop",
+            checkpoint_step=4,
+            checkpoint_updated_channels=["messages"],
+            pending_write_channels=["messages"],
+            pending_write_count=1,
+            history_depth=2,
+            next_nodes=["supervisor"],
+            task_count=1,
+            pending_interrupt_count=1,
+            execution_tasks=[
+                ExecutionTaskSnapshot(
+                    task_id="task-1",
+                    name="supervisor",
+                    path=["supervisor"],
+                    has_error=False,
+                    interrupt_ids=["interrupt-1"],
+                    interrupt_types=["permission_request"],
+                    has_nested_state=False,
+                    has_result=False,
+                )
+            ],
+            pause_cause="permission_request",
+            approval_status="pending",
+            approval_request_id="approval-1",
         )
         json_bytes = snapshot.model_dump_json()
         restored = ThreadStateSnapshot.model_validate_json(json_bytes)
@@ -490,6 +523,21 @@ class TestSnapshotModels:
         assert len(restored.tool_calls) == 1
         assert len(restored.artifacts) == 1
         assert restored.checkpoint_id == "cp-1"
+        assert restored.checkpoint_created_at == NOW
+        assert restored.checkpoint_parent_id == "cp-0"
+        assert restored.checkpoint_source == "loop"
+        assert restored.checkpoint_step == 4
+        assert restored.checkpoint_updated_channels == ["messages"]
+        assert restored.pending_write_channels == ["messages"]
+        assert restored.pending_write_count == 1
+        assert restored.history_depth == 2
+        assert restored.next_nodes == ["supervisor"]
+        assert restored.task_count == 1
+        assert restored.pending_interrupt_count == 1
+        assert len(restored.execution_tasks) == 1
+        assert restored.pause_cause == "permission_request"
+        assert restored.approval_status == "pending"
+        assert restored.approval_request_id == "approval-1"
 
     def test_snapshot_default_empty_lists(self) -> None:
         """ThreadStateSnapshot defaults all collections to empty lists."""
@@ -504,6 +552,21 @@ class TestSnapshotModels:
         assert snapshot.plan == []
         assert snapshot.agents == []
         assert snapshot.pending_permissions == []
+        assert snapshot.checkpoint_created_at is None
+        assert snapshot.checkpoint_parent_id is None
+        assert snapshot.checkpoint_source is None
+        assert snapshot.checkpoint_step is None
+        assert snapshot.checkpoint_updated_channels == []
+        assert snapshot.pending_write_channels == []
+        assert snapshot.pending_write_count == 0
+        assert snapshot.history_depth is None
+        assert snapshot.next_nodes == []
+        assert snapshot.task_count == 0
+        assert snapshot.pending_interrupt_count == 0
+        assert snapshot.execution_tasks == []
+        assert snapshot.pause_cause is None
+        assert snapshot.approval_status is None
+        assert snapshot.approval_request_id is None
 
 
 class TestMissingFacadeTypes:

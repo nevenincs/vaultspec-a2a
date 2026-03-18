@@ -204,7 +204,8 @@ class TestTeamStateStructure:
             # ADR-021: task queue pointer
             "current_task_id",
             # ADR-024: plan approval gate
-            "plan_approved",
+            "approval_status",
+            "approval_request_id",
             # ADR-014: workspace root path
             "workspace_root",
         }

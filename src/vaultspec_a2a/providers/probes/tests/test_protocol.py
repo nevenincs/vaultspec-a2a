@@ -159,6 +159,20 @@ class TestProbeSessionInit:
         assert session.timeout == 45.0
         assert session.env == {"KEY": "val"}
 
+    def test_authenticate_step_uses_interactive_auth_timeout(self) -> None:
+        """Interactive auth waits on its own watchdog rather than the generic timeout."""
+        session = _ProbeSession(
+            command=["test"],
+            env={},
+            timeout=30.0,
+            prompt="Hello",
+            auth_timeout=900.0,
+        )
+
+        assert session._current_step_timeout() == 30.0
+        session.step = "authenticate"
+        assert session._current_step_timeout() == 900.0
+
 
 # ---------------------------------------------------------------------------
 # _ProbeSession.handle_response state transitions
@@ -190,8 +204,56 @@ class TestProbeSessionHandleResponse:
         done = await session.handle_response(1, "initialize", msg)
         assert done is False
         assert session.step == "session/new"
+        assert session.auth_methods == []
         # A new request should have been sent
         assert len(wb.buffer) > 0
+        sent = json.loads(wb.decode().strip())
+        assert sent["method"] == "session/new"
+
+    @pytest.mark.asyncio
+    async def test_session_new_auth_required_triggers_authenticate(self) -> None:
+        """Auth-required session/new errors should follow the ACP authenticate flow."""
+        session = _ProbeSession(
+            command=["test"],
+            env={"GEMINI_CLI_HOME": "/gemini-cli-home", "GOOGLE_GENAI_USE_GCA": "true"},
+            timeout=30.0,
+            prompt="Hello",
+        )
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
+        session.step = "session/new"
+        session.auth_methods = ["oauth-personal", "gemini-api-key"]
+
+        done = await session.handle_response(
+            2,
+            "session/new",
+            {"error": {"code": -32000, "message": "Authentication required"}},
+        )
+
+        assert done is False
+        assert session.step == "authenticate"
+        sent = json.loads(wb.decode().strip())
+        assert sent["method"] == "authenticate"
+        assert sent["params"]["methodId"] == "oauth-personal"
+
+    @pytest.mark.asyncio
+    async def test_authenticate_success_retries_session_new(self) -> None:
+        """Successful authenticate responses should retry session/new."""
+        session = _ProbeSession(
+            command=["test"],
+            env={"GEMINI_CLI_HOME": "/gemini-cli-home", "GOOGLE_GENAI_USE_GCA": "true"},
+            timeout=30.0,
+            prompt="Hello",
+        )
+        wb = _WriteBuffer()
+        session.stdin = wb  # type: ignore[assignment]
+        session.step = "authenticate"
+        session.auth_methods = ["oauth-personal"]
+
+        done = await session.handle_response(3, "authenticate", {"result": {}})
+
+        assert done is False
+        assert session.step == "session/new"
         sent = json.loads(wb.decode().strip())
         assert sent["method"] == "session/new"
 

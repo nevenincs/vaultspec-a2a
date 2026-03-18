@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
+from datetime import UTC, datetime
+
 import httpx
 import pytest
 
@@ -199,6 +201,20 @@ class TestSendEvent:
         assert "/internal/events/batch" in gw.paths
 
     @pytest.mark.asyncio(loop_scope="function")
+    async def test_json_encodes_datetime_payloads(self) -> None:
+        gw = _InProcessGateway()
+        bridge = gw.make_bridge()
+        timestamp = datetime(2026, 3, 9, 12, 30, tzinfo=UTC)
+        try:
+            await bridge.send_event("t-json", {"timestamp": timestamp})
+            await bridge.flush_events()
+        finally:
+            await bridge.close()
+
+        payload = gw.batches[0]["events"][0]["payload"]
+        assert payload["timestamp"] == "2026-03-09T12:30:00+00:00"
+
+    @pytest.mark.asyncio(loop_scope="function")
     async def test_non_200_response_logs_warning_but_does_not_raise(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
@@ -212,6 +228,15 @@ class TestSendEvent:
             assert any(
                 "Batch event relay failed" in rec.message for rec in caplog.records
             )
+            record = next(
+                rec for rec in caplog.records if "Batch event relay failed" in rec.message
+            )
+            assert record.worker_id == "test-worker-001"
+            assert record.action == "flush_events"
+            assert record.batch_size == 1
+            assert record.flush_attempt == 1
+            assert record.flush_attempt_limit >= 1
+            assert record.http_status_code == 503
         finally:
             await bridge.close()
 
@@ -226,6 +251,11 @@ class TestSendEvent:
                 await bridge.flush_events()
 
             assert any("Failed to send" in rec.message for rec in caplog.records)
+            record = next(rec for rec in caplog.records if "Failed to send" in rec.message)
+            assert record.worker_id == "test-worker-001"
+            assert record.action == "flush_events"
+            assert record.batch_size == 1
+            assert record.flush_attempt == 1
         finally:
             await bridge.close()
 

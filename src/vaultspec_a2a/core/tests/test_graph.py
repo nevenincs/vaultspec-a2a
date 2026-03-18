@@ -541,28 +541,36 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_resolve_model_for_worker_mock_provider_succeeds() -> None:
-    """_resolve_model_for_worker returns a model when Provider.MOCK is used."""
-    from ...utils.enums import Provider
-    from ..graph import _resolve_model_for_worker
+def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
+    """Worker-level provider/capability/fallback overrides win over agent/team defaults."""
+    from ...utils.enums import Model, Provider
+    from ..graph import _resolve_worker_model_preferences
     from ..team_config import load_agent_config, load_team_config
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")
     worker_ref = team.workers[0]
 
-    # Override to use the mock provider (no credentials needed)
-    agent_cfg = agent_cfg.model_copy(
-        update={"model": agent_cfg.model.model_copy(update={"provider": Provider.MOCK})}
-    )
     worker_ref = worker_ref.model_copy(
         update={
-            "model": worker_ref.model.model_copy(update={"provider": Provider.MOCK})
+            "model": worker_ref.model.model_copy(
+                update={
+                    "provider": Provider.GEMINI,
+                    "capability": Model.MID,
+                    "provider_fallback": [Provider.OPENAI, Provider.ZHIPU],
+                }
+            )
         }
     )
 
-    result = _resolve_model_for_worker(worker_ref, agent_cfg, team)
-    assert result is not None
+    provider, capability, fallback_chain = _resolve_worker_model_preferences(
+        worker_ref,
+        agent_cfg,
+        team,
+    )
+    assert provider == Provider.GEMINI
+    assert capability == Model.MID
+    assert fallback_chain == [Provider.OPENAI, Provider.ZHIPU]
 
 
 # ---------------------------------------------------------------------------

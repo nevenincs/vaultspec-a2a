@@ -11,8 +11,9 @@ Fixtures OWN the full service lifecycle:
 
 Trace testing:
     1. **httpx event_hooks** -- request/response logging on ``gateway_client``
-    2. **Jaeger testcontainer** -- full OTLP pipeline via Docker
-       (InMemorySpanExporter is BANNED — it is a fake)
+    2. **Persistent local Jaeger** -- reviewable trace surface on fixed host ports
+    3. **Isolated Jaeger testcontainer** -- legacy fixture family retained only
+       for explicit migration work, not for the shared live stack
 
 Fixtures:
     free_port            -- allocate an unused TCP port
@@ -21,9 +22,11 @@ Fixtures:
     worker_process       -- session-scoped worker subprocess
     service_stack        -- gateway + worker ready, returns (gateway_url, worker_url)
     gateway_client       -- httpx.AsyncClient with event_hook tracing
-    jaeger_container     -- session-scoped Jaeger all-in-one Docker container
-    jaeger_otlp_endpoint -- OTLP gRPC endpoint from the Jaeger container
-    jaeger_query_url     -- HTTP query API base URL (port 16686)
+    local_jaeger_otlp_endpoint   -- persistent local Jaeger OTLP gRPC endpoint
+    local_jaeger_query_url       -- persistent local Jaeger HTTP query API base
+    isolated_jaeger_container    -- session-scoped isolated Jaeger container
+    isolated_jaeger_otlp_endpoint -- OTLP gRPC endpoint from isolated Jaeger
+    isolated_jaeger_query_url    -- isolated Jaeger HTTP query API base
 """
 
 import asyncio
@@ -32,13 +35,16 @@ import logging
 import os
 import socket
 import sys
+import uuid
 
 import httpx
 import psutil
 import pytest
 import pytest_asyncio
 
+from docker.errors import DockerException
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from tenacity import (
     retry,
@@ -79,19 +85,39 @@ def worker_free_port():
 
 
 # ---------------------------------------------------------------------------
-# Jaeger testcontainer -- Tier 3 OTLP pipeline
+# Jaeger fixtures
 # ---------------------------------------------------------------------------
 
-_JAEGER_IMAGE = "jaegertracing/jaeger:2"  # Jaeger v2 (v1 EOL Dec 2025)
+_JAEGER_IMAGE = "cr.jaegertracing.io/jaegertracing/jaeger:2.16.0"
 _JAEGER_OTLP_GRPC_PORT = 4317
 _JAEGER_OTLP_HTTP_PORT = 4318
 _JAEGER_UI_PORT = 16686
-_JAEGER_ADMIN_PORT = 14269  # Admin HTTP server — GET / returns 204 when ready
+_JAEGER_HEALTH_PORT = 13133  # OTel health extension — GET /status returns 200 when ready
+_JAEGER_HEALTH_PATH = "/status"
 _POSTGRES_IMAGE = "postgres:16-alpine"
 _POSTGRES_PORT = 5432
 _POSTGRES_USER = "vaultspec"
 _POSTGRES_PASSWORD = "vaultspec"
 _POSTGRES_DB = "vaultspec"
+
+
+def _start_container_or_fail(make_container, *, label: str):
+    """Create and start a testcontainer or hard-fail with a clear readiness message."""
+    try:
+        container = make_container()
+        container.start()
+        return container
+    except DockerException as exc:
+        pytest.fail(
+            f"{label} requires Docker daemon access, but the container bootstrap "
+            f"failed before the service could start: {exc}",
+            pytrace=False,
+        )
+    except Exception as exc:
+        pytest.fail(
+            f"{label} container failed during startup: {exc}",
+            pytrace=False,
+        )
 
 
 async def _probe_postgres_ready(database_url: str) -> None:
@@ -105,36 +131,54 @@ async def _probe_postgres_ready(database_url: str) -> None:
 
 
 @pytest.fixture(scope="session")
-def jaeger_container():
-    """Start a Jaeger v2 container with OTLP receiver.
+def local_jaeger_otlp_endpoint() -> str:
+    """Return the persistent local Jaeger OTLP gRPC endpoint.
+
+    Reviewable ``requires_jaeger`` tests should export to this fixed host
+    endpoint so traces remain visible in the operator-facing local Jaeger UI.
+    """
+    return f"http://localhost:{_JAEGER_OTLP_GRPC_PORT}"
+
+
+@pytest.fixture(scope="session")
+def local_jaeger_query_url() -> str:
+    """Return the persistent local Jaeger HTTP query API base URL."""
+    return f"http://localhost:{_JAEGER_UI_PORT}"
+
+
+@pytest.fixture(scope="session")
+def isolated_jaeger_container():
+    """Start an isolated Jaeger v2 container with OTLP receiver.
 
     Session-scoped: one container shared across all tests.
     Hard-fails if Docker is unavailable or the container fails to become healthy.
-    Uses the admin HTTP port (14269) for readiness — GET / → 204.
+    Uses the OTel health extension (13133) for readiness — GET /status → 200.
     """
     import time
 
-    container = (
-        DockerContainer(_JAEGER_IMAGE)
-        .with_exposed_ports(
-            _JAEGER_OTLP_GRPC_PORT,
-            _JAEGER_OTLP_HTTP_PORT,
-            _JAEGER_UI_PORT,
-            _JAEGER_ADMIN_PORT,
-        )
-        .with_env("COLLECTOR_OTLP_ENABLED", "true")
+    container = _start_container_or_fail(
+        lambda: (
+            DockerContainer(_JAEGER_IMAGE)
+            .with_exposed_ports(
+                _JAEGER_OTLP_GRPC_PORT,
+                _JAEGER_OTLP_HTTP_PORT,
+                _JAEGER_UI_PORT,
+                _JAEGER_HEALTH_PORT,
+            )
+            .with_env("COLLECTOR_OTLP_ENABLED", "true")
+        ),
+        label="Jaeger live fixture",
     )
-    container.start()
 
-    # Poll the admin endpoint until it returns 204 (real readiness signal)
+    # Poll the health endpoint until it returns 200 (real readiness signal)
     host = container.get_container_host_ip()
-    admin_port = container.get_exposed_port(_JAEGER_ADMIN_PORT)
-    admin_url = f"http://{host}:{admin_port}/"
+    health_port = container.get_exposed_port(_JAEGER_HEALTH_PORT)
+    health_url = f"http://{host}:{health_port}{_JAEGER_HEALTH_PATH}"
     deadline = time.monotonic() + 30
     while time.monotonic() < deadline:
         try:
-            resp = httpx.get(admin_url, timeout=2.0)
-            if resp.status_code == 204:
+            resp = httpx.get(health_url, timeout=2.0)
+            if resp.status_code == 200:
                 break
         except Exception:
             pass
@@ -142,7 +186,7 @@ def jaeger_container():
     else:
         container.stop()
         pytest.fail(
-            f"Jaeger container did not become healthy within 30s (admin: {admin_url})",
+            f"Jaeger container did not become healthy within 30s (health: {health_url})",
             pytrace=False,
         )
 
@@ -151,24 +195,24 @@ def jaeger_container():
 
 
 @pytest.fixture(scope="session")
-def jaeger_otlp_endpoint(jaeger_container):
-    """Return the OTLP gRPC endpoint for the running Jaeger container.
+def isolated_jaeger_otlp_endpoint(isolated_jaeger_container):
+    """Return the OTLP gRPC endpoint for the isolated Jaeger container.
 
     Format: ``http://<host>:<mapped_port>``
     """
-    host = jaeger_container.get_container_host_ip()
-    port = jaeger_container.get_exposed_port(_JAEGER_OTLP_GRPC_PORT)
+    host = isolated_jaeger_container.get_container_host_ip()
+    port = isolated_jaeger_container.get_exposed_port(_JAEGER_OTLP_GRPC_PORT)
     return f"http://{host}:{port}"
 
 
 @pytest.fixture(scope="session")
-def jaeger_query_url(jaeger_container):
-    """Return the Jaeger HTTP query API base URL (port 16686).
+def isolated_jaeger_query_url(isolated_jaeger_container):
+    """Return the isolated Jaeger HTTP query API base URL.
 
     Use to query ``/api/traces?service=...`` for span assertions.
     """
-    host = jaeger_container.get_container_host_ip()
-    port = jaeger_container.get_exposed_port(_JAEGER_UI_PORT)
+    host = isolated_jaeger_container.get_container_host_ip()
+    port = isolated_jaeger_container.get_exposed_port(_JAEGER_UI_PORT)
     return f"http://{host}:{port}"
 
 
@@ -177,14 +221,16 @@ def postgres_container():
     """Start a live Postgres container for production-certifying tests."""
     import time
 
-    container = (
-        DockerContainer(_POSTGRES_IMAGE)
-        .with_exposed_ports(_POSTGRES_PORT)
-        .with_env("POSTGRES_USER", _POSTGRES_USER)
-        .with_env("POSTGRES_PASSWORD", _POSTGRES_PASSWORD)
-        .with_env("POSTGRES_DB", _POSTGRES_DB)
+    container = _start_container_or_fail(
+        lambda: (
+            DockerContainer(_POSTGRES_IMAGE)
+            .with_exposed_ports(_POSTGRES_PORT)
+            .with_env("POSTGRES_USER", _POSTGRES_USER)
+            .with_env("POSTGRES_PASSWORD", _POSTGRES_PASSWORD)
+            .with_env("POSTGRES_DB", _POSTGRES_DB)
+        ),
+        label="Postgres live fixture",
     )
-    container.start()
 
     host = container.get_container_host_ip()
     port = container.get_exposed_port(_POSTGRES_PORT)
@@ -231,6 +277,45 @@ def postgres_checkpoint_url(postgres_container):
     )
 
 
+async def _create_postgres_database(admin_url: str, database_name: str) -> None:
+    """Create a fresh logical database inside the live Postgres container."""
+    engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(f'CREATE DATABASE "{database_name}"'))
+    finally:
+        await engine.dispose()
+
+
+async def _drop_postgres_database(admin_url: str, database_name: str) -> None:
+    """Drop a logical database and force-close lingering connections."""
+    engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+    finally:
+        await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def isolated_postgres_urls(postgres_sqlalchemy_url, postgres_checkpoint_url):
+    """Return fresh app/checkpoint URLs backed by a unique logical Postgres DB."""
+    database_name = f"vaultspec_test_{uuid.uuid4().hex}"
+    admin_url = postgres_sqlalchemy_url
+    sqlalchemy_url = make_url(postgres_sqlalchemy_url).set(
+        database=database_name
+    ).render_as_string(hide_password=False)
+    checkpoint_url = make_url(postgres_checkpoint_url).set(
+        database=database_name
+    ).render_as_string(hide_password=False)
+
+    await _create_postgres_database(admin_url, database_name)
+    try:
+        yield sqlalchemy_url, checkpoint_url
+    finally:
+        await _drop_postgres_database(admin_url, database_name)
+
+
 # ---------------------------------------------------------------------------
 # Environment isolation
 # ---------------------------------------------------------------------------
@@ -240,7 +325,7 @@ def postgres_checkpoint_url(postgres_container):
 def service_env(
     free_port,
     worker_free_port,
-    jaeger_otlp_endpoint,
+    local_jaeger_otlp_endpoint,
     postgres_sqlalchemy_url,
     postgres_checkpoint_url,
 ):
@@ -250,7 +335,7 @@ def service_env(
     - Live Postgres database
     - Auto-spawn DISABLED -- we spawn the worker ourselves
     - No internal token (dev mode)
-    - Real OTLP endpoint wired to the Jaeger testcontainer (no fakes)
+    - Real OTLP endpoint wired to the persistent local Jaeger instance
     """
     return {
         **os.environ,
@@ -273,8 +358,9 @@ def service_env(
         "VAULTSPEC_MCP_API_BASE_URL": f"http://127.0.0.1:{free_port}",
         # Disable LangSmith tracing in tests
         "LANGSMITH_TRACING": "false",
-        # Real OTLP pipeline -- gateway and worker export to Jaeger testcontainer
-        "OTEL_EXPORTER_OTLP_ENDPOINT": jaeger_otlp_endpoint,
+        # Real OTLP pipeline -- gateway and worker export to the persistent
+        # local Jaeger instance so traces remain reviewable after the run.
+        "OTEL_EXPORTER_OTLP_ENDPOINT": local_jaeger_otlp_endpoint,
         "OTEL_EXPORTER_OTLP_INSECURE": "true",
     }
 
@@ -287,24 +373,24 @@ def service_env(
 def pytest_runtest_setup(item: pytest.Item) -> None:
     """Fail (not skip) any test marked requires_jaeger when Jaeger is unreachable.
 
-    Checks Jaeger's admin health endpoint (port 14269, GET / → 204).
+    Checks Jaeger's OTel health endpoint (port 13133, GET /status → 200).
     pytest.fail() produces a hard ERROR in the report, not a silent SKIP.
     """
     if item.get_closest_marker("requires_jaeger"):
         try:
             resp = httpx.get(
-                f"http://localhost:{_JAEGER_ADMIN_PORT}/",
+                f"http://localhost:{_JAEGER_HEALTH_PORT}{_JAEGER_HEALTH_PATH}",
                 timeout=2.0,
             )
-            if resp.status_code != 204:
+            if resp.status_code != 200:
                 pytest.fail(
-                    f"Jaeger admin endpoint returned HTTP {resp.status_code} "
-                    f"(expected 204). Run `just jaeger-up` to start Jaeger.",
+                    f"Jaeger health endpoint returned HTTP {resp.status_code} "
+                    f"(expected 200). Run `just jaeger-up` to start Jaeger.",
                     pytrace=False,
                 )
         except Exception as exc:
             pytest.fail(
-                f"Jaeger is not reachable at http://localhost:{_JAEGER_ADMIN_PORT}/: {exc}. "
+                f"Jaeger is not reachable at http://localhost:{_JAEGER_HEALTH_PORT}{_JAEGER_HEALTH_PATH}: {exc}. "
                 "Run `just jaeger-up` to start Jaeger.",
                 pytrace=False,
             )
@@ -594,4 +680,6 @@ async def gateway_client(service_stack):
 
 # InMemorySpanExporter fixtures have been removed.
 # MANDATE: All OTel span assertions must go through a live Jaeger instance.
-# Use jaeger_container + jaeger_query_url fixtures for real trace verification.
+# Use the persistent local Jaeger fixtures for reviewable trace tests and the
+# shared live stack. The isolated Jaeger fixture family remains only as a
+# migration surface until all transient-container trace paths are removed.

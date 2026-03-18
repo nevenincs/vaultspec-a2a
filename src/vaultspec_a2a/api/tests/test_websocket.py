@@ -4,6 +4,7 @@ Uses Starlette TestClient for real WebSocket connections (no mocks).
 """
 
 import asyncio
+import logging
 import threading
 
 from starlette.applications import Starlette
@@ -12,9 +13,10 @@ from starlette.testclient import TestClient
 from starlette.websockets import WebSocket
 
 from ...core.aggregator import EventAggregator
+from ...core.config import settings
 from .. import websocket as websocket_module
 from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEventType
-from ..websocket import _MAX_WS_MESSAGE_BYTES, ConnectionManager
+from ..websocket import ConnectionManager, WebSocketCommandRejectedError
 from ..websocket import ConnectionManager as WebSocketConnectionManager
 
 
@@ -276,6 +278,44 @@ class TestSendMessageCommand:
         assert len(received) == 1
         assert received[0] == ("thread-1", "Hello from client", "coder")
 
+    def test_send_message_log_includes_runtime_fields(
+        self, caplog
+    ) -> None:
+        """SEND_MESSAGE log records should carry client/thread/agent fields."""
+        app, _aggregator, manager = _create_app()
+
+        async def _handler(thread_id: str, content: str, agent_id: str | None) -> None:
+            return None
+
+        manager.set_message_handler(_handler)
+
+        with (
+            caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.websocket"),
+            TestClient(app) as client,
+            client.websocket_connect("/ws") as ws,
+        ):
+            connected = ws.receive_json()
+            client_id = connected["client_id"]
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "thread_id": "thread-1",
+                    "content": "Hello from client",
+                    "agent_id": "coder",
+                }
+            )
+            ws.send_json({"type": "ping"})
+            ws.receive_json()
+
+        record = next(
+            rec for rec in caplog.records if "sent message to thread" in rec.message
+        )
+        assert record.client_id == client_id
+        assert record.thread_id == "thread-1"
+        assert record.agent_id == "coder"
+        assert record.action == "send_message"
+        assert record.command_type == "send_message"
+
     def test_send_message_without_handler_emits_status(self) -> None:
         """SEND_MESSAGE with no handler emits SUBMITTED agent status."""
         app, agg, _manager = _create_app()
@@ -317,6 +357,38 @@ class TestSendMessageCommand:
             e.get("state") == AgentLifecycleState.SUBMITTED for e in status_events
         )
 
+    def test_send_message_handler_rejection_emits_error(self) -> None:
+        """Structured handler rejections should be emitted as WS error frames."""
+        app, _aggregator, manager = _create_app()
+
+        async def _handler(thread_id: str, content: str, agent_id: str | None) -> None:
+            raise WebSocketCommandRejectedError(
+                thread_id=thread_id,
+                code="THREAD_STATE_DRIFT",
+                message="Thread state drift detected.",
+                recoverable=True,
+                metadata={"checkpoint_present": True},
+            )
+
+        manager.set_message_handler(_handler)
+
+        with TestClient(app) as client, client.websocket_connect("/ws") as ws:
+            _connected = ws.receive_json()
+            ws.send_json(
+                {
+                    "type": "send_message",
+                    "thread_id": "thread-drift",
+                    "content": "Hello from client",
+                }
+            )
+            error = ws.receive_json()
+
+        assert error["type"] == "error"
+        assert error["thread_id"] == "thread-drift"
+        assert error["code"] == "THREAD_STATE_DRIFT"
+        assert error["recoverable"] is True
+        assert error["metadata"]["checkpoint_present"] is True
+
 
 # ---------------------------------------------------------------------------
 # AGENT_CONTROL command dispatch (API-M5)
@@ -356,6 +428,49 @@ class TestAgentControlCommand:
         assert len(received) == 1
         assert received[0] == ("thread-ctrl", "coder", AgentControlAction.TERMINATE)
 
+    def test_rejected_command_log_includes_runtime_fields(self, caplog) -> None:
+        """Rejected WS commands should log client/thread/error correlation fields."""
+        app, _aggregator, manager = _create_app()
+
+        async def _ctrl(
+            thread_id: str, agent_id: str, action: AgentControlAction
+        ) -> None:
+            raise WebSocketCommandRejectedError(
+                thread_id=thread_id,
+                code="THREAD_STATE_DRIFT",
+                message="Thread state drift detected.",
+                recoverable=True,
+                metadata={"checkpoint_present": True},
+            )
+
+        manager.set_agent_control_handler(_ctrl)
+
+        with (
+            caplog.at_level(logging.WARNING, logger="vaultspec_a2a.api.websocket"),
+            TestClient(app) as client,
+            client.websocket_connect("/ws") as ws,
+        ):
+            connected = ws.receive_json()
+            client_id = connected["client_id"]
+            ws.send_json(
+                {
+                    "type": "agent_control",
+                    "thread_id": "thread-ctrl",
+                    "agent_id": "coder",
+                    "action": "terminate",
+                }
+            )
+            ws.receive_json()
+
+        record = next(
+            rec for rec in caplog.records if "Rejected websocket command" in rec.message
+        )
+        assert record.client_id == client_id
+        assert record.thread_id == "thread-ctrl"
+        assert record.error_code == "THREAD_STATE_DRIFT"
+        assert record.action == "command_rejected"
+        assert record.recoverable is True
+
 
 # ---------------------------------------------------------------------------
 # Oversized frame rejection (API-M5)
@@ -366,13 +481,13 @@ class TestOversizedFrame:
     """Tests that oversized WebSocket frames are rejected without crashing."""
 
     def test_oversized_message_is_dropped(self) -> None:
-        """A message exceeding _MAX_WS_MESSAGE_BYTES is silently dropped.
+        """A message exceeding the configured max size is silently dropped.
 
         The server should continue processing subsequent valid commands.
         """
         app, _agg, _mgr = _create_app()
         # Craft a message slightly over the limit (JSON overhead adds bytes)
-        oversized_content = "x" * (_MAX_WS_MESSAGE_BYTES + 100)
+        oversized_content = "x" * (settings.ws_max_message_bytes + 100)
         msg_content = '{"type":"send_message","thread_id":"t1","content":"'
         oversized_msg = msg_content + oversized_content + '"}}'
 

@@ -55,3 +55,12 @@ def test_config_aliases(monkeypatch: pytest.MonkeyPatch) -> None:
     settings = Settings()
     assert settings.anthropic_api_key == "sk-standard-priority"
     assert settings.ci is False
+
+
+def test_blank_internal_token_disables_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Blank internal tokens should normalize to None for dev/test IPC."""
+    monkeypatch.setenv("VAULTSPEC_INTERNAL_TOKEN", "")
+
+    settings = Settings()
+
+    assert settings.internal_token is None

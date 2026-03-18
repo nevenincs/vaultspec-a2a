@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
+from ..config import settings
 from ..metadata import (
-    _MAX_CONTEXT_REFS,
     ContextRef,
     ThreadMetadata,
     discover_context_refs,
@@ -196,14 +196,14 @@ class TestDiscoverContextRefs:
         assert refs == []
 
     def test_caps_at_max_refs(self, tmp_path: Path) -> None:
-        """Discovery stops at the _MAX_CONTEXT_REFS limit."""
+        """Discovery stops at the settings.max_context_refs limit."""
         research_dir = tmp_path / ".vault" / "research"
         research_dir.mkdir(parents=True)
-        for i in range(_MAX_CONTEXT_REFS + 10):
+        for i in range(settings.max_context_refs + 10):
             (research_dir / f"auth-flow-doc-{i:04d}.md").write_text(f"# Doc {i}")
 
         refs = discover_context_refs(tmp_path, "auth-flow")
-        assert len(refs) == _MAX_CONTEXT_REFS
+        assert len(refs) == settings.max_context_refs
 
     def test_paths_are_relative(self, tmp_path: Path) -> None:
         """Discovered paths are relative to workspace_root."""

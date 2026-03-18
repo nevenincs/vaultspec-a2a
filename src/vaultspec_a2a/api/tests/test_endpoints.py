@@ -9,15 +9,17 @@ ADR-019: Graph compilation and ingest no longer run in the gateway.
 All work is dispatched to the worker via HTTP POST to /dispatch.  Tests
 verify that the correct dispatch requests are sent.
 
-API-C1: all dependency overrides are applied via the shared make_app()
-helper in conftest.py so tests never touch the production vaultspec.db.
+API-C1: all injected test dependencies are applied via the shared `make_app()`
+helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 """
 
 import asyncio
+import logging
 
 from fastapi.testclient import TestClient
 
 from ...core.aggregator import EventAggregator
+from ...core.config import settings
 from ...database.crud import record_permission_request
 from .conftest import make_app
 
@@ -68,6 +70,28 @@ class TestCreateThread:
         assert dispatch["thread_id"] == thread_id
         assert dispatch["team_preset"] == "vaultspec-structured-coder"
         assert dispatch["content"] == "Hello"
+
+    def test_dispatch_includes_internal_token_when_configured(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Gateway dispatch should keep working when worker auth is enabled."""
+        original_token = settings.internal_token
+        settings.internal_token = "test-internal-token"
+        try:
+            app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+            with TestClient(app, raise_server_exceptions=True) as client:
+                resp = client.post(
+                    "/api/threads",
+                    json={
+                        "initial_message": "Hello",
+                        "team_preset": "vaultspec-structured-coder",
+                    },
+                )
+            assert resp.status_code == 201
+            assert len(worker.dispatches) == 1
+            assert worker.dispatches[0]["action"] == "ingest"
+        finally:
+            settings.internal_token = original_token
 
     def test_initial_message_length_limit(self, session_factory, checkpointer) -> None:
         """initial_message exceeding 64KB is rejected with validation error."""
@@ -122,6 +146,31 @@ class TestListThreads:
         assert len(data["threads"]) == 2
 
 
+class TestHealth:
+    """Tests for GET /health."""
+
+    def test_reports_sqlite_fallback_diagnostics(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Public health should expose explicit SQLite fallback diagnostics."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+        app.state.sqlite_fallback_diagnostics = {
+            "active": True,
+            "busy_timeout_ms": 5000,
+            "production_certifying": False,
+            "limitations": ["sqlite_fallback_not_production_certifying"],
+            "database": {"path": "test.db", "wal_enabled": True, "journal_mode": "wal"},
+        }
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/health")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["sqlite_fallback"]["active"] is True
+        assert data["sqlite_fallback"]["database"]["journal_mode"] == "wal"
+
+
 # ---------------------------------------------------------------------------
 # GET /threads/{id}/state
 # ---------------------------------------------------------------------------
@@ -157,6 +206,16 @@ class TestThreadState:
         assert data["thread_id"] == thread_id
         assert "last_sequence" in data
         assert data["last_sequence"] == 0
+        assert "checkpoint_parent_id" in data
+        assert "checkpoint_source" in data
+        assert "checkpoint_step" in data
+        assert data["checkpoint_updated_channels"] == []
+        assert data["pending_write_channels"] == []
+        assert data["pending_write_count"] == 0
+        assert data["next_nodes"] == []
+        assert data["task_count"] == 0
+        assert data["pending_interrupt_count"] == 0
+        assert data["execution_tasks"] == []
 
 
 # ---------------------------------------------------------------------------
@@ -430,12 +489,15 @@ class TestPermissionRespond:
         asyncio.run(_run())
 
     def test_responds_dispatches_resume_to_worker(
-        self, session_factory, checkpointer
+        self, session_factory, checkpointer, caplog
     ) -> None:
         """Dispatches a resume to the worker and returns accepted=True."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
-        with TestClient(app, raise_server_exceptions=True) as client:
+        with (
+            caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.endpoints"),
+            TestClient(app, raise_server_exceptions=True) as client,
+        ):
             # Create a thread first so the permission endpoint can find it.
             create_resp = client.post(
                 "/api/threads",
@@ -468,6 +530,14 @@ class TestPermissionRespond:
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
+        record = next(
+            rec for rec in caplog.records if "Dispatching resume dispatch_id=" in rec.message
+        )
+        assert record.thread_id == thread_id
+        assert record.request_id == request_id
+        assert record.dispatch_id == dispatch["dispatch_id"]
+        assert record.action == "resume"
+        assert record.option_id == "allow_once"
 
     def test_resume_dispatch_includes_team_preset(
         self, session_factory, checkpointer

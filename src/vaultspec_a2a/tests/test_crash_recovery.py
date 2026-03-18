@@ -17,7 +17,8 @@ Run explicitly::
 import asyncio
 import os
 import sys
-import warnings
+
+from datetime import datetime
 
 import httpx
 import pytest
@@ -109,35 +110,17 @@ async def _trigger_worker_spawn(gateway_url: str, worker_url: str) -> None:
         await _wait_for_health(worker_url)
 
 
-async def _kill_worker_on_port(port: int) -> None:
-    """Find and kill the process listening on the given port (Windows)."""
-    if sys.platform == "win32":
-        # Use netstat to find the PID
-        proc = await asyncio.create_subprocess_exec(
-            "cmd",
-            "/c",
-            f"for /f \"tokens=5\" %a in ('netstat -ano ^| findstr :{port} ^| findstr LISTENING') do @echo %a",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5.0)
-        pids = {
-            line.strip()
-            for line in stdout.decode().splitlines()
-            if line.strip().isdigit()
-        }
-        for pid_str in pids:
-            await _kill_process_tree(int(pid_str))
-    else:
-        # POSIX: use lsof or fuser
-        proc = await asyncio.create_subprocess_exec(
-            "fuser",
-            "-k",
-            f"{port}/tcp",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        await proc.wait()
+async def _kill_gateway_owned_worker(gateway_url: str) -> int:
+    """Kill the exact worker PID owned by the auto-spawn gateway."""
+    async with httpx.AsyncClient(timeout=5.0) as client:
+        resp = await client.get(f"{gateway_url}/health")
+        resp.raise_for_status()
+        body = resp.json()
+    worker_pid = body.get("worker_pid")
+    if not isinstance(worker_pid, int):
+        raise AssertionError(f"gateway did not report an owned worker pid: {body!r}")
+    await _kill_process_tree(worker_pid)
+    return worker_pid
 
 
 @retry(
@@ -159,6 +142,33 @@ async def _wait_for_worker_status(
             if current != target_status:
                 msg = f"worker_status={current!r}, want {target_status!r}"
                 raise _HealthCheckError(msg)
+            return body
+    except (httpx.ConnectError, httpx.TimeoutException) as exc:
+        raise _HealthCheckError(str(exc)) from exc
+
+
+@retry(
+    retry=retry_if_exception_type(_HealthCheckError),
+    wait=wait_exponential(multiplier=0.5, min=0.5, max=3.0),
+    stop=stop_after_delay(_CRASH_RECOVERY_TIMEOUT),
+    reraise=True,
+)
+async def _wait_for_restart_count(
+    gateway_url: str,
+    minimum_count: int,
+) -> dict:
+    """Poll gateway /health until a latched restart record is present."""
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{gateway_url}/health", timeout=2.0)
+            body = resp.json()
+            current = int(body.get("worker_restart_count", 0))
+            if current < minimum_count:
+                raise _HealthCheckError(
+                    f"worker_restart_count={current!r}, want >= {minimum_count!r}"
+                )
+            if body.get("worker_last_restart_succeeded") is not True:
+                raise _HealthCheckError("worker restart record not completed yet")
             return body
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise _HealthCheckError(str(exc)) from exc
@@ -187,7 +197,7 @@ async def test_gateway_survives_worker_death(
         await _trigger_worker_spawn(gateway_url, worker_url)
 
         # Kill the worker
-        await _kill_worker_on_port(wk_port)
+        await _kill_gateway_owned_worker(gateway_url)
 
         # Small delay for the process to exit
         await asyncio.sleep(1.0)
@@ -225,7 +235,7 @@ async def test_worker_crash_triggers_watchdog_restart(
         await _trigger_worker_spawn(gateway_url, worker_url)
 
         # Kill the worker
-        await _kill_worker_on_port(wk_port)
+        previous_pid = await _kill_gateway_owned_worker(gateway_url)
         await asyncio.sleep(1.0)
 
         # Wait for watchdog to detect crash and restart.
@@ -233,6 +243,7 @@ async def test_worker_crash_triggers_watchdog_restart(
         # Total expected time: ~7-12s.
         body = await _wait_for_worker_status(gateway_url, "up")
         assert body["worker_status"] == "up"
+        assert body["worker_pid"] != previous_pid
 
         # Verify the worker is actually healthy again
         await _wait_for_health(worker_url)
@@ -246,15 +257,7 @@ async def test_worker_crash_triggers_watchdog_restart(
 async def test_worker_status_transitions_during_crash_recovery(
     postgres_sqlalchemy_url, postgres_checkpoint_url
 ):
-    """Worker status transitions through restarting during crash recovery.
-
-    After the worker is killed, the watchdog detects the crash and
-    transitions worker_status from ``up`` to ``restarting``, opens the
-    circuit breaker, then restarts the worker and returns to ``up``.
-
-    We observe the ``restarting`` intermediate state to prove crash
-    detection fired.
-    """
+    """Crash recovery produces a durable restart record after worker death."""
     process, gateway_url, _gw_port, wk_port = await _create_autospawn_gateway(
         "crash_status",
         postgres_sqlalchemy_url,
@@ -272,39 +275,32 @@ async def test_worker_status_transitions_during_crash_recovery(
             body = resp.json()
             # Status may still be "pending" if watchdog hasn't polled yet.
             assert body["worker_status"] in ("up", "pending")
+            initial_restart_count = int(body.get("worker_restart_count", 0))
 
         # Kill the worker
-        await _kill_worker_on_port(wk_port)
+        previous_pid = await _kill_gateway_owned_worker(gateway_url)
+        await asyncio.sleep(1.0)
 
-        # Poll for the ``restarting`` status to appear, proving
-        # the watchdog detected the crash.  The window is brief
-        # (watchdog polls 5s, then restarts with 2s backoff), so
-        # poll aggressively.
-        deadline = asyncio.get_event_loop().time() + 30.0
-        saw_restarting = False
-        async with httpx.AsyncClient(timeout=5.0) as client:
-            while asyncio.get_event_loop().time() < deadline:
-                resp = await client.get(f"{gateway_url}/health")
-                body = resp.json()
-                if body.get("worker_status") == "restarting":
-                    saw_restarting = True
-                    break
-                await asyncio.sleep(0.3)
+        # Verify the watchdog leaves behind a durable restart record,
+        # then confirm the worker has returned to ``up``.
+        body = await _wait_for_restart_count(gateway_url, initial_restart_count + 1)
+        assert body["worker_restart_count"] >= initial_restart_count + 1
+        assert body["worker_last_restart_reason"] == "process_exited"
+        assert "stderr_log=" in body["worker_last_restart_detail"]
+        assert body["worker_stderr_log_path"].endswith(".stderr.log")
+        assert body["worker_last_restart_succeeded"] is True
+        assert body["worker_last_restart_attempts"] >= 1
+        assert body["worker_last_restart_started_at"] is not None
+        assert body["worker_last_restart_completed_at"] is not None
+        assert body["worker_pid"] != previous_pid
+        started_at = datetime.fromisoformat(body["worker_last_restart_started_at"])
+        completed_at = datetime.fromisoformat(body["worker_last_restart_completed_at"])
+        assert completed_at >= started_at
 
-        # Even if we miss the brief ``restarting`` window, verify
-        # the watchdog eventually brings the worker back to ``up``.
         body = await _wait_for_worker_status(gateway_url, "up")
         assert body["worker_status"] == "up"
         assert body["circuit_breaker"] in ("closed", "half_open")
-
-        # Log whether we observed the intermediate state.  It's not
-        # a hard failure if we missed it — the race is inherent.
-        if not saw_restarting:
-            warnings.warn(
-                "Did not observe worker_status='restarting' — "
-                "the crash recovery window was too brief to catch",
-                stacklevel=1,
-            )
+        await _wait_for_health(worker_url)
 
     finally:
         await _stop_process(process)
@@ -333,12 +329,13 @@ async def test_dispatch_works_after_crash_recovery(
         await _trigger_worker_spawn(gateway_url, worker_url)
 
         # Kill the worker
-        await _kill_worker_on_port(wk_port)
+        previous_pid = await _kill_gateway_owned_worker(gateway_url)
         await asyncio.sleep(1.0)
 
         # Wait for watchdog to restore the worker
         body = await _wait_for_worker_status(gateway_url, "up")
         assert body["worker_status"] == "up"
+        assert body["worker_pid"] != previous_pid
 
         # Verify the worker health endpoint is reachable
         await _wait_for_health(worker_url)

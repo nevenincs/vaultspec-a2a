@@ -1,8 +1,8 @@
 """Shared fixtures for src/vaultspec_a2a/api/tests/.
 
 Centralises engine, session_factory, session, checkpointer, and make_app so
-that all test modules use the same isolated SQLite setup and dependency
-overrides.
+that all test modules use the same isolated file-backed SQLite setup and
+app-state injection.
 
 ADR-019: The gateway no longer runs agent execution locally.  Tests wire a
 real in-process dispatch receiver (a minimal FastAPI ASGI app served via
@@ -14,7 +14,6 @@ SQLite file so that gateway read-path enrichment exercises the real
 checkpointer implementation, not a ``MemorySaver`` stub.
 """
 
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -23,6 +22,7 @@ import httpx
 import pytest_asyncio
 
 from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import (
@@ -32,16 +32,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ...core.aggregator import EventAggregator
+from ...core.config import settings
 from ...database.models import Base
-from ...database.session import get_db
 from ..app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
-from ..endpoints import (
-    get_aggregator,
-    get_checkpointer,
-    get_circuit_breaker,
-    get_worker_client,
-    get_worker_spawner,
-)
 
 
 __all__: list[str] = []
@@ -54,8 +47,18 @@ __all__: list[str] = []
 
 @pytest_asyncio.fixture
 async def engine():
-    """In-memory async SQLAlchemy engine with all tables created."""
-    eng = create_async_engine("sqlite+aiosqlite:///:memory:")
+    """File-backed async SQLAlchemy engine with all tables created."""
+    case_dir = (
+        Path.home()
+        / ".codex"
+        / "memories"
+        / "tmp"
+        / "api-test-db"
+        / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     async with eng.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     yield eng
@@ -64,7 +67,7 @@ async def engine():
 
 @pytest_asyncio.fixture
 async def session_factory(engine):
-    """Async session factory bound to the in-memory engine."""
+    """Async session factory bound to the file-backed engine."""
     return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
 
 
@@ -88,7 +91,14 @@ async def checkpointer():
     Replaces the former MemorySaver stub so that gateway read-path enrichment
     exercises the real checkpointer implementation (AsyncSqliteSaver).
     """
-    case_dir = Path.cwd() / ".tmp" / "api-test-checkpoints" / uuid4().hex
+    case_dir = (
+        Path.home()
+        / ".codex"
+        / "memories"
+        / "tmp"
+        / "api-test-checkpoints"
+        / uuid4().hex
+    )
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test_checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
@@ -117,7 +127,16 @@ class _InProcessWorker:
         _app = FastAPI()
 
         @_app.post("/dispatch")
-        async def _dispatch(request: Request) -> dict:
+        async def _dispatch(request: Request):
+            expected = settings.internal_token
+            if expected is not None:
+                authorization = request.headers.get("authorization")
+                if authorization != f"Bearer {expected}":
+                    return JSONResponse(
+                        status_code=401,
+                        content={"detail": "Invalid internal token"},
+                        headers={"WWW-Authenticate": "Bearer"},
+                    )
             body = await request.json()
             self.dispatches.append(body)
             return {"status": "dispatched", "thread_id": body.get("thread_id", "")}
@@ -129,6 +148,11 @@ class _InProcessWorker:
         self._client = httpx.AsyncClient(
             transport=ASGITransport(app=_app),
             base_url="http://test-worker:8001",
+            headers=(
+                {"Authorization": f"Bearer {settings.internal_token}"}
+                if settings.internal_token is not None
+                else None
+            ),
         )
 
     @property
@@ -151,7 +175,7 @@ def make_app(
     checkpointer: AsyncSqliteSaver,
     aggregator: EventAggregator | None = None,
 ) -> tuple:
-    """Create a test FastAPI app with all dependency overrides applied.
+    """Create a test FastAPI app with explicit app-state injection.
 
     ADR-019: wires a real in-process dispatch receiver (ASGITransport over a
     minimal FastAPI app) for the worker client, and injects the real
@@ -181,7 +205,10 @@ def make_app(
     app.state.worker_client = worker.client
 
     # PROD-028: circuit breaker for dispatch calls
-    cb = WorkerCircuitBreaker()
+    cb = WorkerCircuitBreaker(
+        failure_threshold=settings.cb_failure_threshold,
+        recovery_timeout=settings.cb_recovery_timeout_seconds,
+    )
     app.state.circuit_breaker = cb
 
     # PHASE-1a: lazy worker spawner — pre-marked as spawned for tests
@@ -190,18 +217,8 @@ def make_app(
         worker_port=8001,
         auto_spawn=False,
     )
-    spawner._spawned = True  # noqa: SLF001
+    spawner.replace_process(None)
     app.state.worker_spawner = spawner
-
-    async def _override_get_db() -> AsyncGenerator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _override_get_db
-    app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_worker_client] = lambda: worker.client
-    app.dependency_overrides[get_circuit_breaker] = lambda: cb
-    app.dependency_overrides[get_worker_spawner] = lambda: spawner
+    app.state.db_session_factory = session_factory
 
     return app, aggregator, worker, checkpointer

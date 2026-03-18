@@ -234,9 +234,17 @@ class TestHandleDispatch:
                 ):
                     await executor.handle_dispatch(req)
 
-                assert any(
-                    "No graph for thread" in rec.message for rec in caplog.records
+                record = next(
+                    rec
+                    for rec in caplog.records
+                    if "No graph for thread" in rec.message
                 )
+                assert record.thread_id == "t-no-graph"
+                assert record.dispatch_id == req.dispatch_id
+                assert record.dispatch_action == "ingest"
+                assert record.runtime_mode == "ingest"
+                assert record.worker_id == "test-worker"
+                assert record.action == "graph_missing"
             finally:
                 await bridge.close()
 
@@ -260,9 +268,17 @@ class TestHandleDispatch:
                 ):
                     await executor.handle_dispatch(req)
 
-                assert any(
-                    "No graph for thread" in rec.message for rec in caplog.records
+                record = next(
+                    rec
+                    for rec in caplog.records
+                    if "No graph for thread" in rec.message
                 )
+                assert record.thread_id == "t-no-graph"
+                assert record.dispatch_id == req.dispatch_id
+                assert record.dispatch_action == "resume"
+                assert record.runtime_mode == "resume"
+                assert record.worker_id == "test-worker"
+                assert record.action == "graph_missing"
             finally:
                 await bridge.close()
 
@@ -296,9 +312,18 @@ class TestHandleDispatch:
                 ):
                     await executor.handle_dispatch(req)
 
-                assert any(
-                    "Ingest already active" in rec.message for rec in caplog.records
+                record = next(
+                    rec
+                    for rec in caplog.records
+                    if "Ingest already active" in rec.message
                 )
+                assert record.thread_id == "t-1"
+                assert record.dispatch_id == req.dispatch_id
+                assert record.dispatch_action == "ingest"
+                assert record.runtime_mode == "ingest"
+                assert record.worker_id == "test-worker"
+                assert record.active_thread_count == 1
+                assert record.action == "ingest_rejected_active"
             finally:
                 await bridge.close()
 
@@ -315,24 +340,6 @@ class TestGraphInputBuilding:
     compilation, no async I/O.  Tests the dict-building logic in isolation.
     """
 
-    def _make_executor(self) -> Executor:
-        """Return an Executor with a no-op checkpointer placeholder.
-
-        ``_build_graph_input`` is a pure synchronous method that does not
-        touch the checkpointer, bridge, or aggregator.  We construct the
-        Executor via the real constructor but do not call any async methods,
-        so we pass ``None`` for the checkpointer and bridge.  Type checkers
-        will see the ``type: ignore`` below; the test is intentionally
-        narrow.
-        """
-        # We cannot avoid constructing a real Executor because _build_graph_input
-        # is an instance method.  We pass sentinel None values for deps that are
-        # not exercised by this method.
-        # Bypass __init__ entirely -- _build_graph_input is a pure method that
-        # only reads from ``req``.  object.__new__ avoids the bridge relay wiring
-        # that would require a real WorkerBridge and checkpointer.
-        return object.__new__(Executor)
-
     def test_first_ingest_contains_all_required_state_fields(self) -> None:
         """On first ingest, graph_input supplies every non-NotRequired TeamState field."""
         req = DispatchRequest(
@@ -341,8 +348,7 @@ class TestGraphInputBuilding:
             content="Hello",
             team_preset="vaultspec-adaptive-coder",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=True)
+        inp = Executor._build_graph_input(req, is_first_ingest=True)
 
         required_fields = {
             "messages",
@@ -369,8 +375,7 @@ class TestGraphInputBuilding:
             thread_id="t-followup",
             content="Follow-up question",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=False)
+        inp = Executor._build_graph_input(req, is_first_ingest=False)
 
         # These keys must NOT be present -- their absence lets LangGraph
         # preserve checkpoint values rather than triggering reducers.
@@ -389,8 +394,7 @@ class TestGraphInputBuilding:
             thread_id="thread-xyz",
             content="test",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=False)
+        inp = Executor._build_graph_input(req, is_first_ingest=False)
         assert inp["thread_id"] == "thread-xyz"
 
     def test_sdd_fields_included_on_first_ingest_when_provided(self) -> None:
@@ -405,8 +409,7 @@ class TestGraphInputBuilding:
             vault_index={"specs": ["auth.md"]},
             validation_errors=["missing tests"],
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=True)
+        inp = Executor._build_graph_input(req, is_first_ingest=True)
 
         assert inp["active_feature"] == "auth-flow"
         assert inp["pipeline_phase"] == "implement"
@@ -422,8 +425,7 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-adaptive-coder",
             # SDD fields left at defaults (None/empty)
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=True)
+        inp = Executor._build_graph_input(req, is_first_ingest=True)
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp
@@ -440,8 +442,7 @@ class TestGraphInputBuilding:
             content="User question",
             context_preamble="You are a helpful assistant.",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=False)
+        inp = Executor._build_graph_input(req, is_first_ingest=False)
 
         msgs = inp["messages"]
         assert len(msgs) == 2
@@ -456,8 +457,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-empty",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=False)
+        inp = Executor._build_graph_input(req, is_first_ingest=False)
         assert inp["messages"] == []
 
     def test_sdd_fields_not_included_on_followup_even_if_provided(self) -> None:
@@ -469,8 +469,7 @@ class TestGraphInputBuilding:
             active_feature="auth-flow",
             pipeline_phase="implement",
         )
-        executor = self._make_executor()
-        inp = executor._build_graph_input(req, is_first_ingest=False)
+        inp = Executor._build_graph_input(req, is_first_ingest=False)
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp
@@ -519,9 +518,17 @@ class TestLazyRecompilation:
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
                 ):
                     await executor.handle_dispatch(req)
-                assert any(
-                    "No graph for thread" in rec.message for rec in caplog.records
+                record = next(
+                    rec
+                    for rec in caplog.records
+                    if "No graph for thread" in rec.message
                 )
+                assert record.thread_id == "t-no-graph"
+                assert record.dispatch_id == req.dispatch_id
+                assert record.dispatch_action == "resume"
+                assert record.runtime_mode == "resume"
+                assert record.worker_id == "test-worker"
+                assert record.action == "graph_missing"
             finally:
                 await bridge.close()
 

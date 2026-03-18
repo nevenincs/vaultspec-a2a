@@ -19,8 +19,9 @@ default to exercise the ``httpx.RequestError`` branch.
 
 import asyncio
 
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from pathlib import Path
+from uuid import uuid4
 
 import httpx
 import pytest
@@ -38,17 +39,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ....api.app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
-from ....api.endpoints import (
-    get_aggregator,
-    get_checkpointer,
-    get_circuit_breaker,
-    get_worker_client,
-    get_worker_spawner,
-)
 from ....core.aggregator import EventAggregator
 from ....database.crud import record_permission_request
 from ....database.models import Base
-from ....database.session import get_db
 from ..server import (
     _reset_client,
     _reset_known_presets,
@@ -103,14 +96,24 @@ async def session_factory(engine):
 
 
 @pytest_asyncio.fixture
-async def checkpointer(tmp_path):
+async def checkpointer():
     """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
 
     Replaces MemorySaver so the real checkpointer implementation is exercised.
     """
-    db_file = tmp_path / "test_checkpoints.db"
+    case_dir = Path.cwd() / ".tmp" / "mcp-test-checkpoints" / uuid4().hex
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test_checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
         yield cp
+
+
+@pytest.fixture
+def workspace_root() -> Path:
+    """Return a repo-local workspace path instead of pytest's temp root."""
+    root = Path.cwd() / ".tmp" / "mcp-test-workspaces" / uuid4().hex
+    root.mkdir(parents=True, exist_ok=True)
+    return root
 
 
 class _InProcessWorker:
@@ -183,29 +186,19 @@ def _make_test_client(
     app.state.worker_client = worker.client
 
     # Circuit breaker starts CLOSED — dispatch succeeds with in-process worker
-    cb = WorkerCircuitBreaker()
+    cb = WorkerCircuitBreaker(failure_threshold=3, recovery_timeout=30.0)
     app.state.circuit_breaker = cb
 
-    # Lazy spawner pre-marked as spawned — no subprocess needed in tests
+    # Mark the worker as already available via the public spawner API.
     spawner = LazyWorkerSpawner(
         worker_url="http://test-worker:8001",
         worker_port=8001,
         auto_spawn=False,
     )
-    spawner._spawned = True
+    spawner.replace_process(None)
     app.state.worker_spawner = spawner
 
-    # Override the DB session so tests use in-memory SQLite
-    async def _override_get_db() -> AsyncGenerator[AsyncSession]:
-        async with session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = _override_get_db
-    app.dependency_overrides[get_aggregator] = lambda: aggregator
-    app.dependency_overrides[get_checkpointer] = lambda: checkpointer
-    app.dependency_overrides[get_worker_client] = lambda: worker.client
-    app.dependency_overrides[get_circuit_breaker] = lambda: cb
-    app.dependency_overrides[get_worker_spawner] = lambda: spawner
+    app.state.db_session_factory = session_factory
     return TestClient(app, raise_server_exceptions=True)
 
 
@@ -302,7 +295,7 @@ class TestCreateThreadViaApp:
         assert data["thread_id"] == thread_id
 
     def test_post_threads_with_workspace_root_returns_201(
-        self, session_factory, checkpointer, tmp_path
+        self, session_factory, checkpointer, workspace_root: Path
     ) -> None:
         """POST /api/threads with workspace_root in metadata passes through to 201."""
         with _make_test_client(session_factory, checkpointer) as client:
@@ -311,7 +304,7 @@ class TestCreateThreadViaApp:
                 json={
                     "initial_message": "Hello workspace",
                     "autonomous": True,
-                    "metadata": {"workspace_root": str(tmp_path)},
+                    "metadata": {"workspace_root": str(workspace_root)},
                 },
             )
         assert resp.status_code == 201

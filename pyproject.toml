@@ -72,7 +72,7 @@ packages = ["src/vaultspec_a2a"]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live"]
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live and not requires_postgres and not requires_jaeger and not requires_vidaimock"]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"

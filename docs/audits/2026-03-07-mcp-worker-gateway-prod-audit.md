@@ -13,7 +13,7 @@ chain have been resolved. Worker watchdog shipped. Integration test harness buil
 
 **Architecture state after fixes:**
 
-```
+```text
 IDE --stdio--> MCP Server --HTTP--> Gateway :8000 --HTTP--> Worker :8001
                  |                      |                       |
                  | auto-starts          | auto-spawns           | heartbeat 10s
@@ -22,7 +22,7 @@ IDE --stdio--> MCP Server --HTTP--> Gateway :8000 --HTTP--> Worker :8001
                  | _require_gateway()   | circuit breaker       | watchdog 5s poll
                  | re-probe 30s TTL     | 3-fail open, 30s      | exponential restart
                  | (MCP-UX-01)          | recovery (PROD-028)   | (PROD-002 DONE)
-```
+```text
 
 ---
 
@@ -158,13 +158,13 @@ error. Fix in progress (#39): timestamp-cached probe with 30s TTL.
 
 ## Fix Execution Order
 
-```
+```text
 CRIT-02 (worker auto-spawn) ──┐
                                ├──> CRIT-01 (MCP auto-start gateway) ──> HIGH-02 (MCP health validation)
 CRIT-03 (gateway health)  ────┘
 
 CRIT-02 ──> HIGH-01 (service start combined mode)
-```
+```yaml
 
 1. **CRIT-02** first: Add `auto_spawn_worker` to config + subprocess spawn in gateway lifespan
 2. **CRIT-03** parallel: Add `/health` endpoint to gateway
@@ -756,7 +756,7 @@ Option 1 is simplest and acceptable since uvicorn already logs to its own stderr
 ```python
 if req.action != "cancel" and executor.at_capacity():
     raise HTTPException(status_code=429, ...)
-```
+```yaml
 
 **Status**: OPEN
 
@@ -860,7 +860,7 @@ No findings. Error handling is consistent and comprehensive.
 ```python
 if thread.status in (ThreadStatus.RUNNING, ThreadStatus.SUBMITTED):
     raise HTTPException(status_code=409, detail="Cancel the thread before deleting")
-```
+```yaml
 
 **Status**: OPEN
 
@@ -909,7 +909,7 @@ except Exception as exc:                      # line 150 — OUTSIDE with block
     span.set_status(...)                      # span already ended = no-op
     span.record_exception(...)                # no-op
     raise
-```
+```yaml
 
 **Impact**: HTTP 5xx errors from downstream handlers are not recorded in OTel spans. Exception details lost from distributed traces.
 **Fix**: Move the `try/except` INSIDE the `with` block:
@@ -924,7 +924,7 @@ with start_as_current_span(...) as span:
         raise
     span.set_attribute("http.response.status_code", response.status_code)
     return response
-```
+```yaml
 
 **Status**: OPEN
 
@@ -1073,7 +1073,7 @@ Option 1 is simpler and preserves the local dev path:
 
 ```dockerfile
 COPY --from=frontend-build /app/src/ui/dist ./src/ui/dist
-```
+```yaml
 
 **Status**: OPEN (PROD-030 regression — source fixed but destination wrong)
 
@@ -1171,7 +1171,7 @@ The auto-spawn issue in dev is less severe since developers may not notice the g
 VAULTSPEC_ENVIRONMENT: 'production'
 VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
 VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?REQUIRED}'
-```
+```text
 
 Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is not set.
 **Status**: OPEN
@@ -1314,7 +1314,7 @@ if not resp.is_success:
     await update_thread_status(db, thread.id, ThreadStatus.FAILED)
     await db.commit()
     raise HTTPException(status_code=resp.status_code, detail=resp.text)
-```
+```yaml
 
 **Status**: OPEN
 
@@ -1370,7 +1370,7 @@ else:
     if token != _settings.internal_token:
         await websocket.close(code=1008, reason="Unauthorized")
         return
-```
+```yaml
 
 **Status**: OPEN
 

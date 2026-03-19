@@ -69,7 +69,7 @@ async def enqueue_event(self, event: Event) -> None:
     await self.queue.put(event)  # Blocks if full (bounded)
     for child in self._children:
         await child.enqueue_event(event)
-```
+```text
 
 - Uses `put()`NOT`put_nowait()`— **backpressure flows upstream**
 - Recursive child fanning respects per-child backpressure
@@ -84,7 +84,7 @@ if no_wait:
     event = self.queue.get_nowait()  # Raises QueueEmpty
 else:
     event = await self.queue.get()  # Waits
-```
+```text
 
 - No timeout at queue level; caller (EventConsumer) applies timeout
 
@@ -104,7 +104,7 @@ async def _broadcast(self, event: ServerEvent) -> None:
                 pass
         queue.put_nowait(event)  # Never blocks
         delivered += 1
-```
+```text
 
 ### CRITICAL DRIFT
 
@@ -157,7 +157,7 @@ class TaskUpdater:
             if state in self._terminal_states:
                 self._terminal_state_reached = True
                 final = True
-```
+```text
 
 ### Key Pattern: Terminal State Protection
 
@@ -179,7 +179,7 @@ A2A TaskState:
   canceled        → TERMINAL (no transitions allowed)
   failed          → TERMINAL (no transitions allowed)
   rejected        → TERMINAL (no transitions allowed)
-```
+```text
 
 ### Helper Methods (lines 154–208)
 
@@ -204,7 +204,7 @@ class AgentLifecycleState(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-```
+```text
 
 ### What we're missing
 
@@ -247,7 +247,7 @@ async def consume_and_emit(self, consumer: EventConsumer) -> AsyncGenerator[Even
     async for event in consumer.consume_all():
         await self.task_manager.process(event)  # Persist
         yield event  # Forward to client
-```
+```text
 
 - Useful for SSE/streaming response
 - Processing happens before yield (synchronous backpressure)
@@ -262,7 +262,7 @@ async def consume_all(self, consumer: EventConsumer) -> Task | Message | None:
             return event  # Early exit on Message
         await self.task_manager.process(event)
     return await self.task_manager.get_task()
-```
+```text
 
 - Blocks until stream ends (queue closes)
 - Returns final Task or Message object
@@ -306,7 +306,7 @@ async def consume_and_break_on_interrupt(
             interrupted = True
             break
     return await self.task_manager.get_task(), interrupted
-```
+```text
 
 ### Key Pattern: Interrupt + Background Continuation
 
@@ -374,7 +374,7 @@ async def _setup_message_execution(
     await self._register_producer(task_id, producer_task)
 
     return task_manager, task_id, queue, result_aggregator, producer_task
-```
+```text
 
 ### Pattern 2: Exception handling + cleanup (lines 315–343)
 
@@ -402,7 +402,7 @@ finally:
     else:
         # SYNCHRONOUS CLEANUP (line 343)
         await self._cleanup_producer(producer_task, task_id)
-```
+```text
 
 ### Key Patterns
 
@@ -432,7 +432,7 @@ def _track_background_task(self, task: asyncio.Task) -> None:
             self._background_tasks.discard(completed)
 
     task.add_done_callback(_on_done)
-```
+```text
 
 ### Pattern 4: Streaming termination (lines 388–401)
 
@@ -456,7 +456,7 @@ async def on_message_send_stream(...) -> AsyncGenerator[Event]:
         cleanup_task = asyncio.create_task(self._cleanup_producer(producer_task, task_id))
         cleanup_task.set_name(f'cleanup_producer:{task_id}')
         self._track_background_task(cleanup_task)
-```
+```text
 
 ### Our Implementation: src/vaultspec_a2a/api/endpoints.py
 
@@ -535,7 +535,7 @@ async def consume_all(self) -> AsyncGenerator[Event]:
         except Exception as e:
             self._exception = e
             continue
-```
+```text
 
 ### Key Pattern: Explicit Queue Closure After Final Event
 
@@ -549,7 +549,7 @@ async def consume_all(self) -> AsyncGenerator[Event]:
 def agent_task_callback(self, agent_task: asyncio.Task[None]) -> None:
     if not agent_task.cancelled() and agent_task.done():
         self._exception = agent_task.exception()  # Store for re-raise in loop
-```
+```typescript
 
 - Agent task completes with exception → stored in `_exception`
 - Consumer loop checks `_exception`at start of each iteration

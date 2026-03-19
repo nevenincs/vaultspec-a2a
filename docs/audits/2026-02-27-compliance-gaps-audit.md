@@ -71,7 +71,7 @@ case ClientCommandType.PERMISSION_RESPONSE:
         "code": "WS_PERMISSION_REJECTED",
         "message": "Permission responses must use REST POST /permissions/{id}/respond"
     })
-```
+```text
 
 ### [COMP-003] ACP initialize response validation is incomplete vs TOAD
 

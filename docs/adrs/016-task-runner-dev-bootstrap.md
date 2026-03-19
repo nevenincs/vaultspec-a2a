@@ -9,7 +9,7 @@ related:
   - docs/packaging/2026-28-02-packaging-distribution-research.md
 ---
 
-# ADR-016: Task Runner & Developer Bootstrap
+## ADR-016: Task Runner & Developer Bootstrap
 
 **Date:** 2026-02-28
 **Status:** Proposed
@@ -79,7 +79,7 @@ setup: _check-uv _check-node
     uv sync --all-groups
     cd src/ui && npm install
     @echo "Setup complete. Run 'just dev' to start."
-```
+```text
 
 ### 2.3 Development: `just dev`
 
@@ -89,7 +89,7 @@ Start both the Python backend and Node frontend dev servers:
 dev:
     uv run vaultspec &
     cd src/ui && npm run dev
-```
+```text
 
 ### 2.4 Environment Template: `.env.example`
 
@@ -165,7 +165,7 @@ _check-uv:
 
 _check-node:
     @node --version || (echo "Install Node.js 22+ via volta (https://volta.sh) or fnm (https://github.com/Schniz/fnm)" && exit 1)
-```
+```text
 
 ### 3.2 .env.example
 
@@ -195,7 +195,7 @@ OTEL_EXPORTER_OTLP_INSECURE=true
 # LANGCHAIN_TRACING_V2=true
 # LANGCHAIN_API_KEY=
 # LANGCHAIN_PROJECT=vaultspec-a2a
-```
+```text
 
 ### 3.3 Node Version Pinning
 
@@ -207,7 +207,7 @@ Add volta config to `src/ui/package.json`:
     "node": "22.0.0"
   }
 }
-```
+```text
 
 This ensures contributors using volta automatically get the correct Node
 version. Those using fnm should create a `.node-version` file at the

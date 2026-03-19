@@ -7,7 +7,7 @@ maturity: 70
 feature: protocol-gaps
 ---
 
-# Protocols Gaps Research
+## Protocols Gaps Research
 
 **Date**: 2026-02-25
 **Domain**: Protocols (A2A ↔ MCP Bridge)
@@ -62,7 +62,7 @@ def aggregate_team_status(agent_states: List[A2AState]) -> MCPState:
 
     # Default fallback: At least one agent is working or submitted
     return MCPState.WORKING
-```
+```text
 
 ## 2. Concurrent Elicitation Handling (Gap G3)
 

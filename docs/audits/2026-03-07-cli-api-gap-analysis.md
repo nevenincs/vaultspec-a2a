@@ -164,7 +164,7 @@
   "initial_message": "string",
   "nickname": "string (optional)"
 }
-```
+```text
 
 **Endpoint Model (schemas/rest.py → CreateThreadRequest):**
 
@@ -176,7 +176,7 @@ class CreateThreadRequest(BaseModel):
     metadata: ThreadMetadata | None = None  # (optional, not sent by CLI)
     nickname: str | None = None  # (optional)
     autonomous: bool | None = None  # (optional, not sent by CLI)
-```
+```text
 
 **Analysis:**
 
@@ -199,7 +199,7 @@ class CreateThreadRequest(BaseModel):
 {
   "content": "string (defaults to 'Continue.' if --message omitted)"
 }
-```
+```text
 
 **Endpoint Model (schemas/rest.py → SendMessageRequest):**
 
@@ -207,7 +207,7 @@ class CreateThreadRequest(BaseModel):
 class SendMessageRequest(BaseModel):
     content: str
     agent_id: str | None = None  # (optional, not sent by CLI)
-```
+```text
 
 **Analysis:**
 
@@ -227,7 +227,7 @@ class SendMessageRequest(BaseModel):
 ```python
 class PermissionResponseRequest(BaseModel):
     option_id: str  # required
-```
+```text
 
 **Expected CLI (_team.py addition):**
 
@@ -240,7 +240,7 @@ def respond(permission_id: str, option: str) -> None:
         f"/permissions/{permission_id}/respond",
         json={"option_id": option}
     )
-```
+```text
 
 **Verdict:** ❌ **Missing CLI surface** (MED-03 above).
 
@@ -309,7 +309,7 @@ None. All critical functionality is implemented.
           data = resp.json()
           for preset in data.get("presets", []):
               click.echo(f"  {preset['id']:30s}  {preset['display_name']}")
-  ```
+  ```text
 
 - **Effort:** ~30 lines
 - **Owner:** coder
@@ -345,7 +345,7 @@ None. All critical functionality is implemented.
           "team_preset": agent_name,
           "initial_message": message,
       }
-  ```
+  ```text
 
 - **Effort:** ~10 lines
 - **Owner:** coder
@@ -557,7 +557,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
         click.echo(f"Error {resp.status_code}: {detail}", err=True)
         raise SystemExit(1) from None
     return resp
-```
+```text
 
 **Coverage:** ✅ Generic handler for all HTTP errors
 
@@ -591,7 +591,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
       resp = client.post("/threads", json=body)
       _handle_response(resp)  # ← only protects against HTTP errors
       # ← if client.post() raises ConnectError, we crash before reaching _handle_response()
-  ```
+  ```text
 
 - **Fix:** Wrap HTTP calls in try/except for network errors:
 
@@ -604,7 +604,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
   except httpx.ReadTimeout:
       click.echo("Error: Backend request timed out (is it hanging?)", err=True)
       raise SystemExit(1) from None
-  ```
+  ```text
 
 - **Affected Commands:** All 8 commands that call REST (team start/status/resume/stop/delete/archive/list, agent ask)
 - **Effort:** 30 lines (create helper; use in all 8 command flows)
@@ -708,7 +708,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
 - run: uv run ruff format --check .
 - run: uv run ty check
 - run: uv run pytest  # ← direct pytest, not CLI
-```
+```text
 
 - ✅ Uses direct `pytest`, not `vaultspec test` — acceptable (full control)
 - ✅ No old `python -m vaultspec_a2a.tests` paths
@@ -717,7 +717,7 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
 
 ```yaml
 run: uv run python -m vaultspec_a2a.tests.evals.suites."$SUITE"
-```
+```yaml
 
 - ⚠️  **MED-10: Uses `python -m` path instead of CLI**
 - **Problem:** Should be `uv run vaultspec test benchmark "$SUITE"`
@@ -727,7 +727,7 @@ run: uv run python -m vaultspec_a2a.tests.evals.suites."$SUITE"
 
   ```yaml
   - run: uv run vaultspec test benchmark ${{ inputs.suite || 'nightly' }}
-  ```
+  ```text
 
 - **Severity:** **MEDIUM** (inconsistency; CLI exists but not used)
 
@@ -866,7 +866,7 @@ def snapshot(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
     # ... create snapshot logic ...
-```
+```text
 
 - **Before:** Two separate commands (`snapshot`, `snapshots`)
 - **Now:** Group with subcommands (`snapshot` bareword or `snapshot list`)
@@ -878,7 +878,7 @@ def snapshot(ctx: click.Context) -> None:
 ```python
 src_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
 src_conn.backup(dst_conn)
-```
+```text
 
 - **Purpose:** Flush SQLite WAL before backup to ensure consistency
 - **Correct?** ✅ Standard SQLite best practice (prevents orphaned WAL files in snapshot)
@@ -893,7 +893,7 @@ def restore(name: str, yes: bool) -> None:
     if not yes:
         click.echo("This will overwrite the current database. Pass --yes to confirm.")
         raise SystemExit(1)
-```
+```text
 
 - **Before:** No confirmation required (unsafe!)
 - **Now:** `--yes` flag required (matches audit spec §6 requirement)
@@ -1070,7 +1070,7 @@ def _api_client() -> Generator[httpx.Client]:
     except httpx.ReadTimeout:
         click.echo("Request timed out. The backend may be overloaded.", err=True)
         raise SystemExit(1) from None
-```
+```text
 
 **Status:** ✅ **FIXED** — Network errors caught at context manager level
 
@@ -1208,7 +1208,7 @@ if thread_id:
 else:
     logger.warning("No thread_id found in request_id=%s -- cannot dispatch resume", request_id)
     # Returns PermissionResponseResult with accepted=False (line 929)
-```
+```text
 
 **Trace:**
 
@@ -1286,14 +1286,14 @@ perms = data.get("pending_permissions", [])
 if perms:
     click.echo(f"Pending permissions: {len(perms)}")
     # ...
-```
+```text
 
 **Output:**
 
-```
+```text
 No agents registered.
 Active threads: 0
-```
+```text
 
 **Verdict:** ✅ **Graceful**
 
@@ -1325,7 +1325,7 @@ try:
     click.echo(json.dumps(data, indent=2))
 except Exception:
     click.echo(resp.text)  # ← Fallback for non-JSON
-```
+```text
 
 **Verdict:** ✅ **Robust**
 
@@ -1350,7 +1350,7 @@ except Exception:
 ```python
 pattern = f"{db_path.stem}.snapshot.*"  # Matches "{db_path.stem}.snapshot.*"
 files = sorted(db_path.parent.glob(pattern), reverse=True)
-```
+```text
 
 **Pattern Analysis:**
 
@@ -1384,7 +1384,7 @@ for preset_id in sorted(discover_team_preset_ids()):  # Empty list if no presets
     summaries.append(...)
 
 return TeamPresetsResponse(presets=summaries)  # Returns {"presets": []} if no summaries
-```
+```text
 
 **CLI Behavior** (`_team.py:153-156`):
 
@@ -1393,7 +1393,7 @@ items = data.get("presets", [])
 if not items:
     click.echo("No team presets found.")
     return
-```
+```text
 
 **Verdict:** ✅ **Graceful**
 

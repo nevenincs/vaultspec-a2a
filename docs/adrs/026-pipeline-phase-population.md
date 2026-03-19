@@ -10,7 +10,7 @@ related:
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
 ---
 
-# ADR-026: pipeline_phase Population
+## ADR-026: pipeline_phase Population
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -92,7 +92,7 @@ def infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
         if vault_index.get(phase):
             return phase
     return "research"
-```
+```text
 
 **Module contract:**
 
@@ -133,7 +133,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
     # ... model invocation and route parsing (unchanged) ...
 
     return {"next": next_route, "pipeline_phase": inferred_phase}
-```
+```text
 
 Key integration constraints:
 
@@ -348,7 +348,7 @@ src/vaultspec_a2a/core/
 │   │                   audit wins over exec, first-session "research" default
 │   └── test_supervisor.py  AMENDED: verify pipeline_phase present in supervisor
 │                           return dict on normal route, FINISH, and error paths
-```
+```text
 
 ## 7. References
 

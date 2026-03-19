@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'How to enforce mandatory review agent invocation before FINISH. Analysis of prior art and recommended gate mechanism for ADR-025.'
 ---
 
-# Research: Mandatory Review Gate
+## Research: Mandatory Review Gate
 
 **Date:** 2026-03-03
 
@@ -44,7 +44,7 @@ if next_route == "FINISH":
     errors = state.get("validation_errors") or []
     if errors:
         next_route = workers[0]  # reroute instead of finishing
-```
+```text
 
 Extending this to a review artifact check is a natural continuation of the same pattern — no new node type is required. The gate lives in `supervisor_node`'s return-path logic.
 
@@ -58,7 +58,7 @@ if next_route == "FINISH":
     if errors:
         next_route = workers[0]
         return {"next": next_route, "routing_error": f"FINISH blocked: {len(errors)} validation error(s)"}
-```
+```text
 
 This is the exact pattern ADR-025 should extend. The review artifact gate becomes a second condition on the same `if next_route == "FINISH"` branch.
 
@@ -109,7 +109,7 @@ if next_route == "FINISH":
         return {"next": next_route, "pipeline_phase": inferred_phase,
                 "routing_error": "FINISH blocked: no review artifact in vault_index[\"audit\"]. "
                                  "A reviewer agent must produce an audit artifact before completion."}
-```
+```text
 
 **Gate condition logic:**
 

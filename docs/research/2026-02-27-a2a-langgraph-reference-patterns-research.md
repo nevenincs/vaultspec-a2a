@@ -33,7 +33,7 @@ async def enqueue_event(self, event: Event) -> None:
     await self.queue.put(event)
     for child in self._children:
         await child.enqueue_event(event)
-```
+```text
 
 ### Key Pattern
 
@@ -75,7 +75,7 @@ late-joining subscribers. Each consumer drains its own queue independently.
                    pass
                queue.put_nowait(event)
            delivered += 1
-   ```
+   ```text
 
 3. Alternatively, adopt A2A's per-task queue model with `tap()` for true
    isolation. This is a larger refactor but matches the canonical pattern.
@@ -104,7 +104,7 @@ if not model_class:
     return self._generate_error_response(
         request_id, A2AError(root=MethodNotFoundError())
     )
-```
+```text
 
 ### Key Pattern (2)
 
@@ -126,7 +126,7 @@ case ClientCommandType.PERMISSION_RESPONSE:
                    "POST /api/threads/{thread_id}/permissions/{request_id}. "
                    "WebSocket delivery is not supported.",
     })
-```
+```text
 
 ---
 
@@ -154,7 +154,7 @@ class UnauthenticatedUser(User):
     @property
     def user_name(self) -> str:
         return ''
-```
+```text
 
 ```python
 # jsonrpc_app.py — DefaultCallContextBuilder.build()
@@ -174,7 +174,7 @@ class DefaultCallContextBuilder(CallContextBuilder):
                 request.headers.getlist(HTTP_EXTENSION_HEADER)
             ),
         )
-```
+```typescript
 
 ### Key Pattern (3)
 
@@ -257,7 +257,7 @@ async def lifespan(app: FastAPI):
         app.state.task_group = tg
         yield
     # All tasks in tg are guaranteed cancelled/finished here
-```
+```text
 
 ---
 
@@ -287,7 +287,7 @@ def tick(self, ...):
 if not exiting:
     # increment step
     self.step += 1
-```
+```text
 
 ```python
 # pregel/main.py:2665-2674 — Error on exhaustion
@@ -302,7 +302,7 @@ if loop.status == "out_of_steps":
         error_code=ErrorCode.GRAPH_RECURSION_LIMIT,
     )
     raise GraphRecursionError(msg)
-```
+```text
 
 ### LangGraph Example: User-Space Iteration Counter (code_assistant notebook)
 
@@ -340,7 +340,7 @@ def decide_to_finish(state: GraphState):
 # Initial invocation passes iterations=0
 
 graph.stream({"messages": [("user", question)], "iterations": 0}, ...)
-```
+```text
 
 ### Key Pattern (5)
 
@@ -377,7 +377,7 @@ async def loop_worker_node(state: TeamState) -> dict:
     result = await original_worker_node(state)
     result["loop_count"] = state.get("loop_count", 0) + 1
     return result
-```
+```text
 
 Also ensure the initial graph invocation passes `loop_count=0`or that the
 default in`TeamState`is 0.
@@ -387,7 +387,7 @@ safety net (LangGraph default is 25):
 
 ```python
 config = {"recursion_limit": max_loops * len(pipeline_nodes) + 10}
-```
+```text
 
 ---
 
@@ -443,7 +443,7 @@ async def clear_events(self, clear_child_queues: bool = True) -> None:
             for child in self._children
         ]
         await asyncio.gather(*child_tasks, return_exceptions=True)
-```
+```text
 
 ```python
 # InMemoryQueueManager.close() — in_memory_queue_manager.py:62-72
@@ -454,7 +454,7 @@ async def close(self, task_id: str) -> None:
             raise NoTaskQueue
         queue = self._task_queue.pop(task_id)  # Remove from registry
         await queue.close()                     # Then close
-```
+```text
 
 ### Key Pattern (6)
 
@@ -482,7 +482,7 @@ def remove_subscriber(self, client_id: str) -> None:
             except asyncio.QueueEmpty:
                 break
     self._subscriptions.pop(client_id, None)
-```
+```text
 
 ---
 
@@ -498,7 +498,7 @@ def tap(self) -> 'EventQueue':
     queue = EventQueue()
     self._children.append(queue)
     return queue
-```
+```text
 
 ```python
 # InMemoryQueueManager.create_or_tap()
@@ -511,7 +511,7 @@ async def create_or_tap(self, task_id: str) -> EventQueue:
             self._task_queue[task_id] = queue
             return queue
         return self._task_queue[task_id].tap()
-```
+```text
 
 ### Key Pattern (7)
 
@@ -575,7 +575,7 @@ Our CORS configuration should be **restrictive by default**:
      allow_methods=["GET", "POST"],
      allow_headers=["*"],
  )
-```
+```text
 
 1. For development, allow localhost origins. For production, restrict to the
    actual frontend domain.

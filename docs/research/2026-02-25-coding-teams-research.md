@@ -8,7 +8,7 @@ maturity: 30
 summary: 'Foundational investigation of the A2A/ACP/MCP protocol landscape, team composition patterns, and key technical decisions for multi-agent coding teams.'
 ---
 
-# Research: Coding Agent Teams via A2A Orchestration
+## Research: Coding Agent Teams via A2A Orchestration
 
 **Date**: 2026-02-25
 **Status**: Preliminary Investigation
@@ -54,7 +54,7 @@ Three protocols form the relevant stack. Each operates at a different layer:
 │  Tool calling, resource access, prompts         │
 │  Transport: stdio / HTTP / SSE                  │
 └─────────────────────────────────────────────────┘
-```
+```text
 
 ### 2.1 A2A Protocol (Core of our approach)
 
@@ -231,7 +231,7 @@ integration vector:
 └──────────────┘              │  (MCP Server +   │              │ Test Agent  │
                               │   A2A Client)    │              └─────────────┘
                               └──────────────────┘
-```
+```text
 
 **The Team Orchestrator** is exposed as an MCP server with tools like:
 
@@ -268,7 +268,7 @@ Orchestrator (Supervisor)
 ├── Coder Agent B (specialist: frontend)
 ├── Reviewer Agent
 └── Test Agent
-```
+```text
 
 The supervisor LLM decides which agent(s) to invoke for each sub-task. Simple,
 proven (a2a-samples multiagent host uses this).
@@ -289,7 +289,7 @@ Orchestrator
 └── Quality Lead
     ├── Reviewer Agent
     └── Test Agent
-```
+```text
 
 Two levels of delegation. The orchestrator handles high-level coordination;
 leads handle their domain.
@@ -301,7 +301,7 @@ leads handle their domain.
 
 ```text
 Planner → Coder → Reviewer → Tester → (loop or complete)
-```
+```text
 
 Sequential pipeline with feedback loops. Each stage is an A2A agent.
 
@@ -316,7 +316,7 @@ Orchestrator (Supervisor)
 ├── Coder Agent(s)    → implements according to plan
 ├── Reviewer Agent    → reviews implementation
 └── (loop: Coder fixes → Reviewer re-reviews → done)
-```
+```text
 
 The supervisor drives the overall flow but the coder→reviewer loop runs as a
 sub-pipeline. This balances simplicity with quality.

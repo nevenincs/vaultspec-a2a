@@ -6,7 +6,7 @@ summary: 'Master index for all coding teams research, organized by theme with ma
 maturity: 40
 ---
 
-# Coding Teams Documentation
+## Coding Teams Documentation
 
 Research and analysis supporting the A2A agent orchestration gateway.
 All documents here are **supporting research** — none have reached ADR status

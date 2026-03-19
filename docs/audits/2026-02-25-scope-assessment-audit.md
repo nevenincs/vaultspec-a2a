@@ -9,7 +9,7 @@ related:
   - docs/adrs/2026-02-26-008-orchestration-topology-pipeline-adr.md
 ---
 
-# Scope Assessment: Agent Team Gateway
+## Scope Assessment: Agent Team Gateway
 
 **Date**: 2026-02-25
 **Status**: Assessment (no commitments)
@@ -56,7 +56,7 @@ FastAPI / Starlette
 ├── Static file serving
 ├── Lifespan context manager
 └── Uvicorn ASGI server
-```
+```text
 
 ### Must be built — Orchestrator Core
 
@@ -99,7 +99,7 @@ MCP Tool Surface (CLI bridge)
 ├── team/respond(session_id, message) → acknowledgment
 ├── team/cancel(session_id) → status
 └── Tool registration with mcp-python-sdk
-```
+```text
 
 ### Must be built — Web Gateway
 
@@ -121,7 +121,7 @@ Frontend (React / React 5)
 ├── Artifact viewer (file tree + CodeMirror 6 read-only)
 ├── WebSocket client (single connection, channel demux, reconnection)
 └── State management (React 5 runes, server-authoritative)
-```
+```text
 
 ### Must be built — Agent Templates
 
@@ -144,7 +144,7 @@ Workspace Manager
 ├── Worktree cleanup on task completion
 ├── Branch naming convention
 └── Merge strategy (manual for v1)
-```
+```text
 
 ---
 
@@ -233,7 +233,7 @@ Workspace Manager
     │ • cleanup   │ │ • Chat       │
     └─────────────┘ │ • Artifacts  │
                     └──────────────┘
-```
+```text
 
 **Build order** (each layer depends on what's above it):
 
@@ -300,7 +300,7 @@ for a minimal agent.
 @mcp.tool()
 def team_status(session_id: str) -> dict:
     return orchestrator.get_status(session_id)
-```
+```typescript
 
 That's it. Schema generated from type hints. Any MCP-supporting CLI can
 call it.

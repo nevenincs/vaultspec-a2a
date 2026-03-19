@@ -11,7 +11,7 @@ related:
   - docs/adrs/026-pipeline-phase-population.md
 ---
 
-# ADR-022: Contextual Anchoring in Graph Lifecycle
+## ADR-022: Contextual Anchoring in Graph Lifecycle
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -98,7 +98,7 @@ def _build_supervisor_prompt(
         else:
             result = result + f"\n\n## Feature Context\n\n{feature_context}"
     return result
-```
+```text
 
 The compile-time `feature_context` block is a static string describing the
 feature tag at graph compilation time. Dynamic, per-invocation context (phase,
@@ -162,7 +162,7 @@ def build_anchoring_context(state: TeamState) -> str | None:
             lines.append(f"  - {err}")
 
     return "\n".join(lines)
-```
+```text
 
 **Token budget:** A typical anchoring summary with one feature tag, one phase,
 five vault paths across three doc-types, and zero errors produces approximately
@@ -193,7 +193,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
     messages.extend(working_state["messages"])
 
     # ... rest of routing logic unchanged ...
-```
+```text
 
 **Message ordering after this change:**
 
@@ -201,7 +201,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
 [1] SystemMessage(content=full_prompt)         <- compiled supervisor prompt (persona + roster)
 [2] SystemMessage(content=anchoring_summary)   <- per-invocation feature context (NEW, when active_feature is set)
 [3..] *working_state["messages"]               <- compacted conversation history
-```
+```text
 
 The anchoring summary sits between the supervisor's identity definition and the
 conversation history --- higher priority than history but lower than the persona
@@ -231,7 +231,7 @@ if next_route == "FINISH":
                 f"FINISH blocked: {len(errors)} validation error(s) must be resolved first."
             ),
         }
-```
+```yaml
 
 This is a fail-closed gate: if the supervisor attempts to finish with unresolved
 validation errors, it is redirected to the first worker in the roster. The
@@ -259,7 +259,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
     messages.extend(working_state["messages"])
 
     # ... rest of worker logic unchanged ...
-```
+```text
 
 **Message ordering after this change:**
 
@@ -267,7 +267,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
 [1] SystemMessage(content=system_prompt)       <- TOML agent persona
 [2] SystemMessage(content=anchoring_summary)   <- per-invocation feature context (NEW, when active_feature is set)
 [3..] *working_state["messages"]               <- compacted conversation history
-```
+```yaml
 
 This is consistent with the ADR-014 S2.3 ordering principle: role definition >
 project context > conversation. The anchoring summary is a dynamic replacement
@@ -380,7 +380,7 @@ src/vaultspec_a2a/core/
     test_graph.py          AMENDED: _build_supervisor_prompt feature_context tests
     test_anchoring.py      NEW: build_anchoring_context unit tests (all branches)
     test_supervisor.py     AMENDED: validation error gate test
-```
+```text
 
 ## 7. References
 

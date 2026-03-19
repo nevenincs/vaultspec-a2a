@@ -8,7 +8,7 @@ related:
   - docs/adrs/019-teamstate-enrichment-sdd-blackboard.md
 ---
 
-# ACP Tool Content Preservation: Fix Design
+## ACP Tool Content Preservation: Fix Design
 
 ## Problem Statement
 
@@ -56,7 +56,7 @@ Three content block variants (protocol.py lines 154-175):
 class ToolCallLocation(SchemaDict, total=False):
     line: int | None
     path: Required[str]  # File path affected by the tool
-```
+```text
 
 ## 2. Where Data Is Stripped
 
@@ -78,7 +78,7 @@ async def _on_tool_call(self, update: dict, ctx: _AcpSessionContext) -> None:
         )
     )
     ctx.chunk_queue.put_nowait(chunk)
-```
+```yaml
 
 **Stripped fields**: `kind`, `status`, `content`, `locations`, `rawInput`,
 `rawOutput`. Note that `update.get("input")` is used (does not exist in ACP
@@ -96,7 +96,7 @@ The `status` field is logged but not forwarded.
 elif u_type == "plan":
     plan_steps = update.get("plan", {}).get("steps", [])
     logger.debug("ACP plan update: %d steps received", len(plan_steps))
-```
+```text
 
 Plan data from ACP is logged and discarded. The actual ACP schema uses
 `update.get("entries")` (not `update.get("plan", {}).get("steps", [])`), so
@@ -140,7 +140,7 @@ async def _on_tool_call(self, update: dict, ctx: _AcpSessionContext) -> None:
         )
     )
     ctx.chunk_queue.put_nowait(chunk)
-```
+```text
 
 ### 3.3 Concrete Change in `_on_tool_call_update`
 
@@ -177,7 +177,7 @@ async def _on_tool_call_update(self, update: dict, ctx: _AcpSessionContext) -> N
             ctx.chunk_queue.put_nowait(chunk)
         except asyncio.QueueFull:
             logger.warning("Chunk queue full — dropping tool_call_update enrichment")
-```
+```text
 
 ## 4. LangChain Chunk Accumulation: Will `additional_kwargs` Survive?
 
@@ -190,7 +190,7 @@ async def _on_tool_call_update(self, update: dict, ctx: _AcpSessionContext) -> N
 additional_kwargs = merge_dicts(
     left.additional_kwargs, *(o.additional_kwargs for o in others)
 )
-```
+```text
 
 `merge_dicts` (langchain-core `utils/_merge.py`) handles these type-specific
 merge strategies:
@@ -216,7 +216,7 @@ chunk_b = AIMessageChunk(content='', additional_kwargs={
 })
 merged = chunk_a + chunk_b
 # Result: {'acp_tool_calls': [{'toolCallId': 'tc1', ...}, {'toolCallId': 'tc2', ...}]}
-```
+```text
 
 **Lists are safely appended.** Each tool call payload is preserved as a distinct
 list element.
@@ -231,7 +231,7 @@ the inner dicts, which **concatenates strings**:
 {'acp_tool_call': {'toolCallId': 'tc1', 'kind': 'edit'}}
 + {'acp_tool_call': {'toolCallId': 'tc2', 'kind': 'read'}}
 = {'acp_tool_call': {'toolCallId': 'tc1tc2', 'kind': 'editread'}}  # CORRUPTED
-```
+```text
 
 The key **must** be `acp_tool_calls` (list-valued) to avoid corruption during
 chunk accumulation.
@@ -271,7 +271,7 @@ if event_kind == "on_chat_model_stream":
 
             # Emit ToolCallStartEvent / ToolCallUpdateEvent with rich data
             # Emit ArtifactUpdateEvent for completed edit/delete/move with diff content
-```
+```text
 
 ### 5.2 ArtifactUpdateEvent Detection
 
@@ -287,7 +287,7 @@ The `plan` session update handler (line 1004) has a schema mismatch. ACP sends:
 
 ```python
 {"sessionUpdate": "plan", "entries": [{"content": "...", "status": "pending"}]}
-```
+```text
 
 Current code reads `update.get("plan", {}).get("steps", [])` — always empty.
 
@@ -304,7 +304,7 @@ elif u_type == "plan":
             )
         )
         ctx.chunk_queue.put_nowait(chunk)
-```
+```text
 
 ## 7. Summary
 

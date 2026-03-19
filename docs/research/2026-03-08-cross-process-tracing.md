@@ -13,12 +13,12 @@ with httpx, covering both HTTP IPC and subprocess spawning.
 
 ### Format
 
-```
+```yaml
 traceparent: 00-{trace_id}-{span_id}-{flags}
              ^^  ^^^^^^^^   ^^^^^^^^   ^^^^^
              |   32 hex     16 hex     2 hex (01=sampled)
              version (00)
-```
+```yaml
 
 Example: `00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01`
 
@@ -44,7 +44,7 @@ propagate.inject(carrier)
 # Extract: read trace context from a carrier (dict) into OTel context
 ctx = propagate.extract(carrier)
 # Use ctx to continue the trace
-```
+```text
 
 The global `propagate` module uses the configured propagator (default:
 `TraceContextTextMapPropagator` for W3C format).
@@ -62,7 +62,7 @@ propagator.inject(headers)
 
 # Extract
 ctx = propagator.extract(carrier={"traceparent": "00-..."})
-```
+```text
 
 ---
 
@@ -84,7 +84,7 @@ resp = await worker_client.post(
     json=dispatch_body,
     headers=headers,  # Contains traceparent
 )
-```
+```text
 
 ### Pattern: Extract on Incoming HTTP Request
 
@@ -103,7 +103,7 @@ with trace.get_tracer(__name__).start_as_current_span(
 ) as span:
     # All spans created within this context are children of the gateway span
     await executor.handle_dispatch(req)
-```
+```text
 
 ### Our Current State
 
@@ -147,7 +147,7 @@ async def _dispatch_to_worker(
             headers=headers,
         )
         # ...
-```
+```text
 
 #### Step 2: Worker Extraction
 
@@ -173,7 +173,7 @@ async def dispatch_endpoint(req: DispatchRequest, request: Request) -> DispatchR
         executor: Executor = app.state.executor
         tg.start_soon(executor.handle_dispatch, req)
         return DispatchResponse(status="dispatched", thread_id=req.thread_id)
-```
+```text
 
 ---
 
@@ -198,7 +198,7 @@ self._event_buffer.append({
     "ts": time.monotonic(),
     "trace_context": carrier,  # NEW: carry traceparent
 })
-```
+```text
 
 ### Gateway-Side Extraction
 
@@ -214,7 +214,7 @@ for event in batch:
         attributes={"thread_id": event["thread_id"]},
     ):
         # Process and relay the event
-```
+```text
 
 ### Our Current State
 
@@ -244,7 +244,7 @@ process = await asyncio.create_subprocess_exec(
     sys.executable, "-m", "uvicorn", ...,
     env=env,
 )
-```
+```text
 
 ### Limitation
 
@@ -279,7 +279,7 @@ server first -- TEL-GAP-02).
 ```python
 def inject_trace_context(carrier: dict[str, Any]) -> None:
     propagate.inject(carrier)
-```
+```text
 
 Called in `_writer_loop()` (`api/websocket.py:476`):
 
@@ -288,7 +288,7 @@ trace_carrier: dict[str, str] = {}
 inject_trace_context(trace_carrier)
 if trace_carrier:
     payload["_trace"] = trace_carrier
-```
+```text
 
 This correctly injects `traceparent` into outgoing WebSocket JSON frames,
 allowing the frontend to reconstruct the distributed trace.
@@ -297,7 +297,7 @@ allowing the frontend to reconstruct the distributed trace.
 
 ## 7. Complete Trace Flow (After Fixes)
 
-```
+```text
 IDE / CLI
   | HTTP request with traceparent header
   v
@@ -321,7 +321,7 @@ Gateway (propagate.extract(event.trace_context))
 Browser / Frontend
   | Reads _trace.traceparent from WS frame
   | Can reconstruct full distributed trace
-```
+```text
 
 ---
 
@@ -338,7 +338,7 @@ from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
 
 HTTPXClientInstrumentor().instrument()
 # Now ALL httpx requests automatically carry traceparent
-```
+```text
 
 ### Trade-offs
 
@@ -376,7 +376,7 @@ worker_span = next(s for s in spans if s.name == "worker.handle_dispatch")
 # Verify parent-child relationship:
 assert worker_span.parent.trace_id == gateway_span.context.trace_id
 assert worker_span.parent.span_id == gateway_span.context.span_id
-```
+```text
 
 ### Cross-Process Testing
 

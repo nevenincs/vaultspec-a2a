@@ -31,7 +31,7 @@ to the coder.
 
 ## Scope — Files Under Change
 
-```
+```text
 src/vaultspec_a2a/core/
   state.py                   # TeamState field changes
   graph.py                   # RetryPolicy, try/except, logging
@@ -44,7 +44,7 @@ src/vaultspec_a2a/core/tests/
   test_graph.py              # new edge-case tests
   test_worker.py             # new (if absent)
   test_supervisor.py         # new (if absent)
-```
+```text
 
 ---
 

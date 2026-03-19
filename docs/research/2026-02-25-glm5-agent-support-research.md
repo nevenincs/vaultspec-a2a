@@ -8,7 +8,7 @@ maturity: 20
 summary: 'Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-compatible REST interface, and Coding Plan subscription pricing.'
 ---
 
-# Phase 4 Research: GLM-5 Agent Support and Specificities
+## Phase 4 Research: GLM-5 Agent Support and Specificities
 
 **Date**: 2026-02-25
 **Provider**: Zhipu AI (GLM-5 Models)
@@ -18,7 +18,8 @@ summary: 'Provider analysis for Zhipu AI GLM-5 covering API-only access, OpenAI-
 
 ## 1. Authentication Process
 
-**Local CLI vs. Direct Online APIs**
+### Local CLI vs. Direct Online APIs
+
 Zhipu AI officially promotes integration with CLI tools by leveraging a
 customized fork of the open-source Gemini CLI (specifically the
 `feature/openrouter-support`branch on`heartyguy/gemini-cli`). This allows users
@@ -35,7 +36,8 @@ to run GLM models locally within a terminal interface.
   structure. Standard libraries (like the `openai`Python package) can easily be
   pointed to Zhipu's base URL using Zhipu API keys.
 
-**Emerging Consensus & Architectural Assessment:**
+### Emerging Consensus & Architectural Assessment
+
 While there is "CLI support" via a community fork of the Gemini CLI, the
 architectural assessment strongly favors **Direct Online APIs**.
 
@@ -87,7 +89,8 @@ To successfully integrate Z.ai's GLM-5 into the proposed coding-teams framework:
 
 ## 5. Pricing & API Usage
 
-**Subscriptions vs. API Billing**
+### Subscriptions vs. API Billing
+
 Zhipu AI's GLM-5 utilizes a unique hybrid approach to billing that is highly
 advantageous for developers building orchestrators.
 

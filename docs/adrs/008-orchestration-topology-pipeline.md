@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-008: Orchestration Topology & Pipeline (LangGraph Core)
+## ADR-008: Orchestration Topology & Pipeline (LangGraph Core)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

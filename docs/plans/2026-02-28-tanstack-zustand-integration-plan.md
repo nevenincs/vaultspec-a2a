@@ -12,7 +12,7 @@ related_research:
   - docs/research/2026-02-25-control-surface-distilled-research.md
 ---
 
-# Plan: TanStack Query v5 + Zustand v5 Integration
+## Plan: TanStack Query v5 + Zustand v5 Integration
 
 ## Context
 
@@ -59,7 +59,7 @@ eliminates prop drilling, and enables selective re-renders.
 @tanstack/react-query-devtools ^5.64.0
 zustand ^5.0.3
 immer ^10.1.1
-```
+```text
 
 ---
 
@@ -88,7 +88,7 @@ src/ui/src/app/
     use-permissions.ts           -- useRespondToPermission mutation
   bridge/
     ws-bridge.ts                 -- initWsBridge(): WS callbacks → Zustand + TQ invalidation
-```
+```text
 
 ### Modified files (10)
 
@@ -103,14 +103,14 @@ src/ui/src/app/components/layout/status-bar.tsx  -- direct store consumption
 src/ui/src/app/components/stream/input-bar.tsx   -- TQ hooks for presets, mutation for create
 src/ui/src/app/components/permission/permission-modal.tsx -- store + mutation
 src/ui/src/app/components/stream/message-stream.tsx      -- receives events as prop (unchanged API)
-```
+```text
 
 ### Deleted files (2)
 
 ```text
 src/ui/src/app/hooks/use-app-state.ts            -- replaced entirely
 src/ui/src/app/data/mock-data.ts                 -- demoPermissionRequest no longer needed
-```
+```text
 
 ---
 
@@ -118,7 +118,7 @@ src/ui/src/app/data/mock-data.ts                 -- demoPermissionRequest no lon
 
 ```text
 AppStore = StreamSlice & ConnectionSlice & PermissionSlice & TabSlice & UiSlice
-```
+```typescript
 
 ### StreamSlice
 
@@ -168,7 +168,7 @@ threads.state(id)     → ['threads', id, 'state']
 threads.metadata(id)  → ['threads', id, 'metadata']
 team.status()         → ['team', 'status']
 team.presets()        → ['team', 'presets']
-```
+```text
 
 ### Queries
 
@@ -230,7 +230,7 @@ s.streamEvents[activeTabId])`
 const state = useAppState();
 <Sidebar state={state} />
 <StatusBar state={state} />
-```
+```text
 
 **After** (direct consumption):
 
@@ -246,13 +246,13 @@ export function Sidebar() {
   const { activeTabId, openTransient, themeMode, setThemeMode, ... } = useStore(
     appStore, useShallow(s => ({ ... }))
   );
-```
+```text
 
 Components that need only 1 property skip `useShallow`:
 
 ```tsx
 const connectionState = useStore(appStore, (s) => s.connectionState);
-```
+```text
 
 ---
 

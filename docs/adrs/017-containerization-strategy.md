@@ -11,7 +11,7 @@ related:
   - docs/packaging/2026-28-02-packaging-distribution-research.md
 ---
 
-# ADR-017: Containerization Strategy
+## ADR-017: Containerization Strategy
 
 **Date:** 2026-02-28
 **Status:** Proposed
@@ -148,7 +148,7 @@ USER appuser
 EXPOSE 8000
 
 CMD ["uv", "run", "vaultspec"]
-```
+```text
 
 **Key patterns:**
 
@@ -196,7 +196,7 @@ services:
 
 volumes:
   db-data:
-```
+```text
 
 **Usage:**
 
@@ -229,7 +229,7 @@ volumes:
     }
   }
 }
-```
+```text
 
 ### 3.4 .dockerignore
 
@@ -259,7 +259,7 @@ tests/
 *.db-shm
 .env
 .claude/
-```
+```text
 
 ### 3.5 SQLite Persistence
 

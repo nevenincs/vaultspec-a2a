@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'What prerequisite artifacts should be required before each phase transition? Gate table, mechanism, and interaction with ADR-026. Research for ADR-023.'
 ---
 
-# Research: Phase Artifact Gates
+## Research: Phase Artifact Gates
 
 **Date:** 2026-03-03
 
@@ -79,7 +79,7 @@ if target_phase:
     elif gate_result.warning:
         # soft gate — proceed but log
         logger.warning(gate_result.message)
-```
+```text
 
 **Pros:** Single location for all routing logic. Consistent with ADR-022 and ADR-025 gate patterns. No new graph nodes.
 

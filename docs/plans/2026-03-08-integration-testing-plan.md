@@ -44,7 +44,7 @@ fixture raises, the test fails. That failure is the correct signal.
 
 ### Two Test Tiers
 
-```
+```yaml
 TIER 1: Unit Tests (rust-style)
   Location: src/vaultspec_a2a/{module}/tests/
   Scope:    Individual functions/classes
@@ -59,11 +59,11 @@ TIER 2: Integration Tests
   Services: Real subprocess-based gateway + worker
   Mocks:    FORBIDDEN
   Transport: Real HTTP via httpx.AsyncClient
-```
+```text
 
 ### Fixture Dependency Graph
 
-```
+```text
 tmp_path_factory (session, built-in)
   └── service_env (session)
         ├── gateway_process (session, async) ←── _start_and_wait()
@@ -78,7 +78,7 @@ gateway_process + worker_process
 
 span_collector (function) → (TracerProvider, InMemorySpanExporter)
   └── collected_spans (function, convenience alias)
-```
+```text
 
 ### Session-Scoped Event Loop
 
@@ -108,7 +108,7 @@ process = await asyncio.create_subprocess_exec(
     stdout=asyncio.subprocess.PIPE,
     stderr=asyncio.subprocess.PIPE,
 )
-```
+```text
 
 **Teardown:** Windows uses `taskkill /T /F /PID {pid}` for tree kill. POSIX uses
 `os.killpg()`. Implemented in `_kill_process_tree()` in conftest.py.
@@ -135,7 +135,7 @@ a `pytest.fail()` in the caller.
 )
 async def _wait_for_health(url: str) -> None:
     ...
-```
+```yaml
 
 Auto-detects async: tenacity uses `AsyncRetrying` + `asyncio.sleep()` when the
 decorated function is a coroutine. No special configuration needed.
@@ -155,7 +155,7 @@ async with httpx.AsyncClient(
     event_hooks={"request": [_log_request], "response": [_log_response]},
 ) as client:
     yield client
-```
+```text
 
 ### 4. InMemorySpanExporter (OTel SDK) — Span Assertions
 
@@ -190,7 +190,7 @@ async def jaeger():
         yield {"otlp_endpoint": f"http://{host}:{otlp_port}"}
     finally:
         container.stop()
-```
+```text
 
 **Not yet installed.** Add `testcontainers>=4.14.0` to dev deps when implementing
 trace verification tests.
@@ -367,7 +367,7 @@ Tests:
 
 ## Execution Order
 
-```
+```text
 TESTING-01 (harness) ─── COMPLETED
     │
     ├── TESTING-02 (crash recovery) ─── IN PROGRESS (coder)
@@ -379,7 +379,7 @@ TESTING-01 (harness) ─── COMPLETED
     └── VERIFY-01 (north star e2e) ─── IN PROGRESS (coder)
               │
               └── MANDATE #56 (replace mock conftest) ─── BLOCKED ON VERIFY-01
-```
+```text
 
 TESTING-02 through TESTING-04 are independent of each other (all depend only on
 TESTING-01). VERIFY-01 depends on TESTING-01 + MCP-UX-01. Task #56 (mock
@@ -405,7 +405,7 @@ dev = [
   "psutil>=6.0.0",          # Process tree inspection + cross-platform kill
   "testcontainers>=4.14.0", # Docker container lifecycle for Jaeger/otelcol
 ]
-```
+```text
 
 ### Runtime
 
@@ -427,7 +427,7 @@ markers = [
 ]
 asyncio_mode = "strict"
 timeout = 300
-```
+```text
 
 ### Running Integration Tests
 
@@ -443,7 +443,7 @@ pytest src/vaultspec_a2a/tests/test_crash_recovery.py -m live -x -v
 
 # Default run excludes integration tests
 pytest -m "not live"
-```
+```text
 
 ---
 

@@ -12,7 +12,7 @@ related:
   - docs/adrs/025-mandatory-review-gate.md
 ---
 
-# ADR-027: Agentic Evaluation Architecture
+## ADR-027: Agentic Evaluation Architecture
 
 **Date:** 2026-03-04
 **Status:** Proposed
@@ -174,7 +174,7 @@ def routing_evaluator(run, example):
         "key": "routing_correct",
         "score": int(run.outputs["next"] == example.outputs["expected_next"]),
     }
-```
+```text
 
 **Threshold:** `routing_accuracy >= 0.90` required for CI pass.
 
@@ -199,7 +199,7 @@ def gate_compliance_evaluator(run, example):
         "key": "gate_compliant",
         "score": int(has_error == expect_blocked),
     }
-```
+```text
 
 **Threshold:** `gate_compliance == 1.0` (deterministic — zero tolerance for
 gate failures).
@@ -213,7 +213,7 @@ vaultspec ADRs?
 
 The `openevals` LLM-as-judge evaluator is used with a custom rubric:
 
-```
+```text
 Given a feature request and a plan document, score the plan 0-1 on:
 - COMPLETENESS: all pipeline stages (research→adr→plan→exec→audit) addressed
 - ACTIONABILITY: each step has a concrete, executable description
@@ -221,7 +221,7 @@ Given a feature request and a plan document, score the plan 0-1 on:
 - TASK_GRANULARITY: tasks are appropriately sized (not too coarse, not too fine)
 
 Respond with JSON: {"score": <float 0-1>, "reasoning": "<string>"}
-```
+```text
 
 **Threshold:** `plan_quality >= 0.75` required for CI pass.
 
@@ -248,7 +248,7 @@ def code_correctness_evaluator(run, example):
         "key": "test_pass_rate",
         "score": passed / total if total > 0 else 0.0,
     }
-```
+```text
 
 **Threshold:** `test_pass_rate >= 0.85` required for CI pass.
 
@@ -263,11 +263,11 @@ Each dataset example includes a code file with N known defects (annotated in
 the example metadata). The LLM judge checks whether each defect appears in the
 review report.
 
-```
+```text
 Given a list of defects and a review report, for each defect output 1 if the
 defect is mentioned in the report (recall), 0 if not.
 Return: {"defect_recall": <float 0-1>}
-```
+```text
 
 **Threshold:** `defect_recall >= 0.80` required for CI pass.
 
@@ -287,7 +287,7 @@ recovery or replanning without failing the evaluation.
 from agentevals import create_trajectory_match_evaluator
 
 trajectory_eval = create_trajectory_match_evaluator(mode="superset")
-```
+```text
 
 The LLM completion judge evaluates whether the final vault artifacts (plan,
 exec, audit docs) constitute a completed feature implementation.
@@ -332,11 +332,11 @@ are therefore fully traced at no extra cost.
 
 Required environment variables for evaluation runs:
 
-```
+```text
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=<langsmith api key>
 LANGSMITH_PROJECT=vaultspec-eval
-```
+```text
 
 ### 2.6 Package Dependencies
 
@@ -350,7 +350,7 @@ eval = [
     "openevals>=0.0.4",
     "langsmith>=0.2",
 ]
-```
+```text
 
 These packages are NOT added to the main dependency group — evaluation is a
 development/CI concern, not a production runtime concern. Production deployments
@@ -486,7 +486,7 @@ evals/                            NEW top-level directory
   suites/
     nightly.py                    Full 6-dimension suite (scheduled CI)
     smoke.py                      Dimensions 1+2 only (fast, on PR)
-```
+```text
 
 No changes to `lib/` production code. No changes to existing `lib/*/tests/`
 directories.

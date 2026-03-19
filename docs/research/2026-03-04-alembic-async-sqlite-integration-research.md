@@ -10,7 +10,7 @@ related:
   - src/vaultspec_a2a/database/migrations/__init__.py
 ---
 
-# ADR-029: Alembic + Async SQLAlchemy + SQLite — Technical Integration Research
+## ADR-029: Alembic + Async SQLAlchemy + SQLite — Technical Integration Research
 
 ## 1. Executive Summary
 
@@ -73,7 +73,7 @@ Alembic ships an `async` template since v1.12. Generate it with:
 
 ```bash
 alembic init -t async migrations
-```
+```text
 
 The canonical `env.py` for `sqlite+aiosqlite` is:
 
@@ -163,7 +163,7 @@ if context.is_offline_mode():
     run_migrations_offline()
 else:
     run_migrations_online()
-```
+```text
 
 ### 3.1 alembic.ini minimal config
 
@@ -205,7 +205,7 @@ formatter = generic
 [formatter_generic]
 format = %(levelname)-5.5s [%(name)s] %(message)s
 datefmt = %H:%M:%S
-```
+```text
 
 **Key point:** `sqlalchemy.url` uses `sqlite+aiosqlite:///`. At runtime the
 actual path comes from `settings.database_url`; override via programmatic
@@ -233,7 +233,7 @@ will be omitted."
 
 ```python
 _LANGGRAPH_TABLES = {"checkpoints", "writes"}
-```
+```yaml
 
 Source: `langgraph-checkpoint-sqlite` `AsyncSqliteSaver.setup()` creates
 `checkpoints` and `writes` tables via `CREATE TABLE IF NOT EXISTS`.
@@ -248,7 +248,7 @@ def include_name(name: str, type_: str, parent_names: dict) -> bool:
     if type_ == "table":
         return name in target_metadata.tables
     return True
-```
+```text
 
 This is the most robust form — it automatically scopes Alembic to *exactly*
 the tables our ORM declares, regardless of what else is in the database file.
@@ -266,14 +266,14 @@ After Alembic is wired up, generate a baseline from the current live schema:
 uv run alembic revision --autogenerate -m "initial_schema"
 # Review the generated file — verify it only covers threads/artifacts/permission_logs/cost_tracking
 uv run alembic upgrade head
-```
+```text
 
 For an already-deployed database, use `alembic stamp head` to record that
 the schema is already current without running the initial migration DDL:
 
 ```bash
 uv run alembic stamp head
-```
+```text
 
 ### 5.2 Adding a column (typical workflow)
 
@@ -298,7 +298,7 @@ async def run_migrations(db_path: str) -> None:
     cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
     # run_migrations_online uses asyncio.run() internally — call from sync context
     await asyncio.to_thread(command.upgrade, cfg, "head")
-```
+```text
 
 **Important:** `alembic.command.upgrade` is synchronous. Use
 `asyncio.to_thread` to avoid blocking the event loop.
@@ -307,7 +307,7 @@ Alternatively, the CLI-only approach (CI/CD or Docker entrypoint):
 
 ```bash
 uv run alembic upgrade head && uv run python -m lib.api
-```
+```text
 
 This is the simpler and more explicit option. The programmatic approach is
 preferred for development convenience; the CLI approach is preferred for
@@ -320,7 +320,7 @@ uv run alembic downgrade -1        # one step back
 uv run alembic downgrade base      # all the way back to empty
 uv run alembic history             # view migration history
 uv run alembic current             # view current revision
-```
+```text
 
 ---
 
@@ -339,7 +339,7 @@ connectable = async_engine_from_config(
     prefix="sqlalchemy.",
     poolclass=pool.NullPool,   # ← mandatory
 )
-```
+```text
 
 ### 6.2 `render_as_batch=True` is mandatory for SQLite
 
@@ -356,7 +356,7 @@ context.configure(
     target_metadata=target_metadata,
     render_as_batch=True,
 )
-```
+```text
 
 **Batch mode pitfalls with SQLite:**
 
@@ -412,7 +412,7 @@ Always manually review generated migrations before applying.
 
 Recommended layout under `src/vaultspec_a2a/database/`:
 
-```
+```text
 src/vaultspec_a2a/database/
 ├── __init__.py
 ├── models.py           # SQLAlchemy ORM models (Base.metadata)
@@ -424,7 +424,7 @@ src/vaultspec_a2a/database/
 │   └── versions/       # NEW — generated migration files
 │       └── 0001_initial_schema.py
 alembic.ini             # NEW — at repo root (or src/vaultspec_a2a/database/alembic.ini)
-```
+```text
 
 **Note:** `alembic.ini` can live at the repo root (conventional) or inside
 `src/vaultspec_a2a/database/`. If placed inside `src/vaultspec_a2a/database/`, the `script_location`
@@ -449,7 +449,7 @@ async def init_db(db_path, *, echo=False):
         except OperationalError:
             pass                                              # ← remove
     return engine
-```
+```text
 
 **After (post-ADR-029):**
 
@@ -459,7 +459,7 @@ async def init_db(db_path, *, echo=False):
     get_session_factory(engine)
     # Schema managed by Alembic: run `alembic upgrade head` before starting app
     return engine
-```
+```text
 
 The `init_db` function retains the engine/session-factory wiring but drops all
 DDL. Schema is entirely owned by Alembic.

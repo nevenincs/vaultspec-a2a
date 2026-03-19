@@ -12,7 +12,7 @@ related:
   - docs/figma-integration/2026-28-02-figma-mcp-react-pivot-research.md
 ---
 
-# ADR-018: React + Tailwind + Figma Stack Migration
+## ADR-018: React + Tailwind + Figma Stack Migration
 
 **Date:** 2026-02-28
 **Status:** Proposed
@@ -139,7 +139,7 @@ the MCP server's `get_design_context` output includes
 - Component usage snippets with prop mappings
 - Custom implementation instructions
 
-**CLI commands:**
+#### CLI Commands
 
 ```bash
 # Interactive setup — scaffolds figma.config.json + .figma.tsx files
@@ -150,7 +150,7 @@ npx figma connect publish --token=$FIGMA_ACCESS_TOKEN
 
 # Remove a specific mapping
 npx figma connect unpublish --node=NODE_URL --label=React
-```
+```text
 
 **Configuration:** `figma.config.json` at project root defines:
 
@@ -181,9 +181,9 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
     </Button>
   ),
 });
-```
+```text
 
-**Prop mapping functions:**
+#### Prop Mapping Functions
 
 - `figma.string(prop)` — text → string
 - `figma.boolean(prop)` — boolean toggle
@@ -192,7 +192,7 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
 - `figma.children(layerName)` — child layers
 - `figma.className(parts[])` — Tailwind class concatenation
 
-**Requirements:**
+#### Requirements
 
 - Node.js 18+
 - Personal access token with Code Connect: Write and File content: Read
@@ -226,7 +226,7 @@ The canonical workflow for implementing or modifying any component:
    ├─► npx figma connect publish
    └─► Now get_design_context returns YOUR component code
        for future iterations
-```
+```text
 
 ### 3.5 Figma Skills (Claude Code Plugin)
 
@@ -262,7 +262,7 @@ The following rules must be added to CLAUDE.md for all Figma-driven work:
 4. After both context + screenshot, download assets and implement
 5. Translate React + Tailwind output to project conventions
 6. Validate 1:1 against Figma screenshot before marking complete
-```
+```typescript
 
 ## 4. Rationale
 

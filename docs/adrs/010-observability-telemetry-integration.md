@@ -8,7 +8,7 @@ related:
   - docs/distilled/INDEX.md
 ---
 
-# ADR-010: Observability & Telemetry Integration (OpenTelemetry)
+## ADR-010: Observability & Telemetry Integration (OpenTelemetry)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

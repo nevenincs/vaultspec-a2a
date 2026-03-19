@@ -225,7 +225,7 @@ with `LANGCHAIN_*` as fallback for backward compatibility with existing `.env` f
 
 Full audit of 19 `@pytest.mark.live` tests across 5 files. Classification is final — team-lead directive received.
 
-**REMOVE (delete entirely) — 7 tests:**
+### REMOVE (delete entirely) — 7 tests
 
 | File | Test | Reason |
 |------|------|--------|
@@ -237,7 +237,7 @@ Full audit of 19 `@pytest.mark.live` tests across 5 files. Classification is fin
 | `test_e2e_live.py` | `test_pipeline_team_gemini_collaboration` | Behavioral assertions against live LLM — ADR-027 Layer 1 violation |
 | `test_graph.py` | `test_graph_execution_routing` | Asserts routing decisions from a real LLM — ADR-027 Layer 1 violation |
 
-**SIMPLIFY (strip behavioral assertions, keep as connectivity/smoke) — 8 tests:**
+### SIMPLIFY (strip behavioral assertions, keep as connectivity/smoke) — 8 tests
 
 | File | Test | Action |
 |------|------|--------|
@@ -249,7 +249,7 @@ Full audit of 19 `@pytest.mark.live` tests across 5 files. Classification is fin
 | `test_acp_chat_model.py` | `test_acp_claude_ainvoke` | Same as above |
 | `test_acp_chat_model.py` | `test_acp_gemini_ainvoke` | Same as above |
 
-**KEEP unchanged — 4 tests:**
+### KEEP unchanged — 4 tests
 
 | File | Test | Reason |
 |------|------|--------|
@@ -266,7 +266,7 @@ Full audit of 19 `@pytest.mark.live` tests across 5 files. Classification is fin
 
 ADR-027 §6 specifies this directory layout. Files to create in order:
 
-```
+```text
 evals/
   __init__.py               # empty, marks package
   conftest.py               # shared fixtures: Client(), dataset_name constants, temperature=0 model factory
@@ -286,7 +286,7 @@ evals/
     __init__.py
     nightly.py              # Full 6-dimension suite; langsmith.aevaluate() calls; scheduled CI
     smoke.py                # Dimensions 1+2 only; fast; on PR
-```
+```yaml
 
 **Creation order**: `__init__.py` stubs first → `conftest.py` → `datasets/` → `evaluators/` (routing first, simplest) → `suites/smoke.py` → `suites/nightly.py`.
 
@@ -355,7 +355,7 @@ runs = list(client.list_runs(
 for run in sorted(runs, key=lambda r: r.start_time):
     print(f"{run.name:40s}  {run.run_type:8s}  {run.status}  "
           f"{(run.end_time - run.start_time).total_seconds():.2f}s")
-```
+```text
 
 Scripts in `scripts/` MUST query and print their own trace summary after the graph
 completes — not just "graph ran". See TASK-009 for script creation.
@@ -433,7 +433,8 @@ ADR-030 Figma developer workflow renumber). Duplicate ADR-018 collision resolved
 
 ### 3. Architectural Decisions Ratified This Sprint
 
-**ADR-024 — Inline plan approval interrupt (ratified)**
+#### ADR-024 — Inline plan approval interrupt (ratified)
+
 The original ADR-024 mandated a dedicated `plan_approval_node` in the graph. The
 implemented approach places `interrupt()` inline inside `supervisor_node` via
 `_handle_plan_approval()` (lines 245-274). This was ratified in ADR-024 §7 with full
@@ -442,7 +443,8 @@ both approaches; the inline variant avoids an extra graph node with no behaviour
 difference. The gate condition depends entirely on state, not LLM output, so replay
 is safe. Reference: `src/vaultspec_a2a/core/nodes/supervisor.py:147-150, 245-274`.
 
-**ENV-BYPASS annotation policy (established)**
+#### ENV-BYPASS annotation policy (established)
+
 Three categories of accepted bare `os.environ` access outside `src/vaultspec_a2a/core/config.py`:
 
 - `# ENV-BYPASS: otel-import-time` — OTel SDK constants evaluated at module import time
@@ -452,20 +454,23 @@ Three categories of accepted bare `os.environ` access outside `src/vaultspec_a2a
   exception that the scrub pattern is designed to enable).
 All three locations are queued for annotation in TASK-018.
 
-**LANGSMITH_* naming as canonical (established)**
+#### LANGSMITH_* naming as canonical (established)
+
 `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` are the canonical names
 (LangSmith SDK ≥0.1.83). `LANGCHAIN_TRACING_V2`, `LANGCHAIN_API_KEY`, `LANGCHAIN_PROJECT`
 are accepted legacy aliases. All new documentation, `.env.example`, `CLAUDE.md`, `GEMINI.md`,
 `testing-rules.md`, and ADR-027 updated to canonical names. `src/vaultspec_a2a/telemetry/instrumentation.py`
 still reads legacy names (functional gap — TASK-001b).
 
-**ADR-020 §5 exception path policy (ratified)**
+#### ADR-020 §5 exception path policy (ratified)
+
 `mounted_context` clearing in `worker_node` applies to successful exit paths only. Exception
 paths raise `WorkerExecutionError` without clearing — this is correct because the exception
 terminates the thread and no subsequent invocation can observe stale state. ADR-020 §5
 updated to reflect this.
 
-**Worker process architecture documented (ADR-031)**
+#### Worker process architecture documented (ADR-031)
+
 The gateway / worker process split had no backing ADR. ADR-031 drafted and merged:
 HTTP IPC over loopback, shared SQLite WAL, auto-spawn vs. standalone modes, Executor
 responsibilities, heartbeat protocol. Stale `ADR-019` references in `src/vaultspec_a2a/worker/` corrected.

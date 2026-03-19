@@ -33,7 +33,7 @@ else:
     cmd += ["--override-ini=...", "-m", target]
 cmd.extend(extra)
 sys.exit(subprocess.run(cmd, check=False).returncode)
-```
+```text
 
 The `target` argument and `extra` tuple are passed directly to `subprocess.run`. Since `subprocess.run` uses `exec` (no shell), direct command injection is not possible. However, `target` can contain arbitrary strings that get interpreted as pytest arguments. For example, `vaultspec test "--co"` would pass `--co` as a test path. Risk is minimal since this is a developer CLI tool.
 
@@ -43,7 +43,7 @@ The `target` argument and `extra` tuple are passed directly to `subprocess.run`.
 
 ```python
 cfg.set_main_option("sqlalchemy.url", settings.database_url)
-```
+```text
 
 `settings.database_url` is injected into Alembic's configuration. If the URL contains special characters (e.g., passwords with `%` signs), Alembic's ConfigParser may misinterpret them. This is a known Alembic quirk where `%` must be escaped as `%%`. Low risk since the URL comes from trusted settings.
 
@@ -57,7 +57,7 @@ cfg.set_main_option("sqlalchemy.url", settings.database_url)
 
 ```python
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-```
+```python
 
 This resolves `src/vaultspec_a2a/cli.py` → `src/vaultspec_a2a` → `src` → repo root. Correct for the current src layout, but would break if the file were moved to a different depth.
 
@@ -69,7 +69,7 @@ The module does not declare `__all__`. Since it's a Click CLI entry point (not a
 
 ```python
 main = cli
-```
+```text
 
 This alias exists for code that calls `main()` directly. If no code uses it, it's dead code. It was explicitly documented as backward-compat.
 
@@ -220,7 +220,7 @@ New `cli/` package created with 6 files.
 
 ### Structure Review
 
-```
+```text
 src/vaultspec_a2a/cli/
   __init__.py     (34 lines) — root group + --show-config + subcommand registration
   _util.py        (30 lines) — _mask(), _show_config_callback()
@@ -228,7 +228,7 @@ src/vaultspec_a2a/cli/
   _test.py        (69 lines) — test unit/smoke/benchmark
   _run.py         (50 lines) — run mock/probe
   _database.py    (37 lines) — database update
-```
+```python
 
 ### Resolved Prior Findings
 

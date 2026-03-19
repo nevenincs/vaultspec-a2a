@@ -74,7 +74,7 @@ tests.
 ```powershell
 .\.venv\Scripts\Activate.ps1
 uv run pytest src/vaultspec_a2a/providers/tests/test_factory.py -v
-```
+```text
 
 ### Manual Verification
 

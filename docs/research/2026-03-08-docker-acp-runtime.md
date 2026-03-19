@@ -12,7 +12,7 @@ _CLAUDE_ACP_JS = _PROJECT_ROOT / "node_modules" / "@zed-industries" / \
     "claude-agent-acp" / "dist" / "index.js"
 
 # Invoked as: ["node", str(_CLAUDE_ACP_JS)]
-```
+```text
 
 **Failure mode in Docker:** `node` is not in PATH, `node_modules/` is not
 copied into the worker image. Any ACP-backed provider (Claude, Gemini) crashes
@@ -22,7 +22,7 @@ with `FileNotFoundError` or `ConfigError`.
 
 ## 1. Current Docker Architecture
 
-```
+```text
 prod.Dockerfile multi-stage:
 
   frontend-build (node:22-alpine)
@@ -40,7 +40,7 @@ prod.Dockerfile multi-stage:
     └── No node_modules/
     └── VAULTSPEC_PROJECT_ROOT=/app (env override for path traversal)
     └── ACP providers BROKEN
-```
+```text
 
 **Key observation:** The `frontend-build` stage has `node:22-alpine` with a
 full Node.js runtime and `npm ci` installs packages. But only the built
@@ -65,7 +65,7 @@ are left behind.
     "zod": "^3.25.0 || ^4.0.0"
   }
 }
-```
+```text
 
 ### 2.2 Dependency Tree Size (verified on disk)
 
@@ -137,7 +137,7 @@ COPY --from=acp-runtime /app/node_modules/ /app/node_modules/
 
 ENV VAULTSPEC_PROJECT_ROOT=/app \
     VAULTSPEC_MCP_API_BASE_URL=http://api:8000
-```
+```text
 
 **Pros:**
 
@@ -169,7 +169,7 @@ RUN npm ci --production
 COPY --from=acp-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=acp-runtime /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/npm
 COPY --from=acp-runtime /app/node_modules/ /app/node_modules/
-```
+```text
 
 ### 3.2 Option B: Install Node.js in Python Base Image
 
@@ -186,7 +186,7 @@ RUN apt-get update && apt-get install -y curl \
 
 # OR: install from Debian repos (older version)
 # RUN apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*
-```
+```text
 
 **Pros:**
 
@@ -215,7 +215,7 @@ services:
       - ./node_modules:/app/node_modules
     command: ["node", "/app/node_modules/@zed-industries/claude-agent-acp/dist/index.js"]
     # Worker connects via TCP instead of subprocess
-```
+```text
 
 **Pros:**
 
@@ -242,7 +242,7 @@ need Node.js at runtime.
 ```bash
 bun build --compile node_modules/@zed-industries/claude-agent-acp/dist/index.js \
     --outfile claude-agent-acp
-```
+```text
 
 **Pros:**
 
@@ -275,7 +275,7 @@ FROM node:22-alpine AS frontend-build
 WORKDIR /app/src/ui
 COPY src/ui/package*.json ./
 RUN npm ci
-```
+```text
 
 This installs `src/ui/package.json` deps (React, Vite, Tailwind, etc.) -- NOT
 the root `package.json` deps (`@zed-industries/claude-agent-acp`). The ACP
@@ -304,7 +304,7 @@ RUN npm ci --production
 FROM python-base AS worker
 COPY --from=acp-runtime /usr/local/bin/node /usr/local/bin/node
 COPY --from=acp-runtime /app/node_modules/ /app/node_modules/
-```
+```yaml
 
 No conflict: `uv` manages Python, `npm` manages Node.js, each in its own
 build stage. The final worker image has both runtimes but only one package
@@ -343,7 +343,7 @@ COPY package.json package-lock.json ./
 ENV npm_config_platform=linux npm_config_arch=x64
 RUN npm ci --production --ignore-scripts \
     && npm rebuild --platform=linux --arch=x64
-```
+```text
 
 This brings node_modules from ~84MB to ~30-40MB (only linux-x64 sharp binaries).
 
@@ -380,7 +380,7 @@ ENV VAULTSPEC_MCP_API_BASE_URL=http://api:8000 \
 EXPOSE 8001
 CMD ["uv", "run", "uvicorn", "vaultspec_a2a.worker.app:create_worker_app", \
      "--factory", "--host", "0.0.0.0", "--port", "8001"]
-```
+```text
 
 ### 7.2 Cross-Platform Considerations
 
@@ -406,7 +406,7 @@ After building, verify inside the worker container:
 docker compose -f docker-compose.prod.yml exec worker node --version
 docker compose -f docker-compose.prod.yml exec worker \
     node /app/node_modules/@zed-industries/claude-agent-acp/dist/index.js --help
-```
+```text
 
 ---
 

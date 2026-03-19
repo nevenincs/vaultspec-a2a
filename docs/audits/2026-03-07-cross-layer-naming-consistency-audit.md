@@ -240,7 +240,7 @@ class PermissionOption(BaseModel):
     option_id: str        # ← Matches PermissionResponseRequest
     name: str             # ← Human-readable label
     kind: PermissionOptionKind
-```
+```yaml
 
 **Finding**: This is actually **correct and consistent**. All layers use `option_id`. The field name is `name` (not `label`), which is semantically appropriate.
 
@@ -469,7 +469,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    ```justfile
    service-start:
        uv run vaultspec service start
-   ```
+   ```yaml
 
 2. **(P3) Add JF-001**: Create recipes for MCP tools:
 
@@ -478,7 +478,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
        uv run vaultspec mcp status
    mcp-tools:
        uv run vaultspec mcp tools
-   ```
+   ```yaml
 
 3. **(P3) Optimize JF-003**: Define CLI variable for DRY (cosmetic):
 
@@ -486,7 +486,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    CLI := "uv run vaultspec"
    teams *STATUS:
        {{CLI}} team list {{STATUS}}
-   ```
+   ```yaml
 
 4. **No action on JF-004/JF-005**: These are correct
 
@@ -560,14 +560,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    except FileNotFoundError:
        click.echo(f"Snapshot file not found: {snapshot_path}", err=True)
        raise SystemExit(1)
-   ```
+   ```yaml
 
 2. **(P1) Fix EH-002**: Add idempotence check to archive endpoint:
 
    ```python
    if thread.status == ThreadStatus.ARCHIVED:
        return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}  # idempotent
-   ```
+   ```yaml
 
 3. **(P2) Improve EH-003**: Wrap restore with try/except for corrupted files:
 
@@ -577,7 +577,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    except sqlite3.DatabaseError as exc:
        click.echo(f"Snapshot file is corrupted: {exc}", err=True)
        raise SystemExit(1)
-   ```
+   ```yaml
 
 4. **No action on EH-004/EH-005/EH-006**: These are acceptable or correct
 

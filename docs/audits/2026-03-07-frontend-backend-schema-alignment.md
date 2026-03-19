@@ -193,7 +193,7 @@ queryFn: async () => {
   const res = await restClient.getTeamStatus();
   return res.agents.map(mapAgentSummary);  // Returns AgentSummary[]
 }
-```
+```yaml
 
 - **Expected cache shape**: `AgentSummary[]`
 - **ws-bridge.ts:84-86**: Writes directly: `setQueryData<AgentSummary[]>(..., event.agents.map(mapAgentSummary))`
@@ -208,7 +208,7 @@ queryFn: async () => {
   const res = await restClient.listThreads();
   return res.threads.map(mapThreadSummary);  // Returns ThreadSummary[]
 }
-```
+```typescript
 
 - **Expected cache shape**: `ThreadSummary[]`
 - **ws-bridge.ts:72-78**: Updates on agent_status: patches thread's `agent_state`
@@ -508,7 +508,7 @@ tool_call_snapshots: list[ToolCallSnapshot] = []
 # Query aggregator for accumulated tool calls (design TBD:
 # store in aggregator._tool_calls dict keyed by thread_id?)
 # OR fetch from checkpoint if LangGraph stores them
-```
+```yaml
 
 **Status**: 8/9 fields correctly populated. tool_calls is architectural gap requiring aggregator enhancement.
 
@@ -584,7 +584,7 @@ tool_call_snapshots: list[ToolCallSnapshot] = []
 {
   "detail": "Thread not found"  // simple string
 }
-```
+```text
 
 ### 13.2 Frontend Error Handling Gaps
 
@@ -609,13 +609,13 @@ class RestClientError extends Error {
     public body?: unknown,
   ) { ... }
 }
-```
+```text
 
 **Instantiated** (rest-client.ts:114, 127):
 
 ```typescript
 throw new RestClientError(res.status, res.statusText, body);  // body = res.text()
-```
+```yaml
 
 **Problem**: `body` is the raw text (usually JSON string), not parsed object. No attempt to extract `detail` field.
 
@@ -629,7 +629,7 @@ def _validate_nickname_slug(cls, v: str | None) -> str | None:
   if v is not None and not re.match(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$", v):
     raise ValueError("nickname must be a lowercase slug (3-64 chars, [a-z0-9-], no leading/trailing hyphens)")
   return v
-```
+```yaml
 
 **Frontend validation**: ❌ NONE. Component accepts any string for nickname.
 
@@ -670,7 +670,7 @@ onError: (err, threadId, context) => {
   }
   log.error(...);
 }
-```
+```yaml
 
 **Semantics**: ✓ Optimistic update + rollback on failure (correct pattern)
 
@@ -691,7 +691,7 @@ onError: (err, { threadId }) => {
   // No rollback! Orphaned message left in stream
   log.error(...);
 }
-```
+```yaml
 
 **Finding SA-1302 (HIGH)**: Optimistic message append has no rollback. If REST fails, user sees ghost message in stream forever.
 
@@ -711,7 +711,7 @@ onError: (err, { threadId }) => {
       }
     ]
   }
-  ```
+  ```yaml
 
 **Frontend Capture**: RestClient receives this but never parses it.
 
@@ -729,7 +729,7 @@ raise HTTPException(
   status_code=409,
   detail=f"Cannot archive thread in {thread.status!r} state",
 )
-```
+```yaml
 
 **Frontend** (use-threads.ts): No mutation defined for archive operation.
 
@@ -768,7 +768,7 @@ private async get<T>(path: string): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
-```
+```text
 
 **Issues**:
 
@@ -786,20 +786,20 @@ private async get<T>(path: string): Promise<T> {
 case 'error':
   console.error(tag, message, data ?? '');
   break;
-```
+```text
 
 **Usage** (use-send-message.ts:44):
 
 ```typescript
 log.error('api.send', `Failed to send message to ${threadId}`, err);
-```
+```yaml
 
 **Problem**: `err` (RestClientError) has `.body` field with JSON string, never parsed. Console shows:
 
-```
+```text
 [api.send] Failed to send message to thread-abc
 RestClientError: REST 422 Unprocessable Entity
-```
+```text
 
 No detail about which field failed validation.
 
@@ -851,7 +851,7 @@ No detail about which field failed validation.
 ```python
 logger.info("Cancellation requested for thread %s", thread_id)  # Line 521
 logger.exception("Ingest failed: %s", error, exc_info=True)  # Line 1725
-```
+```text
 
 **Endpoints** (endpoints.py):
 
@@ -902,7 +902,7 @@ logger.debug(...)    # Lowest — hidden in production
 logger.info(...)     # Operations (thread created, message accepted)
 logger.warning(...) # Degraded (timeout, parse error, missing config)
 logger.exception(...) # Errors + traceback
-```
+```text
 
 **Frontend** (custom logger.ts):
 
@@ -911,7 +911,7 @@ log.debug(...)  // Lowest — console only
 log.info(...)   // Operations + optional UI pill
 log.warn(...)   // Warnings + UI pill (medium auto-dismiss)
 log.error(...) // Errors + sticky UI pill
-```
+```yaml
 
 **Semantics**: ✓ Aligned (debug < info < warn < error)
 
@@ -935,13 +935,13 @@ log.error(...) // Errors + sticky UI pill
 
 ```python
 logger.info("Thread %s created with preset %s", thread_id, preset_id)  # positional args
-```
+```text
 
 **Frontend** (TypeScript):
 
 ```typescript
 log.info('thread.create', `Thread ${res.thread_id} created`);  // string interpolation
-```
+```yaml
 
 **Problem**: No structured key-value pairs (JSON fields). Can't filter/aggregate logs by thread_id.
 
@@ -955,7 +955,7 @@ log.info('thread.create', `Thread ${res.thread_id} created`);  // string interpo
 history(): readonly LogEntry[] {
   return _history;  // Last 500 entries, in-memory only
 }
-```
+```yaml
 
 **Availability**: ✓ Accessible via `window.__vaultspec_log.history()` in browser console
 
@@ -974,13 +974,13 @@ history(): readonly LogEntry[] {
 
 ```python
 logger.exception("Ingest failed: %s", error, exc_info=True)  # Includes traceback
-```
+```text
 
 **Frontend** (use-send-message.ts:44):
 
 ```typescript
 log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = RestClientError
-```
+```yaml
 
 **Problem**: `err` is RestClientError object with no stack trace. Frontend logger logs string representation only (see line 119).
 
@@ -1018,13 +1018,13 @@ log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = R
 
 ```python
 logger.info("Ingest: %s", graph_state)  # Logs full state dict — may contain secrets!
-```
+```text
 
 **Frontend logging** (all mutations):
 
 ```typescript
 log.error('api.send', '...', err);  // err.body may contain validation error detail with user input
-```
+```yaml
 
 **Finding SA-1410 (HIGH)**: No redaction of sensitive data in logs. Graph state may contain credentials; validation errors may expose user input. Ring buffer visible via `window.__vaultspec_log`.
 
@@ -1071,7 +1071,7 @@ log.error('api.send', '...', err);  // err.body may contain validation error det
 type: Literal[ServerEventType.AGENT_STATUS] = ServerEventType.AGENT_STATUS
 type: Literal[ServerEventType.MESSAGE_CHUNK] = ServerEventType.MESSAGE_CHUNK
 # ... 12 total event types with Literal discriminators
-```
+```text
 
 **Frontend Handler** (ws-bridge.ts):
 
@@ -1086,7 +1086,7 @@ const handleWireEvent = (data: unknown) => {
       // ...
   }
 };
-```
+```yaml
 
 **Problem**: `data as WireServerEvent` is unchecked. No runtime validation. Malformed JSON from server could slip through.
 
@@ -1094,7 +1094,7 @@ const handleWireEvent = (data: unknown) => {
 
 ```json
 { "type": "unknown_event_type", "content": "..." }
-```
+```text
 
 Would pass type assertion, then fall through to default case (missing).
 
@@ -1121,7 +1121,7 @@ class ToolKind(str, Enum):
   READ = "read"
   EDIT = "edit"
   # ... 8 more
-```
+```yaml
 
 Pydantic validates at deserialization: if unknown value received, raises ValidationError.
 
@@ -1131,7 +1131,7 @@ Pydantic validates at deserialization: if unknown value received, raises Validat
 export function mapToolKind(wire: WireToolKind): ToolKind {
   return FRONTEND_TOOL_KINDS.has(wire) ? (wire as ToolKind) : 'other';
 }
-```
+```yaml
 
 **Semantics**: ✓ Guarded with Set check; unknown values default to 'other'
 
@@ -1146,21 +1146,21 @@ export function mapToolKind(wire: WireToolKind): ToolKind {
 ```python
 created_at: datetime  # Pydantic auto-serializes to ISO-8601 string
 updated_at: datetime
-```
+```text
 
 **Frontend** (types.ts):
 
 ```typescript
 created_at?: string;  // ISO-8601 string
 updated_at?: string;
-```
+```text
 
 **Deserialization** (use-thread-state.ts):
 
 ```typescript
 const snapshot = await restClient.getThreadState(threadId);
 // snapshot.created_at is string, never parsed to Date object
-```
+```yaml
 
 **Problem**: Timestamp stays as string forever. Comparisons like `new Date(snapshot.created_at) < Date.now()` work but require manual parsing every time.
 
@@ -1174,7 +1174,7 @@ const snapshot = await restClient.getThreadState(threadId);
 options: list[_PermissionOptionSnapshot]  # Never null, always array
 message_history: list[MessageSnapshot] = []  # Default empty array
 tool_calls: list[ToolCallSnapshot] = []  # Default empty array
-```
+```text
 
 **Frontend** (wire-types.ts):
 
@@ -1182,7 +1182,7 @@ tool_calls: list[ToolCallSnapshot] = []  # Default empty array
 options: PermissionOptionSnapshot[];  // Not optional
 message_history?: MessageSnapshot[];  // Optional
 tool_calls?: ToolCallSnapshot[];  // Optional (should match backend)
-```
+```yaml
 
 **Problem**: `tool_calls` is optional in wire-types but always present in backend (default `[]`). Inconsistency.
 
@@ -1200,13 +1200,13 @@ class ThreadMetadata(BaseModel):
   nickname: str
   source_repo: str
   callee: str
-```
+```text
 
 **Wire Format** (wire-types.ts):
 
 ```typescript
 metadata?: ThreadMetadata;  // Optional
-```
+```text
 
 **Frontend Ingestion** (use-threads.ts:41-50):
 
@@ -1219,7 +1219,7 @@ metadata: repo ? {
   source_repo: '',
   callee: '',
 } : undefined
-```
+```yaml
 
 **Problem**: Frontend manually constructs metadata object. If backend adds/removes field, frontend breaks silently.
 
@@ -1239,14 +1239,14 @@ class CreateThreadRequest(BaseModel):
   def _validate_nickname_slug(cls, v):
     if v is not None and not re.match(r"^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$", v):
       raise ValueError("nickname must be lowercase slug")
-```
+```text
 
 **Frontend** (use-threads.ts):
 
 ```typescript
 // No validation — passes anything to createThread()
 const newThread = { nickname: 'ANY_CASING_OK', ... };
-```
+```yaml
 
 **Problem**: Backend validation not mirrored on frontend. User input validation only happens on server (slow feedback loop).
 
@@ -1270,7 +1270,7 @@ switch (event.type) {
   // ... all 12 cases present
   // no default case — dead code error if new event added
 }
-```
+```yaml
 
 **Semantics**: ✓ All 12 cases covered; no default
 
@@ -1293,7 +1293,7 @@ JSON.stringify({
   team_preset: preset?.id,
   metadata: repo ? { ... } : undefined,
 })
-```
+```yaml
 
 **Problem**: `undefined` values serialized as omitted fields (correct). But if backend receives `{ "metadata": null }` vs `{}`, behavior may differ.
 
@@ -1309,7 +1309,7 @@ event = ToolCallStartEvent(
   thread_id=thread_id,
   ...
 )
-```
+```text
 
 **Pydantic validates** all fields match schema at construction time.
 
@@ -1323,7 +1323,7 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
     // ... 6 fields
   };
 }
-```
+```yaml
 
 **Problem**: Mapper doesn't validate that all fields are present. If wire is missing a field, mapper silently defaults to empty string.
 
@@ -1380,7 +1380,7 @@ wsClient.setEventCallback((threadId, event) => {
     // ... 11 more event types
   }
 });
-```
+```text
 
 **Concurrency Model**:
 
@@ -1413,19 +1413,19 @@ case 'agent_status': {
     },
   );
 }
-```
+```yaml
 
 **Race Condition 1: Parallel useTeamStatusQuery**
 
 Timeline:
 
-```
+```text
 t=0  WS agent_status arrives for agent-123 (state=working)
 t=1  handler calls setQueryData (updater fn begins)
 t=2  Meanwhile: useTeamStatusQuery refetch completes from server
 t=3  WS handler updater sees stale agents array, updates agent-123
 t=4  Refetch result overwrites WS update — agent-123 back to old state
-```
+```yaml
 
 **Impact**: WS state update lost. Agent shows old state in UI.
 
@@ -1445,13 +1445,13 @@ queryClient.setQueryData<ThreadSummary[]>(
       t.thread_id === threadId ? { ...t, agent_state: event.state } : t,
     ),
 );
-```
+```yaml
 
 **Race Condition 2: Concurrent thread list invalidation**
 
 Timeline:
 
-```
+```text
 t=0  WS agent_status arrives for thread-abc
 t=1  handler calls setQueryData on threads.list cache
 t=2  Meanwhile: component calls useCancelThread() mutation
@@ -1459,7 +1459,7 @@ t=3  useCancelThread.onSettled() calls invalidateQueries(threads.list)
 t=4  Invalidate clears cache, starts new fetch
 t=5  WS setQueryData updater runs (too late, cache cleared)
 t=6  REST fetch completes, overwrites WS update
-```
+```yaml
 
 **Impact**: WS update lost. Thread state not synced to server state.
 
@@ -1479,18 +1479,18 @@ case 'team_status': {
   );
   appStore.getState().updateAgentDisplayNames(event.agents);
 }
-```
+```yaml
 
 **Race Condition 3: team_status replacement vs individual agent_status**
 
 Timeline:
 
-```
+```text
 t=0  WS agent_status for agent-1 (state=working)
 t=1  handler updates team.status cache (agent-1 only)
 t=2  Meanwhile: server sends team_status event with full agent list (agent-1 is idle)
 t=3  team_status handler runs, full replacement, agent-1 reverts to idle
-```
+```yaml
 
 **Impact**: Agent state oscillates between WS updates and server snapshot. No consistency.
 
@@ -1511,7 +1511,7 @@ const handleWireEvent = (threadId: string, event: ServerEvent) => {
     // Push various event types...
   });
 };
-```
+```yaml
 
 **State Mutation Pattern**: Zustand with Immer plugin allows direct mutation.
 
@@ -1519,14 +1519,14 @@ const handleWireEvent = (threadId: string, event: ServerEvent) => {
 
 Timeline:
 
-```
+```text
 t=0  WS message_chunk arrives for thread-abc
 t=1  handler calls setState, Immer draft created
 t=2  Meanwhile: WS tool_call_start arrives (in microtask queue)
 t=3  setState from (1) commits, subscribers notified
 t=4  setState from (2) starts with stale draft from t=1
 t=5  tool_call_start lost (overwritten by message_chunk commit)
-```
+```yaml
 
 **Problem**: No lock. WS callback is synchronous but JavaScript microtasks can interleave.
 
@@ -1544,7 +1544,7 @@ t=5  tool_call_start lost (overwritten by message_chunk commit)
 if ('sequence' in event && typeof event.sequence === 'number') {
   wsClient.updateLastSequence(threadId, event.sequence);
 }
-```
+```yaml
 
 **Used For**: Reconnection hydration (request only events after lastSequence).
 
@@ -1569,20 +1569,20 @@ onError: (err, threadId, context) => {
     queryClient.setQueryData(..., context.previous);  // Rollback
   }
 }
-```
+```yaml
 
 **Race Condition 5: WS event + pessimistic rollback**
 
 Timeline:
 
-```
+```text
 t=0  User clicks cancel; onMutate optimistically sets agent_state=cancelled
 t=1  WS agent_status arrives with state=working (thread still running)
 t=2  WS handler updates same TQ cache
 t=3  REST POST /cancel returns 500 error
 t=4  onError rollback restores previous state
 t=5  But previous state was captured at t=0, before WS update at t=1
-```
+```yaml
 
 **Impact**: Rollback overwrites WS update. WS state lost.
 
@@ -1603,28 +1603,28 @@ onError: (err, { requestId }) => {
   // No rollback! Permission removed from Zustand forever
   log.error(...);
 }
-```
+```yaml
 
 **Race Condition 6: Permission response + concurrent WS event**
 
 Timeline:
 
-```
+```text
 t=0  User clicks "Accept"; onMutate removes from Zustand
 t=1  Permission widget disappears from UI
 t=2  Meanwhile: server sends permission_request event (stale, already responded)
 t=3  WS handler calls pushPermission, adds back to Zustand
 t=4  Widget reappears — user confused
-```
+```text
 
 **OR if REST fails**:
 
-```
+```text
 t=0  User clicks "Accept"; onMutate removes permission
 t=1  REST returns 500 error
 t=2  onError has no rollback
 t=3  Permission lost from UI forever (even though it's still pending on server)
-```
+```yaml
 
 **Impact**: Orphaned UI state or lost permission requests.
 
@@ -1652,7 +1652,7 @@ wsClient.setEventCallback((threadId, event) => {
   appStore.getState().handleWireEvent(...);  // Zustand
   queryClient.setQueryData(...);             // TQ cache (async, batched)
 });
-```
+```text
 
 **JavaScript Event Loop**:
 
@@ -1750,7 +1750,7 @@ wsClient.setEventCallback((threadId, event) => {
 
 ### Issue Distribution by Category
 
-```
+```text
 Error Handling     → 8 issues (SA-1301/1302/1303/1304/1305/1307/1308, plus SA-502/503)
 Observability      → 10 issues (SA-1401/1402/1403/1404/1405/1406/1407/1408/1409/1410)
 Type Safety        → 10 issues (SA-1501/1502/1503/1504/1505/1506/1507/1508/1509/1510)
@@ -1758,7 +1758,7 @@ Concurrency        → 10 issues (SA-1601/1602/1603/1604/1605/1606/1607/1608/160
 Data Loss          → 5 issues (SA-301, SA-1302, SA-404, SA-1602, SA-1607)
 Schema Alignment   → 7 issues (Passes 1-2)
 Snapshot/Cache     → 6 issues (SA-301/303/401/403/404, SA-1205)
-```
+```text
 
 ### Top Blockers for Frontend Readiness
 
@@ -1810,7 +1810,7 @@ private scheduleReconnect(): void {
   this.reconnectAttempt++;
   this.reconnectTimer = setTimeout(() => this.connect(), delay);
 }
-```
+```yaml
 
 **Delays**: `[1000, 2000, 4000, 8000, 16000, 30000]` ms (exponential backoff, caps at 30s)
 
@@ -1834,7 +1834,7 @@ if (eventType === 'connected') {
     } as SubscribeCommand);
   }
 }
-```
+```yaml
 
 **Semantics**: ✓ Reconnection re-subscribes to threads, maintains clientId
 
@@ -1846,7 +1846,7 @@ if (eventType === 'connected') {
 updateLastSequence(threadId: string, sequence: number): void {
   this.lastSequences.set(threadId, sequence);
 }
-```
+```yaml
 
 **Called From**: ws-bridge.ts:104-106
 
@@ -1854,7 +1854,7 @@ updateLastSequence(threadId: string, sequence: number): void {
 if ('sequence' in event && typeof event.sequence === 'number') {
   wsClient.updateLastSequence(threadId, event.sequence);
 }
-```
+```text
 
 **Stale Event Filtering** (websocket-client.ts:210-214):
 
@@ -1864,7 +1864,7 @@ if (threadId && typeof sequence === 'number') {
   if (sequence <= lastSeq) return; // Skip stale events
   this.lastSequences.set(threadId, sequence);
 }
-```
+```yaml
 
 **Semantics**: ✓ Prevents re-applying events after reconnect
 
@@ -1872,14 +1872,14 @@ if (threadId && typeof sequence === 'number') {
 
 **Example**:
 
-```
+```text
 t=0  Client connected, receives events seq=1, seq=2, seq=3
 t=1  Network disconnects
 t=2  Server continues emitting seq=4, seq=5 (events lost by client)
 t=3  Client reconnects, receives seq=6
 t=4  Client has lastSeq=3, but seq=6 arrives
 t=5  Client accepts seq=6 (doesn't know seq=4,5 were missed!)
-```
+```yaml
 
 **Finding SA-1701 (HIGH)**: Gap detection only filters stale events. Missing events (gap >1) are silently accepted. No recovery mechanism.
 
@@ -1901,7 +1901,7 @@ async def get_thread_state_endpoint(...):
     last_sequence=last_seq,  # Tells client the latest sequence
   )
   # Enrich from checkpoint...
-```
+```yaml
 
 **Endpoint Returns**: ThreadStateSnapshot with `last_sequence` field
 
@@ -1916,23 +1916,23 @@ async def get_thread_state_endpoint(...):
 
 **What Frontend Should Do on Reconnect**:
 
-```
+```text
 1. Connect to WS
 2. Receive event seq=6
 3. Check lastSeq=3
 4. If seq > lastSeq + 1: gap detected (seq=4,5 missing)
 5. Call GET /threads/{id}/state to refill snapshot
 6. Discard any WS events <= snapshot.last_sequence
-```
+```text
 
 **What Frontend Actually Does**:
 
-```
+```text
 1. Connect to WS
 2. Receive event seq=6
 3. Update lastSeq=6
 4. Apply event (data loss!)
-```
+```yaml
 
 **Finding SA-1703 (CRIT)**: No gap fill logic. Missing events silently accepted. Clients will have stale state after reconnect.
 
@@ -1942,7 +1942,7 @@ async def get_thread_state_endpoint(...):
 
 ```typescript
 const HEARTBEAT_TIMEOUT = 65_000; // ~2x 30s interval + margin
-```
+```text
 
 **Backend Heartbeat** (websocket.py):
 
@@ -1951,7 +1951,7 @@ async def _heartbeat_loop(self):
   while True:
     await asyncio.sleep(30)
     # Send HeartbeatEvent
-```
+```text
 
 **Client Timeout Handler** (websocket-client.ts:244-250):
 
@@ -1963,7 +1963,7 @@ private resetHeartbeatTimer(): void {
     this.ws?.close();
   }, HEARTBEAT_TIMEOUT);
 }
-```
+```yaml
 
 **Semantics**: ✓ If no heartbeat in 65s, close WS and trigger reconnect
 
@@ -1982,19 +1982,19 @@ if (this.subscribedThreads.size > 0) {
     thread_ids: [...this.subscribedThreads],
   } as SubscribeCommand);
 }
-```
+```yaml
 
 **Problem**: `subscribedThreads` is memory-only Set. If page reloads, subscriptions are lost.
 
 **Example**:
 
-```
+```text
 1. User opens app, subscribes to thread-abc
 2. Network disconnects
 3. Browser tab refreshes (accidental or explicit)
 4. App reconnects but subscribedThreads is empty
 5. No events received even though user expects to see them
-```
+```yaml
 
 **Finding SA-1705 (MEDIUM)**: Subscriptions not persisted. Page reload after disconnect loses subscriptions.
 
@@ -2007,7 +2007,7 @@ checkpoint_tuple = await asyncio.wait_for(
   checkpointer.aget_tuple(config),
   timeout=10.0,  # 10 second timeout
 )
-```
+```text
 
 **On Timeout** (endpoints.py:673-678):
 
@@ -2018,19 +2018,19 @@ except TimeoutError:
     "returning partial snapshot",
     thread_id,
   )
-```
+```yaml
 
 **Problem**: Client receives partial snapshot without knowing. No signal that state is incomplete.
 
 **Example**:
 
-```
+```text
 1. Client calls GET /state on reconnect
 2. Backend times out loading checkpoint
 3. Returns partial snapshot (status only, no messages/artifacts)
 4. Client thinks state is current
 5. User sees empty stream forever
-```
+```yaml
 
 **Finding SA-1706 (MEDIUM)**: Checkpoint timeout returns partial snapshot without warning. Client can't distinguish complete from incomplete state.
 
@@ -2116,7 +2116,7 @@ except TimeoutError:
 
 **Distribution by Severity**:
 
-```
+```text
 CRIT (12):
   - SA-301 (tool_calls always empty)
   - SA-1302 (message optimistic append no rollback)
@@ -2157,7 +2157,7 @@ LOW (12+):
   - SA-1609 (WS events not explicitly batched)
   - SA-1707/1709 (sequence initialization not documented, monotonicity not validated)
   + Findings from earlier passes
-```
+```text
 
 **TOP 10 BLOCKERS (Must fix before ANY deployment)**:
 
@@ -2236,7 +2236,7 @@ private async get<T>(path: string): Promise<T> {
   }
   return res.json() as Promise<T>;
 }
-```
+```yaml
 
 **Problem**: No Authorization header sent. No token extraction or refresh.
 
@@ -2262,7 +2262,7 @@ async def _verify_internal_token(
     return  # Auth disabled in dev mode
   if authorization != f"Bearer {token}":
     raise HTTPException(status_code=401, detail="Invalid internal token")
-```
+```yaml
 
 **Token Source**: `settings.internal_token` (env var or config)
 
@@ -2287,12 +2287,12 @@ async def _verify_internal_token(
 
 **Example Scenario**:
 
-```
+```text
 1. User A creates thread-abc
 2. User B calls GET /threads
 3. Backend returns all threads (no filter by user)
 4. User B can see thread-abc
-```
+```yaml
 
 **Finding SA-1803 (CRIT)**: No authorization scopes. No user isolation at API level.
 
@@ -2319,7 +2319,7 @@ async def _verify_internal_token(
 async def websocket_endpoint(websocket: WebSocket):
   # No auth check
   await websocket.accept()
-```
+```yaml
 
 **Problem**: Anyone can connect to `/ws` without authentication
 
@@ -2335,7 +2335,7 @@ async def worker_ws_endpoint(websocket: WebSocket):
       return
 
   await websocket.accept()
-```
+```yaml
 
 **Semantics**: ✓ Internal WS validates token before accept
 
@@ -2343,12 +2343,12 @@ async def worker_ws_endpoint(websocket: WebSocket):
 
 **Example**:
 
-```
+```text
 1. Client A connects to WS
 2. Sends SubscribeCommand for thread-123 (owned by User B)
 3. WS accepts (no auth check)
 4. Client A receives all events from thread-123
-```
+```yaml
 
 **Finding SA-1805 (CRIT)**: Public WS has zero auth. Clients can subscribe to any thread.
 
@@ -2365,18 +2365,18 @@ async def respond_to_permission_endpoint(
 ) -> PermissionResponseResult:
   # No check that requester is the target user
   # Any client can respond to any request
-```
+```yaml
 
 **Problem**: No verification that requester has authority to respond
 
 **Example**:
 
-```
+```text
 1. Backend sends PermissionRequestEvent to thread-123 (User A)
 2. User B calls POST /permissions/req-456/respond
 3. Endpoint doesn't verify User B has authority
 4. User B can bypass User A's permission guard
-```
+```yaml
 
 **Finding SA-1806 (CRIT)**: Permission responses not authorized. Any user can respond to any permission request.
 
@@ -2389,7 +2389,7 @@ async def respond_to_permission_endpoint(
 async def list_threads_endpoint(...):
   threads = await list_threads(db)
   return ThreadListResponse(threads=threads, total=len(threads))
-```
+```yaml
 
 **Problem**: Returns ALL threads regardless of user
 
@@ -2402,7 +2402,7 @@ async def get_thread_state_endpoint(thread_id: str, ...):
     raise HTTPException(status_code=404, detail="Thread not found")
   # No check: does authenticated user own this thread?
   return snapshot
-```
+```yaml
 
 **Problem**: No ownership check. Any thread ID can be queried by any user
 
@@ -2417,7 +2417,7 @@ internal_token: str | None = Field(
   default=None,
   description="Bearer token for internal WS/HTTP endpoints"
 )
-```
+```yaml
 
 **Problem**: Token stored in settings. If settings logged or exposed in error, token leaks
 
@@ -2425,11 +2425,11 @@ internal_token: str | None = Field(
 
 **Example**:
 
-```
+```text
 1. Internal WS handshake fails
 2. Backend logs: "Unauthorized: Bearer abc123def456xyz"
 3. Token visible in log aggregation system
-```
+```yaml
 
 **Finding SA-1808 (MEDIUM)**: Internal token can leak in logs. No redaction of Authorization headers.
 
@@ -2452,7 +2452,7 @@ internal_token: str | None = Field(
 ```python
 # No CORS configuration visible
 # No origin whitelist
-```
+```yaml
 
 **Problem**: No CORS headers. Either all origins allowed or blocked completely
 

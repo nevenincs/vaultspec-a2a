@@ -22,7 +22,7 @@
 
 ```python
 _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
-```
+```text
 
 The regex allows `.` and `/` characters, which means `../escape/path` matches the pattern. While git itself rejects branch names containing `..`, the validation should reject them at the application layer too (defense-in-depth). A branch name like `feature/../../../etc` would pass regex validation.
 
@@ -31,7 +31,7 @@ The regex allows `.` and `/` characters, which means `../escape/path` matches th
 ```python
 _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 # Add: if ".." in branch_name: raise
-```
+```text
 
 #### HIGH-02: `trace.py` uses bare `os.environ` reads (ENV-BYPASS)
 
@@ -40,7 +40,7 @@ _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 ```python
 api_key = os.environ.get("LANGSMITH_API_KEY") or os.environ.get("LANGCHAIN_API_KEY")
 tracing_on = os.environ.get("LANGSMITH_TRACING") or os.environ.get("LANGCHAIN_TRACING_V2")
-```
+```text
 
 And lines 51-53:
 
@@ -48,7 +48,7 @@ And lines 51-53:
 project_name
 or os.environ.get("LANGSMITH_PROJECT")
 or os.environ.get("LANGCHAIN_PROJECT")
-```
+```python
 
 These bypass the `Settings` model entirely. The Settings model in `core/config.py` already provides `langsmith_api_key`, `langsmith_tracing`, and `langsmith_project` with proper alias resolution and validation. `trace.py` should use Settings instead of raw `os.environ`.
 
@@ -100,7 +100,7 @@ The extensive inline comments (8 lines explaining the flushing logic) indicate t
 
 ```python
 # M37/L22: asyncio.Lock() at module level is safe in Python 3.10+ (PEP 641);
-```
+```text
 
 PEP 641 is "Using an underscore as a prefix for `_` variables in CPython internals" — it has nothing to do with asyncio.Lock module-level safety. The correct reference is the removal of the DeprecationWarning for creating asyncio primitives outside running loops (cpython/issues/73609, resolved in Python 3.10).
 
@@ -111,7 +111,7 @@ PEP 641 is "Using an underscore as a prefix for `_` variables in CPython interna
 ```python
 for handler in list(root_logger.handlers):
     root_logger.removeHandler(handler)
-```
+```text
 
 This removes ALL existing handlers on every call, including any handlers set by third-party libraries or framework code. If `setup_logging` is called multiple times (e.g., tests, worker restart), it can disrupt logging from libraries that registered their own root handlers.
 
@@ -200,7 +200,7 @@ Lines 67-69:
 for key, value in record.__dict__.items():
     if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
         log_data[key] = value
-```
+```python
 
 This iterates all LogRecord attributes, filtering out standard ones. If a third-party library adds non-standard attributes to LogRecord (e.g., `structlog`, `loguru`), they would leak into the JSON output. Not a bug — this is the documented way to extract `extra` fields — but worth noting for future integration.
 

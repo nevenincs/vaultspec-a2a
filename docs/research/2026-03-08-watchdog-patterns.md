@@ -96,7 +96,7 @@ async def _worker_watchdog(
         else:
             # Process alive -- reset failure counter
             consecutive_failures = 0
-```
+```text
 
 **Pros**:
 
@@ -125,7 +125,7 @@ if self.state == "HALF_OPEN":
     if not await _check_worker_health(worker_url):
         await spawner.respawn()
         await asyncio.sleep(2.0)  # Wait for startup
-```
+```text
 
 **Pros**:
 
@@ -168,7 +168,7 @@ async def _gateway_health_probe(
                 # Trigger restart if process exited
                 if spawner.process and spawner.process.returncode is not None:
                     await spawner.respawn()
-```
+```text
 
 **Pros**:
 
@@ -227,7 +227,7 @@ Environment=VAULTSPEC_AUTO_SPAWN_WORKER=true
 
 [Install]
 WantedBy=multi-user.target
-```
+```text
 
 **Pros**:
 
@@ -341,7 +341,7 @@ class RestartPolicy:
     def delay_for(self, attempt: int) -> float:
         """Calculate backoff delay: min(base * 2^attempt, max_delay)."""
         return min(self.base_delay * (2 ** attempt), self.max_delay)
-```
+```text
 
 ### 5.2 Sequence Example
 

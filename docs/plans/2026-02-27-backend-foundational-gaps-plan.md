@@ -95,7 +95,7 @@ docs/adrs/010-observability-telemetry-integration.md
 docs/adrs/011-frontend-backend-contract.md
 docs/adrs/012-agent-definition-schema.md
 docs/adrs/013-team-composition-topology.md
-```
+```text
 
 ### Audit and Research
 
@@ -103,7 +103,7 @@ docs/adrs/013-team-composition-topology.md
 docs/audits/2026-02-27-implementation-alignment-audit.md
 docs/research/2026-02-27-backend-gaps-research.md
 docs/research/2026-02-27-model-capability-matrix.md
-```
+```text
 
 ### Reference Implementations (read specific files cited per gap)
 
@@ -113,7 +113,7 @@ knowledge/repositories/toad/src/toad/acp/protocol.py        -- TypedDict definit
 knowledge/repositories/a2a-python/src/a2a/server/apps/jsonrpc/fastapi_app.py
 knowledge/repositories/a2a-python/src/a2a/server/events/event_queue.py
 knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py
-```
+```text
 
 ---
 
@@ -715,7 +715,7 @@ Phase C: Gap 1 (FastAPI app) --> Gap 3 (aggregator wiring)
                    |
                    v
 Phase D: Gap 2 (WS wiring) | Gap 4 (REST endpoints) --> Gap 9 (TOML config)
-```
+```text
 
 ---
 

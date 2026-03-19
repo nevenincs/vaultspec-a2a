@@ -35,7 +35,7 @@ process = await asyncio.create_subprocess_exec(
     stderr=asyncio.subprocess.PIPE,     # Capture for crash diagnostics
     env={**os.environ, "CUSTOM_VAR": "value"},
 )
-```
+```text
 
 **Key choices:**
 
@@ -56,7 +56,7 @@ process = await asyncio.create_subprocess_exec(
         subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
     ),
 )
-```
+```text
 
 **Why:** On Windows, `CREATE_NEW_PROCESS_GROUP` creates a new process group
 for the child. This is required for `taskkill /T /F /PID` to correctly
@@ -76,7 +76,7 @@ if process.returncode is not None:
         f"Process exited immediately with code {process.returncode}: "
         f"{stderr_output.decode(errors='replace')}"
     )
-```
+```text
 
 **Important:** `process.stderr` is `None` when spawned with
 `stderr=DEVNULL`. The guard `if process.stderr` prevents `AttributeError`.
@@ -102,7 +102,7 @@ assert process.returncode is not None  # Exit code available
 #  -9 = SIGKILL (Linux)
 #  -15 = SIGTERM (Linux)
 #   1 = TerminateProcess (Windows, mapped to 1)
-```
+```text
 
 ### 2.2 Non-Blocking Crash Check
 
@@ -110,7 +110,7 @@ assert process.returncode is not None  # Exit code available
 def is_alive(process: asyncio.subprocess.Process) -> bool:
     """Check if subprocess is still running without blocking."""
     return process.returncode is None
-```
+```text
 
 `returncode` is updated automatically when the process exits. No syscall
 needed — asyncio's child watcher monitors the process in the background.
@@ -157,7 +157,7 @@ async def _worker_watchdog(
                 logger.error("Restart failed", exc_info=True)
         else:
             consecutive_failures = 0  # Reset on healthy check
-```
+```text
 
 **Implementation:** `api/app.py` `_worker_watchdog()` background task,
 started in gateway lifespan via `asyncio.create_task()`.
@@ -201,7 +201,7 @@ async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
         except TimeoutError:
             process.kill()
             await asyncio.wait_for(process.wait(), timeout=5.0)
-```
+```text
 
 **Flags:**
 
@@ -223,7 +223,7 @@ import signal
 
 # On POSIX, kill the entire process group
 os.killpg(os.getpgid(process.pid), signal.SIGTERM)
-```
+```text
 
 Requires the child to be in its own process group (`preexec_fn=os.setpgrp`
 or `start_new_session=True`). Not available on Windows.
@@ -240,7 +240,7 @@ def kill_tree(pid: int) -> None:
         child.kill()
     parent.kill()
     psutil.wait_procs(children + [parent], timeout=10)
-```
+```text
 
 **Status:** psutil not yet installed. Would replace platform-specific branching
 with a single cross-platform API. Add `psutil>=6.0.0` to dev deps when needed.
@@ -276,7 +276,7 @@ class LazyWorkerSpawner:
             self._process = await self._spawn_worker()
             await self._wait_for_health()
             self._spawned = True
-```
+```text
 
 **Why double-check:**
 
@@ -330,7 +330,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
         # Kill subprocess last
         await _kill_process_tree(worker_process)
-```
+```text
 
 **Key principles:**
 
@@ -354,7 +354,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         tg.start_soon(_heartbeat_receiver)
         yield
         tg.cancel_scope.cancel()
-```
+```text
 
 **Our approach:** We use `asyncio.create_task()` directly. The anyio task
 group is cleaner but adds a dependency on anyio's semantics (already available
@@ -364,14 +364,14 @@ via FastAPI -> Starlette -> anyio chain, but not explicitly used).
 
 The gateway lifespan shutdown order:
 
-```
+```text
 1. Cancel watchdog task (stop monitoring)
 2. Cancel heartbeat task (stop receiving worker heartbeats)
 3. Flush aggregator state (send final events to WS clients)
 4. Close WS connections (notify clients of shutdown)
 5. Kill worker subprocess (process tree kill)
 6. Close httpx clients (IPC bridge, health probe)
-```
+```text
 
 **Implementation:** `api/app.py` `_lifespan()` function.
 
@@ -395,7 +395,7 @@ class RestartPolicy:
     def delay_for(self, attempt: int) -> float:
         """Calculate delay: min(base * 2^attempt, max_delay)."""
         return min(self.base_delay * (2 ** attempt), self.max_delay)
-```
+```text
 
 ### 6.2 Backoff Sequence
 
@@ -445,7 +445,7 @@ async def respawn(self) -> None:
 
     await _wait()
     self._spawned = True
-```
+```text
 
 **tenacity `reraise=True`:** Critical for hard-fail semantics. Without it,
 tenacity wraps the final exception in `RetryError`. With it, the actual

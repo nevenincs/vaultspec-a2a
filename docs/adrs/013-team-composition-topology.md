@@ -10,7 +10,7 @@ related:
   - docs/adrs/012-agent-definition-schema.md
 ---
 
-# ADR-013: Team Composition & Topology (TOML Config)
+## ADR-013: Team Composition & Topology (TOML Config)
 
 **Date:** 2026-02-27
 **Status:** Proposed
@@ -42,7 +42,7 @@ Each team preset is defined by a TOML file at:
 
 ```text
 {workspace_root}/.vaultspec/teams/{team_id}.toml
-```
+```text
 
 Built-in presets ship in `src/vaultspec_a2a/core/presets/teams/`. A new `TeamConfig`
 Pydantic model in `src/vaultspec_a2a/core/team_config.py` validates and deserializes these
@@ -82,7 +82,7 @@ model.capability = "high"
 
 [[team.workers]]
 agent_id = "reviewer"
-```
+```text
 
 #### Pipeline Topology
 
@@ -111,7 +111,7 @@ agent_id = "coder"
 
 [[team.workers]]
 agent_id = "reviewer"
-```
+```text
 
 #### Pipeline-Loop Topology
 
@@ -141,7 +141,7 @@ agent_id = "coder"
 
 [[team.workers]]
 agent_id = "reviewer"
-```
+```text
 
 ### 2.2 Full Field Reference
 
@@ -216,7 +216,7 @@ Model binding follows a strict three-level override chain:
 agent TOML [agent.model].*
     ↓
 [team.defaults].* (lowest priority / fallback)
-```
+```text
 
 `ProviderFactory.create(provider, capability)` is called once per worker
 with the resolved values. The `provider_fallback` list follows the same
@@ -301,7 +301,7 @@ class TeamConfig(BaseModel):
         with path.open("rb") as f:
             data = tomllib.load(f)
         return cls.model_validate(data["team"])
-```
+```text
 
 ### 2.5 Topology → StateGraph Compilation
 
@@ -322,7 +322,7 @@ builder.add_edge(START, "supervisor")
 route_map = {a.id: a.id for a in resolved_agents}
 route_map["FINISH"] = END
 builder.add_conditional_edges("supervisor", lambda s: s["next"], route_map)
-```
+```text
 
 #### Pipeline (`add_sequence`)
 
@@ -337,7 +337,7 @@ for agent_id in team_config.topology.order:
 builder.add_edge(START, node_names[0])
 builder.add_sequence(node_names)           # state.py:889 — auto-wires consecutive edges
 # add_sequence handles: node_names[0]→[1]→[2]→...→END
-```
+```text
 
 #### Pipeline-Loop (`add_sequence` + `add_conditional_edges`)
 
@@ -362,7 +362,7 @@ builder.add_conditional_edges(
     lambda state: state["next"],                   # state.py:839
     {"revise": loop_target, "FINISH": END},
 )
-```
+```text
 
 The `max_loops` guard is enforced by tracking iteration count in
 `TeamState.loop_count: int` (new field, default 0, incremented by
@@ -385,7 +385,7 @@ roster = "\n".join(
     for cfg in resolved_agents
 )
 f"Your team members and their specializations:\n{roster}"
-```
+```text
 
 This is the mechanism by which TOML `description` fields influence routing —
 the supervisor LLM reads them and selects agents accordingly.
@@ -412,7 +412,7 @@ may be used in a future fine-grained per-tool approval implementation.
 1. {workspace_root}/.vaultspec/teams/{team_id}.toml   (workspace override)
 2. src/vaultspec_a2a/core/presets/teams/{team_id}.toml               (bundled default)
 3. Raise TeamConfigNotFoundError                        (fail fast)
-```
+```text
 
 ### 2.9 Built-in Preset Teams
 
@@ -507,7 +507,7 @@ def compile_team_graph(
     checkpointer: AsyncSqliteSaver | None = None,
 ) -> Any:
     ...
-```
+```text
 
 The old signature (`supervisor_model`, `worker_models`) is removed. Call sites
 must migrate to loading `TeamConfig` + `AgentConfig` and passing them in.
@@ -525,7 +525,7 @@ class CreateThreadRequest(BaseModel):
     # DEPRECATED (kept for backward compat, ignored if team_preset set):
     provider: Provider | None = None
     model: Model | None = None
-```
+```text
 
 When `team_preset` is `None`, the system falls back to the single-agent
 behavior using `provider`/`model` with the built-in `solo-coder` preset.
@@ -539,7 +539,7 @@ create a custom team preset in the workspace or modify bundled presets.
 
 ```text
 GET /teams  →  TeamPresetsResponse
-```
+```text
 
 ```python
 class TeamPresetSummary(BaseModel):
@@ -551,7 +551,7 @@ class TeamPresetSummary(BaseModel):
 
 class TeamPresetsResponse(BaseModel):
     presets: list[TeamPresetSummary]
-```
+```text
 
 This endpoint powers the team picker in the frontend thread creation flow.
 
@@ -575,7 +575,7 @@ src/vaultspec_a2a/core/
 │       └── solo-coder.toml
 ├── tests/
 │   └── test_team_config.py   # NEW: validates TOML loading + model resolution
-```
+```text
 
 `src/vaultspec_a2a/core/__init__.py` facade gains `TeamConfig`, `AgentConfig` exports.
 

@@ -10,7 +10,7 @@ related:
   - docs/adrs/026-pipeline-phase-population.md
 ---
 
-# ADR-023: Phase Artifact Gates
+## ADR-023: Phase Artifact Gates
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -21,9 +21,9 @@ D-01 from the vaultspec rule drift audit: the supervisor can route workers to
 any phase without checking that prerequisite artifacts exist. The vaultspec
 framework (`framework.md`) defines an explicit dependency graph between phases:
 
-```
+```text
 research → adr → plan → exec → audit
-```
+```text
 
 Without prerequisite enforcement, the supervisor can route:
 
@@ -95,7 +95,7 @@ if target_phase and active_feature:
         # soft gate — routing proceeds, warning surfaced in state via routing_error
         return {"next": next_route, "pipeline_phase": inferred_phase,
                 "routing_error": gate_result.message}
-```
+```text
 
 `_check_phase_prerequisites` is a new private function in `supervisor.py`
 that encapsulates the gate table logic, returning a result with `blocked:
@@ -257,7 +257,7 @@ src/vaultspec_a2a/core/
                         HARD block (plan/exec/audit without prerequisites),
                         SOFT warn (adr without research),
                         gate skip (no active_feature, unmapped worker)
-```
+```text
 
 ## 7. References
 

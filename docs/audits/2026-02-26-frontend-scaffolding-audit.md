@@ -10,7 +10,7 @@ related:
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
 ---
 
-# Frontend Scaffolding Audit Report
+## Frontend Scaffolding Audit Report
 
 **Date:** 2026-02-26
 **Scope:** `src/ui/`— React 5 frontend scaffolding (Steps 1–9)
@@ -72,7 +72,7 @@ append branch.
 
 ```ts
 let thread: ThreadState = $derived(agentState.getOrCreateThread(threadId));
-```
+```typescript
 
 `getOrCreateThread`mutates the store (creates a new ThreadState + sets it in
 the Map). React 5 runes documentation explicitly warns against side

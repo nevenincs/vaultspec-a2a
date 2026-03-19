@@ -55,7 +55,7 @@ async def rpc_terminal_create(
     if not result_future.result():
         raise jsonrpc.JSONRPCError("Failed to create a terminal.")
     return {"terminalId": terminal_id}
-```
+```text
 
 ### terminal_tool.py `_run` (lines 177-210) -- actual process creation
 
@@ -80,7 +80,7 @@ try:
         env=environment,
         cwd=command.cwd,
     )
-```
+```text
 
 ### danger.py `SAFE_COMMANDS`(lines 9-105) and`UNSAFE_COMMANDS` (lines 107-182)
 
@@ -115,7 +115,7 @@ UNSAFE_COMMANDS = {
     "mount", "umount", "mkfs", "fdisk", "parted", "swapon", "swapoff",
     "patch",
 }
-```
+```text
 
 ### danger.py `analyze()`(lines 253-355) -- path validation using`is_relative_to`
 
@@ -127,7 +127,7 @@ if not target_path.is_relative_to(project_path):
 # ... (2)
 if level == DangerLevel.DANGEROUS and not target_path.is_relative_to(project_path):
     level = DangerLevel.DESTRUCTIVE
-```
+```text
 
 ### Key Pattern
 
@@ -167,7 +167,7 @@ project_path = Path(project_directory).resolve()
 # ... (3)
 if not target_path.is_relative_to(project_path):
     # DESTRUCTIVE
-```
+```text
 
 ### agent.py `rpc_read_text_file` (lines 348-370)
 
@@ -184,7 +184,7 @@ def rpc_read_text_file(
     except IOError:
         text = ""
     # ...
-```
+```text
 
 ### agent.py `rpc_write_text_file` (lines 372-378)
 
@@ -194,7 +194,7 @@ def rpc_write_text_file(self, sessionId: str, path: str, content: str) -> None:
     # TODO: What if the agent wants to write outside of the project path?
     write_path = self.project_root_path / path
     write_path.write_text(content, encoding="utf-8", errors="ignore")
-```
+```text
 
 ### Key Pattern (2)
 
@@ -209,7 +209,7 @@ Additionally,`toad/prompt/resource.py:39` has proper sandbox validation:
 
 ```python
 if not resource_path.is_relative_to(root):
-```
+```text
 
 ### What Our Code Should Do (2)
 
@@ -263,7 +263,7 @@ async def rpc_request_permission(
         "outcome": request_permission_outcome
     }
     return result
-```
+```text
 
 ### TOAD's JSONRPC error handling (jsonrpc.py:144-170)
 
@@ -283,7 +283,7 @@ async def _dispatch_object(self, json: JSONObject) -> JSONType | None:
             "error": {"code": int(ErrorCode.INTERNAL_ERROR),
                       "message": f"An error occurred handling your request: {error!r}"},
         }
-```
+```text
 
 ### Key Pattern (3)
 
@@ -322,7 +322,7 @@ successfully awaiting the user's answer.
 ```python
 case {"sessionUpdate": "plan", "entries": entries}:
     self.post_message(messages.Plan(entries))
-```
+```text
 
 ### protocol.py `PlanEntry` (lines 244-248)
 
@@ -331,7 +331,7 @@ class PlanEntry(SchemaDict, total=False):
     content: Required[str]
     priority: Literal["high", "medium", "low"]
     status: Literal["pending", "in_progress", "completed"]
-```
+```text
 
 ### protocol.py `Plan` (lines 285-288)
 
@@ -339,7 +339,7 @@ class PlanEntry(SchemaDict, total=False):
 class Plan(SchemaDict, total=False):
     entries: Required[list[PlanEntry]]
     sessionUpdate: Required[Literal["plan"]]
-```
+```text
 
 ### messages.py (lines 56-57)
 
@@ -347,7 +347,7 @@ class Plan(SchemaDict, total=False):
 @dataclass
 class Plan(AgentMessage):
     entries: list[protocol.PlanEntry]
-```
+```text
 
 ### Key Pattern (4)
 
@@ -399,7 +399,7 @@ case {
 
         self.tool_calls[tool_call_id] = current_tool_call
         self.post_message(messages.ToolCall(current_tool_call))
-```
+```text
 
 ### Key Pattern (5)
 
@@ -453,7 +453,7 @@ def rpc_read_text_file(
         else:
             text = "\n".join(text.splitlines()[line : line + limit])
     return {"content": text}
-```
+```text
 
 ### Key Pattern (6)
 
@@ -506,7 +506,7 @@ async def rpc_terminal_output(
     if (return_code := terminal_state.return_code) is not None:
         result["exitStatus"] = {"exitCode": return_code}
     return result
-```
+```text
 
 ### protocol.py `TerminalExitStatus` (lines 57-60)
 
@@ -515,7 +515,7 @@ class TerminalExitStatus(SchemaDict, total=False):
     _meta: dict
     exitCode: int | None
     signal: str | None
-```
+```text
 
 ### Key Pattern (7)
 
@@ -602,7 +602,7 @@ while self._output_bytes_count > self._output_byte_limit and self._output:
     # ... evict oldest
     self._output.popleft()
     self._output_bytes_count -= oldest_bytes_count
-```
+```text
 
 ### Key Pattern (9)
 

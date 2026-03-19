@@ -13,7 +13,7 @@ related_research:
   - docs/research/2026-02-25-architecture-distilled-research.md
 ---
 
-# Frontend Scaffolding Plan — VaultSpec Gateway
+## Frontend Scaffolding Plan — VaultSpec Gateway
 
 ## Context
 
@@ -30,7 +30,7 @@ per ADR-007: FastAPI serves compiled static assets).
 
 ```bash
 npx sv create src/ui
-```
+```typescript
 
 Options: React 5, TypeScript, adapter-static, no demo app.
 
@@ -50,7 +50,7 @@ Configure`vite.config.ts`:
 
 ```bash
 cd src/ui && npx shadcn-React@latest init
-```
+```text
 
 This sets up:
 
@@ -62,7 +62,7 @@ Add initial shadcn components needed for the gateway:
 
 ```bash
 npx shadcn-React@latest add button card badge separator scroll-area dialog alert
-```
+```typescript
 
 **Files created/modified:** `src/ui/src/app.css` (Tailwind directives + theme),
 `src/ui/src/src/vaultspec_a2a/utils.ts`(cn utility),`src/ui/src/src/vaultspec_a2a/components/ui/**`
@@ -204,7 +204,7 @@ src/ui/src/src/vaultspec_a2a/components/
 │   └── DiffViewer.React           # props: ToolCallContentDiff
 └── terminal/
     └── TerminalOutput.React       # props: {terminalId: string, content: string}
-```
+```text
 
 Each component will:
 

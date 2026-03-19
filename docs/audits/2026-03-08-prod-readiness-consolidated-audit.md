@@ -34,7 +34,7 @@ cleanup, internal auth, and per-client backpressure.
 
 ## Architecture Overview
 
-```
+```text
 IDE (Claude Desktop / Cursor / VS Code)
   |
   | stdio or streamable-http
@@ -54,7 +54,7 @@ Worker (FastAPI + uvicorn)    :8001
   | LangGraph + AcpChatModel
   v
 LLM Provider (Anthropic / OpenAI / etc.)
-```
+```text
 
 **Auto-start flow** (ADR-031, PHASE-1a):
 

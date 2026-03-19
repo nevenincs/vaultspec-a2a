@@ -40,7 +40,7 @@ All are async and are the canonical source of data for the Event Aggregator:
 StreamMode = Literal[
     "values", "updates", "checkpoints", "tasks", "debug", "messages", "custom"
 ]
-```
+```text
 
 The `"messages"` mode emits LLM token chunks together with metadata for any
 LLM invocations inside nodes — this is the **primary source** for
@@ -64,7 +64,7 @@ stream that fires for every operation in the graph. Each event has this shape:
     "data": dict,         # event-specific payload
     "parent_ids": list[str],
 }
-```
+```text
 
 ### High-value events for our wire protocol
 
@@ -97,7 +97,7 @@ NODE_BOUNDARY_EVENTS = frozenset({
     "on_chain_start",
     "on_chain_end",
 })
-```
+```text
 
 Only emit `agent_status`for`on_chain_start`/`on_chain_end` when
 `event["metadata"].get("langgraph_node")`is set and not in an internal pregel
@@ -257,7 +257,7 @@ class EventAggregator:
                 dead.add(send_fn)
         for fn in dead:
             self._subscribers[thread_id].discard(fn)
-```
+```text
 
 ### 1.4 WebSocket Multiplexing Pattern
 
@@ -323,7 +323,7 @@ CREATE TABLE IF NOT EXISTS writes (
     value          BLOB,   -- serialized channel value
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
 );
-```
+```text
 
 Additionally, `langgraph-checkpoint-sqlite`'s `AsyncSqliteStore` creates a
 `store` table for long-term key-value memory:
@@ -342,7 +342,7 @@ CREATE TABLE IF NOT EXISTS store (
 CREATE INDEX IF NOT EXISTS store_prefix_idx ON store (prefix);
 CREATE INDEX IF NOT EXISTS idx_store_expires_at ON store (expires_at)
     WHERE expires_at IS NOT NULL;
-```
+```yaml
 
 **Key finding**: LangGraph automatically sets `PRAGMA journal_mode=WAL` during
 `AsyncSqliteSaver.setup()`. Our application code does NOT need to set it
@@ -416,7 +416,7 @@ CREATE TABLE IF NOT EXISTS token_usage (
     total_tokens     INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_token_usage_thread_id ON token_usage (thread_id);
-```
+```text
 
 ### 2.3 Sharing the Database File: Safety Considerations
 
@@ -457,7 +457,7 @@ async def setup_app_tables(conn: aiosqlite.Connection) -> None:
         CREATE TABLE IF NOT EXISTS token_usage ( ... );
     """)
     await conn.commit()
-```
+```text
 
 **SQLite WAL mode is set by LangGraph's `AsyncSqliteSaver.setup()`** on first
 connection. Our second connection on the same file inherits WAL mode
@@ -486,7 +486,7 @@ CREATE TABLE IF NOT EXISTS schema_migrations (
     version  INTEGER PRIMARY KEY,
     applied_at TEXT NOT NULL
 );
-```
+```python
 
 Migration runner checks `MAX(version)` and applies numbered scripts from
 `src/vaultspec_a2a/database/migrations/` in order. This gives us forward-only migration
@@ -543,7 +543,7 @@ async def _run_git(
         stdout.decode("utf-8", errors="replace").strip(),
         stderr.decode("utf-8", errors="replace").strip(),
     )
-```
+```text
 
 ### 3.3 Worktree Lifecycle
 
@@ -575,7 +575,7 @@ async def create_worktree(
     )
     if rc != 0:
         raise WorktreeError(f"git worktree add failed: {err}")
-```
+```text
 
 #### Branch Naming Convention (ADR-001)
 
@@ -586,7 +586,7 @@ agent/{role}/{thread_id_short}
 
 agent/coder/a1b2c3d4
 agent/reviewer/a1b2c3d4
-```
+```text
 
 `thread_id_short`= first 8 characters of the`thread_id` UUID.
 
@@ -622,7 +622,7 @@ async def merge_worktree_branch(
 
         # FF not possible: report conflict, DO NOT force
         return False, f"Fast-forward not possible: {err}"
-```
+```yaml
 
 **Why fast-forward only**: Rebasing and three-way merges under the mutex could
 hold it for seconds while git runs recursive merge strategies. An FF check is
@@ -668,7 +668,7 @@ async def check_merge_conflicts(
         # Abort merge to restore clean state
         await _run_git("merge", "--abort", cwd=repo_root)
         return conflicted
-```
+```text
 
 ### 3.4 Worktree Path Resolution (Dual-Mode)
 
@@ -716,7 +716,7 @@ class WorkspaceConfig:
             "VIRTUAL_ENV": str(self.venv_path),
             "PATH": f"{self.venv_path / 'Scripts'};{__import__('os').environ['PATH']}",
         }
-```
+```text
 
 ### 3.5 Worktree Cleanup (Manual Only)
 
@@ -738,7 +738,7 @@ async def remove_worktree(
     )
     if rc != 0:
         raise WorktreeError(f"git worktree remove failed: {err}")
-```
+```text
 
 ### 3.6 Listing Active Worktrees
 
@@ -763,7 +763,7 @@ async def list_worktrees(repo_root: Path) -> list[dict]:
     if current:
         worktrees.append(current)
     return worktrees
-```
+```text
 
 ### 3.7 Mutex Deadlock Prevention
 
@@ -776,7 +776,7 @@ async with _git_mutex:
         # process result
     except Exception:
         raise  # let caller handle; mutex releases via context manager exit
-```
+```text
 
 Since `asyncio.Lock()`is used as an async context manager, Python guarantees
 release on`__aexit__` regardless of exception. The risk is a coroutine being
@@ -786,7 +786,7 @@ cancelled while holding the lock. To mitigate:
 async def safe_git_op(coro):
     """Shield a mutex-holding git operation from external cancellation."""
     return await asyncio.shield(coro)
-```
+```text
 
 Use `asyncio.shield()`only for the critical section inside the mutex (e.g.,
 the`git merge`call) — not for the entire`_run_git` wrapper.

@@ -69,7 +69,7 @@ string is the most impactful single defect.
 "'list_threads' to discover existing threads, "
 "'get_thread_status' to check a specific thread, and "
 "'send_message' to send follow-up input into a running thread."
-```
+```yaml
 
 **Problem**: `respond_to_permission` and `get_team_status` are not mentioned.
 `respond_to_permission` is the **only** way to unblock a supervised thread;
@@ -116,11 +116,11 @@ covering both the autonomous path and the supervised path.
 
 **Current text**:
 
-```
+```yaml
 team_preset: Team configuration preset to use. Available presets:
              see ``_KNOWN_PRESETS`` (auto-discovered from TOML files).
              Defaults to ``vaultspec-adaptive-coder``.
-```
+```python
 
 **Problem**: `_KNOWN_PRESETS` is a Python module-level variable. An LLM caller
 reading the tool description cannot dereference this symbol. The actual preset
@@ -142,11 +142,11 @@ may be available via `list_threads` or `get_team_status`.
 
 **Current text**:
 
-```
+```yaml
 workspace_root: Optional absolute path to the workspace directory.
                 Enables ADR-014 context injection (.vault/ auto-discovery)
                 and scopes ACP agent CWD to this directory.
-```
+```yaml
 
 **Problem**: "ADR-014" and "ACP agent CWD" are internal architecture
 terminology opaque to any LLM caller outside the development team. An IDE agent
@@ -156,13 +156,13 @@ agent's working directory — should be described in plain terms.
 
 **Recommendation**:
 
-```
+```yaml
 workspace_root: Optional absolute path to the project root. When provided,
                 the agent team uses this directory as their working directory
                 and automatically discovers context files from a .vault/
                 subdirectory (markdown, TOML) to inject as background knowledge.
                 Example: "/home/user/myproject"
-```
+```text
 
 ---
 
@@ -172,11 +172,11 @@ workspace_root: Optional absolute path to the project root. When provided,
 
 **Current text**:
 
-```
+```text
 Returns a human-readable summary of the thread's current state including
 message count and checkpoint ID.  For real-time streaming updates, connect
 to the WebSocket endpoint listed in the response.
-```
+```yaml
 
 **Problem**: The comment at line 341 explicitly removes checkpoint_id from the
 output (`# MCP-04: omit checkpoint_id`). The actual return at lines 343-347
@@ -195,9 +195,9 @@ actual fields returned: thread ID, status, message count, live WebSocket URL.
 
 **Current text**:
 
-```
+```yaml
 option_id: The ID of the chosen permission option.
-```
+```yaml
 
 **Problem**: An LLM caller does not know where to find valid option IDs. The
 correct flow is: receive a `PermissionRequestEvent` over the WebSocket (or via
@@ -206,12 +206,12 @@ Without this guidance, a caller is likely to guess or use the wrong value.
 
 **Recommendation**:
 
-```
+```yaml
 option_id: The ID of the chosen option from the PermissionRequestEvent.
            Call ``get_pending_permissions`` to list pending requests and their
            available option IDs. Example option IDs: "approve", "approve_all",
            "reject".
-```
+```text
 
 ---
 
@@ -221,10 +221,10 @@ option_id: The ID of the chosen option from the PermissionRequestEvent.
 
 **Current text**:
 
-```
+```text
 ...Use this tool to submit the chosen option and unblock the
 graph (ADR-011 §2.2).
-```
+```yaml
 
 **Problem**: "ADR-011 §2.2" is an internal architecture document reference
 meaningless to an LLM calling the tool. This appears in the _body_ of the
@@ -243,9 +243,9 @@ thread."
 
 **Current text**:
 
-```
+```text
 Send a follow-up message into an existing thread (async, returns 202).
-```
+```yaml
 
 **Problem**: "(async, returns 202)" is an HTTP status code detail. MCP tool
 callers receive a string return value — they do not see HTTP status codes. This
@@ -293,9 +293,9 @@ it will not know that `input_required` means `respond_to_permission` is needed).
 
 **Current text**:
 
-```
+```text
 ...and any outstanding permission requests that need responses (ADR-011 §2.2).
-```
+```text
 
 Same issue as MCD-07. Internal reference should be replaced with plain
 description: "and any permission requests that are blocking thread execution."
@@ -364,7 +364,7 @@ mcp = FastMCP(
         "get_team_status() for overall agent health and active thread count."
     ),
 )
-```
+```text
 
 ---
 

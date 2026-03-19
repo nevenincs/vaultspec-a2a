@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'How to implement a human-in-the-loop plan approval gate at the plan→exec boundary. Integration with existing interrupt mechanism. Research for ADR-024.'
 ---
 
-# Research: Plan Approval Interrupt
+## Research: Plan Approval Interrupt
 
 **Date:** 2026-03-03
 
@@ -36,7 +36,7 @@ async def _interrupt_permission_callback(tool_name, tool_input, options) -> str:
         "options": options,
     })
     # ... validate and return option_id
-```
+```text
 
 When `interrupt()` is called inside a LangGraph node:
 
@@ -100,7 +100,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
         else:
             return {"next": "FINISH", "pipeline_phase": inferred_phase,
                     "routing_error": "Plan rejected by user — returning to FINISH"}
-```
+```text
 
 **Pros:**
 
@@ -132,7 +132,7 @@ async def plan_approval_node(state: TeamState) -> dict[str, Any]:
     # without using Command API
     from langgraph.types import Command
     return Command(update={"plan_approved": False}, goto="supervisor")
-```
+```text
 
 **Pros:**
 
@@ -169,7 +169,7 @@ interrupt({
     "exec_worker": next_route,                   # which worker will execute
     "task_queue_path": f".vault/plan/{active_feature}-queue.md"  # if exists
 })
-```
+```text
 
 The UI permission modal (already implemented for ACP tool approvals) can be extended
 to render:
@@ -275,7 +275,7 @@ class TeamState(TypedDict):
     # Prevents the plan approval interrupt from re-triggering on subsequent exec routing.
     # Cleared to False (or absent) when a new plan artifact is written.
     plan_approved: NotRequired[bool]
-```
+```text
 
 Uses last-write-wins (default LangGraph semantics). `NotRequired` because legacy
 threads without this field should default to `False` (unapproved) — the gate fires

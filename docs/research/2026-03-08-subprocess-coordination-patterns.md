@@ -35,7 +35,7 @@ async def _tcp_port_ready(host: str, port: int) -> bool:
         return True
     except (OSError, TimeoutError):
         return False
-```
+```yaml
 
 **Our current approach**: `_check_gateway_health()` checks if the gateway
 is already running before spawning. If it is, skip the spawn. This is the
@@ -53,7 +53,7 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-```
+```yaml
 
 **Use case**: Integration tests that need isolated service instances.
 Not suitable for production (port must be discoverable by clients).
@@ -112,14 +112,14 @@ the entire process tree including the worker.
 Send SIGTERM to the root (MCP server). Each process catches SIGTERM and
 forwards it to its children before exiting.
 
-```
+```text
 MCP receives SIGTERM
   -> sends SIGTERM to gateway
      -> gateway catches, sends SIGTERM to worker
         -> worker catches, drains work, exits
      -> gateway waits for worker, then exits
   -> MCP waits for gateway, then exits
-```
+```yaml
 
 **Advantage**: Each process controls its own cleanup.
 **Disadvantage**: Requires signal handling at each level. On Windows,
@@ -137,7 +137,7 @@ shutdown_event.set()
 # Child checks the event in its main loop
 while not shutdown_event.is_set():
     await process_work()
-```
+```yaml
 
 **Advantage**: Clean, non-signal-based.
 **Disadvantage**: Requires shared state (event object) between processes.
@@ -177,7 +177,7 @@ Too fast = false negatives (service still starting). Too slow = wasted time.
 while not healthy:
     await asyncio.sleep(1.0)
     healthy = await check_health()
-```
+```yaml
 
 **Problem**: 1-second resolution means up to 1s wasted after the service
 starts. Sub-second polling wastes CPU.
@@ -190,7 +190,7 @@ while not healthy:
     healthy = await check_health()
     await asyncio.sleep(interval)
     interval = min(interval * 1.5, 2.0)  # Cap at 2s
-```
+```yaml
 
 **Advantage**: Fast initial detection (<200ms), reduced polling as time
 passes.
@@ -251,7 +251,7 @@ logging.basicConfig(
     filename="vaultspec.log",
     format="%(asctime)s [%(process)d] %(name)s %(levelname)s %(message)s",
 )
-```
+```yaml
 
 **Advantage**: Single file to check.
 **Disadvantage**: Concurrent file writes can interleave. On Windows, file
@@ -268,7 +268,7 @@ import sys
 
 handler = logging.StreamHandler(sys.stderr)
 handler.setFormatter(JsonFormatter())
-```
+```yaml
 
 **Advantage**: Machine-parseable, supports querying/filtering.
 **Disadvantage**: Requires custom formatter setup.
@@ -288,7 +288,7 @@ listener.start()
 # In each child process:
 handler = QueueHandler(log_queue)
 logging.getLogger().addHandler(handler)
-```
+```yaml
 
 **Advantage**: Standard library, thread-safe, process-safe.
 **Disadvantage**: Requires `multiprocessing.Queue` (not available with
@@ -304,7 +304,7 @@ process = await asyncio.create_subprocess_exec(
 )
 async for line in process.stderr:
     logger.info("[worker] %s", line.decode().strip())
-```
+```yaml
 
 **Advantage**: No child modification needed.
 **Disadvantage**: Requires PIPE (not DEVNULL), adds relay overhead.
@@ -438,7 +438,7 @@ app = FastAPI()
 async def shutdown_endpoint():
     os.kill(os.getpid(), signal.SIGTERM)
     return {"status": "shutting_down"}
-```
+```text
 
 **How it works on POSIX (Linux/macOS):**
 
@@ -450,11 +450,11 @@ async def shutdown_endpoint():
 
 **BROKEN ON WINDOWS -- VERIFIED BY LIVE TEST:**
 
-```
+```python
 >>> os.kill(os.getpid(), signal.SIGTERM)
 # Process exits immediately with code 15. No handler invoked.
 # The registered signal.signal(SIGTERM, handler) is NEVER called.
-```
+```text
 
 On Windows, `os.kill(pid, SIGTERM)` calls `TerminateProcess()` via the Win32
 API. This bypasses all Python signal handlers and kills the process instantly
@@ -474,14 +474,14 @@ import signal
 async def shutdown_endpoint():
     signal.raise_signal(signal.SIGTERM)
     return {"status": "shutting_down"}
-```
+```text
 
 `signal.raise_signal()` calls the C runtime's `raise()`, which dispatches to
 Python's registered signal handler on ALL platforms.
 
 **VERIFIED BY LIVE TEST on Windows 11 (Python 3.13):**
 
-```
+```python
 >>> import signal
 >>> handler_called = False
 >>> def handler(signum, frame):
@@ -491,7 +491,7 @@ Python's registered signal handler on ALL platforms.
 >>> signal.raise_signal(signal.SIGTERM)
 >>> print(handler_called)
 True   # Handler invoked, process survives
-```
+```text
 
 Compare with `os.kill(os.getpid(), SIGTERM)` which exits with code 15 --
 no handler invoked, process killed immediately.
@@ -514,7 +514,7 @@ Access the uvicorn `Server` instance and set the flag directly.
 ```python
 # Problem: no clean way to access the Server instance from FastAPI
 # The Server is created by uvicorn.run(), not by FastAPI
-```
+```text
 
 **Problem:** FastAPI does not expose the underlying uvicorn `Server` instance.
 There is no public API to reach `server.should_exit` from an endpoint.
@@ -526,7 +526,7 @@ There is no public API to reach `server.should_exit` from an endpoint.
 async def lifespan(app: FastAPI):
     # No access to uvicorn's Server object here either
     yield
-```
+```text
 
 The lifespan function receives `app` but not `Server`. The `Server` is created
 outside the ASGI app boundary by `uvicorn.run()`. No clean way to bridge.
@@ -543,7 +543,7 @@ async def shutdown_endpoint():
     loop = asyncio.get_running_loop()
     loop.call_soon(loop.stop)
     return {"status": "shutting_down"}
-```
+```text
 
 **Problem:** `loop.stop()` immediately stops the event loop, which prevents
 uvicorn from running its graceful shutdown sequence (connection drain, lifespan
@@ -569,7 +569,7 @@ async def shutdown_endpoint(background_tasks: BackgroundTasks):
 
     background_tasks.add_task(_delayed_shutdown)
     return {"status": "shutting_down"}
-```
+```text
 
 **Advantage:** Guarantees the 200 response reaches the client before shutdown
 begins.
@@ -590,7 +590,7 @@ async def shutdown_endpoint():
 
     asyncio.create_task(_signal_after_response())
     return {"status": "shutting_down"}
-```
+```text
 
 ### 8.7 Recommendation for VaultSpec Worker
 
@@ -626,7 +626,7 @@ async def shutdown_endpoint():
 
     asyncio.create_task(_deferred_signal())
     return {"status": "shutting_down"}
-```
+```text
 
 **Why `signal.raise_signal` over `os.kill` -- CRITICAL for Windows:**
 

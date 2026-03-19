@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'Survey of real-world implementations for file-system-as-blackboard, LangGraph state enrichment, persistent task queues, context grounding, and artifact-store bridges in agentic/LLM systems.'
 ---
 
-# External Research: SDD Blackboard Integration Patterns
+## External Research: SDD Blackboard Integration Patterns
 
 **Date:** 2026-03-03
 **Feature tag:** `#sdd-blackboard-integration`
@@ -20,7 +20,8 @@ description: 'Survey of real-world implementations for file-system-as-blackboard
 
 Two directly relevant papers appeared in 2025:
 
-**[LLM-Based Multi-Agent Blackboard System for Information Discovery in Data Science](https://arxiv.org/abs/2510.01285)**
+#### [LLM-Based Multi-Agent Blackboard System for Information Discovery in Data Science](https://arxiv.org/abs/2510.01285)
+
 (arXiv 2510.01285, Oct 2025)
 
 The system implements a three-component blackboard:
@@ -35,7 +36,8 @@ Key result: outperforms master-slave baselines by 13–57% on end-to-end success
 
 **Key insight for our use:** The "private spaces for sub-team discussion" maps exactly to our per-feature `vault_index` partitioning. Each feature tag is a private namespace on the blackboard.
 
-**[Exploring Advanced LLM Multi-Agent Systems Based on Blackboard Architecture](https://arxiv.org/abs/2507.01701)**
+#### [Exploring Advanced LLM Multi-Agent Systems Based on Blackboard Architecture](https://arxiv.org/abs/2507.01701)
+
 (arXiv 2507.01701, Jul 2025)
 
 Confirms the same three-component model and adds: agents communicate _exclusively through the blackboard_, eliminating direct agent-to-agent messaging. The blackboard "replaces traditional per-agent memory modules" — consolidation reduces prompt length while maintaining context.
@@ -48,7 +50,8 @@ Confirms the same three-component model and adds: agents communicate _exclusivel
 
 ### 1.2 MetaGPT — Shared Message Pool as File-System Blackboard
 
-**[MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework](https://arxiv.org/html/2308.00352v6)**
+#### [MetaGPT: Meta Programming for a Multi-Agent Collaborative Framework](https://arxiv.org/html/2308.00352v6)
+
 GitHub: [FoundationAgents/MetaGPT](https://github.com/FoundationAgents/MetaGPT)
 
 MetaGPT is the most direct real-world precedent for our architecture. It implements a **shared message pool** where agents communicate exclusively through structured documents — not dialogue. The architecture:
@@ -58,26 +61,26 @@ MetaGPT is the most direct real-world precedent for our architecture. It impleme
 - Sequential dependency: each document type gates the next pipeline stage.
 - Physical persistence: artifacts are written to a `workspace/` directory. A `FileRepository` (later consolidated with `GitRepo`) tracks all generated files.
 
-**Document schema used by MetaGPT:**
+#### Document schema used by MetaGPT
 
 - PRD: user stories, requirement pools, competitive analysis
 - System Design: file lists, data structures, interface definitions, sequence diagrams
 - Task List: breaking down system design into engineer assignments
 - Each document is structured markdown with defined sections, not free-form chat.
 
-**Pitfalls MetaGPT encountered:**
+#### Pitfalls MetaGPT encountered
 
 - Information overload: despite subscription filtering, agents still received more context than needed.
 - Hallucination during review: LLMs overlooked errors without executable verification. Required runtime code testing as a quality gate (analogous to our `validation_errors` accumulator).
 - Context efficiency: long document chains caused prompt bloat, requiring compression strategies.
 
-**What we adopt:**
+#### What we adopt
 
 - Document-as-communication pattern: `.vault/` artifacts are our message pool. Agents communicate through structured markdown, not conversation.
 - Role-based subscription: our `vault_index` with doc-type priority ordering (ADR > plan > research) mirrors MetaGPT's subscription model — each agent receives only the tier relevant to its role.
 - `validation_errors` in `TeamState` mirrors MetaGPT's runtime testing quality gate.
 
-**What we improve on:**
+#### What we improve on
 
 - MetaGPT's `FileRepository` is a passive store. Our `vault_index` in `TeamState` is an active index that nodes can query without rescanning disk.
 - MetaGPT uses a fixed pipeline (Product Manager → Architect → Engineer → QA). Our LangGraph implementation supports dynamic `star` topology while still enforcing phase-aware anchoring.
@@ -86,7 +89,7 @@ MetaGPT is the most direct real-world precedent for our architecture. It impleme
 
 ### 1.3 "Codified Context" Infrastructure (arXiv 2602.20478)
 
-**[Codified Context: Infrastructure for AI Agents in a Complex Codebase](https://arxiv.org/html/2602.20478v1)**
+#### [Codified Context: Infrastructure for AI Agents in a Complex Codebase](https://arxiv.org/html/2602.20478v1)
 
 This 2026 paper describes production context infrastructure for a complex codebase with a three-tier model:
 
@@ -100,7 +103,7 @@ This 2026 paper describes production context infrastructure for a complex codeba
 
 **Pitfall:** Human oversight cannot be delegated — agents lack autonomous judgment for "design decisions, aesthetic evaluation, architecture." Quality gates require human checkpoints.
 
-**What we adopt:**
+#### What we adopt
 
 - The Tier 1/2/3 hot/warm/cold distinction maps to our mounting priority: ADR (hot) > Plan (warm) > Research (cold).
 - "Load-bearing artifacts" framing validates our `[BLACKBOARD: ...]` marker in mounted SystemMessages.
@@ -113,8 +116,7 @@ This 2026 paper describes production context infrastructure for a complex codeba
 
 ### 2.1 LangGraph Official Reference Pattern
 
-**[LangGraph Persistence Guide](https://fast.io/resources/langgraph-persistence/)** |
-**[External Persistent Memory for Agents](https://medium.com/@princekrampah/external-persistent-memory-for-agents-building-robust-applications-with-langgraph-8415b170beef)**
+**[LangGraph Persistence Guide](https://fast.io/resources/langgraph-persistence/)** | **[External Persistent Memory for Agents](https://medium.com/@princekrampah/external-persistent-memory-for-agents-building-robust-applications-with-langgraph-8415b170beef)**
 
 The canonical LangGraph recommendation for file/artifact integration is the **reference pattern**:
 
@@ -124,13 +126,13 @@ Example state:
 
 ```python
 {"file_url": "https://...", "filename": "report.pdf"}
-```
+```python
 
 The anti-pattern is direct embedding: "If the agent state includes a 50MB PDF and the agent takes 10 steps, the checkpointer writes 500MB of data."
 
 **LangGraph BaseStore:** A cross-thread key-value store (`langchain_ai/data-enrichment` template). Nodes access it via `def node(state: State, store: BaseStore)`. Enables shared memory across thread boundaries without per-checkpoint serialization of large blobs.
 
-**What we adopt:**
+#### What we adopt
 
 - Our `vault_index: dict[str, list[str]]` is the reference pattern applied to `.vault/` documents. We store paths, not content, in `TeamState`. Content is read per-invocation by the mount step (ADR-020).
 - The LangGraph BaseStore is relevant for cross-thread vault sharing (future: multiple threads working on the same feature). Not required for v1.
@@ -141,18 +143,18 @@ The anti-pattern is direct embedding: "If the agent state includes a 50MB PDF an
 
 ### 2.2 Google ADK — Artifact Handle Pattern and Context Compilation
 
-**[Context Engineering: Google ADK Architecture](https://raphaelmansuy.github.io/adk_training/blog/2025/12/08/context-engineering-google-adk-architecture/)**
+#### [Context Engineering: Google ADK Architecture](https://raphaelmansuy.github.io/adk_training/blog/2025/12/08/context-engineering-google-adk-architecture/)
 
 Google ADK implements a tiered context architecture with directly applicable patterns:
 
-**Artifact Handle Pattern:**
+#### Artifact Handle Pattern
 
 - Large files stored in `ArtifactService` (GCS or local filesystem).
 - Agents see only lightweight references (name + summary) by default.
 - `LoadArtifactsTool` enables on-demand expansion into working context.
 - Artifacts are ephemeral in context — loaded for specific reasoning, discarded after.
 
-**Context as a compiled view:**
+#### Context as a compiled view
 
 > "Context is a compiled view over a richer stateful system, rebuilt fresh each invocation."
 
@@ -160,14 +162,14 @@ ADK uses ordered processors (Identity → Instruction → ContextCache → Plann
 
 **`include_contents` pattern:** Sub-agents receive scoped context. Each agent gets only the "mission-critical" context slice. This is implemented via `include_contents` knobs on sub-agent invocations, not via a shared global context.
 
-**Tiered state:**
+#### Tiered state
 
 1. Working Context — immediate prompt, rebuilt each invocation
 2. Session — durable chronological event log
 3. Memory — long-lived, cross-session searchable knowledge
 4. Artifacts — named, versioned, accessed by reference
 
-**What we adopt:**
+#### What we adopt
 
 - The processor pipeline maps exactly to our worker node mount step: the "ContextCache" processor is equivalent to `_mount_blackboard()`.
 - "Ephemeral expansion" validates per-invocation content mounting rather than persistent embedding in state.
@@ -181,7 +183,7 @@ ADK uses ordered processors (Identity → Instruction → ContextCache → Plann
 
 ### 3.1 CrewAI — Task Output File Persistence
 
-**[CrewAI Tasks Documentation](https://docs.crewai.com/en/concepts/tasks)**
+#### [CrewAI Tasks Documentation](https://docs.crewai.com/en/concepts/tasks)
 
 CrewAI's task schema:
 
@@ -195,7 +197,7 @@ CrewAI's task schema:
 | `async_execution` | bool                      | Non-blocking execution            |
 | `output_pydantic` | Optional[Type[BaseModel]] | Structured output schema          |
 
-**TaskOutput schema:**
+#### TaskOutput schema
 
 | Field           | Purpose                             |
 | --------------- | ----------------------------------- |
@@ -209,13 +211,13 @@ CrewAI's task schema:
 
 **Inter-task dependency:** Tasks establish dependencies via `context=[other_task]` — CrewAI ensures upstream outputs are available before downstream execution. No sequential ID system.
 
-**Pitfalls from GitHub issues:**
+#### Pitfalls from GitHub issues
 
 - `output_file` path handling is buggy: path resolution was relative to project root rather than respecting absolute paths (Issue #1707). Fixed but still brittle.
 - Pipeline mode assumes JSON output and fails on raw mode (Issue #1258).
 - No formal task_id — tasks are identified by `description` string, which is fragile for programmatic state tracking.
 
-**What we adopt:**
+#### What we adopt
 
 - The `context=[task]` dependency model validates our `active_task_id` concept — a task knows what came before it.
 - `output_file` pattern validates `.vault/exec/` step file creation.
@@ -243,7 +245,7 @@ There is no explicit task queue schema. The "queue" is inferred from which docum
 
 ### 3.3 AutoGen — Conversational Task Tracking (and its limits)
 
-**[AutoGen vs CrewAI comparison](https://www.zenml.io/blog/crewai-vs-autogen)**
+#### [AutoGen vs CrewAI comparison](https://www.zenml.io/blog/crewai-vs-autogen)
 
 AutoGen takes the opposite approach: task tracking is entirely conversational. Agents self-report task completion in natural language. There is no persistent task queue schema.
 
@@ -257,7 +259,7 @@ AutoGen takes the opposite approach: task tracking is entirely conversational. A
 
 ### 4.1 The Grounding Pattern
 
-**[Grounding — Context Patterns](https://contextpatterns.com/patterns/grounding/)**
+#### [Grounding — Context Patterns](https://contextpatterns.com/patterns/grounding/)
 
 Core definition: grounding ensures models _use_ retrieved information rather than falling back to training data. It combines:
 
@@ -280,7 +282,7 @@ Key design decisions:
 
 ### 4.2 Google ADK — Context Engineering for Production Agents
 
-**[Context Engineering: Google ADK Architecture](https://raphaelmansuy.github.io/adk_training/blog/2025/12/08/context-engineering-google-adk-architecture/)**
+#### [Context Engineering: Google ADK Architecture](https://raphaelmansuy.github.io/adk_training/blog/2025/12/08/context-engineering-google-adk-architecture/)
 
 Additional pattern: **Context Capsules** — structured representations of source documents, each carrying:
 
@@ -296,22 +298,23 @@ This is a pre-processed, "agent-ready" version of a raw document. The capsule is
 
 ### 4.3 OpenHands SDK — Skills Files and Static Context Loading
 
-**[OpenHands Software Agent SDK](https://arxiv.org/html/2511.03690v1)**
+#### [OpenHands Software Agent SDK](https://arxiv.org/html/2511.03690v1)
+
 GitHub: [OpenHands/software-agent-sdk](https://github.com/OpenHands/software-agent-sdk)
 
 OpenHands (formerly OpenDevin) loads static context files via a skills directory:
 
-```
+```text
 .openhands/skills/        # Markdown files auto-loaded into every agent session
 .cursorrules              # Compatible format (also loaded)
 agents.md                 # Compatible format (also loaded)
-```
+```text
 
 `AgentContext` centralizes inputs that shape LLM behavior. Skills can incorporate static context files — "prefixes/suffixes for system/user messages." The workspace abstraction provides `file_upload()`, `file_download()`, and command execution with an append-only EventLog tracking all operations.
 
 **Key architectural decision:** Immutability + event sourcing. All components (agents, tools, LLMs) are immutable. A single `ConversationState` object records all mutable context as an append-only event log.
 
-**What we adopt:**
+#### What we adopt
 
 - `.openhands/skills/` maps to our `.vaultspec/agents/` TOML files — workspace-local overrides for agent behavior, loaded at compile time.
 - The append-only event log validates our `artifacts` reducer in `TeamState` (append-only, deduplicated by id) as the correct persistence strategy for completed work records.
@@ -331,7 +334,7 @@ The absence of a direct precedent means our implementation is genuinely novel in
 
 ### 5.2 LangGraph `data-enrichment` Template
 
-**[langchain-ai/data-enrichment](https://github.com/langchain-ai/data-enrichment)**
+#### [langchain-ai/data-enrichment](https://github.com/langchain-ai/data-enrichment)
 
 The official LangGraph data enrichment template uses an agent that:
 

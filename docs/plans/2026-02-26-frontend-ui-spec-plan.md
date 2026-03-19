@@ -12,7 +12,7 @@ related_research:
   - docs/research/2026-02-25-architecture-distilled-research.md
 ---
 
-# Frontend UI Specification — VaultSpec Gateway
+## Frontend UI Specification — VaultSpec Gateway
 
 ## 1. Overview
 
@@ -53,7 +53,7 @@ and **Inspector** (on-demand).
 ├───────────────┴──────────────────────────────────────────────────┤
 │  Status Bar (connection · threads · heartbeat)                   │
 └──────────────────────────────────────────────────────────────────┘
-```
+```text
 
 When the **Inspector** is open (triggered by clicking a tool card,
 artifact, or plan item):
@@ -69,7 +69,7 @@ artifact, or plan item):
 │               │                      │  Content area             │
 │               │                      │                           │
 └───────────────┴──────────────────────┴───────────────────────────┘
-```
+```text
 
 ### 2.2 Responsive Behavior
 
@@ -112,7 +112,7 @@ The sidebar is divided into two stacked sections:
 │ ○ Coder    idle        │
 │ △ Reviewer input_req   │
 └────────────────────────┘
-```
+```text
 
 ### 3.2 Thread List Items
 
@@ -179,7 +179,7 @@ The central stream renders server events chronologically as inline elements:
 ```text
   ┌─ 💭 Thinking...          [▶] ─┐
   └─────────────────────────────────┘
-```
+```yaml
 
 - **Expanded state**: shows full streaming content
 
@@ -189,7 +189,7 @@ The central stream renders server events chronologically as inline elements:
   │ handling in middleware to        │
   │ understand the auth flow...     │
   └─────────────────────────────────┘
-```
+```yaml
 
 - **Visual**: dimmed opacity (~60%), italic text, smaller font size
 - **Interaction**: click `[▶/▼]` to toggle
@@ -208,7 +208,7 @@ Compact inline cards showing tool execution status:
 │ 🔧 read_file               ●    │  ← animated spinner
 │ auth.py:42            [running]  │  ← location + status badge
 └──────────────────────────────────┘
-```
+```text
 
 **Completed state**:
 
@@ -217,7 +217,7 @@ Compact inline cards showing tool execution status:
 │ ✓ read_file                      │  ← green checkmark
 │ auth.py:42          [completed]  │
 └──────────────────────────────────┘
-```
+```text
 
 **Failed state**:
 
@@ -226,7 +226,7 @@ Compact inline cards showing tool execution status:
 │ ✗ execute_shell                  │  ← red X, red border accent
 │ npm install            [failed]  │
 └──────────────────────────────────┘
-```
+```yaml
 
 - **Click**: opens inspector with tool call detail
 - **Delta-merge**: `ToolCallUpdateEvent`merges into existing card
@@ -240,7 +240,7 @@ Compact inline cards showing tool execution status:
 │ 📄 auth.py (modified)            │
 │ ▸ Click to view diff             │
 └──────────────────────────────────┘
-```
+```yaml
 
 - **Click**: opens inspector with artifact detail (Preview / Diff / Raw tabs)
 - **Icon**: file type icon based on extension
@@ -253,7 +253,7 @@ Compact inline cards showing tool execution status:
 │ 📋 Plan updated (3/5 complete)   │
 │ ▸ Click to view plan             │
 └──────────────────────────────────┘
-```
+```yaml
 
 - **Click**: opens inspector with plan checklist (see §5.3)
 - **Summary**: shows completion ratio inline
@@ -268,7 +268,7 @@ Full-width destructive alert using shadcn `Alert` component:
 │ Connection to agent "Planner" lost.      │
 │ Thread: debug-auth · Code: AGENT_TIMEOUT │
 └──────────────────────────────────────────┘
-```
+```text
 
 ### 4.8 Auto-Scroll Behavior
 
@@ -282,7 +282,7 @@ Full-width destructive alert using shadcn `Alert` component:
   ┌───────────────────────┐
   │  ▼ 3 new messages     │
   └───────────────────────┘
-```
+```yaml
 
 - Click badge: scrolls to bottom and resumes auto-scroll
 - Scroll to bottom manually: also resumes auto-scroll
@@ -327,7 +327,7 @@ Shown when clicking a tool call card.
 │ │     ...                     │ │
 │ └────────────────────────────┘ │
 └────────────────────────────────┘
-```
+```text
 
 **Tab content by `ToolCallContent`type**:
 
@@ -358,7 +358,7 @@ Shown when clicking a plan update card or plan icon.
 │ ☐ Run test suite         MED   │  ← pending (gray)
 │                                │
 └────────────────────────────────┘
-```
+```text
 
 **Status icons**:
 
@@ -430,7 +430,7 @@ across the sidebar thread list, team status panel, and stream badges:
 │ ░░ └──────────────────────────┘ ░░ │
 │ ░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░░ │
 └────────────────────────────────────┘
-```
+```text
 
 ### 7.3 Modal Content
 
@@ -469,7 +469,7 @@ Pinned to the bottom of the stream panel:
 ├─────────────────────────────────────────────┤
 │ Type a message...                      [↑]  │  ← textarea + send
 └─────────────────────────────────────────────┘
-```
+```text
 
 ### 8.2 Elements
 
@@ -515,7 +515,7 @@ Full-width bar at the bottom of the application window:
 ┌──────────────────────────────────────────────────────┐
 │ ● Connected  |  3 threads · 2 active  |  ♥ 1.2s     │
 └──────────────────────────────────────────────────────┘
-```
+```text
 
 ### 9.2 Sections
 
@@ -571,7 +571,7 @@ When a new thread has no messages yet:
 ├──────────────────────────────────────┤
 │ [input bar focused]                  │
 └──────────────────────────────────────┘
-```
+```text
 
 ---
 
@@ -680,7 +680,7 @@ Store.applyEvent(event)     ← dispatches on event.type
          │
          ▼
     Component re-render (fine-grained, per-field)
-```
+```text
 
 On reconnect:
 

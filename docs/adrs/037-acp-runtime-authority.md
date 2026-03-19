@@ -11,7 +11,7 @@ related:
   - docs/research/2026-03-11-observability-debug-correlation-grounding.md
 ---
 
-# ADR-037: ACP Runtime Authority and Observability Boundaries
+## ADR-037: ACP Runtime Authority and Observability Boundaries
 
 **Date:** 2026-03-11
 **Status:** Proposed

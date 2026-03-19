@@ -43,42 +43,43 @@ The technical research confirmed:
 
 ### Phase 2: Baseline migration
 
-6. **Generate initial migration**: `uv run alembic revision --autogenerate -m "initial_schema"`
-7. **Review generated file** — must only contain the 4 app tables + their indexes
-8. **Test upgrade on fresh DB**: `uv run alembic upgrade head` against a new file
-9. **Test stamp on existing DB**: `uv run alembic stamp head` against the current `vaultspec.db`
+1. **Generate initial migration**: `uv run alembic revision --autogenerate -m "initial_schema"`
+2. **Review generated file** — must only contain the 4 app tables + their indexes
+3. **Test upgrade on fresh DB**: `uv run alembic upgrade head` against a new file
+4. **Test stamp on existing DB**: `uv run alembic stamp head` against the current `vaultspec.db`
 
 ### Phase 3: init_db refactor
 
-10. **Strip DDL from `init_db()`** — remove `create_all` call (line 185) and the `ALTER TABLE` try/except block (lines 190-195)
-11. **Add `run_migrations()` helper** to `session.py` (or a new `src/vaultspec_a2a/database/migrate.py`):
+1. **Strip DDL from `init_db()`** — remove `create_all` call (line 185) and the `ALTER TABLE` try/except block (lines 190-195)
+2. **Add `run_migrations()` helper** to `session.py` (or a new `src/vaultspec_a2a/database/migrate.py`):
 
     ```python
     async def run_migrations(db_path: str) -> None:
         cfg = Config("alembic.ini")
         cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
         await asyncio.to_thread(command.upgrade, cfg, "head")
-    ```
+    ```yaml
 
-12. **Wire startup**: call `run_migrations()` in `src/vaultspec_a2a/api/app.py` lifespan before first request (gated by `settings.auto_migrate` flag, default `True` for dev)
-13. **Remove `OperationalError` import** from session.py (no longer needed)
+1. **Wire startup**: call `run_migrations()` in `src/vaultspec_a2a/api/app.py` lifespan before first request (gated by `settings.auto_migrate` flag, default `True` for dev)
+
+1. **Remove `OperationalError` import** from session.py (no longer needed)
 
 ### Phase 4: Test infrastructure
 
-14. **Test fixtures remain unchanged**: tests use `:memory:` or temp-file DBs with `Base.metadata.create_all(conn)` directly — this is the accepted exception (ephemeral DBs don't need migrations)
-15. **Add migration test**: new test in `src/vaultspec_a2a/database/tests/test_migrations.py` that:
+1. **Test fixtures remain unchanged**: tests use `:memory:` or temp-file DBs with `Base.metadata.create_all(conn)` directly — this is the accepted exception (ephemeral DBs don't need migrations)
+2. **Add migration test**: new test in `src/vaultspec_a2a/database/tests/test_migrations.py` that:
     - Creates a temp SQLite file
     - Runs `alembic upgrade head` programmatically
     - Verifies all 4 tables exist
     - Runs `alembic downgrade base`
     - Verifies tables are gone
-16. **Add LangGraph exclusion test**: pre-create `checkpoints` and `writes` tables, run `alembic upgrade head`, verify they are untouched
+3. **Add LangGraph exclusion test**: pre-create `checkpoints` and `writes` tables, run `alembic upgrade head`, verify they are untouched
 
 ### Phase 5: Documentation + cleanup
 
-17. **Update `__all__`** in `src/vaultspec_a2a/database/session.py` if `run_migrations` is added there
-18. **Add `auto_migrate` setting** to `src/vaultspec_a2a/core/config.py` Settings model
-19. **Update MEMORY.md** with completed milestone
+1. **Update `__all__`** in `src/vaultspec_a2a/database/session.py` if `run_migrations` is added there
+2. **Add `auto_migrate` setting** to `src/vaultspec_a2a/core/config.py` Settings model
+3. **Update MEMORY.md** with completed milestone
 
 ## Files Changed (estimated)
 

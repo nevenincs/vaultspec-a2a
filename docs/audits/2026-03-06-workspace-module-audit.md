@@ -36,7 +36,7 @@ This is by design (the function's purpose is to merge into target_branch), but c
 
 ```python
 "LANGCHAIN_TRACING_V2",
-```
+```text
 
 `LANGCHAIN_TRACING_V2` is in the scrub list, but `LANGSMITH_API_KEY`, `LANGSMITH_TRACING`, and `LANGSMITH_PROJECT` are NOT scrubbed. Per the INFRA sprint notes, `LANGSMITH_*` are the canonical names — the scrubbing is incomplete. An agent subprocess could inherit `LANGSMITH_API_KEY` and send tracing data to the parent's LangSmith project.
 
@@ -46,7 +46,7 @@ This is by design (the function's purpose is to merge into target_branch), but c
 
 ```python
 _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
-```
+```text
 
 The regex allows `.` characters. While git itself rejects `..` in branch names (it violates refname rules), the regex doesn't prevent `some..branch` from passing validation. Git would reject it at execution time, but the validation is supposed to be defense-in-depth.
 
@@ -62,7 +62,7 @@ The regex allows `.` characters. While git itself rejects `..` in branch names (
 
 ```python
 for _ in range(10):  # bounded to prevent infinite traversal
-```
+```text
 
 The bound is explained in a comment but not in the docstring. Callers have no visibility into this limit.
 
@@ -135,7 +135,7 @@ All git commands execute via `asyncio.create_subprocess_exec` (git_manager.py:10
 
 ```python
 from ..workspace.git_manager import _git_mutex
-```
+```text
 
 The ACP chat model's `_on_fs_write_text_file` handler imports the private `_git_mutex` to coordinate file writes with git operations. This breaks encapsulation — `_git_mutex` is a module-level private symbol not in `__all__`. If git_manager.py refactors the mutex (e.g., makes it instance-level on GitManager), the ACP model breaks silently.
 
@@ -169,7 +169,7 @@ cwd = Path(self.workspace_root or self.cwd or str(Path.cwd()))
 resolved = (cwd / path).resolve()
 if not resolved.is_relative_to(cwd.resolve()):
     raise ValueError(f"Path {path!r} escapes sandbox")
-```
+```text
 
 **MED-02 (from Cycle 1 scope extension):** If both `workspace_root` and `cwd` are `None`, the sandbox boundary falls back to `Path.cwd()` — the API server's process directory. This is a wider sandbox than intended.
 

@@ -7,7 +7,7 @@ maturity: 30
 feature: agent-process-lifecycle
 ---
 
-# Phase 4 Research: Agent Process Lifecycle Management
+## Phase 4 Research: Agent Process Lifecycle Management
 
 **Date:** 2026-02-25
 **Type:** Research
@@ -72,7 +72,7 @@ task, and forward each line to connected WebSocket clients.
 Agent subprocess
   stdout=PIPE ──> asyncio readline task ──> broadcast to WebSocket clients
   stderr=PIPE ──> asyncio readline task ──> broadcast to WebSocket clients
-```
+```text
 
 ### How the Claude Agent SDK does it (reference implementation)
 
@@ -121,7 +121,7 @@ stderr=PIPE)`
      async with asyncio.TaskGroup() as tg:
          tg.create_task(read_stream(process.stdout, "stdout"))
          tg.create_task(read_stream(process.stderr, "stderr"))
-```
+```text
 
 1. **Backpressure:** If WebSocket clients are slow, the relay buffer can grow
    unbounded.
@@ -177,7 +177,7 @@ equivalent of SIGKILL — there is no graceful shutdown opportunity.
 2. If still alive: process.terminate() → wait 2 seconds
 3. If still alive: taskkill /T /F /PID {pid} (kills entire tree)
 4. Always call process.wait() / communicate() afterward to clean up
-```
+```text
 
 ### 1.4 Windows Process Termination: What Actually Works
 
@@ -232,7 +232,7 @@ parent hasn't called`wait()`). However, Windows has analogous problems:
  info['BasicLimitInformation']['LimitFlags'] |= win32job.JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
  win32job.SetInformationJobObject(job, win32job.JobObjectExtendedLimitInformation, info)
  # Assign child processes to this job
-```
+```text
 
 1. **atexit handler:** Register cleanup that iterates all managed processes and
    terminates
@@ -273,7 +273,7 @@ listening and ready to accept HTTP requests?
          except (ConnectionRefusedError, OSError):
              await asyncio.sleep(0.1)
      return False
-```
+```text
 
 1. **HTTP health endpoint probe:** Better than TCP because it confirms the ASGI
    app is
@@ -303,19 +303,21 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0))
         return s.getsockname()[1]
-```
+```text
 
 **Risk:** Race condition — between finding the port and Uvicorn binding to it,
 another
 process could claim it. In practice this is rare but possible.
 
-**Option B: Uvicorn `--port 0`:**
+### Option B: Uvicorn `--port 0`
+
 Uvicorn supports `port=0`which lets the OS pick a free port. However,
 discovering which
 port was assigned requires parsing Uvicorn's stdout output (e.g.,`"Uvicorn
 running on 0.0.0.0:{port}"`).
 
-**Option C: Pre-bind socket, pass file descriptor:**
+### Option C: Pre-bind socket, pass file descriptor
+
 Bind a socket to port 0, extract the assigned port, then pass the socket FD to
 Uvicorn.
 This is atomic and race-free, but more complex. Uvicorn supports `--fd`flag for
@@ -386,7 +388,7 @@ State: DRAINING
   - Gateway polls agent's task list or waits for task completion events
   - After all tasks complete (or drain timeout expires):
     → transition to STOPPING
-```
+```text
 
 **Drain timeout is essential:** A misbehaving agent could hold tasks
 indefinitely. The
@@ -416,7 +418,7 @@ Launch new "coder" at port 8002 (STARTING → RUNNING)
 Update registry: "coder" → port 8002
   ↓ Mark old as DRAINING
 Old "coder" at port 8001 (DRAINING → STOPPING → STOPPED)
-```
+```text
 
 **Key insight for development tool context:** Blue-green is overkill for
 single-developer
@@ -472,7 +474,7 @@ HALF-OPEN (testing):
   - Route ONE request to the agent
   - If success → CLOSED
   - If failure → OPEN (reset cooldown)
-```
+```text
 
 ### Configuration recommendations
 
@@ -517,7 +519,7 @@ From `knowledge/repositories/claude-agent-sdk/src/claude_agent_sdk/types.py`:
 
 ```python
 PermissionMode = Literal["default", "acceptEdits", "plan", "bypassPermissions"]
-```
+```text
 
 | Mode                  | Behavior                                           |
 | --------------------- | -------------------------------------------------- |
@@ -533,7 +535,7 @@ CanUseTool = Callable[
     [str, dict[str, Any], ToolPermissionContext],
     Awaitable[PermissionResult]
 ]
-```
+```text
 
 This callback receives:
 
@@ -557,7 +559,7 @@ class PermissionUpdate:
     mode: PermissionMode | None = None
     directories: list[str] | None = None
     destination: PermissionUpdateDestination | None = None
-```
+```text
 
 **Key insight:** The `CanUseTool` callback is invoked **per tool call at
 runtime**.
@@ -574,7 +576,7 @@ in-memory config, or API to make decisions.
 class SDKControlSetPermissionModeRequest(TypedDict):
     subtype: Literal["set_permission_mode"]
     mode: str
-```
+```text
 
 ### 3.3 ACP SDK Permission Model
 
@@ -590,7 +592,7 @@ class PermissionOption(BaseModel):
     kind: PermissionOptionKind
     name: str        # Human-readable label
     option_id: str   # Unique identifier
-```
+```text
 
 ### Default permission options
 
@@ -598,7 +600,7 @@ class PermissionOption(BaseModel):
 ("Approve", "allow_once"),
 ("Approve for session", "allow_always"),
 ("Reject", "reject_once")
-```
+```text
 
 **PermissionBroker** — the runtime permission handler:
 
@@ -612,7 +614,7 @@ class PermissionOption(BaseModel):
 ```python
 class RequestPermissionResponse(BaseModel):
     outcome: DeniedOutcome | AllowedOutcome
-```
+```text
 
 The ACP model is inherently runtime-dynamic — each tool call triggers a
 permission
@@ -627,7 +629,7 @@ request that goes through the broker to the user (or an automated policy).
 ```text
 Agent: "coder"
   Permission Mode: [default ▼]  (default | acceptEdits | plan | bypassPermissions)
-```
+```yaml
 
 **Tier 2: Tool-Level Allow/Deny Rules** (per agent)
 
@@ -639,7 +641,7 @@ Agent: "coder"
     ☑ Write      [ask   ▼]  Rule: —
     ☐ WebFetch   [deny  ▼]  Rule: —
     ☑ Read       [allow ▼]  Rule: —
-```
+```yaml
 
 **Tier 3: Directory Scope** (per agent)
 
@@ -649,7 +651,7 @@ Agent: "coder"
     + Y:/code/vaultspec-worktrees/main
     + Y:/code/vaultspec-a2a-worktrees/main
     - Y:/code/secret-project  (blocked)
-```
+```text
 
 ### Recommended granularity for our use case
 
@@ -692,7 +694,7 @@ Supervisord defines the most well-established process lifecycle model:
      │       FATAL
      │          │
      └──── (manual restart)
-```
+```text
 
 ### States
 
@@ -775,7 +777,7 @@ Windows:
                  │    └── (retry) ──────┘
                  v
               FATAL
-```
+```text
 
 ### States for our agent process manager
 
@@ -804,13 +806,13 @@ class RestartPolicy:
     backoff_max_ms: int = 30000       # Maximum delay
     backoff_multiplier: float = 2.0   # Exponential factor
     stable_threshold_s: float = 30.0  # Uptime before resetting retry count
-```
+```text
 
 ### Backoff calculation
 
 ```text
 delay = min(backoff_base_ms * (backoff_multiplier ^ retry_count), backoff_max_ms)
-```
+```yaml
 
 With defaults: 1s, 2s, 4s (then FATAL if max_retries=3).
 

@@ -73,9 +73,10 @@ def test_conversation_messages_passed_after_system() -> None:
     assert messages[2] is ai_msg
 
 
-def test_build_supervisor_messages_adds_workspace_rules() -> None:
-    workspace_root = Path(".tmp-supervisor-node-rules")
-    rules_dir = workspace_root / ".vaultspec" / "rules" / "rules"
+def test_build_supervisor_messages_adds_workspace_rules(
+    tmp_path: Path,
+) -> None:
+    rules_dir = tmp_path / ".vaultspec" / "rules" / "rules"
     rules_dir.mkdir(parents=True)
     (rules_dir / "project.md").write_text(
         "# Repo Rules\n\nDo the thing.\n",
@@ -85,7 +86,7 @@ def test_build_supervisor_messages_adds_workspace_rules() -> None:
     messages = _build_supervisor_messages(
         state=_make_state(),
         full_prompt="You are the supervisor.",
-        workspace_root=workspace_root,
+        workspace_root=tmp_path,
     )
 
     assert any(

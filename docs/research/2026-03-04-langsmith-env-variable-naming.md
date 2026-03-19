@@ -77,7 +77,7 @@ uses `LANGSMITH_*` exclusively:
 LANGSMITH_TRACING=true
 LANGSMITH_API_KEY=<your-api-key>
 LANGSMITH_WORKSPACE_ID=<your-workspace-id>
-```
+```text
 
 The LangSmith SDK README (authoritative for SDK configuration) uses `LANGSMITH_*`:
 
@@ -88,7 +88,7 @@ os.environ["LANGSMITH_ENDPOINT"] = "https://api.smith.langchain.com"
 os.environ["LANGSMITH_API_KEY"] = "<YOUR-LANGSMITH-API-KEY>"
 # os.environ["LANGSMITH_PROJECT"] = "My Project Name"  # Optional: "default" if not set
 # os.environ["LANGSMITH_WORKSPACE_ID"] = "<YOUR-WORKSPACE-ID>"  # Required for org-scoped API keys
-```
+```yaml
 
 Source: <https://github.com/langchain-ai/langsmith-sdk/blob/main/python/README.md>
 
@@ -192,7 +192,7 @@ LANGSMITH_ENDPOINT=https://api.smith.langchain.com
 
 # Note: LANGCHAIN_TRACING_V2, LANGCHAIN_API_KEY, LANGCHAIN_PROJECT are
 # legacy aliases accepted by the SDK but no longer recommended.
-```
+```text
 
 ---
 

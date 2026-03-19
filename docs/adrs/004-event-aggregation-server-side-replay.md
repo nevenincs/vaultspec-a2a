@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-004: Event Aggregation & State Replay (LangGraph Core)
+## ADR-004: Event Aggregation & State Replay (LangGraph Core)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

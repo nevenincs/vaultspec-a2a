@@ -22,17 +22,17 @@
 
 **File:** `instrumentation.py:11-12, 26-27`
 
-```
+```text
 LangSmith tracing is configured separately via environment variables
 (``LANGCHAIN_TRACING_V2`` / ``LANGCHAIN_API_KEY``)
-```
+```text
 
 And lines 78-83:
 
 ```python
 _LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in (...)
 _LANGSMITH_PROJECT = os.environ.get("LANGCHAIN_PROJECT", "default")
-```
+```text
 
 The code reads `LANGCHAIN_TRACING_V2` and `LANGCHAIN_PROJECT` but the INFRA sprint established `LANGSMITH_*` as the canonical names. The Settings class in `config.py` uses `AliasChoices` to accept both, but this module reads `os.environ` directly (accepted exception per ENV-BYPASS policy) and only checks the legacy names. If a user sets only `LANGSMITH_TRACING=true`, this module won't detect it.
 
@@ -42,7 +42,7 @@ The code reads `LANGCHAIN_TRACING_V2` and `LANGCHAIN_PROJECT` but the INFRA spri
 
 ```python
 from .instrumentation import _SDK_DISABLED, get_tracer
-```
+```text
 
 Importing a private constant (leading underscore) from a sibling module. This should be made public or exposed via the facade.
 
@@ -56,7 +56,7 @@ with _get_tracer().start_as_current_span(...) as span:
     return response
 except Exception as exc:
     span.set_status(StatusCode.ERROR, str(exc))  # span from with block
-```
+```text
 
 The `except` block at line 150 catches exceptions from outside the `with` block (after the context manager has exited). If the `with` block's `__exit__` raises, `span` would still be in scope but the span may already be ended. In practice this works because OTel spans are lenient about post-end operations, but it's architecturally fragile.
 
@@ -68,7 +68,7 @@ The `except` block at line 150 catches exceptions from outside the `with` block 
 
 ```python
 _SERVICE_VERSION = os.environ.get("OTEL_SERVICE_VERSION", "0.1.0")
-```
+```text
 
 Same hardcoded version as `websocket.py:83`. Should use `importlib.metadata.version()` for consistency.
 
@@ -92,7 +92,7 @@ Same hardcoded version as `websocket.py:83`. Should use `importlib.metadata.vers
 
 ```python
 time.sleep(2)
-```
+```text
 
 `print_trace_summary()` is a synchronous function that blocks with `time.sleep(2)` in a polling loop (up to 10s total). While this function is designed for CLI runner scripts (not async contexts), if called from an async context it would block the event loop.
 
@@ -102,7 +102,7 @@ time.sleep(2)
 
 ```python
 filter=f'eq(metadata_key, "thread_id") and eq(metadata_value, "{thread_id}")',
-```
+```text
 
 The `thread_id` is interpolated directly into the filter string. If `thread_id` contains special characters (quotes, parentheses), this could break the filter syntax or potentially inject filter predicates. Thread IDs are typically hex UUIDs so practical risk is low, but this is not sanitized.
 
@@ -126,7 +126,7 @@ The facade exports enums and logging but not `print_trace_summary` from `trace.p
 
 ```python
 # Concrete model name mapping as of February 2026
-```
+```text
 
 This date comment will grow stale. The mapping itself is fine but the date stamp suggests it should be reviewed periodically.
 
@@ -146,7 +146,7 @@ This date comment will grow stale. The mapping itself is fine but the date stamp
 
 ```python
 _shared_client._transport.__del__()  # type: ignore[union-attr]
-```
+```python
 
 This was previously flagged in LG-030 (LangGraph Alignment Sprint) for the MCP server module. Calling `__del__()` directly is fragile and non-standard. The correct cleanup is `await _shared_client.aclose()` in an async context, or `_shared_client.close()` in a sync context.
 
@@ -158,7 +158,7 @@ The comment says "Synchronous close is fine in test teardown" but `__del__` is n
 
 ```python
 _KNOWN_PRESETS: frozenset[str] = discover_team_preset_ids()
-```
+```python
 
 This runs `discover_team_preset_ids()` at module import time, which globs `presets/teams/*.toml`. If presets are added/removed at runtime (e.g., workspace-local presets), the MCP server won't see them until the process restarts. The `start_thread` tool rejects unknown presets based on this stale set.
 
@@ -169,14 +169,14 @@ This runs `discover_team_preset_ids()` at module import time, which globs `prese
 ```python
 if workspace_root is not None:
     payload["workspace_root"] = workspace_root
-```
+```text
 
 The `CreateThreadRequest` Pydantic model expects `workspace_root` inside a `metadata` object (as part of `ThreadMetadata`), not as a top-level field. However, looking at the model:
 
 ```python
 class CreateThreadRequest(BaseModel):
     metadata: ThreadMetadata | None = None
-```
+```text
 
 The `workspace_root` at the top level would be silently ignored by Pydantic (it's not a declared field). The MCP server's `start_thread` tool therefore never properly sends `workspace_root` to the API, meaning vault context injection is broken when starting threads via MCP.
 
@@ -200,7 +200,7 @@ Every tool function has an identical 4-branch `except` block handling `ConnectEr
 
 ```python
 app.mount("/mcp", mcp_server.sse_app())
-```
+```python
 
 This works because `mcp_server.sse_app()` calls `mcp.sse_app()` on the FastMCP instance. But the import path `from ..protocols import mcp as mcp_server` means the consumer accesses the FastMCP instance directly. The facade exports are correct for this pattern, but it could be made more explicit.
 

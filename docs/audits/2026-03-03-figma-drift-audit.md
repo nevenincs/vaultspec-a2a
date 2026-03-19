@@ -5,7 +5,7 @@ relevance: 10
 description: "Audit checking for drifts between the Figma Make master UI generation and the local `.figma.tsx` synced React UI codebase."
 ---
 
-# Figma Drift Audit
+## Figma Drift Audit
 
 **Date:** 2026-03-03
 **Target:** `src/ui/src/app/*` -> `figma://make/source/EAs7Eh1lxKVzBqzke5HASU/src/app/*`

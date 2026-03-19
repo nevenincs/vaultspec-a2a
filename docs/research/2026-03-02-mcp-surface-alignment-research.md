@@ -131,7 +131,7 @@ The A2A protocol mandates these core operations for a compliant agent server:
 | `contextId` grouping of related tasks              | No explicit contextId field                 | Missing — thread_id serves this purpose implicitly |
 | Artifacts as formal outputs                        | ArtifactUpdateEvent + ArtifactSnapshot      | Present in wire schema, no MCP tool to retrieve    |
 
-**A2A operations not mandated by the protocol but highly relevant for coding agents:**
+### A2A operations not mandated by the protocol but highly relevant for coding agents
 
 - Listing tasks/threads by contextId (workspace session correlation)
 - Streaming artifact content incrementally
@@ -185,18 +185,18 @@ The A2A protocol mandates these core operations for a compliant agent server:
 
 ### Post-hardening / MEDIUM
 
-5. `list_team_presets` — new tool (enumeration with descriptions)
-6. `cancel_thread` — new tool (requires new REST endpoint first)
-7. `get_thread_status` — enrich with plan entries and pending permissions
-8. `get_pending_permissions` — new tool (requires worker wiring of team/status first)
-9. `start_thread` — add `feature_tag` parameter
+1. `list_team_presets` — new tool (enumeration with descriptions)
+2. `cancel_thread` — new tool (requires new REST endpoint first)
+3. `get_thread_status` — enrich with plan entries and pending permissions
+4. `get_pending_permissions` — new tool (requires worker wiring of team/status first)
+5. `start_thread` — add `feature_tag` parameter
 
 ### Low / Deferred
 
-10. `send_message` — add `agent_id`
-11. `send_message` — add input size cap
-12. `get_thread_status` — add active agent name
-13. `/.well-known/agent.json` — A2A AgentCard (external interop only)
+1. `send_message` — add `agent_id`
+2. `send_message` — add input size cap
+3. `get_thread_status` — add active agent name
+4. `/.well-known/agent.json` — A2A AgentCard (external interop only)
 
 ---
 
@@ -224,7 +224,7 @@ async def start_thread(
     autonomous: bool = True,
     feature_tag: str | None = None,
 ) -> str:
-```
+```typescript
 
 The MCP tool should construct `metadata` only when `workspace_root` is provided, keeping the interface clean.
 
@@ -234,7 +234,7 @@ Must wrap `POST /permissions/{request_id}/respond`. The `request_id` is embedded
 
 ```python
 async def respond_to_permission(request_id: str, option_id: str) -> str:
-```
+```text
 
 Returns confirmation or error. This tool is what allows a supervised thread to proceed after an agent requests approval for a destructive operation.
 

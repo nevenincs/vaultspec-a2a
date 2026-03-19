@@ -8,7 +8,7 @@ maturity: 20
 summary: 'Comparative survey of agent UIs, terminal-in-browser solutions, and real-time dashboard projects with star counts and tech stack recommendations.'
 ---
 
-# Phase 7: Agent UI, Terminal-in-Browser, and Real-time Dashboard Survey
+## Phase 7: Agent UI, Terminal-in-Browser, and Real-time Dashboard Survey
 
 **Date**: 2026-02-25
 **Type**: Research

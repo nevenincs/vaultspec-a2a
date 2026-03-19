@@ -10,7 +10,7 @@ related:
   - docs/adrs/013-team-composition-topology.md
 ---
 
-# ADR-014: Thread Metadata & Context Injection
+## ADR-014: Thread Metadata & Context Injection
 
 **Date:** 2026-02-28
 **Status:** Proposed
@@ -47,13 +47,13 @@ Feature Request
     ├─ Plan       → .vault/plan/yyyy-mm-dd-<feature>-<phase>-plan.md
     └─ Execute    → .vault/exec/yyyy-mm-dd-<feature>/yyyy-mm-dd-<feature>-<phase>-<step>.md
                   → .vault/exec/yyyy-mm-dd-<feature>/yyyy-mm-dd-<feature>-review.md
-```
+```text
 
 Every document in the pipeline carries a YAML frontmatter `tags:` field:
 
 ```yaml
 tags: ['#plan', '#auth-flow']
-```
+```text
 
 The `feature_tag` (e.g., `auth-flow`) is the grouping key. All four agent
 presets (supervisor, planner, coder, reviewer) reference this convention in
@@ -101,7 +101,7 @@ class ThreadMetadata(BaseModel):
     context_refs: list[ContextRef] = Field(default_factory=list)
                                 # Explicit document references. Auto-discovery (§2.4)
                                 # populates this if the caller provides only feature_tag.
-```
+```text
 
 ### 2.2 CreateThreadRequest Amendment
 
@@ -117,7 +117,7 @@ class CreateThreadRequest(BaseModel):
     # DEPRECATED (ADR-013 §6 — kept for backward compat):
     provider: Provider | None = None
     model: Model | None = None
-```
+```text
 
 When `metadata` is `None`, the orchestrator operates in legacy mode —
 identical to today's behaviour (no context injection, no workspace binding,
@@ -172,7 +172,7 @@ graph_input = {
         HumanMessage(content=body.initial_message),
     ]
 }
-```
+```text
 
 **Why a SystemMessage in graph_input, not a template variable in TOML?**
 
@@ -195,7 +195,7 @@ preamble lives in the message stream, not the system prompt, which:
 [2] SystemMessage(content=context_preamble)  ← from graph_input, first in state["messages"]
 [3] HumanMessage(content=initial_message)    ← from graph_input, second in state["messages"]
 [4..] ...subsequent messages...              ← from prior node outputs
-```
+```text
 
 The role definition (TOML) sits above the project context (preamble) which
 sits above the conversation. This is the correct priority ordering for LLM
@@ -232,7 +232,7 @@ def discover_context_refs(
                 stage=stage,
             ))
     return refs
-```
+```text
 
 Discovery is filename-based (glob), not content-based (no YAML frontmatter
 parsing). This is O(1) filesystem calls per stage pattern — fast enough for
@@ -266,7 +266,7 @@ class ThreadModel(Base):
     metadata: Mapped[str | None] = mapped_column(Text, default=None)
 
     # ... relationships unchanged ...
-```
+```text
 
 **Migration note:** The column rename (`agent_config` → `metadata`) is
 safe because `agent_config` was never populated — all existing rows have
@@ -278,7 +278,7 @@ A unique index on `nickname` prevents collision:
 __table_args__ = (
     Index("ix_threads_nickname", "nickname", unique=True),
 )
-```
+```text
 
 Where `nickname` is extracted as a generated/virtual column or enforced at
 the application layer. For SQLite (no virtual columns on expressions), the
@@ -301,7 +301,7 @@ for worker_ref in team_config.workers:
     agent_configs[worker_ref.agent_id] = load_agent_config(
         worker_ref.agent_id, workspace_root=ws_root
     )
-```
+```text
 
 This activates the workspace-local override paths that were already
 implemented but never invoked (ADR-012 §2.8, ADR-013 §2.8):
@@ -309,7 +309,7 @@ implemented but never invoked (ADR-012 §2.8, ADR-013 §2.8):
 ```text
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (now reachable)
 2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml               (bundled fallback)
-```
+```text
 
 ### 2.7 ACP Session Workspace Binding
 
@@ -323,7 +323,7 @@ process = await asyncio.create_subprocess_shell(
     stdin=PIPE, stdout=PIPE, stderr=PIPE,
     cwd=str(cwd),      # ← workspace-scoped
 )
-```
+```text
 
 `_sandbox_path()` validation uses this same `cwd` root. `AcpChatModel`
 | gains a `workspace_root: Path | None = None` Pydantic field, set by |
@@ -345,7 +345,7 @@ class ThreadSummary(BaseModel):
     feature_tag: str | None = None
     source_branch: str | None = None
     callee: str | None = None
-```
+```yaml
 
 These fields power the thread list sidebar: display nickname instead of
 UUID, show the feature tag as a badge, show the branch, show a callee icon.
@@ -354,7 +354,7 @@ UUID, show the feature tag as a badge, show the branch, show a callee icon.
 
 ```text
 GET /threads/{thread_id}/metadata  →  ThreadMetadata | 404
-```
+```text
 
 Returns the full `ThreadMetadata` object for a thread. Used by the
 inspector panel for detailed provenance display.
@@ -371,7 +371,7 @@ class ConnectedEvent(BaseModel):
     last_sequence: int
     # NEW:
     metadata: ThreadMetadata | None = None
-```
+```text
 
 ### 2.9 Nickname Generation
 
@@ -393,7 +393,7 @@ def generate_nickname(
     if feature_tag:
         return f"{feature_tag}-{topology}-{short_hash}"
     return f"thread-{topology}-{short_hash}"
-```
+```text
 
 This produces names like `auth-flow-star-a3f2` or `refactor-pipeline-b7c1`
 — short, unique, and immediately recognizable in the UI.
@@ -462,7 +462,7 @@ config = {
         "metadata": metadata.model_dump(),
     }
 }
-```
+```yaml
 
 Rejected because: (a) `configurable` is meant for LangGraph-internal
 routing keys, not application-level metadata; (b) it would be invisible
@@ -477,7 +477,7 @@ Loading all context documents and injecting their contents as messages:
 for ref in context_refs:
     content = (workspace_root / ref.path).read_text()
     graph_input["messages"].append(SystemMessage(content=content))
-```
+```yaml
 
 Rejected because: (a) research documents can be 5,000–20,000 tokens each;
 (b) 3–5 documents would consume 15,000–100,000 tokens before any agent
@@ -494,7 +494,7 @@ Adding stage-to-role mappings in the team TOML:
 planner = ["research", "adr"]
 coder   = ["plan"]
 reviewer = ["plan", "exec"]
-```
+```yaml
 
 Rejected for v1 because: (a) it couples document semantics to team config;
 (b) it requires changes to graph compilation (different context per node);
@@ -571,7 +571,7 @@ src/vaultspec_a2a/providers/
 │                        #          _start_process() uses it for CWD
 ├── factory.py           # AMENDED: ProviderFactory.create() accepts workspace_root
 └── ...
-```
+```text
 
 ## 7. References
 

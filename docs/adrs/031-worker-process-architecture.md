@@ -10,7 +10,7 @@ related:
   - docs/adrs/021-persistent-task-queue-schema.md
 ---
 
-# ADR-031: Worker Process Architecture
+## ADR-031: Worker Process Architecture
 
 **Date:** 2026-03-04
 **Status:** Accepted
@@ -40,7 +40,7 @@ as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
 
 ### 2.1 Process Topology
 
-```
+```text
 ┌──────────────────────────────────────┐      ┌────────────────────────┐
 │  Gateway (src/vaultspec_a2a/api/)          │      │  Worker (src/vaultspec_a2a/worker/)  │
 │  FastAPI app  :8000                  │ HTTP │  FastAPI app  :8001     │
@@ -51,7 +51,7 @@ as "ADR-019" which is incorrect — ADR-019 covers TeamState/SDD fields).
          ▲                                              │
          │               SQLite WAL (shared)           │
          └─────────────────────────────────────────────┘
-```
+```text
 
 The gateway dispatches a graph run by POSTing a `DispatchRequest` to
 the worker's `/dispatch` endpoint. The worker executes the graph and forwards
@@ -109,7 +109,7 @@ The gateway supports two worker deployment modes:
 
 ### 2.5 Worker Module Structure
 
-```
+```text
 src/vaultspec_a2a/worker/
   __init__.py       Public facade: exports WorkerApp, Executor, WorkerBridge
   __main__.py       Entry point: python -m lib.worker
@@ -119,7 +119,7 @@ src/vaultspec_a2a/worker/
   health.py         /health endpoint implementation
   tests/
     test_executor.py  Unit tests for Executor (MemorySaver, FakeListChatModel)
-```
+```text
 
 ### 2.6 Executor Responsibilities
 
@@ -217,7 +217,7 @@ existing `ServerEvent`/`DispatchRequest` schemas without code generation.
 
 ## 6. Module Hierarchy
 
-```
+```text
 lib/
   worker/
     __init__.py     EXPORTS: WorkerApp, Executor, WorkerBridge (ADR-009 facade)
@@ -226,7 +226,7 @@ lib/
     ipc.py          WorkerBridge; httpx.AsyncClient; event forward + heartbeat
     health.py       /health endpoint; returns {"status": "ok", "active_threads": N}
     __main__.py     python -m lib.worker entry point
-```
+```text
 
 ## 7. References
 

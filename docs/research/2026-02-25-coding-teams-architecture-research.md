@@ -8,7 +8,7 @@ maturity: 35
 summary: 'End-to-end system architecture analysis covering control modes, process topology, tool usage patterns, filesystem scoping, and the two-interface design.'
 ---
 
-# Research: Architecture & App Considerations for Coding Agent Teams
+## Research: Architecture & App Considerations for Coding Agent Teams
 
 **Date**: 2026-02-25
 **Status**: Preliminary Investigation
@@ -35,7 +35,7 @@ CLI ◄──SSE: TaskArtifactUpdate──  file: src/auth.py (partial)
 CLI ◄──SSE: TaskStatusUpdate────  "working: reviewing code..."
 CLI ◄──SSE: TaskArtifactUpdate──  file: src/auth.py (final)
 CLI ◄──SSE: TaskStatusUpdate────  "completed"
-```
+```text
 
 **What the a2a-samples CLI host actually does** (`cli/__main__.py`):
 
@@ -69,7 +69,7 @@ CLI ──POST /setTaskCallback───────► {url: "http://localhost:
 ... later ...
 Orchestrator ──POST /notify──► CLI webhook listener
   {taskId: "abc", status: "completed", artifacts: [...]}
-```
+```text
 
 **What the a2a-samples CLI host does for push notifications**:
 
@@ -103,7 +103,7 @@ CLI ◄──elicitation: "Delete these 3 files? [y/n]"
 CLI ──respond: "y"────────────► MCP Server
 CLI ──poll_task("abc")─────► MCP Server
 CLI ◄──{status: "completed", result: {...}}
-```
+```text
 
 **This is the most promising pattern** because:
 
@@ -185,7 +185,7 @@ Neither sample provides:
 │ Chat / Command Input                             │
 │ > "Also add rate limiting to the auth module"    │
 └─────────────────────────────────────────────────┘
-```
+```text
 
 ---
 
@@ -208,7 +208,7 @@ Neither sample provides:
 │  A2AStarletteApplication            │
 │  EventQueue per task                │
 └──────────────────────────────────────┘
-```
+```text
 
 - All agents share one process, one port
 - Agents are `AgentExecutor` implementations, not separate servers
@@ -227,7 +227,7 @@ Neither sample provides:
 │                │  │ AgentExecutor  │  │ AgentExecutor  │
 │ A2A Client ────┼──┼────────────────┼──► A2A Server     │
 └────────────────┘  └────────────────┘  └────────────────┘
-```
+```text
 
 - Each agent is a separate Uvicorn process
 - Full A2A protocol between them (Agent Cards, Tasks, Messages)
@@ -250,7 +250,7 @@ Neither sample provides:
 │                                               │
 │  Uvicorn (port 9000) ← MCP + A2A Server     │
 └──────────────────────────────────────────────┘
-```
+```text
 
 - Orchestrator is the only long-lived process
 - Agents spawned as subprocesses on demand
@@ -321,7 +321,7 @@ on separate ranges.
 │ MCP Client   │    │ MCP Client   │
 │ (for tools)  │    │ (for tools)  │
 └──────────────┘    └──────────────┘
-```
+```text
 
 ---
 
@@ -344,7 +344,7 @@ async def read_file(path: str) -> str:
 async def write_file(path: str, content: str) -> str:
     Path(path).write_text(content)
     return f"Written to {path}"
-```
+```text
 
 Results flow back to the LLM within the same execution context. No protocol
 overhead.
@@ -359,7 +359,7 @@ async with sse_client(mcp_url) as (read, write):
         await session.initialize()
         tools = await session.list_tools()      # discover
         result = await session.call_tool(name, args)  # execute
-```
+```text
 
 This is the pattern for accessing external tool servers — filesystem, git,
 build systems.
@@ -373,7 +373,7 @@ async def send_message(agent_name: str, message: str, tool_context: ToolContext)
     client = self.remote_agent_connections[agent_name]
     response = await client.send_message(request_message)
     # Store task_id, context_id in tool_context.state for next call
-```
+```text
 
 The LLM sees `send_message`as a tool. It doesn't know it's calling another
 agent.
@@ -405,7 +405,7 @@ Reviewer Agent:
   - read_file (any path)
   - read_diff (worktree vs main)
   - NO write_file                 ← reviews, doesn't modify
-```
+```yaml
 
 **Implementation approach**: Each agent gets its own MCP server instance with
 a scoped filesystem root and allowed command set:
@@ -423,7 +423,7 @@ reviewer_mcp = create_scoped_mcp_server(
     allowed_commands=["git diff", "ruff check"],
     write_enabled=False,
 )
-```
+```text
 
 ### 4.3 Workspace Isolation via Git Worktrees
 
@@ -436,7 +436,7 @@ The strongest isolation pattern for concurrent coding agents:
 │   │   └── (full repo checkout on branch task-001)
 │   └── task-002/           ← Coder B works here
 │       └── (full repo checkout on branch task-002)
-```
+```text
 
 - Each coding task gets a worktree with a dedicated branch
 - Agents can't accidentally overwrite each other's work
@@ -464,7 +464,7 @@ await event_queue.enqueue_event(TaskArtifactUpdateEvent(
     ),
     last_chunk=True,
 ))
-```
+```yaml
 
 The JS coder sample shows the streaming pattern: emit each file as an
 artifact as soon as it's complete, don't wait for all files.
@@ -482,7 +482,7 @@ bidirectional streaming with permission gates:
 Agent ──session/update──► Client     (continuous streaming, no response needed)
 Agent ──request_permission──► Client  (BLOCKS agent until user responds)
 Client ──prompt──► Agent              (user input, not streamed)
-```
+```yaml
 
 **Key insight**: The `request_permission`RPC **pauses the agent**. The agent
 literally waits on a JSON-RPC response. This is the cleanest human-in-the-loop
@@ -504,7 +504,7 @@ for notification in agent_stream:
 
 # UI subscribes to snapshot changes
 accumulator.subscribe(lambda snap, notif: render(snap))
-```
+```yaml
 
 **Why this matters**: For a team of agents, each agent gets its own
 `SessionAccumulator`. The UI subscribes to all of them. No manual state
@@ -526,7 +526,7 @@ class TeamOrchestrator:
             description=f"{agent_id} wants to: {tool_call.title}"
         )
         return response
-```
+```typescript
 
 The user sees permission requests from all agents in a unified queue.
 Each agent independently pauses until its request is approved.
@@ -552,7 +552,7 @@ MCP Tool Surface:
   team/approve(session_id, request_id, decision)
   team/message(session_id, text) → send instruction to team
   team/cancel(session_id)
-```
+```typescript
 
 Using MCP experimental tasks, `team/create` returns immediately with a
 task ID. The CLI can poll for status. If a permission request comes in,
@@ -569,7 +569,7 @@ WebSocket Events:
   agent_artifact_update(agent_id, artifact)
   permission_request(agent_id, tool_call, options)
   team_progress(overall_status, task_graph)
-```
+```text
 
 The dashboard shows per-agent panels, live code streaming, a permission
 queue, and a chat input for sending instructions to the team.
@@ -610,7 +610,7 @@ queue, and a chat input for sending instructions to the team.
                             │ Agent     │ │ Agent      │
                             │ (subprocess)│ (subprocess)│
                             └───────────┘ └────────────┘
-```
+```text
 
 ---
 
@@ -664,7 +664,7 @@ Each coding agent would be:
 │                                       │
 │  EventQueue → streams results back   │
 └──────────────────────────────────────┘
-```
+```text
 
 ---
 

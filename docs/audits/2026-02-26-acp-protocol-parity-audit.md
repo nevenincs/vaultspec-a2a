@@ -31,7 +31,7 @@ Used by **Toad** and **acp-python-sdk**. Bidirectional JSON-RPC:
 Client → stdin:  {"jsonrpc":"2.0","id":1,...}\n
 Agent  → stdout: {"jsonrpc":"2.0","id":1,"result":{...}}\n
 Agent  → stdout: {"jsonrpc":"2.0","method":"session/update",...}\n
-```
+```text
 
 ### Format B: Streaming JSON (claude-agent-sdk)
 

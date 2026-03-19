@@ -7,7 +7,7 @@ maturity: 70
 feature: architecture-gaps
 ---
 
-# Architecture Gaps Research
+## Architecture Gaps Research
 
 **Date**: 2026-02-25
 **Domain**: System Architecture
@@ -47,7 +47,7 @@ class TeamState(TypedDict):
 # The orchestrator compiles the state and starts the Coder with a clean context
 # initialized ONLY with the explicitly required state, resetting token usage to ~1k.
 coder_initial_prompt = format_state_for_prompt(team_state)
-```
+```text
 
 ## 2. Git Worktree Merge Strategy (Gap G10)
 
@@ -82,7 +82,7 @@ isolation and cleanup.
 ```powershell
 # Create a physically separate folder linked to a new isolated branch
 git worktree add ../.worktrees/agent-coder-123 -b agent/coder/123
-```
+```text
 
 1. **Merge Strategy (Sequential Fast-Forward/Rebase)**:
    Once the Reviewer Agent signs off, the Orchestrator executes a rebase to keep
@@ -93,7 +93,7 @@ cd /main/repo
 git merge --ff-only agent/coder/123
 # If ff fails due to concurrency, execute rebase:
 # cd ../.worktrees/agent-coder-123 && git rebase main
-```
+```text
 
 1. **Cleanup Policy (Mandatory)**:
    To prevent disk exhaustion on agent failure, the `ProcessManager`must
@@ -102,4 +102,4 @@ git merge --ff-only agent/coder/123
 ```powershell
 git worktree remove --force ../.worktrees/agent-coder-123
 git branch -D agent/coder/123
-```
+```text

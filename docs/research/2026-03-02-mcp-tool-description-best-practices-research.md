@@ -46,7 +46,7 @@ def get_weather(city: str) -> str: ...
 
 @mcp.tool()
 def sum(a: int, b: int) -> int: ...
-```
+```text
 
 ### 2.2 Cross-Platform Patterns
 
@@ -114,7 +114,7 @@ The MCP specification and documentation recommend:
 Based on all three sources, a well-crafted tool description should follow
 this structure:
 
-```
+```text
 [1-sentence purpose statement — what this tool does]
 
 [1-2 sentences on when to use it and when NOT to use it]
@@ -122,7 +122,7 @@ this structure:
 [Caveats, limitations, side effects — what the user should know]
 
 [Return format — what the output looks like and what fields mean]
-```
+```text
 
 **Example — good description:**
 
@@ -142,7 +142,7 @@ async def start_thread(initial_message: str, team_preset: str | None = None) -> 
     Returns: A plain-text confirmation containing the thread ID, team preset
     name, and URLs for monitoring the thread via REST and WebSocket.
     """
-```
+```text
 
 **Example — bad description (too terse):**
 
@@ -150,7 +150,7 @@ async def start_thread(initial_message: str, team_preset: str | None = None) -> 
 @mcp.tool()
 async def start_thread(initial_message: str) -> str:
     """Start a new thread."""
-```
+```text
 
 ### 3.5 Description Length Guidance
 
@@ -180,7 +180,7 @@ def get_weather(
     unit: str = "celsius" # default value makes it optional
 ) -> str:
     """Get weather for a city."""
-```
+```text
 
 For richer parameter descriptions, use Pydantic `Field`:
 
@@ -190,7 +190,7 @@ from pydantic import Field
 class WeatherData(BaseModel):
     temperature: float = Field(description="Temperature in Celsius")
     humidity: float = Field(description="Humidity percentage")
-```
+```text
 
 ### 4.2 Cross-Provider Parameter Patterns
 
@@ -205,37 +205,37 @@ class WeatherData(BaseModel):
 
 1. **Always include a format example** for string parameters:
 
-   ```
+   ```text
    "The thread ID returned by start_thread, e.g. '550e8400-e29b-41d4-a716-446655440000'"
-   ```
+   ```text
 
 2. **State valid values explicitly** for constrained parameters:
 
-   ```
+   ```yaml
    "Team preset ID. Valid values: 'vaultspec-adaptive-coder', 'vaultspec-solo-coder', etc.
     Use list_team_presets to discover available presets."
-   ```
+   ```text
 
 3. **Document what happens with None/default** for optional parameters:
 
-   ```
+   ```text
    "Workspace root path. If omitted, context injection is disabled and the
     thread runs without project-specific files."
-   ```
+   ```text
 
 4. **Cross-reference related tools** in parameter descriptions:
 
-   ```
+   ```text
    "The thread_id returned by start_thread. Use list_threads to find
     existing thread IDs."
-   ```
+   ```text
 
 5. **State constraints in natural language** (LLMs parse this better than
    raw JSON Schema):
 
-   ```
+   ```text
    "Maximum 32,000 characters. Longer messages are rejected."
-   ```
+   ```text
 
 ---
 
@@ -247,13 +247,13 @@ class WeatherData(BaseModel):
 
 Recommended pattern:
 
-```
+```yaml
 Returns: List of thread objects, each containing:
   - thread_id (str): Unique thread identifier
   - status (str): One of 'running', 'completed', 'failed', 'cancelled'
   - title (str): Thread title (first 80 chars of initial message)
   - created_at (str): ISO 8601 timestamp
-```
+```text
 
 ### 5.2 Structured vs. Plain-Text Returns
 
@@ -318,7 +318,7 @@ Apply this checklist when reviewing each tool in `src/vaultspec_a2a/protocols/mc
 
 ```python
 """Start a new Vaultspec agent team workflow. Returns immediately with thread_id."""
-```
+```text
 
 **Issues**:
 
@@ -331,7 +331,7 @@ Apply this checklist when reviewing each tool in `src/vaultspec_a2a/protocols/mc
 
 ```python
 """Query the current status and message count of a thread."""
-```
+```text
 
 **Issues**:
 
@@ -344,7 +344,7 @@ Apply this checklist when reviewing each tool in `src/vaultspec_a2a/protocols/mc
 
 ```python
 """Send a follow-up message into an existing thread (async, returns 202)."""
-```
+```text
 
 **Issues**:
 

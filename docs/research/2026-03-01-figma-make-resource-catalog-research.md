@@ -182,7 +182,7 @@ All 28 component mappings (27 files) are defined and parse cleanly:
 ```bash
 npx figma connect publish --dry-run --config figma.config.json
 → 28 components detected, 0 warnings
-```
+```yaml
 
 **Publish blocker**: `FIGMA_ACCESS_TOKEN`needs "Code Connect: Write" scope.
 Regenerate at figma.com/settings, then run`npm run figma:publish`in`src/ui/`.

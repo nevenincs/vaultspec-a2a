@@ -16,7 +16,7 @@
 
 ```python
 self._graphs: dict[str, CompiledStateGraph] = {}
-```
+```text
 
 Every new thread compiles and stores a `CompiledStateGraph` instance. There is no eviction, LRU, or TTL mechanism. In a long-running worker processing hundreds of threads, this will consume unbounded memory. `CompiledStateGraph` objects hold compiled node functions, edge logic, and potentially captured closures with model instances.
 
@@ -33,7 +33,7 @@ async def _relay_event(event: Any) -> None:
     thread_id = getattr(event, "thread_id", "")
     if thread_id:
         await _bridge_ref.send_event(thread_id, event.model_dump())
-```
+```text
 
 Every single event emitted by the aggregator (message chunks, tool updates, heartbeats, status changes) is sent as an individual HTTP POST to the gateway. For a typical LLM response with 100+ streaming chunks, this generates 100+ HTTP requests per response turn. This is extremely inefficient — it should batch events or use a WebSocket/SSE connection for the relay.
 
@@ -52,7 +52,7 @@ Additionally, `event.model_dump()` is called inside the hook but the return of `
 ```python
 class HealthCheck:
     """Periodic heartbeat emitter and /healthz endpoint handler."""
-```
+```text
 
 The `HealthCheck` class has no methods or attributes — it's completely empty. Health checks are implemented in `app.py` (`/health` endpoint) and `ipc.py` (`heartbeat_loop`). This file is dead code.
 
@@ -62,7 +62,7 @@ The `HealthCheck` class has no methods or attributes — it's completely empty. 
 
 ```python
 """Allow running the worker as ``python -m lib.worker``."""
-```
+```text
 
 Should be `python -m vaultspec_a2a.worker`.
 
@@ -72,7 +72,7 @@ Should be `python -m vaultspec_a2a.worker`.
 
 ```python
 # Re-export so the facade ``lib.worker`` can expose ``WorkerApp``
-```
+```text
 
 Should reference `vaultspec_a2a.worker`.
 
@@ -86,13 +86,13 @@ async def heartbeat_loop(self, interval: float = 30.0) -> None:
     interval:
         Seconds between heartbeats.  Defaults to 10 s.
     """
-```
+```text
 
 The docstring says 10s but the default parameter is 30s. However, the caller in `app.py:85` passes `10.0` explicitly:
 
 ```python
 tg.start_soon(bridge.heartbeat_loop, 10.0)
-```
+```text
 
 So the actual runtime behavior is 10s, but the signature default of 30s is misleading and the docstring is wrong relative to the signature.
 
@@ -120,7 +120,7 @@ logger.info("Worker %s shutting down", worker_id)
 await executor.shutdown()
 await bridge.close()
 tg.cancel_scope.cancel()
-```
+```text
 
 The `tg.cancel_scope.cancel()` is called last, but the task group's heartbeat task (`bridge.heartbeat_loop`) is still running during `executor.shutdown()` and `bridge.close()`. After `bridge.close()` disposes the httpx client, the heartbeat loop's next `send_heartbeat()` call will raise `httpx.AsyncClientError`. The correct order would be to cancel the task group first, then shutdown executor and close bridge.
 
@@ -143,7 +143,7 @@ This means the gateway endpoint at `endpoints.py:272-294` carefully builds `vaul
 ```python
 preset_info = self._graph_presets.get(req.thread_id)
 team_preset = preset_info[0] if preset_info else req.team_preset
-```
+```text
 
 This is a duplicate lookup — `preset_info` was already resolved at line 267 and used for graph recompilation. The second lookup at line 306 produces identical results. Should reuse the earlier variable.
 
@@ -175,7 +175,7 @@ The parameter is called `api_url` but the property name is `_api_url` and it's p
 
 ```python
 WorkerApp = FastAPI
-```
+```text
 
 This alias exists for facade re-export but doesn't constrain or extend `FastAPI` — it's just a rename. Any code using `WorkerApp` type hints would accept any `FastAPI` instance.
 

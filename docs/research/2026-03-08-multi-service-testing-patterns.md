@@ -33,7 +33,7 @@ async def gateway_process(service_env, free_port):
     )
     yield process
     await _stop_process(process)
-```
+```text
 
 **Why session-scoped:**
 
@@ -64,7 +64,7 @@ async def gateway_process(service_env, free_port):
 
 ### 1.3 Fixture Dependency Graph
 
-```
+```text
 tmp_path_factory (session, built-in)
   └── service_env (session) ← env isolation
         ├── gateway_process (session, async)
@@ -78,7 +78,7 @@ gateway_process + worker_process + free_port + worker_free_port
               └── event_hooks: [_log_request, _log_response]
 
 span_collector (function) → (TracerProvider, InMemorySpanExporter)
-```
+```text
 
 ---
 
@@ -107,7 +107,7 @@ def service_env(free_port, worker_free_port, tmp_path_factory):
         "MYAPP_INTERNAL_TOKEN": "",           # No auth in tests
         "LANGSMITH_TRACING": "false",         # No external calls
     }
-```
+```text
 
 **Key decisions:**
 
@@ -161,7 +161,7 @@ async def _wait_for_health(url: str) -> None:
                 raise _HealthCheckError(f"HTTP {resp.status_code}")
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         raise _HealthCheckError(str(exc)) from exc
-```
+```text
 
 **Why `reraise=True`:**
 
@@ -195,7 +195,7 @@ async def _start_and_wait(env, module, port, label):
             f"stderr: {stderr_data.decode()[:1000]}"
         )
     return process
-```
+```text
 
 **Key principles:**
 
@@ -221,7 +221,7 @@ async def _kill_process_tree(pid: int) -> None:
         await asyncio.wait_for(proc.wait(), timeout=10.0)
     else:
         os.killpg(os.getpgid(pid), signal.SIGTERM)
-```
+```text
 
 ### 4.2 Defense-in-Depth Cleanup
 
@@ -237,7 +237,7 @@ async def _stop_process(process):
         await asyncio.wait_for(process.wait(), timeout=10.0)
     except TimeoutError:
         process.kill()  # Nuclear option
-```
+```text
 
 **Why defense-in-depth:**
 
@@ -292,7 +292,7 @@ async def autospawn_gateway():
     process = await _start_and_wait(env, "gateway:create_app", gw_port, "GW")
     yield process, gw_port, wk_port
     await _stop_process(process)
-```
+```text
 
 ---
 
@@ -330,7 +330,7 @@ services:
     ports: ["8001:8001"]
   db:
     image: postgres:16
-```
+```text
 
 **Not applicable for local dev:** Requires Docker, adds 10-30s startup overhead.
 Better for CI pipelines. We use subprocess spawning for local dev, Docker for
@@ -348,7 +348,7 @@ def docker_services(docker_ip, docker_services):
         timeout=30.0,
         check=lambda: is_healthy(f"http://{docker_ip}:{port}/health")
     )
-```
+```text
 
 **Verdict:** Useful for projects already Dockerized for testing. We prefer
 subprocess spawning (faster, no Docker dependency).
@@ -367,7 +367,7 @@ async def jaeger():
     container.start()  # Raises if Docker unavailable = hard-fail
     yield container
     container.stop()
-```
+```text
 
 **Our plan:** Use for Jaeger/otelcol in trace verification tests (Phase 2).
 Not for gateway/worker (subprocess is better for Python services).
@@ -389,7 +389,7 @@ class ThreadStateMachine(RuleBasedStateMachine):
     def cancel_thread(self):
         resp = self.client.post(f"/api/threads/{self.thread_id}/cancel")
         # Should not crash regardless of current state
-```
+```text
 
 **Verdict:** Valuable for state machine correctness (thread status transitions,
 circuit breaker states). Deferred to Phase 3.
@@ -409,7 +409,7 @@ gateway_client = httpx.AsyncClient(
         "response": [_log_response],
     },
 )
-```
+```text
 
 **What it captures:** Every HTTP request/response between test and gateway.
 Logged at DEBUG level. No external dependency.
@@ -420,7 +420,7 @@ Logged at DEBUG level. No external dependency.
 exporter = InMemorySpanExporter()
 provider = TracerProvider(resource=Resource.create({...}))
 provider.add_span_processor(SimpleSpanProcessor(exporter))
-```
+```text
 
 **What it captures:** OTel spans created within the test process. Does NOT
 capture spans from subprocess gateway/worker.
@@ -439,7 +439,7 @@ async def test_trace_propagation(gateway_client):
         headers={"traceparent": "00-..."},
     )
     # Query Jaeger API for the trace
-```
+```text
 
 **What it captures:** Full W3C traceparent propagation across process boundaries.
 Requires running Jaeger + otelcol. Uses `@requires_otelcol` marker that
@@ -460,7 +460,7 @@ app.dependency_overrides[get_worker_client] = lambda: MockClient()
 
 # CORRECT: spawn real worker, hit it with real HTTP
 process = await _start_uvicorn(env, "worker:create_app", port)
-```
+```text
 
 ### 8.2 Skipping on Service Unavailability
 
@@ -472,7 +472,7 @@ if not shutil.which("uvicorn"):
 # CORRECT: fixture owns lifecycle, fails if broken
 process = await _start_and_wait(env, module, port, label)
 # If this fails, the test fails. That's the correct signal.
-```
+```text
 
 ### 8.3 Sharing State Between Tests Without Cleanup
 
@@ -491,7 +491,7 @@ def test_list_threads():
     client.post("/api/threads", json={...})  # Create locally
     resp = client.get("/api/threads")
     assert len(resp.json()) >= 1  # >= not ==
-```
+```text
 
 ### 8.4 Fixed Ports
 
@@ -504,7 +504,7 @@ def _find_free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-```
+```text
 
 ---
 

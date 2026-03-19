@@ -126,7 +126,7 @@ Client <- WS receives:
   AgentStatusEvent, MessageChunkEvent, ThoughtChunkEvent,
   ToolCallStartEvent, ToolCallUpdateEvent, ArtifactUpdateEvent,
   PlanUpdateEvent, TeamStatusEvent
-```
+```yaml
 
 **Assessment: The path is architecturally complete.** All components are wired.
 The critical question is whether `MemorySaver`(in-memory checkpointer) is
@@ -142,7 +142,7 @@ Same as Path 1 but with topology.type="pipeline_loop":
   -> loop_count incremented per iteration
   -> max_loops guard prevents infinite loops
   -> loop_node's conditional edge checks state["loop_count"] < max_loops
-```
+```yaml
 
 **Assessment: COMPLETE.** The `loop_count`guard is properly implemented
 with`state.get("loop_count", 0)`.
@@ -157,7 +157,7 @@ Client -> GET /api/threads/{id}/state -> ThreadStateSnapshot
   -> Returns {messages, last_sequence, checkpoint_id}
 Client -> SUBSCRIBE {thread_ids: [thread_id]}
 Client discards WS events where sequence <= last_sequence
-```
+```yaml
 
 **Assessment: COMPLETE.** The reconnection protocol is fully implemented with
 sequence-based gap detection.

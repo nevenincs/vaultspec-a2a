@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'Implementation risk analysis for feature-derived sequential task IDs and a queue persisted to disk.'
 ---
 
-# Derisking: Persistent Task Queue Schema
+## Derisking: Persistent Task Queue Schema
 
 **Date:** 2026-03-03
 
@@ -62,7 +62,7 @@ in-place. YAML frontmatter suffers from hallucinated indentation, missing colons
 duplicate keys. JSON inside markdown is worse — models introduce trailing commas,
 unquoted keys, and comment syntax.
 
-**Recommended mitigation — machine-writes, LLM-reads only:**
+### Recommended mitigation — machine-writes, LLM-reads only
 
 The queue file is written exclusively by Python code. The LLM's only interactions are:
 
@@ -83,7 +83,7 @@ a simple `|`-split, more robust than YAML or JSON under generation pressure:
 | SBI-002 | completed   | Implement \_build_initial_vault_index |
 | SBI-003 | in_progress | Implement \_build_anchoring_context   |
 | SBI-004 | pending     | Implement mount step node             |
-```
+```text
 
 ## 4. Key Risks Summary
 

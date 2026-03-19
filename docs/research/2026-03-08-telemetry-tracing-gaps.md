@@ -17,7 +17,7 @@ LangSmith integration depth.
 
 ```python
 configure_telemetry()
-```
+```yaml
 
 **Status**: PRESENT and CORRECT.
 

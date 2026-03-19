@@ -4,7 +4,7 @@ source: vaultspec-a2a research session
 relevance: 10
 ---
 
-# Database Schema Fragility and Migration Engine
+## Database Schema Fragility and Migration Engine
 
 ## Executive Summary
 
@@ -17,7 +17,7 @@ This document investigates the current state of database persistence in `vaultsp
 
    ```python
    await conn.run_sync(Base.metadata.create_all)
-   ```
+   ```python
 
    This SQLAlchemy convenience method is designed *exclusively* for initial blank-slate application bootstrapping. It generates `CREATE TABLE` statements for non-existent tables but fundamentally ignores structural changes (added/removed columns, indexing, constraints) for existing tables.
 

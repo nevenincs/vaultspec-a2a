@@ -10,7 +10,7 @@ sources:
 feature: protocols-distilled
 ---
 
-# Protocols Domain — Distilled
+## Protocols Domain — Distilled
 
 > [!WARNING]
 > **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
@@ -59,7 +59,7 @@ File artifacts stream via multiple`TaskArtifactUpdateEvent` messages:
 Event 1: {artifactId: "abc", append: false, lastChunk: false, parts: [{text: "def foo():"}]}
 Event 2: {artifactId: "abc", append: true,  lastChunk: false, parts: [{text: "    return 42"}]}
 Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n# done"}]}
-```
+```yaml
 
 - Same `artifactId`= same file -`append: true`= concatenate with previous chunks -`lastChunk: true`= file complete -`Part.filename`and`Part.media_type` identify the file
 
@@ -172,7 +172,7 @@ MCP experimental tasks define 5 states:
 ```text
 MCP:  "status": "working"                    (lowercase)
 A2A:  "state": "TASK_STATE_WORKING"          (SCREAMING_SNAKE_CASE, ProtoJSON)
-```
+```text
 
 Direct string comparison fails. Translation layer must normalize.
 
@@ -213,7 +213,7 @@ The SDK explicitly warns at every level:
 ```text
 CLI ──MCP tool──► Orchestrator ──A2A SendMessage──► Agent
 CLI ◄──MCP poll── Orchestrator ◄──A2A GetTask────── Agent
-```
+```text
 
 Works cleanly for single-agent delegation. Gets complex for multi-agent teams:
 
@@ -263,7 +263,7 @@ class WebSocketStreamReader:
 class WebSocketStreamWriter:
     async def write(self, data: bytes) -> None:
         await websocket.send_str(data.decode().rstrip("\n"))
-```
+```yaml
 
 **Verdict**: Web-native ACP host is feasible with no protocol changes.
 
@@ -281,7 +281,7 @@ SessionSnapshot:
   user_messages: tuple[UserMessageChunk, ...]
   agent_messages: tuple[AgentMessageChunk, ...]
   agent_thoughts: tuple[AgentThoughtChunk, ...]
-```
+```text
 
 Each `apply()` returns a new frozen snapshot. Subscribers receive
 `(snapshot, notification)`pairs.
@@ -302,7 +302,7 @@ merging needed.
   "event_type": "status_update",
   "data": { ... }
 }
-```
+```text
 
 ### 7.2 Server → Browser (Permissions)
 
@@ -317,7 +317,7 @@ merging needed.
     { "id": "reject", "label": "Reject", "kind": "reject_once" }
   ]
 }
-```
+```text
 
 ### 7.3 Browser → Server (Commands)
 
@@ -325,7 +325,7 @@ merging needed.
 { "type": "send_message", "agent_id": "coder-a", "message": "Add validation" }
 { "type": "permission_response", "request_id": "req-123", "decision": "approve" }
 { "type": "agent_control", "agent_id": "coder-a", "action": "terminate" }
-```
+```text
 
 ### 7.4 Channel Multiplexing
 

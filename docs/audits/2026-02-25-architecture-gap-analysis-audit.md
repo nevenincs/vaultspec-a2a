@@ -11,7 +11,7 @@ related:
   - docs/adrs/2026-02-26-009-module-hierarchy-adr.md
 ---
 
-# Research Gap Analysis Audit
+## Research Gap Analysis Audit
 
 Cross-cutting audit of all 16 research documents in `docs/coding-teams/`.
 Evaluates coverage of server management, code reuse boundaries, and stack

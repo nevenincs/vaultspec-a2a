@@ -16,7 +16,7 @@
 
 ```python
 _client_cache: dict[tuple, "BaseChatModel"] = {}
-```
+```text
 
 This module-level cache stores `ChatOpenAI` instances keyed by `(provider, model_name)`. Issues:
 
@@ -51,7 +51,7 @@ These are full copy-paste duplicates (exact same logic, same comments). The prob
 except Exception as e:
     logger.debug("MockChatModel hit an error in _astream: %s", e)
     raise
-```
+```yaml
 
 This is actually fine (it re-raises), but the `_agenerate` method (lines 64-79) has a different concern: it imports `ChatGeneration` and `AIMessage` inside the method body every call. These should be module-level imports.
 
@@ -66,7 +66,7 @@ payload = {
     "stream": True,
     **kwargs,
 }
-```
+```text
 
 Any unexpected kwargs from LangGraph (e.g. `stop`, `run_manager` internal fields) are forwarded to the HTTP payload. The `stop` parameter is consumed by LangChain's `_astream` signature but `**kwargs` may contain arbitrary keys from `ainvoke()` callers. These would be sent to the mock server as JSON, potentially causing 400 errors or being silently ignored.
 
@@ -91,7 +91,7 @@ _rpc_dispatch: dict[str, Callable[..., Any]] = {
     "session/request_permission": self._on_request_permission,
     ...
 }
-```
+```python
 
 This dict of 8 entries is constructed fresh on every incoming server RPC. In a typical session with many tool calls, this is called dozens of times. Should be a class attribute or cached in `__init__`.
 
@@ -103,7 +103,7 @@ This dict of 8 entries is constructed fresh on every incoming server RPC. In a t
     python -m lib.providers.probes.claude   # ACP subprocess
     python -m lib.providers.probes.gemini   # ACP subprocess
     python -m lib.providers.probes.openai   # HTTP API
-```
+```text
 
 Should be `python -m vaultspec_a2a.providers.probes.claude` etc.
 
@@ -123,7 +123,7 @@ def _read() -> str:
         if offset:
             fh.seek(offset)
         return fh.read(effective_limit)
-```
+```text
 
 The file is opened in text mode (`encoding="utf-8"`) but the ACP protocol sends `offset` as a byte offset. `fh.seek(offset)` in text mode seeks by character count on some platforms, not bytes. This creates inconsistent behavior between platforms and may read incorrect content when the file contains multi-byte UTF-8 characters.
 
@@ -142,7 +142,7 @@ if process.stderr:
         stderr_data = await asyncio.wait_for(
             process.stderr.read(65536), timeout=0.5
         )
-```
+```text
 
 Two sequential 0.5s waits mean `terminal/output` takes up to 1.0s worst case. These could be run concurrently with `asyncio.gather`. More importantly, if stdout has data but stderr blocks (or vice versa), the response is delayed unnecessarily.
 
@@ -153,7 +153,7 @@ Two sequential 0.5s waits mean `terminal/output` takes up to 1.0s worst case. Th
 ```python
 _CLIENT_ID = "681255809395-oo8ft2oprdrnp9e3aqf6av3hmdib135j.apps.googleusercontent.com"
 _CLIENT_SECRET = "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"
-```
+```text
 
 While the docstring explains these are public "installed application" credentials (intentionally not secret per Google's spec), they are hardcoded rather than read from a config file. If Google rotates these in a gemini-cli update, our code silently fails.
 
@@ -178,7 +178,7 @@ The `run_loop` method processes responses and `session/update` notifications, bu
 ```python
 logger.error("Failed to instantiate: Unsupported provider %s", provider)
 raise ValueError(f"Unsupported provider: {provider}")
-```
+```text
 
 This code is unreachable because the `supported` set check at line 104-107 already catches unsupported providers. The early guard covers all enum members. Dead code.
 
@@ -204,7 +204,7 @@ Every `ainvoke` or `_astream` call spawns a new ACP subprocess, goes through the
 
 ```python
 _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
-```
+```text
 
 This misses `\n` (newline injection), `#` (comment injection), `{` `}` (brace expansion), and `!` (history expansion in bash). While `create_subprocess_exec` doesn't invoke a shell, the comment says this is "defense-in-depth" — the depth could be deeper.
 
@@ -296,7 +296,7 @@ logger.warning(
     "escalating to SIGKILL",
     process.pid,
 )
-```
+```text
 
 Probe copy at `_protocol.py:93-96` silently escalates. Minor operational difference but indicates drift.
 
@@ -306,7 +306,7 @@ Probe copy at `_protocol.py:93-96` silently escalates. Minor operational differe
 
 ```python
 env = os.environ.copy()
-```
+```text
 
 The probe builds its environment from raw `os.environ.copy()` + manual scrubbing logic (lines 371-409), duplicating the credential scrubbing that `resolve_env_vars()` in `workspace/environment.py` already handles comprehensively. The probe's manual scrub misses:
 
@@ -322,7 +322,7 @@ While probes are manual dev tools (lower security bar), the inconsistency means 
 
 ```python
 Facade re-exporting all public types from the ``lib.providers`` subpackage.
-```
+```python
 
 Should be `vaultspec_a2a.providers`.
 

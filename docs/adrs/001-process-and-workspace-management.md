@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-001: Process & Workspace Management (LangGraph Core)
+## ADR-001: Process & Workspace Management (LangGraph Core)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

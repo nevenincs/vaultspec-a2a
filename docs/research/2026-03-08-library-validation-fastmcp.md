@@ -43,7 +43,7 @@ class FastMCP(Generic[LifespanResultT]):
         auth: AuthSettings | None = None,
         transport_security: TransportSecuritySettings | None = None,
     ):
-```
+```text
 
 ### Our Usage (`protocols/mcp/server.py:423-469`)
 
@@ -53,7 +53,7 @@ mcp = FastMCP(
     instructions="...",
     lifespan=_mcp_lifespan,
 )
-```
+```text
 
 ### Validation
 
@@ -77,7 +77,7 @@ The `lifespan` parameter expects:
 
 ```python
 Callable[[FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]]
-```
+```text
 
 The `lifespan_wrapper()` function (line 132-143) wraps it for the low-level
 MCPServer. The lifespan receives the `FastMCP` instance and must yield
@@ -98,7 +98,7 @@ async def _mcp_lifespan(
         yield
     finally:
         # ... cleanup (shutdown gateway process) ...
-```
+```text
 
 ### Validation
 
@@ -135,7 +135,7 @@ The `Context` parameter (if present) is injected automatically.
 async def my_tool(arg1: str, arg2: int = 0) -> str:
     """Tool description from docstring."""
     return "result"
-```
+```text
 
 ### Our Usage (`protocols/mcp/server.py:544+`)
 
@@ -148,7 +148,7 @@ async def start_thread(
     workspace_root: Annotated[str | None, Field(description="...")] = None,
 ) -> str:
     """Start a new multi-agent coding workflow..."""
-```
+```python
 
 ### Validation
 

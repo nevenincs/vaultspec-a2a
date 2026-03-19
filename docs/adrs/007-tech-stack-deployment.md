@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-007: Tech Stack & Deployment Strategy
+## ADR-007: Tech Stack & Deployment Strategy
 
 **Date:** 2026-02-26  
 **Status:** Proposed

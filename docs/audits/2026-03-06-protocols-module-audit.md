@@ -29,7 +29,7 @@ def _reset_client() -> None:
         except Exception:
             pass
     _shared_client = None
-```
+```text
 
 `_transport.__del__()` is a CPython implementation detail, not a public API. The correct approach is `await _shared_client.aclose()` (async) or restructuring so the client lifecycle is tied to the FastAPI lifespan. The `__del__` call can silently fail or leave socket handles open.
 
@@ -43,7 +43,7 @@ def _reset_client() -> None:
 f"{settings.mcp_api_base_url}/api/threads/{thread_id}/state"
 f"{settings.mcp_api_base_url}/api/threads/{thread_id}/messages"
 f"{settings.mcp_api_base_url}/api/threads/{thread_id}/cancel"
-```
+```python
 
 `thread_id` is a raw string from MCP tool input, interpolated directly into URL paths without UUID format validation. While the REST API would return 404 for invalid IDs, a crafted `thread_id` like `../../admin` could cause path traversal in the URL. httpx would normalize this, but defense-in-depth says validate at the boundary.
 
@@ -59,7 +59,7 @@ Every tool function has a nearly identical 15-20 line try/except block catching 
 
 ```python
 _KNOWN_PRESETS: frozenset[str] = discover_team_preset_ids()
-```
+```python
 
 `discover_team_preset_ids()` globs the filesystem for `*.toml` files at import time. Adding or removing a preset TOML file requires restarting the MCP server. For a development tool, this is a significant UX issue.
 
@@ -80,7 +80,7 @@ payload: dict[str, object] = {
 }
 if workspace_root is not None:
     payload["workspace_root"] = workspace_root
-```
+```text
 
 The payload is constructed as a raw dict, not via the Pydantic `CreateThreadRequest` model. If `CreateThreadRequest` adds required fields or renames existing ones, this tool will silently send invalid payloads. This mirrors the dual dispatch path issue identified in the API module audit (HIGH-06).
 
@@ -97,7 +97,7 @@ Field(
         "e.g. 'allow', 'deny', 'allow_always'."
     ),
 ),
-```
+```text
 
 The actual permission option kinds per the schema are `allow_once`, `allow_always`, `reject_once`, `reject_always` — not `allow`, `deny`, `allow_always`. The description will mislead MCP clients.
 
@@ -113,7 +113,7 @@ The actual permission option kinds per the schema are `allow_once`, `allow_alway
 
 ```python
 _shared_client = httpx.AsyncClient()
-```
+```text
 
 No `base_url`, no auth headers, no User-Agent. If the API ever requires authentication (auth.py stub, task LOW-02 in API audit), every tool will need individual header injection.
 
@@ -193,14 +193,14 @@ Main concerns:
 ```python
 if workspace_root is not None:
     payload["workspace_root"] = workspace_root
-```
+```yaml
 
 The MCP tool sends `workspace_root` as a top-level JSON field. But `CreateThreadRequest` (rest.py:35-55) expects `workspace_root` INSIDE a nested `metadata: ThreadMetadata` object:
 
 ```python
 class CreateThreadRequest(BaseModel):
     metadata: ThreadMetadata | None = None  # ← workspace_root lives HERE
-```
+```text
 
 Pydantic v2 defaults to `extra='ignore'`, so the top-level `workspace_root` is **silently dropped** during deserialization. The endpoint never receives it.
 
@@ -225,7 +225,7 @@ payload = {
         "feature_tag": "",  # optional
     }
 }
-```
+```text
 
 **Status:** Task #16 tracks this. Escalated from HIGH to CRITICAL — this breaks the entire MCP→workspace integration.
 

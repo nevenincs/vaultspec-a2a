@@ -113,7 +113,7 @@ Phase 2
 
 ```text
 POST /threads → compile_team_graph(NO CHECKPOINTER) → initial_message DISCARDED → nothing runs
-```
+```text
 
 ---
 
@@ -138,7 +138,7 @@ execute graphs, stream events, and handle interrupt/resume.
  async with AsyncSqliteSaver.from_conn_string(db_path) as checkpointer:
      app.state.checkpointer = checkpointer
      # ... rest of lifespan
-```
+```text
 
 The `async with`manages`__aenter__`/`__aexit__`(H2).
 
@@ -154,7 +154,7 @@ The `async with`manages`__aenter__`/`__aexit__`(H2).
        agent_configs=agent_configs,
        checkpointer=request.app.state.checkpointer,
    )
-   ```
+   ```text
 
 1. The database path must be derived from `settings.database_url`(see Fix 4 /
    H7) to
@@ -187,7 +187,7 @@ processing)
        input={"messages": [HumanMessage(content=body.initial_message)]},
        config={"configurable": {"thread_id": thread.id}},
    )
-   ```
+   ```text
 
 1. The `aggregator.ingest()`call should be the mechanism that
    starts`astream_events`
@@ -221,7 +221,7 @@ processing)
    async with anyio.create_task_group() as tg:
        app.state.task_group = tg
        yield
-   ```
+   ```text
 
    This ensures all background tasks are awaited on shutdown and cannot be GC'd.
 
@@ -376,7 +376,7 @@ resolved.
      message="Permission responses must be submitted via REST: POST /api/permissions/{id}/respond",
  )
  await websocket.send_json(error.model_dump(mode="json"))
-```
+```text
 
 ---
 
@@ -471,7 +471,7 @@ Phase 3 (Parallel — protocol compliance):
   Fix 14: Specific exception handling (M7)
   Fix 15: AgentControlCommand (M4)
   Fix 16: Static asset caching (L4)
-```
+```text
 
 ---
 
@@ -491,7 +491,7 @@ Phase 2 (all parallel, depends on Phase 1 complete):
 
 Phase 3 (all parallel, depends on Phase 1 complete):
   Fix 11-16 (protocol compliance)
-```
+```text
 
 ---
 

@@ -11,7 +11,7 @@ related:
   - docs/research/2026-03-09-postgres-persistence-grounding.md
 ---
 
-# ADR-035: Dual-Backend Database — SQLite (dev) + PostgreSQL (production)
+## ADR-035: Dual-Backend Database — SQLite (dev) + PostgreSQL (production)
 
 **Date:** 2026-03-10
 **Status:** Accepted
@@ -57,7 +57,7 @@ Two new fields:
 ```python
 database_backend: Literal["sqlite", "postgres"] = Field(default="postgres")
 checkpoint_backend: Literal["sqlite", "postgres"] = Field(default="postgres")
-```
+```text
 
 Validation properties (`resolved_database_backend`, `resolved_checkpoint_backend`)
 fail fast when the declared backend contradicts the configured URL — preventing
@@ -120,7 +120,7 @@ Key design constraints for this bridge:
 
 ```python
 render_as_batch=connection.dialect.name == "sqlite",
-```
+```text
 
 `render_as_batch=True` on PostgreSQL would recreate FK-linked tables for every
 column change, causing data loss in production migrations. SQLite still requires

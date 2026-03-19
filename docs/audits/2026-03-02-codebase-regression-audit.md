@@ -91,9 +91,9 @@ tool functions, or use a FastMCP lifespan hook to create and dispose it.
 
 A fifth team preset TOML exists on disk:
 
-```
+```text
 src/vaultspec_a2a/core/presets/teams/vaultspec-continuous-audit.toml
-```
+```python
 
 But neither hardcoded list includes it:
 
@@ -121,7 +121,7 @@ But neither hardcoded list includes it:
 ```python
 class HealthCheck:
     """Periodic heartbeat emitter and /healthz endpoint handler."""
-```
+```text
 
 The `HealthCheck` class has no attributes, no methods, and no implementation.
 The module docstring promises "health check endpoint and heartbeat emitter" but
@@ -149,7 +149,7 @@ await asyncio.wait_for(
 # Lines 106-107
 healthy_since = asyncio.get_running_loop().time()
 elif asyncio.get_running_loop().time() - healthy_since > 60.0:
-```
+```text
 
 Task T19 ("Replace deprecated asyncio.get_event_loop() in supervisor.py") was
 completed, but that task targeted `src/vaultspec_a2a/core/nodes/supervisor.py`. The API-layer
@@ -174,7 +174,7 @@ context manager. Replace `asyncio.get_running_loop().time()` with
 ```python
 agent_id=cmd.agent_id or "supervisor",
 node_name="supervisor",
-```
+```text
 
 After the AGENT-PREFIX rename sprint, the supervisor agent config ID is
 `"vaultspec-supervisor"`. When `cmd.agent_id` is empty (follow-up messages), the
@@ -196,7 +196,7 @@ not need to change.
 
 ```python
 action: str = Field(description="'ingest' | 'resume' | 'cancel'")
-```
+```text
 
 Valid values are documented in the field description but not enforced by type.
 A caller passing `action="ingst"` (typo) will be silently accepted by Pydantic
@@ -212,7 +212,7 @@ but will produce a silent no-op or KeyError in executor dispatch logic.
 
 ```python
 agent_id: str = "supervisor"
-```
+```python
 
 Post-rename, the canonical ID is `"vaultspec-supervisor"`. This default is used
 when no agent_id is specified — e.g. for initial ingest dispatch.
@@ -249,7 +249,7 @@ access these three types. They must use the non-preferred deep-import path
 from .team_config import TeamGraphConfig as TeamGraphConfig
 from .team_config import TeamPermissionsConfig as TeamPermissionsConfig
 from .team_config import TeamPersonaConfig as TeamPersonaConfig
-```
+```text
 
 And add to `__all__`.
 
@@ -281,7 +281,7 @@ No `POST /threads/{id}/cancel` endpoint exists on the REST API, and no
 
 ```python
 minimal_state,  # type: ignore[arg-type]
-```
+```text
 
 The `_enrich_snapshot_from_state` function at line 384 accepts `CheckpointTuple`
 but a synthesized `minimal_state` dict is passed when the checkpointer returns
@@ -296,7 +296,7 @@ could surface as a runtime error for threads with no checkpoint state.
 
 ```python
 # pending_permissions is always empty until wired (API-M8 TODO)
-```
+```python
 
 This confirms that `GET /api/team/status` always returns `pending_permissions=[]`
 in tests. However, `src/vaultspec_a2a/core/aggregator.py:801` implements `get_pending_permissions()`

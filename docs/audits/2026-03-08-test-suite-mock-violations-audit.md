@@ -111,13 +111,13 @@ Verification:
 
 ### CRIT-04: worker/tests/test_ipc.py + test_executor.py (Tasks #59, #64)
 
-**test_ipc.py:**
+#### test_ipc.py
 
 | Line | Violation | Type |
 |------|-----------|------|
 | 37 | `transport=httpx.MockTransport(handler)` | Fake HTTP transport |
 
-**test_executor.py:**
+#### test_executor.py
 
 | Line | Violation | Type |
 |------|-----------|------|

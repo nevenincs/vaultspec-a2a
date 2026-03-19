@@ -8,7 +8,7 @@ source: 'Gemini CLI Research / 2026 Industry Reports / A2A Protocol Specificatio
 relevance: 10
 ---
 
-# Research Report: Agentic Development Landscape (March 2026)
+## Research Report: Agentic Development Landscape (March 2026)
 
 **Date:** 2026-03-02
 

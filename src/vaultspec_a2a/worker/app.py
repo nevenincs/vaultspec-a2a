@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 import anyio
+import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 
@@ -99,6 +100,35 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             worker_id,
             settings.internal_token,
         )
+
+        # Phase 4: non-fatal startup probe — verify the gateway is
+        # reachable *before* we accept dispatches. Logs ERROR if the
+        # gateway cannot be contacted so operators notice immediately.
+        try:
+            probe = await bridge._client.get("/health")
+            if probe.status_code == 200:
+                logger.info(
+                    "Gateway reachable at %s",
+                    settings.gateway_url,
+                )
+            else:
+                logger.error(
+                    "Gateway probe returned HTTP %d"
+                    " (gateway_url=%s) — IPC events may"
+                    " not be delivered",
+                    probe.status_code,
+                    settings.gateway_url,
+                )
+        except httpx.HTTPError:
+            logger.error(
+                "Gateway UNREACHABLE at startup"
+                " (gateway_url=%s) — permission requests"
+                " and status events will NOT be delivered"
+                " until the gateway is available",
+                settings.gateway_url,
+                exc_info=True,
+            )
+
         executor = Executor(checkpointer, bridge)
 
         app.state.executor = executor

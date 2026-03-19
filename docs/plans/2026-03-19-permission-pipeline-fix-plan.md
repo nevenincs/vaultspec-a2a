@@ -10,9 +10,12 @@
 
 ## Root Cause (proven)
 
-Worker IPC bridge (`WorkerBridge`) posts events to `settings.mcp_api_base_url`
-(default `http://localhost:8000`). Gateway can run on any port. Three unlinked
-config keys. No error when they diverge. Permission events vanish silently.
+Worker IPC bridge (`WorkerBridge`) posted events to `settings.mcp_api_base_url`
+(default `http://localhost:8000`). Gateway could run on any port. Three unlinked
+config keys. No error when they diverged. Permission events vanished silently.
+
+**Fixed in Phases 1-4**: Renamed to `gateway_url`, auto-derived from
+`host`+`port`, startup probe + escalating failure logs added.
 
 ---
 
@@ -29,7 +32,7 @@ never resolved.
 narrowing, return type mismatches
 **Status**: [x] Fixed — agents dispatched, errors resolved
 
-### Phase 1 — Normalize Config Foundation ← CURRENT
+### Phase 1 — Normalize Config Foundation ← DONE
 
 **Goal**: Align `config.py` defaults with `.env.example`, fix contradictions,
 remove duplicates. No renames yet — just make the existing config correct.
@@ -81,7 +84,7 @@ consumers.
 **Files touched**: config.py, worker/app.py, protocols/mcp/server.py,
 cli/\_mcp.py, protocols/mcp/\_\_main\_\_.py, protocols/mcp/\_\_init\_\_.py,
 .env.example, docker-compose.\*.yml, Dockerfile, docs/IDE\_SETUP.md, 4 test files
-**Status**: [ ] Not started
+**Status**: [x] Done
 
 ### Phase 3 — Auto-derive `gateway_url` and `worker_url`
 
@@ -96,9 +99,9 @@ that is the root cause.
 - Both retain explicit override capability
 
 **Files touched**: `config.py`, `.env.example` (comment updates)
-**Status**: [ ] Not started
+**Status**: [x] Done
 
-### Phase 4 — IPC Failure Logging
+### Phase 4 — IPC Failure Logging ← DONE
 
 **Goal**: Make gateway unreachability loud and obvious. Add startup
 connectivity check to worker.
@@ -106,11 +109,21 @@ connectivity check to worker.
 **Changes**:
 
 - `worker/ipc.py`: ERROR on flush exhaustion, WARNING/ERROR on heartbeat
-  failures, consecutive failure tracking
+  failures, consecutive failure tracking with escalation
 - `worker/app.py`: Startup gateway health probe (non-fatal, logs ERROR)
 
+**Implementation details**:
+
+- `flush_events()`: after all retries exhausted, logs at ERROR with
+  `gateway_url` and batch size (was WARNING)
+- `send_heartbeat()`: returns `bool` success status, logs non-200 at WARNING
+- `heartbeat_loop()`: tracks `_consecutive_hb_failures` counter —
+  first failure → WARNING, every 5th → ERROR, recovery → INFO
+- `_lifespan()`: probes `GET /health` on gateway before accepting work,
+  ERROR if unreachable (non-fatal — worker still starts)
+
 **Files touched**: `worker/ipc.py`, `worker/app.py`
-**Status**: [ ] Not started
+**Status**: [x] Done — 51 worker tests pass
 
 ### Phase 5 — Permission ID Stability
 

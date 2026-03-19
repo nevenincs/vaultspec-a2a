@@ -68,6 +68,9 @@ class WorkerBridge:
         self._event_buffer: list[dict[str, Any]] = []
         self._flush_task: asyncio.Task[None] | None = None
 
+        # Phase 4: consecutive heartbeat failure tracking for escalating logs.
+        self._consecutive_hb_failures: int = 0
+
     # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
@@ -198,13 +201,31 @@ class WorkerBridge:
                     settings.ipc_retry_backoff_base_seconds * (2**attempt)
                 )
 
-        # All retries exhausted -- re-queue events (respecting buffer cap).
+        # All retries exhausted — events could not reach the gateway.
+        # Phase 4: escalate to ERROR so operators notice IPC breakdown.
+        logger.error(
+            "Event flush to gateway FAILED after %d attempts"
+            " (gateway_url=%s, batch_size=%d) — permission and status"
+            " events may be lost",
+            settings.ipc_max_flush_retries,
+            self._api_url,
+            len(batch),
+            extra={
+                "worker_id": self._worker_id,
+                "action": "flush_events_exhausted",
+                "gateway_url": self._api_url,
+                "batch_size": len(batch),
+                "flush_attempt_limit": settings.ipc_max_flush_retries,
+            },
+        )
+
+        # Re-queue events (respecting buffer cap).
         space = settings.ipc_max_event_buffer - len(self._event_buffer)
         if space > 0:
             self._event_buffer[:0] = batch[:space]
         dropped = len(batch) - max(space, 0)
         if dropped > 0:
-            logger.warning(
+            logger.error(
                 "Dropped %d events after %d failed flush attempts",
                 dropped,
                 settings.ipc_max_flush_retries,
@@ -221,10 +242,16 @@ class WorkerBridge:
     # Heartbeat
     # ------------------------------------------------------------------
 
-    async def send_heartbeat(self) -> None:
-        """Send a single heartbeat POST to the gateway."""
+    async def send_heartbeat(self) -> bool:
+        """Send a single heartbeat POST to the gateway.
+
+        Returns
+        -------
+        bool
+            ``True`` if the heartbeat was accepted, ``False`` on any error.
+        """
         try:
-            await self._client.post(
+            resp = await self._client.post(
                 "/internal/heartbeat",
                 json={
                     "type": "heartbeat",
@@ -233,26 +260,97 @@ class WorkerBridge:
                     "uptime_seconds": round(time.monotonic() - self._start_time),
                 },
             )
+            if resp.status_code == 200:
+                return True
+            # Non-200 is still a failure — gateway may be misconfigured.
+            logger.warning(
+                "Heartbeat returned HTTP %d (gateway_url=%s)",
+                resp.status_code,
+                self._api_url,
+                extra={
+                    "worker_id": self._worker_id,
+                    "action": "send_heartbeat",
+                    "http_status_code": resp.status_code,
+                    "gateway_url": self._api_url,
+                },
+            )
+            return False
         except httpx.HTTPError:
             logger.debug(
-                "Heartbeat send failed",
+                "Heartbeat send failed (gateway_url=%s)",
+                self._api_url,
                 extra={
                     "worker_id": self._worker_id,
                     "action": "send_heartbeat",
                     "active_thread_count": len(self._active_threads),
-                    "active_threads": sorted(self._active_threads),
+                    "gateway_url": self._api_url,
                 },
                 exc_info=True,
             )
+            return False
 
     async def heartbeat_loop(self, interval: float = 30.0) -> None:
         """Run a periodic heartbeat in a loop (designed for task groups).
 
+        Phase 4: tracks consecutive failures and escalates log severity.
+        First failure → WARNING, every 5th consecutive failure → ERROR.
+        On recovery after failures → INFO with recovery notice.
+
         Parameters
         ----------
         interval:
-            Seconds between heartbeats.  Defaults to 10 s.
+            Seconds between heartbeats.  Defaults to 30 s.
         """
         while True:
-            await self.send_heartbeat()
+            success = await self.send_heartbeat()
+
+            if success:
+                if self._consecutive_hb_failures > 0:
+                    logger.info(
+                        "Heartbeat recovered after %d consecutive"
+                        " failures (gateway_url=%s)",
+                        self._consecutive_hb_failures,
+                        self._api_url,
+                        extra={
+                            "worker_id": self._worker_id,
+                            "action": "heartbeat_recovered",
+                            "consecutive_failures": self._consecutive_hb_failures,
+                            "gateway_url": self._api_url,
+                        },
+                    )
+                self._consecutive_hb_failures = 0
+            else:
+                self._consecutive_hb_failures += 1
+                n = self._consecutive_hb_failures
+
+                if n == 1:
+                    logger.warning(
+                        "Gateway heartbeat failed"
+                        " (gateway_url=%s) — will escalate"
+                        " if failures persist",
+                        self._api_url,
+                        extra={
+                            "worker_id": self._worker_id,
+                            "action": "heartbeat_failure",
+                            "consecutive_failures": n,
+                            "gateway_url": self._api_url,
+                        },
+                    )
+                elif n % 5 == 0:
+                    logger.error(
+                        "Gateway UNREACHABLE — %d consecutive"
+                        " heartbeat failures"
+                        " (gateway_url=%s). Permission events"
+                        " and status updates are NOT being"
+                        " delivered.",
+                        n,
+                        self._api_url,
+                        extra={
+                            "worker_id": self._worker_id,
+                            "action": "heartbeat_failure_critical",
+                            "consecutive_failures": n,
+                            "gateway_url": self._api_url,
+                        },
+                    )
+
             await anyio.sleep(interval)

@@ -1,9 +1,9 @@
 """Configuration settings for the A2A Orchestrator."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..utils.enums import Environment, LogLevel
@@ -164,15 +164,15 @@ class Settings(BaseSettings):
     )
 
     gateway_url: str = Field(
-        default="http://localhost:8000",
+        default="",
         validation_alias=AliasChoices(
             "VAULTSPEC_GATEWAY_URL",
             "VAULTSPEC_MCP_API_BASE_URL",
         ),
         description=(
             "Base URL for reaching the gateway HTTP API. Used by the worker "
-            "IPC bridge and the MCP tool server. Derived from host/port when "
-            "not set explicitly (see Phase 3)."
+            "IPC bridge and the MCP tool server. Auto-derived from host+port "
+            "when not set explicitly."
         ),
     )
     mcp_host: str = Field(
@@ -210,8 +210,11 @@ class Settings(BaseSettings):
         alias="VAULTSPEC_WORKER_HOST",
     )
     worker_url: str = Field(
-        default="http://127.0.0.1:8001",
-        description="Worker base URL for dispatch calls",
+        default="",
+        description=(
+            "Worker base URL for dispatch calls. "
+            "Auto-derived from worker_host + worker_port."
+        ),
         alias="VAULTSPEC_WORKER_URL",
     )
     internal_token: str | None = Field(
@@ -594,6 +597,22 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def _derive_service_urls(self) -> Self:
+        """Auto-derive gateway_url and worker_url from host+port when not set.
+
+        This eliminates the config mismatch that caused the permission
+        pipeline to break silently: changing the gateway port no longer
+        requires updating a separate URL field.
+        """
+        if not self.gateway_url:
+            # Can't connect to INADDR_ANY — use loopback instead.
+            host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
+            self.gateway_url = f"http://{host}:{self.port}"
+        if not self.worker_url:
+            self.worker_url = f"http://{self.worker_host}:{self.worker_port}"
+        return self
 
     @property
     def is_dev(self) -> bool:

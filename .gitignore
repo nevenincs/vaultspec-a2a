@@ -63,5 +63,8 @@ data/
 .vaultspec/runtime/
 .tmp-*/
 
+# Scratch workspaces (test/audit throwaway)
+workspaces/
+
 # Stray Python installations
 Python/

@@ -82,7 +82,7 @@ This alias exists for code that calls `main()` directly. If no code uses it, it'
 | CRITICAL | 0     | -- |
 | HIGH     | 0     | -- |
 | MEDIUM   | 2     | Subprocess arg forwarding, Alembic URL encoding |
-| LOW      | 3     | Path assumption, no __all__, compat alias |
+| LOW      | 3     | Path assumption, no **all**, compat alias |
 
 ### Assessment
 
@@ -103,7 +103,7 @@ to the Phase 1-5 CLI restructure tasks.
 |----|----------|----------|-------|--------|
 | CM-001 | HIGH | `api/endpoints.py:41` | **Private symbol import across module boundary.** `from ..core.graph import _build_initial_vault_index` imports a `_`-prefixed function from core.graph. `graph.py:40` declares `__all__ = ["compile_team_graph"]` — `_build_initial_vault_index` is explicitly private. This violates ADR-009 facade pattern. Should be made public and added to `__all__` or the logic should be inlined/moved to a shared location. | OPEN |
 | CM-002 | HIGH | `api/endpoints.py:39-48` | **Deep imports bypass facade.** 6 imports reach into `..core.{aggregator,exceptions,graph,metadata,preamble,team_config}` instead of importing from `..core`. While the facade (`core/__init__.py`) exposes all of these symbols, endpoints.py bypasses it. Per ADR-009 import policy: "Consumers should prefer importing from the sub-module root." | OPEN |
-| CM-003 | HIGH | `database/crud.py:178-204` | **`list_threads()` has no status filter parameter.** Target CLI requires `team list [running|completed|archived]`. CRUD function only accepts `offset` and `limit`. Must add `status: ThreadStatus | None = None` parameter with WHERE clause. | OPEN |
+| CM-003 | HIGH | `database/crud.py:178-204` | **`list_threads()` has no status filter parameter.** Target CLI requires `team list [running|completed|archived]`. CRUD function only accepts`offset` and `limit`. Must add`status: ThreadStatus | None = None` parameter with WHERE clause. | OPEN |
 | CM-004 | HIGH | `database/crud.py:36-44` | **`ThreadStatus` enum missing `ARCHIVED` value.** Target CLI requires `team archive` command. Enum has: SUBMITTED, CREATED, RUNNING, COMPLETED, FAILED, CANCELLED. No ARCHIVED. | OPEN |
 | CM-005 | HIGH | `database/crud.py` | **No `delete_thread()` CRUD function.** Target CLI requires `team delete`. No DELETE endpoint exists in `endpoints.py` either. | OPEN |
 | CM-006 | MED | `cli.py:13-14` | **`_REPO_ROOT` and `_ALEMBIC_INI` are module-level constants.** When cli.py becomes a package (`cli/__init__.py` or `cli/database.py`), the parent depth changes. `_REPO_ROOT = Path(__file__).resolve().parent.parent.parent` assumes exactly 3 parents. Must recalculate or use a more robust root-finding strategy (e.g., walk up until `pyproject.toml` found). | OPEN |

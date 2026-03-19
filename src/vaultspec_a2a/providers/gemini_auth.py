@@ -38,13 +38,11 @@ import json
 import logging
 import os
 import time
-
 from pathlib import Path
 
 import httpx
 
 from ..core.config import settings
-
 
 __all__ = ["gemini_uses_env_auth", "refresh_gemini_token"]
 

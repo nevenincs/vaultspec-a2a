@@ -5,7 +5,6 @@ Derived from Agent Client Protocol and JSON-RPC specifications.
 
 from enum import IntEnum
 
-
 __all__ = [
     "AcpAuthError",
     "AcpError",

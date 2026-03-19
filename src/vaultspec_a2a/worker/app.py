@@ -18,16 +18,17 @@ from __future__ import annotations
 import logging
 import os
 import signal
-
-from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
 from uuid import uuid4
 
 import anyio
 import uvicorn
-
-from fastapi import Depends, FastAPI, HTTPException, Header
+from fastapi import Depends, FastAPI, Header, HTTPException
 
 from ..api.schemas.internal import DispatchRequest, DispatchResponse
 from ..core import settings
@@ -37,7 +38,6 @@ from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils.enums import Environment
 from .executor import Executor
 from .ipc import WorkerBridge
-
 
 __all__ = ["WorkerApp", "create_worker_app", "main"]
 
@@ -136,7 +136,7 @@ def create_worker_app() -> FastAPI:
 
     # TEL-01: Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
-    app.add_middleware(cast(Any, TelemetryMiddleware))
+    app.add_middleware(cast("Any", TelemetryMiddleware))
 
     @app.post(
         "/dispatch",

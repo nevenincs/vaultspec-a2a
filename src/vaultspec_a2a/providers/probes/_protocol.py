@@ -14,14 +14,12 @@ import logging
 import os
 import shutil
 import time
-
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from .._subprocess import kill_process_tree as _kill_process_tree
 from .._subprocess import spawn_acp_process as _spawn_acp_process
-
 
 __all__ = ["ProbeResult", "run_probe"]
 

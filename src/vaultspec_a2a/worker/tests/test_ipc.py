@@ -12,19 +12,17 @@ at an address that refuses connections (localhost:1).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
-
 from datetime import UTC, datetime
 
 import httpx
 import pytest
-
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
 
 from ..ipc import WorkerBridge
-
 
 # ---------------------------------------------------------------------------
 # In-process gateway — real ASGI, no mock transport
@@ -229,7 +227,9 @@ class TestSendEvent:
                 "Batch event relay failed" in rec.message for rec in caplog.records
             )
             record = next(
-                rec for rec in caplog.records if "Batch event relay failed" in rec.message
+                rec
+                for rec in caplog.records
+                if "Batch event relay failed" in rec.message
             )
             assert record.worker_id == "test-worker-001"
             assert record.action == "flush_events"
@@ -251,7 +251,9 @@ class TestSendEvent:
                 await bridge.flush_events()
 
             assert any("Failed to send" in rec.message for rec in caplog.records)
-            record = next(rec for rec in caplog.records if "Failed to send" in rec.message)
+            record = next(
+                rec for rec in caplog.records if "Failed to send" in rec.message
+            )
             assert record.worker_id == "test-worker-001"
             assert record.action == "flush_events"
             assert record.batch_size == 1
@@ -362,10 +364,8 @@ class TestHeartbeatLoop:
             task = asyncio.create_task(run_loop())
             await asyncio.sleep(0.2)
             task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError):
                 await task
-            except asyncio.CancelledError:
-                pass
 
             # Should have fired at least 2 heartbeats in 0.2s with 0.05s interval
             assert len(gw.heartbeats) >= 2

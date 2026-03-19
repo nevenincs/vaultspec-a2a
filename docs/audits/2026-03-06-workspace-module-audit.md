@@ -1,7 +1,7 @@
 # Workspace Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/workspace/` — 3 source files (git_manager.py, environment.py, __init__.py)
+**Scope:** `src/vaultspec_a2a/workspace/` — 3 source files (git_manager.py, environment.py, **init**.py)
 **Baseline:** Last audited 2026-02-28 (Third-Pass Deep Audit Fix Sprint)
 
 ---
@@ -96,6 +96,7 @@ The only actionable concern is **MED-02**: `LANGSMITH_*` keys should be added to
 ## Cycle 2 — Security Deep Dive (2026-03-06)
 
 **Focus areas** (per team-lead brief):
+
 1. Git operations security (agent_id validation, command injection vectors)
 2. Terminal command allowlist vs actual usage
 3. File I/O safety boundaries
@@ -117,6 +118,7 @@ The only actionable concern is **MED-02**: `LANGSMITH_*` keys should be added to
 All git commands execute via `asyncio.create_subprocess_exec` (git_manager.py:106), which bypasses the shell entirely. Arguments are passed as an argv array via `CreateProcess` on Windows. No shell metacharacter injection is possible.
 
 **Input validation chain:**
+
 1. `agent_id` → `_AGENT_ID_RE`: `^[a-zA-Z0-9][a-zA-Z0-9_-]*$` — no `/`, `.`, or `-` prefix. Tight.
 2. `base_branch` / `target_branch` → `_BRANCH_NAME_RE`: `^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$` — allows `/` and `.` but no shell chars. Git flag injection blocked by requiring alphanumeric first char.
 3. `worktree_path` → `_validate_worktree_path()`: absolute check + `resolve()` + `is_relative_to(repo_root)`. Triple-gate.
@@ -150,6 +152,7 @@ The ACP chat model's `_on_fs_write_text_file` handler imports the private `_git_
 Escalated because `LANGSMITH_API_KEY` is a credential, and ADR-027 established `LANGSMITH_*` as canonical naming. Users following canonical docs will set `LANGSMITH_API_KEY` instead of `LANGCHAIN_API_KEY`. The current scrub_keys only has the legacy `LANGCHAIN_API_KEY`.
 
 **Missing from scrub_keys:**
+
 - `LANGSMITH_API_KEY` (credential — MUST scrub)
 - `LANGSMITH_TRACING` (not a credential but enables tracing to parent's project)
 
@@ -160,6 +163,7 @@ Escalated because `LANGSMITH_API_KEY` is a credential, and ADR-027 established `
 **Note:** The terminal sandbox is NOT in the workspace module — it lives in `providers/acp_chat_model.py` (`_on_terminal_create`, `_on_terminal_resize`, `_on_terminal_write`). The workspace module only provides the git mutex that the ACP chat model uses for file writes.
 
 The file I/O sandbox (`_sandbox_path` at `acp_chat_model.py:677-683`) uses workspace-derived `self.workspace_root`:
+
 ```python
 cwd = Path(self.workspace_root or self.cwd or str(Path.cwd()))
 resolved = (cwd / path).resolve()
@@ -186,6 +190,7 @@ Uses `CreateProcess` API, not `cmd.exe /c`. No shell metacharacter injection pos
 **Files:** `git_manager.py:213, 318, 322`
 
 `Path.resolve()` on Windows resolves subst drives and junction points to their physical paths. If `repo_root` is accessed via a subst drive (e.g., `Y:\code\project` → `C:\Users\hello\code\project`), then:
+
 - `repo_root = Path("Y:\\code\\project")` → `self._root.resolve()` = `C:\Users\hello\code\project`
 - `worktree_path = Path("Y:\\code\\project\\agent\\coder")` → `resolved` = `C:\Users\hello\code\project\agent\coder`
 - `resolved.is_relative_to(self._root.resolve())` → `True` (both resolve to `C:\` path)

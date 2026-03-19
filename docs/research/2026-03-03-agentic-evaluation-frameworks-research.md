@@ -10,14 +10,14 @@
 
 ### 1.1 Two Evaluation Modes
 
-LangSmith distinguishes two evaluation modes (source: https://docs.langchain.com/langsmith/evaluation):
+LangSmith distinguishes two evaluation modes (source: <https://docs.langchain.com/langsmith/evaluation>):
 
 - **Offline Evaluation**: Run on curated datasets during development to compare versions, benchmark performance, and catch regressions. This is the primary mode for CI/CD pipeline integration.
 - **Online Evaluation**: Evaluate real user interactions in production to detect issues on live traffic. Supports multi-turn thread evaluation.
 
 ### 1.2 The `evaluate()` / `aevaluate()` API
 
-Source: https://docs.langchain.com/langsmith/evaluate-llm-application
+Source: <https://docs.langchain.com/langsmith/evaluate-llm-application>
 
 The core API requires three components:
 
@@ -52,7 +52,8 @@ results = client.evaluate(
 
 For large jobs, `aevaluate()` is the async variant with identical interface. Requires `langsmith>=0.3.13`.
 
-**Evaluator return types** (source: https://docs.langchain.com/langsmith/code-evaluator-sdk):
+**Evaluator return types** (source: <https://docs.langchain.com/langsmith/code-evaluator-sdk>):
+
 - `bool` â€” binary pass/fail
 - `float` / `int` â€” numeric score
 - `dict` with `key` and `score` â€” named metric: `{"key": "correctness", "score": 0.85}`
@@ -63,7 +64,8 @@ For large jobs, `aevaluate()` is the async variant with identical interface. Req
 ### 1.3 Evaluator Types
 
 #### Exact Match (code evaluator)
-Source: https://docs.langchain.com/langsmith/code-evaluator-ui
+
+Source: <https://docs.langchain.com/langsmith/code-evaluator-ui>
 
 ```python
 def perform_eval(run, example):
@@ -73,7 +75,8 @@ def perform_eval(run, example):
 ```
 
 #### LLM-as-Judge
-Source: https://docs.langchain.com/langsmith/llm-as-judge-sdk
+
+Source: <https://docs.langchain.com/langsmith/llm-as-judge-sdk>
 
 Uses a separate LLM to score output quality against rubric criteria. Example pattern:
 
@@ -93,10 +96,11 @@ def valid_reasoning(inputs: dict, outputs: dict) -> bool:
     return response.choices[0].message.parsed.reasoning_is_valid
 ```
 
-**Prebuilt evaluators**: The `openevals` package (open source, LangChain-maintained) provides prebuilt LLM-as-judge evaluators including `CORRECTNESS_PROMPT` (source: https://docs.langchain.com/langsmith/prebuilt-evaluators).
+**Prebuilt evaluators**: The `openevals` package (open source, LangChain-maintained) provides prebuilt LLM-as-judge evaluators including `CORRECTNESS_PROMPT` (source: <https://docs.langchain.com/langsmith/prebuilt-evaluators>).
 
 #### Trajectory Evaluators (`agentevals` package)
-Source: https://docs.langchain.com/langsmith/trajectory-evals
+
+Source: <https://docs.langchain.com/langsmith/trajectory-evals>
 
 The `agentevals` package (open source, LangChain-maintained) provides agent-specific evaluators:
 
@@ -137,19 +141,20 @@ Reference trajectory is optional for the LLM judge variant.
 
 ### 1.4 LangGraph Trace Structure in LangSmith
 
-Source: https://docs.langchain.com/langsmith/trace-with-langgraph
+Source: <https://docs.langchain.com/langsmith/trace-with-langgraph>
 
 LangSmith **automatically** traces LangGraph graphs when `LANGCHAIN_TRACING_V2=true` and `LANGCHAIN_API_KEY` are set. No explicit SDK calls needed.
 
 Each LangGraph invocation produces a **hierarchical trace**:
+
 - Root span: the `graph.invoke()` / `graph.astream()` call, identified by `thread_id`
 - Child spans: one per node execution (supervisor, worker, mount, etc.)
 - Leaf spans: LLM calls within each node, tool calls via ToolNode
 - Metadata: `thread_id` is automatically propagated via `config["configurable"]["thread_id"]`
 
-The `@traceable` decorator can annotate custom functions within nodes for additional granularity. LangSmith's CI/CD pipeline example (https://docs.langchain.com/langsmith/cicd-pipeline-example) shows trajectory evaluation that "analyzes the complete path your agent takes through the graph, including all intermediate steps and decision points."
+The `@traceable` decorator can annotate custom functions within nodes for additional granularity. LangSmith's CI/CD pipeline example (<https://docs.langchain.com/langsmith/cicd-pipeline-example>) shows trajectory evaluation that "analyzes the complete path your agent takes through the graph, including all intermediate steps and decision points."
 
-**Multi-turn thread evaluation**: LangSmith supports evaluating entire conversation threads across multiple graph invocations (source: https://docs.langchain.com/langsmith/online-evaluations-multi-turn), measuring semantic intent, semantic outcome, and trajectory across all turns.
+**Multi-turn thread evaluation**: LangSmith supports evaluating entire conversation threads across multiple graph invocations (source: <https://docs.langchain.com/langsmith/online-evaluations-multi-turn>), measuring semantic intent, semantic outcome, and trajectory across all turns.
 
 ---
 
@@ -157,7 +162,7 @@ The `@traceable` decorator can annotate custom functions within nodes for additi
 
 ### 2.1 `agentevals` Package (Current Recommended Approach)
 
-Source: https://docs.langchain.com/langsmith/trajectory-evals
+Source: <https://docs.langchain.com/langsmith/trajectory-evals>
 
 `agentevals` is the current LangChain-maintained open-source evaluation package for agent trajectories. It supersedes the older `langchain.evaluation` module for agent use cases. Key modules:
 
@@ -187,9 +192,10 @@ experiment_results = Client().evaluate(
 
 ### 2.2 `openevals` Package
 
-Source: https://docs.langchain.com/langsmith/prebuilt-evaluators
+Source: <https://docs.langchain.com/langsmith/prebuilt-evaluators>
 
 `openevals` provides prebuilt evaluators including:
+
 - `CORRECTNESS_PROMPT` â€” LLM judge for answer correctness
 - `create_llm_as_judge` â€” generic LLM judge factory
 - Multi-turn simulation support via `run_multiturn_simulation` and `create_llm_simulated_user`
@@ -251,7 +257,7 @@ The LangChain docs do not cover alternatives in detail. Based on the ecosystem l
 
 ## 4. Non-Determinism Handling in Evaluation Frameworks
 
-Source: https://docs.langchain.com/langsmith/evaluation-approaches, https://docs.langchain.com/langsmith/evaluation-concepts
+Source: <https://docs.langchain.com/langsmith/evaluation-approaches>, <https://docs.langchain.com/langsmith/evaluation-concepts>
 
 ### 4.1 Core Problem
 
@@ -298,6 +304,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Given a task description and conversation history, does the supervisor route to the correct next agent?
 
 **Approach**: Offline dataset evaluation with exact-match evaluator.
+
 - Dataset: pairs of `(conversation_history, expected_next_agent)` for known scenarios
 - Target: `supervisor_node(state) â†’ state["next"]`
 - Evaluator: `state["next"] == reference_outputs["expected_next"]`
@@ -311,6 +318,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Does the planner produce a plan that is actionable, complete, and addresses the task?
 
 **Approach**: LLM-as-judge evaluator with rubric.
+
 - Dataset: task descriptions with reference plan outlines
 - Target: `planner_node(state) â†’ messages[-1].content` (the plan text)
 - Evaluator rubric dimensions:
@@ -326,6 +334,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Does the coder produce code that passes tests and meets the implementation spec from the plan?
 
 **Approach**: Code execution evaluator (most reliable for correctness).
+
 - Run the generated code against a test harness
 - Evaluator: `pytest_exit_code == 0` (binary) + `test_pass_rate` (float)
 - Secondary: LLM-as-judge for code quality (naming, ADR compliance, no mocks)
@@ -337,6 +346,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Does the reviewer identify real issues and produce an audit report that blocks incorrect code?
 
 **Approach**: LLM-as-judge against known-bad code samples.
+
 - Dataset: pairs of `(code_with_known_issues, expected_issues_list)`
 - Evaluator: what fraction of known issues does the reviewer identify? (`issue_recall` metric)
 - Secondary: does the reviewer correctly output PASS for correct code? (`false_positive_rate`)
@@ -346,6 +356,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Given a task, does the full pipeline produce a correct, tested, reviewed implementation?
 
 **Approach**: Multi-turn trajectory evaluation.
+
 - Dataset: task descriptions with expected outcomes
 - Target: `run_full_pipeline(task) â†’ {"final_code": str, "trajectory": list[messages]}`
 - Evaluators:
@@ -358,6 +369,7 @@ The vaultspec pipeline is a supervisor-driven multi-agent system: **supervisor â
 **What to evaluate**: Does the system correctly enforce ADR-023 phase gates, ADR-025 review gate, and ADR-024 plan approval?
 
 **Approach**: Deterministic unit evaluation (no LLM needed).
+
 - These are pure logic checks on supervisor routing output
 - FakeListChatModel-based tests already cover these at the unit level
 - For integration: dataset of `(vault_index_state, expected_routing_outcome)` pairs
@@ -379,6 +391,7 @@ Based on the research, the recommended evaluation stack is:
 | Observability | LangSmith traces (automatic with LangGraph) | Existing OTel instrumentation maps to LangSmith spans |
 
 **Non-determinism mitigations**:
+
 1. `temperature=0` for models under evaluation
 2. `superset` trajectory matching (not `strict`) for multi-agent pipelines
 3. Numeric rubric scores (0â€“3) rather than binary for LLM judges
@@ -390,15 +403,15 @@ Based on the research, the recommended evaluation stack is:
 
 ## Sources
 
-- LangSmith Evaluation: https://docs.langchain.com/langsmith/evaluation
-- evaluate() API: https://docs.langchain.com/langsmith/evaluate-llm-application
-- Target function: https://docs.langchain.com/langsmith/define-target-function
-- LLM-as-judge: https://docs.langchain.com/langsmith/llm-as-judge-sdk
-- Trajectory evaluations (agentevals): https://docs.langchain.com/langsmith/trajectory-evals
-- Complex agent evaluation: https://docs.langchain.com/langsmith/evaluate-complex-agent
-- Evaluation approaches: https://docs.langchain.com/langsmith/evaluation-approaches
-- LangGraph tracing in LangSmith: https://docs.langchain.com/langsmith/trace-with-langgraph
-- Prebuilt evaluators (openevals): https://docs.langchain.com/langsmith/prebuilt-evaluators
-- Multi-turn simulation: https://docs.langchain.com/langsmith/multi-turn-simulation
-- Multi-turn online evaluators: https://docs.langchain.com/langsmith/online-evaluations-multi-turn
-- CI/CD pipeline example: https://docs.langchain.com/langsmith/cicd-pipeline-example
+- LangSmith Evaluation: <https://docs.langchain.com/langsmith/evaluation>
+- evaluate() API: <https://docs.langchain.com/langsmith/evaluate-llm-application>
+- Target function: <https://docs.langchain.com/langsmith/define-target-function>
+- LLM-as-judge: <https://docs.langchain.com/langsmith/llm-as-judge-sdk>
+- Trajectory evaluations (agentevals): <https://docs.langchain.com/langsmith/trajectory-evals>
+- Complex agent evaluation: <https://docs.langchain.com/langsmith/evaluate-complex-agent>
+- Evaluation approaches: <https://docs.langchain.com/langsmith/evaluation-approaches>
+- LangGraph tracing in LangSmith: <https://docs.langchain.com/langsmith/trace-with-langgraph>
+- Prebuilt evaluators (openevals): <https://docs.langchain.com/langsmith/prebuilt-evaluators>
+- Multi-turn simulation: <https://docs.langchain.com/langsmith/multi-turn-simulation>
+- Multi-turn online evaluators: <https://docs.langchain.com/langsmith/online-evaluations-multi-turn>
+- CI/CD pipeline example: <https://docs.langchain.com/langsmith/cicd-pipeline-example>

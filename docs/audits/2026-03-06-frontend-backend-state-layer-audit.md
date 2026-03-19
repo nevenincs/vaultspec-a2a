@@ -39,7 +39,7 @@
 ### [HIGH] P1-05 — PlanEntry field name mismatch: backend `content` vs frontend `title` + missing `id`
 
 - **Location**: `src/vaultspec_a2a/api/schemas/events.py:95-100` vs `src/ui/src/app/data/types.ts:42-47`
-- **Description**: Backend `PlanEntry` has fields: `content`, `status`, `priority`. Frontend `PlanEntry` has: `id`, `title`, `status`, `priority`. The backend has no `id` field and uses `content` instead of `title`. The stream-slice.ts handles this by synthesizing: `id: \`${e.content.slice(0, 20)}-${e.status}\`` and `title: e.content`. But the MCP server `get_thread_status` reads `entry.get("title", "untitled")` which will always return "untitled" since the backend field is `content`.
+- **Description**: Backend `PlanEntry` has fields: `content`, `status`, `priority`. Frontend `PlanEntry` has: `id`, `title`, `status`, `priority`. The backend has no `id` field and uses `content` instead of `title`. The stream-slice.ts handles this by synthesizing: `id: \`${e.content.slice(0, 20)}-${e.status}\`` and `title: e.content`. But the MCP server`get_thread_status` reads `entry.get("title", "untitled")` which will always return "untitled" since the backend field is `content`.
 - **Impact**: MCP tool `get_thread_status` will show "untitled" for all plan entries because it reads `title` instead of `content`. The synthetic `id` in stream-slice is fragile and non-unique if two entries share the same 20-char prefix and status.
 - **Suggested Fix**: Either add `id` and rename `content` to `title` in backend PlanEntry, or fix the MCP server to read `content` field. The stream-slice synthesis should use a more robust ID (e.g., index-based).
 
@@ -338,7 +338,7 @@
 ### [MED] P6-13 — PlanUpdateCard maps `PlanEntry.content` to `title` via stream-slice, fragile ID
 
 - **Location**: `src/ui/src/app/store/slices/stream-slice.ts:245-250`
-- **Description**: Stream-slice synthesizes plan entry objects with `id: \`${e.content.slice(0, 20)}-${e.status}\`` and `title: e.content`. If two plan entries share the first 20 chars and same status, they get the same `id`, causing React key collisions and rendering bugs.
+- **Description**: Stream-slice synthesizes plan entry objects with `id: \`${e.content.slice(0, 20)}-${e.status}\`` and `title: e.content`. If two plan entries share the first 20 chars and same status, they get the same`id`, causing React key collisions and rendering bugs.
 - **Impact**: Plan updates with similar entries may render incorrectly due to duplicate keys.
 - **Suggested Fix**: Use an index-based ID: `id: \`plan-entry-${idx}\`` or include the full content hash.
 
@@ -382,6 +382,7 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 ### 1. sidebar.tsx — Thread Rendering
 
 **Fields accessed on `ThreadSummary`**:
+
 - `thread.thread_id` (line 358) -- OK
 - `thread.nickname` (line 424) -- OK
 - `thread.title` (line 424, 530) -- OK (present in types.ts)
@@ -426,6 +427,7 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 ### 2. message-stream.tsx — Stream Event Rendering
 
 **Discriminated union branches checked** (line 135-168, AgentCapsule switch):
+
 - `agent_message` -- renders `AgentBubble`
 - `thought` -- renders `ThoughtBlock`
 - `tool_call` -- renders `ToolCallCard`
@@ -482,6 +484,7 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 ### 4. input-bar.tsx — Send Flow and Data Model
 
 **Send flow**:
+
 1. User types in `MarkdownEditor`, state held in `message` useState
 2. `handleSend()` at line 251-267 fires on Enter or button click
 3. In "create" mode (new thread): calls `onSend(message.trim(), { preset, repo, branch, featureTag })`
@@ -514,22 +517,26 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 
 - **Location**: `src/ui/src/app/components/permission/permission-modal.tsx:67-73`
 - **Description**: The button variant logic:
+
   ```
   option.kind === 'allow' ? 'default'
   : option.kind === 'deny' ? 'outline'
   : option.kind === 'allow_always' ? 'secondary'
   : 'ghost'
   ```
+
   And the extra class (line 75-77): `option.kind === 'deny'` for error styling.
   But `types.ts` PermissionOptionKind is now `allow_once | allow_always | reject_once | reject_always`. No option will ever have kind `'allow'` or `'deny'`. The `allow_always` check happens to match. `reject_once` and `reject_always` fall through to `'ghost'` with no error styling.
 - **Impact**: **BROKEN**: Allow-once buttons get `'ghost'` variant (barely visible) instead of `'default'` (primary). Reject buttons get `'ghost'` with no error coloring instead of `'outline'` with red styling. Only `allow_always` renders correctly as `'secondary'`.
 - **Suggested Fix**: Update to:
+
   ```
   option.kind === 'allow_once' ? 'default'
   : option.kind === 'reject_once' ? 'outline'
   : option.kind === 'allow_always' ? 'secondary'
   : 'ghost'
   ```
+
   And update the `extraClass` check to `option.kind === 'reject_once' || option.kind === 'reject_always'`.
 
 ### 6. permission-card.tsx — Same PermissionOptionKind Issue
@@ -538,11 +545,13 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 
 - **Location**: `src/ui/src/app/components/stream/permission-card.tsx:91-106`
 - **Description**: Identical pattern to permission-modal.tsx:
+
   ```
   const isAllow = option.kind === 'allow';
   const isDeny = option.kind === 'deny';
   const isAlwaysAllow = option.kind === 'allow_always';
   ```
+
   With `types.ts` now using `allow_once`/`reject_once`, `isAllow` and `isDeny` are always `false`.
 - **Impact**: **BROKEN**: Same as P7-14. In-stream permission cards render all buttons as ghost variant, no visual distinction between allow and reject.
 - **Suggested Fix**: Update to `option.kind === 'allow_once'`, `option.kind === 'reject_once'` or `option.kind.startsWith('reject')`.
@@ -769,6 +778,7 @@ The aggregator emits these wire-protocol event types:
 | `team_status` | `emit_team_status()` | **NEVER CALLED** | Method exists but no caller |
 
 **Events NOT emitted by the aggregator:**
+
 - `plan_update` — No LangGraph event maps to it. The `emit` method exists on the aggregator but `process_langgraph_event()` never produces a PlanUpdateEvent. Plan data would need to come from graph state inspection or a custom event.
 - `artifact_update` — Same situation. No LangGraph source maps to it.
 - `connected` / `heartbeat` — Emitted by ConnectionManager directly, not through the aggregator.
@@ -975,6 +985,7 @@ Mock-Seeder:
 ```
 
 To enable mock-seeder live streaming, it must either:
+
 1. Switch from `astream()` to `astream_events()` and POST each event to `/internal/events`
 2. Create its own `EventAggregator` + `WorkerBridge` (essentially becoming a second worker)
 

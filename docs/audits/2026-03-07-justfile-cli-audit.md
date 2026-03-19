@@ -17,6 +17,7 @@
 ### CRIT-01: `just clean` broken on Windows
 
 **Justfile line 92-94**:
+
 ```just
 clean:
     rm -rf dist/ *.egg-info
@@ -28,6 +29,7 @@ bash-only `rm -rf`. PowerShell's `rm` alias (`Remove-Item`) does not accept
 `-rf`. The `fd ... -x rm -rf {}` also fails under PowerShell.
 
 **Fix**: Use PowerShell-compatible commands:
+
 ```just
 clean:
     Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
@@ -56,6 +58,7 @@ in `_to_oragnize/` (old probe scripts with `lib.*` imports, missing annotations)
 This noise masks real issues in `src/vaultspec_a2a/`.
 
 **Fix**: Add `_to_oragnize` to ruff and ty exclude lists in `pyproject.toml`:
+
 ```toml
 [tool.ruff]
 exclude = ["fix_*.py", "_to_oragnize"]
@@ -82,6 +85,7 @@ The CLI lacks explicit `--exclude-live` / `--ci` semantics that match the
 Justfile's `test-unit` behavior.
 
 **Fix**: Either:
+
 - (A) Make CLI `test unit` always pass `-m "not live"` unless `--include-live` is given
 - (B) Document that `vaultspec test unit "not live"` is the equivalent (fragile)
 
@@ -102,6 +106,7 @@ adding a `snapshots` alias via `@database.command("snapshots")` pointing to
 ### MED-02: `vaultspec run mock` output says "preps" not "mock"
 
 When run without arguments, `vaultspec run mock` prints:
+
 ```
 Available preps scenarios:
   python -m vaultspec_a2a.tests.preps.solo_coder  -- Single coder agent...
@@ -135,6 +140,7 @@ collector running in dev). Not a bug, but noisy.
 ### Correct Architecture
 
 The split is mostly correct:
+
 - **Justfile** = developer workflows (lint, format, typecheck, test, dev, CI, Docker, clean, build)
 - **CLI** = operational commands (service, team, agent, database management)
 

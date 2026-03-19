@@ -1,13 +1,18 @@
-"""Tests for src/vaultspec_a2a/core/task_queue.py — create_mark_task_complete_tool and _filter_queue_content."""
+"""Tests for src/vaultspec_a2a/core/task_queue.py.
+
+Covers create_mark_task_complete_tool and _filter_queue_content.
+"""
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 
-from ..task_queue import _filter_queue_content, create_mark_task_complete_tool
+if TYPE_CHECKING:
+    from pathlib import Path
 
+from ..task_queue import _filter_queue_content, create_mark_task_complete_tool
 
 _SAMPLE_QUEUE = """\
 ## Task Queue — sdd-blackboard-integration

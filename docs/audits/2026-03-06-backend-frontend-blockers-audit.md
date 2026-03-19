@@ -139,6 +139,7 @@
 
 - **Impact**: **CRITICAL** -- any relayed `permission_request` event will crash `sync_worker_event()` with a Pydantic ValidationError. The permission is NOT stored in the API aggregator's `_pending_permissions`. The `GET /team/status` endpoint's `pending_permissions` remains empty. The WS relay still works (events bypass the aggregator), so the frontend receives permission requests over WS, but REST queries for pending permissions fail.
 - **Fix**: Change to:
+
   ```python
   PermissionOption(
       option_id=opt.get("option_id", ""),
@@ -257,16 +258,20 @@
 
 - **Location**: `src/vaultspec_a2a/core/nodes/worker.py:78-84` (interrupt payload), `src/vaultspec_a2a/core/aggregator.py:1196-1213` (consumer)
 - **Description**: The worker's `_interrupt_permission_callback` passes ACP-format options to `interrupt()`:
+
   ```python
   {"type": "permission_request", "tool_name": ..., "options": options}
   ```
+
   where `options` is the raw ACP options list with `optionId` keys (camelCase).
 
   The aggregator's `_emit_interrupt_events` at line 1202-1209 reads these options and constructs the wire-protocol format:
+
   ```python
   "option_id": opt.get("optionId", opt.get("option_id", "allow_once"))
   "name": opt.get("label", opt.get("name", opt.get("optionId", "Allow")))
   ```
+
   This dual-key lookup (`optionId` OR `option_id`, `label` OR `name`) is a defensive pattern that handles both ACP format and wire format. Currently correct since the worker always passes ACP format.
 
 - **Impact**: Working correctly today. The dual-key lookup is robust. Noting for documentation.
@@ -309,11 +314,13 @@
 
 - **Location**: `src/vaultspec_a2a/core/aggregator.py:980-991`
 - **Description**: The `on_chat_model_stream` handler extracts `chunk.content` only:
+
   ```python
   content = getattr(chunk, "content", "")
   if isinstance(content, str) and content:
       await self._buffer_message_chunk(...)
   ```
+
   Claude and other models emit reasoning/thinking tokens in two ways:
   1. `chunk.additional_kwargs.reasoning` (Anthropic extended thinking)
   2. `chunk.content` as a list of content blocks where `block["type"] == "thinking"` (structured content)
@@ -399,17 +406,20 @@
 ## Priority Fix Order
 
 ### Tier 1: Runtime crashes (immediate)
+
 1. **BE-13** (CRIT) -- Fix PermissionOption field names in `sync_worker_event()`. One-line fix.
 2. **BE-19** (CRIT) -- Fix plan approval resume type mismatch. Small fix in supervisor or executor.
 3. **BE-18** (HIGH) -- Fix MCP server PlanEntry field name. Trivial one-line fix.
 
 ### Tier 2: Silent data loss (high UX impact)
+
 4. **BE-26** (HIGH) -- Reasoning/thought token extraction from `on_chat_model_stream`. Medium effort -- handle list content blocks + `additional_kwargs.reasoning`.
 5. **BE-27** (MED) -- Add `finish_reason` signal via `on_chat_model_end` handler. Low effort.
 6. **BE-10** (HIGH) -- Add missing fields to `_AgentSnapshot`. Low effort.
 7. **BE-09** (HIGH) -- Enrich snapshot with agents, plan, artifacts from checkpoint + aggregator state. Medium effort.
 
 ### Tier 3: Missing features (event pipeline completeness)
+
 8. **BE-28/BE-01** (HIGH) -- Implement PlanUpdateEvent emission (supervisor writes plan + aggregator detects). Medium effort.
 9. **BE-29/BE-02** (HIGH) -- Implement ArtifactUpdateEvent emission. Medium effort.
 10. **BE-12** (HIGH) -- Sync node metadata to API aggregator for team status display names. Medium effort.
@@ -417,6 +427,7 @@
 12. **BE-30** (LOW) -- Enrich tool call events with input/output/kind. Low-Medium effort.
 
 ### Tier 4: Infrastructure
+
 13. **BE-17** (HIGH) -- Convert mock-seeder to use event pipeline. Medium effort.
 
 ---
@@ -504,6 +515,7 @@
 
 - **Impact**: Thread status can regress to earlier states due to race conditions (see BE-32). The frontend thread list shows incorrect status.
 - **Fix**: Add a state machine validation in `update_thread_status()`:
+
   ```python
   _VALID_TRANSITIONS = {
       "submitted": {"created", "running", "cancelled"},
@@ -512,6 +524,7 @@
       # Terminal states: no transitions allowed
   }
   ```
+
   Reject transitions from terminal states (`completed`, `failed`, `cancelled`) to any other state.
 
 ### [LOW] BE-38 -- Orphaned threads: no cleanup for threads stuck in `RUNNING` after worker crash

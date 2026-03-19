@@ -1,12 +1,10 @@
 """Tests for the EventAggregator central event bus."""
 
 import asyncio
-
 from datetime import UTC, datetime
 from typing import ClassVar, cast
 
 import pytest
-
 from langchain_core.messages import AIMessageChunk
 from langgraph.errors import GraphInterrupt
 
@@ -32,7 +30,6 @@ from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..config import settings
 from ..exceptions import EventAggregatorError
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -88,7 +85,7 @@ class TestSubscriberManagement:
     def test_add_subscriber_returns_bounded_queue(
         self, aggregator: EventAggregator
     ) -> None:
-        """add_subscriber returns an asyncio.Queue with maxsize=settings.event_queue_maxsize."""
+        """add_subscriber returns a Queue with maxsize=settings.event_queue_maxsize."""
         queue = aggregator.add_subscriber("client-1")
         assert isinstance(queue, asyncio.Queue)
         assert queue.maxsize == settings.event_queue_maxsize
@@ -420,8 +417,8 @@ class TestSequenceOnEvents:
             message_id="msg-2",
         )
 
-        e1 = cast(MessageChunkEvent, queue.get_nowait())
-        e2 = cast(MessageChunkEvent, queue.get_nowait())
+        e1 = cast("MessageChunkEvent", queue.get_nowait())
+        e2 = cast("MessageChunkEvent", queue.get_nowait())
         first_seq = 1
         second_seq = 2
         assert e1.sequence == first_seq
@@ -454,7 +451,7 @@ class TestSequenceOnEvents:
             message_id="msg-3",
         )
 
-        events = [cast(MessageChunkEvent, queue.get_nowait()) for _ in range(3)]
+        events = [cast("MessageChunkEvent", queue.get_nowait()) for _ in range(3)]
         a_events = [e for e in events if e.thread_id == "thread-a"]
         b_events = [e for e in events if e.thread_id == "thread-b"]
 

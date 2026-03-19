@@ -11,6 +11,7 @@ This document consolidates the framework evaluation from Task #21 and the
 library validation from the integration testing stack research.
 
 **Related documents:**
+
 - `2026-03-08-integration-testing-stack.md` — Detailed library-by-library API validation
 - `2026-03-08-multi-service-integration-testing.md` — Test harness patterns and crash simulation
 - `2026-03-08-cross-process-tracing.md` — W3C traceparent propagation testing
@@ -25,6 +26,7 @@ library validation from the integration testing stack research.
 runs a real service image with lifecycle managed by the test framework.
 
 **Key APIs:**
+
 ```python
 from testcontainers.core.container import DockerContainer
 from testcontainers.core.waiting_utils import wait_for_logs
@@ -38,6 +40,7 @@ otlp_port = container.get_exposed_port(4317)
 ```
 
 **Pros:**
+
 - Real process isolation via Docker namespaces
 - Reproducible environments (pinned image tags)
 - Port mapping handled automatically (`get_exposed_port()`)
@@ -45,6 +48,7 @@ otlp_port = container.get_exposed_port(4317)
 - Built-in log waiting (`wait_for_logs`)
 
 **Cons:**
+
 - Requires Docker Desktop running (not always available in Windows CI)
 - 2-5s startup overhead per container
 - Our gateway/worker are not Dockerized for local dev
@@ -64,6 +68,7 @@ for local dev testing where Docker may not be available.
 services defined in a `docker-compose.yml` before tests, stops after.
 
 **Key pattern:**
+
 ```python
 @pytest.fixture(scope="session")
 def docker_services(docker_ip, docker_services):
@@ -76,11 +81,13 @@ def docker_services(docker_ip, docker_services):
 ```
 
 **Pros:**
+
 - Uses existing docker-compose files (no custom container config)
 - `wait_until_responsive()` with custom health check
 - Session-scoped by default (services shared across tests)
 
 **Cons:**
+
 - Requires docker-compose installed and Docker daemon running
 - Slower than subprocess spawning (Docker overhead)
 - Less control over individual service lifecycle than testcontainers
@@ -99,6 +106,7 @@ loss, connection reset, bandwidth throttling). Sits between test client and
 service.
 
 **Key pattern:**
+
 ```python
 from toxiproxy import Toxiproxy
 
@@ -114,11 +122,13 @@ proxy.add_toxic(type="timeout", attributes={"timeout": 0})
 ```
 
 **Pros:**
+
 - Fine-grained network fault injection (latency, jitter, reset, timeout)
 - No code changes to services (transparent proxy)
 - Useful for testing circuit breaker, retry, and timeout behavior
 
 **Cons:**
+
 - Requires Toxiproxy daemon running (Go binary, ~10MB)
 - Additional dependency and infrastructure
 - Only simulates network faults, not process crashes
@@ -138,6 +148,7 @@ processes, identical to production. Health-checks via HTTP, cleanup via
 platform-specific process tree kill.
 
 **Key APIs:**
+
 ```python
 process = await asyncio.create_subprocess_exec(
     sys.executable, "-m", "uvicorn",
@@ -150,6 +161,7 @@ process = await asyncio.create_subprocess_exec(
 ```
 
 **Pros:**
+
 - Zero external dependencies beyond stdlib
 - Tests exercise exact production code paths
 - No Docker daemon requirement
@@ -159,6 +171,7 @@ process = await asyncio.create_subprocess_exec(
 - `PIPE` for stderr capture on crash
 
 **Cons:**
+
 - Slower than in-process tests (2-5s startup per service)
 - Port conflicts if multiple test sessions run concurrently
 - Must handle process cleanup carefully (orphan prevention)
@@ -176,6 +189,7 @@ use this pattern.
 (not a mock) wired via `SimpleSpanProcessor`.
 
 **Key APIs:**
+
 ```python
 from opentelemetry.sdk.trace import TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
@@ -191,6 +205,7 @@ assert any(s.name == "POST /api/threads" for s in spans)
 ```
 
 **Pros:**
+
 - Real exporter (mandate compliant — not a mock)
 - Thread-safe span list
 - Synchronous export via SimpleSpanProcessor (no batching delay)
@@ -198,6 +213,7 @@ assert any(s.name == "POST /api/threads" for s in spans)
 - OTel SDK silently drops export failures (tests never fail from missing OTLP endpoint)
 
 **Cons:**
+
 - Only captures spans from the test process, not from subprocess gateway/worker
 - For cross-process trace verification, need Jaeger + testcontainers
 
@@ -213,6 +229,7 @@ shrinking. Useful for testing input validation, state machines, and protocol
 compliance.
 
 **Key pattern:**
+
 ```python
 from hypothesis import given, strategies as st
 
@@ -224,11 +241,13 @@ async def test_message_content_roundtrip(content):
 ```
 
 **Pros:**
+
 - Finds edge cases humans miss (unicode, empty strings, very long inputs)
 - Shrinking gives minimal reproducing examples
 - Stateful testing for state machine verification
 
 **Cons:**
+
 - Slow (generates many test cases)
 - Not suitable for integration tests with real services (too many requests)
 - Better for unit tests on pure functions
@@ -271,6 +290,7 @@ async fixtures and tests. No benefit for our asyncio-only codebase.
 ## 3. Decision: TESTING-01 through TESTING-04 Framework Choices
 
 ### TESTING-01: Integration Test Harness
+
 - **asyncio subprocess** for gateway + worker lifecycle
 - **tenacity** with `reraise=True` for health polling
 - **httpx.AsyncClient** for test transport
@@ -278,18 +298,21 @@ async fixtures and tests. No benefit for our asyncio-only codebase.
 - **Session-scoped fixtures** with `loop_scope="session"`
 
 ### TESTING-02: Crash Recovery
+
 - **asyncio subprocess** per-test (not session-scoped — crash mutates state)
 - **`process.kill()`** for crash simulation
 - **`taskkill /T /F /PID`** on Windows for tree kill
 - **tenacity** for restart detection polling
 
 ### TESTING-03: IPC and Heartbeat
+
 - **Session-scoped stack** from TESTING-01 fixtures
 - **WebSocket client** (httpx or websockets) for event stream
 - **Event ordering assertions** (monotonic timestamps from IPC-01)
 - **Heartbeat staleness** via worker kill + health poll
 
 ### TESTING-04: MCP End-to-End
+
 - **Direct function calls** to `@mcp.tool()` decorated functions
 - **Session-scoped stack** for write tools (start_thread)
 - **No-stack tests** for degraded mode error messages

@@ -69,6 +69,7 @@ Both directions use `httpx.AsyncClient`. The internal API is authenticated via
 `VAULTSPEC_INTERNAL_TOKEN` bearer token (optional in development).
 
 This design was chosen over alternatives (see §4) because:
+
 - HTTP is language-agnostic and requires no shared memory or named pipes.
 - The existing FastAPI + Pydantic schema layer is reused for both sides.
 - The worker can be deployed on a separate host (future scaling) with only a
@@ -92,6 +93,7 @@ This is consistent with the single-container production constraint in ADR-017.
 The gateway supports two worker deployment modes:
 
 **Auto-spawn** (`VAULTSPEC_AUTO_SPAWN_WORKER=true`, default):
+
 - Gateway spawns the worker as a child process via `subprocess.Popen`
   on startup.
 - Worker inherits environment variables from the gateway process.
@@ -99,6 +101,7 @@ The gateway supports two worker deployment modes:
 - Suitable for development and single-host production.
 
 **Standalone** (`VAULTSPEC_AUTO_SPAWN_WORKER=false`):
+
 - Worker is started independently (e.g., Docker service, systemd unit).
 - Gateway connects via `VAULTSPEC_WORKER_URL`.
 - Suitable for Docker Compose multi-container deployments (ADR-017) and
@@ -140,6 +143,7 @@ per worker ID. If the heartbeat is missed for 90 seconds, the gateway
 logs a warning (future: circuit-break new dispatches until the worker reconnects).
 
 The heartbeat payload includes:
+
 - `worker_id`: random hex assigned at startup
 - `active_threads`: count of currently executing graph runs
 - `uptime_seconds`: worker process uptime

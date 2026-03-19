@@ -1,4 +1,5 @@
 # ADR 028: Universal Rule Propagation
+
 Date: 2026-03-04
 Status: Flaky - needs researching and formalizing
 
@@ -20,9 +21,9 @@ The outstanding question is what to do about the builtin rules. The concern is c
 
 ### The Problem
 
-Currently, the LangGraph orchestration engine in `vaultspec-a2a` completely lacks a mechanism to discover and load these project rules into its execution context. 
+Currently, the LangGraph orchestration engine in `vaultspec-a2a` completely lacks a mechanism to discover and load these project rules into its execution context.
 
-When `src/vaultspec_a2a/core/anchoring.py` constructs the base `SystemMessage` for an agent, it includes only the agent's intrinsic behavioral persona (from the TOML definition). 
+When `src/vaultspec_a2a/core/anchoring.py` constructs the base `SystemMessage` for an agent, it includes only the agent's intrinsic behavioral persona (from the TOML definition).
 
 Consequently, **none of the project-defined mandates end up in the LangGraph pipeline**. All agents across all supported providers (OpenAI, Zhipu, Claude, Gemini) operate completely blind to the project-specific coding mandates that govern the repository they are working in. This leads to agents generating code that violates the project's established standards.
 
@@ -44,15 +45,18 @@ This ensures that every agent, regardless of whether it is powered by an ACP wra
 ## Consequences
 
 ### Positive
+
 - **Persona Preservation**: The high-fidelity agent definitions remain the master source of truth, maintaining exact intent.
 - **Provider Equivalence**: An OpenAI API agent and a Gemini CLI agent will receive the exact same rule mandates, eliminating arbitrary behavioral discrepancies.
 - **Architectural Cleanup**: Rule compilation becomes a localized, testable LangGraph sub-routine rather than an OS-level environment variable bridging hack.
 
 ### Negative
+
 - **Token Inflation**: Injecting large markdown rule sets directly into the `SystemMessage` on every loop cycle will increase input token usage against the LLM providers, though role-targeting mitigates this.
-- **Complexity**: We must ensure native CLIs (like Gemini) don't duplicate the newly injected LangGraph rules with their own implicit file-reads. 
+- **Complexity**: We must ensure native CLIs (like Gemini) don't duplicate the newly injected LangGraph rules with their own implicit file-reads.
 
 ## References
+
 - Source implementation of legacy logic: `y:/code/vaultspec-worktrees/main/src/vaultspec/protocol/providers/base.py` (specifically `resolve_includes`).
 - Initial Audit: `docs/research/2026-03-04-rule-propagation-research.md` (Empirical finding of the gap).
 - [ADR-014](014-thread-metadata-context-injection.md) - Establishes the existence of the Context Preamble SystemMessage.

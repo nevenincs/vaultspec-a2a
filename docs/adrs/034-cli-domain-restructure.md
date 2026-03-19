@@ -37,7 +37,7 @@ restructures into 6 domain groups plus 1 global flag.
 ### 2.1 Command Taxonomy
 
 Replace the flat command list with 6 domain groups. Each group completes a
-sentence: "I want to ___ ___."
+sentence: "I want to ______."
 
 ```
 vaultspec --show-config
@@ -142,19 +142,23 @@ async internally.
 ### 2.6 Service Management
 
 `service start [target]`:
+
 - `backend` → `uvicorn.run("vaultspec_a2a.api.app:create_app", ...)`
 - `worker` → `uvicorn.run("vaultspec_a2a.worker.app:create_worker_app", ...)`
 - bare → start both (backend in main thread, worker via `auto_spawn_worker`)
 
 `service stop [target]`:
+
 - POST `/admin/shutdown` (new lightweight endpoint) with httpx.
 - Falls back to "not running" message if connection refused.
 
 `service kill [target]`:
+
 - Like stop but sends SIGTERM/taskkill to the process.
 - Requires PID tracking (see §2.8).
 
 `service delete DOCKER_SERVICE`:
+
 - Wraps `docker compose down --rmi local <service>`.
 - Errors if target is `backend` or `worker` (native processes, not Docker).
 

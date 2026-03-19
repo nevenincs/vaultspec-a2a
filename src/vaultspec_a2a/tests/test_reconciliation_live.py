@@ -14,7 +14,6 @@ from .test_permission_durability_live import (
     _start_manual_stack,
 )
 
-
 pytestmark = pytest.mark.live
 
 _THREAD_STATE_TIMEOUT = 180.0
@@ -73,13 +72,13 @@ async def _wait_for_thread_state(
             if (
                 snapshot.get("status") == expected_status
                 and snapshot.get("repair_status") == expected_repair_status
-                and snapshot.get("execution_readiness")
-                == expected_execution_readiness
+                and snapshot.get("execution_readiness") == expected_execution_readiness
             ):
                 return snapshot
 
             last_detail = (
-                f"thread not yet reconciled as {expected_status}/{expected_repair_status} "
+                f"thread not yet reconciled as "
+                f"{expected_status}/{expected_repair_status} "
                 f"(status={snapshot.get('status')!r}, "
                 f"repair_status={snapshot.get('repair_status')!r}, "
                 f"execution_readiness={snapshot.get('execution_readiness')!r}, "
@@ -159,7 +158,9 @@ async def test_cancelling_thread_reconciles_after_gateway_restart(
 
         timeout = httpx.Timeout(60.0, connect=5.0, read=10.0, write=10.0, pool=5.0)
         async with httpx.AsyncClient(timeout=timeout) as client:
-            cancel_resp = await client.post(f"{gateway_url}/api/threads/{thread_id}/cancel")
+            cancel_resp = await client.post(
+                f"{gateway_url}/api/threads/{thread_id}/cancel"
+            )
             cancel_resp.raise_for_status()
             cancel_body = cancel_resp.json()
             assert cancel_body["accepted"] is True

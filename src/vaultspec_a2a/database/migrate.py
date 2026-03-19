@@ -10,14 +10,12 @@ References:
 
 import asyncio
 import logging
-
 from pathlib import Path
 
 from alembic import command
 from alembic.config import Config
 
 from ..core.config import settings
-
 
 __all__ = ["run_migrations"]
 

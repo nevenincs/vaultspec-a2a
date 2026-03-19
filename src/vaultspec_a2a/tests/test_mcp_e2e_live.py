@@ -4,7 +4,6 @@ import re
 import sys
 
 import pytest
-
 from mcp.client.session import ClientSession
 from mcp.client.stdio import StdioServerParameters, stdio_client
 
@@ -15,12 +14,9 @@ from .test_permission_durability_live import (
     _start_manual_stack,
 )
 
-
 pytestmark = pytest.mark.live
 
-_THREAD_ID_RE = re.compile(
-    r"Thread started:\s+([0-9a-fA-F]{32}|[0-9a-fA-F-]{36})"
-)
+_THREAD_ID_RE = re.compile(r"Thread started:\s+([0-9a-fA-F]{32}|[0-9a-fA-F-]{36})")
 
 
 def _tool_text(result) -> str:
@@ -35,7 +31,9 @@ def _tool_text(result) -> str:
 def _extract_thread_id(tool_text: str) -> str:
     match = _THREAD_ID_RE.search(tool_text)
     if match is None:
-        raise AssertionError(f"Could not extract thread ID from MCP output: {tool_text!r}")
+        raise AssertionError(
+            f"Could not extract thread ID from MCP output: {tool_text!r}"
+        )
     return match.group(1)
 
 
@@ -70,9 +68,10 @@ async def test_mcp_stdio_tools_hit_live_gateway_and_create_real_thread(
         errlog_path = tmp_path / "mcp-stderr.log"
 
         with errlog_path.open("w", encoding="utf-8") as errlog:
-            async with stdio_client(server_params, errlog=errlog) as streams, ClientSession(
-                *streams
-            ) as session:
+            async with (
+                stdio_client(server_params, errlog=errlog) as streams,
+                ClientSession(*streams) as session,
+            ):
                 await session.initialize()
 
                 tools = await session.list_tools()
@@ -94,7 +93,9 @@ async def test_mcp_stdio_tools_hit_live_gateway_and_create_real_thread(
                 start_result = await session.call_tool(
                     "start_thread",
                     {
-                        "initial_message": "Implement a backend improvement and report progress.",
+                        "initial_message": (
+                            "Implement a backend improvement and report progress."
+                        ),
                         "team_preset": "vaultspec-adaptive-coder",
                         "autonomous": True,
                         "workspace_root": str(workspace_root),

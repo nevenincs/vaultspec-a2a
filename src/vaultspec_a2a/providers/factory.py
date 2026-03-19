@@ -3,7 +3,6 @@
 import logging
 import os
 import shutil
-
 from pathlib import Path
 from typing import Any
 
@@ -15,7 +14,6 @@ from ..core.exceptions import ConfigError
 from ..core.team_config import AgentConfig
 from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
-
 
 __all__ = ["ProviderFactory"]
 
@@ -238,7 +236,7 @@ class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
     @classmethod
-    def create(  # noqa: PLR0912
+    def create(
         cls,
         provider: Provider,
         model: "Model | str | None" = None,
@@ -314,7 +312,7 @@ class ProviderFactory:
         )
 
         if provider == Provider.MOCK:
-            from .mock_chat_model import MockChatModel  # noqa: PLC0415
+            from .mock_chat_model import MockChatModel
 
             return MockChatModel(agent_config=agent_config)
 

@@ -1,4 +1,5 @@
 # Frontend ↔ Backend Schema Alignment Audit
+
 **Date**: 2026-03-07
 **Scope**: TypeScript wire-types.ts + types.ts vs. Pydantic schemas (events, REST, snapshots, enums)
 **Status**: Backend CORRECT (5/7 CRIT fixed); Frontend BOTTLENECK: wire-types.ts is stale (not regenerated since backend fixes)
@@ -9,6 +10,7 @@
 ## Verification Status (2026-03-07)
 
 ### Backend Status: ✅ CORRECT
+
 ✓ **PermissionRequestEvent.tool_kind** — PRESENT (events.py:192); used in aggregator.py:913, emitted at ~line 917
 ✓ **ConnectedEvent** — PRESENT (events.py:235) with client_id, server_version, active_threads
 ✓ **PermissionOption fields** — CORRECT (option_id, name — events.py:106-107)
@@ -16,11 +18,13 @@
 ✓ **finish_reason emission** — IMPLEMENTED (aggregator.py:1264-1278)
 
 ### Frontend Status: ❌ STALE (wire-types.ts not regenerated)
+
 ❌ **wire-types.ts** lacks:
-  - PermissionRequestEvent.tool_kind field
-  - ConnectedEvent schema entirely
-  - Provider.mock enum value
-  - ArtifactUpdateEvent.append + last_chunk fields
+
+- PermissionRequestEvent.tool_kind field
+- ConnectedEvent schema entirely
+- Provider.mock enum value
+- ArtifactUpdateEvent.append + last_chunk fields
 
 **Root Cause**: wire-types.ts is auto-generated from OpenAPI schema. Generation hasn't been re-run since backend fixes committed in previous sprint.
 
@@ -45,6 +49,7 @@
 ## B. EVENT SCHEMA ALIGNMENT
 
 ### 1. PermissionRequestEvent
+
 | Field | Backend | Wire-Types (auto-gen) | Types.ts | Status |
 |-------|---------|----------------------|----------|--------|
 | type | Literal["permission_request"] | "permission_request" | N/A (handled in mappers) | ✓ |
@@ -61,6 +66,7 @@
 **Finding**: Backend emits `tool_kind` on PermissionRequestEvent (events.py:192), but wire-types.ts has no such field. Mapper defaults it to `'other'` (mappers.ts:75). **Impact**: Frontend cannot distinguish tool permission types.**
 
 ### 2. ToolCallStartEvent
+
 | Field | Backend | Wire-Types | Types.ts StreamEvent | Status |
 |-------|---------|-----------|------------------|--------|
 | type | Literal["tool_call_start"] | "tool_call_start" | "tool_call" | ✓ (discriminator mapped) |
@@ -74,6 +80,7 @@
 **Finding**: Backend sends `locations: list[ToolCallLocation]` + `content: list[ToolCallContent]`, but frontend StreamEvent expects `location?: ToolCallLocation` (single) + `input/output/diff` (flat fields). **Data loss: content blocks not stored in timeline.**
 
 ### 3. ToolCallUpdateEvent
+
 | Field | Backend | Wire-Types | Status |
 |-------|---------|-----------|--------|
 | All fields optional | Y | Y | ✓ |
@@ -83,12 +90,14 @@
 | content | list \| None | content[] \| null | ✓ (but FE drops it) |
 
 ### 4. PlanUpdateEvent
+
 | Field | Backend | Wire-Types | Types.ts | Status |
 |-------|---------|-----------|----------|--------|
 | type | Literal["plan_update"] | "plan_update" | "plan_update" | ✓ |
 | entries | list[PlanEntry] | PlanEntry[] | PlanEntry[] (mapped) | ⚠️ |
 
 **PlanEntry mismatch**:
+
 - **Backend**: `{ content: str, status: PlanEntryStatus, priority: PlanEntryPriority }`
 - **Wire-types**: `{ content, status, priority }`
 - **Types.ts**: `{ id, title, status, priority }`
@@ -96,6 +105,7 @@
 **Issue**: Frontend's PlanEntry expects `id` and `title`, but backend sends only `content`. Mapper doesn't populate `id`/`title` (see use-thread-state.ts — no plan handling).
 
 ### 5. ArtifactUpdateEvent
+
 | Field | Backend | Wire-Types | Types.ts | Status |
 |-------|---------|-----------|----------|--------|
 | type | Literal["artifact_update"] | "artifact_update" | "artifact" | ✓ |
@@ -108,6 +118,7 @@
 **Finding**: Backend sends `append` and `last_chunk` to signal streaming progress, but wire-types.ts omits both fields. **Data loss: Frontend cannot detect complete artifacts.**
 
 ### 6. TeamStatusEvent
+
 | Field | Backend | Wire-Types | Usage (ws-bridge) | Status |
 |-------|---------|-----------|------------------|--------|
 | agents | list[AgentSummary] | AgentSummary[] | Stored flat in TQ cache | ✓ |
@@ -116,6 +127,7 @@
 **Finding**: ws-bridge.ts:84-86 caches only `agents` array, discarding `active_thread_ids`. Backend sends it but frontend ignores.
 
 ### 7. ConnectedEvent
+
 | Field | Backend | Wire-Types | Status |
 |-------|---------|-----------|--------|
 | type | Literal["connected"] | "connected" | ✓ |
@@ -131,6 +143,7 @@
 ## C. REST RESPONSE ALIGNMENT
 
 ### 1. TeamStatusResponse
+
 | Field | Backend (rest.py) | Wire-Types | Frontend Usage | Status |
 |-------|------------------|-----------|----------------|--------|
 | agents | list[AgentStatusEntry] | AgentStatusEntry[] | Mapped to AgentSummary[] via mapAgentSummary | ✓ |
@@ -140,6 +153,7 @@
 **Finding**: useTeamStatusQuery() discards 2 of 3 response fields (active_threads, pending_permissions). Likely dead code fields in backend.
 
 ### 2. ThreadListResponse → ThreadSummary cache
+
 | Field | Backend | Wire-Types | FE types.ts | Mapper | Status |
 |-------|---------|-----------|------------|--------|--------|
 | thread_id | str | string | string | ✓ | ✓ |
@@ -157,6 +171,7 @@
 **Critical**: Mapper (mappers.ts:27-40) does NOT map `created_at`. Thread list queries silently drop creation timestamp. **Impact: UI cannot sort by creation date.**
 
 ### 3. TeamPresetsResponse → TeamPreset
+
 | Field | Backend | Wire-Types | FE types.ts | Mapper | Issue |
 |-------|---------|-----------|------------|--------|-------|
 | id | str | id | id | ✓ | ✓ |
@@ -170,31 +185,39 @@
 ## D. TANSTACK CACHE SHAPE ISSUES
 
 ### 1. Team Status Query
+
 **useTeamStatusQuery()** (use-team.ts:6-14):
+
 ```typescript
 queryFn: async () => {
   const res = await restClient.getTeamStatus();
   return res.agents.map(mapAgentSummary);  // Returns AgentSummary[]
 }
 ```
+
 - **Expected cache shape**: `AgentSummary[]`
 - **ws-bridge.ts:84-86**: Writes directly: `setQueryData<AgentSummary[]>(..., event.agents.map(mapAgentSummary))`
 - **Status**: ✓ Aligned
 
 ### 2. Threads List Query
+
 **useThreadsQuery()** (use-threads.ts:12-20):
+
 ```typescript
 queryFn: async () => {
   const res = await restClient.listThreads();
   return res.threads.map(mapThreadSummary);  // Returns ThreadSummary[]
 }
 ```
+
 - **Expected cache shape**: `ThreadSummary[]`
 - **ws-bridge.ts:72-78**: Updates on agent_status: patches thread's `agent_state`
 - **Status**: ✓ Aligned (but created_at missing)
 
 ### 3. Thread State Query
+
 **useThreadStateQuery()** (use-thread-state.ts:24-95):
+
 - Returns `{ events: StreamEvent[], lastSequence: number }`
 - **Status**: ✓ Own shape, not synced with ws-bridge
 
@@ -273,12 +296,14 @@ queryFn: async () => {
 ## G. RECOMMENDED FIXES (PRIORITY ORDER)
 
 ### Priority 1 (Today)
+
 1. Add `tool_kind?: ToolKind | null;` to PermissionRequestEvent in wire-types.ts (around line 1117)
 2. Update mappers.ts to use tool_kind from event (line 75)
 3. Change types.ts ToolCallStatus from `'running'` to `'in_progress'` (line 14)
 4. Add `created_at: wire.created_at,` to mapThreadSummary (mappers.ts:27)
 
 ### Priority 2 (This sprint)
+
 5. Regenerate wire-types.ts from OpenAPI schema to capture:
    - ConnectedEvent (missing entirely)
    - Provider.mock (missing from enum)
@@ -289,6 +314,7 @@ queryFn: async () => {
 7. Fix PlanEntry shape (add id + title to backend, or update frontend to use content)
 
 ### Priority 3 (Design decision)
+
 8. Decide on TeamStatusResponse unused fields (active_threads, pending_permissions) — keep or deprecate?
 9. Populate Agent metadata fields (display_name, description, role) from compiled graph metadata
 
@@ -380,7 +406,7 @@ queryFn: async () => {
 
 | ID | Severity | Category | Finding | Evidence |
 |----|----------|----------|---------|----------|
-| SA-701 | CRIT | MetadataPopulation | `register_graph()` is NEVER called on EventAggregator | app.py:256 initializes EventAggregator() but never calls register_graph(). Result: _node_metadata always empty. |
+| SA-701 | CRIT | MetadataPopulation | `register_graph()` is NEVER called on EventAggregator | app.py:256 initializes EventAggregator() but never calls register_graph(). Result:_node_metadata always empty. |
 | SA-702 | CRIT | MetadataPopulation | Agent metadata (role, display_name, description) always returns empty strings | aggregator.py:403-406 caches metadata, but if register_graph() never runs, defaults to "". Snapshots return empty agent summaries. |
 | SA-703 | HIGH | MetadataPopulation | Workers (langchain/thread runners) don't populate aggregator metadata | ADR-012 §6 assumes register_graph() on aggregator; nothing in worker flow calls it |
 
@@ -466,6 +492,7 @@ queryFn: async () => {
 ### Critical Gap
 
 **SA-1101 (CRIT)**: `tool_calls` array ALWAYS empty in snapshots
+
 - Schema expects `list[ToolCallSnapshot]` (snapshots.py:100)
 - _enrich_snapshot_from_state() does NOT populate it (no code reads from checkpoint or aggregator)
 - Frontend queries snapshot expecting tool_calls (use-thread-state.ts:56-70)
@@ -545,12 +572,14 @@ tool_call_snapshots: list[ToolCallSnapshot] = []
 ### 13.1 Backend Error Response Schema
 
 **Backend Exception Handlers** (endpoints.py):
+
 - 422 (Unprocessable Entity): `workspace_root` validation (line 175), nickname validation error
 - 409 (Conflict): Duplicate nickname (line 254), archived thread message (line 688), invalid status transition (line 1035)
 - 404 (Not Found): Thread/metadata missing (lines 417, 594, 685, 879, 955, 1010, 1027)
 - 202 (Accepted): SendMessage returns 202 on success (line 741)
 
 **FastAPI Default Error Format** (as per Pydantic):
+
 ```json
 {
   "detail": "Thread not found"  // simple string
@@ -571,6 +600,7 @@ tool_call_snapshots: list[ToolCallSnapshot] = []
 ### 13.3 RestClientError Class Initialization
 
 **Defined** (rest-client.ts:23-32):
+
 ```typescript
 class RestClientError extends Error {
   constructor(
@@ -582,6 +612,7 @@ class RestClientError extends Error {
 ```
 
 **Instantiated** (rest-client.ts:114, 127):
+
 ```typescript
 throw new RestClientError(res.status, res.statusText, body);  // body = res.text()
 ```
@@ -591,6 +622,7 @@ throw new RestClientError(res.status, res.statusText, body);  // body = res.text
 ### 13.4 Validation Schema Misalignment
 
 **Backend nickname validation** (schemas/rest.py:53-59):
+
 ```python
 @field_validator("nickname")
 def _validate_nickname_slug(cls, v: str | None) -> str | None:
@@ -600,6 +632,7 @@ def _validate_nickname_slug(cls, v: str | None) -> str | None:
 ```
 
 **Frontend validation**: ❌ NONE. Component accepts any string for nickname.
+
 - Evidence: use-threads.ts:46 passes `nickname: ''` directly to metadata without validation
 - Error Case: User enters uppercase or special chars → 422 response → no UI feedback
 
@@ -619,6 +652,7 @@ def _validate_nickname_slug(cls, v: str | None) -> str | None:
 ### 13.6 Error Recovery Semantics
 
 **useCancelThread** (use-cancel-thread.ts:12-32):
+
 ```typescript
 onMutate: async (threadId) => {
   // Optimistic: set agent_state to 'cancelled' immediately
@@ -641,6 +675,7 @@ onError: (err, threadId, context) => {
 **Semantics**: ✓ Optimistic update + rollback on failure (correct pattern)
 
 **useSendMessage** (use-send-message.ts:21-45):
+
 ```typescript
 onMutate: ({ threadId, content }) => {
   // Optimistic: push user message to stream
@@ -663,7 +698,9 @@ onError: (err, { threadId }) => {
 ### 13.7 Pydantic Validation Error Detail Serialization
 
 **Backend Behavior** (Pydantic default):
+
 - When `@field_validator` raises `ValueError`, FastAPI catches and returns HTTP 422 with:
+
   ```json
   {
     "detail": [
@@ -677,6 +714,7 @@ onError: (err, { threadId }) => {
   ```
 
 **Frontend Capture**: RestClient receives this but never parses it.
+
 - Evidence: rest-client.ts:127 stores `errBody` as raw text, never accessed by callers
 - `useSendMessage.onError(err)` receives Error object with `.body` field, but `.body` is string, not parsed
 
@@ -685,6 +723,7 @@ onError: (err, { threadId }) => {
 ### 13.8 Thread State Transition Error Cases
 
 **Backend** (endpoints.py:1035-1036):
+
 ```python
 raise HTTPException(
   status_code=409,
@@ -710,6 +749,7 @@ raise HTTPException(
 ### 13.10 Wire Type Error Response Schemas
 
 **Auto-generated from OpenAPI** (wire-types.ts):
+
 - No explicit `HttpErrorResponse` or `ValidationErrorResponse` type defined
 - Callers cannot distinguish 404 from 422 at TypeScript level without string matching
 
@@ -718,6 +758,7 @@ raise HTTPException(
 ### 13.11 Network Timeout & Abort Handling
 
 **RestClient** (rest-client.ts:110-116):
+
 ```typescript
 private async get<T>(path: string): Promise<T> {
   const res = await fetch(`${this.baseUrl}${path}`);
@@ -730,6 +771,7 @@ private async get<T>(path: string): Promise<T> {
 ```
 
 **Issues**:
+
 - No timeout specified (uses browser default, ~300s on Firefox)
 - No AbortController support for manual cancellation
 - Network error (no response) falls through uncaught; not wrapped in RestClientError
@@ -739,6 +781,7 @@ private async get<T>(path: string): Promise<T> {
 ### 13.12 Logger Error Detail Handling
 
 **Logger** (utils/logger.ts:117-120):
+
 ```typescript
 case 'error':
   console.error(tag, message, data ?? '');
@@ -746,11 +789,13 @@ case 'error':
 ```
 
 **Usage** (use-send-message.ts:44):
+
 ```typescript
 log.error('api.send', `Failed to send message to ${threadId}`, err);
 ```
 
 **Problem**: `err` (RestClientError) has `.body` field with JSON string, never parsed. Console shows:
+
 ```
 [api.send] Failed to send message to thread-abc
 RestClientError: REST 422 Unprocessable Entity
@@ -778,6 +823,7 @@ No detail about which field failed validation.
 **Root Cause**: Mutations focus on happy path; error branches are either missing or silent (log only). RestClientError has `.body` field but it's the raw text response, not parsed JSON. Callers don't extract the `detail` field for display.
 
 **Recommendation**:
+
 1. Parse RestClientError.body as JSON in RestClient constructor
 2. Add `detail` field extraction to RestClientError
 3. Wire error handlers to UI toast/dialog component
@@ -793,6 +839,7 @@ No detail about which field failed validation.
 ### 14.1 Backend Logging Coverage
 
 **Aggregator** (aggregator.py):
+
 - Line 408: DEBUG ingest start
 - Line 521: INFO cancellation requested
 - Line 1493: EXCEPTION on ingest error
@@ -800,12 +847,14 @@ No detail about which field failed validation.
 - No structured logging for event emission (emit_* methods not logged)
 
 **Evidence**:
+
 ```python
 logger.info("Cancellation requested for thread %s", thread_id)  # Line 521
 logger.exception("Ingest failed: %s", error, exc_info=True)  # Line 1725
 ```
 
 **Endpoints** (endpoints.py):
+
 - Line 258: INFO thread created
 - Line 321: WARNING status filter case mismatch
 - Line 690: INFO message accepted
@@ -816,6 +865,7 @@ logger.exception("Ingest failed: %s", error, exc_info=True)  # Line 1725
 ### 14.2 Frontend Logging Coverage
 
 **Logger utility** (utils/logger.ts:1-221):
+
 - ✓ Centralized logging with 4 levels (debug/info/warn/error)
 - ✓ Structured source tags (e.g., 'api.send', 'thread.create')
 - ✓ Ring buffer (500 entries, in-memory)
@@ -823,6 +873,7 @@ logger.exception("Ingest failed: %s", error, exc_info=True)  # Line 1725
 - ✓ Auto-dismiss timers (info: 4s, warn: 6s, error: sticky)
 
 **Usage across codebase**:
+
 - use-threads.ts:72: `log.info('thread.create', ...)`
 - use-send-message.ts:40: `log.info('thread.send', ...)`
 - use-cancel-thread.ts:35: `log.info('thread.cancel', ...)`
@@ -845,6 +896,7 @@ logger.exception("Ingest failed: %s", error, exc_info=True)  # Line 1725
 ### 14.4 Logging Levels & Semantics
 
 **Backend** (Python logging):
+
 ```python
 logger.debug(...)    # Lowest — hidden in production
 logger.info(...)     # Operations (thread created, message accepted)
@@ -853,6 +905,7 @@ logger.exception(...) # Errors + traceback
 ```
 
 **Frontend** (custom logger.ts):
+
 ```typescript
 log.debug(...)  // Lowest — console only
 log.info(...)   // Operations + optional UI pill
@@ -879,11 +932,13 @@ log.error(...) // Errors + sticky UI pill
 ### 14.6 Structured Logging Gaps
 
 **Backend** (Python):
+
 ```python
 logger.info("Thread %s created with preset %s", thread_id, preset_id)  # positional args
 ```
 
 **Frontend** (TypeScript):
+
 ```typescript
 log.info('thread.create', `Thread ${res.thread_id} created`);  // string interpolation
 ```
@@ -895,6 +950,7 @@ log.info('thread.create', `Thread ${res.thread_id} created`);  // string interpo
 ### 14.7 Ring Buffer & History Access
 
 **Frontend Logger** (utils/logger.ts:198-200):
+
 ```typescript
 history(): readonly LogEntry[] {
   return _history;  // Last 500 entries, in-memory only
@@ -904,6 +960,7 @@ history(): readonly LogEntry[] {
 **Availability**: ✓ Accessible via `window.__vaultspec_log.history()` in browser console
 
 **Limitations**:
+
 - ❌ Entries lost on page reload
 - ❌ No export/download function
 - ❌ No filtering beyond log level
@@ -914,11 +971,13 @@ history(): readonly LogEntry[] {
 ### 14.8 Error Stack Traces
 
 **Backend** (aggregator.py:1493):
+
 ```python
 logger.exception("Ingest failed: %s", error, exc_info=True)  # Includes traceback
 ```
 
 **Frontend** (use-send-message.ts:44):
+
 ```typescript
 log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = RestClientError
 ```
@@ -933,6 +992,7 @@ log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = R
 **Frontend**: ❌ No latency logging for REST calls or WS event processing
 
 **Missing**:
+
 - REST response time (useful for API perf tracking)
 - WS event delivery latency (server emit → client receive)
 - Aggregator ingest time (useful for identifying slow graphs)
@@ -945,6 +1005,7 @@ log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = R
 **Frontend**: ❌ No correlation IDs in logs
 
 **Impact**: When debugging a failed thread creation:
+
 1. Backend logs: "Thread XYZ created"
 2. Frontend logs: "Thread created: XYZ"
 3. No way to tie together logs from different processes
@@ -954,11 +1015,13 @@ log.error('api.send', `Failed to send message to ${threadId}`, err);  // err = R
 ### 14.11 Redaction & Secrets
 
 **Backend logging** (aggregator.py):
+
 ```python
 logger.info("Ingest: %s", graph_state)  # Logs full state dict — may contain secrets!
 ```
 
 **Frontend logging** (all mutations):
+
 ```typescript
 log.error('api.send', '...', err);  // err.body may contain validation error detail with user input
 ```
@@ -985,6 +1048,7 @@ log.error('api.send', '...', err);  // err.body may contain validation error det
 **Root Cause**: Logging implemented for happy path (success cases) but missing for failure/debug paths. WS bridge is a critical data path with zero observability. No correlation mechanism between frontend and backend logs.
 
 **Recommendation**:
+
 1. Add log.debug/info calls to ws-bridge.ts event handlers (12 events)
 2. Add logging to RestClient.get/post methods (performance + errors)
 3. Log HTTPException handlers in endpoints.py
@@ -1002,6 +1066,7 @@ log.error('api.send', '...', err);  // err.body may contain validation error det
 ### 15.1 Discriminated Union Safety
 
 **Backend Events** (events.py):
+
 ```python
 type: Literal[ServerEventType.AGENT_STATUS] = ServerEventType.AGENT_STATUS
 type: Literal[ServerEventType.MESSAGE_CHUNK] = ServerEventType.MESSAGE_CHUNK
@@ -1009,6 +1074,7 @@ type: Literal[ServerEventType.MESSAGE_CHUNK] = ServerEventType.MESSAGE_CHUNK
 ```
 
 **Frontend Handler** (ws-bridge.ts):
+
 ```typescript
 const handleWireEvent = (data: unknown) => {
   const event = data as WireServerEvent;  // Type assertion without guard
@@ -1025,9 +1091,11 @@ const handleWireEvent = (data: unknown) => {
 **Problem**: `data as WireServerEvent` is unchecked. No runtime validation. Malformed JSON from server could slip through.
 
 **Example**:
+
 ```json
 { "type": "unknown_event_type", "content": "..." }
 ```
+
 Would pass type assertion, then fall through to default case (missing).
 
 **Finding SA-1501 (HIGH)**: No discriminated union validation at deserialization boundary. Relies on TypeScript compile-time type narrowing only.
@@ -1035,6 +1103,7 @@ Would pass type assertion, then fall through to default case (missing).
 ### 15.2 Type Assertion Patterns
 
 **Mappers** (mappers.ts):
+
 - Line 62: `topology: wire.topology as TeamPreset['topology']` — unchecked cast
 - Line 99: `return wire as ToolCallStatus` — unchecked cast
 - Line 103: `wire as ToolKind` — guarded only by Set membership check
@@ -1046,6 +1115,7 @@ Would pass type assertion, then fall through to default case (missing).
 ### 15.3 Enum Validation on Ingestion
 
 **Backend** (schemas/enums.py):
+
 ```python
 class ToolKind(str, Enum):
   READ = "read"
@@ -1056,6 +1126,7 @@ class ToolKind(str, Enum):
 Pydantic validates at deserialization: if unknown value received, raises ValidationError.
 
 **Frontend** (mappers.ts:102-104):
+
 ```typescript
 export function mapToolKind(wire: WireToolKind): ToolKind {
   return FRONTEND_TOOL_KINDS.has(wire) ? (wire as ToolKind) : 'other';
@@ -1071,18 +1142,21 @@ export function mapToolKind(wire: WireToolKind): ToolKind {
 ### 15.4 Timestamp Serialization
 
 **Backend** (schemas/snapshots.py):
+
 ```python
 created_at: datetime  # Pydantic auto-serializes to ISO-8601 string
 updated_at: datetime
 ```
 
 **Frontend** (types.ts):
+
 ```typescript
 created_at?: string;  // ISO-8601 string
 updated_at?: string;
 ```
 
 **Deserialization** (use-thread-state.ts):
+
 ```typescript
 const snapshot = await restClient.getThreadState(threadId);
 // snapshot.created_at is string, never parsed to Date object
@@ -1095,6 +1169,7 @@ const snapshot = await restClient.getThreadState(threadId);
 ### 15.5 Array Serialization & Nullability
 
 **Backend** (schemas/events.py):
+
 ```python
 options: list[_PermissionOptionSnapshot]  # Never null, always array
 message_history: list[MessageSnapshot] = []  # Default empty array
@@ -1102,6 +1177,7 @@ tool_calls: list[ToolCallSnapshot] = []  # Default empty array
 ```
 
 **Frontend** (wire-types.ts):
+
 ```typescript
 options: PermissionOptionSnapshot[];  // Not optional
 message_history?: MessageSnapshot[];  // Optional
@@ -1115,6 +1191,7 @@ tool_calls?: ToolCallSnapshot[];  // Optional (should match backend)
 ### 15.6 Nested Object Serialization
 
 **ThreadMetadata** (core/metadata.py):
+
 ```python
 class ThreadMetadata(BaseModel):
   workspace_root: str
@@ -1126,11 +1203,13 @@ class ThreadMetadata(BaseModel):
 ```
 
 **Wire Format** (wire-types.ts):
+
 ```typescript
 metadata?: ThreadMetadata;  // Optional
 ```
 
 **Frontend Ingestion** (use-threads.ts:41-50):
+
 ```typescript
 metadata: repo ? {
   workspace_root: repo,
@@ -1149,6 +1228,7 @@ metadata: repo ? {
 ### 15.7 Pydantic Validation vs TypeScript Narrowing
 
 **Backend** (schemas/rest.py:37-59):
+
 ```python
 class CreateThreadRequest(BaseModel):
   initial_message: str = Field(max_length=65536)
@@ -1162,6 +1242,7 @@ class CreateThreadRequest(BaseModel):
 ```
 
 **Frontend** (use-threads.ts):
+
 ```typescript
 // No validation — passes anything to createThread()
 const newThread = { nickname: 'ANY_CASING_OK', ... };
@@ -1175,11 +1256,13 @@ const newThread = { nickname: 'ANY_CASING_OK', ... };
 
 **Backend Events** (events.py:10-250):
 12 event types defined with Literal discriminators:
+
 - AGENT_STATUS, MESSAGE_CHUNK, THOUGHT_CHUNK, TOOL_CALL_START, TOOL_CALL_UPDATE
 - PERMISSION_REQUEST, ARTIFACT_UPDATE, PLAN_UPDATE, TEAM_STATUS
 - ERROR, CONNECTED, HEARTBEAT
 
 **Frontend Switch** (ws-bridge.ts:15-100):
+
 ```typescript
 switch (event.type) {
   case 'agent_status': ...
@@ -1198,11 +1281,13 @@ switch (event.type) {
 ### 15.9 JSON Serialization Edge Cases
 
 **Backend** (Pydantic auto-serialization):
+
 - Enum fields serialized as string value (not name)
 - datetime fields serialized to ISO-8601 string
 - None values included in JSON (not omitted)
 
 **Frontend** (JSON.stringify for REST):
+
 ```typescript
 JSON.stringify({
   team_preset: preset?.id,
@@ -1217,6 +1302,7 @@ JSON.stringify({
 ### 15.10 Type-Safe Message Construction
 
 **Backend** (aggregator.py):
+
 ```python
 event = ToolCallStartEvent(
   type=ServerEventType.TOOL_CALL_START,
@@ -1228,6 +1314,7 @@ event = ToolCallStartEvent(
 **Pydantic validates** all fields match schema at construction time.
 
 **Frontend** (mappers.ts):
+
 ```typescript
 export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRequest {
   return {
@@ -1262,6 +1349,7 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
 **Root Cause**: Type safety relies on TypeScript compile-time checking + Pydantic backend validation. No runtime guards at deserialization boundaries. Enum validation hardcoded. Mappers use defaults instead of validation.
 
 **Recommendation**:
+
 1. Add runtime discriminated union validation (e.g., `zod` schema)
 2. Replace hardcoded enum Sets with runtime check from wire-types
 3. Add nullable/required field validation in mappers
@@ -1279,6 +1367,7 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
 ### 16.1 Event Processing Concurrency Model
 
 **WS Bridge** (ws-bridge.ts:42-107):
+
 ```typescript
 wsClient.setEventCallback((threadId, event) => {
   switch (event.type) {
@@ -1294,6 +1383,7 @@ wsClient.setEventCallback((threadId, event) => {
 ```
 
 **Concurrency Model**:
+
 - WS events arrive sequentially (WebSocket is FIFO)
 - Each `setEventCallback` call is synchronous
 - Zustand store update (1) completes before TQ cache update (2)
@@ -1306,6 +1396,7 @@ wsClient.setEventCallback((threadId, event) => {
 ### 16.2 TanStack Query Cache Update Race Conditions
 
 **agent_status Event Handler** (ws-bridge.ts:56-80):
+
 ```typescript
 case 'agent_status': {
   // Update TQ cache: team.status() agents array
@@ -1327,6 +1418,7 @@ case 'agent_status': {
 **Race Condition 1: Parallel useTeamStatusQuery**
 
 Timeline:
+
 ```
 t=0  WS agent_status arrives for agent-123 (state=working)
 t=1  handler calls setQueryData (updater fn begins)
@@ -1344,6 +1436,7 @@ t=4  Refetch result overwrites WS update — agent-123 back to old state
 ### 16.3 Thread List Cache Update Race Condition
 
 **agent_status Handler** (ws-bridge.ts:71-78):
+
 ```typescript
 queryClient.setQueryData<ThreadSummary[]>(
   queryKeys.threads.list(),
@@ -1357,6 +1450,7 @@ queryClient.setQueryData<ThreadSummary[]>(
 **Race Condition 2: Concurrent thread list invalidation**
 
 Timeline:
+
 ```
 t=0  WS agent_status arrives for thread-abc
 t=1  handler calls setQueryData on threads.list cache
@@ -1376,6 +1470,7 @@ t=6  REST fetch completes, overwrites WS update
 ### 16.4 Team Status Full Replacement Race
 
 **team_status Event Handler** (ws-bridge.ts:82-90):
+
 ```typescript
 case 'team_status': {
   queryClient.setQueryData<AgentSummary[]>(
@@ -1389,6 +1484,7 @@ case 'team_status': {
 **Race Condition 3: team_status replacement vs individual agent_status**
 
 Timeline:
+
 ```
 t=0  WS agent_status for agent-1 (state=working)
 t=1  handler updates team.status cache (agent-1 only)
@@ -1405,6 +1501,7 @@ t=3  team_status handler runs, full replacement, agent-1 reverts to idle
 ### 16.5 Zustand Store Race Conditions
 
 **handleWireEvent** (stream-slice.ts):
+
 ```typescript
 const handleWireEvent = (threadId: string, event: ServerEvent) => {
   setState((state) => {
@@ -1421,6 +1518,7 @@ const handleWireEvent = (threadId: string, event: ServerEvent) => {
 **Race Condition 4: Concurrent event appends**
 
 Timeline:
+
 ```
 t=0  WS message_chunk arrives for thread-abc
 t=1  handler calls setState, Immer draft created
@@ -1441,6 +1539,7 @@ t=5  tool_call_start lost (overwritten by message_chunk commit)
 ### 16.6 Sequence Number Tracking
 
 **Sequence update** (ws-bridge.ts:103-106):
+
 ```typescript
 if ('sequence' in event && typeof event.sequence === 'number') {
   wsClient.updateLastSequence(threadId, event.sequence);
@@ -1456,6 +1555,7 @@ if ('sequence' in event && typeof event.sequence === 'number') {
 ### 16.7 Optimistic Update Rollback Timing
 
 **useCancelThread** (use-cancel-thread.ts:12-32):
+
 ```typescript
 onMutate: async (threadId) => {
   await queryClient.cancelQueries({ queryKey: queryKeys.threads.list() });
@@ -1474,6 +1574,7 @@ onError: (err, threadId, context) => {
 **Race Condition 5: WS event + pessimistic rollback**
 
 Timeline:
+
 ```
 t=0  User clicks cancel; onMutate optimistically sets agent_state=cancelled
 t=1  WS agent_status arrives with state=working (thread still running)
@@ -1492,6 +1593,7 @@ t=5  But previous state was captured at t=0, before WS update at t=1
 ### 16.8 Permission Response Optimistic Remove
 
 **useRespondToPermission** (use-permissions.ts:16-19):
+
 ```typescript
 onMutate: ({ requestId }) => {
   appStore.getState().removePermission(requestId);  // Optimistic remove
@@ -1506,6 +1608,7 @@ onError: (err, { requestId }) => {
 **Race Condition 6: Permission response + concurrent WS event**
 
 Timeline:
+
 ```
 t=0  User clicks "Accept"; onMutate removes from Zustand
 t=1  Permission widget disappears from UI
@@ -1515,6 +1618,7 @@ t=4  Widget reappears — user confused
 ```
 
 **OR if REST fails**:
+
 ```
 t=0  User clicks "Accept"; onMutate removes permission
 t=1  REST returns 500 error
@@ -1541,6 +1645,7 @@ t=3  Permission lost from UI forever (even though it's still pending on server)
 ### 16.10 Microtask Ordering Guarantees
 
 **WS Event Loop** (initWsBridge):
+
 ```typescript
 wsClient.setEventCallback((threadId, event) => {
   // Synchronous handler — runs in microtask queue
@@ -1550,6 +1655,7 @@ wsClient.setEventCallback((threadId, event) => {
 ```
 
 **JavaScript Event Loop**:
+
 1. Macrotask: WS message received
 2. WS handler runs (setEventCallback)
 3. Zustand setState (sync)
@@ -1581,6 +1687,7 @@ wsClient.setEventCallback((threadId, event) => {
 **Root Cause**: Frontend uses multiple state systems (TanStack Query + Zustand) without coordination layer. WS events can race with REST mutations and refetches. No atomic transactions or locks. Optimistic updates lack rollback protection for WS events.
 
 **Recommendation**:
+
 1. Implement request deduplication (idempotency key) for mutations
 2. Add WS handler guards: check TQ cache timestamp before overwriting with old data
 3. Batch WS events explicitly with React batching or custom batching
@@ -1595,6 +1702,7 @@ wsClient.setEventCallback((threadId, event) => {
 ## COMPREHENSIVE FINDINGS SUMMARY (Passes 3-16: 40+ Issues Identified)
 
 ### CRITICAL Findings (6 issues — block frontend readiness)
+
 | ID | Area | Finding | Status |
 |----|----|---------|--------|
 | SA-301 | Snapshot | tool_calls array ALWAYS empty, never populated from graph | OPEN |
@@ -1605,6 +1713,7 @@ wsClient.setEventCallback((threadId, event) => {
 | SA-1607 | Concurrency | Permission response optimistic remove lacks rollback + WS protection | OPEN |
 
 ### HIGH Findings (12 issues — significant feature/data loss risks)
+
 | ID | Area | Finding | Status |
 |----|----|---------|--------|
 | SA-1301 | Error Handling | No UI feedback for HTTP errors (404/409/422) | OPEN |
@@ -1621,6 +1730,7 @@ wsClient.setEventCallback((threadId, event) => {
 | SA-1603 | Concurrency | team_status full replacement overwrites agent_status | OPEN |
 
 ### MEDIUM Findings (15+ issues — degraded observability/robustness)
+
 | ID | Area | Finding | Status |
 |----|----|---------|--------|
 | SA-1303 | Error Handling | Validation error details lost in RestClientError.body | OPEN |
@@ -1653,6 +1763,7 @@ Snapshot/Cache     → 6 issues (SA-301/303/401/403/404, SA-1205)
 ### Top Blockers for Frontend Readiness
 
 **CRIT (Cannot deploy)**:
+
 1. tool_calls array always empty (SA-301) — clients load snapshot expecting tool list, get empty array
 2. No optimistic rollback for messages (SA-1302) — users see ghost messages on send error
 3. No WS boundary validation (SA-1501) — malformed WS data crashes without guard
@@ -1683,6 +1794,7 @@ Snapshot/Cache     → 6 issues (SA-301/303/401/403/404, SA-1205)
 ### 17.1 Reconnection Protocol
 
 **WebSocket Client** (websocket-client.ts:221-235):
+
 ```typescript
 private handleClose(): void {
   this.ws = null;
@@ -1703,6 +1815,7 @@ private scheduleReconnect(): void {
 **Delays**: `[1000, 2000, 4000, 8000, 16000, 30000]` ms (exponential backoff, caps at 30s)
 
 **On Reconnection** (websocket-client.ts:162-195):
+
 ```typescript
 private handleOpen(): void {
   this.reconnectAttempt = 0;
@@ -1728,6 +1841,7 @@ if (eventType === 'connected') {
 ### 17.2 Sequence-Based Gap Detection
 
 **Last Sequence Tracking** (websocket-client.ts:150-152):
+
 ```typescript
 updateLastSequence(threadId: string, sequence: number): void {
   this.lastSequences.set(threadId, sequence);
@@ -1735,6 +1849,7 @@ updateLastSequence(threadId: string, sequence: number): void {
 ```
 
 **Called From**: ws-bridge.ts:104-106
+
 ```typescript
 if ('sequence' in event && typeof event.sequence === 'number') {
   wsClient.updateLastSequence(threadId, event.sequence);
@@ -1742,6 +1857,7 @@ if ('sequence' in event && typeof event.sequence === 'number') {
 ```
 
 **Stale Event Filtering** (websocket-client.ts:210-214):
+
 ```typescript
 if (threadId && typeof sequence === 'number') {
   const lastSeq = this.lastSequences.get(threadId) ?? 0;
@@ -1755,6 +1871,7 @@ if (threadId && typeof sequence === 'number') {
 **Problem**: Only detects **stale events** (sequence ≤ lastSeq). Doesn't detect **gaps** (sequence > lastSeq + 1).
 
 **Example**:
+
 ```
 t=0  Client connected, receives events seq=1, seq=2, seq=3
 t=1  Network disconnects
@@ -1769,6 +1886,7 @@ t=5  Client accepts seq=6 (doesn't know seq=4,5 were missed!)
 ### 17.3 Gap Filling via Snapshot
 
 **Snapshot Endpoint** (endpoints.py:602-686):
+
 ```python
 @router.get("/threads/{thread_id}/state", response_model=ThreadStateSnapshot)
 async def get_thread_state_endpoint(...):
@@ -1788,6 +1906,7 @@ async def get_thread_state_endpoint(...):
 **Endpoint Returns**: ThreadStateSnapshot with `last_sequence` field
 
 **Frontend Usage**: ❌ NOT USED
+
 - Evidence: No code in frontend queries snapshot on reconnect
 - `use-thread-state.ts` loads snapshot but only on manual click (not automatic on gap)
 
@@ -1796,6 +1915,7 @@ async def get_thread_state_endpoint(...):
 ### 17.4 Missing Gap Fill Query
 
 **What Frontend Should Do on Reconnect**:
+
 ```
 1. Connect to WS
 2. Receive event seq=6
@@ -1806,6 +1926,7 @@ async def get_thread_state_endpoint(...):
 ```
 
 **What Frontend Actually Does**:
+
 ```
 1. Connect to WS
 2. Receive event seq=6
@@ -1818,11 +1939,13 @@ async def get_thread_state_endpoint(...):
 ### 17.5 Heartbeat Timeout
 
 **Timeout Configuration** (websocket-client.ts:37-39):
+
 ```typescript
 const HEARTBEAT_TIMEOUT = 65_000; // ~2x 30s interval + margin
 ```
 
 **Backend Heartbeat** (websocket.py):
+
 ```python
 async def _heartbeat_loop(self):
   while True:
@@ -1831,6 +1954,7 @@ async def _heartbeat_loop(self):
 ```
 
 **Client Timeout Handler** (websocket-client.ts:244-250):
+
 ```typescript
 private resetHeartbeatTimer(): void {
   if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
@@ -1850,6 +1974,7 @@ private resetHeartbeatTimer(): void {
 ### 17.6 Re-subscription Logic
 
 **On Reconnect** (websocket-client.ts:189-194):
+
 ```typescript
 if (this.subscribedThreads.size > 0) {
   this.send({
@@ -1862,6 +1987,7 @@ if (this.subscribedThreads.size > 0) {
 **Problem**: `subscribedThreads` is memory-only Set. If page reloads, subscriptions are lost.
 
 **Example**:
+
 ```
 1. User opens app, subscribes to thread-abc
 2. Network disconnects
@@ -1875,6 +2001,7 @@ if (this.subscribedThreads.size > 0) {
 ### 17.7 Checkpoint Timeout
 
 **Snapshot Query Timeout** (endpoints.py:637-640):
+
 ```python
 checkpoint_tuple = await asyncio.wait_for(
   checkpointer.aget_tuple(config),
@@ -1883,6 +2010,7 @@ checkpoint_tuple = await asyncio.wait_for(
 ```
 
 **On Timeout** (endpoints.py:673-678):
+
 ```python
 except TimeoutError:
   logger.warning(
@@ -1895,6 +2023,7 @@ except TimeoutError:
 **Problem**: Client receives partial snapshot without knowing. No signal that state is incomplete.
 
 **Example**:
+
 ```
 1. Client calls GET /state on reconnect
 2. Backend times out loading checkpoint
@@ -1920,6 +2049,7 @@ except TimeoutError:
 ### 17.9 No Event Log Endpoint
 
 **Backend**: No endpoint to query events by sequence range
+
 - Evidence: Endpoints list (lines 208-1077) has no such endpoint
 - Only `/threads/{id}/state` returns snapshot, not event log
 
@@ -1934,6 +2064,7 @@ except TimeoutError:
 **Question**: Are sequence numbers guaranteed monotonically increasing?
 
 **Backend**: EventAggregator emits events but no sequence field in emit
+
 - Evidence: aggregator.py emit_* methods don't set sequence
 - Sequence set by ConnectionManager.broadcast() before sending
 
@@ -1962,6 +2093,7 @@ except TimeoutError:
 **Root Cause**: Reconnection protocol detects stale events but not gaps. No automatic refetch on gap. Clients silently accept out-of-order state.
 
 **Recommendation**:
+
 1. Implement gap detection: `if (seq > lastSeq + 1) refetchSnapshot()`
 2. Add backoff to snapshot refetch (exponential, cap at 30s)
 3. Persist subscriptions to localStorage
@@ -1983,6 +2115,7 @@ except TimeoutError:
 **Low Issues**: 12+ (polish, documentation, minor gaps)
 
 **Distribution by Severity**:
+
 ```
 CRIT (12):
   - SA-301 (tool_calls always empty)
@@ -2044,6 +2177,7 @@ LOW (12+):
 **Security Risk Level**: 🚨 **CRITICAL** — System is NOT SAFE for multi-user or untrusted network deployment. Recommend for local/trusted use ONLY until auth implemented.
 
 **Next Steps**:
+
 1. **IMMEDIATE (Today)**:
    - Add authentication layer (endpoints.py: require Depends(authenticate_request))
    - Add thread ownership checks (all endpoints: filter by user)
@@ -2064,6 +2198,7 @@ LOW (12+):
    - Performance optimization (deduplication, batching)
 
 **Estimated Fix Effort**:
+
 - CRIT: 3-5 days (auth + data integrity)
 - HIGH: 2-3 days (feature completeness)
 - MED: 3-5 days (observability + robustness)
@@ -2091,6 +2226,7 @@ This comprehensive audit identified critical security gaps, data integrity issue
 ### 18.1 Frontend Authentication
 
 **REST Client** (rest-client.ts:110-130):
+
 ```typescript
 private async get<T>(path: string): Promise<T> {
   const res = await fetch(`${this.baseUrl}${path}`);
@@ -2109,12 +2245,14 @@ private async get<T>(path: string): Promise<T> {
 ### 18.2 Backend Authentication
 
 **Public API** (endpoints.py):
+
 - All routes (POST /threads, GET /threads, etc.) have NO `Depends(authenticate_request)`
 - No authentication enforced on any public endpoint
 
 **Evidence**: endpoints.py router routes (lines 208-1077) use only `Depends(get_db)`, not auth
 
 **Internal API** (internal.py:92-105):
+
 ```python
 async def _verify_internal_token(
   authorization: str | None = Header(None),
@@ -2139,13 +2277,16 @@ async def _verify_internal_token(
 **Question**: What scopes does each endpoint require?
 
 **Backend**: No scope checking in any endpoint
+
 - Evidence: No Depends() on scope validators
 - `authenticate_request` is a no-op (line 41)
 
 **Frontend**: No scope enforcement
+
 - Evidence: No token claims parsing, no scope validation before calling API
 
 **Example Scenario**:
+
 ```
 1. User A creates thread-abc
 2. User B calls GET /threads
@@ -2158,9 +2299,11 @@ async def _verify_internal_token(
 ### 18.4 Token Refresh & Expiration
 
 **Frontend**: No token refresh logic
+
 - Evidence: No token extraction, no exp checking, no refresh endpoint called
 
 **Backend**: No token issuing
+
 - Evidence: No POST /auth/token endpoint, no JWT signing
 
 **Problem**: If future implementation adds JWT tokens, frontend has no way to refresh before expiry
@@ -2170,6 +2313,7 @@ async def _verify_internal_token(
 ### 18.5 WebSocket Authorization
 
 **Public WS** (websocket.py):
+
 ```python
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
@@ -2180,6 +2324,7 @@ async def websocket_endpoint(websocket: WebSocket):
 **Problem**: Anyone can connect to `/ws` without authentication
 
 **Internal WS** (internal.py:115-126):
+
 ```python
 @internal_router.websocket("/ws")
 async def worker_ws_endpoint(websocket: WebSocket):
@@ -2197,6 +2342,7 @@ async def worker_ws_endpoint(websocket: WebSocket):
 **But Problem**: Public WS has zero auth. No access control on subscription commands.
 
 **Example**:
+
 ```
 1. Client A connects to WS
 2. Sends SubscribeCommand for thread-123 (owned by User B)
@@ -2209,6 +2355,7 @@ async def worker_ws_endpoint(websocket: WebSocket):
 ### 18.6 Permission Request Isolation
 
 **Permission Response Endpoint** (endpoints.py:965-1000):
+
 ```python
 @router.post("/permissions/{request_id}/respond", response_model=PermissionResponseResult)
 async def respond_to_permission_endpoint(
@@ -2223,6 +2370,7 @@ async def respond_to_permission_endpoint(
 **Problem**: No verification that requester has authority to respond
 
 **Example**:
+
 ```
 1. Backend sends PermissionRequestEvent to thread-123 (User A)
 2. User B calls POST /permissions/req-456/respond
@@ -2235,6 +2383,7 @@ async def respond_to_permission_endpoint(
 ### 18.7 Thread Ownership & Access Control
 
 **GET /threads** (endpoints.py:346-380):
+
 ```python
 @router.get("/threads", response_model=ThreadListResponse)
 async def list_threads_endpoint(...):
@@ -2245,6 +2394,7 @@ async def list_threads_endpoint(...):
 **Problem**: Returns ALL threads regardless of user
 
 **GET /threads/{id}/state** (endpoints.py:602-686):
+
 ```python
 async def get_thread_state_endpoint(thread_id: str, ...):
   thread = await get_thread(db, thread_id)
@@ -2261,6 +2411,7 @@ async def get_thread_state_endpoint(thread_id: str, ...):
 ### 18.8 Internal Token Exposure
 
 **Settings** (core/config.py):
+
 ```python
 internal_token: str | None = Field(
   default=None,
@@ -2273,6 +2424,7 @@ internal_token: str | None = Field(
 **Evidence**: No redaction in logging (Pass 14 finding SA-1410)
 
 **Example**:
+
 ```
 1. Internal WS handshake fails
 2. Backend logs: "Unauthorized: Bearer abc123def456xyz"
@@ -2284,6 +2436,7 @@ internal_token: str | None = Field(
 ### 18.9 Frontend Token Storage
 
 **If tokens are implemented**:
+
 - Where would token be stored? (localStorage, sessionStorage, memory?)
 - No xsrf protection (no CSRF token visible)
 - No HttpOnly flag possible (fetch() can't set it)
@@ -2295,6 +2448,7 @@ internal_token: str | None = Field(
 ### 18.10 CORS & Origin Validation
 
 **Backend** (app.py):
+
 ```python
 # No CORS configuration visible
 # No origin whitelist
@@ -2330,6 +2484,7 @@ internal_token: str | None = Field(
 **Critical Risk**: System is NOT SAFE for multi-user deployment or untrusted network access.
 
 **Recommendation**:
+
 1. **IMMEDIATE**: Add user authentication (e.g., OIDC, API key)
 2. **IMMEDIATE**: Add thread ownership checks (only owner can access)
 3. **IMMEDIATE**: Add scope validation (permission endpoint requires authority)

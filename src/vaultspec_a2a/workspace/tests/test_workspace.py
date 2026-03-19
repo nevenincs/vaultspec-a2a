@@ -4,15 +4,14 @@ Every test creates a fresh temporary git repo — no mocks, no monkeypatching.
 """
 
 import subprocess
-
 from pathlib import Path
+from typing import ClassVar
 
 import pytest
 
 from ...core.exceptions import WorkspaceError
 from ..environment import resolve_env_vars, resolve_venv
 from ..git_manager import GitManager, MergeStrategy
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -336,7 +335,7 @@ class TestResolveEnvVars:
 class TestCredentialScrubbing:
     """Tests verifying that known secret env vars are scrubbed (WS-H3)."""
 
-    _SECRET_KEYS = [
+    _SECRET_KEYS: ClassVar[list[str]] = [
         "ANTHROPIC_API_KEY",
         # CLAUDE_CODE_OAUTH_TOKEN is intentionally NOT scrubbed here — it is in
         # the CLAUDE_CODE_* allowlist so the provider layer can re-inject it.
@@ -349,7 +348,8 @@ class TestCredentialScrubbing:
         "ZHIPU_API_KEY",
         "LANGCHAIN_API_KEY",
         "LANGCHAIN_TRACING_V2",
-        # ACP-ENV-005: ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption
+        # ACP-ENV-005: ANTHROPIC_LOG causes SDK debug text on stdout
+        # → JSON-RPC corruption
         "ANTHROPIC_LOG",
     ]
 
@@ -409,7 +409,9 @@ class TestCredentialScrubbing:
     def test_claude_code_allowlist_keys_are_preserved(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ACP-ENV-004/006: allowlisted CLAUDE_CODE_* keys pass through the wildcard scrub."""
+        """ACP-ENV-004/006: allowlisted CLAUDE_CODE_* keys pass through
+        the wildcard scrub.
+        """
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-abc123")
         monkeypatch.setenv("CLAUDE_CODE_EXECUTABLE", "/usr/local/bin/claude")
         monkeypatch.setenv("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")

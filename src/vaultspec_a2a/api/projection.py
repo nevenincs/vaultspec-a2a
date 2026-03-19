@@ -3,23 +3,25 @@
 from __future__ import annotations
 
 import json
-
 from dataclasses import dataclass, field
 from datetime import datetime
-from typing import Any
-
-from langgraph.checkpoint.base import CheckpointTuple
-from sqlalchemy.ext.asyncio import AsyncSession
+from typing import TYPE_CHECKING, Any
 
 from ..database.crud import (
     get_pending_permission_requests,
     get_thread_execution_state,
 )
-from ..database.models import (
-    PermissionRequestModel,
-    ThreadExecutionStateModel,
-    ThreadModel,
-)
+
+if TYPE_CHECKING:
+    from langgraph.checkpoint.base import CheckpointTuple
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    from ..database.models import (
+        PermissionRequestModel,
+        ThreadExecutionStateModel,
+        ThreadModel,
+    )
+
 from .schemas.enums import PermissionOptionKind, PermissionType
 from .schemas.snapshots import (
     ExecutionTaskSnapshot,
@@ -27,7 +29,6 @@ from .schemas.snapshots import (
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
-
 
 _PLAN_APPROVAL_PAUSE_CAUSES = {
     PermissionType.PLAN_APPROVAL.value,
@@ -213,9 +214,7 @@ def project_checkpoint_tuple(
     """Project repair-relevant checkpoint data beyond raw channel values."""
     checkpoint = checkpoint_tuple.checkpoint
     metadata = (
-        checkpoint_tuple.metadata
-        if isinstance(checkpoint_tuple.metadata, dict)
-        else {}
+        checkpoint_tuple.metadata if isinstance(checkpoint_tuple.metadata, dict) else {}
     )
     parent_config = (
         checkpoint_tuple.parent_config
@@ -240,9 +239,7 @@ def project_checkpoint_tuple(
             str(metadata.get("source")) if metadata.get("source") is not None else None
         ),
         checkpoint_step=(
-            int(metadata["step"])
-            if isinstance(metadata.get("step"), int)
-            else None
+            int(metadata["step"]) if isinstance(metadata.get("step"), int) else None
         ),
         checkpoint_updated_channels=[
             str(channel)

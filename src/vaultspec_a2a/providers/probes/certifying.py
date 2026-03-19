@@ -10,7 +10,6 @@ from __future__ import annotations
 import subprocess
 import sys
 
-
 __all__ = ["main"]
 
 
@@ -61,12 +60,8 @@ def main() -> int:
             result = _run_probe(provider)
         except subprocess.TimeoutExpired:
             timeout = _probe_timeout_seconds(provider)
-            timeout_label = (
-                "interactive watchdog" if timeout is None else f"{timeout}s"
-            )
-            failures.append(
-                f"{provider}: probe subprocess exceeded {timeout_label}"
-            )
+            timeout_label = "interactive watchdog" if timeout is None else f"{timeout}s"
+            failures.append(f"{provider}: probe subprocess exceeded {timeout_label}")
             continue
 
         detail = (result.stdout + result.stderr).strip()

@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-
 __all__ = ["_api_client", "_handle_response", "_mask", "_show_config_callback"]
 
-from collections.abc import Generator
 from contextlib import contextmanager
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
 
 import click
 import httpx
-
 
 _SENSITIVE_SUBSTRINGS = ("key", "token", "secret", "password")
 _MASK_MIN_LEN = 4
@@ -33,7 +34,7 @@ def _show_config_callback(
 ) -> None:
     if not value or ctx.resilient_parsing:
         return
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     for name in settings.model_fields:
         click.echo(f"{name}={_mask(name, getattr(settings, name))}")
@@ -61,7 +62,7 @@ def _api_client() -> Generator[httpx.Client]:
     Catches network-level errors (connect failures, timeouts) and prints
     a clean message instead of a raw traceback.
     """
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     base_url = f"http://127.0.0.1:{settings.port}/api"
     try:

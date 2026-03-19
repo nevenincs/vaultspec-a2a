@@ -2,7 +2,6 @@
 
 from enum import IntEnum, StrEnum
 
-
 __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",

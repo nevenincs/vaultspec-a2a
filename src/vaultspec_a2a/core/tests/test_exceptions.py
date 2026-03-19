@@ -25,7 +25,6 @@ from .. import exceptions as _exceptions_module
 # GitWorkspaceError lives in exceptions but is NOT re-exported by the core facade
 from ..exceptions import GitWorkspaceError
 
-
 # ---------------------------------------------------------------------------
 # ErrorSeverity enum
 # ---------------------------------------------------------------------------

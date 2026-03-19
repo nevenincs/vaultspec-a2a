@@ -18,7 +18,6 @@ default to exercise the ``httpx.RequestError`` branch.
 """
 
 import asyncio
-
 from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import uuid4
@@ -26,7 +25,6 @@ from uuid import uuid4
 import httpx
 import pytest
 import pytest_asyncio
-
 from fastapi import FastAPI, Request
 from fastapi.testclient import TestClient
 from httpx import ASGITransport
@@ -58,7 +56,6 @@ from ..server import (
     send_message,
     start_thread,
 )
-
 
 # ---------------------------------------------------------------------------
 # Shared client reset — the module-level httpx.AsyncClient is bound to a
@@ -223,7 +220,9 @@ async def test_start_thread_unknown_preset_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_start_thread_default_preset_not_unknown() -> None:
-    """start_thread with team_preset=None uses 'vaultspec-adaptive-coder' -- not unknown."""
+    """start_thread with team_preset=None uses 'vaultspec-adaptive-coder'
+    -- not unknown.
+    """
     # With no server running this hits a connection error -- but must NOT raise
     # an "Unknown preset" error.
     with pytest.raises(ToolError) as exc_info:
@@ -763,7 +762,9 @@ class TestCancelThreadViaApp:
     def test_cancel_thread_repeat_request_stays_accepting_until_terminal_event(
         self, session_factory, checkpointer
     ) -> None:
-        """Repeated cancel requests stay accepted until the worker confirms terminal state."""
+        """Repeated cancel requests stay accepted until worker
+        confirms terminal state.
+        """
         with _make_test_client(session_factory, checkpointer) as client:
             create_resp = client.post(
                 "/api/threads",
@@ -807,11 +808,15 @@ class TestDeleteArchiveThreadErrorPaths:
 
 
 class TestKnownPresetsCache:
-    """_known_presets_cache is populated on first call and cleared by _reset_known_presets."""
+    """_known_presets_cache is populated on first call and cleared by
+    _reset_known_presets.
+    """
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_reset_known_presets_clears_cache_after_population(self) -> None:
-        """_reset_known_presets() sets _known_presets_cache back to None after it was set."""
+        """_reset_known_presets() sets _known_presets_cache back to None
+        after it was set.
+        """
         import sys
 
         from ..server import _get_known_presets

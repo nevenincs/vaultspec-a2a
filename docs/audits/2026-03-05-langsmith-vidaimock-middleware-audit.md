@@ -124,15 +124,15 @@
 
 1) **Critical** — Telemetry still reads legacy `LANGCHAIN_*` vars (`LANGCHAIN_TRACING_V2`, `LANGCHAIN_PROJECT`) and does not reference canonical `LANGSMITH_*` env vars. This conflicts with current LangSmith guidance that best practice is `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`, `LANGSMITH_ENDPOINT`, with `LANGCHAIN_*` treated as legacy aliases.  
    **Evidence:** `lib/telemetry/instrumentation.py` reads `LANGCHAIN_TRACING_V2` and `LANGCHAIN_PROJECT` only.  
-   **Doc ground:** LangSmith env var guidance and legacy alias note (https://docs.langchain.com/langsmith/trace-without-env-vars, https://docs.langchain.com/langsmith/observability-llm-tutorial).
+   **Doc ground:** LangSmith env var guidance and legacy alias note (<https://docs.langchain.com/langsmith/trace-without-env-vars>, <https://docs.langchain.com/langsmith/observability-llm-tutorial>).
 
 2) **Critical** — `docker-compose.dev.yml` sets `LANGSMITH_ENDPOINT` default to `https://api.smith.langchain.com` without `/v1`. LangSmith docs explicitly state the env var must include `/v1` (or `/api/v1` for self-hosted) when configured via `LANGSMITH_ENDPOINT`.  
    **Evidence:** `docker-compose.dev.yml` mock-seeder environment block.  
-   **Doc ground:** LangSmith API endpoint requirement for `LANGSMITH_ENDPOINT` (https://docs.langchain.com/langsmith/cicd-pipeline-example, https://docs.langchain.com/langsmith/self-host-usage).
+   **Doc ground:** LangSmith API endpoint requirement for `LANGSMITH_ENDPOINT` (<https://docs.langchain.com/langsmith/cicd-pipeline-example>, <https://docs.langchain.com/langsmith/self-host-usage>).
 
 3) **Low (Verified/Aligned)** — Worker checkpointer lifecycle matches LangGraph guidance: uses `AsyncSqliteSaver.from_conn_string(...)` inside an async context manager and calls `await saver.setup()` before use.  
    **Evidence:** `lib/worker/app.py` uses `AsyncSqliteSaver.from_conn_string(...)` with `await checkpointer.setup()` in lifespan.  
-   **Doc ground:** LangGraph checkpointer async context manager pattern (https://docs.langchain.com/langsmith/custom-checkpointer) and checkpointer library listing for SQLite (https://docs.langchain.com/oss/python/langgraph/persistence).
+   **Doc ground:** LangGraph checkpointer async context manager pattern (<https://docs.langchain.com/langsmith/custom-checkpointer>) and checkpointer library listing for SQLite (<https://docs.langchain.com/oss/python/langgraph/persistence>).
 
 ---
 

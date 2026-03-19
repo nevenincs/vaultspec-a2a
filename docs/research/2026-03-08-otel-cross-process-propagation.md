@@ -9,6 +9,7 @@ LangSmith-OTel bridge gap, and implementation-ready solutions for TEL-GAP-03
 (our highest-severity telemetry gap).
 
 Related documents:
+
 - `2026-03-08-cross-process-tracing.md` — W3C format, gap catalog, fix plan
 - `2026-03-08-telemetry-tracing-gaps.md` — full gap audit (TEL-GAP-01 through 07)
 - `telemetry/instrumentation.py` — SDK setup, `configure_telemetry()`
@@ -80,6 +81,7 @@ HTTPXClientInstrumentor.instrument_client(client)
 ```
 
 **What it does**:
+
 - Injects `traceparent`/`tracestate` into outgoing request headers
 - Creates a CLIENT span for each outgoing request
 - Records `http.method`, `http.url`, `http.status_code` attributes
@@ -621,6 +623,7 @@ Browser / Frontend
 ```
 
 **Correlation chain**:
+
 - OTel: trace_id links all spans across processes
 - LangSmith: run metadata contains otel_trace_id for cross-reference
 - Combined: operator can find LangSmith run from OTel trace, or vice versa
@@ -669,6 +672,7 @@ resp = await client.post("/dispatch", json={
 
 HTTP headers are the correct carrier for W3C trace context. Embedding
 in JSON body:
+
 - Pollutes the business schema with infrastructure concerns
 - Requires custom extraction (cannot use `propagate.extract(request.headers)`)
 - Breaks compatibility with standard OTel auto-instrumentation
@@ -734,8 +738,9 @@ Always inject WITHIN the span's context manager, before the HTTP call.
    in live tests.
 
 Sources:
+
 - OpenTelemetry Python SDK: `opentelemetry.propagate` module (installed, verified)
-- httpx event_hooks: https://www.python-httpx.org/advanced/event-hooks/
-- W3C TraceContext: https://www.w3.org/TR/trace-context/
-- LangSmith metadata search: https://docs.smith.langchain.com/observability/how_to_guides/filter_traces_in_application
+- httpx event_hooks: <https://www.python-httpx.org/advanced/event-hooks/>
+- W3C TraceContext: <https://www.w3.org/TR/trace-context/>
+- LangSmith metadata search: <https://docs.smith.langchain.com/observability/how_to_guides/filter_traces_in_application>
 - Existing codebase: `telemetry/middleware.py`, `worker/ipc.py`, `core/aggregator.py`

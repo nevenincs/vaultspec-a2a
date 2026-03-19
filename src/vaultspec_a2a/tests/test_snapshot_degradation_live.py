@@ -5,7 +5,6 @@ import time
 
 import httpx
 import pytest
-
 from testcontainers.core.container import DockerContainer
 
 from .conftest import (
@@ -23,7 +22,6 @@ from .test_permission_durability_live import (
     _select_certifying_provider,
     _start_manual_stack,
 )
-
 
 pytestmark = pytest.mark.live
 
@@ -64,7 +62,7 @@ async def _start_checkpoint_postgres_container() -> tuple[DockerContainer, str]:
 
 @pytest.mark.asyncio(loop_scope="session")
 @pytest.mark.timeout(480)
-async def test_snapshot_reports_explicit_degradation_when_checkpoint_backend_is_unavailable(
+async def test_snapshot_reports_degradation_when_checkpoint_backend_unavailable(
     postgres_sqlalchemy_url,
     tmp_path,
 ):
@@ -76,7 +74,10 @@ async def test_snapshot_reports_explicit_degradation_when_checkpoint_backend_is_
     worker = None
 
     try:
-        checkpoint_container, checkpoint_url = await _start_checkpoint_postgres_container()
+        (
+            checkpoint_container,
+            checkpoint_url,
+        ) = await _start_checkpoint_postgres_container()
         gateway, worker, gateway_url, _env = await _start_manual_stack(
             postgres_sqlalchemy_url=postgres_sqlalchemy_url,
             postgres_checkpoint_url=checkpoint_url,

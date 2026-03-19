@@ -10,9 +10,7 @@ References:
 
 import contextlib
 import logging
-
 from pathlib import Path
-
 
 __all__ = ["RuleManager"]
 

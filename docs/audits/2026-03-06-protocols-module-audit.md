@@ -1,7 +1,7 @@
 # Protocols Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/protocols/` — 4 source files (protocols/__init__.py, mcp/__init__.py, mcp/server.py, a2a/__init__.py, adapter/__init__.py)
+**Scope:** `src/vaultspec_a2a/protocols/` — 4 source files (protocols/**init**.py, mcp/**init**.py, mcp/server.py, a2a/**init**.py, adapter/**init**.py)
 **Baseline:** No prior dedicated audit. Tasks #16 and #17 reference previously identified findings.
 
 ---
@@ -153,6 +153,7 @@ All imports use proper relative patterns. Clean migration.
 The MCP server is functionally complete with 9 well-documented tools covering the full orchestration lifecycle. Tool descriptions are excellent — clear about when to use, when not to use, return format, and side effects. The `instructions` string on the FastMCP instance provides good autonomous workflow guidance.
 
 Main concerns:
+
 1. **HIGH-03**: The ~150 lines of duplicated error handling is the biggest maintainability issue. A shared wrapper would cut the file by ~35%.
 2. **HIGH-02**: UUID validation at the MCP boundary would prevent any path traversal via crafted thread IDs.
 3. **MED-02**: The incorrect permission option_id examples could cause MCP clients to send invalid responses.
@@ -169,6 +170,7 @@ Main concerns:
 ## Cycle 2 — Tool Correctness & Dual Aggregator Deep Dive (2026-03-06)
 
 **Focus areas** (per team-lead brief):
+
 1. Tool implementations correctness (are they sending/receiving the right data?)
 2. Are MCP tools reading stale state (dual aggregator problem)?
 3. Error handling on tool failures
@@ -205,12 +207,14 @@ Pydantic v2 defaults to `extra='ignore'`, so the top-level `workspace_root` is *
 **Evidence:** The test `test_post_threads_with_workspace_root_returns_201` (test_server.py:221-234) sends `workspace_root` at the top level and gets 201 — but this only proves the endpoint doesn't crash, NOT that workspace_root is received.
 
 **Impact:** Every MCP `start_thread` call with `workspace_root` runs WITHOUT project context:
+
 - No `.vault/` document injection
 - No feature_tag / context_refs discovery
 - No workspace-scoped file operations
 - ADR-014 context injection completely bypassed
 
 **Correct payload structure:**
+
 ```python
 payload = {
     "initial_message": initial_message,
@@ -320,6 +324,7 @@ All MCP tools operate via HTTP against the REST API. They inherit ALL dual aggre
 ### Error Handling Assessment
 
 All 9 tools follow the same 4-tier error handling pattern:
+
 1. `httpx.ConnectError` → "Network error: could not connect..."
 2. `httpx.TimeoutException` → "Timeout: server did not respond..."
 3. `httpx.HTTPStatusError` → "Server error: HTTP {status_code}" (with 404 special handling where applicable)
@@ -346,6 +351,7 @@ All 9 tools follow the same 4-tier error handling pattern:
 | cancel_thread | YES (server unavailable) | YES (404 + cancel + double-cancel) | — |
 
 **Missing test coverage:**
+
 - `start_thread` oversized message rejection (MCP-01)
 - `start_thread` with workspace_root actually reaching the endpoint correctly (CRIT-01 — test passes but data is silently dropped)
 - `get_pending_permissions` with actual pending permissions

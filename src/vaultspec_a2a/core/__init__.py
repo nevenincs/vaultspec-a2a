@@ -1,9 +1,7 @@
 """Core orchestration logic and state."""
 
 import importlib
-
 from typing import TYPE_CHECKING
-
 
 if TYPE_CHECKING:
     from .aggregator import EventAggregator as EventAggregator
@@ -118,7 +116,6 @@ from .team_config import (
 from .team_config import (
     load_team_config as load_team_config,
 )
-
 
 # Lazy imports for two reasons:
 # 1. Break circular dependencies:

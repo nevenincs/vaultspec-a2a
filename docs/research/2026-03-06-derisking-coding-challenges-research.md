@@ -48,12 +48,14 @@ Three content block types exist:
 ### 1.3 Detecting File-Modifying Tools
 
 Use `kind` field for classification:
+
 - **File writes**: `kind == "edit"` or `kind == "delete"` or `kind == "move"`
 - **File reads**: `kind == "read"` or `kind == "search"`
 - **Terminal**: `kind == "execute"`
 - **Content with diff**: presence of `content` blocks with `type: "diff"`
 
 For `ArtifactUpdateEvent` emission, detect:
+
 1. `tool_call_update` with `status == "completed"` AND `kind in ("edit", "delete", "move")`
 2. OR presence of `diff` content blocks in the `content` list
 3. Extract `locations[0].path` as the artifact filename
@@ -222,11 +224,13 @@ async def execute_mock_team(api_base: str, preset_id: str) -> None:
 ```
 
 Changes required:
+
 - `docker/run.py`: Replace graph compilation + `astream()` with HTTP POST
 - `docker-compose.dev.yml`: Add `depends_on: api` to mock-seeder service
 - Environment: Add `API_BASE_URL=http://api:8000` to mock-seeder env
 
 Benefits:
+
 - Zero duplication of event pipeline logic
 - Mock threads are indistinguishable from real threads in the frontend
 - Mock-seeder becomes a thin "scenario driver" (~30 lines)

@@ -28,6 +28,7 @@ The codebase already has the building blocks for crash detection:
 
 No component currently **detects a crash and restarts** the worker. The
 `LazyWorkerSpawner` spawns once and never monitors. If the worker crashes:
+
 1. Heartbeats stop arriving
 2. After 90s, `/internal/health` reports worker as stale
 3. Circuit breaker opens after 3 failed dispatches
@@ -98,12 +99,14 @@ async def _worker_watchdog(
 ```
 
 **Pros**:
+
 - Zero external dependencies
 - Runs inside the existing asyncio event loop
 - Direct access to `LazyWorkerSpawner` and `WorkerCircuitBreaker`
 - Works on Windows (no signals needed)
 
 **Cons**:
+
 - If the gateway crashes, the watchdog dies too
 - No protection against gateway hangs (event loop blocked)
 
@@ -125,11 +128,13 @@ if self.state == "HALF_OPEN":
 ```
 
 **Pros**:
+
 - No separate background task
 - Restart only triggered when there's actual demand (a dispatch)
 - Natural integration with existing circuit breaker flow
 
 **Cons**:
+
 - Restart happens on the request path (adds latency to the probe dispatch)
 - Does not detect crash between dispatches
 - More complex circuit breaker state machine
@@ -166,11 +171,13 @@ async def _gateway_health_probe(
 ```
 
 **Pros**:
+
 - Detects worker crashes faster than waiting for heartbeat timeout (90s)
 - Bidirectional health verification
 - Simple implementation
 
 **Cons**:
+
 - Redundant with worker heartbeats
 - Additional HTTP traffic (minor)
 
@@ -186,12 +193,14 @@ async def _gateway_health_probe(
 Configurable via INI files. Auto-restart on crash with backoff.
 
 **Pros**:
+
 - Battle-tested, mature
 - Handles stdout/stderr logging
 - Process groups (start/stop related processes together)
 - Configurable restart policies (always, on-failure, unexpected)
 
 **Cons**:
+
 - UNIX only -- does not work on Windows
 - Separate daemon process to manage
 - Configuration complexity for our 2-process setup
@@ -221,6 +230,7 @@ WantedBy=multi-user.target
 ```
 
 **Pros**:
+
 - Production-grade process management
 - Socket activation (start on first connection)
 - Resource limits (cgroups)
@@ -228,6 +238,7 @@ WantedBy=multi-user.target
 - Dependencies between units
 
 **Cons**:
+
 - Linux only
 - Requires root or user lingering
 - Only manages the gateway; worker auto-spawn handled internally
@@ -242,11 +253,13 @@ local development.
 with restart policies.
 
 **Pros**:
+
 - Works on Windows
 - Auto-restart with configurable delay
 - stdout/stderr logging to file
 
 **Cons**:
+
 - Requires admin privileges for service installation
 - Not suitable for development workflow
 - External dependency
@@ -258,6 +271,7 @@ with restart policies.
 **What**: Node.js process manager, but works with any executable.
 
 **Pros**:
+
 - Cross-platform (Windows + Linux + macOS)
 - Auto-restart with exponential backoff
 - Cluster mode (multiple instances)
@@ -265,6 +279,7 @@ with restart policies.
 - Watch mode (restart on file change)
 
 **Cons**:
+
 - Requires Node.js runtime
 - Designed for Node.js ecosystem
 - Another runtime dependency
@@ -276,6 +291,7 @@ with restart policies.
 **What**: Background asyncio task inside the gateway process.
 
 **Pros**:
+
 - Zero dependencies
 - Full access to application state (circuit breaker, spawner)
 - Works on all platforms
@@ -283,6 +299,7 @@ with restart policies.
 - Development and production compatible
 
 **Cons**:
+
 - Dies if gateway crashes
 - No protection against event loop hangs
 - Must be carefully written to not block the event loop

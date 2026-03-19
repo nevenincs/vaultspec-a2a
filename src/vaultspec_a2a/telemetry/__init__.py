@@ -43,7 +43,6 @@ from .middleware import (
     ws_span as ws_span,
 )
 
-
 __all__ = [
     "TelemetryConfig",
     "TelemetryMiddleware",

@@ -61,6 +61,7 @@ It causes:
 ## Findings
 
 ### CRIT-01 — Jaeger topology split on active runtime paths is closed, but regression risk remains
+
 **Type:** observability contract drift
 
 **Finding:** The shared `requires_jaeger` gate probes the persistent local Jaeger at `localhost:13133/status`, and the active reviewable runtime paths now align with that contract. Telemetry trace verification and the shared `service_env` live stack both export/query against persistent local Jaeger.
@@ -70,6 +71,7 @@ It causes:
 **Why this matters:** The main standardization defect is no longer active on the current runtime path, but the contract is not fully secure until the dormant isolated fixture family is removed or fenced off.
 
 **Queue:** `JAEGER-STANDARD-001`
+
 - Severity: Critical
 - Type: observability contract drift
 - Suggested next action: keep the active path on persistent local Jaeger and remove or fence off the remaining isolated fixture family so transient Jaeger cannot be reintroduced silently.
@@ -79,6 +81,7 @@ It causes:
 ---
 
 ### HIGH-01 — Marker and docs drift still describe inconsistent Jaeger health semantics
+
 **Type:** docs/config drift
 
 **Finding:** The live code path probes `13133/status`, but marker/help text and historical comments still contain stale `14269` references.
@@ -88,6 +91,7 @@ It causes:
 **Why this matters:** Standardization cannot succeed while health semantics remain inconsistent. Health contract drift already caused confusion in this audit pass.
 
 **Queue:** `JAEGER-CONTRACT-001`
+
 - Severity: High
 - Type: docs/config drift
 - Suggested next action: normalize all Jaeger health references to the actual v2 contract and remove stale `14269` assumptions from the active code/documentation surface.
@@ -95,6 +99,7 @@ It causes:
 ---
 
 ### HIGH-02 — Tactical telemetry bridge `conftest.py` repaired fixture visibility but is not final standardization
+
 **Type:** test infrastructure stopgap
 
 **Finding:** The telemetry package now uses a local bridge `conftest.py` to re-export shared Jaeger fixtures and the `requires_jaeger` setup hook. This repaired pytest fixture visibility, but it does not resolve the underlying topology split.
@@ -104,6 +109,7 @@ It causes:
 **Why this matters:** The bridge is an implementation patch, not a final ownership model for shared Jaeger fixtures.
 
 **Queue:** `JAEGER-FIXTURE-001`
+
 - Severity: High
 - Type: test infrastructure standardization
 - Suggested next action: treat the bridge as transitional; redesign fixture ownership and endpoint semantics once the standard Jaeger topology is chosen.
@@ -111,6 +117,7 @@ It causes:
 ---
 
 ### HIGH-03 — Diagnostics are split between persistent verifier artifacts and ad hoc test-local traces/logs
+
 **Type:** diagnostics architecture gap
 
 **Finding:** The verifier persists query results and logs against persistent local Jaeger and stable artifact roots, while tests still rely on a mixture of startup stderr capture, HTTP event-hook logging, and transient fixture-owned Jaeger queries.
@@ -120,6 +127,7 @@ It causes:
 **Why this matters:** Even when traces exist, there is no fully standardized route from test execution to persistent operator review. This undermines debugging and post-run analysis.
 
 **Queue:** `JAEGER-DIAG-001`
+
 - Severity: High
 - Type: diagnostics architecture gap
 - Suggested next action: align test diagnostics with the persistent Jaeger + artifact model already used by the verifier, and emit stable service names / trace identifiers into retained evidence.
@@ -127,6 +135,7 @@ It causes:
 ---
 
 ### HIGH-04 — Persistent Jaeger currently lacks the metrics backend required for Service Performance Monitoring
+
 **Type:** observability capability gap
 
 **Finding:** The operator observed that the persistent Jaeger UI reports: Service Performance Monitoring requires a Prometheus-compatible time series database. Current local task-runner and compose surfaces expose Jaeger for trace collection/query, but no Prometheus-compatible metrics backend is wired into that local persistent deployment.
@@ -136,6 +145,7 @@ It causes:
 **Why this matters:** “Persistent traces visible” and “persistent observability service fully usable” are currently different capability levels. If the repo intends persistent Jaeger to be the review surface for both tests and production-like workflows, the missing metrics backend is a real operational gap.
 
 **Queue:** `JAEGER-SPM-001`
+
 - Severity: High
 - Type: observability platform gap
 - Suggested next action: define whether SPM is in scope for local persistent observability. If yes, add a Prometheus-compatible metrics backend and document the required wiring. If not, document that local persistent Jaeger supports trace review only, not service-performance monitoring.
@@ -143,6 +153,7 @@ It causes:
 ---
 
 ### MED-01 — Shared live fixture stack couples Jaeger, Postgres, and gateway/worker runtime semantics
+
 **Type:** rollout complexity
 
 **Finding:** The shared live fixture surface in `src/vaultspec_a2a/tests/conftest.py` couples Jaeger, Postgres, and gateway/worker runtime environment construction in one place.
@@ -152,6 +163,7 @@ It causes:
 **Why this matters:** Standardization cannot be treated as telemetry-test-only work. The shared live fixture owner must be audited as a multi-service surface.
 
 **Queue:** `JAEGER-ROLL-001`
+
 - Severity: Medium
 - Type: rollout dependency
 - Suggested next action: stage rollout through fixture ownership first, then integration env wiring, then telemetry tests, then verifier/doc updates.
@@ -164,6 +176,7 @@ API change. The remaining migration risk sits with any future test that assumes
 `service_env` owns an isolated trace backend.
 
 ### MED-02 — Dormant isolated Jaeger fixture family can reintroduce transient topology
+
 **Type:** observability contract regression risk
 
 **Finding:** `isolated_jaeger_container`, `isolated_jaeger_otlp_endpoint`, and
@@ -181,6 +194,7 @@ topology can still re-enter the codebase unless the isolated fixture family is
 either removed or fenced behind an explicit isolated contract.
 
 **Queue:** `JAEGER-ISOLATED-001`
+
 - Severity: Medium
 - Type: residual rollout risk
 - Suggested next action: either delete the isolated fixture family or move it
@@ -192,7 +206,9 @@ either removed or fenced behind an explicit isolated contract.
 ## Rollout Coverage
 
 ### Workstream 1 — Contract normalization
+
 Files:
+
 - `pyproject.toml`
 - `Justfile`
 - `src/vaultspec_a2a/telemetry/tests/test_telemetry.py`
@@ -200,27 +216,34 @@ Files:
 - `src/vaultspec_a2a/telemetry/tests/conftest.py`
 
 Order:
+
 1. Normalize health endpoint/status contract and active wording.
 2. Define the authoritative meaning of `requires_jaeger`.
 3. Decide whether the persistent local Jaeger path is the default reviewable contract.
 
 ### Workstream 2 — Fixture ownership and endpoint semantics
+
 Files:
+
 - `src/vaultspec_a2a/tests/conftest.py`
 - `src/vaultspec_a2a/telemetry/tests/conftest.py`
 - `src/vaultspec_a2a/telemetry/tests/test_telemetry.py`
 
 Order:
+
 1. Separate persistent-local Jaeger semantics from transient testcontainer semantics.
 2. Rework fixture names or marker families to remove ambiguity.
 3. Remove or deprecate transitional bridge assumptions once the final fixture owner is in place.
 
 Rollout state:
+
 - telemetry Jaeger verification and the shared `service_env` path are already migrated to persistent local Jaeger
 - remaining fixture work is removal or fencing of the dormant isolated Jaeger family, not active-path rewiring
 
 ### Workstream 3 — Runtime export-path convergence
+
 Files:
+
 - `src/vaultspec_a2a/telemetry/instrumentation.py`
 - `src/vaultspec_a2a/api/app.py`
 - `src/vaultspec_a2a/worker/app.py`
@@ -230,30 +253,37 @@ Files:
 - `docker-compose.integration.yml`
 
 Order:
+
 1. Verify OTLP defaults and compose/runtime wiring match the chosen persistent-local contract.
 2. Verify service names remain distinct and reviewable.
 3. Verify no test/runtime path silently overrides the intended persistent Jaeger destination.
 
 ### Workstream 4 — Operator diagnostics and retained evidence
+
 Files:
+
 - `src/vaultspec_a2a/cli/_verify.py`
 - `src/vaultspec_a2a/cli/tests/test_verify.py`
 - `.vault/runtime/verify-prodlike-docker/*` artifact contract
 - relevant test fixture logging surfaces
 
 Order:
+
 1. Align verifier assumptions with the standardized Jaeger topology.
 2. Ensure trace IDs, service names, and query URLs are retained in artifacts.
 3. Ensure test logs and persistent traces are reviewable after execution without transient container discovery.
 
 ### Workstream 5 — Persistent observability capability uplift
+
 Files:
+
 - `Justfile`
 - local/persistent Jaeger deployment wiring
 - compose/runtime docs
 - any future metrics backend configuration surface
 
 Order:
+
 1. Decide whether local persistent Jaeger is trace-only or trace-plus-SPM.
 2. If SPM is required, add Prometheus-compatible metrics backend wiring.
 3. Update docs and operator expectations accordingly.
@@ -263,29 +293,37 @@ Order:
 ## Multi-Pass Verification Plan
 
 ### Pass 1 — Contract surface verification
+
 Verify all active `requires_jaeger` text and helper comments point to the same persistent local Jaeger contract.
 Surface:
+
 - `pyproject.toml`
 - `Justfile`
 - telemetry test docstrings
 - shared fixture docstrings
 
 ### Pass 2 — Fixture topology verification
+
 Verify every Jaeger fixture consumed by reviewable tests resolves to the intended persistent-local endpoint family.
 Surface:
+
 - `src/vaultspec_a2a/tests/conftest.py`
 - `src/vaultspec_a2a/telemetry/tests/conftest.py`
 - telemetry Jaeger tests
 
 ### Pass 3 — Runtime export-path verification
+
 Verify that reviewable Jaeger tests, gateway/worker subprocesses, and OTLP defaults all export to the same persistent destination under the chosen contract.
 Surface:
+
 - telemetry instrumentation
 - service env fixture wiring
 - compose/runtime OTLP configuration
 
 ### Pass 4 — Operator reviewability verification
+
 Verify a human can:
+
 1. start persistent Jaeger
 2. run the relevant test
 3. open `http://localhost:16686`
@@ -295,15 +333,19 @@ Verify a human can:
 This pass is mandatory because the current defect is fundamentally about operator reviewability, not just test pass/fail.
 
 Immediate verification ask for this slice:
+
 1. rerun `src/vaultspec_a2a/telemetry/tests/test_telemetry.py::test_worker_middleware_extracts_incoming_traceparent`
 2. rerun one shared live-stack suite, preferably `src/vaultspec_a2a/tests/test_smoke.py`
 
 ### Pass 5 — Diagnostics retention verification
+
 Verify that stdout/stderr evidence, trace queries, trace IDs, and service names are retained in a stable evidence surface rather than depending on transient mapped ports.
 
 ### Pass 6 — Cross-module regression verification
+
 Audit all modules that set, default, or assume Jaeger OTLP/query paths so no remaining path silently targets a different topology.
 Surface:
+
 - `telemetry/instrumentation.py`
 - `tests/conftest.py`
 - verifier
@@ -311,14 +353,18 @@ Surface:
 - docs/audits/research trail
 
 ### Pass 7 — Persistent observability capability verification
+
 If SPM is declared in scope, verify that the persistent Jaeger deployment includes the Prometheus-compatible metrics backend required for service-performance views. If not in scope, verify the limitation is documented clearly.
 
 ### Pass 8 — User-run validation cycles
+
 Require at least two explicit user-run validation cycles:
+
 1. Jaeger absent: confirm hard fail-fast remains clear and correct
 2. Jaeger present: confirm traces are persisted into the intended local review surface and remain inspectable after test completion
 
 Current slice:
+
 1. mandatory: telemetry Jaeger verification against persistent local Jaeger
 2. mandatory: one shared live-stack consumer against persistent local Jaeger
 3. optional: broader live durability validation if trace review is desired there
@@ -328,6 +374,7 @@ Current slice:
 ## Evidence Anchors
 
 ### Persistent local Jaeger contract
+
 - `Justfile:85-100`
 - `src/vaultspec_a2a/cli/_verify.py:32`
 - `src/vaultspec_a2a/telemetry/instrumentation.py:22`
@@ -337,17 +384,20 @@ Current slice:
 - `docker-compose.integration.yml`
 
 ### Shared testcontainer Jaeger fixtures and local fail-fast gate
+
 - `src/vaultspec_a2a/tests/conftest.py:88-197`
 - `src/vaultspec_a2a/tests/conftest.py:305-345`
 - `src/vaultspec_a2a/tests/conftest.py:353-376`
 - `src/vaultspec_a2a/tests/conftest.py:663`
 
 ### Telemetry-specific split and tactical bridge
+
 - `src/vaultspec_a2a/telemetry/tests/test_telemetry.py:1-10`
 - `src/vaultspec_a2a/telemetry/tests/test_telemetry.py:443-549`
 - `src/vaultspec_a2a/telemetry/tests/conftest.py:1-21`
 
 ### Operator-facing diagnostics persistence
+
 - `src/vaultspec_a2a/cli/_verify.py:259-303`
 - `src/vaultspec_a2a/cli/_verify.py:331-458`
 - `src/vaultspec_a2a/cli/_verify.py:481-539`
@@ -355,6 +405,7 @@ Current slice:
 - `src/vaultspec_a2a/cli/tests/test_verify.py:249-330`
 
 ### Existing audit/research trail
+
 - `docs/audits/2026-03-12-debugging-trace-consistency-audit.md`
 - `docs/audits/2026-03-08-continuous-backend-readiness-audit.md:1197-1202`
 - `docs/audits/2026-03-07-justfile-cli-audit.md:118`
@@ -364,6 +415,7 @@ Current slice:
 - `docs/adrs/016-task-runner-dev-bootstrap.md`
 
 ### Operator-observed new issue
+
 - Local persistent Jaeger UI reports that Service Performance Monitoring requires a Prometheus-compatible time series database
 - Current local task-runner and compose surfaces presented in this audit show Jaeger trace wiring, but no Prometheus-compatible metrics backend wiring in the active persistent-local operator path
 

@@ -86,7 +86,9 @@ def _make_state_for_plan_approval(
         "token_usage": {},
         "next": "",
         "vault_index": (
-            vault_index if vault_index is not None else {"plan": [".vault/plan/plan.md"]}
+            vault_index
+            if vault_index is not None
+            else {"plan": [".vault/plan/plan.md"]}
         ),
     }
     if active_feature is not None:
@@ -444,6 +446,3 @@ def test_build_supervisor_messages_adds_workspace_rules() -> None:
         and "Project Coding Rules & Guidelines" in message.content
         for message in messages
     )
-
-
-

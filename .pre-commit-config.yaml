@@ -1,37 +1,48 @@
 repos:
+  # ── Read-only checks only ───────────────────────────────────────────
+  # Every hook here is a pure gate: it exits non-zero when the code is
+  # not acceptable but NEVER modifies files.  Auto-fixing lives in
+  # `just dev format` which is safe to run outside the stash cycle.
+  #
+  # Why: pre-commit stashes unstaged changes before running hooks, then
+  # restores them afterward.  If any hook modifies files AND the restore
+  # conflicts, pre-commit rolls back ALL fixes — even from unrelated
+  # hooks that succeeded.  Keeping hooks read-only avoids this entirely.
   - repo: local
     hooks:
       - id: ruff-check
-        name: Lint and fix Python code (Ruff)
-        entry: ruff check --fix
+        name: Lint Python code (Ruff)
+        entry: uv run ruff check
         language: system
         types: [python]
         pass_filenames: true
 
-      - id: ruff-format
-        name: Format Python code (Ruff)
-        entry: ruff format
+      - id: ruff-format-check
+        name: Check Python formatting (Ruff)
+        entry: uv run ruff format --check
         language: system
         types: [python]
         pass_filenames: true
 
-      - id: taplo-format
-        name: Format TOML files (Taplo)
-        entry: npx @taplo/cli fmt
-        language: system
+      - id: taplo-format-check
+        name: Check TOML formatting (Taplo)
+        entry: taplo fmt --check
+        language: node
+        additional_dependencies: ["@taplo/cli@0.7.0"]
         types: [toml]
         pass_filenames: true
 
       - id: taplo-lint
         name: Lint TOML files (Taplo)
-        entry: npx @taplo/cli lint
-        language: system
+        entry: taplo lint
+        language: node
+        additional_dependencies: ["@taplo/cli@0.7.0"]
         types: [toml]
         pass_filenames: true
 
       - id: ty
         name: Type-check Python codebase (Ty)
-        entry: uv run python -m ty check src
+        entry: uv run python -m ty check src/vaultspec_a2a
         language: system
         types: [python]
         pass_filenames: false
@@ -58,38 +69,9 @@ repos:
 
       - id: markdownlint
         name: Lint Markdown style (markdownlint)
-        entry: npx --yes markdownlint-cli
-        language: system
-        args:
-          [
-            '--config',
-            '.markdownlint.json',
-            'README.md',
-            'knowledge/*.md',
-            '.gemini/*.md',
-          ]
+        entry: markdownlint
+        language: node
+        additional_dependencies: ["markdownlint-cli@0.44.0"]
+        args: ["--config", ".markdownlint.json"]
+        pass_filenames: true
         types: [markdown]
-        pass_filenames: false
-
-      # ── Frontend Hooks ──────────────────────────────────────────
-
-      - id: eslint
-        name: Lint JS/TS (ESLint)
-        entry: npx eslint --fix
-        language: system
-        types_or: [javascript, ts]
-        pass_filenames: true
-
-      - id: prettier
-        name: Format JS/TS/CSS (Prettier)
-        entry: npx prettier --write --ignore-unknown
-        language: system
-        types_or: [javascript, ts, css, html, json]
-        pass_filenames: true
-
-      - id: stylelint
-        name: Lint CSS / Tailwind (Stylelint)
-        entry: npx stylelint --fix
-        language: system
-        types: [css]
-        pass_filenames: true

@@ -8,6 +8,7 @@ monitoring patterns used in CRIT-01 (MCP auto-start gateway), CRIT-02 (worker
 auto-spawn), and PROD-002 (worker watchdog).
 
 **Related documents:**
+
 - `2026-03-08-library-validation-asyncio-subprocess.md` — API validation
 - `2026-03-08-subprocess-coordination-patterns.md` — Coordination patterns
 - `2026-03-08-watchdog-patterns.md` — Watchdog and supervision patterns
@@ -37,6 +38,7 @@ process = await asyncio.create_subprocess_exec(
 ```
 
 **Key choices:**
+
 - `sys.executable` ensures the same Python interpreter (same venv)
 - `--factory` tells uvicorn to call `create_app()` to get the ASGI app
 - `PIPE` for stdout/stderr enables crash diagnostic capture
@@ -202,11 +204,13 @@ async def _kill_process_tree(process: asyncio.subprocess.Process) -> None:
 ```
 
 **Flags:**
+
 - `/T` — terminate the process tree (the target and all children)
 - `/F` — force termination (no graceful shutdown prompt)
 - `/PID` — target by process ID
 
 **Implementation:** Used in 3 places:
+
 1. `protocols/mcp/server.py:329-367` — MCP kills gateway
 2. `api/app.py:439-474` — Gateway kills worker
 3. Integration test `conftest.py` — Test cleanup
@@ -275,6 +279,7 @@ class LazyWorkerSpawner:
 ```
 
 **Why double-check:**
+
 1. **First check (no lock):** Fast path for the common case. After the worker
    is spawned, this returns immediately without lock contention.
 2. **Second check (under lock):** Prevents the race where two tasks both pass
@@ -282,6 +287,7 @@ class LazyWorkerSpawner:
    spawns a duplicate worker.
 
 **asyncio.Lock specifics:**
+
 - `asyncio.Lock` is NOT thread-safe — only safe within a single event loop
 - This is correct for our use case: all dispatch endpoints run on the same loop
 - `async with self._lock:` yields to other tasks while waiting (non-blocking)
@@ -327,6 +333,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 ```
 
 **Key principles:**
+
 1. **Create tasks in lifespan startup** — they share the app's event loop
 2. **Cancel tasks in lifespan finally** — ensures cleanup on shutdown
 3. **Suppress CancelledError** — cancellation is expected, not an error
@@ -492,7 +499,7 @@ Future: psutil `Process.children(recursive=True)` is cross-platform.
 - Python 3.13 asyncio subprocess: `asyncio.create_subprocess_exec`
 - Python 3.13 signal: `signal.raise_signal()` (available since 3.8)
 - uvicorn shutdown: `.venv/Lib/site-packages/uvicorn/server.py` (verified)
-- Windows `taskkill` docs: `taskkill /? ` (built-in)
+- Windows `taskkill` docs: `taskkill /?` (built-in)
 - tenacity: `tenacity>=9.0.0` (installed)
 - Our implementation: `src/vaultspec_a2a/api/app.py` (LazyWorkerSpawner, watchdog)
 - Our implementation: `src/vaultspec_a2a/protocols/mcp/server.py` (gateway spawn)

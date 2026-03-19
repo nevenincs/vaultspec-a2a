@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 __all__ = ["team"]
 
 import click
@@ -29,7 +28,7 @@ def start(
     autonomous: bool | None,
 ) -> None:
     """Start a new team from a preset."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         body: dict[str, object] = {
@@ -53,7 +52,7 @@ def start(
 @click.option("--id", "thread_id", required=True, help="Thread ID or nickname.")
 def status(thread_id: str) -> None:
     """Get team status for a thread."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.get(f"/threads/{thread_id}/state")
@@ -77,7 +76,7 @@ def status(thread_id: str) -> None:
 )
 def resume(thread_id: str, message: str | None) -> None:
     """Send a message into a thread to resume work."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.post(
@@ -92,7 +91,7 @@ def resume(thread_id: str, message: str | None) -> None:
 @click.option("--id", "thread_id", required=True, help="Thread ID.")
 def stop(thread_id: str) -> None:
     """Cancel a running team."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.post(f"/threads/{thread_id}/cancel")
@@ -110,7 +109,7 @@ def stop(thread_id: str) -> None:
 @click.option("--id", "thread_id", required=True, help="Thread ID.")
 def delete(thread_id: str) -> None:
     """Delete a thread and all its data."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.delete(f"/threads/{thread_id}")
@@ -122,7 +121,7 @@ def delete(thread_id: str) -> None:
 @click.option("--id", "thread_id", required=True, help="Thread ID.")
 def archive(thread_id: str) -> None:
     """Archive a completed/failed/cancelled thread."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.post(f"/threads/{thread_id}/archive")
@@ -153,7 +152,7 @@ def archive(thread_id: str) -> None:
 )
 def list_cmd(status_filter: str | None) -> None:
     """List teams. Optional filter: running | completed | archived | ..."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         params: dict[str, str] = {}
@@ -174,7 +173,7 @@ def list_cmd(status_filter: str | None) -> None:
 @team.command()
 def presets() -> None:
     """List available team presets."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.get("/teams")
@@ -197,7 +196,7 @@ def presets() -> None:
 @click.option("--option", "option_id", required=True, help="Option ID to select.")
 def respond(request_id: str, option_id: str) -> None:
     """Respond to a pending permission request."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.post(
@@ -213,7 +212,7 @@ def respond(request_id: str, option_id: str) -> None:
 @team.command()
 def overview() -> None:
     """Show team-wide status: agents, active threads, pending permissions."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         resp = client.get("/team/status")

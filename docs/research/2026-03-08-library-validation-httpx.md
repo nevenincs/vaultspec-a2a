@@ -26,6 +26,7 @@ class Timeout:
 ```
 
 Usage patterns from docstring:
+
 ```python
 Timeout(None)               # No timeouts
 Timeout(5.0)                # 5s timeout on all operations
@@ -39,6 +40,7 @@ Default httpx timeout: 5.0 seconds on all operations.
 ### Our Usage
 
 **MCP shared client** (`protocols/mcp/server.py:118-119`):
+
 ```python
 _shared_client = httpx.AsyncClient(
     timeout=httpx.Timeout(30.0, connect=5.0),
@@ -46,6 +48,7 @@ _shared_client = httpx.AsyncClient(
 ```
 
 **Worker IPC bridge** (`worker/ipc.py:66-69`):
+
 ```python
 self._client = httpx.AsyncClient(
     base_url=self._api_url,
@@ -55,6 +58,7 @@ self._client = httpx.AsyncClient(
 ```
 
 **Gateway health check** (`protocols/mcp/server.py:228`):
+
 ```python
 async with httpx.AsyncClient() as client:
     resp = await client.get(
@@ -153,13 +157,16 @@ httpx.AsyncClient(
 ### Our Usage Across Codebase
 
 **MCP shared client** (`protocols/mcp/server.py:118`):
+
 ```python
 httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0))
 ```
+
 No `base_url` -- uses full URLs in each request. This is intentional because
 the API base URL comes from runtime settings.
 
 **Worker bridge** (`worker/ipc.py:66-69`):
+
 ```python
 httpx.AsyncClient(
     base_url=self._api_url,
@@ -167,14 +174,17 @@ httpx.AsyncClient(
     headers=headers,
 )
 ```
+
 Uses `base_url` because all requests go to the same gateway.
 
 **Test worker client** (`api/tests/conftest.py:141-143`):
+
 ```python
 worker_client = httpx.AsyncClient(
     transport=transport, base_url="http://test-worker:8001"
 )
 ```
+
 Uses `transport` override (MockTransport) + `base_url`.
 
 ### Validation
@@ -258,6 +268,7 @@ errors, read timeouts, or write failures.
 
 We do NOT use `AsyncHTTPTransport(retries=...)`. Retry logic is implemented
 at the application level:
+
 - Worker bridge: `_MAX_FLUSH_RETRIES = 3` with exponential backoff
   (`worker/ipc.py:30-33`)
 - MCP health polling: Exponential backoff in `_spawn_gateway()`
@@ -287,6 +298,7 @@ use case (we need to retry on HTTP errors too, not just connection errors).
 | Deprecated patterns | NONE FOUND | None |
 
 **Findings**:
+
 - **LIB-VAL-02** (mandate): MockTransport in conftest violates no-mock mandate
 - **LIB-VAL-03** (LOW): Sync `_transport.close()` in test helper (not production)
 

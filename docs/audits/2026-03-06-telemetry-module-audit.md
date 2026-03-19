@@ -1,7 +1,7 @@
 # Telemetry Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/telemetry/` — 3 source files (instrumentation.py, middleware.py, __init__.py)
+**Scope:** `src/vaultspec_a2a/telemetry/` — 3 source files (instrumentation.py, middleware.py, **init**.py)
 **Baseline:** No prior dedicated audit for this module.
 
 ---
@@ -52,6 +52,7 @@ Cross-module import of a private symbol (leading underscore). If `_SDK_DISABLED`
 **File:** `instrumentation.py:60-83`
 
 Seven `os.environ.get()` calls at module level create constants evaluated once at import time. This is explicitly documented (comments at lines 50-59) and accepted as an ENV-BYPASS exception. However:
+
 - Tests cannot override these values without subprocess isolation
 - The test at `test_telemetry.py:141` uses `monkeypatch.delenv("LANGCHAIN_TRACING_V2")` which has NO effect since `_LANGSMITH_ENABLED` was already evaluated at import time
 
@@ -123,6 +124,7 @@ Minor: the example code in the docstring uses `@asynccontextmanager` but doesn't
 ### Assessment
 
 The telemetry module is well-architected with proper separation of concerns:
+
 - `instrumentation.py`: OTel SDK setup (TracerProvider, MeterProvider)
 - `middleware.py`: HTTP middleware + WS span helper + context injection
 - Facade in `__init__.py` exports all public symbols correctly
@@ -148,7 +150,7 @@ No fixes have been applied to the telemetry module since Cycle 1. All 2 HIGH, 4 
 
 ### Cross-Module Consistency
 
-#### HIGH-01 Correlation: LANGCHAIN_* vs LANGSMITH_* inconsistency is systemic
+#### HIGH-01 Correlation: LANGCHAIN_*vs LANGSMITH_* inconsistency is systemic
 
 The telemetry module's HIGH-01 (`instrumentation.py:78-83` reads only `LANGCHAIN_TRACING_V2`) is part of a broader pattern:
 
@@ -167,6 +169,7 @@ The telemetry module is the ONLY module that reads exclusively legacy names. `tr
 `telemetry/__init__.py` exports 7 symbols: `TelemetryConfig`, `TelemetryMiddleware`, `configure_telemetry`, `get_meter`, `get_tracer`, `inject_trace_context`, `ws_span`.
 
 **Not exported (by design):**
+
 - `_SDK_DISABLED` — private constant, consumed by `middleware.py` via direct import. Per HIGH-02, should be exposed as `is_sdk_disabled()` or `SDK_DISABLED`.
 - `_get_tracer()` — internal helper, not public. Correct to exclude.
 

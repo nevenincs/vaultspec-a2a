@@ -13,9 +13,7 @@ from __future__ import annotations
 
 import logging
 import time
-
 from datetime import UTC, datetime
-
 
 _logger = logging.getLogger(__name__)
 
@@ -23,10 +21,10 @@ _logger = logging.getLogger(__name__)
 def _trace_print(msg: str) -> None:
     """Write trace output to both logger and stdout for CLI visibility."""
     _logger.info(msg)
-    print(msg)  # noqa: T201
+    print(msg)
 
 
-def print_trace_summary(thread_id: str, project_name: str | None = None) -> None:  # noqa: PLR0912, PLR0915
+def print_trace_summary(thread_id: str, project_name: str | None = None) -> None:
     """Query LangSmith for the most recent trace for thread_id and print a summary.
 
     Polls briefly to allow the trace to propagate after the run completes,
@@ -41,7 +39,7 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
         project_name: LangSmith project name. Defaults to settings.langsmith_project,
                       then "default".
     """
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     if not settings.langsmith_api_key:
         _trace_print("[trace] LANGSMITH_API_KEY not set — skipping trace query.")
@@ -51,7 +49,7 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
         return
 
     try:
-        from langsmith import Client  # noqa: PLC0415
+        from langsmith import Client
     except ImportError:
         _trace_print("[trace] langsmith package not installed — skipping trace query.")
         return
@@ -116,7 +114,7 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
             root_run = runs[0]
             break
 
-        if attempt < 4:  # noqa: PLR2004
+        if attempt < 4:
             time.sleep(2)
 
     if root_run is None:
@@ -125,8 +123,8 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
     root_latency_ms: float | None = None
     if root_run.start_time and root_run.end_time:
         root_latency_ms = (
-            (root_run.end_time - root_run.start_time).total_seconds() * 1000
-        )
+            root_run.end_time - root_run.start_time
+        ).total_seconds() * 1000
     header = f"[trace] root run id={root_run.id} status={root_run.status}"
     if root_latency_ms is not None:
         header += f" total_latency={root_latency_ms:.0f}ms"

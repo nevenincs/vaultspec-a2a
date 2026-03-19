@@ -1,14 +1,19 @@
 """Tests for the team graph compilation and execution."""
 
-from collections.abc import AsyncGenerator
+from __future__ import annotations
+
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from langchain_core.runnables import RunnableConfig
 
 from ..exceptions import ConfigError
 from ..graph import compile_team_graph
@@ -212,7 +217,8 @@ async def test_compile_unknown_topology_raises(
 async def test_compile_pipeline_loop_structure(
     checkpointer: AsyncSqliteSaver,
 ) -> None:
-    """vaultspec-iterative-coder (pipeline_loop) produces correct node set without a supervisor.
+    """vaultspec-iterative-coder (pipeline_loop) produces correct node set
+    without a supervisor.
 
     CORE-L4: independent test for _compile_pipeline_loop topology.
     """
@@ -403,7 +409,7 @@ def test_worker_retry_on_connection_error_is_retried() -> None:
 
 
 def test_worker_retry_on_connection_error_wrapped_in_worker_error_is_retried() -> None:
-    """WorkerExecutionError wrapping ConnectionError is retried via __cause__ inspection."""
+    """WorkerExecutionError wrapping ConnectionError is retried via __cause__."""
     from ..exceptions import WorkerExecutionError
     from ..graph import _worker_retry_on
 
@@ -502,7 +508,9 @@ def test_build_supervisor_prompt_injects_directive() -> None:
 
 
 def test_build_supervisor_prompt_no_directive() -> None:
-    """_build_supervisor_prompt does not add directive section when directive is None."""
+    """_build_supervisor_prompt omits directive section
+    when directive is None.
+    """
     from ..graph import _build_supervisor_prompt
 
     base = "You are a supervisor."
@@ -542,7 +550,9 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
 
 
 def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
-    """Worker-level provider/capability/fallback overrides win over agent/team defaults."""
+    """Worker-level provider/capability/fallback overrides
+    win over agent/team defaults.
+    """
     from ...utils.enums import Model, Provider
     from ..graph import _resolve_worker_model_preferences
     from ..team_config import load_agent_config, load_team_config
@@ -579,7 +589,9 @@ def test_resolve_worker_model_preferences_honors_worker_override_precedence() ->
 
 
 def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
-    """GraphRecursionError must never be retried — retrying would just hit the limit again."""
+    """GraphRecursionError must never be retried
+    — retrying would hit the limit again.
+    """
     from langgraph.errors import GraphRecursionError
 
     from ..graph import _worker_retry_on

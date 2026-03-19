@@ -1,7 +1,7 @@
 # Database Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/database/` — all 12 source files (models.py, crud.py, session.py, migrate.py, __init__.py, migrations/env.py, migrations/__init__.py, migrations/versions/0001_initial_schema.py, tests/)
+**Scope:** `src/vaultspec_a2a/database/` — all 12 source files (models.py, crud.py, session.py, migrate.py, **init**.py, migrations/env.py, migrations/**init**.py, migrations/versions/0001_initial_schema.py, tests/)
 **Baseline:** Last audited 2026-03-04 (ADR-029 Alembic Migration Sprint)
 
 ---
@@ -32,6 +32,7 @@ async with engine.begin() as conn:
 ```
 
 With Alembic migrations in place (ADR-029), `init_db()` should NOT use `Base.metadata.create_all` for production databases. The Alembic migration `0001_initial_schema.py` already creates all tables including `team_preset`. Running both `create_all` AND Alembic migrations means:
+
 1. `create_all` creates tables that Alembic doesn't know about (Alembic thinks it still needs to run 0001)
 2. The ALTER TABLE is redundant — 0001 already has `team_preset`
 3. Future schema changes must be reflected in both Alembic migrations AND models.py + init_db() ALTER blocks
@@ -169,6 +170,7 @@ Focus: Migration file integrity, model vs schema drift, CRUD correctness, thread
 ### Migration File Integrity
 
 **0001_initial_schema.py** — VERIFIED CORRECT.
+
 - All 4 tables match model definitions exactly (columns, types, nullability, indexes, foreign keys)
 - Downgrade correctly drops in reverse FK-dependency order (cost_tracking, permission_logs, artifacts, threads)
 - `render_as_batch=True` in env.py enables SQLite ALTER TABLE emulation
@@ -192,6 +194,7 @@ Focus: Migration file integrity, model vs schema drift, CRUD correctness, thread
 ### CRUD Operations Correctness
 
 All CRUD functions verified:
+
 - `save_model`: Generic typed with PEP 695 syntax `[M: (...)]` — correct for Python 3.13
 - `create_thread`: Proper TOCTOU handling (SELECT pre-check + IntegrityError catch)
 - `_coerce_status`: Correctly rejects invalid status strings (DB-HIGH-02)
@@ -202,6 +205,7 @@ All CRUD functions verified:
 ### Alembic env.py Health
 
 **HEALTHY.** Key characteristics:
+
 - Absolute import `from vaultspec_a2a.database.models import Base` with `# noqa: TID252` — accepted exception (Alembic CLI loader)
 - `disable_existing_loggers=False` — worker isolation fix applied
 - `pool.NullPool` — prevents connection pool issues with aiosqlite async sessions
@@ -222,12 +226,14 @@ SUBMITTED → RUNNING → ??? (never transitions to COMPLETED or FAILED)
 ```
 
 Evidence:
+
 - `create_thread()` at `endpoints.py:237`: sets `ThreadStatus.SUBMITTED`
 - `send_message_endpoint()` at `endpoints.py:675`: sets `ThreadStatus.RUNNING`
 - `cancel_thread_endpoint()` at `endpoints.py:955`: sets `ThreadStatus.CANCELLED`
 - **NOWHERE** in the entire codebase is `ThreadStatus.COMPLETED` or `ThreadStatus.FAILED` ever written
 
 The only references to COMPLETED/FAILED are:
+
 1. Read-only guard in `cancel_thread_endpoint` (endpoints.py:928-929) — checks if thread is already terminal
 2. MCP server instructions (server.py:104) — tells users to "poll until status is 'completed' or 'failed'"
 
@@ -254,6 +260,7 @@ Searching for `ThreadStatus.CREATED` or `status.*created` yields zero results ou
 **File:** `database/__init__.py`
 
 Re-verified: `backfill_teamstate_sdd_fields` is imported directly at `api/app.py:45`:
+
 ```python
 from ..database.migrations import backfill_teamstate_sdd_fields
 ```

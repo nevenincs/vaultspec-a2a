@@ -20,7 +20,6 @@ from uuid import uuid4
 
 import httpx
 import pytest_asyncio
-
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from httpx import ASGITransport
@@ -36,7 +35,6 @@ from ...core.config import settings
 from ...database.models import Base
 from ..app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
 
-
 __all__: list[str] = []
 
 
@@ -48,14 +46,7 @@ __all__: list[str] = []
 @pytest_asyncio.fixture
 async def engine():
     """File-backed async SQLAlchemy engine with all tables created."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-db"
-        / uuid4().hex
-    )
+    case_dir = Path.home() / ".codex" / "memories" / "tmp" / "api-test-db" / uuid4().hex
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")

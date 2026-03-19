@@ -8,7 +8,6 @@ remains JSON-serializable for the LangGraph SQLite checkpointer.
 
 from dataclasses import asdict, dataclass
 
-
 __all__ = [
     "ArtifactRef",
     "PlanStep",

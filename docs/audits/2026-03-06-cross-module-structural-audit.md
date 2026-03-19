@@ -119,14 +119,17 @@ Symbols that are public API but missing from their submodule's `__init__.py`:
 Two managed circular dependency cycles exist, both handled correctly:
 
 ### Cycle 1: `core` <-> `api.schemas`
+
 - **Direction**: `core.aggregator` imports event types from `api.schemas.events`; `api.schemas` imports `TeamState` from `core.state`
 - **Mitigation**: No `__init__.py`-level cross-import. Both sides import from submodules directly, avoiding circular resolution at package init time.
 
 ### Cycle 2: `core` <-> `providers`
+
 - **Direction**: `core.graph` imports `create_chat_model` from `providers.factory`; `providers.acp_chat_model` imports `TeamConfig` from `core.team_config`
 - **Mitigation**: `core.__init__.py` uses lazy `__getattr__` for `compile_team_graph` and `build_initial_vault_index` (both in `core.graph`). `providers/__init__.py` uses lazy `__getattr__` for `create_chat_model`, `AcpChatModel`, `GeminiChatModel`.
 
 ### No unmanaged cycles detected
+
 A dependency graph traversal confirms no other circular paths exist between the 10 submodules.
 
 ---

@@ -21,7 +21,6 @@ import re
 import shutil
 import subprocess
 import sys
-
 from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
@@ -63,7 +62,6 @@ from .acp_exceptions import (
     AcpSessionError,
 )
 from .gemini_auth import refresh_gemini_token
-
 
 __all__ = ["AcpChatModel"]
 
@@ -120,7 +118,6 @@ _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 
 # Valid POSIX environment variable name pattern (PROV-M3).
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
-
 
 
 def _log_task_exception(task: asyncio.Task) -> None:
@@ -266,9 +263,9 @@ class AcpChatModel(BaseChatModel):
     async def _astream(
         self,
         messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: object,
+        _stop: list[str] | None = None,
+        _run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **_kwargs: object,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
         prompt_blocks: list[dict[str, str]] = []
@@ -338,7 +335,7 @@ class AcpChatModel(BaseChatModel):
             await self._setup_session(ctx)
             prompt_future = await self._setup_prompt(prompt_blocks, ctx)
 
-            async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
+            async for chunk in self._yield_chunks(ctx, prompt_future, _run_manager):
                 yield chunk
         finally:
             await self._cleanup_session(ctx, stdout_task, stderr_task)
@@ -871,7 +868,7 @@ class AcpChatModel(BaseChatModel):
         return resolved
 
     async def _on_fs_read_text_file(
-        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+        self, rpc_id: int | str, params: dict, _ctx: _AcpSessionContext
     ) -> dict[str, object]:
         """Handle fs/read_text_file RPC.
 
@@ -908,7 +905,7 @@ class AcpChatModel(BaseChatModel):
             }
 
     async def _on_fs_write_text_file(
-        self, rpc_id: int | str, params: dict, ctx: _AcpSessionContext
+        self, rpc_id: int | str, params: dict, _ctx: _AcpSessionContext
     ) -> dict[str, object]:
         """Handle fs/write_text_file RPC.
 
@@ -1497,8 +1494,7 @@ class AcpChatModel(BaseChatModel):
             if self._is_auth_cancelled_error(err):
                 self._raise_auth_outcome_error(
                     message=(
-                        "Authentication was cancelled before completion: "
-                        f"{err_msg}"
+                        f"Authentication was cancelled before completion: {err_msg}"
                     ),
                     code=err_code,
                     auth_outcome="operator_cancelled",

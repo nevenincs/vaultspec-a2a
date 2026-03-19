@@ -12,7 +12,6 @@ concerns covered by the session-scoped smoke tests in
 from __future__ import annotations
 
 import json
-
 from pathlib import Path
 from uuid import uuid4
 

@@ -65,6 +65,7 @@ That is useful evidence capture, but it is not a real-time debugging facade.
 ## Findings
 
 ### CRIT-01 — Telemetry Jaeger fixture discovery is structurally broken
+
 **Type:** test framework / fixture topology
 
 **Finding:** The failing telemetry test requires `jaeger_otlp_endpoint` and `jaeger_query_url`, but those fixtures are defined in a sibling `conftest.py` tree rather than an ancestor conftest visible to `src/vaultspec_a2a/telemetry/tests/`.
@@ -78,6 +79,7 @@ That is useful evidence capture, but it is not a real-time debugging facade.
 ---
 
 ### HIGH-01 — Jaeger health contract is drifted across marker docs, hooks, and task runner comments
+
 **Type:** docs/config drift
 
 **Finding:** The repository advertises inconsistent Jaeger readiness semantics.
@@ -96,6 +98,7 @@ Observed drift:
 ---
 
 ### HIGH-02 — Diagnostics are fragmented; no unified live facade exists
+
 **Type:** observability / debugging ergonomics
 
 **Finding:** The repository lacks a robust uniform surface for correlating runtime logs with traces in real time.
@@ -114,6 +117,7 @@ Existing mechanisms are split:
 ---
 
 ### HIGH-03 — Core graph execution tests have a hard VidaiMock dependency and currently fail at environment bootstrap
+
 **Type:** live-test dependency / environment readiness
 
 **Finding:** The graph execution suite is intentionally marked `requires_vidaimock` and hard-fails when VidaiMock is unreachable at `MOCK_API_BASE` or `http://localhost:8100`.
@@ -127,6 +131,7 @@ Existing mechanisms are split:
 ---
 
 ### HIGH-04 — Migration tests have a hard Postgres dependency and currently fail at environment bootstrap
+
 **Type:** live-test dependency / environment readiness
 
 **Finding:** The migration suite is hard-failing because Postgres is not reachable at the configured DSN.
@@ -140,6 +145,7 @@ Existing mechanisms are split:
 ---
 
 ### HIGH-05 — ACP auth failure path contains a real call-signature defect
+
 **Type:** implementation bug / error handling
 
 **Finding:** The ACP auth failure path raises a `TypeError` because `_raise_auth_outcome_error()` is called with a positional argument that its signature does not accept.
@@ -153,6 +159,7 @@ Existing mechanisms are split:
 ---
 
 ### MED-01 — Telemetry test contract mixes two Jaeger models without a single clear ownership boundary
+
 **Type:** test architecture / contract drift
 
 **Finding:** The repo simultaneously uses:
@@ -169,6 +176,7 @@ The telemetry test claims a live Jaeger contract and uses fixtures defined elsew
 ---
 
 ### LOW-01 — Pytest collection emits warning noise around Click objects named `test`
+
 **Type:** test hygiene / warning noise
 
 **Finding:** Pytest emits collection warnings because a Click `test` callable is being seen during discovery and is not a function test target.
@@ -182,12 +190,14 @@ The telemetry test claims a live Jaeger contract and uses fixtures defined elsew
 ## Triage Queue
 
 ### Critical
+
 - `TRACE-TEST-001` — Fix Jaeger fixture visibility for telemetry tests.
   - Severity: Critical
   - Type: test framework / fixture topology
   - Suggested next action: move shared Jaeger fixtures to an ancestor `conftest.py`, or explicitly load them via pytest plugin/re-export so `src/vaultspec_a2a/telemetry/tests/` can resolve them.
 
 ### High
+
 - `TRACE-CONTRACT-001` — Normalize Jaeger health endpoint/status contract across marker text, hooks, and Just targets.
   - Severity: High
   - Type: docs/config drift
@@ -214,12 +224,14 @@ The telemetry test claims a live Jaeger contract and uses fixtures defined elsew
   - Suggested next action: align `_authenticate_rpc()` failure handling with `_raise_auth_outcome_error()` signature and preserve the intended browser URL surfacing contract.
 
 ### Medium
+
 - `TRACE-ARCH-001` — Clarify ownership boundary between localhost Jaeger gating and testcontainer Jaeger fixtures.
   - Severity: Medium
   - Type: test architecture / contract clarity
   - Suggested next action: document when each model is authoritative and prevent cross-surface fixture leakage/misassumption.
 
 ### Low
+
 - `PYTEST-HYGIENE-001` — Eliminate Click-related collection warning noise.
   - Severity: Low
   - Type: test hygiene
@@ -230,14 +242,17 @@ The telemetry test claims a live Jaeger contract and uses fixtures defined elsew
 ## Current Failure Intake
 
 ### Environment/setup failures
+
 - VidaiMock unreachable at `http://localhost:8100` for graph execution tests
 - Postgres unreachable at `postgresql://postgres:postgres@127.0.0.1:5432/vaultspec` for migration tests
 - telemetry test blocked on missing Jaeger fixture before live trace verification begins
 
 ### Implementation failures
+
 - ACP auth failure path raises `TypeError` instead of the intended `AcpAuthError` path with browser URL context
 
 ### Output-quality failures
+
 - Click collection warnings add noise during pytest output review
 
 ---

@@ -5,9 +5,8 @@ requiring a live ACP subprocess (PROV-M6).
 """
 
 import asyncio
-
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, ClassVar, cast
 
 import pytest
 
@@ -17,7 +16,6 @@ from ..acp_chat_model import (
     _TERMINAL_COMMAND_ALLOWLIST,
     AcpChatModel,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers: construct a minimal AcpChatModel for security tests
@@ -209,7 +207,7 @@ class TestOnTerminalCreateValidation:
 
         class _MinimalSessionContext:
             stdin_lock = asyncio.Lock()
-            terminals: dict = {}
+            terminals: ClassVar[dict] = {}
 
         return _MinimalSessionContext()
 
@@ -221,11 +219,11 @@ class TestOnTerminalCreateValidation:
         resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "curl", "args": ["http://example.com"]},
-            ctx=cast(Any, ctx),
+            ctx=cast("Any", ctx),
         )
-        resp_dict = cast(dict[str, Any], resp)
+        resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
-        error_obj = cast(dict[str, Any], resp_dict["error"])
+        error_obj = cast("dict[str, Any]", resp_dict["error"])
         assert error_obj["code"] == -32603
         assert "allowlist" in error_obj["message"]
 
@@ -237,11 +235,11 @@ class TestOnTerminalCreateValidation:
         resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": ["script.py; rm -rf /"]},
-            ctx=cast(Any, ctx),
+            ctx=cast("Any", ctx),
         )
-        resp_dict = cast(dict[str, Any], resp)
+        resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
-        error_obj = cast(dict[str, Any], resp_dict["error"])
+        error_obj = cast("dict[str, Any]", resp_dict["error"])
         assert error_obj["code"] == -32603
         assert "metacharacter" in error_obj["message"]
 
@@ -253,11 +251,11 @@ class TestOnTerminalCreateValidation:
         resp = await model._on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": [], "cwd": "/etc"},
-            ctx=cast(Any, ctx),
+            ctx=cast("Any", ctx),
         )
-        resp_dict = cast(dict[str, Any], resp)
+        resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
-        error_obj = cast(dict[str, Any], resp_dict["error"])
+        error_obj = cast("dict[str, Any]", resp_dict["error"])
         assert error_obj["code"] == -32603
         assert "sandbox" in error_obj["message"]
 
@@ -273,10 +271,10 @@ class TestOnTerminalCreateValidation:
                 "args": [],
                 "env": [{"name": "1INVALID", "value": "x"}],
             },
-            ctx=cast(Any, ctx),
+            ctx=cast("Any", ctx),
         )
-        resp_dict = cast(dict[str, Any], resp)
+        resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
-        error_obj = cast(dict[str, Any], resp_dict["error"])
+        error_obj = cast("dict[str, Any]", resp_dict["error"])
         assert error_obj["code"] == -32603
         assert "Invalid environment variable" in error_obj["message"]

@@ -15,11 +15,10 @@ See ADR-009 §2.2 for the module hierarchy mandate.
 
 from fastapi import Request
 
-
 __all__ = ["authenticate_request"]
 
 
-async def authenticate_request(request: Request) -> None:
+async def authenticate_request(_request: Request) -> None:
     """Authenticate an incoming HTTP request.
 
     This is a no-op stub. When authentication is implemented, this function

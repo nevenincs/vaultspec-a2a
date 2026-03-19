@@ -13,7 +13,6 @@ import contextlib
 import json
 import logging
 import time
-
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Any, cast
@@ -39,7 +38,6 @@ from .schemas.enums import (
     ClientCommandType,
 )
 from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent, ServerEvent
-
 
 logger = logging.getLogger(__name__)
 
@@ -525,23 +523,23 @@ class ConnectionManager:
                 match command.type:
                     case ClientCommandType.SUBSCRIBE:
                         await self._handle_subscribe(
-                            client_id, cast(SubscribeCommand, command)
+                            client_id, cast("SubscribeCommand", command)
                         )
                     case ClientCommandType.UNSUBSCRIBE:
                         await self._handle_unsubscribe(
-                            client_id, cast(UnsubscribeCommand, command)
+                            client_id, cast("UnsubscribeCommand", command)
                         )
                     case ClientCommandType.SEND_MESSAGE:
                         await self._handle_send_message(
-                            client_id, cast(SendMessageCommand, command)
+                            client_id, cast("SendMessageCommand", command)
                         )
                     case ClientCommandType.AGENT_CONTROL:
                         await self._handle_agent_control(
-                            client_id, cast(AgentControlCommand, command)
+                            client_id, cast("AgentControlCommand", command)
                         )
                     case ClientCommandType.PERMISSION_RESPONSE:
                         await self._handle_permission_response(
-                            client_id, cast(PermissionResponseCommand, command)
+                            client_id, cast("PermissionResponseCommand", command)
                         )
                     case ClientCommandType.PING:
                         await self._handle_ping(client_id)

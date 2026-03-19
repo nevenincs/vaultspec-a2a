@@ -3,21 +3,23 @@
 from __future__ import annotations
 
 import asyncio
-import builtins
 import inspect
 import logging
 import sys
 import threading
-
-from collections.abc import AsyncIterator, Callable
-from concurrent.futures import Future as ConcurrentFuture
 from contextlib import asynccontextmanager
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.checkpoint.base import BaseCheckpointSaver
 
-from ..core.config import settings
+if TYPE_CHECKING:
+    import builtins
+    from collections.abc import AsyncIterator, Callable
+    from concurrent.futures import Future as ConcurrentFuture
 
+    from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+from ..core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -110,7 +112,7 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
         async def _invoke() -> object:
             target = self._resolve_target(method_name)
             if callable(target):
-                fn = cast(Callable[..., object], target)
+                fn = cast("Callable[..., object]", target)
                 result = fn(*args, **kwargs)
             else:
                 if args or kwargs:
@@ -141,42 +143,42 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
         return self._submit(method_name, *args, **kwargs).result()
 
     @property
-    def config_specs(self) -> Any:  # noqa: ANN401
+    def config_specs(self) -> Any:
         return self._run_sync("config_specs")
 
     async def setup(self) -> None:
         await self._run_async("setup")
 
-    async def aget(self, config: Any) -> Any:  # noqa: ANN401
+    async def aget(self, config: Any) -> Any:
         return await self._run_async("aget", config)
 
-    async def aget_tuple(self, config: Any) -> Any:  # noqa: ANN401
+    async def aget_tuple(self, config: Any) -> Any:
         return await self._run_async("aget_tuple", config)
 
-    async def alist(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:  # noqa: ANN401
+    async def alist(self, *args: Any, **kwargs: Any) -> AsyncIterator[Any]:
         items = cast(
-            list[Any],
+            "list[Any]",
             await self._run_async("_collect_alist", *args, **kwargs),
         )
         for item in items:
             yield item
 
-    async def aput(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def aput(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aput", *args, **kwargs)
 
-    async def aput_writes(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def aput_writes(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aput_writes", *args, **kwargs)
 
-    async def acopy_thread(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def acopy_thread(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("acopy_thread", *args, **kwargs)
 
-    async def adelete_for_runs(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def adelete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("adelete_for_runs", *args, **kwargs)
 
-    async def adelete_thread(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def adelete_thread(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("adelete_thread", *args, **kwargs)
 
-    async def aprune(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    async def aprune(self, *args: Any, **kwargs: Any) -> Any:
         return await self._run_async("aprune", *args, **kwargs)
 
     async def _collect_alist(
@@ -186,44 +188,42 @@ class _SelectorThreadPostgresCheckpointer(BaseCheckpointSaver[Any]):
             raise RuntimeError("AsyncPostgresSaver is not initialized")
         return [item async for item in self._saver.alist(*args, **kwargs)]
 
-    def get(self, config: Any) -> Any:  # noqa: ANN401
+    def get(self, config: Any) -> Any:
         return self._run_sync("get", config)
 
-    def get_tuple(self, config: Any) -> Any:  # noqa: ANN401
+    def get_tuple(self, config: Any) -> Any:
         return self._run_sync("get_tuple", config)
 
-    def get_next_version(self, current: Any, channel: Any) -> Any:  # noqa: ANN401
+    def get_next_version(self, current: Any, channel: Any) -> Any:
         return self._run_sync("get_next_version", current, channel)
 
-    def list(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def list(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("list", *args, **kwargs)
 
-    def put(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def put(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("put", *args, **kwargs)
 
-    def put_writes(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def put_writes(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("put_writes", *args, **kwargs)
 
-    def copy_thread(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def copy_thread(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("copy_thread", *args, **kwargs)
 
-    def delete_for_runs(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def delete_for_runs(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("delete_for_runs", *args, **kwargs)
 
-    def delete_thread(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def delete_thread(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("delete_thread", *args, **kwargs)
 
-    def prune(self, *args: Any, **kwargs: Any) -> Any:  # noqa: ANN401
+    def prune(self, *args: Any, **kwargs: Any) -> Any:
         return self._run_sync("prune", *args, **kwargs)
 
     def with_allowlist(
         self, *args: object, **kwargs: object
     ) -> _SelectorThreadPostgresCheckpointer:
-        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
-
         new_saver = self._run_sync("with_allowlist", *args, **kwargs)
         if new_saver is not None:
-            self._saver = cast(AsyncPostgresSaver, new_saver)
+            self._saver = cast("AsyncPostgresSaver", new_saver)
         if self._saver is not None:
             self.serde = self._saver.serde
         return self

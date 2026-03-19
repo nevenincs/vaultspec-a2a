@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 import pytest
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 from ..config import settings
 from ..nodes.mount import create_mount_node
@@ -204,7 +207,8 @@ async def test_cache_reuse(tmp_path: Path) -> None:
     result1 = await node(state)
     # Overwrite the file after first read — cache should return original for same mtime
     # (We don't change mtime explicitly, so if OS gives same mtime the cache is hit)
-    # Instead verify that two calls with same state both succeed and return consistent results
+    # Instead verify that two calls with same state both succeed and return
+    # consistent results
     result2 = await node(state)
 
     assert result1["mounted_context"] == result2["mounted_context"]

@@ -16,6 +16,7 @@ changes — all existing behavior preserved under new names.
 Convert `src/vaultspec_a2a/cli.py` → `src/vaultspec_a2a/cli/__init__.py`.
 
 **Files created:**
+
 ```
 src/vaultspec_a2a/cli/
 ├── __init__.py     # root group + --show-config + subgroup imports
@@ -27,6 +28,7 @@ src/vaultspec_a2a/cli/
 ```
 
 **`__init__.py`:**
+
 ```python
 """Click CLI for vaultspec-a2a."""
 
@@ -65,6 +67,7 @@ main = cli
 ```
 
 **`_util.py`:**
+
 ```python
 """Shared CLI helpers."""
 
@@ -687,6 +690,7 @@ def ask(agent_name: str, message: str) -> None:
 ### Step 3.7 — Register team + agent groups
 
 Add to `cli/__init__.py`:
+
 ```python
 from ._agent import agent
 from ._team import team

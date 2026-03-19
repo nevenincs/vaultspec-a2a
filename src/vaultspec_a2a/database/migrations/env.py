@@ -10,7 +10,6 @@ References:
 """
 
 import asyncio
-
 from collections.abc import MutableMapping
 from logging.config import fileConfig
 from typing import Literal
@@ -23,7 +22,6 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 from vaultspec_a2a.database.models import (
     Base,
 )
-
 
 # -- Alembic config object ---------------------------------------------------
 config = context.config
@@ -50,7 +48,7 @@ def include_name(
         "unique_constraint",
         "foreign_key_constraint",
     ],
-    parent_names: _AlembicParentNames,
+    _parent_names: _AlembicParentNames,
 ) -> bool:
     """Scope autogenerate to app-owned tables only.
 

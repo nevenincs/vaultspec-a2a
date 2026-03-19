@@ -9,6 +9,7 @@ implement circuit breakers, and coordinate exponential backoff restarts — all
 within the asyncio event loop.
 
 **Related documents:**
+
 - `2026-03-08-watchdog-patterns.md` — Watchdog design survey
 - `2026-03-08-subprocess-coordination-patterns.md` — Port, shutdown, health patterns
 - `2026-03-08-asyncio-subprocess-monitoring-research.md` — Subprocess API validation
@@ -46,6 +47,7 @@ cooperating components:
 ### 1.1 Spawner — Lifecycle Management
 
 Owns the child process handle. Responsible for:
+
 - **Lazy spawn** (defer to first need)
 - **Double-checked locking** (exactly-once semantics)
 - **Health verification** (HTTP probe after spawn)
@@ -54,6 +56,7 @@ Owns the child process handle. Responsible for:
 ### 1.2 Watchdog — Continuous Monitoring
 
 Background asyncio task that polls child health and triggers restart:
+
 - **Crash detection** via `process.returncode` (not None = exited)
 - **Staleness detection** via heartbeat timestamp
 - **Exponential backoff restart** (prevent crash loops)
@@ -62,6 +65,7 @@ Background asyncio task that polls child health and triggers restart:
 ### 1.3 Circuit Breaker — Request Gating
 
 Protects the parent from cascading failures:
+
 - **Failure counting** (consecutive dispatch failures)
 - **State machine** (closed -> open -> half_open -> closed)
 - **Time-based recovery** (auto-transition to half_open after timeout)
@@ -138,6 +142,7 @@ async def _spawn_worker(worker_url: str, worker_port: int) -> Process | None:
 ```
 
 **Key patterns:**
+
 - `sys.executable` ensures same Python interpreter/venv
 - `PIPE` for stderr enables crash diagnostic capture
 - Immediate returncode check detects startup failures
@@ -220,6 +225,7 @@ fastest). Heartbeat staleness as secondary (catches frozen-but-alive workers).
 Active health probe as tertiary (useful for external workers not spawned by us).
 
 **Our implementation uses signals 1 and 2:**
+
 - `_process_crashed()`: checks `process.returncode is not None`
 - `_heartbeat_stale()`: checks `monotonic() - last_heartbeat > 90s`
 
@@ -445,6 +451,7 @@ the watchdog detects the crash and tries to restart — racing with shutdown.
 ### 6.1 Celery Worker Monitoring
 
 Celery (the most widely deployed Python process supervisor) uses:
+
 - **Heartbeat protocol**: Workers send heartbeats to the broker every 2s
 - **Event system**: Worker events (started, succeeded, failed) relayed to monitors
 - **Process pool management**: prefork/eventlet/gevent pool with child monitoring
@@ -458,6 +465,7 @@ worker -> gateway heartbeat. Our 10s interval is reasonable (Celery default is
 
 Gunicorn's `Arbiter` class (arbiter.py) is the canonical Python process
 supervisor:
+
 - **Master process** spawns N worker processes
 - **Signal-based control**: SIGHUP (reload), SIGTERM (graceful stop), SIGQUIT (quick stop)
 - **Worker monitoring**: `os.waitpid(WNOHANG)` in a polling loop
@@ -476,6 +484,7 @@ of using HTTP health checks + `taskkill` is the correct Windows adaptation.
 
 Uvicorn's `Server` class (server.py) demonstrates FastAPI-compatible process
 management:
+
 - **`should_exit` flag**: Checked in main loop, set by signal handlers
 - **Graceful shutdown**: `timeout_graceful_shutdown` config for connection drain
 - **Child reap**: When using `--workers`, the multiprocess supervisor monitors
@@ -490,6 +499,7 @@ shutdown sequence is critical for our `/shutdown` endpoint (CLI-I03).
 ### 6.4 JupyterHub Spawner Pattern
 
 JupyterHub manages per-user server processes:
+
 - **Spawner abstraction**: `LocalProcessSpawner`, `DockerSpawner`, `KubeSpawner`
 - **Polling**: `spawner.poll()` returns exit code or None (alive)
 - **Configurable restart**: `c.Spawner.start_timeout`, `c.Spawner.http_timeout`
@@ -502,6 +512,7 @@ readiness signal (not just process existence).
 ### 6.5 Airflow Scheduler Pattern
 
 Apache Airflow's scheduler supervises DAG processors:
+
 - **`DagFileProcessorManager`**: Spawns subprocess per DAG file
 - **Heartbeat table**: Writes heartbeat to database, not HTTP
 - **Timeout detection**: `last_heartbeat + timeout < now` in SQL query

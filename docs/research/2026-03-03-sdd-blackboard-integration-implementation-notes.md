@@ -33,7 +33,7 @@ class State(TypedDict):
     result: NotRequired[str]   # absent until the node sets it
 ```
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/durable-execution
+**Source:** <https://docs.langchain.com/oss/python/langgraph/durable-execution>
 
 Key behaviour:
 
@@ -69,8 +69,8 @@ class State(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
 ```
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/use-graph-api,
-https://docs.langchain.com/oss/python/langgraph/graph-api
+**Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>,
+<https://docs.langchain.com/oss/python/langgraph/graph-api>
 
 Reducer function signature:
 
@@ -119,7 +119,7 @@ using `JsonPlusSerializer` from `langgraph-checkpoint`. This serializer:
 - Serializes only the keys that are **present** in state — absent `NotRequired`
   keys produce no entry in the checkpoint blob.
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/persistence
+**Source:** <https://docs.langchain.com/oss/python/langgraph/persistence>
 
 **Critical constraint:** All values stored in `TeamState` must be
 JSON-serializable primitives (dicts, lists, strings, numbers, booleans).
@@ -127,7 +127,7 @@ JSON-serializable primitives (dicts, lists, strings, numbers, booleans).
 this. Storing `Path` objects, `ContextRef` Pydantic models, or any non-primitive
 in these fields would cause a serialization error at checkpoint time.
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/functional-api
+**Source:** <https://docs.langchain.com/oss/python/langgraph/functional-api>
 
 > "Use python primitives like dictionaries, lists, strings, numbers, and
 > booleans to ensure that your inputs and outputs are serializable."
@@ -203,7 +203,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
     # → _append_validation_errors(existing_errors, ["frontmatter..."]) is called
 ```
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/use-graph-api
+**Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>
 
 Keys not present in the returned dict are **not touched** — their existing values
 are preserved in state. There is no need to return the full state.
@@ -283,7 +283,7 @@ builder.add_conditional_edges(
 )
 ```
 
-**Source:** https://docs.langchain.com/oss/python/langgraph/use-graph-api
+**Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>
 
 The validation error gate in ADR-022 is implemented **inside `supervisor_node`**
 (before returning `{"next": ...}`), not in the conditional edge function. This

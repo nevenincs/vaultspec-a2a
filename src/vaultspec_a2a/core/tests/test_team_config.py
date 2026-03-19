@@ -4,12 +4,10 @@ All tests load real TOML files from src/vaultspec_a2a/core/presets/ — no mocks
 """
 
 import tomllib
-
 from pathlib import Path
 from typing import cast
 
 import pytest
-
 from pydantic import ValidationError
 
 from ...utils.enums import Model, Provider
@@ -28,7 +26,6 @@ from ..team_config import (
     load_agent_config,
     load_team_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Paths for preset fixtures
@@ -297,7 +294,7 @@ class TestTopologyConfigValidation:
     def test_unknown_type_raises(self) -> None:
         """An unsupported topology type raises ValidationError."""
         with pytest.raises(ValidationError, match="'star'"):
-            TopologyConfig(type=cast(TopologyType, "mesh"))
+            TopologyConfig(type=cast("TopologyType", "mesh"))
 
 
 # ---------------------------------------------------------------------------

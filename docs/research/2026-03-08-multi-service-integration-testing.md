@@ -29,11 +29,13 @@ entire point of our integration tests is to verify real subprocess lifecycle.
 runs a real service image.
 
 **Pros**:
+
 - Real process isolation
 - Reproducible environments
 - Network namespace separation
 
 **Cons**:
+
 - Requires Docker daemon running (not always available in CI on Windows)
 - Significant startup overhead per container (2-5s each)
 - Our services are not Dockerized for local dev (only for prod)
@@ -49,6 +51,7 @@ for local development testing.
 processes, wait for health endpoints, then exercise HTTP APIs with `httpx`.
 
 **Pros**:
+
 - Zero external dependencies beyond what the project already uses
 - Tests exercise the exact same code paths as production
 - No Docker daemon requirement
@@ -56,6 +59,7 @@ processes, wait for health endpoints, then exercise HTTP APIs with `httpx`.
 - Works on Windows (our primary platform)
 
 **Cons**:
+
 - Slower than in-process tests (2-5s startup per service)
 - Port conflicts if multiple test sessions run concurrently
 - Must handle process cleanup carefully to avoid orphans

@@ -6,7 +6,6 @@ import time
 
 import httpx
 import pytest
-
 from websockets.asyncio.client import connect
 
 from .conftest import _stop_process
@@ -15,7 +14,6 @@ from .test_permission_durability_live import (
     _select_certifying_provider,
     _start_manual_stack,
 )
-
 
 pytestmark = pytest.mark.live
 
@@ -46,7 +44,9 @@ async def _create_autonomous_thread(
         return create_resp.json()["thread_id"]
 
 
-async def _send_followup_message(*, gateway_url: str, thread_id: str, content: str) -> None:
+async def _send_followup_message(
+    *, gateway_url: str, thread_id: str, content: str
+) -> None:
     timeout = httpx.Timeout(60.0, connect=5.0, read=10.0, write=10.0, pool=5.0)
     async with httpx.AsyncClient(timeout=timeout) as client:
         resp = await client.post(

@@ -19,6 +19,7 @@ _client_cache: dict[tuple, "BaseChatModel"] = {}
 ```
 
 This module-level cache stores `ChatOpenAI` instances keyed by `(provider, model_name)`. Issues:
+
 1. **No cache eviction**: entries accumulate forever across the process lifetime
 2. **No invalidation on credential change**: if `settings.openai_api_key` changes (env reload, config update), cached clients retain the stale key
 3. **Thread safety**: `_client_cache` is a plain dict accessed from potentially concurrent async contexts (multiple graph executions). While CPython's GIL protects dict mutations, the check-then-write pattern (`if cache_key in _client_cache`) is not atomic across an async yield point
@@ -29,6 +30,7 @@ This module-level cache stores `ChatOpenAI` instances keyed by `(provider, model
 #### CRIT-02: `_spawn_acp_process` and `_kill_process_tree` are duplicated 3x
 
 **Files:**
+
 - `acp_chat_model.py:139-241` (production)
 - `probes/_protocol.py:30-100` (probe copy)
 - Comment in probe says "Mirrors `lib.providers.acp_chat_model._spawn_acp_process`"
@@ -73,6 +75,7 @@ Any unexpected kwargs from LangGraph (e.g. `stop`, `run_manager` internal fields
 **File:** `mock_chat_model.py:17, 81-181`
 
 `MockChatModel(ChatOpenAI)` inherits all of ChatOpenAI's initialization, validation, and internal state management, but then completely bypasses it in `_astream` by using raw `httpx.AsyncClient`. This means:
+
 - `ChatOpenAI.__init__` validates `api_key`, sets up `openai.AsyncOpenAI` client, etc. — all wasted
 - The `self.openai_api_base` property is used only to extract the URL string
 - `streaming=True` is forced in `__init__` but the actual streaming is custom httpx code
@@ -270,12 +273,14 @@ Focus: ACP subprocess environment handling, factory correctness post-migration, 
 **Files:** `probes/_protocol.py:30-57` vs `_subprocess.py:24-69`
 
 The shared `_subprocess.py` has evolved:
+
 - Supports `use_exec: bool = False` parameter for binary backend (`create_subprocess_exec` on Windows)
 - Type annotation uses `dict[str, Any]` (vs probe's `dict[str, object]`)
 
 The probe's copy at `_protocol.py:30-57`:
+
 - Always uses `create_subprocess_shell` on Windows (no `use_exec` support)
-- Docstring line 37: `Mirrors ``lib.providers.acp_chat_model._spawn_acp_process``` — stale path AND no longer accurate (production code uses `_subprocess.py`)
+- Docstring line 37: `Mirrors ``lib.providers.acp_chat_model._spawn_acp_process``` — stale path AND no longer accurate (production code uses`_subprocess.py`)
 
 This means binary backend probes (`--backend binary`) always go through `cmd.exe` shim on Windows even though the production code uses `create_subprocess_exec` for binaries. This is a correctness difference between probe and production behavior.
 
@@ -284,6 +289,7 @@ This means binary backend probes (`--backend binary`) always go through `cmd.exe
 **Files:** `probes/_protocol.py:60-100` vs `_subprocess.py:72-121`
 
 Production `_subprocess.py:109-113` logs a warning before escalating from SIGTERM to SIGKILL:
+
 ```python
 logger.warning(
     "ACP process %s did not exit after SIGTERM; "
@@ -303,6 +309,7 @@ env = os.environ.copy()
 ```
 
 The probe builds its environment from raw `os.environ.copy()` + manual scrubbing logic (lines 371-409), duplicating the credential scrubbing that `resolve_env_vars()` in `workspace/environment.py` already handles comprehensively. The probe's manual scrub misses:
+
 - `VAULTSPEC_*` prefix scrubbing (done in `resolve_env_vars()` line 112)
 - `GOOGLE_API_KEY`, `AWS_SECRET_ACCESS_KEY`, `AZURE_OPENAI_API_KEY` scrubbing
 - `LANGCHAIN_API_KEY`, `LANGCHAIN_TRACING_V2` scrubbing
@@ -322,6 +329,7 @@ Should be `vaultspec_a2a.providers`.
 #### NEW-05 (MEDIUM): Stale `lib.` docstring paths in all 4 probe modules
 
 **Files:**
+
 - `probes/gemini.py:5` — `:func:`~lib.providers.gemini_auth.refresh_gemini_token``
 - `probes/gemini.py:10` — `python -m lib.providers.probes.gemini`
 - `probes/openai.py:5` — `:class:`~lib.providers.factory.ProviderFactory``

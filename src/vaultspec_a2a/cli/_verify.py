@@ -11,11 +11,9 @@ import subprocess
 import sys
 import tempfile
 import time
-
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib import error, parse, request
-
 
 _ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _PRODLIKE_COMPOSE_FILES = (
@@ -83,9 +81,7 @@ def _extract_gemini_auth_settings(source_home: Path) -> dict[str, object]:
         return {"security": {"auth": {"selectedType": "oauth-personal"}}}
 
     selected_type = (
-        payload.get("security", {})
-        if isinstance(payload.get("security"), dict)
-        else {}
+        payload.get("security", {}) if isinstance(payload.get("security"), dict) else {}
     )
     selected_type = (
         selected_type.get("auth", {}) if isinstance(selected_type, dict) else {}

@@ -12,7 +12,6 @@ from .git_manager import (
     WorktreeInfo as WorktreeInfo,
 )
 
-
 __all__ = [
     "GitManager",
     "MergeStrategy",

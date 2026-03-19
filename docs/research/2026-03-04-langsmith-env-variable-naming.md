@@ -32,13 +32,13 @@ LangGraph tracing guide) consistently use:
 | API endpoint | `LANGSMITH_ENDPOINT` | `LANGCHAIN_ENDPOINT` |
 | Workspace ID | `LANGSMITH_WORKSPACE_ID` | (no legacy alias documented) |
 
-### Verbatim from official LangSmith observability tutorial:
+### Verbatim from official LangSmith observability tutorial
 
 > "You may see these variables referenced as `LANGCHAIN_*` in other places.
 > These are all equivalent, however **the best practice is to use `LANGSMITH_TRACING`,
 > `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`**."
 
-Source: https://docs.langchain.com/langsmith/observability-llm-tutorial
+Source: <https://docs.langchain.com/langsmith/observability-llm-tutorial>
 
 This is the clearest authoritative statement: `LANGCHAIN_*` equivalents exist and work,
 but `LANGSMITH_*` is the recommended best practice.
@@ -90,7 +90,7 @@ os.environ["LANGSMITH_API_KEY"] = "<YOUR-LANGSMITH-API-KEY>"
 # os.environ["LANGSMITH_WORKSPACE_ID"] = "<YOUR-WORKSPACE-ID>"  # Required for org-scoped API keys
 ```
 
-Source: https://github.com/langchain-ai/langsmith-sdk/blob/main/python/README.md
+Source: <https://github.com/langchain-ai/langsmith-sdk/blob/main/python/README.md>
 
 No `LANGCHAIN_*` variables appear in the README examples at all.
 
@@ -105,7 +105,7 @@ The complete set of supported variables, from SDK docs and LangSmith quickstarts
 | Variable | Type | Description |
 |----------|------|-------------|
 | `LANGSMITH_TRACING` | `"true"` / `"false"` | Enable/disable trace upload. Must be `"true"` to send any traces. |
-| `LANGSMITH_API_KEY` | string | Your LangSmith API key. Obtain at https://smith.langchain.com/settings |
+| `LANGSMITH_API_KEY` | string | Your LangSmith API key. Obtain at <https://smith.langchain.com/settings> |
 | `LANGSMITH_ENDPOINT` | URL string | API endpoint. Default: `https://api.smith.langchain.com`. EU region: `https://eu.api.smith.langchain.com` |
 
 ### Optional
@@ -154,7 +154,7 @@ already a transitional name.
 
 ## 6. Impact on This Codebase
 
-### Files that reference `LANGCHAIN_*` variables (must be updated):
+### Files that reference `LANGCHAIN_*` variables (must be updated)
 
 | File | Current usage | Required change |
 |------|---------------|-----------------|

@@ -36,7 +36,6 @@ import os
 
 from opentelemetry import metrics, trace
 
-
 __all__ = [
     "TelemetryConfig",
     "configure_telemetry",

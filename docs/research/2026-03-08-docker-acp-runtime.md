@@ -140,6 +140,7 @@ ENV VAULTSPEC_PROJECT_ROOT=/app \
 ```
 
 **Pros:**
+
 - Minimal: only `node` binary (~100MB) + production node_modules (~84MB)
 - `npm ci --production` skips devDependencies (saves ~86MB vs full install)
 - Reuses existing `node:22-alpine` as build stage -- no new base image
@@ -148,6 +149,7 @@ ENV VAULTSPEC_PROJECT_ROOT=/app \
   Debian-based node image instead
 
 **Cons:**
+
 - Adds ~184MB to worker image (node + node_modules)
 - Alpine's node binary is musl-linked; slim-bookworm is glibc. Need to either:
   - (a) Use `node:22-bookworm-slim` as the copy source (matches glibc)
@@ -187,11 +189,13 @@ RUN apt-get update && apt-get install -y curl \
 ```
 
 **Pros:**
+
 - Simple, single-stage approach
 - Node.js is a proper Debian package with correct library dependencies
 - npm is also available for `npm ci` in the same stage
 
 **Cons:**
+
 - Bloats the shared python-base image (API stage doesn't need Node.js)
 - NodeSource adds an external GPG key dependency
 - `apt-get update` adds cache invalidation noise
@@ -214,11 +218,13 @@ services:
 ```
 
 **Pros:**
+
 - Clean separation: Python image stays pure Python
 - Node.js image stays pure Node.js
 - Independent scaling
 
 **Cons:**
+
 - **BREAKS the ACP protocol.** AcpChatModel communicates via stdin/stdout
   JSON-RPC. The entire protocol assumes subprocess IPC, not network IPC.
   Switching to network would require rewriting AcpChatModel, which contradicts
@@ -239,11 +245,13 @@ bun build --compile node_modules/@zed-industries/claude-agent-acp/dist/index.js 
 ```
 
 **Pros:**
+
 - No Node.js runtime needed in Docker
 - Single ~50-100MB binary
 - No node_modules in production image
 
 **Cons:**
+
 - Bun compile is experimental and known to break on some packages
 - Already confirmed BROKEN on Windows (session/new crash)
 - The `@anthropic-ai/claude-agent-sdk` bundles WASM modules (resvg, tree-sitter)
@@ -261,6 +269,7 @@ bun build --compile node_modules/@zed-industries/claude-agent-acp/dist/index.js 
 a new one?
 
 The `frontend-build` stage runs:
+
 ```dockerfile
 FROM node:22-alpine AS frontend-build
 WORKDIR /app/src/ui
@@ -392,6 +401,7 @@ No Node.js needed in the API image.
 ### 7.4 Verification
 
 After building, verify inside the worker container:
+
 ```bash
 docker compose -f docker-compose.prod.yml exec worker node --version
 docker compose -f docker-compose.prod.yml exec worker \

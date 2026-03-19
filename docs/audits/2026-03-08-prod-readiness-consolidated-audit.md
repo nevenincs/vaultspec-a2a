@@ -57,6 +57,7 @@ LLM Provider (Anthropic / OpenAI / etc.)
 ```
 
 **Auto-start flow** (ADR-031, PHASE-1a):
+
 1. IDE starts `vaultspec-mcp` (stdio)
 2. MCP lifespan spawns gateway subprocess (`mcp/server.py:221`)
 3. Gateway lifespan spawns worker subprocess via `LazyWorkerSpawner` (`api/app.py:439`)
@@ -65,6 +66,7 @@ LLM Provider (Anthropic / OpenAI / etc.)
 6. Write tools call `_require_gateway()` which polls gateway health (`mcp/server.py:421`)
 
 **Shutdown flow**:
+
 - MCP lifespan exit -> `_shutdown_worker_process()` -> `taskkill /T /F /PID` (Windows)
 - Gateway lifespan exit -> worker process cleanup via `_shutdown_worker_process()`
 - Process tree kill ensures no orphaned grandchildren (`api/app.py:393-420`)
@@ -327,7 +329,7 @@ compose hardening (Phase 2).
 | #53 | EP-M02: Health endpoint generic detail strings | MED | Code done, awaiting commit |
 | #54 | EP-M04: Permission terminal state guard | MED | Code done, awaiting commit |
 | #55 | PROV-O02: Docker _PROJECT_ROOT (VAULTSPEC_PROJECT_ROOT) | HIGH | Code done, awaiting commit |
-| #56 | MANDATE: Replace mock API test conftest | CRIT | **Substantially done** — MockTransport+MemorySaver removed, _InProcessWorker replaces _CapturedDispatch |
+| #56 | MANDATE: Replace mock API test conftest | CRIT | **Substantially done** — MockTransport+MemorySaver removed, _InProcessWorker replaces_CapturedDispatch |
 | #60 | SKIP-01: pytest.skip → hard fails in provider tests | MED | Partially done (ACP tests fixed, factory tests remain) |
 
 ### Coder Priority Queue (after commit)

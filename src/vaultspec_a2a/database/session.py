@@ -10,7 +10,6 @@ References:
 """
 
 import logging
-
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -25,7 +24,6 @@ from sqlalchemy.ext.asyncio import (
 
 from ..core.config import settings
 from .models import Base
-
 
 logger = logging.getLogger(__name__)
 
@@ -181,7 +179,7 @@ async def init_db(
         async with engine.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)
     else:
-        from .migrate import run_migrations  # noqa: PLC0415
+        from .migrate import run_migrations
 
         await run_migrations(url)
 
@@ -240,7 +238,7 @@ def inspect_sqlite_database(path: Path) -> dict[str, object]:
         diagnostics["detail"] = "sqlite file missing"
         return diagnostics
 
-    import sqlite3  # noqa: PLC0415
+    import sqlite3
 
     try:
         conn = sqlite3.connect(str(path))

@@ -8,7 +8,6 @@ the reviewer's audit report.
 
 from __future__ import annotations
 
-
 REVIEWER_RUBRIC = """\
 Given a list of defects and a review report, for each defect output 1 if the
 defect is mentioned in the report (recall), 0 if not.

@@ -20,6 +20,7 @@ asyncio.create_subprocess_exec(
 ```
 
 On Windows:
+
 - Uses `ProactorEventLoop` (default since Python 3.8)
 - Does NOT support `preexec_fn` (POSIX-only)
 - `CREATE_NEW_PROCESS_GROUP` is available via `creationflags`
@@ -27,6 +28,7 @@ On Windows:
 ### Our Usage
 
 **MCP gateway spawn** (`protocols/mcp/server.py:263-275`):
+
 ```python
 process = await asyncio.create_subprocess_exec(
     sys.executable,
@@ -44,6 +46,7 @@ process = await asyncio.create_subprocess_exec(
 Similar pattern with `sys.executable -m uvicorn ...`
 
 **ACP subprocess** (`providers/_subprocess.py`):
+
 ```python
 proc = await asyncio.create_subprocess_exec(
     *cmd,
@@ -89,6 +92,7 @@ processes. Grandchildren are orphaned.
 ### Our Usage
 
 **Gateway shutdown** (`protocols/mcp/server.py:329-367`):
+
 ```python
 if sys.platform == "win32":
     killer = await asyncio.create_subprocess_exec(
@@ -134,6 +138,7 @@ Redirects stdout/stderr to the platform's null device (`/dev/null` on POSIX,
 ### Our Usage
 
 All subprocess spawns for gateway and worker use `DEVNULL`:
+
 ```python
 stdout=asyncio.subprocess.DEVNULL,
 stderr=asyncio.subprocess.DEVNULL,
@@ -175,6 +180,7 @@ await asyncio.wait_for(process.wait(), timeout=10.0)  # With timeout
 ### Our Usage
 
 All `wait()` calls use `asyncio.wait_for()` with appropriate timeouts:
+
 - Gateway shutdown: 5s for taskkill, 15s for POSIX terminate
 - Worker shutdown: 5s for taskkill, 10s for POSIX terminate
 - Final cleanup: 5s for confirmation wait
@@ -227,6 +233,7 @@ loop selection.
 | Event loop | CORRECT | None |
 
 **Findings**:
+
 - **LIB-VAL-04** (LOW): Stderr read in `_spawn_gateway()` is dead code
   because stderr is `DEVNULL`
 

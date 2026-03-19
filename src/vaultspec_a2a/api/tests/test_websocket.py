@@ -19,7 +19,6 @@ from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEvent
 from ..websocket import ConnectionManager, WebSocketCommandRejectedError
 from ..websocket import ConnectionManager as WebSocketConnectionManager
 
-
 # ---------------------------------------------------------------------------
 # App factory
 # ---------------------------------------------------------------------------
@@ -278,9 +277,7 @@ class TestSendMessageCommand:
         assert len(received) == 1
         assert received[0] == ("thread-1", "Hello from client", "coder")
 
-    def test_send_message_log_includes_runtime_fields(
-        self, caplog
-    ) -> None:
+    def test_send_message_log_includes_runtime_fields(self, caplog) -> None:
         """SEND_MESSAGE log records should carry client/thread/agent fields."""
         app, _aggregator, manager = _create_app()
 

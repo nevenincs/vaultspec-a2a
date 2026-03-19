@@ -12,10 +12,10 @@ def test_tool_rows_match_registered_mcp_tools() -> None:
     tool_rows = dict(_tool_rows())
 
     assert tool_rows
-    assert (
-        tool_rows["start_thread"]
-        == "Start a new multi-agent coding workflow and return a thread ID for tracking."
+    expected = (
+        "Start a new multi-agent coding workflow and return a thread ID for tracking."
     )
+    assert tool_rows["start_thread"] == expected
     assert tool_rows["cancel_thread"].startswith("Cancel a running thread")
 
 

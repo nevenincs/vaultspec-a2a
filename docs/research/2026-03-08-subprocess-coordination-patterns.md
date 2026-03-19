@@ -89,6 +89,7 @@ before the gateway causes dispatch failures.
 #### 2.1 Reverse-Dependency Order (Recommended)
 
 Shut down services in reverse order of their dependency chain:
+
 1. Stop accepting new requests (gateway stops dispatching)
 2. Drain in-flight work (worker completes current tasks)
 3. Kill worker first (leaf of the dependency chain)
@@ -152,6 +153,7 @@ while not shutdown_event.is_set():
 
 Our top-down kill via `taskkill /T /F /PID` is correct for Windows (kills
 entire tree atomically). On POSIX, consider adding a graceful drain period:
+
 1. Gateway sends shutdown signal to worker
 2. Worker stops accepting new dispatches
 3. Worker waits up to N seconds for in-flight work
@@ -194,6 +196,7 @@ while not healthy:
 passes.
 
 **Our implementation** (`protocols/mcp/server.py:278-322`):
+
 - `_POLL_INITIAL_INTERVAL = 0.1` (100ms)
 - `_POLL_MAX_INTERVAL = 2.0` (2s cap)
 - `_POLL_BACKOFF_FACTOR = 1.5` (exponential growth)
@@ -381,6 +384,7 @@ cross-process synchronization.
 | P3 | Readiness pipe for instant startup detection | Eliminates polling entirely |
 
 Sources:
+
 - [Python Multiprocessing Graceful Shutdown](https://www.peterspython.com/en/blog/python-multiprocessing-graceful-shutdown-in-the-proper-order)
 - [Python subprocess documentation](https://docs.python.org/3/library/subprocess.html)
 - [asyncio subprocess documentation](https://docs.python.org/3/library/asyncio-subprocess.html)
@@ -437,6 +441,7 @@ async def shutdown_endpoint():
 ```
 
 **How it works on POSIX (Linux/macOS):**
+
 1. Endpoint handler calls `os.kill(os.getpid(), signal.SIGTERM)`
 2. Python's signal handler dispatches to `Server.handle_exit()` (line 341)
 3. `handle_exit()` sets `self.should_exit = True` (line 346)
@@ -492,6 +497,7 @@ Compare with `os.kill(os.getpid(), SIGTERM)` which exits with code 15 --
 no handler invoked, process killed immediately.
 
 **Cross-platform behavior:**
+
 - **Windows:** C `raise()` -> Python signal handler -> uvicorn `handle_exit()`
   -> `should_exit = True` -> graceful shutdown
 - **Linux:** C `raise()` -> kernel signal delivery -> Python signal handler ->
@@ -623,6 +629,7 @@ async def shutdown_endpoint():
 ```
 
 **Why `signal.raise_signal` over `os.kill` -- CRITICAL for Windows:**
+
 - `os.kill(os.getpid(), SIGTERM)` on Windows: calls `TerminateProcess()`,
   process exits code 15 instantly. **No handler. No cleanup. No response sent.**
   Verified by live test.
@@ -638,6 +645,7 @@ to the client. The delay ensures the response frame is written to the socket
 before shutdown begins. This applies equally to all platforms.
 
 **Lifespan shutdown order (all platforms):** When `should_exit` is set:
+
 1. Uvicorn stops accepting connections
 2. Drains in-flight requests (respects `timeout_graceful_shutdown`)
 3. Calls `lifespan.shutdown()` which triggers the worker lifespan teardown:
@@ -648,6 +656,7 @@ before shutdown begins. This applies equally to all platforms.
 ### 8.8 CLI-I03 Integration
 
 The `service stop` CLI command should:
+
 1. POST to `{worker_url}/shutdown` (new endpoint)
 2. POST to `{gateway_url}/api/admin/shutdown` (existing endpoint)
 3. Both endpoints use `signal.raise_signal(SIGTERM)` internally

@@ -6,6 +6,7 @@ Two path resolution patterns in the codebase use fragile `__file__` parent
 traversal that breaks in non-editable (pip/uv) installs:
 
 1. **`api/app.py` line 71-74 (`_UI_BUILD_DIR`):**
+
    ```python
    Path(__file__).resolve().parent.parent.parent.parent / "src" / "ui" / "dist"
    # Expects: project_root/src/ui/dist
@@ -14,6 +15,7 @@ traversal that breaks in non-editable (pip/uv) installs:
    ```
 
 2. **`providers/factory.py` line 28-32 (`_PROJECT_ROOT`):**
+
    ```python
    Path(__file__).resolve().parent.parent.parent.parent
    # Expects: project_root (to find node_modules/)
@@ -50,6 +52,7 @@ These are locatable via `importlib.resources.files("vaultspec_a2a")`.
 ### 1.2 External Assets (importlib.resources CANNOT find these)
 
 Files that are **outside the Python package** directory:
+
 - `src/ui/dist/` -- React SPA build output (JavaScript, CSS, HTML)
 - `node_modules/` -- Node.js dependencies for ACP runtime
 
@@ -79,6 +82,7 @@ presets = ref / "core" / "presets"
 ```
 
 **Verified on Python 3.13 (Windows 11):**
+
 ```python
 >>> importlib.resources.files("vaultspec_a2a")
 WindowsPath('Y:\\code\\...\\src\\vaultspec_a2a')
@@ -164,6 +168,7 @@ _UI_BUILD_DIR = (
 ```
 
 **Evaluation:**
+
 - Works in Docker: env var set in Dockerfile
 - Works in dev: `__file__` traversal works in editable installs
 - **The fallback is fragile** -- breaks in non-editable installs without env var
@@ -181,11 +186,13 @@ can find them.
 ```
 
 Then in code:
+
 ```python
 ui_dist = importlib.resources.files("vaultspec_a2a") / "ui_dist"
 ```
 
 **Problem for SPA assets:**
+
 - The UI build (`npm run build`) outputs to `src/ui/dist/`
 - To include in the Python package, you'd need to copy these files to
   `src/vaultspec_a2a/ui_dist/` before `uv sync`
@@ -193,6 +200,7 @@ ui_dist = importlib.resources.files("vaultspec_a2a") / "ui_dist"
 - In Docker, the `COPY --from=frontend-build` already handles this correctly
 
 **Problem for node_modules:**
+
 - node_modules is 84-170MB. Including it in the Python package is not viable.
 - It's a Node.js ecosystem artifact, not Python package data.
 
@@ -289,8 +297,9 @@ def resolve_acp_entry_point() -> Path | None:
 env var), it returns `None` instead of a garbage path.
 
 **Benefits:**
+
 - Single source of truth for all path resolution
-- Clear priority: env var > importlib > __file__ with validation
+- Clear priority: env var > importlib > **file** with validation
 - `None` return signals "asset not available" (instead of a wrong path)
 - Callers can provide actionable errors: "Set VAULTSPEC_UI_BUILD_DIR"
 - Cross-platform: `Path` and `os.environ` are identical on all platforms
@@ -352,6 +361,7 @@ raise a descriptive `ConfigError` at the call site.
 
 Create `src/vaultspec_a2a/paths.py` as shown in Pattern D. All path-sensitive
 code imports from there. Benefits:
+
 - Single file to audit for path correctness
 - Clear env var documentation in one place
 - Easy to test (mock env vars, check resolved paths)

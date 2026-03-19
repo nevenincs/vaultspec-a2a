@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import sqlite3
-
 from pathlib import Path
 from types import SimpleNamespace
 from typing import cast
@@ -11,7 +10,6 @@ from uuid import uuid4
 
 import httpx
 import pytest
-
 from httpx import ASGITransport
 from langgraph.checkpoint.base import empty_checkpoint
 
@@ -32,12 +30,7 @@ from .conftest import make_app
 def test_build_worker_restart_detail_includes_log_tail() -> None:
     """Crash detail should include both stderr tail text and the log path."""
     case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-app"
-        / uuid4().hex
+        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
     )
     case_dir.mkdir(parents=True, exist_ok=True)
     stderr_log = case_dir / "worker.stderr.log"
@@ -119,9 +112,7 @@ async def test_api_health_reports_worker_stderr_log_path(
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body["worker_stderr_log_path"].endswith(
-        "worker-autospawn-8001.stderr.log"
-    )
+    assert body["worker_stderr_log_path"].endswith("worker-autospawn-8001.stderr.log")
     assert body["worker_last_restart_detail"] == "returncode=9; stderr_log=example.log"
 
 

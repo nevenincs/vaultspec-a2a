@@ -43,7 +43,7 @@ different `next_route`, causing the conditional guard to evaluate differently
 and the `interrupt()` call to be skipped entirely. The corrected design places
 the interrupt in a dedicated `plan_approval_node` that calls `interrupt()`
 unconditionally when entered — matching the documented LangGraph approval node
-pattern (https://docs.langchain.com/oss/python/langgraph/interrupts).
+pattern (<https://docs.langchain.com/oss/python/langgraph/interrupts>).
 
 ## 2. Decision
 
@@ -349,7 +349,7 @@ behind a five-condition guard. Rejected because:
    behaviour.
 2. **Violates documented pattern.** Official LangGraph docs show `interrupt()`
    in dedicated nodes that call it unconditionally
-   (https://docs.langchain.com/oss/python/langgraph/interrupts — "Approval Node
+   (<https://docs.langchain.com/oss/python/langgraph/interrupts> — "Approval Node
    with Interrupt"). Placing it conditionally inside a routing node is not a
    documented pattern.
 3. **Mixed responsibilities.** `supervisor_node` is a routing node (LLM call →

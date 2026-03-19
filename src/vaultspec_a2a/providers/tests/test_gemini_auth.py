@@ -7,7 +7,6 @@ are marked @pytest.mark.live.
 import json
 import time
 import uuid
-
 from pathlib import Path
 
 import pytest
@@ -19,7 +18,6 @@ from ..gemini_auth import (
     gemini_uses_env_auth,
     refresh_gemini_token,
 )
-
 
 _TEST_TEMP_ROOT = Path.home() / ".codex" / "memories" / "vaultspec-gemini-auth-tests"
 _TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)

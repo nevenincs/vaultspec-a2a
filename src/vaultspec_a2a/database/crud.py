@@ -1,19 +1,20 @@
 """Async CRUD operations for durable orchestration state."""
 
-# ruff: noqa: D103, PLR0913
-
 from __future__ import annotations
 
 import json
-
-from collections.abc import Sequence
 from datetime import UTC, datetime
 from enum import StrEnum
+from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.ext.asyncio import AsyncSession
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
+
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core.exceptions import NicknameConflictError
 from .models import (

@@ -9,7 +9,6 @@ a real implementation replaces the stub.
 import inspect
 
 import pytest
-
 from fastapi import Request
 
 from ..auth import authenticate_request

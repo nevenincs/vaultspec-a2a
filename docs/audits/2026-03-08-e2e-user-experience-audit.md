@@ -33,6 +33,7 @@ cd src/ui && npm ci   # Frontend deps (optional — only for UI development)
 ### Required environment variables
 
 From `.env.example` (105 lines):
+
 - **At least one LLM provider key** (ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN,
   OPENAI_API_KEY, GEMINI_API_KEY, ZHIPU_API_KEY, GOOGLE_API_KEY)
 - **Optional**: LANGSMITH_API_KEY (tracing), VAULTSPEC_INTERNAL_TOKEN (prod auth),
@@ -64,7 +65,7 @@ From `.env.example` (105 lines):
 - **Transport**: stdio (default) or streamable-http (`--transport streamable-http`)
 - **Source**: `protocols/mcp/__main__.py` — argparse with `--transport`, `--host`, `--port`
 - **Env vars for MCP** (from `protocols/mcp/server.py` `_MCPSettings`):
-  - `VAULTSPEC_MCP_API_BASE_URL` — gateway URL (default: http://localhost:8000)
+  - `VAULTSPEC_MCP_API_BASE_URL` — gateway URL (default: <http://localhost:8000>)
   - `VAULTSPEC_MCP_AUTO_START_GATEWAY` — auto-spawn gateway (default: true)
   - `VAULTSPEC_MCP_HOST` — bind host for streamable-http (default: 0.0.0.0)
   - `VAULTSPEC_MCP_PORT` — bind port for streamable-http (default: 8100)
@@ -177,7 +178,7 @@ IDE calls MCP tool "start_thread"
 
 | Phase | Duration | Source | Notes |
 |-------|----------|--------|-------|
-| MCP lifespan start | ~0.5s | __main__.py | Module imports, settings parse |
+| MCP lifespan start | ~0.5s | **main**.py | Module imports, settings parse |
 | Gateway subprocess spawn | ~2-3s | server.py:240 | Python interpreter + uvicorn startup |
 | Gateway DB init + migrations | ~1-2s | lifespan | First run creates DB file |
 | Gateway health poll | ~1-2s | server.py:256 | 0.5s intervals until /health 200 |
@@ -350,6 +351,7 @@ best-effort").
 ### Logging architecture (utils/logging.py, 134 lines)
 
 `setup_logging()` configures the root logger:
+
 - **Interactive terminal** (TTY + no color disabled + not CI + is_dev):
   → `RichHandler` with rich tracebacks, timestamps, paths
 - **All other cases** (non-TTY, production, CI):

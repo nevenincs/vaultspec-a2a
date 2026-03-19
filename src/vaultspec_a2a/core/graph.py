@@ -13,7 +13,6 @@ map.  Three topology types are supported (ADR-013 §2.5):
 import functools
 import glob as _glob
 import logging
-
 from pathlib import Path
 from typing import Any, cast
 
@@ -34,7 +33,6 @@ from .nodes.supervisor import create_supervisor_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .state import TeamState
 from .team_config import AgentConfig, TeamConfig, TopologyType, WorkerRef
-
 
 logger = logging.getLogger(__name__)
 
@@ -214,7 +212,7 @@ def build_initial_vault_index(
     index: dict[str, list[str]] = {}
     for stage, pattern in _VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[:settings.vault_index_cap]
+        matches = sorted(workspace_root.glob(resolved))[: settings.vault_index_cap]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index
@@ -298,7 +296,7 @@ def compile_team_graph(
                      or if topology configuration is invalid.
         ValueError:  If an unknown topology type is encountered.
     """
-    builder = StateGraph(cast(Any, TeamState))
+    builder = StateGraph(cast("Any", TeamState))
     topology = team_config.topology
 
     # M3: validate topology_type is a known TopologyType enum value before dispatch.
@@ -682,7 +680,7 @@ def _compile_pipeline_loop(
     builder: StateGraph,
     team_config: TeamConfig,
     agent_configs: dict[str, AgentConfig],
-    supervisor_agent_config: AgentConfig | None,
+    _supervisor_agent_config: AgentConfig | None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,

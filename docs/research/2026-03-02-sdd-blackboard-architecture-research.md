@@ -72,9 +72,9 @@ class TeamState(TypedDict):
 
 Modify `src/vaultspec_a2a/core/nodes/worker.py`. Instead of just passing `state["messages"]`, we implement a context-mounting step:
 
-1.  Look at `state["active_feature"]`.
-2.  Scan `.vault/` for the relevant `Research`, `ADR`, and `Plan` files.
-3.  Inject these files as a high-priority `SystemMessage` block at the _bottom_ of the context window (closest to the current prompt) so the agent is strictly grounded in the architectural decisions, not the chat history.
+1. Look at `state["active_feature"]`.
+2. Scan `.vault/` for the relevant `Research`, `ADR`, and `Plan` files.
+3. Inject these files as a high-priority `SystemMessage` block at the _bottom_ of the context window (closest to the current prompt) so the agent is strictly grounded in the architectural decisions, not the chat history.
 
 ### Step 3: Implement the "Verifier" Loop Guard
 

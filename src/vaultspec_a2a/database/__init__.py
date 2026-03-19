@@ -38,7 +38,6 @@ from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import verify_wal_mode as verify_wal_mode
 
-
 __all__ = [
     "ArtifactModel",
     "Base",

@@ -12,7 +12,6 @@ from langchain_core.messages import SystemMessage
 
 from .metadata import ThreadMetadata
 
-
 __all__ = ["build_context_preamble"]
 
 

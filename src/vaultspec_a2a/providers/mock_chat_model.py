@@ -2,12 +2,10 @@
 
 import json
 import logging
-
 from collections.abc import AsyncIterator
 from typing import Any
 
 import httpx
-
 from langchain_core.callbacks import (
     AsyncCallbackManagerForLLMRun,
     CallbackManagerForLLMRun,
@@ -26,7 +24,6 @@ from pydantic import Field, PrivateAttr
 
 from ..core.config import settings
 from ..core.team_config import AgentConfig
-
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +45,7 @@ class MockChatModel(BaseChatModel):
 
     _agent_config: AgentConfig | None = PrivateAttr(default=None)
 
-    def __init__(self, **kwargs: Any) -> None:  # noqa: ANN401
+    def __init__(self, **kwargs: Any) -> None:
         """Route to the correct VidaiMock tape based on agent config."""
         agent_config = kwargs.pop("agent_config", None)
 
@@ -81,7 +78,7 @@ class MockChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: CallbackManagerForLLMRun | None = None,
-        **kwargs: Any,  # noqa: ANN401
+        **kwargs: Any,
     ) -> ChatResult:
         """Synchronous generation — not supported, use async."""
         raise NotImplementedError(
@@ -93,7 +90,7 @@ class MockChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,  # noqa: ANN401
+        **kwargs: Any,
     ) -> ChatResult:
         """Accumulate streaming chunks into a single ChatResult."""
         generation = None
@@ -108,12 +105,12 @@ class MockChatModel(BaseChatModel):
         message = generation.message if generation else AIMessage(content="")
         return ChatResult(generations=[ChatGeneration(message=message)])
 
-    async def _astream(  # noqa: PLR0912
+    async def _astream(
         self,
         messages: list[BaseMessage],
-        stop: list[str] | None = None,
-        run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: Any,  # noqa: ANN401
+        _stop: list[str] | None = None,
+        _run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Proxy to VidaiMock via native SSE streaming (ADR-032 §2).
 

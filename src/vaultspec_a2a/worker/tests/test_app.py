@@ -44,9 +44,12 @@ def test_dispatch_rejects_missing_internal_token_outside_development() -> None:
     """Worker /dispatch should fail loudly when token auth is required but missing."""
     app = _make_app_without_lifespan()
     dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
-    with _SettingsOverride(
-        environment=Environment.TESTING, internal_token="secret-token"
-    ), TestClient(app, raise_server_exceptions=False) as client:
+    with (
+        _SettingsOverride(
+            environment=Environment.TESTING, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
         resp = client.post("/dispatch", json=dispatch.model_dump())
 
     assert resp.status_code == 401
@@ -57,10 +60,13 @@ def test_dispatch_rejects_missing_token_configuration_outside_development() -> N
     """Worker /dispatch should fail loudly when internal auth is not configured."""
     app = _make_app_without_lifespan()
     dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
-    with _SettingsOverride(
-        environment=Environment.TESTING,
-        internal_token=None,
-    ), TestClient(app, raise_server_exceptions=False) as client:
+    with (
+        _SettingsOverride(
+            environment=Environment.TESTING,
+            internal_token=None,
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
         resp = client.post("/dispatch", json=dispatch.model_dump())
 
     assert resp.status_code == 500
@@ -71,9 +77,12 @@ def test_dispatch_rejects_invalid_internal_token() -> None:
     """Worker /dispatch should reject incorrect bearer tokens."""
     app = _make_app_without_lifespan()
     dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
-    with _SettingsOverride(
-        environment=Environment.DEVELOPMENT, internal_token="secret-token"
-    ), TestClient(app, raise_server_exceptions=False) as client:
+    with (
+        _SettingsOverride(
+            environment=Environment.DEVELOPMENT, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
         resp = client.post(
             "/dispatch",
             json=dispatch.model_dump(),

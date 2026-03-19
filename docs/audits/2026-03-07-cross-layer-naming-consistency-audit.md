@@ -1,4 +1,5 @@
 # Cross-Layer Naming & Semantic Consistency Audit
+
 **Date**: 2026-03-07
 **Auditor**: cross-layer-inconsistency-auditor
 **Scope**: CLI, REST API, MCP tools, Frontend types, Database layer
@@ -49,6 +50,7 @@ The system is **roughly consistent** across 4 layers (CLI, REST API, MCP tools, 
 **Status**: ⚠️ CRITICAL INCONSISTENCY
 
 **Findings**:
+
 1. **MCP docstring says `input_required` as a thread status** (line 288, 456): This doesn't exist in `ThreadStatus` enum. Should be removed from MCP documentation.
 2. **Frontend AgentLifecycleState includes `input_required`** (types.ts line 7): This is **correct for agents** but the docstring is confusing because MCP suggests it's a thread status.
 3. **REST ThreadSummary has `agent_state: AgentLifecycleState | None`** (rest.py line 99): This is separate and correct.
@@ -75,6 +77,7 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ⚠️ HIGH INCONSISTENCY
 
 **Findings**:
+
 1. **REST schema has TWO naming fields but no docs clarify the difference**:
    - `title`: Optional, max 200 chars, meant for task summary
    - `nickname`: Optional, max 64 chars, must be slug format (regex: `^[a-z0-9][a-z0-9\-]{1,62}[a-z0-9]$`)
@@ -85,6 +88,7 @@ This is the **most confusing area**. Three different fields being used for the s
 5. **MCP output shows both if present** which is correct
 
 **Action Required**:
+
 - Document: `title` is for machine-readable task summary; `nickname` is for human-friendly slug
 - CLI: Option to set `--title` separately if needed (currently only `--name` which maps to nickname)
 - REST: Consider whether both fields should be required, optional, or mutually exclusive
@@ -106,12 +110,14 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ⚠️ MEDIUM INCONSISTENCY
 
 **Findings**:
+
 1. **Naming is mostly consistent**: `team_preset` across CLI, REST, MCP, DB
 2. **Frontend uses `preset_id`** (not `team_preset` or `id`): Mild divergence but semantically clear
 3. **CLI `agent ask --agent` flag is a BUG**: Accepts an agent name but ignores it, always uses `vaultspec-solo-coder` (line 46 in _agent.py). The flag is cosmetic.
 4. **MCP discovery works**: `list_team_presets()` validates presets dynamically (line 94 in server.py uses `discover_team_preset_ids()`)
 
 **Action Required**:
+
 - Remove or document `--agent` flag in `agent ask` (it's currently non-functional)
 - Consider: Should `agent ask` allow specifying which preset/team to use, or is solo-coder always correct?
 
@@ -134,6 +140,7 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ⚠️ MEDIUM INCONSISTENCY
 
 **Findings**:
+
 1. **Resume vs Send**:
    - CLI: `team resume` (suggests continuation of paused work)
    - MCP: `send_message` (generic message delivery)
@@ -151,6 +158,7 @@ This is the **most confusing area**. Three different fields being used for the s
    - `archive_thread`: CLI has it, but MCP has no equivalent → asymmetric capabilities
 
 **Action Required**:
+
 - Decide: Should `stop` or `cancel` be the canonical name? Recommend standardizing on `cancel` (more explicit).
 - Add MCP tools for `delete_thread` and `archive_thread` if these are user-facing operations
 - Consider: Is archiving a public feature or internal-only? If public, MCP should expose it
@@ -169,6 +177,7 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ⚠️ MEDIUM CONSISTENCY ISSUE
 
 **Findings**:
+
 1. **Backend**: CLI checks `/internal/health` which is correct (internal-only health)
 2. **Worker**: CLI checks `/health` (line 121 in _service.py)
    - This path is **assumed** but not verified in worker implementation
@@ -176,6 +185,7 @@ This is the **most confusing area**. Three different fields being used for the s
    - This is a potential silent failure point
 
 **Action Required**:
+
 - Verify that worker actually has `/health` endpoint
 - If not, add it or update CLI to use correct path
 - Document expected health check paths in worker setup
@@ -193,6 +203,7 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ⚠️ MEDIUM INCONSISTENCY
 
 **Findings**:
+
 1. **Actual commands**:
    - `vaultspec database snapshot` → creates (singular, correct)
    - `vaultspec database snapshots` → lists (plural, non-standard)
@@ -202,6 +213,7 @@ This is the **most confusing area**. Three different fields being used for the s
    - But listing uses plural noun instead of subcommand
 
 **Action Required**:
+
 - Rename `snapshots` to `snapshot list` (more consistent with Click subcommand patterns)
 - Keep backward compatibility if users rely on old name (unlikely, new codebase)
 
@@ -222,6 +234,7 @@ This is the **most confusing area**. Three different fields being used for the s
 **Status**: ✅ CONSISTENT (FALSE FINDING RETRACTED)
 
 **Verification**: Live code at `src/vaultspec_a2a/api/schemas/events.py` (line 103-109):
+
 ```python
 class PermissionOption(BaseModel):
     option_id: str        # ← Matches PermissionResponseRequest
@@ -264,16 +277,19 @@ class PermissionOption(BaseModel):
 ## Recommendations (Priority Order)
 
 ### P0 (Blocking)
+
 1. **Fix REST schema docs**: Clarify `title` vs `nickname` semantics in CreateThreadRequest docstring
 2. **Fix MCP docs**: Remove `input_required` from thread status list; clarify it's an agent state
 
 ### P1 (Before Release)
+
 4. Standardize cancel/stop terminology (recommend `cancel`)
 5. Add MCP tools for `delete_thread` and `archive_thread` (if these should be public)
 6. Rename `database snapshots` → `database snapshot list`
 7. Remove or document `agent ask --agent` flag (it's unused)
 
 ### P2 (Cleanup)
+
 8. Consider REST option to set `--title` separately from `--name` in CLI
 
 ---
@@ -296,6 +312,7 @@ class PermissionOption(BaseModel):
 ## Conclusion
 
 The system is **~80% consistent** with **clear patterns** across layers. The main issues are:
+
 1. Documentation gaps (title/nickname semantics, thread vs agent status)
 2. Minor terminology choices (stop vs cancel, snapshot vs snapshot list)
 3. Feature gaps (MCP missing delete/archive, agent ask non-functional flag)
@@ -319,6 +336,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **CL-001 (HIGH)**: Foreign Key constraint violation risk
+
 - Tables with FK references: `artifacts.thread_id`, `permission_logs.thread_id`, `cost_tracking.thread_id` (models.py:77, 102, 120)
 - Current delete order: cost_tracking, permission_logs, artifacts, threads
 - Issue: If `threads` deletion fails, orphaned records remain in dependent tables; violates FK invariant
@@ -326,22 +344,26 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - Current order happens to work because SQLite allows FK violations until PRAGMA, but is poor practice
 
 **CL-002 (HIGH)**: Case sensitivity mismatch
+
 - CLI accepts: `vaultspec team list running` OR `vaultspec team list RUNNING` (Click choice is case-insensitive, _team.py:121)
 - REST expects exact match: ThreadStatus enum requires "running" not "RUNNING" (endpoints.py:417 calls `ThreadStatus(status)`)
 - Test case: `vaultspec team list RUNNING` → Click accepts → REST endpoint receives "RUNNING" → ThreadStatus("RUNNING") raises ValueError → HTTP 422
 
 **CL-003 (MEDIUM)**: No CRUD layer abstraction for snapshot listing
+
 - Database snapshots are filesystem artifacts, not in the database schema
 - `database snapshots` command (_database.py:93) reads files directly via `db_path.parent.glob()`, bypassing CRUD layer
 - Inconsistency: `database snapshot` (create) and `database restore` interact with SQLite, but `database snapshots` (list) doesn't
 
 **CL-004 (LOW)**: Implicit positional argument works but is unclear
+
 - Justfile recipe (Justfile:122): `uv run vaultspec team list {{STATUS}}`
 - CLI definition (_team.py:115-116): `@click.argument("status_filter", ...)` as ARGUMENT not OPTION
 - This works because Click ARGUMENT consumes positional args, but Justfile doesn't document it
 - Better: Use `@click.option` with `--status` flag for clarity
 
 **CL-005 (LOW)**: Error handling order issue
+
 - Current flow in `restore()` (_database.py:110-132): Check if service is running (line 117) → Check if snapshot file exists (line 130) → Restore
 - If file doesn't exist, user sees "Service is running" error first (misleading)
 - Should be: Check if snapshot file exists (fail fast) → Check service → Restore
@@ -373,12 +395,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 **RS-002 (INFO)**: Autonomous mode is ephemeral — `autonomous` parameter in CreateThreadRequest (rest.py:51) is accepted but not persisted to ThreadModel. Verified at endpoints.py:278-304: the value is resolved and passed to worker dispatch (line 304) but never saved to DB. This is **by design**: autonomous mode is a runtime execution parameter, not thread state. No issue.
 
 **RS-003 (MEDIUM)**: ThreadSummary.agent_state field source mismatch
+
 - REST schema (rest.py:99): `agent_state: AgentLifecycleState | None` (required-ish field in response)
 - ThreadModel (models.py): No agent_state field anywhere
 - Reality: agent_state is populated from ThreadStateSnapshot (thread checkpoints), not ThreadModel
 - Issue: Callers reading REST API docs might assume agent_state comes from ThreadModel, but it actually comes from LangGraph snapshots. This isn't documented in rest.py.
 
 **RS-004 (LOW)**: Ephemeral fields should be documented
+
 - `autonomous` (rest.py:51) accepts a boolean but doesn't persist
 - No documentation in CreateThreadRequest docstring saying "ephemeral" or "dispatch-only"
 - API users might expect it to affect thread re-execution (it doesn't — only initial dispatch)
@@ -406,29 +430,34 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **JF-001 (LOW)**: MCP command not exposed in Justfile
+
 - CLI registers: `mcp_group` with `@click.group("mcp")` (line 10 of _mcp.py)
 - CLI commands available: `vaultspec mcp status`, `vaultspec mcp tools`, `vaultspec mcp discovery`
 - Justfile: **No recipe uses any mcp subcommand**
 - Status: Works fine, just missing Justfile convenience recipes
 
 **JF-002 (LOW)**: Asymmetric service start recipes
+
 - Justfile:20 has: `service start worker` (target-specific)
 - CLI (_service.py:38): Default target is None (means "start backend")
 - Missing recipe: `service start` (backend) or `service start backend` (explicit)
 - Status: Users must call bare `vaultspec service start` directly without Justfile convenience
 
 **JF-003 (LOW)**: Repetitive `uv run vaultspec` pattern in Justfile
+
 - 7 recipes repeat `uv run vaultspec` verbatim (Justfile:103, 107, 111, 115, 119, 123, 127, 131)
 - Could define: `CLI := "uv run vaultspec"` and use `{{CLI}} ...`
 - Cosmetic improvement only
 
 **JF-004 (INFO)**: Team list recipe correctly passes STATUS
+
 - Justfile:122 defines: `teams *STATUS:`
 - Recipe:123: `uv run vaultspec team list {{STATUS}}`
 - CLI (_team.py:115): Accepts `status_filter` as ARGUMENT (positional)
 - Status: ✅ **Correct**
 
 **JF-005 (INFO)**: Service commands correctly map
+
 - Justfile:126-127: `service-status:` → `uv run vaultspec service status` ✅
 - Justfile:130-131: `service-stop:` → `uv run vaultspec service stop` ✅
 - Status: **All correct**
@@ -436,12 +465,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Recommendations
 
 1. **(P2) Add JF-002**: Create recipe for bare `service start` (backend):
+
    ```justfile
    service-start:
        uv run vaultspec service start
    ```
 
 2. **(P3) Add JF-001**: Create recipes for MCP tools:
+
    ```justfile
    mcp-status:
        uv run vaultspec mcp status
@@ -450,6 +481,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    ```
 
 3. **(P3) Optimize JF-003**: Define CLI variable for DRY (cosmetic):
+
    ```justfile
    CLI := "uv run vaultspec"
    teams *STATUS:
@@ -476,6 +508,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **EH-001 (MEDIUM)**: TOCTOU (Time-of-Check-Time-of-Use) race in restore
+
 - Line 130: `if not snapshot_path.exists(): raise`
 - Lines 134-140: Tries to open snapshot file
 - Race window: Between exists() check and connect(), another process could delete the file
@@ -483,6 +516,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - Fix: Use try/except around sqlite3.connect() instead of pre-check
 
 **EH-002 (MEDIUM)**: Archive idempotence issue
+
 - Endpoint (endpoints.py:1008): `if thread.status not in (...COMPLETED, FAILED, CANCELLED): raise 409`
 - Missing case: What if status is already ARCHIVED?
 - Result: Calling `POST /threads/{id}/archive` twice succeeds both times (second call does nothing)
@@ -490,12 +524,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - Recommendation: Add explicit check: `if thread.status == ARCHIVED: raise HTTPException(status_code=400, detail="already archived")`
 
 **EH-003 (LOW)**: No snapshot file integrity validation
+
 - _database.py:134-140: Opens snapshot file without validation
 - If snapshot file is corrupted SQLite file, `src_conn.backup(dst_conn)` will raise an exception
 - Not caught; exception propagates up (OK for CLI but not ideal)
 - Low severity because corrupted snapshots are rare, but defensive coding would help
 
 **EH-004 (LOW)**: Thread ID format not validated
+
 - endpoints.py routes: `/threads/{thread_id}` accepts any string
 - No validation that thread_id is UUID-format or matches expected format
 - Works because CRUD layer just does string equality, but could add defensive check
@@ -503,11 +539,13 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - Low severity because backend uses string comparison, not file paths
 
 **EH-005 (INFO)**: Pagination parameters are well-bounded
+
 - `offset: int = Query(default=0, ge=0)` — allows any non-negative offset ✅
 - `limit: int = Query(default=50, ge=1, le=200)` — bounds to 1-200 ✅
 - Status: **Correct and defensive**
 
 **EH-006 (INFO)**: Archive state machine is enforced
+
 - endpoints.py:1008 explicitly checks allowed pre-archive states
 - Prevents archiving RUNNING, SUBMITTED, CREATED threads
 - Status: **Correct and enforces valid transitions**
@@ -515,6 +553,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Recommendations
 
 1. **(P1) Fix EH-001**: Replace pre-check with exception handling in `database restore`:
+
    ```python
    try:
        src_conn = sqlite3.connect(str(snapshot_path))
@@ -524,12 +563,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
    ```
 
 2. **(P1) Fix EH-002**: Add idempotence check to archive endpoint:
+
    ```python
    if thread.status == ThreadStatus.ARCHIVED:
        return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}  # idempotent
    ```
 
 3. **(P2) Improve EH-003**: Wrap restore with try/except for corrupted files:
+
    ```python
    try:
        src_conn.backup(dst_conn)
@@ -556,24 +597,28 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **DT-001 (INFO)**: DateTime fields
+
 - ThreadModel stores: `Mapped[datetime]` (UTC-aware, from `_utcnow()`)
 - REST schema expects: `datetime` (Pydantic field)
 - Serialization: Pydantic auto-converts to ISO 8601 JSON string
 - Status: ✅ **Correct and compatible**
 
 **DT-002 (INFO)**: Enum serialization
+
 - All API enums inherit from StrEnum (e.g., `ServerEventType`, `AgentLifecycleState`, `ToolKind`)
 - StrEnum auto-serializes to string value in JSON (e.g., "running" not {"value": "running"})
 - REST schemas and frontend expect string values
 - Status: ✅ **Correct and consistent**
 
 **DT-003 (INFO)**: Graceful metadata fallback
+
 - endpoints.py:376: `try: json.loads(...) except (JSONDecodeError, TypeError): pass`
 - Allows legacy threads with invalid metadata to be returned (fields are None)
 - No 500 errors; degrades gracefully
 - Status: ✅ **Correct defensive coding**
 
 **DT-004 (INFO)**: ID normalization
+
 - ThreadModel.id → REST thread_id (endpoints.py:439)
 - ThreadModel.created_at/updated_at → REST created_at/updated_at (endpoints.py:440)
 - Consistent field name mapping across all endpoints
@@ -610,12 +655,14 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### All Actionable Items (Complete List)
 
 **P0 (Blocking):**
+
 - CL-001: Reverse delete order in `database clear`
 - CL-002: Normalize status filter to lowercase in CLI
 - EH-001: Replace pre-check with exception handling in `database restore`
 - Initial: Document REST CreateThreadRequest `title` vs `nickname` fields
 
 **P1 (Before Release):**
+
 - MCP docs: Remove `input_required` from thread status list
 - CLI `agent ask`: Remove non-functional `--agent` flag
 - EH-002: Add idempotence check to archive endpoint
@@ -623,6 +670,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - RS-004: Document `autonomous` field as ephemeral
 
 **P2 (Polish):**
+
 - CL-003: Remove asymmetry in snapshot CRUD abstraction
 - CL-005: Improve error handling order in `database restore`
 - EH-003: Add corrupted file detection in restore
@@ -630,6 +678,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 - JF-001: Add MCP tool recipes
 
 **P3 (Cosmetic):**
+
 - CL-004: Use `@click.option` instead of `@click.argument` for status filter
 - JF-003: Use Justfile variable for CLI invocation
 - JF-005: Standardize stop/cancel terminology (recommend `cancel`)
@@ -656,6 +705,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **FM-001 (MEDIUM)**: Metadata field name divergence
+
 - DB: `thread_metadata: str | None` (JSON-serialized)
 - REST request: `metadata: ThreadMetadata | None` (Pydantic object)
 - Mapping: Unpacked via JSON parsing in endpoints.py:376-384
@@ -683,6 +733,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Details
 
 **CF-001/CF-002/CF-003 (MEDIUM)**: Orphaned configuration
+
 - Defined in config.py but never referenced in codebase
 - Pollute config namespace; users might try to set them expecting effect
 - Originally intended for provider/model fallback; superseded by per-agent team config
@@ -701,12 +752,13 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 | ID | Severity | Location | Finding | Status |
 |----|----------|----------|---------|--------|
 | IMP-001 | INFO | api/endpoints.py | All imports use facade pattern (`from ..core import X`, `from ..database.crud import X`) | ✅ Correct |
-| IMP-002 | INFO | core/__init__.py | 40+ symbols re-exported; lazy loading for circular deps (EventAggregator, StreamableGraph, graph functions) | ✅ Proper |
+| IMP-002 | INFO | core/**init**.py | 40+ symbols re-exported; lazy loading for circular deps (EventAggregator, StreamableGraph, graph functions) | ✅ Proper |
 | IMP-003 | INFO | All endpoints | No deep imports (`from ..core.graph` or `from ..core.aggregator`) detected | ✅ Correct |
 
 ### Details
 
 **Import Pattern: Correct throughout**
+
 - Facade pattern properly enforced
 - All imports from module roots, not sub-modules
 - Lazy loading used appropriately for circular deps
@@ -735,6 +787,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 ### Comprehensive P0/P1 Action List
 
 **P0 (Critical/must fix):**
+
 1. CL-001: Fix FK constraint in `database clear` — reverse delete order
 2. CL-002: Fix case-sensitivity in `team list` — normalize to lowercase
 3. EH-001: Fix TOCTOU race in `database restore` — use exception handling
@@ -742,6 +795,7 @@ The system is **~80% consistent** with **clear patterns** across layers. The mai
 5. Initial CRITICAL: Document REST `title` vs `nickname` semantics
 
 **P1 (Before release):**
+
 1. CF-001/CF-002/CF-003: Remove orphaned config settings
 2. FM-001: Document metadata field name mapping
 3. MCP docs: Clarify `input_required` is agent state, not thread status

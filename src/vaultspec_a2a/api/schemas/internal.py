@@ -9,7 +9,6 @@ from pydantic import BaseModel, Field
 
 from ...core.config import settings
 
-
 __all__ = [
     "DispatchRequest",
     "DispatchResponse",
@@ -40,9 +39,7 @@ class DispatchRequest(BaseModel):
     autonomous: bool = False
     metadata_json: str | None = None
     context_preamble: str | None = None
-    recursion_limit: int = Field(
-        default_factory=lambda: settings.graph_recursion_limit
-    )
+    recursion_limit: int = Field(default_factory=lambda: settings.graph_recursion_limit)
     # ADR-019: SDD blackboard fields
     active_feature: str | None = None
     pipeline_phase: str | None = None

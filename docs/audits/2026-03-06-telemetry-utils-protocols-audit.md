@@ -28,6 +28,7 @@ LangSmith tracing is configured separately via environment variables
 ```
 
 And lines 78-83:
+
 ```python
 _LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in (...)
 _LANGSMITH_PROJECT = os.environ.get("LANGCHAIN_PROJECT", "default")
@@ -225,6 +226,7 @@ No way to run the MCP server in isolation for debugging without the full FastAPI
 All three modules are small and well-focused. The telemetry module's OTel integration is particularly clean, with proper lazy initialization and no-op fallbacks.
 
 The main concerns:
+
 1. **PROTO-HIGH-03**: MCP `start_thread` tool sends `workspace_root` as a top-level field instead of inside `metadata`, breaking vault context injection for MCP-initiated threads. This is a functional bug.
 2. **PROTO-HIGH-01**: `_transport.__del__()` cleanup is fragile and non-standard.
 3. **TEL-MED-01**: LangSmith detection only checks legacy `LANGCHAIN_*` env vars, missing the canonical `LANGSMITH_*` names.

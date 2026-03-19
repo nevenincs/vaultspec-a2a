@@ -23,7 +23,6 @@ from ..factory import ProviderFactory
 from ._http import run_http_probe
 from ._protocol import ProbeResult
 
-
 __all__ = ["main"]
 
 logger = logging.getLogger(__name__)

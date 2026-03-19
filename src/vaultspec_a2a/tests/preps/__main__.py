@@ -2,7 +2,6 @@
 
 import sys
 
-
 SCENARIOS = {
     "solo_coder": "Single coder agent (pipeline)",
     "pipeline_team": "Planner + coder + reviewer (pipeline)",

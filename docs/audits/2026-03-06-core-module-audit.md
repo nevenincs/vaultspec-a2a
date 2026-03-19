@@ -29,6 +29,7 @@ Rules are compiled and injected in THREE separate locations per single node invo
 **File:** `anchoring.py:66-72`
 
 Lines 66-72 contain a duplicated import block:
+
 ```python
     from .config import settings
     from .rules import RuleManager
@@ -48,6 +49,7 @@ The `from .config import settings` and `from .rules import RuleManager` imports 
 **File:** `anchoring.py:74` vs `nodes/supervisor.py:123-124` vs `nodes/worker.py:153-154`
 
 `build_anchoring_context()` uses the global `settings.workspace_root` (line 74), but supervisor_node and worker_node derive workspace_root from `state.get("workspace_root")` or the closure-captured `workspace_root` parameter. These may differ:
+
 - `settings.workspace_root` defaults to `./workspaces`
 - The actual workspace_root is threaded from the API endpoint through to graph compilation
 
@@ -86,6 +88,7 @@ The type annotation says `new: list[dict[str, str]]` but the body checks `new is
 **Files:** `nodes/supervisor.py:123`, `nodes/worker.py:153`
 
 Both supervisor_node and worker_node call `state.get("workspace_root")`, but `TeamState` (state.py) does NOT define a `workspace_root` field. This means:
+
 - The key is never set by any reducer
 - It would only exist if manually injected into graph_input
 - `state.get("workspace_root")` always returns `None` unless something outside the typed state sets it
@@ -117,12 +120,14 @@ In `_compile_star`, `create_worker_node` is called with `workspace_root=workspac
 **File:** `graph.py:54-60`
 
 The memory notes say `"researcher"` entry was removed from `_ROLE_TO_PHASE`, but it's still present:
+
 ```python
 _ROLE_TO_PHASE: dict[str, str] = {
     "researcher": "research",
     ...
 }
 ```
+
 This is actually correct per the code — `"researcher"` maps to `"research"` phase. The memory note about removal was likely about a different map. No action needed, but documenting for clarity.
 
 **Status:** FALSE POSITIVE — "researcher" is correct here.

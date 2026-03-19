@@ -51,6 +51,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: `start_thread` caps `initial_message` at 32,000 chars in MCP layer (`server.py:89`, `server.py:200-205`), but `send_message` has no equivalent check on REST layer.
 
 **Evidence**:
+
 - `server.py:89` — `_MAX_INITIAL_MESSAGE_CHARS = 32_000`
 - `server.py:200-205` — raises `ToolError` if exceeds limit
 - `endpoints.py:671-746` — `send_message_endpoint` accepts `body: SendMessageRequest` with no size validation
@@ -67,12 +68,16 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: MCP tool `list_threads` clamps pagination params (`server.py:299-300`), but REST endpoint validates differently.
 
 **Evidence**:
+
 - `server.py:299-300`:
+
   ```python
   limit = max(1, min(limit, 200))
   offset = max(0, offset)
   ```
+
 - `endpoints.py:348`:
+
   ```python
   limit: int = Query(default=50, ge=1, le=200),
   ```
@@ -88,12 +93,14 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: **MCP discovery document not served**. IDEs cannot auto-discover MCP tools without manual configuration.
 
 **Evidence**:
+
 - `app.py:381` — `app.mount("/mcp", mcp_server.sse_app())`
 - FastMCP SSE app routes: `['/sse', '/messages']` (no discovery endpoint)
 - No custom `/.well-known/mcp.json` handler in `app.py`
 - MCP spec requires `GET /.well-known/mcp.json` for client discovery
 
 **Standard MCP Discovery Flow**:
+
 1. IDE makes `GET https://host/.well-known/mcp.json`
 2. Server responds with tool list, capabilities, schema
 3. IDE establishes connection to `/mcp` (SSE)
@@ -101,12 +108,15 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Current State**: Step 1 fails (404). Users must manually configure IDEs with connection URL.
 
 **Impact**:
+
 - Cursor/Windsurf cannot auto-discover MCP server
 - Users see 404 when IDE tries discovery
 - Manual config required (workaround exists but bad UX)
 
 **Recommendation**:
+
 1. **Add custom handler in `app.py`**:
+
    ```python
    @app.get("/.well-known/mcp.json")
    async def mcp_discovery() -> dict:
@@ -116,6 +126,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
            "tools": [...9 tools...]
        }
    ```
+
 2. **OR**: Use FastMCP's built-in discovery (check if available in newer versions)
 3. **OR**: Extract from FastMCP registry at runtime
 
@@ -128,15 +139,18 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: `get_thread_status` reads from LangGraph checkpointer with 10s timeout, but error message is generic.
 
 **Evidence**:
+
 - `endpoints.py:609` — `await asyncio.wait_for(checkpointer.aget_tuple(config), timeout=10.0)`
 - `endpoints.py:645-656` — catches `TimeoutError` and `Exception`, returns partial snapshot
 
 **Issue**:
+
 - 10s is aggressive for reads on WAL database under load
 - No backoff or retry logic
 - Partial snapshots sent to client without indication that data is stale
 
 **Recommendation**:
+
 1. Increase timeout to 30s (still safe for WAL reads)
 2. Add `data_incomplete: bool` flag to snapshot
 3. Log timeout as warning (not exception)
@@ -148,7 +162,9 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: MCP error messages expose `settings.mcp_api_base_url` to clients.
 
 **Evidence**:
+
 - `server.py:237-239`:
+
   ```python
   raise ToolError(
       f"Network error: could not connect to {settings.mcp_api_base_url}. "
@@ -165,7 +181,9 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: Permission response endpoint assumes `tool_call == "plan_approval"` string literal.
 
 **Evidence**:
+
 - `endpoints.py:893-895`:
+
   ```python
   perm_event = aggregator._pending_permissions.get(request_id)
   if perm_event and perm_event.tool_call == "plan_approval":
@@ -173,11 +191,13 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
   ```
 
 **Issue**:
+
 - `tool_call` value is not validated against enum or schema
 - If ADR changes string literal, this silently breaks
 - No test for this behavior
 
 **Recommendation**:
+
 1. Define permission type enum (not string)
 2. Add unit test for plan_approval special case
 
@@ -188,6 +208,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: MCP tools can be called unlimited times without rate limiting.
 
 **Evidence**:
+
 - No middleware in `app.py` for rate limiting
 - No per-IP or per-API-key throttling
 
@@ -202,7 +223,9 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: `cancel_thread` updates DB status before confirming dispatch success.
 
 **Evidence**:
+
 - `endpoints.py:970-994`:
+
   ```python
   dispatched = False
   dispatch = DispatchRequest(action="cancel", thread_id=thread_id)
@@ -217,6 +240,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
   ```
 
 **Issue**:
+
 - If worker dispatch fails, DB shows CANCELLED but worker is still running
 - Client receives success response even if worker never got the cancel
 - Asymmetric state
@@ -260,12 +284,15 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 **Problem**: Repo has no example IDE configuration files.
 
 **Search Results**:
+
 - No `.cursor/mcp.json` found
 - No `.windsurf/mcp.json` found
 - No `.well-known/` directory
 
 **Expected Location**:
+
 - User should add `~/.cursor/mcp.json`:
+
   ```json
   {
     "tools": {
@@ -373,15 +400,18 @@ Add this to ~/.cursor/mcp.json:
 ## Recommendations
 
 ### Phase 1 (Now)
+
 - [ ] Add `GET /.well-known/mcp.json` endpoint (MCP-V4)
 - [ ] Add IDE setup documentation
 
 ### Phase 2 (Next Sprint)
+
 - [ ] Fix message size validation (MCP-V2)
 - [ ] Review checkpointer timeout (MCP-V5)
 - [ ] Fix cancel thread DB/dispatch race (MCP-V9)
 
 ### Phase 3 (Polish)
+
 - [ ] Standardize pagination validation (MCP-V3)
 - [ ] Refactor plan approval as enum (MCP-V7)
 - [ ] Mask internal URLs in error messages (MCP-V6)
@@ -416,7 +446,9 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: When worker dispatch fails (network error), request is silently dropped. No retry logic.
 
 **Evidence**:
+
 - `app.py:315-325` (create_thread dispatch):
+
   ```python
   try:
       await worker_client.post("/dispatch", json=dispatch.model_dump())
@@ -426,6 +458,7 @@ Add this to ~/.cursor/mcp.json:
   ```
 
 **Impact**:
+
 - Thread created in DB but worker never receives initial message
 - User must manually retry via `send_message`
 - Asymmetric state (DB shows thread, but no execution)
@@ -437,6 +470,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Worker HTTP POST calls have no explicit timeout. Can hang indefinitely if worker unresponsive.
 
 **Evidence**:
+
 - `app.py:316` — `await worker_client.post("/dispatch", ...)`
 - Worker client configured with `timeout=httpx.Timeout(30.0, connect=5.0)` in `app.py:271-274`
 - But individual calls don't override timeout
@@ -448,17 +482,20 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: If worker dispatch fails during `create_thread`, metadata (workspace_root, feature_tag) is lost permanently.
 
 **Evidence**:
+
 - `endpoints.py:266-327` — thread created in DB, then dispatch attempted
 - If dispatch fails: logger.warning() + continue (line 321)
 - Worker never receives metadata because dispatch queue is empty
 - User cannot re-send metadata; thread is orphaned with incomplete data
 
 **Impact**:
+
 - Context information (.vault/ docs, workspace_root) never injected into worker
 - Agent execution happens without project context
 - Metadata can never be recovered (thread_metadata is set once at creation)
 
 **Recommendation**:
+
 1. Queue metadata separately from dispatch (guaranteed delivery)
 2. Or: Retry dispatch with metadata until worker ACKs
 
@@ -467,11 +504,13 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: When gateway sends dispatch to worker, there's no request_id to correlate the response.
 
 **Evidence**:
+
 - `DispatchRequest` (schemas/internal.py) has no `request_id` field
 - Worker response is broadcast back via `/internal/events` without reference to original dispatch
 - If two concurrent dispatches occur, responses are indistinguishable
 
 **Impact**:
+
 - Hard to debug which dispatch caused which worker event
 - No idempotency guarantee (if dispatch is retried, worker might execute twice)
 
@@ -482,17 +521,20 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Events from worker are batched and relayed out-of-order. No FIFO guarantee.
 
 **Evidence**:
+
 - `internal.py:227-263` — `/events/batch` endpoint processes events in a loop
 - No ordering constraint: `for evt in events: await cm.broadcast_to_thread(thread_id, payload)`
 - Worker could batch events out of chronological order
 - Aggregator sequence numbers are monotonic per thread, but individual WS messages could arrive out of order
 
 **Impact**:
+
 - Frontend receives events out of order
 - Last message shown might not be the most recent
 - Plan updates could be shown before messages that caused them
 
 **Recommendation**:
+
 1. Enforce FIFO ordering on `/events/batch` (sort by timestamp before processing)
 2. Add test for event ordering guarantees
 
@@ -516,12 +558,14 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Heartbeats sent from one async task, events from another. No ordering guarantee.
 
 **Evidence**:
+
 - `websocket.py:174` — hb_task (heartbeat loop)
 - `websocket.py:175` — wr_task (writer loop, drains event queue)
 - Both send to same WebSocket without serialization
 - Heartbeat could arrive between two events, reordering perceived sequence
 
 **Impact**:
+
 - Frontend receives events out of order even though aggregator sent them in order
 - Last message sequence might not be accurate for reconnection
 
@@ -530,6 +574,7 @@ Add this to ~/.cursor/mcp.json:
 ### WS-ORD-02: Single Read Loop Handles All Commands ✓
 
 **Evidence**: `websocket.py:219-270` — single `async def listen()` loop
+
 - All client commands parsed and dispatched sequentially
 - No race condition in command processing
 
@@ -540,6 +585,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: If writer task is cancelled, WebSocket send could be partial.
 
 **Evidence**:
+
 - `websocket.py:444-500+` — writer loop drains event queue
 - If task is cancelled during `await websocket.send_json(...)`, frame might be partial
 - Starlette should handle this, but no explicit guarantee
@@ -551,7 +597,9 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Heartbeat and writer tasks cancel each other. If one crashes before setting callback, the other continues forever.
 
 **Evidence**:
+
 - `websocket.py:177-185`:
+
   ```python
   def _cancel_partner(done_task, other_task):
       if not other_task.done():
@@ -586,6 +634,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: `_pending_permissions` dict grows without bound. Old permissions never GC'd.
 
 **Evidence**:
+
 - `aggregator.py:353` — `self._pending_permissions: dict[str, PermissionRequestEvent] = {}`
 - `aggregator.py:996` — add on new permission
 - `aggregator.py:1011` — remove on permission_resolved
@@ -593,6 +642,7 @@ Add this to ~/.cursor/mcp.json:
 - No TTL or cleanup
 
 **Impact**:
+
 - Long-running server accumulates stale permission records
 - Could eventually exhaust memory
 
@@ -603,7 +653,9 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: `permission_resolved` event doesn't validate the request_id actually exists in the pending map.
 
 **Evidence**:
+
 - `aggregator.py:1008-1012`:
+
   ```python
   elif event_type == "permission_resolved":
       request_id = payload.get("request_id", "")
@@ -621,6 +673,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: `_tool_call_update_pending` dict is written from multiple concurrent emitter tasks without lock.
 
 **Evidence**:
+
 - `aggregator.py:354` — `self._tool_call_update_pending: dict[str, float] = {}`
 - Multiple workers might emit `tool_call_update` events concurrently
 - No lock protecting writes
@@ -634,6 +687,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: `sync_worker_event` assumes payload has expected fields. No schema validation.
 
 **Evidence**:
+
 - `aggregator.py:952-1053` — all `.get()` calls, no raises
 - If worker sends malformed event, it silently fails
 - Example: permission options missing `option_id` → PermissionOption gets empty string
@@ -645,7 +699,9 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: `_sequences` dict keeps entries for all threads ever created. Never cleaned up.
 
 **Evidence**:
+
 - `aggregator.py:488-494`:
+
   ```python
   def _next_sequence(self, thread_id: str) -> int:
       self._sequences[thread_id] += 1
@@ -700,6 +756,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Events in batch could arrive out of chronological order.
 
 **Evidence**:
+
 - `ipc.py:105-117` — `send_event()` appends to list without timestamp
 - `ipc.py:133` — `batch = self._event_buffer[:]` (copy as-is, no sort)
 - `internal.py:253-262` — receives batch, broadcasts in loop order (no reordering)
@@ -713,6 +770,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: Gateway accepts batch without validating chronological order.
 
 **Evidence**:
+
 - `internal.py:253-262` loops through events with no timestamp checks
 - No warning if current.timestamp < previous.timestamp
 
@@ -723,6 +781,7 @@ Add this to ~/.cursor/mcp.json:
 **Problem**: If gateway down, events logged as warning but never retried.
 
 **Evidence**:
+
 - `ipc.py:141-152` — HTTP error → log warning → continue
 - Buffer cleared immediately (line 134), no backlog
 
@@ -750,6 +809,7 @@ Unbounded array growth on high event rate; timer-based flushing inconsistent.
 **Problem**: Fast events to slow client fills shared aggregator queue, blocking all clients.
 
 **Evidence**:
+
 - `websocket.py:444-480` — writer reads from `asyncio.Queue[ServerEvent]` (maxsize=512)
 - Queue shared across all clients via aggregator
 - If client socket blocks, queue fills, aggregator blocks on `queue.put()`
@@ -763,6 +823,7 @@ Unbounded array growth on high event rate; timer-based flushing inconsistent.
 **Problem**: Two paths deliver events — queue-based + direct broadcast relay. No coordination.
 
 **Evidence**:
+
 - Path 1: `emit_*` → queue → writer loop → WS
 - Path 2: `internal.broadcast_to_thread` → direct send (line 536)
 - Both to same client, no mutual exclusion
@@ -790,18 +851,22 @@ Unbounded array growth on high event rate; timer-based flushing inconsistent.
 **Problem**: Worker WebSocket at `/internal/ws` has NO authentication.
 
 **Evidence**:
+
 - `internal.py:115-118`:
+
   ```python
   @internal_router.websocket("/ws")
   async def worker_ws_endpoint(websocket: WebSocket) -> None:
       await websocket.accept()
   ```
+
 - No `Depends(_verify_internal_token)` on decorator
 - HTTP endpoints have auth (line 111), but WS doesn't
 
 **Impact**: Any process on network could connect and inject malicious events into worker stream.
 
 **Recommendation**: Add auth check before `accept()`:
+
 ```python
 from fastapi import WebSocketException
 token = websocket.headers.get("authorization", "")
@@ -861,6 +926,7 @@ Payload validation, buffer bounds, timing attacks, dev mode, rate limiting, logg
 **Problem**: All CRUD functions use `await session.flush()` but rely on endpoint callers to invoke `await db.commit()`. No explicit transaction wrapping.
 
 **Evidence**:
+
 - `crud.py:153, 233, 306` — all use `flush()` (in-memory only)
 - `endpoints.py:988, 1011` — caller must invoke `commit()`
 - `session.py:149-153` — `async_sessionmaker` default config, `expire_on_commit=False`
@@ -868,6 +934,7 @@ Payload validation, buffer bounds, timing attacks, dev mode, rate limiting, logg
 **Issue**: If an endpoint crashes between `flush()` and `commit()`, the transaction silently rolls back. Worse: if two endpoints race on the same thread_id, both may observe stale reads before either commits.
 
 **Transaction Isolation Chain**:
+
 1. FastAPI dependency injects `AsyncSession` (line 212-214 in `endpoints.py`)
 2. CRUD function calls `session.flush()` (in-memory, no commit)
 3. Endpoint code runs (may fail, may dispatch to worker)
@@ -875,6 +942,7 @@ Payload validation, buffer bounds, timing attacks, dev mode, rate limiting, logg
 5. FastAPI cleanup calls `session.close()` (line 216 in `session.py`)
 
 **Example Race** (concurrent creates):
+
 ```
 Request A: Create thread_id=X, nickname="feature-1", flush() ✓
 Request B: Create thread_id=Y, nickname="feature-1", flush() ✓
@@ -885,11 +953,13 @@ BUT: If Request A crashes after flush() but before commit(),
 ```
 
 **Recommendation**: Use explicit transaction context:
+
 ```python
 async with db.begin_nested():  # Savepoint
     await create_thread(db, ...)
 # Auto-commit on exit
 ```
+
 Or wrap all CRUD calls in `async with db.begin()`.
 
 ---
@@ -912,6 +982,7 @@ await session.flush()                                # (4) Flush
 ```
 
 **Race Scenario**:
+
 1. Thread A reads status=RUNNING, transition RUNNING→COMPLETED valid ✓
 2. Thread B reads status=RUNNING, transition RUNNING→FAILED valid ✓
 3. Thread A transitions to COMPLETED, flushes
@@ -921,6 +992,7 @@ await session.flush()                                # (4) Flush
 **Root Cause**: SQLAlchemy `session.get()` uses identity map cache. Two concurrent requests get different session objects with different caches, both reading stale state.
 
 **Recommendation**: Use row-level locking:
+
 ```python
 from sqlalchemy import select, for_update
 query = select(ThreadModel).where(
@@ -930,6 +1002,7 @@ thread = await session.scalar(query)
 ```
 
 Or use optimistic locking with version column:
+
 ```python
 thread.version += 1
 await session.flush()  # Raises IntegrityError on version mismatch
@@ -942,17 +1015,20 @@ await session.flush()  # Raises IntegrityError on version mismatch
 **Problem**: `create_async_engine()` in `session.py:125` has no `isolation_level` parameter.
 
 SQLite defaults to `DEFERRED` (lock acquired on first write), not `SERIALIZABLE`. In `DEFERRED` mode:
+
 - Multiple readers + writer can create phantom reads
 - Dirty reads possible if write-write race occurs
 
 **Evidence**: `session.py:125` — `create_async_engine(url, echo=echo)` with no isolation config.
 
 **SQLAlchemy/SQLite Isolation Levels**:
+
 - `DEFERRED` (default): Transaction doesn't acquire lock until first write. Weaker guarantees.
 - `IMMEDIATE`: Lock acquired at BEGIN. Better, but still not serializable.
 - `SERIALIZABLE`: Fully isolated. Slower, but ACID-guaranteed.
 
 **Recommendation**: Explicitly set isolation level:
+
 ```python
 _engine = create_async_engine(
     url,
@@ -975,6 +1051,7 @@ await session.flush()  # ORM cascade happens here
 ```
 
 SQLAlchemy's ORM cascade is achieved by:
+
 1. `session.delete(thread)` marks object for deletion
 2. `session.flush()` runs individual DELETE statements for each related table
 3. If error occurs mid-cascade, partial deletes may be committed
@@ -982,6 +1059,7 @@ SQLAlchemy's ORM cascade is achieved by:
 **Race**: Worker still holds reference to thread while gateway deletes it.
 
 **Recommendation**: Use SQL-level foreign key cascade:
+
 ```sql
 -- In Alembic migration
 ALTER TABLE artifact
@@ -989,7 +1067,9 @@ ALTER TABLE artifact
   FOREIGN KEY (thread_id) REFERENCES thread(id)
   ON DELETE CASCADE;
 ```
+
 Then:
+
 ```python
 # Simple ORM delete now cascades atomically
 await session.delete(thread)
@@ -1005,16 +1085,19 @@ await session.flush()  # Single SQL DELETE CASCADE, atomic
 **Problem**: Two concurrent requests can bypass the SELECT pre-check and both try to INSERT with same nickname.
 
 **Evidence**:
+
 - `crud.py:136-142` — SELECT pre-check
 - `crud.py:152-162` — IntegrityError catch converts to NicknameConflictError
 
 **Verdict**: **Works correctly but fragile**. Depends on catching IntegrityError, which relies on:
+
 1. Unique constraint on `nickname` column (verified in DB schema)
 2. Constraint violation being reported as IntegrityError (SQLAlchemy behavior)
 
 **Risk**: Code is correct but implementation detail (IntegrityError catch) is fragile. If unique constraint is removed, bug silently reappears.
 
 **Recommendation**: Add comment documenting the TOCTOU protection pattern:
+
 ```python
 # H12/H17: TOCTOU race protection — SELECT pre-check catches most conflicts,
 # but IntegrityError catch ensures atomicity in face of concurrent INSERTs.
@@ -1048,6 +1131,7 @@ await db.commit()
 **Issue**: Each endpoint calls `update_thread_status()` + `commit()` separately. If second call fails, first may already be committed.
 
 **Recommendation**: Batch status updates within single transaction:
+
 ```python
 async with db.begin():
     await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
@@ -1087,6 +1171,7 @@ async def shutdown(self) -> None:
 ```
 
 **Race Scenario**:
+
 1. Worker emits event → aggregator receives in `sync_worker_event()`
 2. Event buffered in `_chunk_buffers[thread_id]` with debounce timer
 3. `shutdown()` called (e.g., API shutdown)
@@ -1097,6 +1182,7 @@ async def shutdown(self) -> None:
 **Missing**: No `await db.commit()` equivalent for pending buffers before clearing.
 
 **Recommendation**: Add drain mechanism:
+
 ```python
 async def shutdown(self) -> None:
     """Drain pending events before shutting down debounce tasks."""
@@ -1123,6 +1209,7 @@ self._pending_permissions: dict[str, PermissionRequestEvent] = {}
 ```
 
 **Issue**: If permission responses are lost/delayed, requests accumulate forever:
+
 - Each new thread may spawn permission requests
 - Requests cleared only by `resolve_permission(request_id)` call in endpoint
 - If worker/gateway disconnect, pending requests orphaned
@@ -1130,6 +1217,7 @@ self._pending_permissions: dict[str, PermissionRequestEvent] = {}
 **Memory Impact**: Per 100 threads × 2 permissions/thread = 200 dict entries. Each entry ≈ 500 bytes → 100KB leaked per server restart if not responded.
 
 **Recommendation**: Add TTL with automatic eviction:
+
 ```python
 from datetime import datetime, timedelta, UTC
 
@@ -1168,6 +1256,7 @@ def _next_sequence(self, thread_id: str) -> int:
 **Impact**: After 1M threads, dict has 1M entries (each ≈ 40 bytes) ≈ 40MB leaked memory.
 
 **Recommendation**: Clean on thread deletion:
+
 ```python
 def on_thread_deleted(self, thread_id: str) -> None:
     """Called by CRUD layer when thread is deleted."""
@@ -1202,6 +1291,7 @@ if tool_id not in self._tool_call_update_pending:  # ← Check
 ```
 
 **Recommendation**: Use `self._lock` (defined at line 360):
+
 ```python
 async def on_tool_end(self, ...):
     async with self._lock:
@@ -1227,6 +1317,7 @@ async def shutdown(self) -> None:
 If a chunk is still pending when `_sequences` is cleared, the sequence number is lost. Subscribers may see gaps in event numbering.
 
 **Recommendation**: Verify all buffers are empty before clearing:
+
 ```python
 async def shutdown(self) -> None:
     # Drain all buffers
@@ -1259,6 +1350,7 @@ async def shutdown(self) -> None:
 **Problem**: When worker process crashes, all threads in RUNNING status are orphaned.
 
 **Scenario**:
+
 1. Gateway creates thread_id=A, status=RUNNING
 2. Worker starts graph execution
 3. Worker process crashes (OOM, segfault, etc.)
@@ -1268,17 +1360,20 @@ async def shutdown(self) -> None:
 7. Thread A never completes, stuck forever
 
 **Evidence**:
+
 - `supervisor.py:83-112` — monitor loop only checks process health, never DB state
 - No reconciliation logic on restart
 - `crud.py` has no "transition orphaned RUNNING → FAILED" function
 
 **Root Cause**: Thread state stored in **two places**:
+
 1. Database (ThreadModel.status = RUNNING)
 2. Worker process memory (LangGraph graph in execution)
 
 When worker crashes, DB state stale but not updated.
 
 **Recommendation**: Add reconciliation on restart:
+
 ```python
 async def monitor(self, check_interval: float = 2.0) -> None:
     while True:
@@ -1313,6 +1408,7 @@ async def _orphan_running_threads(self) -> None:
 **Problem**: Worker doesn't periodically checkpoint thread state to database. On crash, in-flight graph state lost forever.
 
 **Evidence**:
+
 - `supervisor.py:102` — restart creates new worker process
 - No shared checkpoint between worker and DB
 - Thread metadata, partial results not written to DB during execution
@@ -1320,6 +1416,7 @@ async def _orphan_running_threads(self) -> None:
 **Impact**: If thread had completed 90% of work before crash, that work is lost. Thread reported as FAILED with no partial results available.
 
 **Recommendation**: Add periodic checkpoint:
+
 ```python
 # In worker's main loop
 async def checkpoint_thread_state(thread_id: str, state: dict[str, Any]) -> None:
@@ -1334,6 +1431,7 @@ async def checkpoint_thread_state(thread_id: str, state: dict[str, Any]) -> None
 ```
 
 Then on restart:
+
 ```python
 async def _restore_from_checkpoint(thread_id: str) -> dict[str, Any] | None:
     """Restore thread state from last checkpoint."""
@@ -1364,6 +1462,7 @@ if healthy_since is None:
 If crash occurs during graph compilation (CPU-intensive), supervisor's health check interval (2s) may miss it.
 
 **Recommendation**: Add startup verification:
+
 ```python
 async def start(self) -> None:
     """Spawn worker and verify startup within timeout."""
@@ -1408,6 +1507,7 @@ self._event_buffer: list[dict[str, Any]] = []
 **Impact**: Last batch of events (< 50ms worth) never reach gateway. Thread state inconsistency.
 
 **Recommendation**: Persist buffer to database:
+
 ```python
 # In worker
 async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
@@ -1427,6 +1527,7 @@ async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
 ```
 
 Then on startup, replay unprocessed events:
+
 ```python
 async def replay_pending_events(worker_id: str) -> None:
     """Replay events from previous worker crash."""
@@ -1458,6 +1559,7 @@ def is_alive(self) -> bool:
 If worker enters infinite loop or deadlock, `poll()` returns None (process still alive), supervisor thinks it's healthy.
 
 **Recommendation**: Add heartbeat-based liveness detection:
+
 ```python
 async def monitor(self, check_interval: float = 2.0) -> None:
     while True:
@@ -1542,6 +1644,7 @@ While table names are hardcoded in this case, if `tables` ever becomes user inpu
 **Risk**: Attacker could craft table name like `threads; DROP TABLE threads; --` to execute arbitrary SQL.
 
 **Recommendation**: Use SQLAlchemy's quoted identifiers:
+
 ```python
 from sqlalchemy import table as sa_table, delete
 for table_name in tables:
@@ -1550,6 +1653,7 @@ for table_name in tables:
 ```
 
 Or use explicit enumeration with validation:
+
 ```python
 ALLOWED_TABLES = {"threads", "artifacts", "permission_logs", "cost_tracking"}
 if table_name not in ALLOWED_TABLES:
@@ -1575,12 +1679,14 @@ result = subprocess.run(
 ```
 
 **Risk**: If `port` is user-controlled or contaminated, PowerShell interprets special characters:
+
 - `-Command "...{port}..."` with `port="0; Remove-Item C:\*"` would delete files
 - PowerShell argument parsing is complex; bare integers are generally safe, but settings loading could be poisoned
 
 **Root Cause**: `settings.port` is a Pydantic int, so numeric safety is guaranteed. But `port` could be poisoned if settings are loaded from untrusted source.
 
 **Recommendation**: Use subprocess array form (already correct) but ensure port is int:
+
 ```python
 port_int = int(settings.port)  # Explicit int cast
 if not (1 <= port_int <= 65535):
@@ -1610,6 +1716,7 @@ if not snapshot_path.resolve().is_relative_to(db_path.parent.resolve()):
 **Issue**: Project specifies Python 3.13 in `.claude/CLAUDE.md`, so this is technically safe. However, it's a version dependency that could silently break on older runtimes.
 
 **Recommendation**: Add explicit version check or use compatibility fallback:
+
 ```python
 try:
     # Python 3.12+
@@ -1645,6 +1752,7 @@ def start(target: str | None, host: str | None, port: int | None, log_level: str
 **Issue**: When user presses Ctrl+C, uvicorn's shutdown is not graceful. Worker may not be cleaned up. No context manager or try/finally.
 
 **Recommendation**: Wrap with shutdown handler:
+
 ```python
 async def start(...):
     import signal
@@ -1683,11 +1791,13 @@ finally:
 ```
 
 **Risk**: If source DB is corrupted:
+
 1. `backup()` may partially succeed, creating invalid snapshot
 2. Invalid snapshot written to disk
 3. User attempts `restore` later, overwrites good DB with corrupted snapshot
 
 **Recommendation**: Validate before and after:
+
 ```python
 src_conn = sqlite3.connect(str(db_path))
 try:
@@ -1734,11 +1844,13 @@ finally:
 ```
 
 **Risk**: If snapshot file is corrupted or manually edited:
+
 1. `backup()` may partially succeed
 2. Destination DB is now corrupted
 3. User loses current working database
 
 **Recommendation**: Validate snapshot before restore (similar to above):
+
 ```python
 src_conn = sqlite3.connect(str(snapshot_path))
 try:
@@ -1778,6 +1890,7 @@ def update(target: str) -> None:
 **Issue**: If migration fails (e.g., schema conflict, bad migration script), exception propagates as raw traceback. User sees exception but exit code may not indicate failure.
 
 **Recommendation**: Catch and report cleanly:
+
 ```python
 def update(target: str) -> None:
     from alembic import command
@@ -1812,6 +1925,7 @@ def discovery() -> None:
 ```
 
 **Current Behavior**: Running `vaultspec mcp discovery` returns:
+
 ```
 Error 404: Not Found
 ```
@@ -1868,6 +1982,7 @@ Locking on shared dicts, hung worker detection, SQLite corruption validation, di
 **Problem**: When WebSocket reconnects, frontend doesn't invalidate TQ caches. Stale data remains in cache while new events arrive.
 
 **Scenario**:
+
 1. User opens thread, cache populated: `useThreadState(id="abc")` → {status: RUNNING}
 2. Connection drops (network failure)
 3. Worker continues (user didn't see it), thread completes: status=COMPLETED
@@ -1876,12 +1991,14 @@ Locking on shared dicts, hung worker detection, SQLite corruption validation, di
 6. New events processed, but cache was already invalid
 
 **Evidence**:
+
 - `ws-bridge.ts:29-115` — `initWsBridge()` has no cache invalidation on reconnect
 - `websocket-client.ts:183-196` — `connected` event re-subscribes but doesn't signal cache update
 
 **Root Cause**: No mechanism to invalidate caches on reconnection. Only new events update TQ cache.
 
 **Recommendation**: Invalidate relevant caches on reconnect:
+
 ```typescript
 // In ws-bridge.ts
 wsClient.setConnectedCallback((event) => {
@@ -1906,6 +2023,7 @@ wsClient.setConnectedCallback((event) => {
 **Problem**: Frontend tracks `lastSequences[threadId]` but doesn't detect if a gap exists after reconnect.
 
 **Scenario**:
+
 1. Last received event: sequence=5
 2. Connection drops during events 6,7,8
 3. Worker continues, events are queued/lost
@@ -1914,6 +2032,7 @@ wsClient.setConnectedCallback((event) => {
 6. Events 6-8 silently lost; UI desynchronized
 
 **Evidence**:
+
 ```typescript
 // websocket-client.ts:210-214
 const lastSeq = this.lastSequences.get(threadId) ?? 0;
@@ -1926,6 +2045,7 @@ No gap check: just monotonic increase validation.
 **Root Cause**: Sequence validation only prevents *stale* events, not *missing* events.
 
 **Recommendation**: Detect and report gaps:
+
 ```typescript
 if (sequence <= lastSeq) {
   // Stale or duplicate
@@ -1963,6 +2083,7 @@ private resetHeartbeatTimer(): void {
 ```
 
 **Issue**: If connection hangs (no heartbeat), then closes:
+
 1. Reconnect delay = 1s (attempt 0)
 2. Heartbeat timeout fires at 65s, closes
 3. Reconnect delay = 2s (attempt 1)
@@ -1971,6 +2092,7 @@ private resetHeartbeatTimer(): void {
 6. Normal reconnect would've reset counter after 60s of health (supervisor.py:107)
 
 **Recommendation**: Reset counter on heartbeat timeout:
+
 ```typescript
 private resetHeartbeatTimer(): void {
   if (this.heartbeatTimer) clearTimeout(this.heartbeatTimer);
@@ -2001,6 +2123,7 @@ if (this.subscribedThreads.size > 0) {
 **Race**: Server could reject subscription (e.g., thread deleted), but frontend assumes it succeeded.
 
 **Scenario**:
+
 1. Frontend subscribed to thread "abc"
 2. Connection drops
 3. Backend deletes thread "abc" (via API)
@@ -2009,6 +2132,7 @@ if (this.subscribedThreads.size > 0) {
 6. Frontend thinks it's subscribed; never gets events
 
 **Recommendation**: Add subscription ACK mechanism:
+
 ```typescript
 // Define AckCommand in wire schema
 interface SubscriptionAckCommand {
@@ -2049,6 +2173,7 @@ this.lastSequences.set(threadId, sequence);
 ```
 
 **Scenario**:
+
 1. Last event received: sequence=100
 2. Worker crashes, event log reset
 3. Worker restarts, resets sequences to 1
@@ -2060,6 +2185,7 @@ this.lastSequences.set(threadId, sequence);
 **Root Cause**: Sequences are global (not per-connection), but worker resets them on restart.
 
 **Recommendation**: Clear sequence map on reconnect or use connection-scoped tracking:
+
 ```typescript
 // Option 1: Clear on reconnect
 private handleMessage(e: MessageEvent): void {
@@ -2085,6 +2211,7 @@ private sequencesByConnection: Map<string, Map<string, number>> = new Map();
 **Problem**: Frontend has no mechanism to hydrate UI state after reconnect. Cache remains stale until events arrive.
 
 **Scenario**:
+
 1. User opens thread list (cached)
 2. Connection drops for 30s
 3. Backend: multiple threads created, statuses changed
@@ -2093,12 +2220,14 @@ private sequencesByConnection: Map<string, Map<string, number>> = new Map();
 6. Wait for next event to trigger cache update
 
 **Evidence**:
+
 - `ws-bridge.ts:29-115` — no hydration callback
 - `websocket-client.ts:183-196` — `connected` event only re-subscribes, doesn't trigger fetch
 
 **Root Cause**: No "full state sync" on reconnect. Only incremental event processing.
 
 **Recommendation**: Add hydration on reconnect:
+
 ```typescript
 // In websocket-client.ts
 onConnected?.(event as ConnectedEvent);
@@ -2198,6 +2327,7 @@ def downgrade() -> None:
 **Current Safeguard**: Only available via CLI (manual command), not automatic. But no confirmation prompt or warning.
 
 **Recommendation**: Add safety checks:
+
 ```python
 def downgrade() -> None:
     """Drop all app-owned tables (DESTRUCTIVE)."""
@@ -2231,12 +2361,14 @@ def do_run_migrations(connection: Connection) -> None:
 ```
 
 **Issue**: If a migration fails (e.g., bad SQL syntax, constraint violation):
+
 1. Exception propagates (breaks migration)
 2. Transaction rolls back (safe)
 3. But error not logged clearly; app startup fails
 4. No retry mechanism; must run `alembic upgrade head` manually
 
 **Better Practice**: Wrap with error handling and logging:
+
 ```python
 def do_run_migrations(connection: Connection) -> None:
     context.configure(...)
@@ -2262,17 +2394,20 @@ sa.ForeignKeyConstraint(["thread_id"], ["threads.id"]),
 ```
 
 **Current Behavior**: When thread deleted:
+
 1. ORM cascade deletes artifacts (via SQLAlchemy)
 2. ORM cascade deletes permission_logs, cost_tracking (via SQLAlchemy)
 3. But DB constraint doesn't enforce it — orphaned records possible if ORM bypassed
 
 **Scenario** (manual SQL delete):
+
 ```sql
 DELETE FROM threads WHERE id='abc';
 -- Artifacts for 'abc' still exist (ORM cascade bypassed)
 ```
 
 **Recommendation**: Add SQL-level cascade:
+
 ```python
 sa.ForeignKeyConstraint(
     ["thread_id"], ["threads.id"],
@@ -2298,6 +2433,7 @@ async def run_migrations(database_url: str) -> None:
 **Risk**: If migration fails mid-execution (e.g., power loss), DB in corrupted/partial state. No rollback possible.
 
 **Recommendation**: Add pre-migration snapshot:
+
 ```python
 async def run_migrations(database_url: str) -> None:
     import sqlite3
@@ -2344,6 +2480,7 @@ context.configure(
 **Minor Risk**: If someone exports schema from `target_metadata`, `alembic_version` is missing. Reimporting wouldn't track migration history.
 
 **Recommendation**: Document explicitly:
+
 ```python
 # In models.py or separate file
 class AlembicVersion(Base):
@@ -2367,6 +2504,7 @@ async def run_migrations(database_url: str) -> None:
 ```
 
 **Scenario**: Two workers start simultaneously:
+
 1. Worker A begins migration: `CREATE TABLE ...`
 2. Worker B begins migration: `CREATE TABLE ...` (same)
 3. Both try to upgrade from same revision
@@ -2374,6 +2512,7 @@ async def run_migrations(database_url: str) -> None:
 5. DB in inconsistent state
 
 **Recommendation**: Add advisory lock:
+
 ```python
 import sqlite3
 
@@ -2409,12 +2548,14 @@ Database layer, Aggregator/Worker, CLI security, Frontend reconnection.
 ### 🟠 8 HIGH findings (updated)
 
 6 from Passes 12-16 + **2 new from migration**:
+
 - **MIG-A1**: Downgrade destructive without confirmation
 - **MIG-A6**: Concurrent migration attempts not prevented
 
 ### 🟡 16 MEDIUM findings (updated)
 
 From Passes 12-16 + **4 new from migration**:
+
 - **MIG-A2**: No error handling in migration transaction
 - **MIG-A3**: Foreign keys lack cascade delete (SQL-level)
 - **MIG-A4**: No pre-migration backup
@@ -2427,11 +2568,13 @@ From Passes 12-16 + **4 new from migration**:
 **Passes 9-17 complete:** 2400+ lines of audit documentation covering 9 major system areas.
 
 **Total findings: 36+**
+
 - 11 CRITICAL
 - 8 HIGH
 - 17 MEDIUM
 
 **Coverage:**
+
 1. ✅ MCP server tools & protocol (Pass 9-11)
 2. ✅ Database atomicity (Pass 12, 17)
 3. ✅ Aggregator lifecycle (Pass 13)
@@ -2468,6 +2611,7 @@ if dispatched:
 ```
 
 **Scenario**:
+
 1. User responds to permission: `POST /permissions/{request_id}/respond`
 2. Server dispatches to worker, returns `dispatched=True`
 3. Network glitch; client retries same request
@@ -2477,6 +2621,7 @@ if dispatched:
 **Risk**: Idempotent operations safe; but permission responses with side effects (file deletion, code execution) could double-execute.
 
 **Recommendation**: Add idempotency check:
+
 ```python
 # Maintain a set of processed permission IDs (with TTL)
 self._processed_permissions: dict[str, datetime] = {}
@@ -2498,6 +2643,7 @@ if dispatched:
 **Problem**: `resolve_permission()` accepts any string; no validation that it's a valid request_id.
 
 **Scenario**:
+
 ```python
 aggregator.resolve_permission("malformed_id")  # ← No validation
 aggregator.resolve_permission("../../../admin")  # ← No path traversal check
@@ -2506,6 +2652,7 @@ aggregator.resolve_permission("../../../admin")  # ← No path traversal check
 While low risk (internal use), should defend against logic errors.
 
 **Recommendation**: Validate format:
+
 ```python
 import re
 
@@ -2533,6 +2680,7 @@ if perm_event and perm_event.tool_call == "plan_approval":
 **Risk**: If wire schema defines `option_id` enum with different values, this check fails silently.
 
 **Recommendation**: Use schema validation:
+
 ```python
 from enum import Enum
 
@@ -2556,6 +2704,7 @@ if perm_event and perm_event.tool_call == "plan_approval":
 **Problem**: See AGG-L2 — `_pending_permissions` dict unbounded, no TTL.
 
 **Additional**: Frontend may display stale permissions forever if:
+
 1. Permission request sent
 2. User navigates away
 3. Backend crashes, permission lost
@@ -2577,6 +2726,7 @@ if thread_record is None:
 **Risk**: User's permission response is rejected (404), but aggregator still holds permission in `_pending_permissions`.
 
 **Scenario**:
+
 1. Permission request emitted for thread "abc"
 2. User responds
 3. Backend: thread "abc" hard-deleted
@@ -2585,6 +2735,7 @@ if thread_record is None:
 6. Memory leak + stale permission persists
 
 **Recommendation**: Always clear pending permission regardless of thread state:
+
 ```python
 try:
     thread_record = await get_thread(db, thread_id)
@@ -2612,12 +2763,14 @@ if perm_event and perm_event.tool_call == "plan_approval":
 ```
 
 **Scenario**:
+
 1. Permission request: `options: ["review", "skip"]`
 2. User sends: `option_id: "delete"` (not in options)
 3. Server accepts and resumes worker with invalid option
 4. Worker may crash or misbehave
 
 **Recommendation**: Validate against available options:
+
 ```python
 perm_event = aggregator._pending_permissions.get(request_id)
 if perm_event:
@@ -2653,6 +2806,7 @@ if perm_event:
 **Audit document:** 2500+ lines, 18 comprehensive passes
 
 **All findings documented with:**
+
 - Evidence (code file:line references)
 - Root cause analysis
 - Impact scenarios
@@ -2699,6 +2853,7 @@ def is_alive(self) -> bool:
 **Impact**: Threads stuck in RUNNING forever after worker crash.
 
 **Recommendation**: Add DB reconciliation on startup:
+
 ```python
 async with get_db() as db:
     async with db.begin():
@@ -2738,16 +2893,20 @@ os.kill(os.getpid(), signal.SIGINT)  # ← Immediate kill
 ### OPS-CR5: Health Checks Superficial ⚠️ LOW
 
 **Gateway** (`internal.py:188-191`):
+
 ```python
 return {"status": "ok", "service": "control-surface"}
 ```
+
 - ✅ HTTP layer running
 - ❌ DB connectivity unknown
 
 **Worker** (`worker/app.py:136-139`):
+
 ```python
 return {"status": "ok", "service": "worker"}
 ```
+
 - ✅ HTTP layer running
 - ❌ Checkpointer connectivity unknown
 
@@ -2777,12 +2936,14 @@ delay = min(2**self._restart_count, self._max_restart_backoff)
 ### 🔴 CRITICAL (13 total)
 
 Original 11 + **2 new from crash recovery**:
+
 - **OPS-CR2**: No orphan reconciliation on restart (threads stuck RUNNING)
 - **OPS-CR3**: Shutdown doesn't coordinate with worker (in-flight work lost)
 
 ### 🟠 HIGH (14 total)
 
 Original 13 + **1 new**:
+
 - **OPS-CR4**: Graceful shutdown doesn't update thread states
 
 ### 🟡 MEDIUM (22 total)

@@ -45,6 +45,7 @@ IDE extension spawns it as a child process communicating via **JSON-RPC 2.0
 over stdin/stdout**. No ports, no HTTP, no service discovery.
 
 Key characteristics:
+
 - IDE manages the child process lifecycle (spawn on activate, kill on deactivate)
 - Communication is stdin/stdout (no port conflicts, no firewall issues)
 - Platform binaries avoid Node.js dependency for end users
@@ -112,6 +113,7 @@ Main Process (Electron)
 ```
 
 Key supervision features:
+
 - Extension Host crash = only extensions die, main process survives
 - Extension Host is automatically restarted
 - Extensions can spawn child processes freely
@@ -120,6 +122,7 @@ Key supervision features:
 ### JetBrains Gateway
 
 Gateway acts as a **supervisor** that:
+
 1. Launches a remote IDE backend on the target machine
 2. Launches the local thin client
 3. Sets up an encrypted TLS 1.3 tunnel between them
@@ -147,6 +150,7 @@ The IDE extension activates on relevant file type or user action, spawns the
 backend as a child process, waits for ready signal, then serves requests.
 
 **Startup sequence:**
+
 1. User opens IDE / activates extension
 2. Extension spawns backend child process
 3. Backend sends "ready" message (LSP: `initialized`, MCP: tool listing)
@@ -160,6 +164,7 @@ Service runs as a system daemon. CLI/IDE connects to it. If daemon is down,
 show actionable error.
 
 **Startup sequence:**
+
 1. System boots -> daemon starts (launchd/systemd)
 2. User runs CLI command or IDE extension activates
 3. CLI/Extension connects to daemon's HTTP API
@@ -187,17 +192,20 @@ This is the main UX risk -- see Section 6.
 ### Best-in-Class Examples
 
 **GitHub Copilot:**
+
 - Status bar icon: spinning (loading), checkmark (ready), warning (error)
 - Notification: "GitHub Copilot could not connect to server"
 - Auto-retry with exponential backoff
 - Graceful fallback: completions silently disabled, chat shows error
 
 **VS Code Extension Host:**
+
 - If Extension Host crashes: notification "Extension Host terminated unexpectedly"
 - One-click "Restart Extension Host" action
 - Extensions that fail to activate are silently skipped with error in Output panel
 
 **JetBrains Gateway:**
+
 - Connection lost: modal dialog with retry button and timeout countdown
 - Backend health: periodic `pid-alive` check, reconnect on failure
 - Status bar shows connection quality

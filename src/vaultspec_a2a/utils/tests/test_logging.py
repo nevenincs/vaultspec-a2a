@@ -4,11 +4,9 @@ import io
 import json
 import logging
 import sys
-
 from collections.abc import Generator
 
 import pytest
-
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 

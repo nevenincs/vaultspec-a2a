@@ -22,21 +22,22 @@ attributes by this module.
 from __future__ import annotations
 
 import logging
-
-from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from opentelemetry import context as otel_context
 from opentelemetry import propagate, trace
 from opentelemetry.trace import SpanKind, StatusCode
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request
-from starlette.responses import Response
-from starlette.types import ASGIApp
 
 from .instrumentation import _SDK_DISABLED, get_tracer
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator, Callable
+
+    from starlette.requests import Request
+    from starlette.responses import Response
+    from starlette.types import ASGIApp
 
 __all__ = [
     "TelemetryMiddleware",

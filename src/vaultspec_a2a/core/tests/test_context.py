@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
 from ..context import (
@@ -13,7 +12,6 @@ from ..context import (
     should_compact,
 )
 from ..state import TeamState
-
 
 # ---------------------------------------------------------------------------
 # Token estimation

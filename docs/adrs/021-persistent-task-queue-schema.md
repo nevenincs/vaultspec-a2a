@@ -114,9 +114,10 @@ the mount step (ADR-020).
 The `mark_task_complete` tool returns a `Command(update={...})` object that LangGraph
 propagates directly through the state reducer pipeline. This is the documented pattern
 for tools that need to update graph state (LangGraph docs:
-https://docs.langchain.com/oss/python/langgraph/use-graph-api).
+<https://docs.langchain.com/oss/python/langgraph/use-graph-api>).
 
 **Key constraints from official docs:**
+
 - The tool must be decorated with `@tool` (or equivalent) so `ToolNode` can handle it.
 - `Command.update` **must** include a `messages` key containing a `ToolMessage` with
   the correct `tool_call_id`. This is required because LLM providers enforce that every

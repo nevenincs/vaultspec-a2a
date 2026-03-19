@@ -18,7 +18,6 @@ from .enums import (
 )
 from .events import PlanEntry, ToolCallContent, ToolCallLocation
 
-
 __all__ = [
     "ArtifactSnapshot",
     "ExecutionTaskSnapshot",

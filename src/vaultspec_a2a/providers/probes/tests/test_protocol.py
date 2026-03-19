@@ -17,12 +17,12 @@ Policy note on _WriteBuffer usage (PROV-L1):
 """
 
 import asyncio
+import contextlib
 import json
 
 import pytest
 
 from .._protocol import ProbeResult, _ProbeSession
-
 
 # ---------------------------------------------------------------------------
 # Shared write-buffer helper
@@ -160,7 +160,7 @@ class TestProbeSessionInit:
         assert session.env == {"KEY": "val"}
 
     def test_authenticate_step_uses_interactive_auth_timeout(self) -> None:
-        """Interactive auth waits on its own watchdog rather than the generic timeout."""
+        """Interactive auth waits on its own watchdog rather than generic timeout."""
         session = _ProbeSession(
             command=["test"],
             env={},
@@ -534,10 +534,8 @@ class TestHeartbeat:
         await asyncio.sleep(0)
         task.cancel()
         # Should not raise
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 # ---------------------------------------------------------------------------
@@ -580,7 +578,9 @@ class TestAnthropicLogScrub:
         assert env["ANTHROPIC_LOG"] == "debug"
 
     def test_anthropic_log_overwritten_from_parent_when_debug_true(self) -> None:
-        """If parent had a different ANTHROPIC_LOG value, debug=True resets it to 'debug'."""
+        """If parent had a different ANTHROPIC_LOG value, debug=True
+        resets it to 'debug'.
+        """
         parent = {"ANTHROPIC_LOG": "info", "PATH": "/usr/bin"}
         env = self._build_probe_env(parent, debug=True)
         assert env["ANTHROPIC_LOG"] == "debug"

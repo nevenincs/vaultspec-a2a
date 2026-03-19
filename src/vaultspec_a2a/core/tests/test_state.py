@@ -3,7 +3,6 @@
 import json
 
 import pytest
-
 from langchain_core.messages import HumanMessage
 
 from ..state import (
@@ -12,7 +11,6 @@ from ..state import (
     _merge_token_usage,
     _replace_plan,
 )
-
 
 # ---------------------------------------------------------------------------
 # Reducer unit tests
@@ -98,7 +96,9 @@ class TestReplacePlan:
         assert result == new
 
     def test_empty_new_clears_plan(self) -> None:
-        """An empty list explicitly clears the plan (T12 fix — was silently discarded)."""
+        """An empty list explicitly clears the plan
+        (T12 fix — was silently discarded).
+        """
         old = [{"step": "research", "status": "done", "agent": "planner"}]
         result = _replace_plan(old, [])
         assert result == []

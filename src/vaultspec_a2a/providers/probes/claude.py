@@ -25,7 +25,6 @@ from ...utils.logging import setup_logging
 from ..factory import _build_acp_command
 from ._protocol import ProbeResult, run_probe
 
-
 __all__ = ["main"]
 
 logger = logging.getLogger(__name__)

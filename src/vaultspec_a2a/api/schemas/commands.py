@@ -11,7 +11,6 @@ from pydantic import Field
 from .base import ClientCommand
 from .enums import AgentControlAction, ClientCommandType
 
-
 __all__ = [
     "AgentControlCommand",
     "ClientMessage",

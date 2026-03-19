@@ -3,14 +3,12 @@
 import json
 import logging
 import sys
-
 from typing import TYPE_CHECKING, Any
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
 from .enums import LogLevel
-
 
 __all__ = ["JSONFormatter", "OTelCorrelationFilter", "setup_logging"]
 

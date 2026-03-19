@@ -10,20 +10,17 @@ Verifies:
 
 import sqlite3
 import uuid
-
 from pathlib import Path
 from urllib.parse import urlparse, urlunparse
 
 import psycopg
 import psycopg.sql
 import pytest
-
 from alembic import command
 from alembic.config import Config
 
 from ..migrate import run_migrations
 from .conftest import resolve_postgres_dsn
-
 
 _APP_TABLES = {
     "threads",
@@ -48,7 +45,8 @@ def _get_tables(db_path: Path) -> set[str]:
     conn = sqlite3.connect(str(db_path))
     try:
         cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'"
+            "SELECT name FROM sqlite_master"
+            " WHERE type='table' AND name NOT LIKE 'sqlite_%'"
         )
         return {row[0] for row in cursor.fetchall()}
     finally:

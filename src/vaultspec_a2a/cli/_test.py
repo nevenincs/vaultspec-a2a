@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 
-
 __all__ = ["test"]
 
 import subprocess
 import sys
-
 from pathlib import Path
 
 import click
@@ -17,7 +15,7 @@ from ._verify import verify_prodlike_docker, verify_prodlike_docker_provider
 
 def _pytest_env() -> dict[str, str]:
     """Build a repo-local pytest environment to avoid temp-dir permission drift."""
-    import os  # noqa: PLC0415
+    import os
 
     base_dir = Path.home() / ".codex" / "memories" / "vaultspec-pytest"
     tmp_root = base_dir / "tmp"

@@ -1030,19 +1030,23 @@ In `aggregator.py`:
 
 1. Add `from langgraph.types import Command` to imports.
 2. Change `StreamableGraph.astream_events` signature:
+
    ```python
    # Before:
    graph_input: dict[str, Any] | None,
    # After:
    graph_input: dict[str, Any] | Command | None,
    ```
+
 3. Change `ingest()` signature identically:
+
    ```python
    # Before:
    graph_input: dict[str, Any] | None,
    # After:
    graph_input: dict[str, Any] | Command | None,
    ```
+
    This removes the `cast(StreamableGraph, graph)` workaround in `executor.py` and makes the
    type system accurate. No runtime behaviour changes.
 
@@ -1118,6 +1122,7 @@ Three changes needed:
 
 3. **`src/vaultspec_a2a/worker/executor.py`** — pass `settings.graph_node_timeout_seconds` when calling
    `compile_team_graph()`:
+
    ```python
    graph = compile_team_graph(
        ...,
@@ -1897,14 +1902,18 @@ fall back to `result["raw"].content` (plain text routing) when `parsed` is None.
 **Finding:** `Command.update` goes through NORMAL channel reducers. Full trace:
 
 1. `map_command()` in `_io.py:76-78`:
+
    ```python
    for k, v in cmd._update_as_tuples():
        yield (NULL_TASK_ID, k, v)   # ← (task_id, channel, value) write tuples
    ```
+
 2. `apply_writes()` in `_algo.py:280-296` groups writes by channel and calls:
+
    ```python
    channels[chan].update(vals)   # ← invokes the channel's reducer
    ```
+
 3. For `messages` (annotated with `add_messages`), this merges. For `current_plan`
    with `_replace_plan` reducer, this replaces. Behaviour is identical to a normal node
    return dict.
@@ -2302,6 +2311,7 @@ class CachePolicy(Generic[KeyFuncT]):
 Source: channel source files read this cycle.
 
 **Channel types available:**
+
 | Type | Behaviour | Our usage |
 |------|-----------|-----------|
 | `LastValue` | Stores last write, raises `InvalidUpdateError` if 2+ writes in same superstep | plain `str`/`int` fields |
@@ -2355,6 +2365,7 @@ Full trace:
 2. `_aprepare_state_snapshot` calls `prepare_next_tasks(saved.checkpoint, saved.pending_writes, ...)`
    to reconstruct which tasks are pending next execution.
 3. `tasks_w_writes()` at `debug.py:215` iterates `pending_writes` for each task:
+
    ```python
    task_interrupts = tuple(
        v
@@ -2363,6 +2374,7 @@ Full trace:
        for v in (vv if isinstance(vv, Sequence) else [vv])
    )
    ```
+
 4. `PregelTask(task.id, task.name, task.path, task_error, task_interrupts, ...)` is created.
 5. `StateSnapshot.interrupts` is the flat union: `tuple([i for task in tasks_with_writes for i in task.interrupts])`.
 
@@ -3466,7 +3478,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 ---
 
-### MCP doc update — adding ACP-02 to MCP surface audit? No — ACP-02 is a provider finding, not MCP-specific. No MCP doc update needed this cycle.
+### MCP doc update — adding ACP-02 to MCP surface audit? No — ACP-02 is a provider finding, not MCP-specific. No MCP doc update needed this cycle
 
 ---
 

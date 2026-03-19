@@ -163,6 +163,7 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 #### `database clear --yes` (lines 51-64)
 
 **Implementation:**
+
 - Requires `--yes` flag (Click `is_flag=True, required=True`) -- correct
 - Uses sync `create_engine` with URL replacing `+aiosqlite` with empty string
 - Hardcodes table names: `["cost_tracking", "permission_logs", "artifacts", "threads"]`
@@ -180,6 +181,7 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 #### `database snapshot` (lines 67-89)
 
 **Implementation:**
+
 - Uses `sqlite3.backup()` -- correct per task #11 plan correction
 - Creates snapshot at `db_path.with_suffix(f".snapshot.{ts}")`
 - Timestamp format: `%Y%m%d-%H%M%S` (UTC)
@@ -196,6 +198,7 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 #### `database snapshots` (lines 92-104)
 
 **Implementation:**
+
 - Globs `{stem}.snapshot.*` in parent directory
 - Sorts reverse chronological (newest first)
 - Shows filename and size in KB
@@ -210,6 +213,7 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 #### `database restore --name SNAPSHOT` (lines 107-139)
 
 **Implementation:**
+
 - Checks if service is running via `httpx.get(f"{base}/health", timeout=2.0)`
 - Uses `sqlite3.backup()` for restore (snapshot -> db_path)
 - Properly closes connections in `finally` block
@@ -227,6 +231,7 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 #### `_get_db_path()` helper (lines 25-32)
 
 **Implementation:**
+
 - Lazy import of settings
 - Guards against `:memory:` databases
 - Returns resolved Path
@@ -291,14 +296,17 @@ File grew from 39 to 140 lines. Docstring updated to reflect new commands.
 ### Phase 2 Post-Triage Verification
 
 **P2-007 (worker port check): VERIFIED PRESENT**
+
 - `_database.py:117`: `for check_port in (settings.port, settings.worker_port):` — checks both ports
 - Both get `/health` with 2s timeout; if either responds, restore is refused
 
 **P2-009 (path traversal guard): VERIFIED PRESENT**
+
 - `_database.py:127`: `snapshot_path.resolve().is_relative_to(db_path.parent.resolve())`
 - Resolves symlinks and `../` before containment check. Generic error message (no path leakage).
 
 **Accepted findings (no fix needed):**
+
 - P2-001 (f-string SQL): Tables are constants — noqa is appropriate
 - P2-002 (hardcoded table list): Correct design — avoids deleting LangGraph tables
 - P2-003 (URL replace): Sufficient for SQLite-only codebase
@@ -344,6 +352,7 @@ This means a future `delete_thread()` CRUD function only needs `session.delete(t
 ### 2. CRUD Layer (`database/crud.py`)
 
 **`list_threads()` signature (lines 178-204):**
+
 ```python
 async def list_threads(
     session: AsyncSession,
@@ -364,6 +373,7 @@ cascade deletion directly via `session.delete(thread)` — not via a CRUD functi
 Phase 3 needs a new `delete_thread(session, thread_id) -> bool` function.
 
 **`ThreadStatus` enum (lines 36-44):**
+
 ```python
 class ThreadStatus(StrEnum):
     SUBMITTED = "submitted"
@@ -377,6 +387,7 @@ class ThreadStatus(StrEnum):
 **Gap: No `ARCHIVED` value.** Phase 3 `team archive` command needs `ARCHIVED = "archived"` added.
 
 **`__all__` (lines 47-64):** Contains 15 exports. Phase 3 additions will need:
+
 - `delete_thread` added to `__all__`
 - No change needed for `list_threads` (signature change, not new function)
 
@@ -385,6 +396,7 @@ class ThreadStatus(StrEnum):
 **Current exports (39 items in `__all__`):**
 
 CRUD functions exposed:
+
 - `create_thread`, `get_thread`, `list_threads`, `update_thread_status`
 - `update_thread_metadata`, `get_thread_metadata`
 - `create_artifact`, `get_artifact`, `get_artifacts_by_thread`
@@ -397,6 +409,7 @@ Models exposed: `Base`, `ThreadModel`, `ArtifactModel`, `PermissionLogModel`, `C
 Session/DB exposed: `init_db`, `close_db`, `get_db`, `get_engine`, `get_session_factory`, `verify_wal_mode`, `run_migrations`
 
 **Gap:** When `delete_thread` is added to `crud.py`, it must also be added to:
+
 1. `crud.py:__all__` (line 47)
 2. `database/__init__.py` imports (add `from .crud import delete_thread as delete_thread`)
 3. `database/__init__.py:__all__` (line 39)

@@ -28,7 +28,6 @@ from ._service import service  # noqa: E402
 from ._team import team  # noqa: E402
 from ._test import test  # noqa: E402
 
-
 cli.add_command(agent)
 cli.add_command(database)
 cli.add_command(mcp_group)

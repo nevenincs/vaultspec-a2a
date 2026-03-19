@@ -7,9 +7,7 @@ the worktrees directory) or in the main repository root.
 """
 
 import os
-
 from pathlib import Path
-
 
 __all__ = [
     "resolve_env_vars",

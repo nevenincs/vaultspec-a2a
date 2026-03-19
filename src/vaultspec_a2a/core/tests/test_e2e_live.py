@@ -36,15 +36,18 @@ Run only Gemini::
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-
 from langchain_core.messages import AIMessage, HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph.state import CompiledStateGraph
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.graph.state import CompiledStateGraph
 
 from ...utils.enums import Model, Provider
 from ..graph import compile_team_graph
@@ -56,7 +59,6 @@ from ..team_config import (
     load_agent_config,
     load_team_config,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -145,7 +147,10 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
     state = {
         "messages": [
             HumanMessage(
-                content="Write a Python function that checks if a number is prime. Keep it short."
+                content=(
+                    "Write a Python function that checks if a number is prime."
+                    " Keep it short."
+                )
             )
         ]
     }
@@ -201,8 +206,8 @@ async def test_pipeline_team_openai_collaboration(
         "messages": [
             HumanMessage(
                 content=(
-                    "Write a Python function that reverses a string without using slicing. "
-                    "Keep each response concise."
+                    "Write a Python function that reverses a string"
+                    " without using slicing. Keep each response concise."
                 )
             )
         ]
@@ -385,7 +390,10 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
     state = {
         "messages": [
             HumanMessage(
-                content="Write a Python function that checks if a string is a palindrome. Keep it short."
+                content=(
+                    "Write a Python function that checks if a string is a palindrome."
+                    " Keep it short."
+                )
             )
         ]
     }

@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING, Any
 
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
 
 from .config import settings
-
 
 __all__ = ["create_mark_task_complete_tool"]
 

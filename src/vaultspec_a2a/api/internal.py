@@ -17,15 +17,14 @@ import contextlib
 import json
 import logging
 import time
-
 from datetime import datetime
 from typing import Any
 
 from fastapi import (
     APIRouter,
     Depends,
-    HTTPException,
     Header,
+    HTTPException,
     Request,
     WebSocket,
     WebSocketDisconnect,
@@ -33,7 +32,6 @@ from fastapi import (
 
 from ..core import settings
 from .schemas.internal import ExecutionStateProjectionPayload
-
 
 __all__ = ["internal_router"]
 
@@ -56,8 +54,8 @@ async def _handle_terminal_event(
     thread_id: str,
     payload: dict[str, Any],
     *,
-    aggregator: Any | None = None,  # noqa: ANN401
-    session_factory: Any | None = None,  # noqa: ANN401
+    aggregator: Any | None = None,
+    session_factory: Any | None = None,
 ) -> None:
     """Update thread DB status when a ``thread_terminal`` event arrives.
 
@@ -73,7 +71,7 @@ async def _handle_terminal_event(
     if not status_str:
         return
     try:
-        from ..database.crud import (  # noqa: PLC0415
+        from ..database.crud import (
             ControlActionType,
             InvalidTransitionError,
             RepairStatus,
@@ -83,8 +81,9 @@ async def _handle_terminal_event(
             set_thread_repair_state,
             update_thread_status,
         )
+
         if session_factory is None:
-            from ..database.session import get_session_factory  # noqa: PLC0415
+            from ..database.session import get_session_factory
 
             factory = get_session_factory()
         else:
@@ -171,9 +170,9 @@ async def _handle_terminal_event(
             )
 
 
-def time_now_utc() -> Any:  # noqa: ANN401
+def time_now_utc() -> Any:
     """Late-bound helper to avoid a top-level datetime import churn in this module."""
-    from datetime import UTC, datetime  # noqa: PLC0415
+    from datetime import UTC, datetime
 
     return datetime.now(UTC)
 
@@ -182,14 +181,14 @@ async def _handle_permission_event(
     thread_id: str,
     payload: dict[str, Any],
     *,
-    session_factory: Any | None = None,  # noqa: ANN401
+    session_factory: Any | None = None,
 ) -> None:
     """Persist worker permission events into the durable journal."""
     event_type = payload.get("type", "")
     if event_type not in {"permission_request", "permission_resolved"}:
         return
 
-    from ..database.crud import (  # noqa: PLC0415
+    from ..database.crud import (
         ApprovalStatus,
         ControlActionResultStatus,
         ControlActionType,
@@ -205,8 +204,9 @@ async def _handle_permission_event(
         supersede_permission_requests,
         update_thread_status,
     )
+
     if session_factory is None:
-        from ..database.session import get_session_factory  # noqa: PLC0415
+        from ..database.session import get_session_factory
 
         factory = get_session_factory()
     else:
@@ -314,7 +314,7 @@ async def _handle_progress_event(
     thread_id: str,
     payload: dict[str, Any],
     *,
-    session_factory: Any | None = None,  # noqa: ANN401
+    session_factory: Any | None = None,
 ) -> None:
     """Infer permission application from post-resume worker progress."""
     event_type = payload.get("type", "")
@@ -328,7 +328,7 @@ async def _handle_progress_event(
     }:
         return
 
-    from ..database.crud import (  # noqa: PLC0415
+    from ..database.crud import (
         ApprovalStatus,
         ControlActionResultStatus,
         ControlActionType,
@@ -341,8 +341,9 @@ async def _handle_progress_event(
         set_thread_repair_state,
         update_thread_status,
     )
+
     if session_factory is None:
-        from ..database.session import get_session_factory  # noqa: PLC0415
+        from ..database.session import get_session_factory
 
         factory = get_session_factory()
     else:
@@ -397,23 +398,22 @@ async def _handle_execution_state_event(
     thread_id: str,
     payload: dict[str, Any],
     *,
-    session_factory: Any | None = None,  # noqa: ANN401
+    session_factory: Any | None = None,
 ) -> None:
     """Persist worker-owned execution-state projection events."""
     if payload.get("type") != "execution_state_projection":
         return
 
-    from ..database.crud import record_thread_execution_state  # noqa: PLC0415
+    from ..database.crud import record_thread_execution_state
+
     projection = ExecutionStateProjectionPayload.model_validate(payload)
     snapshot_created_at: datetime | None = None
     if projection.snapshot_created_at is not None:
         with contextlib.suppress(ValueError):
-            snapshot_created_at = datetime.fromisoformat(
-                projection.snapshot_created_at
-            )
+            snapshot_created_at = datetime.fromisoformat(projection.snapshot_created_at)
 
     if session_factory is None:
-        from ..database.session import get_session_factory  # noqa: PLC0415
+        from ..database.session import get_session_factory
 
         factory = get_session_factory()
     else:
@@ -458,7 +458,7 @@ async def _verify_internal_token(
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
     configuration error (PROD-017).
     """
-    from ..utils.enums import Environment  # noqa: PLC0415
+    from ..utils.enums import Environment
 
     token = settings.internal_token
     if token is None:
@@ -517,9 +517,7 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
             thread_id,
             extra={
                 "thread_id": thread_id,
-                "event_type": str(
-                    payload.get("event_type", payload.get("type", ""))
-                ),
+                "event_type": str(payload.get("event_type", payload.get("type", ""))),
                 "transport": "ws",
                 "action": "relay_drop_event",
             },
@@ -593,9 +591,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
                         len(msg.get("active_threads", [])),
                         extra={
                             "message_type": msg_type,
-                            "active_thread_count": len(
-                                msg.get("active_threads", [])
-                            ),
+                            "active_thread_count": len(msg.get("active_threads", [])),
                             "transport": "ws",
                         },
                     )

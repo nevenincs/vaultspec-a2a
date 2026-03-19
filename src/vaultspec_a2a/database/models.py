@@ -22,7 +22,6 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-
 __all__ = [
     "ArtifactModel",
     "Base",
@@ -51,7 +50,7 @@ class UTCDateTime(TypeDecorator[datetime]):
     cache_ok = True
 
     def process_bind_param(
-        self, value: datetime | None, dialect: object
+        self, value: datetime | None, _dialect: object
     ) -> datetime | None:
         """Normalize inbound values to naive UTC for storage."""
         if value is None:
@@ -62,7 +61,7 @@ class UTCDateTime(TypeDecorator[datetime]):
         return value.astimezone(UTC).replace(tzinfo=None)
 
     def process_result_value(
-        self, value: datetime | None, dialect: object
+        self, value: datetime | None, _dialect: object
     ) -> datetime | None:
         """Restore UTC timezone info on loaded datetime values."""
         if value is None:

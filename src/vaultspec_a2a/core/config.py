@@ -8,7 +8,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..utils.enums import Environment, LogLevel
 
-
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: core/config.py → core → vaultspec_a2a → src → project-root.
 _DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent

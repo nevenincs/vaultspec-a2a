@@ -1,0 +1,10 @@
+knowledge/
+.vault/
+.vaultspec/
+.claude/
+.gemini/
+.codex/
+
+AGENTS.md
+GEMINI.md
+CLAUDE.md

@@ -7,6 +7,7 @@ Covers the full integration test suite for VaultSpec A2A's multi-service
 architecture (MCP Server, Gateway, Worker).
 
 **Research inputs:**
+
 - `docs/research/2026-03-08-integration-testing-stack.md` — library validation
 - `docs/research/2026-03-08-cross-process-tracing.md` — W3C traceparent propagation
 - `docs/research/2026-03-08-multi-service-integration-testing.md` — framework survey
@@ -22,6 +23,7 @@ Fixtures own the full service lifecycle. If a service fails to start, the
 fixture raises, the test fails. That failure is the correct signal.
 
 **FORBIDDEN:**
+
 - `pytest.skip()` based on service availability
 - `shutil.which()` skip guards
 - `@pytest.mark.requires_*` markers that gate on availability
@@ -29,6 +31,7 @@ fixture raises, the test fails. That failure is the correct signal.
 - Any "graceful degradation" in test fixtures
 
 **REQUIRED:**
+
 - Real services exercised in every test
 - Hard failure when services are unavailable
 - Full lifecycle (start -> health-check -> test -> teardown) in session-scoped fixtures
@@ -208,6 +211,7 @@ trace verification tests.
 **Location:** `src/vaultspec_a2a/tests/conftest.py`
 
 **Deliverables:**
+
 - Session-scoped fixtures: `free_port`, `worker_free_port`, `service_env`,
   `gateway_process`, `worker_process`, `service_stack`, `gateway_client`
 - Health polling: `_wait_for_health()` with tenacity `reraise=True`
@@ -218,6 +222,7 @@ trace verification tests.
 **Location of smoke tests:** `src/vaultspec_a2a/tests/test_smoke.py`
 
 Tests:
+
 1. `test_gateway_health_returns_ok` — GET /health returns status=ok
 2. `test_gateway_health_reports_worker_spawned` — worker_spawned + circuit_breaker present
 3. `test_worker_health_returns_ok` — direct worker /health probe
@@ -237,12 +242,14 @@ gets its own gateway+worker because crash/restart mutates process state. Uses
 and the watchdog can detect exit.
 
 Tests:
+
 1. `test_gateway_survives_worker_death` — read-only endpoints work after worker kill
 2. `test_worker_crash_triggers_watchdog_restart` — watchdog detects crash, restarts
 3. `test_circuit_breaker_opens_during_worker_crash` — CB opens on crash, closes on restart
 4. `test_exhausted_restart_retries` — port-blocked worker, watchdog gives up after 3 retries
 
 **Key patterns:**
+
 - `_create_autospawn_gateway()` — per-test gateway with auto-spawn=true
 - `_kill_worker_on_port()` — Windows `netstat`/POSIX `fuser` to find and kill worker
 - `_wait_for_worker_status()` — tenacity poll of /health until worker_status matches
@@ -259,6 +266,7 @@ Tests:
 **Fixtures needed:** Session-scoped `service_stack` from conftest.py.
 
 Tests:
+
 1. `test_heartbeat_updates_gateway_state`
    - Start full stack, wait 15s (heartbeat interval 10s)
    - GET /health, assert `worker_last_heartbeat` is recent (<15s old)
@@ -286,6 +294,7 @@ Tests:
    - Assert thread status = "failed" (PROD-012)
 
 **Windows caveat for test 2:** No SIGSTOP on Windows. Options:
+
 - (a) Kill worker and check stale detection in the window before watchdog restart
 - (b) Add `VAULTSPEC_HEARTBEAT_TIMEOUT` env var override for testing
 - (c) Accept that this specific test only works on POSIX
@@ -301,6 +310,7 @@ They call loopback REST at `settings.api_base_url`. Can be called directly
 without stdio transport.
 
 Tests:
+
 1. `test_mcp_list_threads_without_worker`
    - Start only gateway (no worker)
    - Set `_gateway_connected = True`, configure `_mcp_settings` to point at test gateway
@@ -339,6 +349,7 @@ Tests:
 > recovers -> tools work again
 
 **Phase A — Startup Chain:**
+
 1. Start gateway subprocess (auto-spawn enabled)
 2. Poll /health until status=ok
 3. POST /api/threads with vaultspec-solo-coder preset
@@ -379,6 +390,7 @@ replacement) is blocked on VERIFY-01 proving the live harness works.
 ## Environment Requirements
 
 ### Currently Installed
+
 - httpx (production + test transport)
 - tenacity (health polling with `reraise=True`)
 - pytest-asyncio (async fixtures, session scope)
@@ -386,6 +398,7 @@ replacement) is blocked on VERIFY-01 proving the live harness works.
 - opentelemetry-sdk (InMemorySpanExporter, TracerProvider, SimpleSpanProcessor)
 
 ### To Be Added (`[dependency-groups] dev`)
+
 ```toml
 [dependency-groups]
 dev = [
@@ -395,6 +408,7 @@ dev = [
 ```
 
 ### Runtime
+
 - Python 3.13 on Windows 11
 - No WSL dependency
 - SQLite (temp filesystem, isolated per session/test)

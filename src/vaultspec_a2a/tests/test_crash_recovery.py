@@ -17,12 +17,10 @@ Run explicitly::
 import asyncio
 import os
 import sys
-
 from datetime import datetime
 
 import httpx
 import pytest
-
 from tenacity import (
     retry,
     retry_if_exception_type,
@@ -31,13 +29,12 @@ from tenacity import (
 )
 
 from .conftest import (
-    _HealthCheckError,
     _find_free_port,
+    _HealthCheckError,
     _kill_process_tree,
     _stop_process,
     _wait_for_health,
 )
-
 
 pytestmark = pytest.mark.live
 

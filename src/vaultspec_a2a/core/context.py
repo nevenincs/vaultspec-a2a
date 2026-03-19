@@ -12,7 +12,6 @@ from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from .config import settings
 from .state import TeamState
 
-
 __all__ = [
     "compact_context",
     "estimate_tokens",

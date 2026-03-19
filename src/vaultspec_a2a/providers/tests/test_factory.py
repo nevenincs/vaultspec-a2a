@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
@@ -163,9 +162,12 @@ def test_provider_factory_gemini_creates_acp() -> None:
     expected_model = MODEL_MAP[Provider.GEMINI][Model.MID]
     assert model.command[1:] == ["--model", expected_model, "--experimental-acp"]
 
+
 def test_build_gemini_command_uses_explicit_executable() -> None:
     """Gemini command builder preserves an already-resolved executable path."""
-    command = _build_gemini_command("gemini-test-model", executable="/usr/local/bin/gemini")
+    command = _build_gemini_command(
+        "gemini-test-model", executable="/usr/local/bin/gemini"
+    )
     assert command == [
         "/usr/local/bin/gemini",
         "--model",

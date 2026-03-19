@@ -74,6 +74,7 @@ async def setup(self) -> None:
 ```
 
 Key properties:
+
 - **Idempotent**: `self.is_setup` flag prevents re-execution
 - **Thread-safe**: Protected by `self.lock` (asyncio.Lock)
 - **WAL mode**: Automatically sets `PRAGMA journal_mode=WAL`
@@ -187,6 +188,7 @@ This is exactly the recommended pattern.
 ### Library Recommendation
 
 Use `":memory:"` for test isolation:
+
 ```python
 async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
     graph = builder.compile(checkpointer=saver)

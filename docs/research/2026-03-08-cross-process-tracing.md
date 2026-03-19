@@ -115,6 +115,7 @@ No trace context extraction. The worker starts unlinked spans.
 
 **Gap: TEL-GAP-03** (HIGH). This is the most significant trace propagation
 gap. Fix requires:
+
 1. Gateway: inject headers before POST /dispatch
 2. Worker: extract headers and use as parent context
 
@@ -253,6 +254,7 @@ variable propagation, the OTel spec recommends uppercase `TRACEPARENT`.
 
 The Python SDK provides `EnvironmentGetter` for reading from env vars, but
 this pattern is not widely used in practice because:
+
 1. Subprocess startup is a one-time event
 2. The trace context is stale by the time the subprocess starts
 3. HTTP-level propagation (Step 3 above) is more useful
@@ -380,6 +382,7 @@ assert worker_span.parent.span_id == gateway_span.context.span_id
 
 For real subprocess tests, each process has its own `TracerProvider`.
 Options:
+
 1. Use `OTEL_EXPORTER_CONSOLE=true` and parse stdout/stderr
 2. Use OTLP exporter to a test collector (e.g., Jaeger all-in-one)
 3. Use `InMemorySpanExporter` in-process only (for gateway spans)
@@ -407,6 +410,7 @@ Options:
 Total estimated code change: ~25 lines across 4 files.
 
 Sources:
+
 - [OpenTelemetry Python Propagation](https://opentelemetry.io/docs/languages/python/propagation/)
 - [OpenTelemetry Context Propagation Concepts](https://opentelemetry.io/docs/concepts/context-propagation/)
 - [Environment Variables as Context Carriers](https://opentelemetry.io/docs/specs/otel/context/env-carriers/)

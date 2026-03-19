@@ -18,7 +18,7 @@ documentation. All claims are sourced from context7 MCP queries against
 
 ## 1. Official LangGraph Testing Patterns
 
-Source: https://langchain-ai.github.io/langgraph/concepts/testing/
+Source: <https://langchain-ai.github.io/langgraph/concepts/testing/>
 
 ### 1.1 Unit Testing Individual Nodes
 
@@ -124,7 +124,7 @@ testing. This model returns pre-configured responses and never calls a real LLM.
 
 ## 2. LangSmith Tracing Integration
 
-Source: https://langchain-ai.github.io/langgraph/concepts/observability/
+Source: <https://langchain-ai.github.io/langgraph/concepts/observability/>
 
 ### 2.1 Enabling Traces
 
@@ -227,7 +227,7 @@ For the Layer 2 direct scripts, use a distinct project name per run type
 
 ## 3. `astream(stream_mode=...)` Modes
 
-Source: https://langchain-ai.github.io/langgraph/concepts/streaming/
+Source: <https://langchain-ai.github.io/langgraph/concepts/streaming/>
 
 LangGraph's `astream()` supports four stream modes. They can be combined by passing
 a list. This is the API used in `src/vaultspec_a2a/core/aggregator.py` (post-LG-018 fix).
@@ -312,7 +312,7 @@ LangSmith always captures the full execution regardless of stream mode.
 
 ## 4. Integration Testing Patterns for Supervisor, Multi-Agent, and Checkpoint/Resume
 
-Source: https://langchain-ai.github.io/langgraph/concepts/multi_agent/ and testing docs
+Source: <https://langchain-ai.github.io/langgraph/concepts/multi_agent/> and testing docs
 
 ### 4.1 Supervisor Routing — Layer 1 Pattern
 

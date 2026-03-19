@@ -15,7 +15,6 @@ from langchain_core.messages import HumanMessage
 
 from ._protocol import ProbeResult
 
-
 __all__ = ["run_http_probe"]
 
 logger = logging.getLogger(__name__)

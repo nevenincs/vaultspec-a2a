@@ -13,14 +13,12 @@ from __future__ import annotations
 
 import asyncio
 import logging
-
 from collections import OrderedDict
 from datetime import datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
-from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import Command, StateSnapshot
 
 from ..api.schemas.internal import (
@@ -39,10 +37,13 @@ from ..core import (
     load_team_config,
     settings,
 )
-from ..database.checkpoints import Checkpointer
 from ..telemetry import ws_span
-from .ipc import WorkerBridge
 
+if TYPE_CHECKING:
+    from langgraph.graph.state import CompiledStateGraph
+
+    from ..database.checkpoints import Checkpointer
+    from .ipc import WorkerBridge
 
 __all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
 
@@ -103,9 +104,7 @@ class Executor:
         async def _relay_event(event: Any) -> None:
             thread_id = getattr(event, "thread_id", "")
             if thread_id:
-                await _bridge_ref.send_event(
-                    thread_id, event.model_dump(mode="json")
-                )
+                await _bridge_ref.send_event(thread_id, event.model_dump(mode="json"))
 
         self._aggregator.add_broadcast_hook(_relay_event)
 
@@ -304,7 +303,7 @@ class Executor:
 
         self._graph_cache[new_key] = graph
         self._thread_to_cache_key[req.thread_id] = new_key
-        self._aggregator.register_graph(cast(StreamableGraph, graph))
+        self._aggregator.register_graph(cast("StreamableGraph", graph))
         # BE-12: relay node metadata to the control-surface aggregator so
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
@@ -338,9 +337,7 @@ class Executor:
     # Pre-flight checkpoint inspection (reconciliation window guard)
     # ------------------------------------------------------------------
 
-    async def _pre_flight_checkpoint(
-        self, thread_id: str
-    ) -> tuple[str | None, bool]:
+    async def _pre_flight_checkpoint(self, thread_id: str) -> tuple[str | None, bool]:
         """Inspect the latest checkpoint before running an ingest.
 
         Resolves the reconciliation window gap: after a worker restart the
@@ -534,7 +531,7 @@ class Executor:
                 outcome = await self._aggregator.ingest(
                     req.thread_id,
                     agent_id,
-                    cast(StreamableGraph, graph),
+                    cast("StreamableGraph", graph),
                     graph_input,
                     config,
                 )
@@ -554,7 +551,7 @@ class Executor:
             finally:
                 await self._emit_execution_state_projection(
                     req.thread_id,
-                    cast(StreamableGraph, graph),
+                    cast("StreamableGraph", graph),
                     config,
                 )
                 await self._emit_terminal_status(req.thread_id, outcome)
@@ -663,7 +660,7 @@ class Executor:
                 outcome = await self._aggregator.ingest(
                     req.thread_id,
                     agent_id,
-                    cast(StreamableGraph, graph),
+                    cast("StreamableGraph", graph),
                     Command(resume=req.option_id),
                     config,
                 )
@@ -683,7 +680,7 @@ class Executor:
             finally:
                 await self._emit_execution_state_projection(
                     req.thread_id,
-                    cast(StreamableGraph, graph),
+                    cast("StreamableGraph", graph),
                     config,
                 )
                 await self._emit_terminal_status(req.thread_id, outcome)
@@ -804,7 +801,7 @@ class Executor:
         """Emit latest runtime execution-state truth over the internal event path."""
         try:
             state = await asyncio.wait_for(graph.aget_state(config), timeout=10.0)
-            payload = self._normalize_execution_state(cast(StateSnapshot, state))
+            payload = self._normalize_execution_state(cast("StateSnapshot", state))
         except TimeoutError:
             payload = ExecutionStateProjectionPayload(
                 degraded_reasons=["execution_state_projection_timeout"]
@@ -899,7 +896,7 @@ class Executor:
 
         try:
             team_config = load_team_config(
-                cast(str, req.team_preset), workspace_root=ws_root
+                cast("str", req.team_preset), workspace_root=ws_root
             )
         except TeamConfigNotFoundError as exc:
             raise ValueError(f"Team preset not found: {req.team_preset!r}") from exc

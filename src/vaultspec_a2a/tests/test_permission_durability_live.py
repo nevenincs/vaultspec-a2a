@@ -11,7 +11,6 @@ import os
 import subprocess
 import sys
 import time
-
 from pathlib import Path
 
 import httpx
@@ -23,7 +22,6 @@ from .conftest import (
     _stop_process,
     _wait_for_health,
 )
-
 
 pytestmark = pytest.mark.live
 
@@ -130,7 +128,9 @@ async def _start_manual_stack(
         "Gateway",
     )
     gateway_url = f"http://127.0.0.1:{gateway_port}"
-    await _wait_for_health(gateway_url, health_path="/api/health", require_status_ok=True)
+    await _wait_for_health(
+        gateway_url, health_path="/api/health", require_status_ok=True
+    )
     return gateway, worker, gateway_url, env
 
 
@@ -152,7 +152,7 @@ def _prepare_workspace(tmp_path: Path, feature_tag: str, provider: str) -> str:
 [team]
 id = "vaultspec-adaptive-coder"
 display_name = "Vaultspec Adaptive Coder (Certifying Live Test Override)"
-description = "Workspace override for deterministic live Postgres approval durability tests."
+description = "Live Postgres approval durability test override."
 
 [team.defaults]
 provider = "{provider}"
@@ -384,7 +384,9 @@ async def test_plan_approval_survives_gateway_restart_and_response_retry(
         assert paused_before_restart["pause_cause"] == "plan_approval_request"
 
         gateway = await _restart_gateway(gateway, env, gateway_url)
-        paused_after_restart = await _wait_for_paused_plan_approval(gateway_url, thread_id)
+        paused_after_restart = await _wait_for_paused_plan_approval(
+            gateway_url, thread_id
+        )
         pending_after_restart = paused_after_restart["pending_permissions"][0]
         assert paused_after_restart["approval_status"] == "pending"
         assert paused_after_restart["approval_request_id"] == request_id
@@ -443,14 +445,18 @@ async def test_execution_state_projection_survives_gateway_restart_for_paused_th
         _assert_execution_state_projection(paused_before_restart)
 
         gateway = await _restart_gateway(gateway, env, gateway_url)
-        paused_after_restart = await _wait_for_paused_plan_approval(gateway_url, thread_id)
+        paused_after_restart = await _wait_for_paused_plan_approval(
+            gateway_url, thread_id
+        )
         _assert_execution_state_projection(paused_after_restart)
-        assert paused_after_restart["approval_request_id"] == paused_before_restart[
-            "approval_request_id"
-        ]
-        assert paused_after_restart["pending_interrupt_count"] >= paused_before_restart[
-            "pending_interrupt_count"
-        ]
+        assert (
+            paused_after_restart["approval_request_id"]
+            == paused_before_restart["approval_request_id"]
+        )
+        assert (
+            paused_after_restart["pending_interrupt_count"]
+            >= paused_before_restart["pending_interrupt_count"]
+        )
         assert paused_after_restart["task_count"] >= paused_before_restart["task_count"]
     finally:
         if gateway is not None:

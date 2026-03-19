@@ -11,7 +11,6 @@ from pydantic import BaseModel
 
 from .enums import ClientCommandType, ServerEventType
 
-
 __all__ = [
     "ClientCommand",
     "EventEnvelope",

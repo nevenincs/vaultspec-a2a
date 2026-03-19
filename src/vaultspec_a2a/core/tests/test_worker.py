@@ -4,7 +4,6 @@ from langgraph.types import Interrupt
 from ..exceptions import WorkerExecutionError
 from ..nodes.worker import _wrap_worker_exception
 
-
 # ---------------------------------------------------------------------------
 # T04 — WorkerExecutionError wrapping
 # ---------------------------------------------------------------------------

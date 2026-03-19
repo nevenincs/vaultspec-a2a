@@ -29,6 +29,7 @@ I suggest if the research backs it up that we implement different internal "conv
 ## What the UI should see
 
 Multiple teams:
+
 - A team that has concluded work. There's a history for each agents, but work has already
 finished. Team has shut down and finished running in the past with success.
 - A team that finished running with a failiure: what kind of failiures are defined? tool calling errors?

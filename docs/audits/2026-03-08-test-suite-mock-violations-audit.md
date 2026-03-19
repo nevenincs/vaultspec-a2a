@@ -52,6 +52,7 @@ The original scan is now stale in several important places.
 1. `core/tests/test_supervisor.py`
    - local `_StubChatModel` still violates the repository's stricter
      no-stubs mandate
+
 ### Verification for the latest refresh slice
 
 - `uv run ruff check src/vaultspec_a2a/worker/executor.py src/vaultspec_a2a/worker/tests/test_executor.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
@@ -80,11 +81,13 @@ The `_InProcessWorker` class (line 98) is a real FastAPI ASGI app served via
 real Pydantic validation.
 
 Consumers updated:
+
 - `test_endpoints.py`: 8 `_CapturedDispatch` imports replaced with `_InProcessWorker`
 - `test_thread_metadata.py`: updated to use new `make_app` signature
 - `test_projection.py`: stale-checkpoint coverage now uses file-backed SQLite, not `:memory:`
 
 Verification:
+
 - `.\.venv\Scripts\python.exe -m ruff check src\vaultspec_a2a\api\tests\conftest.py src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_projection.py`
 - `.\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_projection.py src\vaultspec_a2a\api\tests\test_internal.py -q --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir`
 - Result: `49 passed`

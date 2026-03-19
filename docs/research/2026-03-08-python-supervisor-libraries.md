@@ -10,6 +10,7 @@ that could replace or augment our custom implementation, with a focus on
 asyncio-native options and Windows compatibility.
 
 **Related documents:**
+
 - `2026-03-08-asyncio-process-supervision-patterns.md` — our implementation patterns
 - `2026-03-08-process-supervision-models.md` — industry architecture comparison
 - `2026-02-25-agent-process-lifecycle-research.md` — supervisord/PM2 state machines
@@ -35,6 +36,7 @@ stopwaitsecs=10
 ```
 
 **How it works**:
+
 - Runs as a daemon on a Unix socket or TCP port
 - Reads a `.conf` file with `[program:name]` sections
 - Manages process lifecycle: start, stop, restart, status
@@ -50,6 +52,7 @@ Windows. It relies on Unix signals (SIGCHLD, SIGTERM, SIGHUP), Unix domain
 sockets, and `os.fork()`.
 
 **Assessment for our use case**:
+
 - Mature and battle-tested (15+ years in production)
 - Cannot run on Windows (dealbreaker)
 - Designed for server deployments, not desktop developer tools
@@ -65,6 +68,7 @@ sockets, and `os.fork()`.
 **Architecture**: ZeroMQ-based process and socket manager.
 
 **How it works**:
+
 - Uses ZeroMQ for inter-process communication
 - Manages processes as "watchers" with configurable restart policies
 - Supports socket activation (bind socket, fork workers to inherit)
@@ -82,6 +86,7 @@ max_retry = 5
 ```
 
 **Key feature — flapping detection**:
+
 ```python
 # If a process restarts more than `max_retry` times within
 # `retry_in` seconds, circus marks it as "flapping" and stops it.
@@ -94,6 +99,7 @@ Circus has never officially supported Windows and issues report failures on
 process group management.
 
 **Assessment for our use case**:
+
 - More sophisticated than supervisord (ZeroMQ, plugins, sockets)
 - ZeroMQ is a heavy dependency for a dev tool
 - Windows support is unofficial and unreliable
@@ -115,10 +121,11 @@ worker: uv run uvicorn vaultspec_a2a.worker.app:app --port 8001
 ```
 
 ```bash
-$ honcho start
+honcho start
 ```
 
 **How it works**:
+
 - Reads a `Procfile` with `name: command` entries
 - Starts all processes, multiplexes stdout/stderr with color-coded prefixes
 - When one process exits, sends SIGTERM to all others (crash-together)
@@ -130,6 +137,7 @@ Signal handling is limited (no SIGTERM — uses `TerminateProcess`). Process
 group management is unreliable.
 
 **Assessment for our use case**:
+
 - Too simple — no restart policies, no health checks, no crash recovery
 - Useful for development (see all logs in one terminal) but not for production
 - "Crash-together" semantics are wrong for our use case (we want the gateway
@@ -155,6 +163,7 @@ supervisor library** on PyPI. The asyncio ecosystem has:
 The absence of an asyncio supervisor library is not surprising: asyncio's
 primary use case is I/O multiplexing within a single process. Multi-process
 supervision is traditionally handled by:
+
 1. The operating system (systemd, launchd, Windows SCM)
 2. Container orchestrators (Docker, Kubernetes)
 3. Application servers (Gunicorn, uvicorn with `--workers`)
@@ -190,6 +199,7 @@ class Multiprocess:
 ### 2.3 Gunicorn's Arbiter Pattern
 
 **What it does**: Gunicorn's `Arbiter` class is a process supervisor that:
+
 - Spawns N workers via `os.fork()`
 - Monitors via `SIGCHLD` + `os.waitpid()`
 - Implements graceful reload (spawn new workers, drain old ones)
@@ -197,6 +207,7 @@ class Multiprocess:
 - Kills workers that stop heartbeating (stale detection)
 
 **Key insight — file-based heartbeat**:
+
 ```python
 # Worker side: touch a temp file every second
 self.tmp.notify()  # Writes current time to a temp file
@@ -219,6 +230,7 @@ but has higher overhead.
 
 Celery uses a process pool with a supervisor (`billiard` library, fork of
 `multiprocessing`). The supervisor:
+
 - Pre-forks worker processes
 - Monitors via `os.waitpid()` and signals
 - Implements "max tasks per child" (restart after N tasks = memory leak protection)
@@ -267,12 +279,14 @@ actions= restart/60000/restart/60000/restart/60000` (restart after 60s on
 failure, reset failure count after 24h).
 
 **Pros**:
+
 - Built into Windows — zero dependencies
 - Survives user logoff
 - Automatic restart on failure
 - Visible in `services.msc` UI
 
 **Cons**:
+
 - Requires admin privileges to install
 - `pywin32` dependency (heavy, C extensions)
 - Service runs in a different session — no console access
@@ -325,6 +339,7 @@ the service does not call `sd_notify(0, "WATCHDOG=1")` within `WatchdogSec`
 seconds, systemd considers it stuck and restarts it.
 
 Python integration via `python-systemd`:
+
 ```python
 from systemd.daemon import notify
 notify("WATCHDOG=1")  # Call periodically from health check loop
@@ -403,6 +418,7 @@ processes:
 ```
 
 **Features**:
+
 - HTTP/TCP/exec readiness probes (Kubernetes-style)
 - Process dependency ordering (`depends_on` with health conditions)
 - Restart policies with exponential backoff
@@ -415,6 +431,7 @@ processes:
 and `GenerateConsoleCtrlEvent`.
 
 **Assessment for our use case**:
+
 - Almost exactly what we need for the Phase 3 "daemon mode" architecture
 - Single binary, no Python dependencies
 - Health probes would replace our custom health-check polling
@@ -446,6 +463,7 @@ developers. Not a cross-platform solution.
 and deployment system.
 
 **Python support**: pm2 can manage non-Node processes:
+
 ```bash
 pm2 start "uv run vaultspec service start" --name vaultspec-a2a
 ```
@@ -565,6 +583,7 @@ doc), the supervision scope shrinks to just the Worker subprocess. Our existing
 For daemon mode, where VaultSpec runs as a persistent background service:
 
 **process-compose** is the strongest candidate because:
+
 - Single Go binary (no runtime dependency)
 - Full Windows, Linux, macOS support
 - Kubernetes-style health probes (HTTP, TCP, exec)
@@ -573,6 +592,7 @@ For daemon mode, where VaultSpec runs as a persistent background service:
 - REST API for programmatic control
 
 **Integration sketch**:
+
 ```yaml
 # process-compose.yml (shipped with vaultspec)
 version: "0.5"
@@ -674,6 +694,7 @@ gating, lazy spawn) that no external library provides.
 
 When starting Phase 3 (daemon mode), evaluate `process-compose` as the
 process supervisor. Key evaluation criteria:
+
 - Binary distribution: Can we bundle process-compose with `uv` or require
   separate install?
 - Config generation: Can `vaultspec daemon init` generate the YAML config?
@@ -707,6 +728,7 @@ process supervisor. Key evaluation criteria:
    existing watchdog.
 
 Sources:
+
 - supervisord.org — Process Control System
 - github.com/circus-tent/circus — Mozilla Circus
 - github.com/nickstenning/honcho — Procfile runner

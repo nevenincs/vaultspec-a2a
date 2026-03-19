@@ -38,6 +38,7 @@ This requires the API server to be running. No CI step validates freshness.
 Let me double-check `_PermissionSnapshot` in the backend:
 
 Backend `_PermissionSnapshot` (snapshots.py:60-66):
+
 ```python
 class _PermissionSnapshot(BaseModel):
     request_id: str
@@ -119,11 +120,13 @@ Since the file is auto-generated, the cleanest fix is:
 If regeneration is not practical right now, these are the 4 minimal edits:
 
 **A. Add `tool_kind` to `PermissionRequestEvent` (after line 1116):**
+
 ```typescript
 tool_kind: components["schemas"]["ToolKind"] | null;
 ```
 
 **B. Add 3 fields to `_AgentSnapshot` (after line 788):**
+
 ```typescript
 /**
  * Role

@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
-
-from collections.abc import Callable
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
 from ..config import settings
-from ..state import TeamState
-from ..task_queue import _filter_queue_content
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from pathlib import Path
+
+    from ..state import TeamState
+
+from ..task_queue import _filter_queue_content
 
 __all__ = ["create_mount_node"]
 

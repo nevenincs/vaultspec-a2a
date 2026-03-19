@@ -22,7 +22,6 @@ from .app import WorkerApp, create_worker_app, main
 from .executor import Executor
 from .ipc import WorkerBridge
 
-
 __all__ = [
     "Executor",
     "WorkerApp",

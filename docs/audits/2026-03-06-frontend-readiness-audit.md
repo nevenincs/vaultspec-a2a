@@ -234,19 +234,23 @@
 ## Priority Fix Order
 
 ### Tier 1: Immediate (blocks correctness)
+
 1. **FE-20** (CRIT) -- Regenerate `wire-types.ts` from OpenAPI schema. Update `mapPermissionRequest` to use `wire.tool_kind`.
 
 ### Tier 2: High UX impact
+
 2. **FE-21** (HIGH) -- Included in wire-types regeneration (FE-20).
 3. **FE-22** (MED) -- Included in wire-types regeneration (FE-20).
 4. **FE-04** (HIGH) -- Fix ArtifactCard "created"/"modified" logic (remove `old_content` check or derive from context).
 5. **FE-24** (MED) -- Add thread status invalidation on terminal `agent_status` events.
 
 ### Tier 3: Polish
+
 6. **FE-12** (MED) -- Invalidate thread state TQ cache on plan/artifact events.
 7. **FE-26** (MED) -- Resolve agent display name from team status cache for permissions.
 8. **FE-15** (MED) -- Artifact inspect shows file content instead of raw JSON.
 9. **FE-19** (MED) -- Plan approval context display.
 
 ### Tier 4: Deferred
+
 10. **FE-13** (LOW) -- Sequence gap detection (needs backend BE-36).

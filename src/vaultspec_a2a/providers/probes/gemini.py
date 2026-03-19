@@ -25,7 +25,6 @@ from ..factory import _build_gemini_command, _build_gemini_env
 from ..gemini_auth import refresh_gemini_token
 from ._protocol import ProbeResult, run_probe
 
-
 __all__ = ["main"]
 
 logger = logging.getLogger(__name__)

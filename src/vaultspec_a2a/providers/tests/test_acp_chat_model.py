@@ -15,7 +15,6 @@ import asyncio
 import sys
 
 import pytest
-
 from langchain_core.messages import HumanMessage
 
 from ...core.config import settings
@@ -23,7 +22,6 @@ from ...utils.enums import MODEL_MAP, AcpRequestId, Model, Provider
 from ..acp_chat_model import AcpChatModel, _AcpSessionContext
 from ..acp_exceptions import AcpAuthError
 from ..factory import _CLAUDE_ACP_JS
-
 
 _GEMINI_COMMAND = [
     "gemini",
@@ -252,7 +250,9 @@ def test_runtime_log_extra_includes_handshake_context() -> None:
 
 
 @pytest.mark.asyncio
-async def test_wait_for_authenticate_response_returns_future_result_before_exit() -> None:
+async def test_wait_for_authenticate_response_returns_future_result_before_exit() -> (
+    None
+):
     """Auth wait should complete on the RPC response without waiting for exit."""
     model = AcpChatModel(command=["gemini", "--experimental-acp"])
     response_future = asyncio.get_running_loop().create_future()
@@ -387,7 +387,9 @@ async def test_authenticate_rpc_exit_error_surfaces_browser_url() -> None:
 
 
 @pytest.mark.asyncio
-async def test_authenticate_rpc_cancelled_outcome_sets_operator_cancelled_data() -> None:
+async def test_authenticate_rpc_cancelled_outcome_sets_operator_cancelled_data() -> (
+    None
+):
     """Cancelled auth futures should surface operator_cancelled outcome data."""
     model = AcpChatModel(command=["gemini", "--experimental-acp"])
     response_futures: dict[int, asyncio.Future] = {}

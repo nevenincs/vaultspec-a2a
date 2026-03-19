@@ -97,10 +97,10 @@ The most significant trend in 2026 is the bifurcation of agentic systems into tw
 
 To remain aligned with the 2026 industry standard, the VaultSpec orchestration engine should:
 
-1.  **Prioritize State over Chat:** Enhance the `TeamState` to include a structured **Blackboard** for task-specific data (e.g., `modified_files`, `test_results`) instead of relying solely on the message list.
-2.  **Support Nested Hierarchies:** Allow "Team of Teams" where a sub-agent is itself a self-contained A2A cluster.
-3.  **Implement Dynamic Discovery:** Fully leverage **Agent Cards** (`/.well-known/agent.json`) for runtime team composition rather than hardcoded presets.
-4.  **Enforce Verifier Personas:** Mandate a "Verifier" node in every topology to execute tests/linting before state transition.
+1. **Prioritize State over Chat:** Enhance the `TeamState` to include a structured **Blackboard** for task-specific data (e.g., `modified_files`, `test_results`) instead of relying solely on the message list.
+2. **Support Nested Hierarchies:** Allow "Team of Teams" where a sub-agent is itself a self-contained A2A cluster.
+3. **Implement Dynamic Discovery:** Fully leverage **Agent Cards** (`/.well-known/agent.json`) for runtime team composition rather than hardcoded presets.
+4. **Enforce Verifier Personas:** Mandate a "Verifier" node in every topology to execute tests/linting before state transition.
 
 ---
 

@@ -360,6 +360,7 @@ do not require the eval stack.
 
 All models invoked during evaluation runs MUST be configured with
 `temperature=0`. This applies to:
+
 - The model under evaluation (the agent being tested).
 - LLM-as-judge models (openevals judge calls).
 
@@ -497,7 +498,7 @@ directories.
 - [ADR-013](013-team-composition-topology.md) — multi-agent topology this evaluation covers
 - [ADR-023](023-phase-artifact-gates.md) — phase gate compliance (dimension 2)
 - [ADR-025](025-mandatory-review-gate.md) — review gate (informs reviewer completeness dimension 5)
-- LangSmith `aevaluate()` API: https://docs.smith.langchain.com/evaluation
-- `agentevals` package: https://github.com/langchain-ai/agentevals
-- `openevals` package: https://github.com/langchain-ai/openevals
-- LangGraph v1 release notes: https://docs.langchain.com/oss/python/releases/langgraph-v1
+- LangSmith `aevaluate()` API: <https://docs.smith.langchain.com/evaluation>
+- `agentevals` package: <https://github.com/langchain-ai/agentevals>
+- `openevals` package: <https://github.com/langchain-ai/openevals>
+- LangGraph v1 release notes: <https://docs.langchain.com/oss/python/releases/langgraph-v1>

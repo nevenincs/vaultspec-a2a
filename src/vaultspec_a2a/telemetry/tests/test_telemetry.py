@@ -13,18 +13,20 @@ from __future__ import annotations
 
 import asyncio
 import time
+from typing import TYPE_CHECKING
 
 import httpx
 import pytest
-
 from httpx import ASGITransport, AsyncClient
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import ReadableSpan, TracerProvider
 from opentelemetry.trace import StatusCode
 from starlette.applications import Starlette
-from starlette.requests import Request
 from starlette.responses import JSONResponse
 from starlette.routing import Route
+
+if TYPE_CHECKING:
+    from starlette.requests import Request
 
 from .. import (
     TelemetryConfig,
@@ -35,7 +37,6 @@ from .. import (
     inject_trace_context,
     ws_span,
 )
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -446,7 +447,8 @@ async def test_worker_middleware_extracts_incoming_traceparent(
     local_jaeger_otlp_endpoint: str,
     local_jaeger_query_url: str,
 ) -> None:
-    """TelemetryMiddleware on the worker app creates a child span from gateway traceparent.
+    """TelemetryMiddleware on the worker app creates a child span from a
+    gateway traceparent.
 
     Simulates the gateway injecting a W3C traceparent into a dispatch POST.
     Verifies the worker's TelemetryMiddleware exports the child span to the

@@ -8,6 +8,7 @@ test multi-process service stacks without mocks, focusing on fixture patterns,
 lifecycle management, and real-world precedents.
 
 **Related documents:**
+
 - `2026-03-08-multiservice-testing-research.md` — Framework evaluation
 - `2026-03-08-integration-testing-stack.md` — Library-by-library API validation
 - `docs/plans/2026-03-08-integration-testing-plan.md` — Implementation plan
@@ -35,11 +36,13 @@ async def gateway_process(service_env, free_port):
 ```
 
 **Why session-scoped:**
+
 - Services take 2-5s to start. Starting per-test wastes 90%+ of test time.
 - Session scope means one startup for the entire test suite.
 - Tradeoff: tests must not mutate shared state destructively (or must clean up).
 
 **Why `loop_scope="session"`:**
+
 - pytest-asyncio strict mode requires explicit loop scope declaration.
 - Session-scoped async fixtures MUST use `loop_scope="session"` — otherwise
   pytest-asyncio creates a new event loop per test, breaking subprocess handles.
@@ -107,6 +110,7 @@ def service_env(free_port, worker_free_port, tmp_path_factory):
 ```
 
 **Key decisions:**
+
 - `**os.environ` inherits PATH, PYTHONPATH, etc. — required for subprocess
 - Dynamic ports via `socket.bind(("127.0.0.1", 0))`
 - `tmp_path_factory.mktemp()` provides pytest-managed temp directories
@@ -160,11 +164,13 @@ async def _wait_for_health(url: str) -> None:
 ```
 
 **Why `reraise=True`:**
+
 - Without it: tenacity wraps the final exception in `RetryError`, losing context
 - With it: the actual `_HealthCheckError` propagates with the real failure message
 - This becomes a `pytest.fail()` in the fixture, giving the developer actionable output
 
 **Why exponential backoff (not fixed interval):**
+
 - Initial polls at 100ms catch fast startups (service ready in <1s)
 - Backoff to 2s avoids hammering during slow startups
 - Total budget: 30s (sufficient for uvicorn + database init + migrations)
@@ -192,6 +198,7 @@ async def _start_and_wait(env, module, port, label):
 ```
 
 **Key principles:**
+
 - Fixture RAISES on failure — test FAILS (not skips)
 - stderr capture provides diagnostic context
 - Process is killed on failure (no orphans)
@@ -233,6 +240,7 @@ async def _stop_process(process):
 ```
 
 **Why defense-in-depth:**
+
 - `taskkill` may fail (process already dead, access denied)
 - `process.kill()` as fallback catches all edge cases
 - Final `wait()` with timeout prevents hanging test session

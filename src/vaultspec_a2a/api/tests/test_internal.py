@@ -1,4 +1,5 @@
-"""Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints (ADR-019).
+"""Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints
+(ADR-019).
 
 Validates the /internal/health, /internal/events, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
@@ -11,7 +12,6 @@ from __future__ import annotations
 import logging
 
 import pytest
-
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
@@ -20,7 +20,6 @@ from ...core.aggregator import EventAggregator
 from ...database.crud import create_thread, get_thread_execution_state
 from ..internal import internal_router
 from ..websocket import ConnectionManager
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -406,9 +405,7 @@ class TestInternalEvents:
                     "thread_id": "t-84-degraded",
                     "payload": {
                         "type": "execution_state_projection",
-                        "degraded_reasons": [
-                            "execution_state_projection_unavailable"
-                        ],
+                        "degraded_reasons": ["execution_state_projection_unavailable"],
                     },
                 },
             )
@@ -606,7 +603,6 @@ class TestWorkerBridgeRetry:
     async def test_flush_retries_on_http_500_then_succeeds(self) -> None:
         """flush_events retries on 500; succeeds when the gateway recovers."""
         import httpx as _httpx
-
         from fastapi import FastAPI as _FastAPI
         from fastapi.responses import JSONResponse as _JSONResponse
         from httpx import ASGITransport as _ASGITransport
@@ -642,9 +638,8 @@ class TestWorkerBridgeRetry:
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_buffer_cap_drops_oldest_event(self) -> None:
-        """send_event drops the oldest entry when the buffer reaches _MAX_EVENT_BUFFER."""
+        """send_event drops the oldest entry when buffer reaches _MAX_EVENT_BUFFER."""
         import httpx as _httpx
-
         from fastapi import FastAPI as _FastAPI
         from fastapi.responses import JSONResponse as _JSONResponse
         from httpx import ASGITransport as _ASGITransport
@@ -682,7 +677,9 @@ class TestAggregatorGCOnTerminal:
         self,
         session_factory,
     ) -> None:
-        """_handle_terminal_event removes the terminated thread from aggregator _sequences."""
+        """_handle_terminal_event removes the terminated thread from
+        aggregator _sequences.
+        """
         from ..internal import _handle_terminal_event
 
         aggregator = EventAggregator()
@@ -763,9 +760,7 @@ class TestAggregatorGCOnTerminal:
                 session_factory=session_factory,
             )
 
-        record = next(
-            rec for rec in caplog.records if "transition to" in rec.message
-        )
+        record = next(rec for rec in caplog.records if "transition to" in rec.message)
         assert record.thread_id == "t-terminal-skip"
         assert record.status == "completed"
         assert record.event_type == "thread_terminal"

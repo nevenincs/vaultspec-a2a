@@ -8,7 +8,6 @@ get_checkpointer and get_worker_client so tests never touch vaultspec.db.
 """
 
 import tempfile
-
 from pathlib import Path
 
 from fastapi.testclient import TestClient

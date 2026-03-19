@@ -1,7 +1,6 @@
 """Worker node for LangGraph agent task execution."""
 
 import logging
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
@@ -18,7 +17,6 @@ from ..exceptions import WorkerExecutionError
 from ..rules import RuleManager
 from ..state import TeamState
 from ..task_queue import create_mark_task_complete_tool
-
 
 _logger = logging.getLogger(__name__)
 
@@ -90,8 +88,7 @@ def _wrap_worker_exception(
 ) -> WorkerExecutionError:
     """Convert a non-interrupt worker failure into WorkerExecutionError."""
     _logger.exception(
-        "worker[%s] model=%s raised during ainvoke"
-        " — wrapping as WorkerExecutionError",
+        "worker[%s] model=%s raised during ainvoke — wrapping as WorkerExecutionError",
         worker,
         model_type,
         exc_info=exc,

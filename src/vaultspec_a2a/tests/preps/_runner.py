@@ -1,17 +1,21 @@
 """Shared runner infrastructure for preps/ scenarios."""
 
+from __future__ import annotations
+
 import os
 import tempfile
-
-from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
-from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
-from langgraph.graph.state import CompiledStateGraph
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
+    from pathlib import Path
+
+    from langchain_core.runnables import RunnableConfig
+    from langgraph.graph.state import CompiledStateGraph
 
 from ...core import compile_team_graph, load_agent_config, load_team_config
 from ...core.team_config import AgentConfigNotFoundError

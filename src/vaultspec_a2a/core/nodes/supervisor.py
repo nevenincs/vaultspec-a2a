@@ -1,7 +1,6 @@
 """Supervisor node for LangGraph agent routing."""
 
 import logging
-
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Protocol, cast
@@ -18,7 +17,6 @@ from ..phase import infer_phase_from_vault_index
 from ..rules import RuleManager
 from ..state import TeamState
 
-
 _logger = logging.getLogger(__name__)
 
 
@@ -32,7 +30,7 @@ def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     """
     if text in options:
         return text, False
-    for option in cast(list[str], sorted(options, key=len, reverse=True)):
+    for option in cast("list[str]", sorted(options, key=len, reverse=True)):
         if option.lower() in text.lower():
             return option, False
     return "FINISH", True
@@ -153,25 +151,22 @@ def _evaluate_supervisor_response(
     next_route, unparseable = _parse_route(response_text, options)
     if unparseable:
         _logger.warning(
-            "supervisor could not parse route from"
-            " response %r — defaulting to FINISH",
+            "supervisor could not parse route from response %r — defaulting to FINISH",
             response_text[:120],
         )
         return _SupervisorDecision(
             next_route="FINISH",
             inferred_phase=inferred_phase,
-            routing_error=(
-                f"supervisor could not parse route from: {response_text!r}"
-            ),
+            routing_error=(f"supervisor could not parse route from: {response_text!r}"),
         )
 
     if next_route == "FINISH":
         blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
         if blocked is not None:
             return _SupervisorDecision(
-                next_route=cast(str, blocked["next"]),
-                inferred_phase=cast(str, blocked["pipeline_phase"]),
-                routing_error=cast(str, blocked["routing_error"]),
+                next_route=cast("str", blocked["next"]),
+                inferred_phase=cast("str", blocked["pipeline_phase"]),
+                routing_error=cast("str", blocked["routing_error"]),
             )
 
     if worker_phase_map and state.get("active_feature"):

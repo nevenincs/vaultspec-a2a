@@ -7,6 +7,7 @@ relevance: 10
 # Rule Propagation in A2A Pipeline
 
 ## Executive Summary
+
 This document analyzes the gap in rule propagation within the `vaultspec-a2a` LangGraph pipeline compared to the original `vaultspec` CLI framework. It details how rules are currently generated, how the native CLIs consume them, and how the A2A orchestrator must bridge the gap for API and CLI-agnostic agents.
 
 ## Original Mechanism in Vaultspec
@@ -20,7 +21,7 @@ This document analyzes the gap in rule propagation within the `vaultspec-a2a` La
 
 1. **Missing Project Mandate Injection:**
    In the `vaultspec` ecosystem, project-specific coding mandates (e.g., "Use absolute imports", "Follow snake_case conventions", "Do not truncate code") are stored as markdown files in the workspace root, typically deployed to `.agent/rules/` or `.gemini/rules/`.
-   
+
    Currently, the LangGraph orchestration engine in `vaultspec-a2a` constructs a bare `SystemMessage` comprising *only* the intrinsic behavioral persona defined in the agent TOML files. It completely lacks a discovery pipeline to load the actual deployed project mandates.
 
 2. **Universal Rule Blindness Across Providers:**
@@ -44,9 +45,10 @@ To fix this architectural gap, `vaultspec-a2a` must natively load these project 
 
 ## Related Architecture Decisions
 
-This research is formalized in **ADR-028: Universal Rule Propagation**. It executes in parallel with **ADR-029: Database Migration Framework**. 
+This research is formalized in **ADR-028: Universal Rule Propagation**. It executes in parallel with **ADR-029: Database Migration Framework**.
 
 Source references for original logic studied:
+
 - `y:/code/vaultspec-worktrees/main/src/vaultspec/protocol/providers/base.py` (for `resolve_includes`)
 - `y:/code/vaultspec-worktrees/main/core/config_gen.py` (for `.gemini/` rule sync mechanics)
 - `y:/code/vaultspec-a2a-worktrees/main/src/vaultspec_a2a/core/presets/agents/vaultspec-coder.toml` (for context bloat evidence)

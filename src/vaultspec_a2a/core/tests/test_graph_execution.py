@@ -21,18 +21,19 @@ Covered scenarios
 
 from __future__ import annotations
 
-from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-
 from langchain_core.messages import AIMessage, HumanMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
 from ..graph import compile_team_graph
 from ..team_config import load_agent_config, load_team_config
-
 
 pytestmark = pytest.mark.requires_vidaimock
 
@@ -107,7 +108,8 @@ async def test_mock_single_agent_pipeline_runs_to_completion(
 
     ai_msgs = _ai_messages(states)
     assert len(ai_msgs) >= 2, (
-        f"Expected ≥2 AI messages (tool-call turn + completion turn), got {len(ai_msgs)}"
+        f"Expected ≥2 AI messages (tool-call turn + completion turn), "
+        f"got {len(ai_msgs)}"
     )
 
     # First AI message must carry the run_command tool call
@@ -172,7 +174,8 @@ async def test_mock_tool_failure_pipeline_surfaces_failure_summary(
 
     ai_msgs = _ai_messages(states)
     assert len(ai_msgs) >= 2, (
-        f"Expected ≥2 AI messages (tool-call turn + failure summary), got {len(ai_msgs)}"
+        f"Expected ≥2 AI messages (tool-call turn + failure summary), "
+        f"got {len(ai_msgs)}"
     )
 
     first = ai_msgs[0]
@@ -183,7 +186,9 @@ async def test_mock_tool_failure_pipeline_surfaces_failure_summary(
     )
 
     last = ai_msgs[-1]
-    assert not last.tool_calls, "Final AI message should be a text summary, not a tool call"
+    assert not last.tool_calls, (
+        "Final AI message should be a text summary, not a tool call"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -244,5 +249,6 @@ async def test_mock_human_in_loop_pauses_on_permission_request(
     ]
     assert permission_calls, (
         "Expected a 'session_request_permission' tool call in AI messages; "
-        f"found tool calls: {[tc['name'] for msg in ai_msgs for tc in (msg.tool_calls or [])]}"
+        f"found tool calls: "
+        f"{[tc['name'] for msg in ai_msgs for tc in (msg.tool_calls or [])]}"
     )

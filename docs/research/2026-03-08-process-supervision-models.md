@@ -16,6 +16,7 @@ IDE ──stdio──▶ MCP Server ──HTTP──▶ Gateway :8000 ──HTTP
 ```
 
 A user who types `start_thread("fix the login bug")` in Cursor must wait for:
+
 1. MCP server lifespan to auto-start the gateway subprocess
 2. Gateway lifespan to auto-start the worker subprocess
 3. Worker health check to pass (~0.5s polling * N attempts)
@@ -32,6 +33,7 @@ still 3 subprocesses spawned lazily with polling health checks.
 ### 2.1 The Ollama Model — Gold Standard for Developer Tool UX
 
 **Architecture:** Single Go binary, client-server over localhost HTTP.
+
 - `ollama serve` starts the HTTP server + GPU scheduler in one process.
 - `ollama run llama3` is just an HTTP client that talks to the running server.
 - First run: install binary, `ollama pull`, `ollama serve` — working in < 2min.
@@ -43,6 +45,7 @@ to "just work." They don't want to think about service topology.
 ### 2.2 Cursor / Copilot / Windsurf — Cloud-First Architecture
 
 **Architecture:** Cloud backend, thin local client.
+
 - All LLM execution and context processing happens on vendor cloud infrastructure.
 - The IDE extension is a pure client — no local servers to manage.
 - MCP servers are spawned as subprocesses by the IDE host, not by the tool.
@@ -56,6 +59,7 @@ service management.
 ### 2.3 Continue.dev — Open Source, Model-Agnostic
 
 **Architecture:** VS Code extension + optional local inference via Ollama.
+
 - Extension communicates directly to LLM providers (cloud or local).
 - No intermediate gateway or worker process.
 - Configuration is a single `config.json` file.
@@ -64,6 +68,7 @@ service management.
 ### 2.4 Sourcegraph Cody — Enterprise, Self-Hosted Option
 
 **Architecture:** Sourcegraph server (multi-container) + VS Code extension.
+
 - Self-hosted: Docker Compose with multiple services (frontend, gitserver,
   searcher, repo-updater, etc.)
 - But the **VS Code extension itself** is just an API client — all complexity
@@ -74,6 +79,7 @@ service management.
 ### 2.5 MCP Ecosystem Patterns (2025-2026 specification)
 
 From the MCP specification and best practices:
+
 - **stdio transport** is the recommended default for IDE integration. The IDE
   spawns the MCP server as a subprocess — one process, no configuration.
 - **Streamable HTTP** is for networked/production deployments.
@@ -92,11 +98,13 @@ MCP (stdio) → spawns Gateway (subprocess) → spawns Worker (subprocess)
 ```
 
 **Pros:**
+
 - Already implemented (CRIT-01/02/03)
 - Clean process isolation per ADR-031
 - Worker can be scaled independently (future)
 
 **Cons:**
+
 - 90s worst-case cold start
 - 3 processes to manage, kill, debug
 - Cascading subprocess spawning is fragile (Windows process tree issues)
@@ -112,6 +120,7 @@ IDE ──stdio──▶ MCP+Gateway (single process :8000) ──HTTP──▶ 
 ```
 
 **How it works:**
+
 - The MCP tool functions call the gateway's internal Python APIs directly
   instead of making HTTP calls to `localhost:8000`.
 - FastMCP runs in stdio mode as the IDE-facing transport.
@@ -122,6 +131,7 @@ IDE ──stdio──▶ MCP+Gateway (single process :8000) ──HTTP──▶ 
 - Gateway lifespan auto-spawns the worker as before.
 
 **Pros:**
+
 - Eliminates one subprocess spawn (gateway)
 - MCP tool calls are in-process function calls — near-zero latency
 - Cold start: only worker startup (~5-10s)
@@ -130,6 +140,7 @@ IDE ──stdio──▶ MCP+Gateway (single process :8000) ──HTTP──▶ 
 - Web UI still works (FastAPI serves on :8000 via uvicorn in a thread/task)
 
 **Cons:**
+
 - MCP server and gateway share an event loop — long REST handlers could
   theoretically block MCP responses (but MCP is async, so unlikely)
 - More complex module coupling (MCP imports gateway internals)
@@ -137,6 +148,7 @@ IDE ──stdio──▶ MCP+Gateway (single process :8000) ──HTTP──▶ 
 - Cannot horizontally scale MCP independently of gateway (not a real need)
 
 **Implementation sketch:**
+
 ```python
 @asynccontextmanager
 async def _mcp_lifespan(server: FastMCP[None]) -> AsyncIterator[None]:
@@ -155,6 +167,7 @@ async def _mcp_lifespan(server: FastMCP[None]) -> AsyncIterator[None]:
 ```
 
 MCP tool functions would use in-process calls:
+
 ```python
 @mcp.tool()
 async def start_thread(...):
@@ -175,16 +188,19 @@ IDE ──stdio──▶ MCP+Gateway+Worker (single process)
 ```
 
 **How it works:**
+
 - MCP, gateway, and worker all run in one Python process.
 - Graph execution uses `asyncio.create_task()` in a dedicated task group.
 - No HTTP IPC — all communication is in-process function calls.
 
 **Pros:**
+
 - Zero cold start for service coordination
 - Simplest possible architecture
 - One process to manage
 
 **Cons:**
+
 - **ADR-031 explicitly rejected this.** Long LLM calls saturated the event loop,
   causing 10-30s latency spikes on REST calls.
 - SQLite write contention without WAL read/write process separation.
@@ -200,6 +216,7 @@ IDE ──stdio──▶ MCP client (thin) ──HTTP──▶ Daemon (Gateway+W
 ```
 
 **How it works:**
+
 - A persistent background daemon runs Gateway+Worker (or just Gateway with
   auto-spawn worker).
 - The MCP server is a thin stdio wrapper that just forwards calls to the daemon
@@ -209,12 +226,14 @@ IDE ──stdio──▶ MCP client (thin) ──HTTP──▶ Daemon (Gateway+W
 - Platform-specific: Windows Service / macOS launchd / Linux systemd user unit.
 
 **Pros:**
+
 - Daemon survives IDE restarts — no cold start after first run
 - MCP server is truly lightweight (just an HTTP client + stdio bridge)
 - Matches Ollama model (`ollama serve` = daemon)
 - Clean separation of concerns
 
 **Cons:**
+
 - Platform-specific daemon management (Windows Service API, launchd plist, systemd)
 - Users must install/manage a background service
 - More complex first-run experience
@@ -242,6 +261,7 @@ LLM call).
 ## 5. Recommended Architecture Evolution
 
 ### Phase 1 (Now — v1.0): Optimize 3-Process Chain
+
 - Already done: CRIT-01/02/03, circuit breaker, health checks
 - **Add:** Progress feedback during startup (MCP can send notifications)
 - **Add:** Startup parallelization (gateway + worker concurrently)
@@ -249,17 +269,20 @@ LLM call).
 - **Target:** <30s cold start
 
 ### Phase 2 (v1.1): Merge MCP + Gateway (Option B)
+
 - MCP tool functions call gateway logic in-process
 - Gateway still serves HTTP for web UI
 - Worker remains separate subprocess
 - **Target:** <15s cold start (only worker spawn)
 
 ### Phase 3 (v2.0): Daemon Mode (Option D)
+
 - Background daemon with platform-specific auto-start
 - Thin MCP client for IDE integration
 - **Target:** <2s after first run
 
 ### Phase 4 (Future): Horizontal Scaling
+
 - PostgreSQL replaces SQLite
 - Multiple workers behind load balancer
 - Gateway becomes a proper API gateway
@@ -292,6 +315,7 @@ LLM call).
 ### 6.2 Configuration Simplification
 
 Current env vars a user might need to set:
+
 - `VAULTSPEC_MCP_API_BASE_URL`
 - `VAULTSPEC_MCP_AUTO_START_GATEWAY`
 - `VAULTSPEC_AUTO_SPAWN_WORKER`
@@ -309,6 +333,7 @@ Everything else should have sensible defaults and auto-discovery.
 ### 6.3 Error Message Quality
 
 Every error a user might see should include:
+
 1. What went wrong (one sentence)
 2. Why it matters (one sentence)
 3. How to fix it (one command)

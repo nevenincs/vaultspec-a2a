@@ -13,7 +13,6 @@ from .test_permission_durability_live import (
     _start_manual_stack,
 )
 
-
 pytestmark = pytest.mark.live
 
 _ACTIVE_THREAD_TIMEOUT = 180.0
@@ -30,7 +29,9 @@ async def _create_autonomous_thread(
         resp = await client.post(
             f"{gateway_url}/api/threads",
             json={
-                "initial_message": "Implement a backend improvement and report progress.",
+                "initial_message": (
+                    "Implement a backend improvement and report progress."
+                ),
                 "team_preset": "vaultspec-adaptive-coder",
                 "autonomous": True,
                 "metadata": {
@@ -43,7 +44,9 @@ async def _create_autonomous_thread(
         return resp.json()["thread_id"]
 
 
-async def _wait_for_thread_activity(gateway_url: str, thread_id: str) -> tuple[dict, dict]:
+async def _wait_for_thread_activity(
+    gateway_url: str, thread_id: str
+) -> tuple[dict, dict]:
     timeout = httpx.Timeout(30.0, connect=5.0, read=5.0, write=5.0, pool=5.0)
     deadline = time.monotonic() + _ACTIVE_THREAD_TIMEOUT
     last_health = None
@@ -58,9 +61,8 @@ async def _wait_for_thread_activity(gateway_url: str, thread_id: str) -> tuple[d
             health = health_resp.json()
             team_status = team_resp.json()
 
-            if (
-                health.get("worker_connected") is True
-                and thread_id in team_status.get("active_threads", [])
+            if health.get("worker_connected") is True and thread_id in team_status.get(
+                "active_threads", []
             ):
                 return health, team_status
 
@@ -82,7 +84,9 @@ async def _request_cancel(gateway_url: str, thread_id: str) -> dict:
         return resp.json()
 
 
-async def _wait_for_thread_to_settle_after_cancel(gateway_url: str, thread_id: str) -> dict:
+async def _wait_for_thread_to_settle_after_cancel(
+    gateway_url: str, thread_id: str
+) -> dict:
     timeout = httpx.Timeout(30.0, connect=5.0, read=5.0, write=5.0, pool=5.0)
     deadline = time.monotonic() + _ACTIVE_THREAD_TIMEOUT
     last_snapshot = None
@@ -92,14 +96,18 @@ async def _wait_for_thread_to_settle_after_cancel(gateway_url: str, thread_id: s
             resp = await client.get(f"{gateway_url}/api/threads/{thread_id}/state")
             resp.raise_for_status()
             snapshot = resp.json()
-            if snapshot.get("status") in {"cancelling", "cancelled", "completed", "failed"}:
+            if snapshot.get("status") in {
+                "cancelling",
+                "cancelled",
+                "completed",
+                "failed",
+            }:
                 return snapshot
             last_snapshot = snapshot
             await asyncio.sleep(1.0)
 
     raise AssertionError(
-        "Timed out waiting for cancel-visible snapshot: "
-        f"{last_snapshot!r}"
+        f"Timed out waiting for cancel-visible snapshot: {last_snapshot!r}"
     )
 
 

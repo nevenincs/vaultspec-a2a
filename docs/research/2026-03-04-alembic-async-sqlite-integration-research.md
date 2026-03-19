@@ -359,6 +359,7 @@ context.configure(
 ```
 
 **Batch mode pitfalls with SQLite:**
+
 - **Foreign keys**: disable `PRAGMA foreign_keys` before running batch
   migrations that touch referenced tables, then re-enable after. Batch mode
   drops and recreates the table; if another table has a FK referencing it,
@@ -436,6 +437,7 @@ is `migrations` (relative). If at repo root, use `src/vaultspec_a2a/database/mig
 Current `init_db()` in `session.py` must be simplified once Alembic is wired:
 
 **Before (current):**
+
 ```python
 async def init_db(db_path, *, echo=False):
     engine = get_engine(db_path, echo=echo)
@@ -450,6 +452,7 @@ async def init_db(db_path, *, echo=False):
 ```
 
 **After (post-ADR-029):**
+
 ```python
 async def init_db(db_path, *, echo=False):
     engine = get_engine(db_path, echo=echo)

@@ -1,12 +1,17 @@
 """Scenario: plan approval interrupt + human resume."""
 
+from __future__ import annotations
+
 import asyncio
 import logging
+from typing import TYPE_CHECKING
 
 from langchain_core.messages import HumanMessage
-from langchain_core.runnables import RunnableConfig
 from langgraph.errors import GraphInterrupt
 from langgraph.types import Command
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 from ._runner import print_trace_url, setup_graph
 

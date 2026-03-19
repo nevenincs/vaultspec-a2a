@@ -19,7 +19,6 @@ import pytest
 
 from .conftest import _find_free_port, _start_uvicorn, _stop_process
 
-
 pytestmark = pytest.mark.live
 
 
@@ -121,7 +120,9 @@ async def test_gateway_fails_fast_when_postgres_required_but_sqlite_selected(
         "VAULTSPEC_INTERNAL_TOKEN": "",
         "LANGSMITH_TRACING": "false",
     }
-    process = await _start_uvicorn(env, "vaultspec_a2a.api.app:create_app", gateway_port)
+    process = await _start_uvicorn(
+        env, "vaultspec_a2a.api.app:create_app", gateway_port
+    )
     try:
         return_code = await asyncio.wait_for(process.wait(), timeout=10.0)
         stderr = b""

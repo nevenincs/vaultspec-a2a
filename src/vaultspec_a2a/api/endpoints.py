@@ -24,15 +24,13 @@ import contextlib
 import hashlib
 import json
 import logging
-
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
 import httpx
-
-from fastapi import APIRouter, Depends, HTTPException, Header, Query, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 from langchain_core.runnables import RunnableConfig
 from langgraph.types import StateSnapshot
@@ -97,8 +95,8 @@ from .schemas.rest import (
     PermissionResponseResult,
     SendMessageRequest,
     SendMessageResponse,
-    TeamPresetSummary,
     TeamPresetsResponse,
+    TeamPresetSummary,
     TeamStatusResponse,
     ThreadListResponse,
     ThreadSummary,
@@ -112,7 +110,6 @@ from .schemas.snapshots import (
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
-
 
 __all__ = [
     "get_aggregator",
@@ -176,7 +173,7 @@ def get_worker_client(request: Request) -> httpx.AsyncClient:
     return client
 
 
-def get_circuit_breaker(request: Request) -> Any:  # noqa: ANN401
+def get_circuit_breaker(request: Request) -> Any:
     """FastAPI dependency for the WorkerCircuitBreaker (PROD-028)."""
     cb = getattr(request.app.state, "circuit_breaker", None)
     if cb is None:
@@ -184,7 +181,7 @@ def get_circuit_breaker(request: Request) -> Any:  # noqa: ANN401
     return cb
 
 
-def get_worker_spawner(request: Request) -> Any:  # noqa: ANN401
+def get_worker_spawner(request: Request) -> Any:
     """FastAPI dependency for the LazyWorkerSpawner (PHASE-1a)."""
     spawner = getattr(request.app.state, "worker_spawner", None)
     if spawner is None:
@@ -216,8 +213,8 @@ async def health(
     request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
-    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
 ) -> dict:
     """Public health endpoint aggregating gateway, worker, and database status."""
     checks: dict[str, dict[str, str]] = {}
@@ -361,7 +358,7 @@ def _process_metadata(
 
 
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
-async def create_thread_endpoint(  # noqa: PLR0915
+async def create_thread_endpoint(
     body: CreateThreadRequest,
     services: tuple[
         AsyncSession,
@@ -369,8 +366,8 @@ async def create_thread_endpoint(  # noqa: PLR0915
         Checkpointer,
         httpx.AsyncClient,
     ] = Depends(get_services),
-    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
-    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
 ) -> CreateThreadResponse:
     """Create a new orchestration thread and dispatch to the worker.
 
@@ -679,7 +676,7 @@ async def get_thread_metadata_endpoint(
 # ---------------------------------------------------------------------------
 
 
-def _enrich_snapshot_from_state(  # noqa: PLR0912, PLR0915
+def _enrich_snapshot_from_state(
     snapshot: ThreadStateSnapshot,
     state: StateSnapshot,
     aggregator: EventAggregator | None = None,
@@ -1035,10 +1032,10 @@ async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
     db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    _aggregator: EventAggregator = Depends(get_aggregator),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
-    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> SendMessageResponse:
     """Send a user message into an existing thread.
@@ -1327,14 +1324,14 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
     "/permissions/{request_id}/respond",
     response_model=PermissionResponseResult,
 )
-async def respond_to_permission_endpoint(  # noqa: PLR0912, PLR0915
+async def respond_to_permission_endpoint(
     request_id: str,
     body: PermissionResponseRequest,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
     aggregator: EventAggregator = Depends(get_aggregator),
-    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
-    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery.
@@ -1613,8 +1610,8 @@ async def cancel_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
-    circuit_breaker: Any = Depends(get_circuit_breaker),  # noqa: ANN401
-    worker_spawner: Any = Depends(get_worker_spawner),  # noqa: ANN401
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> CancelThreadResponse:
     """Cancel a running thread by dispatching a cancel action to the worker.
@@ -1820,8 +1817,8 @@ async def archive_thread_endpoint(
 @router.post("/admin/shutdown", status_code=202)
 async def shutdown_endpoint() -> dict[str, str]:
     """Initiate graceful server shutdown."""
-    import os  # noqa: PLC0415
-    import signal  # noqa: PLC0415
+    import os
+    import signal
 
     os.kill(os.getpid(), signal.SIGINT)
     return {"status": "shutting_down"}

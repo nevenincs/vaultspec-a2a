@@ -14,5 +14,4 @@ See ADR-003 (Protocol Bridging) and ADR-006 (MCP Tool Mapping).
 
 from .server import mcp as mcp
 
-
 __all__ = ["mcp"]

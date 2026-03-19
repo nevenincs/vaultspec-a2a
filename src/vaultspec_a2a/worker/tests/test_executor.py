@@ -13,7 +13,6 @@ import logging
 
 import httpx
 import pytest
-
 from fastapi import FastAPI, Request
 from fastapi.responses import Response
 from httpx import ASGITransport
@@ -23,7 +22,6 @@ from pydantic import ValidationError
 from ...api.schemas.internal import DispatchRequest
 from ..executor import Executor
 from ..ipc import WorkerBridge
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -341,7 +339,9 @@ class TestGraphInputBuilding:
     """
 
     def test_first_ingest_contains_all_required_state_fields(self) -> None:
-        """On first ingest, graph_input supplies every non-NotRequired TeamState field."""
+        """On first ingest, graph_input supplies every
+        non-NotRequired TeamState field.
+        """
         req = DispatchRequest(
             action="ingest",
             thread_id="t-init",
@@ -461,7 +461,9 @@ class TestGraphInputBuilding:
         assert inp["messages"] == []
 
     def test_sdd_fields_not_included_on_followup_even_if_provided(self) -> None:
-        """SDD fields are silently ignored on follow-up ingests (is_first_ingest=False)."""
+        """SDD fields are silently ignored on follow-up ingests
+        (is_first_ingest=False).
+        """
         req = DispatchRequest(
             action="ingest",
             thread_id="t-sdd-followup",

@@ -25,7 +25,6 @@ import re
 import subprocess
 import sys
 import time
-
 from collections.abc import AsyncGenerator, Callable
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
@@ -34,7 +33,6 @@ from typing import Any, cast
 
 import httpx
 import uvicorn
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -62,7 +60,6 @@ from .internal import internal_router
 from .schemas.enums import AgentControlAction
 from .schemas.internal import DispatchRequest
 from .websocket import ConnectionManager, WebSocketCommandRejectedError
-
 
 __all__ = [
     "LazyWorkerSpawner",
@@ -191,7 +188,7 @@ class WorkerCircuitBreaker:
 
     def pre_dispatch(self) -> None:
         """Call before each dispatch.  Raises ``HTTPException(503)`` if open."""
-        from fastapi import HTTPException  # noqa: PLC0415
+        from fastapi import HTTPException
 
         current = self.state
         if current == "open":
@@ -275,11 +272,11 @@ def _trace_headers() -> dict[str, str]:
 async def _classify_missing_ws_thread(
     *,
     thread_id: str,
-    session_factory: Any,  # noqa: ANN401
-    checkpointer: Any,  # noqa: ANN401
+    session_factory: Any,
+    checkpointer: Any,
 ) -> WebSocketCommandRejectedError:
     """Classify a missing-thread WebSocket command without assuming total absence."""
-    from ..database.crud import get_thread_execution_state  # noqa: PLC0415
+    from ..database.crud import get_thread_execution_state
 
     execution_state_present = False
     try:
@@ -352,8 +349,8 @@ async def _classify_missing_ws_thread(
 
 async def _ws_mark_failed_and_broadcast(
     thread_id: str,
-    session_factory: Any,  # noqa: ANN401
-    connection_manager: Any,  # noqa: ANN401
+    session_factory: Any,
+    connection_manager: Any,
     error_detail: str,
 ) -> None:
     """Mark a thread FAILED and broadcast a terminal WS event.
@@ -388,11 +385,11 @@ async def _ws_mark_failed_and_broadcast(
 
 def _create_dispatch_message_handler(
     worker_client: httpx.AsyncClient,
-    session_factory: Any,  # noqa: ANN401
-    checkpointer: Any,  # noqa: ANN401
+    session_factory: Any,
+    checkpointer: Any,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
-    connection_manager: Any,  # noqa: ANN401
+    connection_manager: Any,
 ) -> Callable:
     """Create message handler that dispatches to the worker process.
 
@@ -441,8 +438,7 @@ def _create_dispatch_message_handler(
                         thread_id=thread_id,
                         code="THREAD_TERMINAL",
                         message=(
-                            f"Cannot send messages to thread in"
-                            f" {thread.status!r} state"
+                            f"Cannot send messages to thread in {thread.status!r} state"
                         ),
                         recoverable=False,
                     )
@@ -524,8 +520,8 @@ def _create_dispatch_message_handler(
 
 def _create_dispatch_control_handler(
     worker_client: httpx.AsyncClient,
-    session_factory: Any,  # noqa: ANN401
-    checkpointer: Any,  # noqa: ANN401
+    session_factory: Any,
+    checkpointer: Any,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
 ) -> Callable:
@@ -595,6 +591,7 @@ def _create_dispatch_control_handler(
 # Worker auto-spawn helpers (ADR-031 §2.4)
 # ---------------------------------------------------------------------------
 
+
 async def _tcp_port_ready(host: str, port: int) -> bool:
     """Fast-path: check if a TCP port is accepting connections.
 
@@ -624,7 +621,7 @@ async def _check_worker_health(
                 f"{url}/health",
                 timeout=timeout,
             )
-            return resp.status_code == 200  # noqa: PLR2004
+            return resp.status_code == 200
     except (httpx.ConnectError, httpx.TimeoutException):
         return False
 
@@ -888,6 +885,7 @@ class LazyWorkerSpawner:
 # Worker watchdog (PROD-002)
 # ---------------------------------------------------------------------------
 
+
 class WorkerWatchdog:
     """Background task monitoring worker health and auto-restarting on crash.
 
@@ -904,7 +902,7 @@ class WorkerWatchdog:
         self,
         spawner: LazyWorkerSpawner,
         circuit_breaker: WorkerCircuitBreaker,
-        app_state: Any,  # noqa: ANN401
+        app_state: Any,
     ) -> None:
         """Initialise watchdog with references to spawner, breaker, and app state."""
         self._spawner = spawner
@@ -937,9 +935,7 @@ class WorkerWatchdog:
 
     def _mark_restart_finished(self, succeeded: bool, attempts: int) -> None:
         """Record the terminal outcome of the most recent restart cycle."""
-        self._app_state.worker_last_restart_completed_at = (
-            datetime.now(UTC).isoformat()
-        )
+        self._app_state.worker_last_restart_completed_at = datetime.now(UTC).isoformat()
         self._app_state.worker_last_restart_succeeded = succeeded
         self._app_state.worker_last_restart_attempts = attempts
 
@@ -1248,7 +1244,7 @@ def create_app() -> FastAPI:
     # in production the deployer sets VAULTSPEC_CORS_ALLOWED_ORIGINS.
     cors_origins: list[str] = list(settings.cors_allowed_origins)
     app.add_middleware(
-        cast(Any, CORSMiddleware),
+        cast("Any", CORSMiddleware),
         allow_origins=cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
@@ -1256,10 +1252,10 @@ def create_app() -> FastAPI:
     )
 
     # --- Telemetry Middleware (ADR-010) ---
-    app.add_middleware(cast(Any, TelemetryMiddleware))
+    app.add_middleware(cast("Any", TelemetryMiddleware))
 
     # --- Cache-Control Middleware (ADR-007 S5) ---
-    app.add_middleware(cast(Any, _CacheControlMiddleware))
+    app.add_middleware(cast("Any", _CacheControlMiddleware))
 
     # --- REST Router ---
     app.include_router(router, prefix="/api")
@@ -1279,8 +1275,8 @@ def create_app() -> FastAPI:
         last_hb = getattr(app.state, "worker_last_heartbeat_ts", None)
         if last_hb is not None:
             worker_connected = (
-                (time.monotonic() - last_hb) < settings.worker_heartbeat_timeout_seconds
-            )
+                time.monotonic() - last_hb
+            ) < settings.worker_heartbeat_timeout_seconds
         cb: WorkerCircuitBreaker | None = getattr(
             app.state,
             "circuit_breaker",

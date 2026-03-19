@@ -7,14 +7,12 @@ cross-session durability, and cascade-delete behaviour.
 """
 
 import json
-
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from uuid import uuid4
 
 import pytest
 import pytest_asyncio
-
 from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
@@ -67,7 +65,6 @@ from ..session import (
     init_db,
     verify_wal_mode,
 )
-
 
 # ---------------------------------------------------------------------------
 # Fixtures

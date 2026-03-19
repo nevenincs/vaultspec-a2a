@@ -274,10 +274,13 @@ The MCP server cannot reach the gateway API.
    the gateway automatically. Wait for the health check to pass (~5-15s on
    first start).
 2. If running the gateway separately:
+
    ```bash
    uv run vaultspec service start all
    ```
+
 3. Verify the gateway is healthy:
+
    ```bash
    curl http://localhost:8000/health
    ```
@@ -287,13 +290,16 @@ The MCP server cannot reach the gateway API.
 The gateway cannot reach the worker.
 
 1. Check if the worker is running:
+
    ```bash
    curl http://localhost:8001/health
    ```
+
 2. If using auto-spawn (default), the worker starts on first dispatch. The
    first request may take 5-10s while the worker initializes.
 3. Check gateway logs for worker spawn errors.
 4. Restart the service:
+
    ```bash
    uv run vaultspec service start all
    ```
@@ -308,11 +314,14 @@ failures. This typically means the worker crashed.
 2. If the worker crashed, the watchdog will auto-restart it (up to 5 attempts
    with exponential backoff).
 3. Check circuit breaker status:
+
    ```bash
    curl http://localhost:8000/health
    # Look for "circuit_breaker": {"status": "open"|"closed"|"half_open"}
    ```
+
 4. If stuck open, restart the gateway:
+
    ```bash
    uv run vaultspec service start all
    ```
@@ -322,21 +331,27 @@ failures. This typically means the worker crashed.
 Another process is using port 8000 or 8001.
 
 1. Check what's using the port:
+
    ```powershell
    # Windows
    netstat -ano | findstr :8000
    taskkill /F /PID <pid>
    ```
+
    ```bash
    # Linux/macOS
    lsof -i :8000 | grep LISTEN
    kill <pid>
    ```
+
 2. Change the ports via environment variables:
+
    ```bash
    VAULTSPEC_PORT=9000 VAULTSPEC_WORKER_PORT=9001 uv run vaultspec service start
    ```
+
    Update `VAULTSPEC_MCP_API_BASE_URL` accordingly:
+
    ```json
    {
      "env": {

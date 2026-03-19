@@ -12,6 +12,7 @@ chain have been resolved. Worker watchdog shipped. Integration test harness buil
 - **Next priorities:** MCP-UX-01 (stale gateway probe) -> VERIFY-01 (E2E smoke)
 
 **Architecture state after fixes:**
+
 ```
 IDE --stdio--> MCP Server --HTTP--> Gateway :8000 --HTTP--> Worker :8001
                  |                      |                       |
@@ -33,6 +34,7 @@ the gateway, the gateway lazily spawns the worker on first dispatch, and health 
 with circuit breakers protect the entire chain.
 
 **Original root cause chain (all fixed):**
+
 1. ~~MCP server starts standalone — no gateway subprocess spawned~~ → FIXED (CRIT-01)
 2. ~~Gateway never spawns worker~~ → FIXED (CRIT-02, PHASE-1a lazy spawn)
 3. ~~No health-check infrastructure~~ → FIXED (CRIT-03, HIGH-02, PROD-028)
@@ -143,7 +145,7 @@ error. Fix in progress (#39): timestamp-cached probe with 30s TTL.
 | PROD-072 | LOW | WS control handler ignores worker 429 on cancel | app.py:282 |
 | PROD-058 | LOW | Mock-seeder bypasses dispatch pipeline | docker/run.py:150 |
 | PROD-054 | LOW | Docker healthcheck URL auth-gated | docker-compose.prod.yml |
-| PROD-048 | LOW | MCP process cleanup on SIGKILL | __main__.py |
+| PROD-048 | LOW | MCP process cleanup on SIGKILL | **main**.py |
 | PROD-045 | LOW | Vite proxy rules are dead code | vite.config.ts |
 
 ### CLOSED (re-assessed)
@@ -177,6 +179,7 @@ CRIT-02 ──> HIGH-01 (service start combined mode)
 ### CRIT-01 | CRITICAL | MCP Server — Hollow Shell
 
 **Files:**
+
 - `src/vaultspec_a2a/protocols/mcp/server.py` — MCP tool surface
 - `src/vaultspec_a2a/protocols/mcp/__main__.py` — entry point
 
@@ -184,6 +187,7 @@ CRIT-02 ──> HIGH-01 (service start combined mode)
 The MCP server creates 11 tools that all call `http://localhost:8000` (gateway API) via httpx. When an IDE starts the MCP server via stdio (`python -m vaultspec_a2a.protocols.mcp`), the gateway is never started. Every tool call gets `httpx.ConnectError: [Errno 111] Connection refused`.
 
 **Evidence:**
+
 - `server.py:62-65`: `mcp_api_base_url: str = "http://localhost:8000"` — hardcoded default
 - `server.py:94-100`: `_get_client()` creates httpx client but never verifies gateway is reachable
 - `__main__.py:45-50`: `main()` just calls `mcp.run_stdio_async()` or `mcp.run_streamable_http_async()` — no gateway startup
@@ -197,6 +201,7 @@ The MCP server creates 11 tools that all call `http://localhost:8000` (gateway A
 ### CRIT-02 | CRITICAL | Gateway — Worker Auto-Spawn Not Implemented
 
 **Files:**
+
 - `src/vaultspec_a2a/core/config.py` — settings (missing `auto_spawn_worker`)
 - `src/vaultspec_a2a/api/app.py` — gateway lifespan (no spawn code)
 
@@ -206,11 +211,13 @@ ADR-031 section 2.4 specifies:
 > Gateway spawns the worker as a child process via `subprocess.Popen` on startup.
 
 This was **never implemented**:
+
 - `config.py` has no `auto_spawn_worker` setting
 - `api/app.py` lifespan creates an httpx client to `worker_url` but never spawns the worker process
 - `_service.py:36` comment says "worker auto-spawns via settings" but this is false
 
 **Evidence:**
+
 - `config.py:85-107`: Worker settings exist (`worker_port`, `worker_url`, `internal_token`) but no `auto_spawn_worker`
 - `api/app.py:268-274`: Creates `httpx.AsyncClient(base_url=settings.worker_url)` — assumes worker is already running
 - Searched entire `src/vaultspec_a2a/` for `auto_spawn|AUTO_SPAWN` — zero matches
@@ -224,11 +231,13 @@ This was **never implemented**:
 ### CRIT-03 | CRITICAL | Gateway — No Health Endpoint for Startup Probing
 
 **Files:**
+
 - `src/vaultspec_a2a/api/app.py` — no `/health` route
 - `src/vaultspec_a2a/api/internal.py` — has `/internal/health` but may not be suitable
 
 **Problem:**
 The MCP server needs to probe gateway readiness after spawning it. There's no clean health endpoint on the gateway. The internal health endpoint at `/internal/health` exists but:
+
 1. It's under the internal router (may require auth token)
 2. It may not report worker connectivity
 3. The CLI `_service.py:133` uses it, suggesting it works, but MCP should use a public endpoint
@@ -305,18 +314,21 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 1 — worker/app.py
 
 #### PROD-001 | CRIT | Worker: Auto-spawn (duplicate of CRIT-02)
+
 **File**: src/vaultspec_a2a/worker/app.py + src/vaultspec_a2a/api/app.py:_lifespan
 **Problem**: No worker auto-spawn logic exists anywhere. The gateway creates `httpx.AsyncClient(base_url=settings.worker_url)` but never checks if the worker is running or attempts to start it. `_service.py:36` says "worker auto-spawns via settings" — aspirational only.
 **Impact**: Worker must be manually started. If missing, ALL dispatches silently fail (logged as warnings). Threads stuck in SUBMITTED.
 **Status**: OPEN (covered by CRIT-02 / Task #10)
 
 #### PROD-002 | CRIT | Worker: No PID tracking or crash restart
+
 **File**: src/vaultspec_a2a/worker/app.py + src/vaultspec_a2a/api/app.py
 **Problem**: Neither process tracks the worker PID. Worker crash → in-flight graph runs silently lost, `_active_ingests` gone (memory-only), gateway continues dispatching to dead worker. No watchdog or restart logic.
 **Impact**: Worker crash = permanent service degradation until manual intervention. Threads stuck in RUNNING forever.
 **Status**: OPEN
 
 #### PROD-003 | HIGH | Worker: /health is a static stub
+
 **File**: src/vaultspec_a2a/worker/app.py:136-139
 **Problem**: Returns static `{"status": "ok"}` regardless of state. Does not report active graph count, event buffer depth, checkpointer status, or capacity. Docker probes and gateway health aggregation give false positives.
 **Impact**: Worker degradation (at capacity, checkpointer disconnected) invisible to monitoring.
@@ -324,6 +336,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-004 | LOW | Worker: Heartbeat loop docstring mismatch
+
 **File**: src/vaultspec_a2a/worker/ipc.py:211-218
 **Problem**: Docstring says "Defaults to 10 s" but parameter default is `30.0`. Call site passes `10.0`.
 **Impact**: Documentation confusion only.
@@ -332,6 +345,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 2 — worker/executor.py
 
 #### PROD-005 | HIGH | Worker: Graph compilation failure — no terminal event
+
 **File**: src/vaultspec_a2a/worker/executor.py:231-237, 275-286
 **Problem**: When `_compile_graph` raises, `_get_or_compile_graph` returns None. `_handle_ingest` logs "No graph" and returns — no `thread_terminal` event sent. Thread permanently stuck.
 **Impact**: Invalid preset or missing agent config → thread stuck in SUBMITTED forever with no user feedback.
@@ -339,6 +353,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-006 | MED | Worker: LRU eviction — stale _thread_to_cache_key entries
+
 **File**: src/vaultspec_a2a/worker/executor.py:240-241
 **Problem**: Graph eviction via `popitem(last=False)` doesn't clean up `_thread_to_cache_key` entries pointing to the evicted key. These grow unboundedly over the worker's lifetime.
 **Impact**: Memory leak proportional to unique thread count.
@@ -346,6 +361,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-007 | MED | Worker: No timeout on graph execution
+
 **File**: src/vaultspec_a2a/worker/executor.py:343-349, 417-423
 **Problem**: `aggregator.ingest()` awaited with no timeout. Hung graph (infinite loop, hung tool call) holds ingest slot forever. 5 hung graphs = 429 for all new work.
 **Impact**: Worker capacity exhaustion from hung executions.
@@ -355,6 +371,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 3 — worker/ipc.py
 
 #### PROD-008 | MED | IPC: Event buffer pop(0) is O(n)
+
 **File**: src/vaultspec_a2a/worker/ipc.py:123
 **Problem**: `self._event_buffer.pop(0)` on a list is O(n) with `_MAX_EVENT_BUFFER = 10_000`.
 **Impact**: Performance degradation under sustained high event throughput at buffer capacity.
@@ -362,6 +379,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-009 | LOW | IPC: Heartbeat failure logged at DEBUG only
+
 **File**: src/vaultspec_a2a/worker/ipc.py:209
 **Problem**: Failed heartbeats logged at DEBUG. With default INFO level, operator has no visibility into broken IPC.
 **Impact**: Heartbeat failures invisible in production logs.
@@ -371,6 +389,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 4 — worker/health.py
 
 #### PROD-010 | HIGH | Worker: HealthCheck class is empty stub
+
 **File**: src/vaultspec_a2a/worker/health.py:1-8
 **Problem**: Exported via `__all__` but completely empty — no methods, no usage. Actual health is in `worker/app.py:136`.
 **Impact**: Dead code, architectural confusion.
@@ -380,12 +399,14 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 5 — api/app.py
 
 #### PROD-011 | CRIT | Gateway: No worker health check on startup (duplicate of CRIT-03)
+
 **File**: src/vaultspec_a2a/api/app.py:269-274
 **Problem**: Creates `httpx.AsyncClient(base_url=settings.worker_url)` without verifying worker is reachable. No startup probe, no readiness gate.
 **Impact**: Race condition — gateway starts before worker, first dispatches silently fail.
 **Status**: OPEN (covered by CRIT-03 / Task #11)
 
 #### PROD-012 | HIGH | Gateway: Dispatch failure doesn't update thread status
+
 **File**: src/vaultspec_a2a/api/endpoints.py:360-371
 **Problem**: `create_thread_endpoint` — when dispatch fails, thread committed as SUBMITTED but no retry mechanism exists. Comment says "worker can pick it up" but that's false.
 **Impact**: Silent thread creation failure. Thread stuck in SUBMITTED forever.
@@ -393,6 +414,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-013 | HIGH | Gateway: worker_last_heartbeat_ts stored but never consumed
+
 **File**: src/vaultspec_a2a/api/internal.py:179,195,315
 **Problem**: Heartbeat timestamp stored on `app.state` by 3 code paths, but NOTHING reads it. No watchdog, no circuit breaker, health endpoint probes worker directly via HTTP.
 **Impact**: Heartbeat mechanism has zero effect on gateway behavior. Gateway dispatches to dead worker indefinitely.
@@ -402,6 +424,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 6 — api/endpoints.py
 
 #### PROD-014 | HIGH | Gateway: /admin/shutdown — not portable, orphans worker
+
 **File**: src/vaultspec_a2a/api/endpoints.py:1148-1155
 **Problem**: Uses `os.kill(os.getpid(), signal.SIGINT)`. On Windows (primary dev platform), behavior is unreliable. Does not shut down worker. No drain period.
 **Impact**: Shutdown may not work cleanly on Windows. Worker orphaned.
@@ -409,6 +432,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-015 | MED | Gateway: Thread status set to RUNNING before dispatch confirms
+
 **File**: src/vaultspec_a2a/api/endpoints.py:769
 **Problem**: `send_message_endpoint` sets RUNNING and commits BEFORE dispatch attempt. Failed dispatch → status lies (RUNNING but nothing executing).
 **Impact**: Misleading thread status.
@@ -416,6 +440,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-016 | MED | Gateway: Permission response accesses private aggregator field
+
 **File**: src/vaultspec_a2a/api/endpoints.py:970
 **Problem**: `aggregator._pending_permissions.get(request_id)` — private field access with `# noqa: SLF001`.
 **Impact**: Fragile coupling. Breaks if aggregator internals change.
@@ -425,6 +450,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 7 — api/internal.py
 
 #### PROD-017 | HIGH | Gateway: Internal endpoints unauthenticated by default
+
 **File**: src/vaultspec_a2a/api/internal.py:112-128
 **Problem**: `_verify_internal_token` skips auth when `internal_token is None` (dev mode). In production, if operator forgets to set `VAULTSPEC_INTERNAL_TOKEN`, anyone on the network can inject fake events, manipulate thread statuses, or DoS.
 **Impact**: Security vulnerability — unauthenticated event injection in production if token not set.
@@ -432,6 +458,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-018 | MED | Gateway: content-length header parsing unsafe
+
 **File**: src/vaultspec_a2a/api/internal.py:235-237, 273-275
 **Problem**: `int(content_length)` can raise ValueError on malformed header. Missing header bypasses size check entirely.
 **Impact**: Malformed header → 500. Missing header → bypass.
@@ -441,12 +468,14 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 ### Pass 8 — protocols/mcp/server.py
 
 #### PROD-019 | CRIT | MCP: No gateway/worker auto-start (duplicate of CRIT-01)
+
 **File**: src/vaultspec_a2a/protocols/mcp/server.py (entire file)
 **Problem**: MCP server calls gateway via HTTP but never starts it. IDE user gets `ToolError("Network error")` with unhelpful message.
 **Impact**: First-run experience completely broken.
 **Status**: OPEN (covered by CRIT-01 / Task #9)
 
 #### PROD-020 | HIGH | MCP: Shared httpx client has no transport-level timeout
+
 **File**: src/vaultspec_a2a/protocols/mcp/server.py:101-104
 **Problem**: `httpx.AsyncClient()` created with default settings — no transport-level timeout. Hung gateway → MCP hangs indefinitely.
 **Impact**: IDE tool execution blocked indefinitely on hung gateway.
@@ -454,12 +483,14 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-021 | MED | MCP: _reset_client() calls private _transport.close()
+
 **File**: src/vaultspec_a2a/protocols/mcp/server.py:113
 **Problem**: Private attribute access + synchronous close in async context. Masked by suppress(Exception).
 **Impact**: Potential resource leak. Test-only code path.
 **Status**: OPEN
 
 #### PROD-022 | MED | MCP: Preset cache never invalidates (empty cache permanent)
+
 **File**: src/vaultspec_a2a/protocols/mcp/server.py:135-168
 **Problem**: `_known_presets_cache` set to empty frozenset on gateway failure — never retried. MCP start before gateway → preset validation permanently broken.
 **Impact**: All `start_thread` calls with preset fail until MCP restart.
@@ -467,6 +498,7 @@ Full file-by-file production readiness audit across 12 files. 29 findings total.
 **Status**: OPEN
 
 #### PROD-023 | LOW | MCP: Module-level settings instantiation
+
 **File**: src/vaultspec_a2a/protocols/mcp/server.py:76
 **Problem**: `McpSettings()` at import time — malformed env → obscure ImportError to IDE.
 **Impact**: Poor DX on misconfiguration.
@@ -479,6 +511,7 @@ No production gaps beyond what's covered by existing findings.
 ### Pass 11 — docker/run.py
 
 #### PROD-025 | HIGH | Docker: run.py is mock-seeder, NOT production runner
+
 **File**: docker/run.py (entire file)
 **Problem**: The file is a mock-seeder daemon for UI testing — not a production process supervisor. No production Docker entrypoint exists.
 **Impact**: No turnkey production deployment. Docker users must configure separate containers.
@@ -486,6 +519,7 @@ No production gaps beyond what's covered by existing findings.
 **Status**: OPEN
 
 #### PROD-026 | MED | Docker: mock-seeder bypasses worker architecture
+
 **File**: docker/run.py:126-150
 **Problem**: Direct `graph.astream()` calls bypass gateway/worker dispatch. Same DB with no IPC relay. Known backlog (#14).
 **Impact**: DB contention if run alongside production gateway.
@@ -494,6 +528,7 @@ No production gaps beyond what's covered by existing findings.
 ### Pass 12 — Justfile
 
 #### PROD-027 | HIGH | Justfile: `dev` recipe uses bash `&` — broken on Windows
+
 **File**: Justfile:13-16
 **Problem**: `just _dev-worker &` uses bash backgrounding. Windows shell is PowerShell where `&` is the call operator, not backgrounding.
 **Impact**: `just dev` broken on Windows (primary dev platform).
@@ -503,6 +538,7 @@ No production gaps beyond what's covered by existing findings.
 ### Cross-cutting
 
 #### PROD-028 | CRIT | Cross: No circuit breaker on gateway→worker dispatch
+
 **File**: src/vaultspec_a2a/api/endpoints.py (all dispatch sites)
 **Problem**: Every dispatch is fire-and-forget with `except httpx.HTTPError: logger.warning()`. No circuit breaker, backoff, health-aware routing, or retry queue. Health endpoint probes worker but result not used by dispatch logic.
 **Impact**: Worker down → every user operation silently fails. System appears functional but nothing executes.
@@ -510,6 +546,7 @@ No production gaps beyond what's covered by existing findings.
 **Status**: OPEN
 
 #### PROD-029 | HIGH | Cross: No env var validation at startup
+
 **File**: src/vaultspec_a2a/core/config.py
 **Problem**: All settings have defaults. No startup log of critical config. No warning for insecure defaults (no internal_token, permissive CORS).
 **Impact**: Misconfiguration discovered at runtime, not startup.
@@ -523,8 +560,10 @@ No production gaps beyond what's covered by existing findings.
 ### Pass 13 — Docker + SPA Build Path Mismatch
 
 #### PROD-030 | CRIT | Docker: SPA build path triple mismatch
+
 **File**: docker/prod.Dockerfile:14,43 + src/vaultspec_a2a/api/app.py:58-60
 **Problem**: Three path mismatches combine to make the Docker-served SPA completely broken:
+
 1. **Vite outputs to `dist/`** (default, no `outDir` override in `vite.config.ts`). The Dockerfile at line 14 runs `npm run build` which produces `/app/src/ui/dist/`. But line 43 copies from `/app/src/ui/build` — this directory does not exist. The `COPY` may silently produce an empty directory or fail.
 2. **Dockerfile copies to wrong location**: Line 43: `COPY --from=frontend-build /app/src/ui/build ./src/vaultspec_a2a/api/static/` — destination is `api/static/`. But the gateway's `_UI_BUILD_DIR` (app.py:58-60) resolves to `<project_root>/src/ui/build` which in Docker is `/app/src/ui/build`, NOT `/app/src/vaultspec_a2a/api/static/`.
 3. **Gateway path says `build` not `dist`**: Even in local dev, the gateway looks at `src/ui/build` but the actual Vite output is `src/ui/dist`.
@@ -533,6 +572,7 @@ No production gaps beyond what's covered by existing findings.
 
 **Impact**: Production Docker deployment serves NO frontend — the `StaticFiles` mount silently skips with "SPA build not found" log. The React UI is completely unavailable.
 **Fix**:
+
 1. Change Dockerfile line 43: `COPY --from=frontend-build /app/src/ui/dist ./src/ui/dist`
 2. Change gateway `_UI_BUILD_DIR` to use `dist` instead of `build`
 3. OR set `outDir: 'build'` in `vite.config.ts` to match existing paths
@@ -541,8 +581,10 @@ No production gaps beyond what's covered by existing findings.
 ### Pass 14 — WebSocket Connection Manager Edge Cases
 
 #### PROD-031 | MED | WebSocket: No authentication on public /ws endpoint
+
 **File**: src/vaultspec_a2a/api/app.py:355-360 + src/vaultspec_a2a/api/websocket.py
 **Problem**: The public WebSocket endpoint at `/ws` has no authentication. Any client can connect and:
+
 - Subscribe to any thread_id to eavesdrop on agent events
 - Send `SEND_MESSAGE` commands to inject messages into threads
 - Send `AGENT_CONTROL` commands to cancel threads
@@ -552,6 +594,7 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 **Status**: OPEN
 
 #### PROD-032 | LOW | WebSocket: writer_loop exception swallows error context
+
 **File**: src/vaultspec_a2a/api/websocket.py:481-484
 **Problem**: When `send_json` fails, the error is logged at WARNING but the exception details are not included (`exc_info` not set). The loop breaks, disconnecting the client, but the operator doesn't know WHY the send failed.
 **Impact**: Difficulty debugging client disconnections in production logs.
@@ -561,8 +604,10 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 ### Pass 15 — Docker Compose Production
 
 #### PROD-033 | HIGH | Docker: Shared SQLite volume between containers — WAL issues
+
 **File**: docker-compose.prod.yml:15,44 + docker-compose.dev.yml:16,42
 **Problem**: Both the `api` and `worker` containers mount the same `db-data` volume and access the same SQLite file (`/app/data/vaultspec.db`). SQLite WAL mode requires that all processes accessing the DB reside on the same filesystem AND that the WAL/SHM files are on the same filesystem. With Docker named volumes, this works — BUT:
+
 1. There is no file locking verification at startup
 2. If one container crashes and leaves a corrupt WAL, the other container may not detect it
 3. No periodic WAL checkpoint is triggered (the gateway has one at startup via `backfill_teamstate_sdd_fields`, but the worker does not)
@@ -571,23 +616,26 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 **Status**: OPEN
 
 #### PROD-034 | MED | Docker: No VAULTSPEC_INTERNAL_TOKEN in compose files
+
 **File**: docker-compose.prod.yml, docker-compose.dev.yml
 **Problem**: Neither compose file sets `VAULTSPEC_INTERNAL_TOKEN`. The prod compose uses `env_file: .env` which MIGHT contain it, but it's not explicitly documented. The dev compose has no env_file for the worker service. Per PROD-017, without this token, the internal endpoints are unauthenticated.
 **Impact**: Docker prod deployment may have unauthenticated internal endpoints if `.env` doesn't set the token.
 **Fix**: Add `VAULTSPEC_INTERNAL_TOKEN` to the compose environment with a generated value, or document that it MUST be in `.env`.
 **Status**: OPEN
 
-### Pass 16 — MCP __main__.py Edge Cases
+### Pass 16 — MCP **main**.py Edge Cases
 
 #### PROD-035 | MED | MCP: asyncio.run() blocks — no graceful cleanup
-**File**: src/vaultspec_a2a/protocols/mcp/__main__.py:46,50
+
+**File**: src/vaultspec_a2a/protocols/mcp/**main**.py:46,50
 **Problem**: Both transport modes use `asyncio.run(mcp.run_*_async())` which blocks until the server exits. There is no signal handler or cleanup hook. If the MCP server spawns a gateway subprocess (after CRIT-01 fix), `asyncio.run()` will not clean up child processes on SIGTERM.
 **Impact**: With future auto-start implementation, child processes may become orphans on MCP shutdown.
 **Fix**: Register signal handlers or use `atexit` to clean up child processes.
 **Status**: OPEN (future — depends on CRIT-01)
 
 #### PROD-036 | LOW | MCP: mcp.settings mutation is not thread-safe
-**File**: src/vaultspec_a2a/protocols/mcp/__main__.py:48-49
+
+**File**: src/vaultspec_a2a/protocols/mcp/**main**.py:48-49
 **Problem**: `mcp.settings.host = args.host or ...` mutates the FastMCP settings object after module import. This is fine for a single-process MCP server, but if the module is imported in a test or multi-process context, the mutation leaks.
 **Impact**: No production impact (MCP runs as a single process). Minor test isolation concern.
 **Status**: OPEN
@@ -595,6 +643,7 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 ### Pass 17 — Worker Environment Variable
 
 #### PROD-037 | HIGH | Worker: VAULTSPEC_API_BASE_URL vs VAULTSPEC_MCP_API_BASE_URL confusion
+
 **File**: docker/prod.Dockerfile:55 + src/vaultspec_a2a/worker/app.py:72 + src/vaultspec_a2a/core/config.py
 **Problem**: The Dockerfile sets `VAULTSPEC_API_BASE_URL=http://api:8000` for the worker (line 55). But the worker's `WorkerBridge` receives `settings.mcp_api_base_url` (app.py:72). The config field is `mcp_api_base_url` which maps to env `VAULTSPEC_MCP_API_BASE_URL`. The Dockerfile sets `VAULTSPEC_API_BASE_URL` — a different env var name! The worker would use the default `http://localhost:8000` instead of `http://api:8000`.
 **Impact**: In Docker prod, the worker IPC bridge connects to `localhost:8000` (itself) instead of the gateway container. All heartbeats and event relays fail silently.
@@ -604,6 +653,7 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 ### Pass 18 — CLI Service Stop
 
 #### PROD-038 | MED | CLI: `service stop worker` sends to non-existent endpoint
+
 **File**: src/vaultspec_a2a/cli/_service.py:76,84
 **Problem**: `service stop` sends `POST /api/admin/shutdown` to both backend and worker. The worker has no `/api/admin/shutdown` endpoint (it only has `/dispatch` and `/health`). The comment at line 76 acknowledges this: "Worker has no shutdown endpoint — use the same path as a best-effort." The worker will return 404, caught as `httpx.HTTPError`, and the CLI prints "shutdown failed".
 **Impact**: `vaultspec service stop worker` does not actually stop the worker. The `service kill` command (line 96-122) using `taskkill` is the only reliable way on Windows.
@@ -613,8 +663,10 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 ### Pass 19 — Database Session Layer
 
 #### PROD-039 | MED | Database: Gateway and worker both open independent SQLite connections
+
 **File**: src/vaultspec_a2a/api/app.py:247-248 + src/vaultspec_a2a/worker/app.py:68-69
 **Problem**: Both the gateway and worker independently create `AsyncSqliteSaver.from_conn_string()` connections to the same SQLite file. This is a dual-writer scenario on SQLite — technically supported by WAL mode, but:
+
 1. SQLite WAL mode allows ONE writer at a time — concurrent writes block
 2. The gateway's checkpointer is documented as "read-only" (app.py:243-246) but there's no enforcement — nothing prevents writes
 3. The LangGraph `checkpointer.setup()` call may create tables, which is a write operation
@@ -623,6 +675,7 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 **Status**: OPEN
 
 #### PROD-040 | LOW | Database: Module-level singletons make testing fragile
+
 **File**: src/vaultspec_a2a/database/session.py:42-43
 **Problem**: `_engine` and `_session_factory` are module-level global singletons. If `init_db()` is called multiple times with different paths (e.g., in tests), the first path wins silently. The `get_engine()` function (lines 87-114) has a complex path-comparison guard that logs a warning, but the behavior of "return the wrong engine" is confusing.
 **Impact**: Test isolation issue. No production impact since the singleton is initialized once.
@@ -633,10 +686,12 @@ The only protection is that `PERMISSION_RESPONSE` over WS is rejected (clients m
 **Verified FIXED**: PROD-001/CRIT-02 (auto-spawn), PROD-011/CRIT-03 (health endpoint), PROD-005 (#15), PROD-020 (#16)
 
 #### PROD-041 | HIGH | Gateway: auto-spawn captures stdout/stderr PIPE — deadlock risk
+
 **File**: src/vaultspec_a2a/api/app.py:267-268
 **Problem**: `_spawn_worker()` creates the subprocess with `stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE`. After the startup health poll succeeds, the process handle is stored but the PIPE streams are never drained. On Unix/Windows, subprocess stdout/stderr pipes have finite buffers (~64KB on Linux, ~4KB on Windows). If the worker produces enough log output to fill the pipe buffer, it BLOCKS on write — the worker hangs completely.
 **Impact**: On Windows (primary dev platform, 4KB pipe buffer), the worker will deadlock within minutes of active logging. The gateway will start seeing health check failures and dispatch failures, with no obvious cause.
 **Fix**: Either:
+
 1. Use `stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL` (discard output)
 2. Use `subprocess.DEVNULL` and let uvicorn's own logging handle it
 3. Spawn a background task to continuously drain the pipes
@@ -644,13 +699,15 @@ Option 1 is simplest and acceptable since uvicorn already logs to its own stderr
 **Status**: OPEN
 
 #### PROD-042 | MED | Gateway: PROD-013 partially fixed — heartbeat consumed by /health but not by dispatch
+
 **File**: src/vaultspec_a2a/api/app.py:486-490 + src/vaultspec_a2a/api/endpoints.py (dispatch sites)
 **Problem**: The new `/health` endpoint now reads `worker_last_heartbeat_ts` (fixing the "stored but never consumed" aspect of PROD-013). However, the dispatch logic in `endpoints.py` still doesn't check worker health before dispatching. Dispatches are still fire-and-forget to a potentially dead worker.
 **Impact**: Health endpoint reports `worker_connected: false` but dispatches still proceed, silently failing.
 **Fix**: This is partially addressed by PROD-028 (circuit breaker). Noting for completeness.
 **Status**: PARTIALLY FIXED (health reads it; dispatch doesn't)
 
-#### Remaining UNFIXED findings from Pass 1-19:
+#### Remaining UNFIXED findings from Pass 1-19
+
 - **PROD-030** (CRIT): Docker SPA path triple mismatch — NOT FIXED
 - **PROD-037** (HIGH): Docker worker env var name — NOT FIXED
 - PROD-002 (CRIT): No PID tracking/restart — PARTIALLY FIXED (auto-spawn tracks PID, but no watchdog restart)
@@ -695,16 +752,19 @@ Option 1 is simplest and acceptable since uvicorn already logs to its own stderr
 **Problem**: The `/dispatch` endpoint applies `executor.at_capacity()` check BEFORE routing the action. Cancel dispatches (`action="cancel"`) are subject to the same 429 rejection as ingest dispatches. When the worker has 5/5 concurrent ingests (at capacity), a cancel request is rejected. This is precisely the scenario where cancel is most needed — the user wants to free up a slot.
 **Impact**: Worker at capacity → user cannot cancel any running thread → permanent capacity exhaustion until threads complete naturally.
 **Fix**: Exempt `cancel` action from the `at_capacity()` gate:
+
 ```python
 if req.action != "cancel" and executor.at_capacity():
     raise HTTPException(status_code=429, ...)
 ```
+
 **Status**: OPEN
 
 ### PROD-044 | MED | Worker: Cancel arrives when no ingest active — no terminal event
 
 **File**: `src/vaultspec_a2a/worker/executor.py:178-180` + `src/vaultspec_a2a/core/aggregator.py:520-534`
 **Problem**: The cancel handler calls `self._aggregator.cancel_thread(req.thread_id)`, which sets an `asyncio.Event` if one exists. But:
+
 1. **Cancel before ingest**: If the cancel dispatch arrives before the ingest dispatch (or while ingest is still compiling the graph), no cancel_event exists yet. `cancel_thread()` logs debug "No active cancel event" and returns. The subsequent ingest creates a FRESH event (unset) and runs to completion.
 2. **Cancel after ingest completes**: If the cancel arrives after the ingest finishes, `_clear_cancel_event` has already removed the event. Same result — cancel is silently dropped.
 3. **No terminal event on standalone cancel**: The cancel handler does NOT emit `thread_terminal("cancelled")`. Only the ingest/resume `finally` blocks do (via `_emit_terminal_status`). If cancel is dispatched to a thread with no active ingest, the thread stays RUNNING in the DB forever.
@@ -748,6 +808,7 @@ This is actually worse than PROD-041 because it creates a chain: MCP -> gateway 
 
 **File**: `src/vaultspec_a2a/protocols/mcp/__main__.py:46-51` + `server.py:297-313`
 **Problem**: The `_mcp_lifespan` uses `try/finally` to call `_shutdown_gateway_process()`, which handles graceful shutdown correctly. However:
+
 1. `asyncio.run()` wraps the event loop and cancels pending tasks on `SIGINT` (KeyboardInterrupt). The `finally` block in `_mcp_lifespan` WILL run in this case.
 2. On `SIGKILL` (Unix) or `taskkill /F` (Windows), the process is terminated immediately — no cleanup runs. The gateway child process becomes orphaned. The gateway's own child (worker) is also orphaned.
 3. On Windows, `SIGTERM` is not a native signal — `process.terminate()` on Windows calls `TerminateProcess()`, which is an immediate kill (no signal handling). When an IDE terminates the MCP server's stdio transport, it may not send a graceful signal.
@@ -759,6 +820,7 @@ This is actually worse than PROD-041 because it creates a chain: MCP -> gateway 
 
 **File**: `src/vaultspec_a2a/protocols/mcp/server.py:120-127`
 **Problem**: `_reset_client()` accesses `_shared_client._transport.close()` — a private attribute. This is masked by `suppress(Exception)` but:
+
 1. `_transport` is a private API — may change or be removed in future httpx versions
 2. `.close()` is synchronous, called in what should be an async context
 3. The proper approach is `await _shared_client.aclose()`
@@ -769,6 +831,7 @@ This is test-only code (called by test fixtures) and has the `# noqa: SLF001` su
 ### MCP Tool Error Handling — Verified Consistent
 
 All 11 MCP tools follow the same error handling pattern:
+
 1. `httpx.ConnectError` → `ToolError("Network error: ...")`
 2. `httpx.TimeoutException` → `ToolError("Timeout: ...")`
 3. `httpx.HTTPStatusError` → `ToolError("Server error: HTTP {status}")` (with 404 special-casing where applicable)
@@ -784,6 +847,7 @@ No findings. Error handling is consistent and comprehensive.
 
 **File**: `src/vaultspec_a2a/api/endpoints.py:1097-1106` + `src/vaultspec_a2a/database/crud.py:218-236`
 **Problem**: `delete_thread_endpoint` and `delete_thread()` CRUD have no status guard. A running thread can be hard-deleted while the worker is actively executing its graph. After deletion:
+
 1. The worker continues executing `aggregator.ingest()` — writing events
 2. `_emit_terminal_status()` sends `thread_terminal` to the gateway
 3. `_handle_terminal_event()` tries `get_thread(db, thread_id)` — thread not found
@@ -792,10 +856,12 @@ No findings. Error handling is consistent and comprehensive.
 6. If LangGraph writes a checkpoint after deletion, the data is orphaned
 **Impact**: Active graph execution with no thread record. Worker wastes resources on a deleted thread. Checkpointer data leaks.
 **Fix**: Guard delete behind terminal-state check:
+
 ```python
 if thread.status in (ThreadStatus.RUNNING, ThreadStatus.SUBMITTED):
     raise HTTPException(status_code=409, detail="Cancel the thread before deleting")
 ```
+
 **Status**: OPEN
 
 ### PROD-051 | MED | Gateway: send_message commits RUNNING before dispatch (confirmed PROD-015)
@@ -810,6 +876,7 @@ if thread.status in (ThreadStatus.RUNNING, ThreadStatus.SUBMITTED):
 ### Cancel Pattern Verified Correct
 
 The cancel endpoint at `endpoints.py:1062-1083` correctly:
+
 1. Dispatches to worker first (`worker_client.post`)
 2. Only updates DB on success (`if dispatched`)
 3. Returns current status if dispatch fails
@@ -832,6 +899,7 @@ The concurrent cancel+terminal race (cancel endpoint sets CANCELLED, then worker
 **File**: `src/vaultspec_a2a/telemetry/middleware.py:150-154`
 **Problem**: The `except` block at line 150 is OUTSIDE the `with _get_tracer().start_as_current_span(...)` context manager at line 128. When an exception propagates out of the `with` block, the span is ended first (via `__exit__`), then the `except` catches the exception. Calling `span.set_status()` and `span.record_exception()` on an already-ended span is a no-op in the OTel Python SDK.
 **Code structure**:
+
 ```python
 try:
     with start_as_current_span(...) as span:  # line 128
@@ -842,8 +910,10 @@ except Exception as exc:                      # line 150 — OUTSIDE with block
     span.record_exception(...)                # no-op
     raise
 ```
+
 **Impact**: HTTP 5xx errors from downstream handlers are not recorded in OTel spans. Exception details lost from distributed traces.
 **Fix**: Move the `try/except` INSIDE the `with` block:
+
 ```python
 with start_as_current_span(...) as span:
     try:
@@ -855,12 +925,14 @@ with start_as_current_span(...) as span:
     span.set_attribute("http.response.status_code", response.status_code)
     return response
 ```
+
 **Status**: OPEN
 
 ### Migration Safety — Verified OK
 
 **File**: `src/vaultspec_a2a/database/migrations/__init__.py`
 The `backfill_teamstate_sdd_fields()` function uses synchronous `sqlite3.connect()` during lifespan init. This is acceptable because:
+
 1. It runs during lifespan startup (blocking is OK, no async context needed)
 2. For `:memory:` databases, it opens a separate in-memory DB (not the async engine's), finds no rows, and returns 0 — harmless
 3. For file-based DBs, it opens the same file, patches checkpoint rows, and commits. WAL mode allows concurrent reads from the async engine during this brief window.
@@ -870,6 +942,7 @@ No finding.
 
 **File**: `src/vaultspec_a2a/worker/ipc.py`
 Reviewed the full IPC bridge. Confirmed existing findings:
+
 - PROD-004 (docstring "10 s" vs 30.0 default) — still unfixed
 - PROD-008 (list `pop(0)` O(n)) — still unfixed
 - PROD-009 (heartbeat failure at DEBUG only) — still unfixed
@@ -882,39 +955,49 @@ No new findings. The retry logic (3 attempts, exponential backoff, re-queue on f
 Verified the following completed tasks by reviewing `git diff` output:
 
 ### PROD-030 — VERIFIED FIXED
+
 - Dockerfile line 43: `COPY --from=frontend-build /app/src/ui/dist` (was `build`)
 - Gateway `_UI_BUILD_DIR`: now uses `dist` (was `build`)
 - Both sides match. SPA will be served correctly in Docker.
 
 ### PROD-037 — VERIFIED FIXED
+
 - Dockerfile line 55: `ENV VAULTSPEC_MCP_API_BASE_URL=http://api:8000` (was `VAULTSPEC_API_BASE_URL`)
 - Worker IPC bridge will correctly reach the gateway container.
 
 ### PROD-041 — VERIFIED FIXED
+
 - Gateway `_spawn_worker()`: `stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL`
 - No more PIPE deadlock risk.
 
 ### PROD-047 — VERIFIED FIXED
+
 - MCP `_spawn_gateway()`: `stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL`
 - Chain deadlock eliminated.
 
 ### PROD-012 — VERIFIED FIXED (Task #19)
+
 - `create_thread_endpoint`: On dispatch failure, now sets `ThreadStatus.FAILED` and raises `HTTPException(502)` instead of silently swallowing the error.
 
 ### PROD-015 / PROD-051 — VERIFIED FIXED (Task #19)
+
 - `send_message_endpoint`: Status update to RUNNING now happens AFTER successful dispatch (moved to line ~825). On dispatch failure, sets FAILED and raises 502.
 - This matches the cancel endpoint pattern. Correct.
 
 ### PROD-017 — VERIFIED FIXED (Task #18)
+
 - `_verify_internal_token`: Now requires `VAULTSPEC_INTERNAL_TOKEN` in non-DEVELOPMENT environments. Returns HTTP 500 with clear error message if missing.
 
 ### PROD-018 — VERIFIED FIXED (Task #18)
+
 - `content-length` parsing wrapped in `try/except ValueError`, returns HTTP 400 on malformed header. Both single-event and batch endpoints fixed.
 
 ### PROD-022 — VERIFIED FIXED (CRIT-01 task)
+
 - `_get_known_presets()`: On failure, now returns `frozenset()` WITHOUT caching it. Empty results are no longer permanently cached.
 
 ### PROD-002b (Windows process tree kill) — VERIFIED FIXED (Task #20)
+
 - MCP `_shutdown_gateway_process` uses `taskkill /T /F /PID` on Windows to kill the entire process tree (gateway + worker child). Falls back to `process.kill()` on non-Windows.
 
 ### Updated Summary
@@ -949,6 +1032,7 @@ With these fixes verified, the updated status:
 
 **File**: `docker-compose.prod.yml:16-19` + `src/vaultspec_a2a/core/config.py:108-114`
 **Problem**: The Docker compose file does NOT set `VAULTSPEC_AUTO_SPAWN_WORKER=false` in the api service's environment. The default is `true`. When the gateway container starts, it will:
+
 1. Auto-spawn a worker subprocess inside the api container
 2. Wait for it to become healthy
 3. Start dispatching work to `http://127.0.0.1:8001` (the subprocess)
@@ -974,6 +1058,7 @@ If the subprocess and the container worker both run on the same shared volume, t
 **Problem**: PROD-030 was only PARTIALLY fixed. The source path was corrected (`dist` instead of `build`), but the destination path still doesn't match the gateway's `_UI_BUILD_DIR`.
 
 In Docker:
+
 - `_UI_BUILD_DIR` resolves to `/app/src/ui/dist` (because `__file__` is at `/app/src/vaultspec_a2a/api/app.py`, walking up 4 parents gives `/app/`, then appending `src/ui/dist`)
 - Dockerfile copies to `/app/src/vaultspec_a2a/api/static/` (line 43: `COPY --from=frontend-build /app/src/ui/dist ./src/vaultspec_a2a/api/static/`)
 
@@ -981,18 +1066,22 @@ These are **different paths**. The gateway looks at `/app/src/ui/dist`, but the 
 
 **Impact**: Production Docker deployment STILL serves no frontend.
 **Fix**: Either:
+
 1. Change Dockerfile destination to `./src/ui/dist` (match gateway expectation)
 2. OR change `_UI_BUILD_DIR` to `Path(__file__).resolve().parent / "static"` (match Dockerfile destination)
 Option 1 is simpler and preserves the local dev path:
+
 ```dockerfile
 COPY --from=frontend-build /app/src/ui/dist ./src/ui/dist
 ```
+
 **Status**: OPEN (PROD-030 regression — source fixed but destination wrong)
 
 ### Worker Lifespan — Verified OK
 
 **File**: `src/vaultspec_a2a/worker/app.py:44-96`
 The worker lifespan correctly:
+
 1. Creates `AsyncSqliteSaver` with proper cleanup via async context manager
 2. Creates `WorkerBridge` with internal token from settings
 3. Starts heartbeat at 10s interval (matches ADR)
@@ -1028,6 +1117,7 @@ The executor `shutdown()` method clears caches and shuts down the aggregator but
 
 **File**: `docker-compose.prod.yml`
 **Problem**: Neither compose file sets `VAULTSPEC_ENVIRONMENT`. The default is `DEVELOPMENT`. This means:
+
 1. The PROD-017 fix (require internal token in non-dev) is bypassed — internal endpoints remain unauthenticated
 2. Dev-mode CORS origins are included (localhost:5173, etc.)
 3. No production-specific logging or behavior is activated
@@ -1038,6 +1128,7 @@ The executor `shutdown()` method clears caches and shuts down the aggregator but
 ### Docker Dev Compose — Same Issues as Prod (Expected)
 
 `docker-compose.dev.yml` has:
+
 - No `VAULTSPEC_AUTO_SPAWN_WORKER=false` (same ghost worker issue as PROD-053)
 - Healthcheck uses `/internal/health` (but auth is skipped in dev mode — acceptable)
 - No `VAULTSPEC_ENVIRONMENT` set (defaults to DEVELOPMENT — correct for dev)
@@ -1068,17 +1159,20 @@ The auto-spawn issue in dev is less severe since developers may not notice the g
 
 **File**: `docker-compose.prod.yml:21,50`
 **Problem**: Both `api` and `worker` services use `env_file: .env`, which imports **all** variables from the host `.env` file into the container. The `environment:` section overrides some vars, but critical variables like `VAULTSPEC_ENVIRONMENT` are NOT overridden. This means:
+
 1. If `.env` has `VAULTSPEC_ENVIRONMENT=development` (or omits it), the container runs in dev mode → PROD-057 root cause confirmed
 2. If `.env` has `LANGSMITH_TRACING=true`, production containers trace every request to LangSmith → data leak + cost (see PROD-061)
 3. If `.env` has `VAULTSPEC_INTERNAL_TOKEN=` (empty, as in `.env.example`), internal endpoints remain unauthenticated
 4. If `.env` has `VAULTSPEC_AUTO_SPAWN_WORKER=true` (or omits it), the ghost worker problem (PROD-053) persists
 **Impact**: The prod compose's security posture is entirely dependent on the contents of an unversioned `.env` file. There is no fail-safe.
 **Fix**: The `environment:` section in prod compose MUST explicitly set all security-critical variables:
+
 ```yaml
 VAULTSPEC_ENVIRONMENT: 'production'
 VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
 VAULTSPEC_INTERNAL_TOKEN: '${VAULTSPEC_INTERNAL_TOKEN:?REQUIRED}'
 ```
+
 Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is not set.
 **Status**: OPEN
 
@@ -1086,6 +1180,7 @@ Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is n
 
 **File**: `docker-compose.prod.yml:21`, `.env:9`
 **Problem**: The `.env` file has `LANGSMITH_TRACING=true` (line 9). Via `env_file: .env`, this is imported into both api and worker containers. Neither service overrides `LANGSMITH_TRACING` in its `environment:` section. In production, this means:
+
 1. Every LangGraph execution sends full traces (prompts, completions, tool calls) to `api.smith.langchain.com`
 2. Customer/user data in thread messages is exfiltrated to a third-party service
 3. LangSmith API costs scale linearly with production traffic
@@ -1113,6 +1208,7 @@ Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is n
 
 **File**: `src/vaultspec_a2a/api/endpoints.py:1128-1137`, `src/vaultspec_a2a/database/crud.py:delete_thread`
 **Problem**: The delete endpoint performs a hard-delete with no status guard. A RUNNING thread can be deleted while the worker is actively executing a graph for it. This causes:
+
 1. Worker continues graph execution, writing checkpoints and events for a deleted thread
 2. Worker attempts to emit terminal events, calling `/internal/events/batch` with a thread_id that no longer exists in the DB
 3. The `_handle_terminal_event` in `internal.py` calls `update_thread_status` which will fail because the thread was deleted
@@ -1125,6 +1221,7 @@ Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is n
 
 **File**: `src/vaultspec_a2a/api/endpoints.py:778,844`, `src/vaultspec_a2a/worker/executor.py:289-295`
 **Problem**: `send_message_endpoint` checks for ARCHIVED status (line 778) but does NOT check if the thread is already RUNNING. If a user sends a second message while a graph execution is in progress:
+
 1. Gateway dispatches a second `ingest` to the worker (succeeds, 200 OK)
 2. Gateway sets thread status to RUNNING (already RUNNING, transition is a no-op)
 3. Worker's `_mark_ingest_active()` returns False (thread already active)
@@ -1142,6 +1239,7 @@ Using `${VAR:?REQUIRED}` syntax causes compose to fail-fast if the variable is n
 
 **File**: `src/vaultspec_a2a/worker/executor.py:380-385`
 **Problem**: In `_handle_resume`, if `_mark_ingest_active()` returns False (another ingest/resume already running for the same thread), the handler returns silently — no `_emit_terminal_status`, no error event. Compare with `_handle_ingest` (line 289-295) which also drops silently, but the resume case is worse:
+
 1. User responded to a permission request (explicit action)
 2. Worker drops the resume because an ingest is somehow already active (race window)
 3. Graph stays at the interrupt forever — the user's permission response is lost
@@ -1175,6 +1273,7 @@ No new findings in aggregator memory management.
 
 **File**: `src/vaultspec_a2a/api/endpoints.py:1090`
 **Problem**: `cancel_thread_endpoint` calls `circuit_breaker.pre_dispatch()` (line 1090) before dispatching the cancel to the worker. If the circuit breaker is OPEN (3+ consecutive worker failures), cancel requests are rejected with 503 "Worker circuit breaker OPEN". This creates an unresolvable state:
+
 1. Worker goes down -> 3 dispatch failures -> circuit opens
 2. Threads that were RUNNING at failure time are stuck in RUNNING state
 3. User tries to cancel -> 503 from circuit breaker -> cancel impossible
@@ -1199,6 +1298,7 @@ No new findings in aggregator memory management.
 
 **File**: `src/vaultspec_a2a/api/endpoints.py:371-392`
 **Problem**: In `create_thread_endpoint`, the `worker_client.post("/dispatch")` response is **not checked for status code**. When the worker returns 429 (at capacity):
+
 1. httpx does NOT raise an exception for 4xx responses — it returns a Response object
 2. The response is discarded (line 372: no variable assignment)
 3. `circuit_breaker.record_success()` is called (worker is alive, just busy)
@@ -1207,6 +1307,7 @@ No new findings in aggregator memory management.
 6. The thread sits forever in SUBMITTED state — no graph execution, no events, no terminal status
 **Impact**: Under high load, threads silently fail to start. User sees successful creation but nothing happens.
 **Fix**: Check `resp.is_success` after the POST. If False (429 or other error), mark thread as FAILED and return 429 or 502 to the user:
+
 ```python
 resp = await worker_client.post("/dispatch", json=dispatch.model_dump())
 if not resp.is_success:
@@ -1214,6 +1315,7 @@ if not resp.is_success:
     await db.commit()
     raise HTTPException(status_code=resp.status_code, detail=resp.text)
 ```
+
 **Status**: OPEN
 
 ### PROD-068 | HIGH | Same 429-ignored bug in send_message_endpoint
@@ -1229,6 +1331,7 @@ The circuit breaker recording 429s as "success" is actually correct behavior. 42
 ### PROD-043 status update — Double-confirmed
 
 The cancel-at-capacity bug (PROD-043) is confirmed from both sides:
+
 - **Worker side** (`worker/app.py:121`): `at_capacity()` rejects cancel dispatches with 429
 - **Gateway cancel endpoint** (`endpoints.py:1096`): `resp.is_success` IS checked for cancel (unlike create/send), so 429 → `dispatched=False` → DB unchanged. But the user gets `cancelled=False` without explanation.
 - **Gateway circuit breaker** (`endpoints.py:1090`): Rejects cancel attempts when circuit is OPEN (PROD-066).
@@ -1251,10 +1354,12 @@ Total: Cancel has two separate blockers — capacity (429) and circuit breaker (
 **File**: `src/vaultspec_a2a/api/internal.py:179-183`
 **Problem**: The internal WebSocket endpoint manually checks `internal_token` (because WS routes bypass router-level Depends). If `internal_token` is None, auth is completely skipped regardless of environment. The HTTP `_verify_internal_token` dependency (line 127-128) checks `settings.environment != DEVELOPMENT` and raises 500 if token is missing in production. But the WS endpoint has no equivalent environment check.
 **Scenario**: In production with `VAULTSPEC_INTERNAL_TOKEN` unset (PROD-057 scenario):
+
 - HTTP internal endpoints correctly reject (500 "token required")
 - Internal WS endpoint silently accepts unauthenticated connections
 - An attacker who can reach the internal port can connect and inject arbitrary events (heartbeats, graph events, terminal status updates)
 **Fix**: Add environment check to the WS auth:
+
 ```python
 if _settings.internal_token is None:
     if _settings.environment != Environment.DEVELOPMENT:
@@ -1266,6 +1371,7 @@ else:
         await websocket.close(code=1008, reason="Unauthorized")
         return
 ```
+
 **Status**: OPEN
 
 ### Permission response 429 handling — Verified OK (mostly)
@@ -1312,7 +1418,7 @@ All 6 dispatch sites in the gateway have been audited:
 
 | Layer | Files Audited | Passes | Key Areas |
 |-------|---------------|--------|-----------|
-| MCP Server | server.py, __main__.py | 4+ | Auto-start, health probing, tool error handling, httpx client |
+| MCP Server | server.py, **main**.py | 4+ | Auto-start, health probing, tool error handling, httpx client |
 | Gateway API | app.py, endpoints.py, internal.py, websocket.py | 12+ | Dispatch pipeline, circuit breaker, CORS, auth, StaticFiles |
 | Worker | executor.py, app.py, ipc.py | 8+ | Ingest gating, cancel races, resume handling, graph cache |
 | Database | session.py, crud.py, migrations/ | 4+ | WAL mode, status transitions, thread lifecycle |
@@ -1341,20 +1447,24 @@ All 6 dispatch sites in the gateway have been audited:
 ### Recommended Fix Batches
 
 **Batch 1 — Production blockers** (4 changes):
+
 - Fix Dockerfile COPY destination to match `_UI_BUILD_DIR` resolution
 - Check worker response status in create_thread and send_message endpoints
 - Add explicit security vars to prod compose environment section
 - Skip circuit breaker for cancel and resume dispatches
 
 **Batch 2 — Cancel reliability** (2 changes):
+
 - Exempt cancel from worker at_capacity check
 - Add status guard for DELETE on RUNNING threads
 
 **Batch 3 — Auth hardening** (2 changes):
+
 - Add environment check to internal WS auth (parity with HTTP dependency)
 - Add CORS environment conditioning
 
 **Batch 4 — Data integrity** (2 changes):
+
 - Guard send_message against RUNNING threads (return 409)
 - Emit terminal event when resume is dropped
 
@@ -1432,13 +1542,14 @@ after `_on_tool_call_update` if the dict exceeds a threshold.
 `_TERMINAL_COMMAND_ALLOWLIST` includes `bash`, `sh`, `zsh`, `pwsh`,
 `powershell`, and `cmd`. While `_SHELL_METACHAR_RE` rejects metacharacters in
 args, the agent can still:
+
 1. Execute `bash` with `-c` and a carefully crafted string that avoids the
    metachar regex (e.g., using `$(...)` is blocked by `$` and `(`, but
    `bash -c "echo hello"` with only spaces/quotes passes).
 2. Launch an interactive shell that accepts further input via terminal/output.
 
-The `_SHELL_METACHAR_RE` check (`[|&;`$()<>]`) does NOT block quotes (`"`, `'`),
-spaces, or newlines. An agent can pass `bash` with args `["-c", "rm -rf /tmp/data"]`
+The `_SHELL_METACHAR_RE` check (`[|&;`$()<>]`) does NOT block quotes (`"`,`'`),
+spaces, or newlines. An agent can pass`bash` with args `["-c", "rm -rf /tmp/data"]`
 — no metacharacters but arbitrary command execution.
 
 **Impact**: Defense-in-depth bypass. The sandbox path check on `cwd` limits

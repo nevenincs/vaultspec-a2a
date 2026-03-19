@@ -10,7 +10,6 @@ from typing import Annotated, NotRequired, TypedDict
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
 
-
 __all__ = ["TeamState"]
 
 

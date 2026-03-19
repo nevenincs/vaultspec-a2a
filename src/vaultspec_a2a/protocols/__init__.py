@@ -8,5 +8,4 @@ See ADR-003 (Protocol Bridging) and ADR-006 (Protocol Ecosystem Bridge).
 
 from .mcp import mcp as mcp
 
-
 __all__ = ["mcp"]

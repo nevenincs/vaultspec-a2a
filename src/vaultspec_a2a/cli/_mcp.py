@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 __all__ = ["mcp_group"]
 
 import anyio
@@ -61,7 +60,7 @@ def tools_cmd() -> None:
 @mcp_group.command()
 def discovery() -> None:
     """Print MCP server discovery info (static — MCP is now standalone)."""
-    import json  # noqa: PLC0415
+    import json
 
     data = {
         "name": "vaultspec-a2a",

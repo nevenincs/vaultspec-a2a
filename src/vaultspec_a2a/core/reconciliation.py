@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+from typing import TYPE_CHECKING
 
-from sqlalchemy.ext.asyncio import AsyncSession
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..database.checkpoints import Checkpointer
+    from ..database.checkpoints import Checkpointer
+
 from ..database.crud import (
     ControlActionResultStatus,
     ControlActionType,

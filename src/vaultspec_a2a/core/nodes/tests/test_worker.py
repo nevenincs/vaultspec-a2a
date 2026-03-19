@@ -1,7 +1,6 @@
 """Tests for deterministic worker node helpers."""
 
 import sys
-
 from pathlib import Path
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
@@ -18,7 +17,6 @@ from ..worker import (
     _resolve_effective_worker_model,
     _validate_option_id,
 )
-
 
 # ---------------------------------------------------------------------------
 # _first_option_id helper

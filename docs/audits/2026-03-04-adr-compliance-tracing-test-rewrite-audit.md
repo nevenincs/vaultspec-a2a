@@ -185,11 +185,12 @@ Bare `os.environ.get()` / `os.environ[...]` calls are an architectural violation
 | `src/vaultspec_a2a/workspace/environment.py` | 93 | `# ENV-SCRUB: intentional` | Scrub list logic must iterate raw env to build filtered subprocess env. Functionally equivalent to the probes exception. |
 
 **Not a violation** (no annotation needed):
+
 - `src/vaultspec_a2a/core/config.py` — is `Settings` itself; reading env is its purpose.
 
 **Action**: TASK-018 (coder) adds all three annotation comments. TASK-001b moves `LANGSMITH_*` reads in instrumentation.py to canonical names (covered separately).
 
-### LANGSMITH_* vs LANGCHAIN_* Naming (2026-03-04)
+### LANGSMITH_*vs LANGCHAIN_* Naming (2026-03-04)
 
 **Decision**: `LANGSMITH_*` is the canonical current naming per official LangSmith SDK docs
 and all official quickstart guides. `LANGCHAIN_*` are backward-compatible aliases that still
@@ -205,6 +206,7 @@ Where code reads env vars directly (e.g., `instrumentation.py`), read `LANGSMITH
 with `LANGCHAIN_*` as fallback for backward compatibility with existing `.env` files.
 
 **Complete canonical variable set**:
+
 | Canonical | Legacy Alias | Default |
 |-----------|-------------|---------|
 | `LANGSMITH_TRACING` | `LANGCHAIN_TRACING_V2` | (unset = disabled) |
@@ -289,6 +291,7 @@ evals/
 **Creation order**: `__init__.py` stubs first → `conftest.py` → `datasets/` → `evaluators/` (routing first, simplest) → `suites/smoke.py` → `suites/nightly.py`.
 
 **Pre-requisites before writing evaluators**:
+
 - LangSmith datasets must exist in cloud (`vaultspec-routing-v1`, `vaultspec-e2e-v1`)
 - `pyproject.toml` `[eval]` optional dependency group must be added (`agentevals>=0.0.4`, `openevals>=0.0.4`, `langsmith>=0.2`)
 - `LANGSMITH_API_KEY` + `LANGSMITH_TRACING=true` in CI secrets
@@ -298,6 +301,7 @@ evals/
 ### DRIFT-A/B Testability (2026-03-04)
 
 `_interrupt_permission_callback` approve/reject flows are testable at Layer 1 using:
+
 - `MemorySaver` + minimal `StateGraph` (no ACP subprocess)
 - Pattern established in `src/vaultspec_a2a/core/tests/test_supervisor.py:663-688`
 - First invocation triggers `interrupt()` → `result["__interrupt__"]`
@@ -317,6 +321,7 @@ as `TAG_NOSTREAM` in `src/vaultspec_a2a/core/nodes/supervisor.py`.
 
 **Mandate (2026-03-04, team-lead):** Producing a LangSmith trace is not sufficient.
 Every live graph run MUST be followed by a programmatic trace query that reports:
+
 - Which nodes fired and in what order
 - LLM inputs/outputs at each node
 - Latency per node
@@ -439,6 +444,7 @@ is safe. Reference: `src/vaultspec_a2a/core/nodes/supervisor.py:147-150, 245-274
 
 **ENV-BYPASS annotation policy (established)**
 Three categories of accepted bare `os.environ` access outside `src/vaultspec_a2a/core/config.py`:
+
 - `# ENV-BYPASS: otel-import-time` — OTel SDK constants evaluated at module import time
   (cannot use `settings` singleton due to circular dep / import-time evaluation constraint).
 - `# ENV-BYPASS: subprocess-env-inherit` — ACP subprocess env copy in `_protocol.py`.

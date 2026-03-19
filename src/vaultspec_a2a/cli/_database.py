@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 __all__ = ["database"]
 
 from datetime import UTC
@@ -10,15 +9,14 @@ from pathlib import Path
 
 import click
 
-
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
 _ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
 
 
 def _alembic_cfg() -> tuple:
-    from alembic.config import Config as AlembicConfig  # noqa: PLC0415
+    from alembic.config import Config as AlembicConfig
 
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     cfg = AlembicConfig(str(_ALEMBIC_INI))
     cfg.set_main_option("sqlalchemy.url", settings.database_url)
@@ -26,7 +24,7 @@ def _alembic_cfg() -> tuple:
 
 
 def _get_db_path() -> Path:
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     if settings.resolved_database_backend != "sqlite":
         click.echo(
@@ -53,7 +51,7 @@ def database() -> None:
 @click.option("--target", default="head", help="Migration target (default: head).")
 def update(target: str) -> None:
     """Run pending database migrations."""
-    from alembic import command  # noqa: PLC0415
+    from alembic import command
 
     cfg, _ = _alembic_cfg()
     command.upgrade(cfg, target)
@@ -64,11 +62,11 @@ def update(target: str) -> None:
 @click.option(
     "--yes", is_flag=True, required=True, help="Confirm destructive operation."
 )
-def clear(yes: bool) -> None:
+def clear(_yes: bool) -> None:
     """Delete all application data (preserves schema)."""
-    from sqlalchemy import create_engine, text  # noqa: PLC0415
+    from sqlalchemy import create_engine, text
 
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     engine = create_engine(settings.database_sync_url)
     tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]
@@ -85,9 +83,8 @@ def snapshot(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is not None:
         return
 
-    import sqlite3  # noqa: PLC0415
-
-    from datetime import datetime  # noqa: PLC0415
+    import sqlite3
+    from datetime import datetime
 
     db_path = _get_db_path()
     if not db_path.exists():
@@ -133,11 +130,11 @@ def restore(name: str, yes: bool) -> None:
         click.echo("This will overwrite the current database. Pass --yes to confirm.")
         raise SystemExit(1)
 
-    import sqlite3  # noqa: PLC0415
+    import sqlite3
 
-    import httpx  # noqa: PLC0415
+    import httpx
 
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     checks = [
         (settings.port, "/internal/health"),

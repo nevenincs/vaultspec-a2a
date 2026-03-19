@@ -28,23 +28,19 @@ See ADR-003 §2 (Protocol Bridging), ADR-006 §5 (MCP Tool Mapping).
 
 import contextlib
 import logging
-
 from typing import Annotated
 from urllib.parse import urlparse
 
 import httpx
-
 from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ...core.config import settings
 
-
 __all__ = ["mcp"]
 
 logger = logging.getLogger(__name__)
-
 
 
 # MCP-05: Shared httpx.AsyncClient — lazily created on first use and reused
@@ -64,7 +60,7 @@ def _get_client() -> httpx.AsyncClient:
     loop.  If the previous client was closed (e.g. event loop recycled between
     test runs), a new one is created automatically.
     """
-    global _shared_client  # noqa: PLW0603
+    global _shared_client
     if _shared_client is None or _shared_client.is_closed:
         _shared_client = httpx.AsyncClient()
     return _shared_client
@@ -72,11 +68,11 @@ def _get_client() -> httpx.AsyncClient:
 
 def _reset_client() -> None:
     """Close and discard the shared client.  Used by test fixtures."""
-    global _shared_client  # noqa: PLW0603
+    global _shared_client
     if _shared_client is not None and not _shared_client.is_closed:
         # LG-030: use close() instead of __del__() for proper cleanup.
         with contextlib.suppress(Exception):
-            _shared_client._transport.close()  # type: ignore[union-attr]  # noqa: SLF001
+            _shared_client._transport.close()  # type: ignore[union-attr]
     _shared_client = None
 
 
@@ -100,7 +96,7 @@ async def _get_known_presets() -> frozenset[str]:
     If the gateway is unreachable, returns an empty frozenset (allowing
     the gateway itself to reject unknown presets at create time).
     """
-    global _known_presets_cache  # noqa: PLW0603
+    global _known_presets_cache
     if _known_presets_cache is not None:
         return _known_presets_cache
 
@@ -127,7 +123,7 @@ async def _get_known_presets() -> frozenset[str]:
 
 def _reset_known_presets() -> None:
     """Clear the preset cache.  Used by test fixtures."""
-    global _known_presets_cache  # noqa: PLW0603
+    global _known_presets_cache
     _known_presets_cache = None
 
 
@@ -553,7 +549,7 @@ async def get_thread_status(
             content = last_msg.get("content", "")
             role = last_msg.get("role", "unknown")
             ellipsis = "..." if len(content) > settings.mcp_preview_truncate_len else ""
-            preview = content[:settings.mcp_preview_truncate_len] + ellipsis
+            preview = content[: settings.mcp_preview_truncate_len] + ellipsis
             lines.append(f"Last message ({role}): {preview}")
 
         # Agent summaries

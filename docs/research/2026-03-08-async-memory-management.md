@@ -42,6 +42,7 @@ thread_id or derived keys. All grow monotonically with thread creation:
 ### 1.2 What Gets Cleaned Up
 
 The `ingest()` method's `finally` block (line 1791-1812) cleans up **per-thread**:
+
 - `_cancel_events[thread_id]` (cleared)
 - `_chunk_buffers[thread_id]` (flushed)
 - `_tool_update_last_emit` entries for `thread_id` (deleted)
@@ -53,6 +54,7 @@ runs on process termination.
 ### 1.3 What Leaks
 
 After a thread completes, these entries remain forever:
+
 - `_sequences[thread_id]` -- 1 int per thread (small but unbounded)
 - `_ingest_queues[thread_id]` -- `asyncio.Queue` object (non-trivial memory)
 - `_fanout_tasks[thread_id]` -- `asyncio.Task` reference (may hold result/exc)
@@ -63,6 +65,7 @@ After a thread completes, these entries remain forever:
 ### 1.4 Quantifying the Leak
 
 Per completed thread, approximately:
+
 - `_sequences`: ~100 bytes (str key + int value)
 - `_ingest_queues`: ~500 bytes (Queue object + internal deque)
 - `_fanout_tasks`: ~200 bytes (Task object, GC'd if done)
@@ -159,12 +162,14 @@ class EventAggregator:
 ### 3.2 Pros/Cons
 
 **Pros:**
+
 - Simple to implement
 - No external dependencies
 - Works on both gateway and worker
 - Configurable TTL per deployment
 
 **Cons:**
+
 - Requires tracking `_last_activity` per thread (one more dict)
 - Periodic wake-up even when no pruning needed
 - TTL must be tuned: too short risks pruning active threads, too long defeats the purpose
@@ -227,12 +232,14 @@ if outcome in ("completed", "failed", "cancelled"):
 ### 4.3 Pros/Cons
 
 **Pros:**
+
 - Immediate cleanup, no TTL delay
 - No background task overhead
 - Memory stays proportional to **active** threads only
 - Simple call site
 
 **Cons:**
+
 - Requires a reliable "thread is terminal" signal
 - If `ingest()` throws unexpectedly, cleanup might not run (need try/finally)
 - Does not handle the case where a thread becomes terminal via external means
@@ -242,6 +249,7 @@ if outcome in ("completed", "failed", "cancelled"):
 
 Interrupted threads (permission request) are NOT terminal -- they may resume.
 `cleanup_thread()` must NOT be called for interrupted threads. Only for:
+
 - `completed`
 - `failed`
 - `cancelled`
@@ -342,11 +350,13 @@ class BoundedThreadState:
 ### 6.2 Pros/Cons
 
 **Pros:**
+
 - Guaranteed bounded memory regardless of thread count
 - No background task
 - Simple implementation
 
 **Cons:**
+
 - May evict state for active long-running threads
 - Requires careful sizing of `maxsize`
 - Does not clean up asyncio Tasks/Queues (only works for simple data)
@@ -370,6 +380,7 @@ Validated from installed source at
 `.venv/Lib/site-packages/langgraph/checkpoint/memory/__init__.py`.
 
 LangGraph's `InMemorySaver` uses three unbounded `defaultdict` structures:
+
 - `storage`: thread_id -> checkpoint_ns -> checkpoint_id -> checkpoint data
 - `writes`: (thread_id, checkpoint_ns, checkpoint_id) -> pending writes
 - `blobs`: (thread_id, checkpoint_ns, channel, version) -> serialized blob
@@ -471,6 +482,7 @@ tg.start_soon(_prune_loop, executor.aggregator)
 ### 8.3 Memory After Fix
 
 With explicit cleanup, memory is proportional to **active threads** only:
+
 - 0 completed thread entries (cleaned immediately)
 - ~1KB per active thread (same as before)
 - Permission TTL GC runs as safety net every 60s
@@ -507,6 +519,7 @@ terminal `AgentStatusEvent`).
 | LRU eviction | Debounce maps, bounded data | Can evict active entries | Yes (for debounce only) |
 
 **Recommended combo for WRK-K02:**
+
 1. `cleanup_thread()` called on terminal outcomes (immediate)
 2. `prune_stale_permissions()` on 60s interval (safety net)
 3. Existing `_evict_oldest()` for debounce maps (bounded cap)

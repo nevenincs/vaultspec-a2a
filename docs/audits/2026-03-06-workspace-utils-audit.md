@@ -27,6 +27,7 @@ _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 The regex allows `.` and `/` characters, which means `../escape/path` matches the pattern. While git itself rejects branch names containing `..`, the validation should reject them at the application layer too (defense-in-depth). A branch name like `feature/../../../etc` would pass regex validation.
 
 **Mitigation:** Git's own `rev-parse --verify` would reject invalid refs, but the regex should be tightened to prevent `..` sequences:
+
 ```python
 _BRANCH_NAME_RE = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_/.-]*$")
 # Add: if ".." in branch_name: raise
@@ -42,6 +43,7 @@ tracing_on = os.environ.get("LANGSMITH_TRACING") or os.environ.get("LANGCHAIN_TR
 ```
 
 And lines 51-53:
+
 ```python
 project_name
 or os.environ.get("LANGSMITH_PROJECT")
@@ -136,6 +138,7 @@ The frozenset of standard LogRecord attributes does not include `stackLevel` (ad
 ### Assessment
 
 Both modules are well-maintained after the `lib/` -> `src/vaultspec_a2a/` migration:
+
 - **Zero stale `lib.` paths** in either module
 - All imports use proper relative patterns
 - Security measures (input validation, credential scrubbing, path traversal prevention) are thorough
@@ -162,10 +165,12 @@ No fixes applied to workspace/ or utils/ since Cycle 1.
 ### Utils Facade Analysis
 
 `utils/__init__.py` exports 9 symbols from `enums.py` + `logging.py`:
+
 - `MODEL_MAP`, `PROVIDER_DEFAULT_MODELS`, `AcpRequestId`, `AgentState`, `Environment`, `LogLevel`, `Model`, `Provider` (from enums)
 - `setup_logging` (from logging)
 
 **Not exported:**
+
 - `JSONFormatter` — declared in `logging.py:__all__` but not re-exported from facade. Only used internally by `setup_logging()`. **MED-02 still open.**
 - `trace.py` — entire module not exported. `print_trace_summary` only used by `scripts/` runners. **MED-03 still open.**
 - `trace.py` has no `__all__` declaration. **MED-01 still open.**
@@ -175,6 +180,7 @@ No fixes applied to workspace/ or utils/ since Cycle 1.
 #### `_STANDARD_LOG_ATTRS` completeness check (LOW-03)
 
 Missing from the frozenset vs Python 3.13 `logging.LogRecord`:
+
 - `stackLevel` — added in Python 3.8, used as a parameter to `Logger.log()` but NOT stored as a LogRecord attribute (it's consumed during call-site resolution). **Not actually a gap** — LOW-03 was a false positive for `stackLevel`.
 - `taskName` — IS included (line 43). Correct for Python 3.12+.
 
@@ -189,6 +195,7 @@ Lines 98-100 remove all root handlers unconditionally. This is standard practice
 #### `JSONFormatter` extra field extraction (new observation)
 
 Lines 67-69:
+
 ```python
 for key, value in record.__dict__.items():
     if key not in _STANDARD_LOG_ATTRS and not key.startswith("_"):
@@ -202,12 +209,14 @@ This iterates all LogRecord attributes, filtering out standard ones. If a third-
 Confirmed: `acp_chat_model.py:731` imports `from ..workspace.git_manager import _git_mutex`. This private symbol is used for file-write coordination between the ACP chat model and git operations. The mutex is module-level in `git_manager.py` (line 44) and is shared across the process.
 
 This is a **cross-module coupling** that should be resolved by either:
+
 1. Making `_git_mutex` public (`git_mutex`) and exporting from the workspace facade
 2. Moving the shared lock to a common location (e.g., `core/`)
 
 ### Environment: LANGSMITH_API_KEY Scrub Gap (MED-04)
 
 Still open. `workspace/environment.py:72-89` scrub_keys contains:
+
 - `LANGCHAIN_API_KEY` (legacy)
 - `OPENAI_API_KEY`
 - `ANTHROPIC_API_KEY`

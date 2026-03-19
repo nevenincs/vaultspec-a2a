@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-
 __all__ = ["agent"]
 
 import secrets
-
 from pathlib import Path
 
 import click
@@ -40,7 +38,7 @@ def list_cmd() -> None:
 @click.option("--message", required=True, help="Message to send.")
 def ask(agent_name: str, message: str) -> None:
     """Send a question to an agent preset (solo-coder by default)."""
-    from ._util import _api_client, _handle_response  # noqa: PLC0415
+    from ._util import _api_client, _handle_response
 
     with _api_client() as client:
         # CLI-I01: append a 6-char hex suffix so each invocation gets a unique

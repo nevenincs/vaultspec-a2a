@@ -11,11 +11,11 @@ import asyncio
 import logging
 import subprocess
 import sys
-
-from collections.abc import Mapping
 from contextlib import suppress
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 __all__ = ["kill_process_tree", "spawn_acp_process"]
 

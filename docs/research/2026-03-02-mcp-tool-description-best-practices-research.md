@@ -232,6 +232,7 @@ class WeatherData(BaseModel):
 
 5. **State constraints in natural language** (LLMs parse this better than
    raw JSON Schema):
+
    ```
    "Maximum 32,000 characters. Longer messages are rejected."
    ```

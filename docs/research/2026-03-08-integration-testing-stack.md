@@ -17,12 +17,14 @@ quota exceeded; library source is more authoritative anyway).
 **Team-lead directive (2026-03-08): tests must HARD FAIL, never skip.**
 
 Fixtures OWN the full service lifecycle:
+
 - They START required services (subprocess or Docker container) in setup
 - They STOP and CLEAN UP services in teardown
 - If a service fails to start or become healthy, the fixture raises, the test
   FAILS. That failure is the correct signal.
 
 **FORBIDDEN in test code:**
+
 - `pytest.skip()` based on service availability
 - `shutil.which()` checks that skip tests
 - `@pytest.mark.requires_*` that gate on availability
@@ -30,6 +32,7 @@ Fixtures OWN the full service lifecycle:
 - Any "graceful degradation" or "self-healing skip" in test fixtures
 
 **REQUIRED:**
+
 - Always exercise real services
 - Always hard-fail when real services are unavailable
 - Own the full lifecycle (start -> test -> stop) in session-scoped fixtures
@@ -50,6 +53,7 @@ added to `[dependency-groups] dev`.
 
 The stdlib `asyncio.subprocess.Process` exposes only `pid`, `terminate()`,
 `kill()`, and `wait()`. It cannot:
+
 - List child processes (worker spawned by gateway)
 - Check which process holds a port
 - Inspect process CPU/memory for resource leak tests
@@ -566,6 +570,7 @@ asyncio_default_fixture_loop_scope = "function"
 ### The Problem
 
 If every integration test spawns its own gateway + worker subprocess:
+
 - ~5-15s startup per test
 - Port conflicts between concurrent spawns
 - Wasted CI time
@@ -1222,6 +1227,7 @@ def assert_trace_chain(exporter, parent_name: str, child_name: str) -> None:
 
 **InMemorySpanExporter only captures spans from the process it runs in.**
 For our architecture:
+
 - Gateway spans: captured (gateway runs in the test process or a subprocess)
 - Worker spans: NOT captured (worker is a separate subprocess with its own
   TracerProvider)
@@ -1462,14 +1468,15 @@ signal to the developer.
 ---
 
 Sources:
+
 - Installed library source: `.venv/Lib/site-packages/` (all libraries above)
-- psutil documentation: https://psutil.readthedocs.io/
-- pytest-timeout PyPI: https://pypi.org/project/pytest-timeout/
-- tenacity documentation: https://tenacity.readthedocs.io/
-- httpx documentation: https://www.python-httpx.org/
-- pytest-asyncio docs: https://pytest-asyncio.readthedocs.io/
-- testcontainers-python: https://testcontainers-python.readthedocs.io/ + GitHub source
-- testcontainers PyPI: https://pypi.org/project/testcontainers/ (v4.14.1)
-- OpenTelemetry Collector: https://opentelemetry.io/docs/collector/
+- psutil documentation: <https://psutil.readthedocs.io/>
+- pytest-timeout PyPI: <https://pypi.org/project/pytest-timeout/>
+- tenacity documentation: <https://tenacity.readthedocs.io/>
+- httpx documentation: <https://www.python-httpx.org/>
+- pytest-asyncio docs: <https://pytest-asyncio.readthedocs.io/>
+- testcontainers-python: <https://testcontainers-python.readthedocs.io/> + GitHub source
+- testcontainers PyPI: <https://pypi.org/project/testcontainers/> (v4.14.1)
+- OpenTelemetry Collector: <https://opentelemetry.io/docs/collector/>
 - OTel Python SDK source: `opentelemetry/sdk/_shared_internal/__init__.py` (BatchProcessor error handling)
 - OTel OTLP gRPC exporter source: `opentelemetry/exporter/otlp/proto/grpc/exporter.py` (retry + error handling)

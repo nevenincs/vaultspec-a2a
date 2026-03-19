@@ -1,25 +1,34 @@
 # MockLLM Research Synthesis and Architecture Strategy
+
 **Date:** 2026-03-04
 **Context:** Vaultspec-A2A UI testing decoupling
 
 ## Objective
+
 To determine the best approach for implementing a `MockLLM` that can simulate full LangGraph team behaviors, error states, tool calls, and permission handling natively.
 
 ## 1. Native SDK Framework Support
+
 LangChain explicitly provides mocking facilities through:
+
 1. `GenericFakeChatModel`: Streams predefined messages deterministically.
 2. Custom `BaseChatModel` subclasses: Recommended in LangChain docs for fine-grained control over prompt handling and complex simulated workflows.
 
 ## 2. Architecture Comparison: Native SDK vs. ACP-Based Agent
+
 ### ACP-Based Agent (External Process)
+
 **Pros:** Uses the exact same `acp_chat_model.py` transport layer as real LLMs.
-**Cons:** 
+**Cons:**
+
 - Requires spawning an external Node/Python process.
 - Hard to programmatically trigger core deep LangGraph exceptions (`GraphBubbleUp`, `InvalidUpdateError`) via JSON-RPC.
 - Slower test execution due to subprocess overhead and pipe serialization.
 
 ### Native Python SDK (BaseChatModel subclass)
-**Pros:** 
+
+**Pros:**
+
 - Runs natively IN the LangGraph state machine.
 - 100% trace compatibility: LangSmith perfectly traces Native SDK nodes exactly as it does for real LLMs.
 - Capable of injecting native errors directly.
@@ -29,6 +38,7 @@ LangChain explicitly provides mocking facilities through:
 **Recommendation:** Go with the Native SDK Implementation. Implement `MockChatModel` in `src/vaultspec_a2a/providers/mock_chat_model.py`.
 
 ## 3. LangGraph Failure States & Error Mapping
+
 Our mock implementation must simulate real failures observed in the LangGraph application. Here is the mapping of LangGraph exceptions to our mock scenarios:
 
 | Failure Type | LangGraph / Native Exception | Mock Simulation Strategy |
@@ -40,6 +50,7 @@ Our mock implementation must simulate real failures observed in the LangGraph ap
 | **Provider Auth Error** | `AuthenticationError` | Model explicitly raises an HTTP-like auth error or `AcpAuthError` on the first tick. |
 
 ## 4. Derived Mock Team Presets
+
 Based on the required UI states, we will structure the `.vaultspec/teams/mock-*.toml` files to use `provider = "mock"` and bind `capability` to these precise scenarios:
 
 1. **`mock-success-single.toml`**: Simulates a single model completing a task cleanly.
@@ -50,6 +61,7 @@ Based on the required UI states, we will structure the `.vaultspec/teams/mock-*.
 6. **`mock-human-in-loop.toml`**: Model invokes `session/request_permission`, raising a `GraphBubbleUp` interrupt to the UI.
 
 ## Conclusion
+
 The Native SDK implementation allows robust testing of the front-end stream without additional mock server infrastructure.
 
 By combining `MockChatModel` with custom TOML definitions, developers can launch the primary VaultSpec server with `LANGSMITH_PROJECT=mock-tests` and saturate the UI via the standard WebSocket stream.

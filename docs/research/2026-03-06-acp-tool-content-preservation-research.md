@@ -276,6 +276,7 @@ if event_kind == "on_chat_model_stream":
 ### 5.2 ArtifactUpdateEvent Detection
 
 When `status == "completed"` and `kind in ("edit", "delete", "move")`:
+
 1. Extract filename from `locations[0]["path"]`
 2. Extract diff content from `content` blocks with `type == "diff"`
 3. Emit `ArtifactUpdateEvent(filename=..., content=...)`

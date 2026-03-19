@@ -74,6 +74,7 @@ mcp = FastMCP(
 ### Library API
 
 The `lifespan` parameter expects:
+
 ```python
 Callable[[FastMCP[LifespanResultT]], AbstractAsyncContextManager[LifespanResultT]]
 ```
@@ -174,6 +175,7 @@ tools would enable MCP progress notifications (PHASE-1d).
 ### Library API
 
 Three transport modes:
+
 - `"stdio"`: `anyio.run(self.run_stdio_async)` -- used for IDE integration
 - `"sse"`: SSE over HTTP (legacy, being deprecated in favor of streamable-http)
 - `"streamable-http"`: Modern HTTP transport

@@ -5,7 +5,6 @@ All tests use real temp directories (tmp_path). No mocks, no monkeypatching.
 
 import shutil
 import time
-
 from pathlib import Path
 
 from ..rules import RuleManager

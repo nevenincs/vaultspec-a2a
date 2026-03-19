@@ -22,7 +22,6 @@ from .enums import (
     ToolKind,
 )
 
-
 __all__ = [
     # Event models
     "AgentStatusEvent",

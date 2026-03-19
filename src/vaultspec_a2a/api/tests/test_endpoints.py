@@ -23,7 +23,6 @@ from ...core.config import settings
 from ...database.crud import record_permission_request
 from .conftest import make_app
 
-
 # ---------------------------------------------------------------------------
 # POST /threads
 # ---------------------------------------------------------------------------
@@ -531,7 +530,9 @@ class TestPermissionRespond:
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == "allow_once"
         record = next(
-            rec for rec in caplog.records if "Dispatching resume dispatch_id=" in rec.message
+            rec
+            for rec in caplog.records
+            if "Dispatching resume dispatch_id=" in rec.message
         )
         assert record.thread_id == thread_id
         assert record.request_id == request_id
@@ -664,7 +665,9 @@ class TestCreateThreadAutonomous:
     def test_create_thread_autonomous_inherits_team_auto_approve(
         self, session_factory, checkpointer
     ) -> None:
-        """When autonomous is not set, team auto_approve=True makes dispatch autonomous."""
+        """When autonomous is not set, team auto_approve=True
+        makes dispatch autonomous.
+        """
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with TestClient(app, raise_server_exceptions=True) as client:

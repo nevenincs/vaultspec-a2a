@@ -117,7 +117,7 @@ vaultspec database restore --name SNAPSHOT  # refuses if service is running
 ### Design principles
 
 1. Command names understandable without docs.
-2. Sub-commands complete a sentence: "I want to test ___" / "I want to run ___."
+2. Sub-commands complete a sentence: "I want to test _**" / "I want to run**_."
 3. Defaults do the most common thing.
 4. Max 3 segments for the common case.
 5. `test` = verification. `run` = execution. `agent` = single-agent. `team` = multi-agent lifecycle. `service` = process control. `database` = data management.

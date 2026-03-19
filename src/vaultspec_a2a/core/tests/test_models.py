@@ -9,7 +9,6 @@ import pytest
 from ..models import ArtifactRef, PlanStep, TokenUsageEntry
 from ..state import _append_validation_errors, _merge_vault_index
 
-
 # ---------------------------------------------------------------------------
 # TokenUsageEntry
 # ---------------------------------------------------------------------------

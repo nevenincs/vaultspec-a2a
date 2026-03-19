@@ -1,7 +1,7 @@
 # API Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/api/` — all 12 source files (app.py, endpoints.py, internal.py, supervisor.py, websocket.py, auth.py, schemas/{__init__, base, commands, enums, events, internal, rest, snapshots}.py)
+**Scope:** `src/vaultspec_a2a/api/` — all 12 source files (app.py, endpoints.py, internal.py, supervisor.py, websocket.py, auth.py, schemas/{**init**, base, commands, enums, events, internal, rest, snapshots}.py)
 **Baseline:** Last audited 2026-02-28 (Third-Pass Deep Audit Fix Sprint)
 
 ---
@@ -232,6 +232,7 @@ status: str
 The API module is well-structured after the ADR-019 service separation. The gateway pattern is clean — no graph execution runs locally, all work dispatches to the worker via HTTP. The schemas subpackage is comprehensive with proper discriminated unions and Pydantic models.
 
 The main concerns are:
+
 1. **HIGH-06**: The dual dispatch paths (WS vs REST) construct payloads differently, with the WS path bypassing `DispatchRequest` validation entirely. This will cause silent divergence as `DispatchRequest` evolves.
 2. **HIGH-03**: Using the undocumented `checkpointer.aget()` instead of the documented `aget_tuple()` API.
 3. **Stale paths**: 4 separate docstrings still reference `lib.*` instead of `vaultspec_a2a.*`.
@@ -248,6 +249,7 @@ The main concerns are:
 ## Cycle 2 — Dual Aggregator Deep Dive (2026-03-06)
 
 **Focus areas** (per team-lead brief):
+
 1. `app.py` lifespan — how EventAggregator is wired
 2. `endpoints.py` — REST handlers reading aggregator state (stale/empty data?)
 3. `websocket.py` — how WS subscribers get wired
@@ -270,6 +272,7 @@ The main concerns are:
 #### CRIT-01: REST handlers return stale/empty aggregator data until worker relays `graph_registered`
 
 **Root cause:** The API-side `EventAggregator` (created at `app.py:254`) starts with ZERO state:
+
 - `_node_metadata = {}` — populated ONLY when `sync_worker_event()` receives a `graph_registered` event from the worker (aggregator.py:891-908)
 - `_agent_states = {}` — empty until `sync_worker_event()` processes `agent_status` events
 - `_pending_permissions = {}` — empty until `sync_worker_event()` processes `permission_request`
@@ -296,12 +299,14 @@ The main concerns are:
 **File:** `aggregator.py:829-908`
 
 `sync_worker_event()` processes:
+
 - `agent_status` → updates `_agent_states`, advances sequence
 - `permission_request` → stores in `_pending_permissions`, advances sequence
 - `permission_resolved` → removes from `_pending_permissions`, advances sequence
 - `graph_registered` → populates `_node_metadata` (BE-12), does NOT advance sequence
 
 All other event types (`message_chunk`, `tool_call_start`, `tool_call_update`, `plan_update`, `error`, `artifact_update`, `thought_chunk`) are silently dropped. This means:
+
 - `get_sequence()` only advances for 3 of 12 event types — making `last_sequence` unreliable for gap detection
 - `graph_registered` does not advance sequence either (no thread_id context)
 - Any REST endpoint relying on aggregator state for non-agent/permission data gets stale results
@@ -311,6 +316,7 @@ All other event types (`message_chunk`, `tool_call_start`, `tool_call_update`, `
 **File:** `websocket.py:506-537`
 
 `broadcast_to_thread()` sends events directly to WebSocket clients via `websocket.send_json(payload)`, completely bypassing the aggregator's `_broadcast()` / queue mechanism. This means:
+
 - Events sent via `broadcast_to_thread()` do NOT get sequence numbers stamped by the aggregator
 - The `_writer_loop()` (which drains the aggregator queue) and `broadcast_to_thread()` can race on the same WebSocket connection — no ordering guarantee between aggregator-queued events and relay-broadcast events
 - The aggregator's `_broadcast_hooks` are not invoked for relay events
@@ -331,6 +337,7 @@ Should be `vaultspec_a2a.core.aggregator` and `vaultspec_a2a.api.schemas`.
 #### HIGH-10: 10 stale `lib.` path references across api/ module (including tests)
 
 **Files and locations:**
+
 1. `websocket.py:511` — `lib.api.internal`
 2. `internal.py:9` — `lib.worker.ipc`
 3. `__init__.py:5-6` — `lib.core.aggregator`, `lib.api.schemas`
@@ -414,17 +421,20 @@ Connection-scoped events (Connected, Heartbeat) correctly extend `BaseModel` dir
 **Status: CORRECT but dual-path**
 
 The `ConnectionManager` is wired at `app.py:257`:
+
 ```python
 cm = ConnectionManager(aggregator)
 app.state.connection_manager = cm
 ```
 
 Subscriber lifecycle:
+
 1. **connect()** (line 129): Accepts WS, generates `client_id`, calls `aggregator.add_subscriber(client_id)` to get a dedicated `asyncio.Queue[ServerEvent]`, starts heartbeat + writer tasks
 2. **listen()** (line 208): Read loop dispatching client commands (SUBSCRIBE, UNSUBSCRIBE, SEND_MESSAGE, etc.)
 3. **disconnect()** (line 182): Cancels tasks, calls `aggregator.remove_subscriber(client_id)`, removes connection
 
 **Dual delivery path:** Events reach WS clients via TWO independent paths:
+
 1. **Aggregator queue path**: `aggregator._broadcast()` → per-subscriber `Queue.put()` → `_writer_loop()` → `websocket.send_json()`
 2. **Internal relay path**: `internal.py` → `cm.broadcast_to_thread()` → direct `websocket.send_json()`
 

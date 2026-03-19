@@ -125,9 +125,11 @@ Sensitive value masking via `_mask()` helper.
 ### 5.2 Reference: LangGraph CLI
 
 Uses Click 9.x+ with **reusable option constants**:
+
 ```python
 OPT_CONFIG = click.option("--config", "-c", help="Config path")
 ```
+
 Good pattern for shared options across `service` and `team` subcommands.
 
 ### 5.3 Reference: MCP Python SDK CLI
@@ -137,6 +139,7 @@ Uses Typer. Not applicable — project is committed to Click.
 ### 5.4 Dispatch Patterns
 
 Two patterns in codebase:
+
 1. **Subprocess dispatch**: `sys.exit(subprocess.run([sys.executable, "-m",
    ...]).returncode)` — used by `test`, `preps`, `eval`.
 2. **Direct invocation**: `uvicorn.run(...)` — used by `serve`, `worker`.

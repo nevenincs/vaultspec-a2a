@@ -13,16 +13,13 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
-
 from typing import Any
 
 import anyio
 import httpx
-
 from fastapi.encoders import jsonable_encoder
 
 from ..core.config import settings
-
 
 __all__ = ["WorkerBridge"]
 

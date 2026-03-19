@@ -1,7 +1,7 @@
 # Worker Module Audit — 2026-03-06
 
 **Auditor:** codebase-researcher (automated)
-**Scope:** `src/vaultspec_a2a/worker/` — 6 source files (app.py, executor.py, ipc.py, health.py, __main__.py, __init__.py)
+**Scope:** `src/vaultspec_a2a/worker/` — 6 source files (app.py, executor.py, ipc.py, health.py, **main**.py, **init**.py)
 **Baseline:** Never fully audited (module created during ADR-019 service separation sprint, 2026-03-03)
 
 ---
@@ -101,6 +101,7 @@ So the actual runtime behavior is 10s, but the signature default of 30s is misle
 **File:** `ipc.py:88-114`
 
 `send_event()` performs a blocking HTTP POST for every event. If the gateway is slow or unresponsive, events will queue up in the asyncio event loop. There's no:
+
 - Rate limiting
 - Queue with bounded size
 - Batching window
@@ -206,6 +207,7 @@ Dead code that should be deleted. See HIGH-01.
 The worker module implements ADR-019 service separation correctly — graph compilation, execution, and event aggregation all run in the worker process. The `Executor` class is well-structured with proper ingest gating and lazy recompilation.
 
 The main concerns are:
+
 1. **CRIT-01**: The `_graphs` dict will grow unboundedly in production. An LRU eviction policy with configurable capacity is needed.
 2. **CRIT-02**: Per-event HTTP POST relay is extremely chatty. Batching or switching to a persistent connection would dramatically reduce I/O.
 3. **MED-01**: SDD blackboard fields (`vault_index`, `active_feature`) are carefully built by the API, dispatched to the worker, and silently dropped. This breaks ADR-020 vault mounting for newly created threads.

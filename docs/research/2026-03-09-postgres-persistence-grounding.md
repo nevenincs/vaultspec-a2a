@@ -2175,13 +2175,13 @@ Official LangGraph docs reinforce the same authority boundary:
 ### Reference sources
 
 - LangGraph persistence:
-  https://docs.langchain.com/oss/python/langgraph/persistence
+  <https://docs.langchain.com/oss/python/langgraph/persistence>
 - LangGraph durable execution:
-  https://docs.langchain.com/oss/python/langgraph/durable-execution
+  <https://docs.langchain.com/oss/python/langgraph/durable-execution>
 - LangGraph interrupts:
-  https://docs.langchain.com/oss/python/langgraph/interrupts
+  <https://docs.langchain.com/oss/python/langgraph/interrupts>
 - LangGraph Platform threads/history:
-  https://docs.langchain.com/langgraph-platform/use-threads
+  <https://docs.langchain.com/langgraph-platform/use-threads>
 
 ## Slice extension: local code precedent for worker-owned `StateSnapshot` authority
 

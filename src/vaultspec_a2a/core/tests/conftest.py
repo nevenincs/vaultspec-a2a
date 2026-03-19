@@ -14,7 +14,6 @@ import os
 import httpx
 import pytest
 
-
 __all__: list[str] = []
 
 _DEFAULT_VIDAIMOCK_URL = "http://localhost:8100"

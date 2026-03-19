@@ -12,13 +12,11 @@ will be normalised).  Falls back to
 from __future__ import annotations
 
 import os
-
 from pathlib import Path
 from uuid import uuid4
 
 import psycopg
 import pytest
-
 
 __all__: list[str] = []
 

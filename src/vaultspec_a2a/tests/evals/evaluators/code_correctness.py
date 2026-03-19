@@ -8,9 +8,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
-
 from typing import Any
-
 
 _PYTEST_SUMMARY_RE = re.compile(r"(\d+) passed")
 _PYTEST_FAILED_RE = re.compile(r"(\d+) failed")

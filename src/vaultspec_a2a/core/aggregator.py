@@ -14,7 +14,6 @@ import asyncio
 import json
 import logging
 import time
-
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from datetime import UTC, datetime
@@ -51,7 +50,6 @@ from ..api.schemas.events import (
 from ..telemetry.instrumentation import get_meter, get_tracer
 from .config import settings
 from .exceptions import EventAggregatorError
-
 
 # M6: import GraphInterrupt for isinstance check vs string comparison.
 try:
@@ -809,7 +807,7 @@ class EventAggregator:
             except (TypeError, ValueError):
                 args_str = str(input_args)
             if len(args_str) > settings.tool_arg_truncate_len:
-                args_str = args_str[:settings.tool_arg_truncate_len] + "..."
+                args_str = args_str[: settings.tool_arg_truncate_len] + "..."
             content.append(ToolCallContentText(text=args_str))
         event = ToolCallStartEvent(
             thread_id=thread_id,
@@ -1179,7 +1177,7 @@ class EventAggregator:
     # LangGraph astream_events integration (research §1.2)
     # ------------------------------------------------------------------
 
-    async def process_langgraph_event(  # noqa: PLR0911, PLR0915
+    async def process_langgraph_event(
         self,
         event_data: dict[str, Any],
         thread_id: str,
@@ -1325,7 +1323,7 @@ class EventAggregator:
                     if output_str:
                         if len(output_str) > settings.tool_arg_truncate_len:
                             output_str = (
-                                output_str[:settings.tool_arg_truncate_len] + "..."
+                                output_str[: settings.tool_arg_truncate_len] + "..."
                             )
                         output_content = [ToolCallContentText(text=output_str)]
                 await self.emit_tool_call_update(
@@ -1493,7 +1491,7 @@ class EventAggregator:
     async def _emit_interrupt_events(
         self,
         thread_id: str,
-        agent_id: str,
+        _agent_id: str,
         graph: StreamableGraph,
         config: dict[str, Any],
     ) -> bool:

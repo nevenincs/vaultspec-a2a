@@ -7,13 +7,12 @@ import socketserver
 import subprocess
 import threading
 import uuid
-
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
+from typing import ClassVar
 from urllib import parse
 
 from .. import _verify
-
 
 _TEST_TEMP_ROOT = Path.home() / ".codex" / "memories" / "vaultspec-verify-tests"
 _TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
@@ -27,7 +26,7 @@ def test_wait_for_health_records_probe_history_until_ok() -> None:
     """Health wait should preserve probe history across non-ready responses."""
 
     class HealthHandler(BaseHTTPRequestHandler):
-        responses = [
+        responses: ClassVar[list[dict[str, str]]] = [
             {"status": "starting"},
             {
                 "status": "ok",
@@ -134,9 +133,7 @@ def test_resolve_gemini_host_cli_home_uses_explicit_cli_home() -> None:
     creds_path.parent.mkdir(parents=True)
     creds_path.write_text("{}", encoding="utf-8")
 
-    resolved = _verify._resolve_gemini_host_cli_home(
-        {"GEMINI_CLI_HOME": str(cli_home)}
-    )
+    resolved = _verify._resolve_gemini_host_cli_home({"GEMINI_CLI_HOME": str(cli_home)})
 
     assert resolved == cli_home
 
@@ -144,9 +141,7 @@ def test_resolve_gemini_host_cli_home_uses_explicit_cli_home() -> None:
 def test_resolve_gemini_host_cli_home_returns_none_without_creds() -> None:
     """Verifier should reject Gemini OAuth mode when the host creds file is absent."""
     missing = _TEST_TEMP_ROOT / f"missing-{uuid.uuid4().hex}"
-    resolved = _verify._resolve_gemini_host_cli_home(
-        {"GEMINI_CLI_HOME": str(missing)}
-    )
+    resolved = _verify._resolve_gemini_host_cli_home({"GEMINI_CLI_HOME": str(missing)})
 
     assert resolved is None
 
@@ -366,10 +361,5 @@ def test_write_evidence_manifest_records_correlation_artifacts() -> None:
     assert manifest["readiness_probe_count"] == 2
     assert manifest["artifacts"]["compose_config"] == "compose.config.yaml"
     assert manifest["services"]["gateway"]["inspect"] == "gateway.inspect.json"
-    assert manifest["trace_services"]["vaultspec-a2a"]["trace_ids"] == [
-        "trace-a"
-    ]
-    assert (
-        manifest["provider_probe"]["stdout_artifact"]
-        == "gemini.probe.stdout.txt"
-    )
+    assert manifest["trace_services"]["vaultspec-a2a"]["trace_ids"] == ["trace-a"]
+    assert manifest["provider_probe"]["stdout_artifact"] == "gemini.probe.stdout.txt"

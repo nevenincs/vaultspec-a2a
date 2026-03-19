@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-
 __all__ = ["service"]
 
 import json
@@ -11,13 +10,11 @@ import signal
 import subprocess
 import sys
 import time
-
 from pathlib import Path
 from typing import Any
 
 import click
 import httpx
-
 
 _WINDOWS_DETACHED_FLAGS = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(
     subprocess, "CREATE_NEW_PROCESS_GROUP", 0
@@ -45,7 +42,7 @@ def _registry_path(runtime_dir: Path | None = None) -> Path:
 
 def _service_specs() -> dict[str, dict[str, Any]]:
     """Return the static service spec map."""
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     return {
         "gateway": {
@@ -320,7 +317,7 @@ def start(
     log_level: str | None,
 ) -> None:
     """Start one or more local services in the background."""
-    from ..core.config import settings  # noqa: PLC0415
+    from ..core.config import settings
 
     target = target.lower()
     level = (log_level or settings.log_level.value).lower()

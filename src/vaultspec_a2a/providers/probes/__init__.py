@@ -21,7 +21,6 @@ directly from their modules to avoid the Python ``__main__`` re-import warning.
 from ._http import run_http_probe
 from ._protocol import ProbeResult, run_probe
 
-
 __all__ = [
     "ProbeResult",
     "run_http_probe",

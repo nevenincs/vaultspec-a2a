@@ -41,7 +41,6 @@ import httpx
 import psutil
 import pytest
 import pytest_asyncio
-
 from docker.errors import DockerException
 from sqlalchemy import text
 from sqlalchemy.engine import make_url
@@ -53,7 +52,6 @@ from tenacity import (
     wait_exponential,
 )
 from testcontainers.core.container import DockerContainer
-
 
 __all__: list[str] = []
 
@@ -92,7 +90,9 @@ _JAEGER_IMAGE = "cr.jaegertracing.io/jaegertracing/jaeger:2.16.0"
 _JAEGER_OTLP_GRPC_PORT = 4317
 _JAEGER_OTLP_HTTP_PORT = 4318
 _JAEGER_UI_PORT = 16686
-_JAEGER_HEALTH_PORT = 13133  # OTel health extension — GET /status returns 200 when ready
+_JAEGER_HEALTH_PORT = (
+    13133  # OTel health extension — GET /status returns 200 when ready
+)
 _JAEGER_HEALTH_PATH = "/status"
 _POSTGRES_IMAGE = "postgres:16-alpine"
 _POSTGRES_PORT = 5432
@@ -186,7 +186,8 @@ def isolated_jaeger_container():
     else:
         container.stop()
         pytest.fail(
-            f"Jaeger container did not become healthy within 30s (health: {health_url})",
+            f"Jaeger container did not become healthy within 30s "
+            f"(health: {health_url})",
             pytrace=False,
         )
 
@@ -292,7 +293,9 @@ async def _drop_postgres_database(admin_url: str, database_name: str) -> None:
     engine = create_async_engine(admin_url, isolation_level="AUTOCOMMIT")
     try:
         async with engine.connect() as conn:
-            await conn.execute(text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)'))
+            await conn.execute(
+                text(f'DROP DATABASE IF EXISTS "{database_name}" WITH (FORCE)')
+            )
     finally:
         await engine.dispose()
 
@@ -302,12 +305,16 @@ async def isolated_postgres_urls(postgres_sqlalchemy_url, postgres_checkpoint_ur
     """Return fresh app/checkpoint URLs backed by a unique logical Postgres DB."""
     database_name = f"vaultspec_test_{uuid.uuid4().hex}"
     admin_url = postgres_sqlalchemy_url
-    sqlalchemy_url = make_url(postgres_sqlalchemy_url).set(
-        database=database_name
-    ).render_as_string(hide_password=False)
-    checkpoint_url = make_url(postgres_checkpoint_url).set(
-        database=database_name
-    ).render_as_string(hide_password=False)
+    sqlalchemy_url = (
+        make_url(postgres_sqlalchemy_url)
+        .set(database=database_name)
+        .render_as_string(hide_password=False)
+    )
+    checkpoint_url = (
+        make_url(postgres_checkpoint_url)
+        .set(database=database_name)
+        .render_as_string(hide_password=False)
+    )
 
     await _create_postgres_database(admin_url, database_name)
     try:
@@ -390,7 +397,8 @@ def pytest_runtest_setup(item: pytest.Item) -> None:
                 )
         except Exception as exc:
             pytest.fail(
-                f"Jaeger is not reachable at http://localhost:{_JAEGER_HEALTH_PORT}{_JAEGER_HEALTH_PATH}: {exc}. "
+                f"Jaeger is not reachable at "
+                f"http://localhost:{_JAEGER_HEALTH_PORT}{_JAEGER_HEALTH_PATH}: {exc}. "
                 "Run `just jaeger-up` to start Jaeger.",
                 pytrace=False,
             )

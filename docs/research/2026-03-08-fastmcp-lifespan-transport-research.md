@@ -8,6 +8,7 @@ FastMCP's lifespan pattern, transport internals, and caveats for embedding in
 existing applications.
 
 **Related documents:**
+
 - `2026-03-08-library-validation-fastmcp.md` — API validation against installed source
 - `2026-03-08-subprocess-coordination-patterns.md` — Process lifecycle patterns
 
@@ -28,6 +29,7 @@ lifespan: Callable[
 ```
 
 The lifespan is a callable that:
+
 - Receives the `FastMCP` instance as its sole argument
 - Returns an async context manager
 - The context manager yields a value of type `LifespanResultT`
@@ -132,6 +134,7 @@ async def run_stdio_async(self) -> None:
 ```
 
 **Internals:**
+
 1. `stdio_server()` is an async context manager from `mcp.server.stdio`
 2. It wraps `sys.stdin` and `sys.stdout` in `anyio.abc.ByteStream` adapters
 3. `read_stream` reads JSON-RPC messages from stdin (line-delimited)
@@ -139,6 +142,7 @@ async def run_stdio_async(self) -> None:
 5. `MCPServer.run()` enters the main message processing loop
 
 **Our entry point** (`protocols/mcp/__main__.py`):
+
 ```python
 mcp.run(transport="stdio")
 ```
@@ -271,6 +275,7 @@ mcp.run() → anyio.run()
 ```
 
 This means:
+
 - Lifespan startup runs AFTER the transport is connected
 - Lifespan cleanup runs BEFORE the transport disconnects
 - For stdio: lifespan runs once per stdin connection (IDE session)
@@ -298,6 +303,7 @@ async def start_thread(
 ```
 
 FastMCP extracts:
+
 - Tool name from function name
 - Description from docstring
 - Parameters from function signature (Pydantic model generated)

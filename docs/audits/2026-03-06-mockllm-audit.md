@@ -45,7 +45,7 @@
 
 | ID | Priority | Status | Description | File:Line | Fix Applied |
 |----|----------|--------|-------------|-----------|-------------|
-| ARCH-001 | HIGH | Fixed | model_copy drops _agent_config — VidaiMock URL routing lost, all workers hit wrong tape after copy. Resolved by MOCK-004 (PrivateAttr). | `mock_chat_model.py:32`, `worker.py:176` | Fixed by MOCK-004 in Batch 1 |
+| ARCH-001 | HIGH | Fixed | model_copy drops_agent_config — VidaiMock URL routing lost, all workers hit wrong tape after copy. Resolved by MOCK-004 (PrivateAttr). | `mock_chat_model.py:32`, `worker.py:176` | Fixed by MOCK-004 in Batch 1 |
 | ARCH-004 | MED | Fixed | MockChatModel lacks permission_callback — mock-human-in-loop HIL path never wired. | `worker.py:173` | Added `permission_callback: Any \| None = Field(default=None, exclude=True)` to MockChatModel class body; `hasattr(model, "permission_callback")` now returns True |
 | ARCH-006 | LOW | Informational | Supervisor in mock topologies always hits mock-success-single tape (no agent_config passed to ProviderFactory). | `graph.py` supervisor resolution | — |
 | ARCH-007 | LOW | Informational | mock-seeder autonomous=True means mock-human-in-loop runs same as mock-autonomous. | `docker/run.py:104` | — |

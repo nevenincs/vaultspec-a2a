@@ -6,9 +6,7 @@ Idempotent migration functions that can be run safely multiple times.
 import json
 import logging
 import sqlite3
-
 from pathlib import Path
-
 
 __all__ = ["backfill_teamstate_sdd_fields"]
 

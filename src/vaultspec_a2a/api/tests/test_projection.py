@@ -5,7 +5,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-
 from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -162,9 +161,7 @@ def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     projected = apply_checkpoint_projection(snapshot, projection)
 
     assert projected.checkpoint_id == "cp-1"
-    assert projected.checkpoint_created_at == datetime(
-        2026, 3, 9, 10, 20, tzinfo=UTC
-    )
+    assert projected.checkpoint_created_at == datetime(2026, 3, 9, 10, 20, tzinfo=UTC)
     assert projected.checkpoint_parent_id == "cp-0"
     assert projected.checkpoint_source == "loop"
     assert projected.checkpoint_step == 4

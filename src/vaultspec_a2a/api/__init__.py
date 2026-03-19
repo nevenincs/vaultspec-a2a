@@ -18,7 +18,6 @@ from .schemas import EventEnvelope as EventEnvelope
 from .schemas import ServerEvent as ServerEvent
 from .schemas import ThreadStateSnapshot as ThreadStateSnapshot
 
-
 __all__ = [
     "ClientCommand",
     "ClientMessage",

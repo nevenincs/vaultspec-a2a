@@ -92,124 +92,37 @@ markers = [
 
 [tool.ruff]
 line-length = 88
-indent-width = 4
 target-version = "py313"
-# Exclude throwaway utility scripts at repo root (not part of the package).
-exclude = ["fix_*.py", "_to_oragnize"]
-
 
 [tool.ruff.lint]
 select = [
-  "E",  # pycodestyle errors (PEP 8)
-  "W",  # pycodestyle warnings (PEP 8)
-  "F",  # Pyflakes (logical errors, unused imports/variables)
-  "I",  # isort (import sorting - Google Style §3.1.2)
-  "D",  # pydocstyle (docstring conventions - Google Style §3.8)
-  "N",  # pep8-naming (naming conventions - Google Style §3.16)
-  "UP", # pyupgrade (use modern Python syntax)
-  "ANN",# flake8-annotations (type hint usage/style - Google Style §2.22)
-  "A",  # flake8-builtins (avoid shadowing builtins)
-  "B",  # flake8-bugbear (potential logic errors & style issues - incl. mutable defaults B006, B008)
-  "C4", # flake8-comprehensions (unnecessary list/set/dict comprehensions)
-  "ISC",# flake8-implicit-str-concat (disallow implicit string concatenation across lines)
-  "T20",# flake8-print (discourage `print` - prefer logging)
-  "SIM",# flake8-simplify (simplify code, e.g., `if cond: return True else: return False`)
-  "PTH",# flake8-use-pathlib (use pathlib instead of os.path where possible)
-  "PL", # Pylint rules ported to Ruff (PLC, PLE, PLR, PLW)
-  "PIE",# flake8-pie (misc code improvements, e.g., no-unnecessary-pass)
-  "RUF",# Ruff-specific rules (e.g., RUF001-003 ambiguous unicode)
-  "RET",# flake8-return (consistency in return statements)
-  "SLF",# flake8-self (check for private member access via `self`)
-  "TID",# flake8-tidy-imports (relative imports, banned imports - configure if needed)
-  "YTT",# flake8-boolean-trap (checks for boolean positional arguments, truthiness tests - Google Style §3.10)
-  "TD", # flake8-todos (check TODO format - Google Style §3.7)
-]
-ignore = [
-  "TID251", # Custom banned imports (not used yet)
-  "TID252", # Relative imports from parent modules (Required by ADR-009)
-  "D104",   # Missing docstring in public package (__init__.py)
+  "E",   # pycodestyle errors
+  "W",   # pycodestyle warnings
+  "F",   # pyflakes
+  "I",   # isort
+  "B",   # flake8-bugbear
+  "C4",  # flake8-comprehensions
+  "UP",  # pyupgrade
+  "ARG", # flake8-unused-arguments
+  "SIM", # flake8-simplify
+  "TCH", # flake8-type-checking
+  "RUF", # ruff-specific rules
+  "N",   # pep8-naming
 ]
 unfixable = ["B"]
 
 [tool.ruff.lint.per-file-ignores]
-# emit_permission_request takes 6 positional args by design (thread_id, agent_id,
-# request_id, description, options, tool_call) — collapsing them into a dataclass
-# would require a breaking API change.
-"src/vaultspec_a2a/core/aggregator.py" = ["PLR0913", "PLR0912"]
-
-# process_langgraph_event dispatches 13 LangGraph event kinds inline; extracting
-# sub-handlers would obscure the mapping without reducing actual complexity.
-# git_manager.py: merge_worktree branches over 3 merge strategies + pre-flight
-# checks — each branch is a distinct git operation, not reducible.
-"src/vaultspec_a2a/workspace/git_manager.py" = ["PLR0912"]
-
-# FastAPI endpoints use Depends() in function defaults — this IS the correct
-# FastAPI pattern, not a mutable default argument bug.
+"**/test_*.py" = ["ARG"]
+"**/tests/**/*.py" = ["ARG"]
+# FastAPI endpoints use Depends() in function defaults
 "src/vaultspec_a2a/api/endpoints.py" = ["B008"]
-# Internal router uses FastAPI Depends() in function defaults
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
-# Worker app uses FastAPI Depends() in function defaults (same as endpoints.py).
-# Lazy import of AsyncSqliteSaver avoids circular dep through checkpoint package.
-"src/vaultspec_a2a/worker/app.py" = ["B008", "PLC0415"]
-# Executor: __init__ docstring on class (D107), Any for event dispatch (ANN401)
-"src/vaultspec_a2a/worker/executor.py" = ["D107", "ANN401"]
-# IPC bridge: __init__ docstring on class (D107), HTTP status codes (PLR2004)
-"src/vaultspec_a2a/worker/ipc.py" = ["D107", "PLR2004"]
-# Telemetry: conditional SDK imports are inside functions because the SDK
-# may not be loaded yet at import time; logging uses lazy imports.
-"src/vaultspec_a2a/telemetry/instrumentation.py" = ["PLC0415"]
-"src/vaultspec_a2a/utils/logging.py" = ["PLC0415"]
-# ACP: lazy import of _git_mutex avoids circular deps; process management
-# functions legitimately use Any for subprocess/dict-based RPC messages.
-# _process_tool_result and _handle_subprocess_output have > 12 branches
-# from dispatcher logic and error handling paths.
-"src/vaultspec_a2a/providers/acp_chat_model.py" = ["PLC0415", "PLR0912"]
-# Factory uses **kwargs: Any for delegation — genuinely untyped.
-# Factory.__init__ has 51 statements from provider initialization.
-"src/vaultspec_a2a/providers/factory.py" = ["ANN401", "PLR0915"]
-# Database session uses module-level global singletons for engine/factory pooling.
-# Middleware uses a module-level global for the tracer instance.
-"src/vaultspec_a2a/database/session.py" = ["PLW0603"]
-"src/vaultspec_a2a/database/checkpoints.py" = ["PLC0415"]
-"src/vaultspec_a2a/telemetry/middleware.py" = ["PLW0603"]
-# CLI uses click decorators, print for user output, and lazy imports inside commands.
-"src/vaultspec_a2a/cli.py" = ["T20", "PLC0415"]
-
-# Test files: fixtures and helper stubs don't need full type annotations or
-# docstrings, and magic status-code comparisons (e.g. == 200) are idiomatic.
-# Private member access is needed for testing internal implementation details.
-# Mutable defaults are used in test helper classes (intentional).
-"src/vaultspec_a2a/**/tests/test_*.py" = ["ANN", "D", "E501", "PLR2004", "SIM105", "SLF001", "RUF012", "PLC0415"]
-"src/vaultspec_a2a/**/tests/conftest.py" = ["ANN", "D", "E501", "PLR2004", "PLC0415"]
-# Preps scenario runners use print() for console output by design.
-"src/vaultspec_a2a/tests/preps/*.py" = ["T20", "ANN", "D"]
-# Evals files are not production code; relax annotation/docstring rules.
-"src/vaultspec_a2a/tests/evals/**/*.py" = ["ANN", "D"]
-
-[tool.ruff.lint.pylint]
-# Default max-args=5 is too restrictive for graph compilation and CRUD
-# functions that need thread_id + session + several configuration params.
-max-args = 8
-
-[tool.ruff.lint.pydocstyle]
-convention = "google"
+"src/vaultspec_a2a/worker/app.py" = ["B008"]
 
 [tool.ruff.lint.isort]
-#force-sort-within-sections = true
-#combine-as-imports = true
-case-sensitive = true
-#force-single-line = false
-#known-first-party = []
-#known-third-party = []
-lines-after-imports = 2
-lines-between-types = 1
-#no-lines-before = ["LOCALFOLDER"]
-#required-imports = []
-#section-order = ["future", "standard-library", "third-party", "first-party", "local-folder"]
+known-first-party = ["vaultspec_a2a"]
 
 [tool.ruff.format]
-docstring-code-format = true
-docstring-code-line-length = "dynamic" # Or set to 80
 quote-style = "double"
 indent-style = "space"
 

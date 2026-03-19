@@ -26,6 +26,7 @@ This sets the global `TracerProvider` and `MeterProvider` via
 `telemetry/instrumentation.py:220-285`.
 
 **What it configures**:
+
 - SDK TracerProvider with Resource (`service.name`, `service.version`)
 - OTLP gRPC exporter (if `opentelemetry-exporter-otlp-proto-grpc` installed)
 - Console exporter (if `OTEL_EXPORTER_CONSOLE=true`)
@@ -40,6 +41,7 @@ This sets the global `TracerProvider` and `MeterProvider` via
 
 The worker process (`worker/app.py:44-96`) never calls `configure_telemetry()`.
 This means:
+
 - The worker runs with the OTel no-op provider
 - No spans are emitted from the worker process
 - No metrics are recorded by the worker
@@ -96,12 +98,14 @@ The `DispatchRequest` schema (`api/schemas/internal.py`) has no
 the worker called `configure_telemetry()`, it would start new root spans
 rather than continuing the gateway's trace. The distributed trace chain would
 show disconnected spans:
+
 - Gateway: `POST /api/threads/send` -> `POST /dispatch`
 - Worker: (new root) `handle_dispatch` -> LangGraph execution
 
 **Fix**: Inject `traceparent` into the dispatch HTTP request headers. The
 worker should extract it and attach to the `handle_dispatch` span. This
 requires:
+
 1. Gateway dispatch code: `inject_trace_context(headers)` before POST
 2. Worker dispatch handler: `propagate.extract(request.headers)` before
    starting the execution span
@@ -167,11 +171,13 @@ MCP tool invocations cannot be correlated with gateway spans by trace ID.
 
 LangSmith tracing is completely independent of OTel. LangChain reads these
 env vars at import time:
+
 - `LANGCHAIN_TRACING_V2=true`: Enables tracing
 - `LANGCHAIN_API_KEY`: Auth key
 - `LANGCHAIN_PROJECT`: Project name
 
 When enabled, LangChain automatically traces:
+
 - All `ChatModel.ainvoke()` / `astream()` calls
 - All tool calls
 - LangGraph node transitions
@@ -203,6 +209,7 @@ env_file in Docker compose). The fix is to explicitly set
 ### 5.1 Gateway Metrics
 
 The gateway defines OTel counters and histograms via `telemetry/get_meter()`:
+
 - `api/websocket.py:56-61`: `ws.events_sent`, `ws.heartbeats_sent`,
   `ws.connections_active`
 - `api/endpoints.py`: Request latency (via TelemetryMiddleware spans)

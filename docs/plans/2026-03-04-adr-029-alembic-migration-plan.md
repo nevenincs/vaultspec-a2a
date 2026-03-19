@@ -52,12 +52,14 @@ The technical research confirmed:
 
 10. **Strip DDL from `init_db()`** — remove `create_all` call (line 185) and the `ALTER TABLE` try/except block (lines 190-195)
 11. **Add `run_migrations()` helper** to `session.py` (or a new `src/vaultspec_a2a/database/migrate.py`):
+
     ```python
     async def run_migrations(db_path: str) -> None:
         cfg = Config("alembic.ini")
         cfg.set_main_option("sqlalchemy.url", f"sqlite+aiosqlite:///{db_path}")
         await asyncio.to_thread(command.upgrade, cfg, "head")
     ```
+
 12. **Wire startup**: call `run_migrations()` in `src/vaultspec_a2a/api/app.py` lifespan before first request (gated by `settings.auto_migrate` flag, default `True` for dev)
 13. **Remove `OperationalError` import** from session.py (no longer needed)
 

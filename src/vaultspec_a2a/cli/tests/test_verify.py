@@ -9,7 +9,7 @@ import threading
 import uuid
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, cast
 from urllib import parse
 
 from .. import _verify
@@ -44,7 +44,7 @@ def test_wait_for_health_records_probe_history_until_ok() -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, message_format: str, *args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = _ThreadedHTTPServer(("127.0.0.1", 0), HealthHandler)
@@ -67,7 +67,8 @@ def test_wait_for_health_records_probe_history_until_ok() -> None:
     assert probe_history[0]["ok"] is False
     assert probe_history[0]["response"] == {"status": "starting"}
     assert probe_history[1]["ok"] is True
-    assert probe_history[1]["response"]["database_backend"] == "postgres"
+    response = cast("dict[str, object]", probe_history[1]["response"])
+    assert response["database_backend"] == "postgres"
 
 
 def test_write_provider_probe_artifacts_persists_stdout_and_stderr() -> None:
@@ -234,7 +235,7 @@ def test_wait_for_traces_uses_lookback_query_for_exercised_services() -> None:
             self.end_headers()
             self.wfile.write(body)
 
-        def log_message(self, message_format: str, *args: object) -> None:
+        def log_message(self, format: str, *args: object) -> None:
             return
 
     server = _ThreadedHTTPServer(("127.0.0.1", 0), JaegerHandler)
@@ -252,7 +253,8 @@ def test_wait_for_traces_uses_lookback_query_for_exercised_services() -> None:
         server.server_close()
         thread.join(timeout=1)
 
-    assert results["vaultspec-a2a"]["data"][0]["traceID"] == "trace-a"
+    data = cast("list[dict[str, str]]", results["vaultspec-a2a"]["data"])
+    assert data[0]["traceID"] == "trace-a"
     assert requests == [
         {
             "service": ["vaultspec-a2a"],
@@ -264,7 +266,7 @@ def test_wait_for_traces_uses_lookback_query_for_exercised_services() -> None:
 
 def test_capture_jaeger_diagnostics_scopes_manifest_to_queried_services() -> None:
     """Trace manifests should only require and record the queried services."""
-    trace_results = {
+    trace_results: dict[str, dict[str, object]] = {
         "vaultspec-a2a": {
             "data": [{"traceID": "trace-a"}],
             "errors": None,
@@ -286,7 +288,8 @@ def test_capture_jaeger_diagnostics_scopes_manifest_to_queried_services() -> Non
 
     assert manifest["services"] == ["vaultspec-a2a"]
     assert manifest["lookback"] == "1m"
-    assert manifest["vaultspec-a2a"]["trace_ids"] == ["trace-a"]
+    a2a = cast("dict[str, object]", manifest["vaultspec-a2a"])
+    assert a2a["trace_ids"] == ["trace-a"]
     assert "vaultspec-worker" not in manifest
     written = json.loads(
         (artifact_dir / "trace-manifest.json").read_text(encoding="utf-8")
@@ -297,7 +300,7 @@ def test_capture_jaeger_diagnostics_scopes_manifest_to_queried_services() -> Non
 
 def test_write_evidence_manifest_records_correlation_artifacts() -> None:
     """Evidence manifests should link bounded artifacts, traces, and services."""
-    probe_history = [
+    probe_history: list[dict[str, object]] = [
         {
             "timestamp": "2026-03-11T12:00:00Z",
             "url": "http://localhost:8000/api/health",
@@ -311,7 +314,7 @@ def test_write_evidence_manifest_records_correlation_artifacts() -> None:
             "response": {"status": "ok", "database_backend": "postgres"},
         },
     ]
-    trace_manifest = {
+    trace_manifest: dict[str, object] = {
         "start_ms": 1,
         "end_ms": 2,
         "vaultspec-a2a": {

@@ -100,11 +100,11 @@ def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -
 def _build_worker_restart_detail(
     *,
     returncode: int | None,
-    stderr_log_path: Path,
+    stderr_log_path: Path | None,
 ) -> str:
     """Build a compact diagnostic string for health/readiness surfaces."""
     detail = f"returncode={returncode}"
-    stderr_tail = _read_log_tail(stderr_log_path)
+    stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
     if stderr_tail:
         compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
         detail += f"; stderr_tail={compact_tail}"

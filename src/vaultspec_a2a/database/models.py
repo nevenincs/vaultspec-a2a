@@ -11,6 +11,7 @@ References:
 """
 
 from datetime import UTC, datetime
+from typing import override
 
 from sqlalchemy import (
     DateTime,
@@ -20,6 +21,7 @@ from sqlalchemy import (
     TypeDecorator,
     UniqueConstraint,
 )
+from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
 __all__ = [
@@ -49,8 +51,9 @@ class UTCDateTime(TypeDecorator[datetime]):
     impl = DateTime
     cache_ok = True
 
+    @override
     def process_bind_param(
-        self, value: datetime | None, _dialect: object
+        self, value: datetime | None, dialect: Dialect
     ) -> datetime | None:
         """Normalize inbound values to naive UTC for storage."""
         if value is None:
@@ -60,8 +63,9 @@ class UTCDateTime(TypeDecorator[datetime]):
             raise TypeError(msg)
         return value.astimezone(UTC).replace(tzinfo=None)
 
+    @override
     def process_result_value(
-        self, value: datetime | None, _dialect: object
+        self, value: datetime | None, dialect: Dialect
     ) -> datetime | None:
         """Restore UTC timezone info on loaded datetime values."""
         if value is None:

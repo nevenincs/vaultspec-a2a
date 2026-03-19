@@ -156,12 +156,17 @@ inject `VAULTSPEC_GATEWAY_URL`, `VAULTSPEC_PORT`, `VAULTSPEC_WORKER_PORT`,
 **Files touched**: `api/app.py`
 **Status**: [x] Done
 
-### Phase 7 — CLI Pre-flight Health Check
+### Phase 7 — CLI Pre-flight Health Check ← DONE
 
 **Goal**: Warn users when gateway is up but worker is disconnected.
 
+**Implementation**: Added `_preflight_check()` in `cli/_util.py` that probes
+`/api/health` with a 5s timeout before yielding the httpx client. Warns on
+stderr if worker status is `error` or circuit breaker is `open`. Best-effort —
+any exception is swallowed so read-only commands still work.
+
 **Files touched**: `cli/_util.py`
-**Status**: [ ] Not started
+**Status**: [x] Done — 25 CLI tests pass
 
 ---
 

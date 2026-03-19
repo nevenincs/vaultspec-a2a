@@ -27,17 +27,27 @@ class Settings(BaseSettings):
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     log_level: LogLevel = Field(default=LogLevel.INFO)
     database_backend: Literal["sqlite", "postgres"] = Field(
-        default="postgres",
+        default="sqlite",
         alias="VAULTSPEC_DATABASE_BACKEND",
-        description="Primary application database backend.",
+        description=(
+            "Primary application database backend.  SQLite is the local/dev "
+            "default (ADR-035).  Production deployments set 'postgres' via env."
+        ),
     )
     checkpoint_backend: Literal["sqlite", "postgres"] = Field(
-        default="postgres",
+        default="sqlite",
         alias="VAULTSPEC_CHECKPOINT_BACKEND",
-        description="LangGraph checkpointer persistence backend.",
+        description=(
+            "LangGraph checkpointer persistence backend.  Follows the same "
+            "convention as database_backend: sqlite for dev, postgres for prod."
+        ),
     )
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec"
+        default="sqlite+aiosqlite:///vaultspec.db",
+        description=(
+            "SQLAlchemy async database URL.  Must match the selected "
+            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg)."
+        ),
     )
     checkpoint_database_url: str | None = Field(
         default=None,
@@ -95,7 +105,8 @@ class Settings(BaseSettings):
         ),
     )
     provider_timeout_seconds: int = Field(
-        default=300, description="Global timeout for LLM provider API calls."
+        default=120,
+        description="Global timeout (seconds) for LLM provider API calls.",
     )
     # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
     # These are the canonical names used by every external tool and SDK.

@@ -139,7 +139,7 @@ async def services():
             else:
                 proc.terminate()
             await asyncio.wait_for(proc.wait(), timeout=10.0)
-```
+```text
 
 ### 2.2 Health Probe Helper
 
@@ -157,7 +157,7 @@ async def _wait_for_health(url: str, timeout: float = 15.0) -> None:
                 pass
             await asyncio.sleep(0.25)
     raise TimeoutError(f"Service at {url} did not become healthy in {timeout}s")
-```
+```text
 
 ### 2.3 Port Allocation
 
@@ -169,7 +169,7 @@ def _find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(("127.0.0.1", 0))
         return s.getsockname()[1]
-```
+```text
 
 ---
 
@@ -198,7 +198,7 @@ async def test_worker_crash_recovery(services):
         resp = await client.get(f"{gateway_url}/internal/health")
         health = resp.json()
         assert health["circuit_breaker"]["status"] == "open"
-```
+```text
 
 ### 3.2 Gateway Crash (MCP Perspective)
 
@@ -208,7 +208,7 @@ async def test_mcp_gateway_unreachable():
     # Start MCP server without gateway
     # Invoke a write tool (start_thread)
     # Verify ToolError contains "Gateway is not running"
-```
+```text
 
 ### 3.3 Graceful Shutdown
 
@@ -219,7 +219,7 @@ async def test_graceful_shutdown(services):
     gateway_proc.terminate()
     returncode = await asyncio.wait_for(gateway_proc.wait(), timeout=15.0)
     assert returncode == 0  # Clean exit
-```
+```text
 
 ---
 
@@ -309,7 +309,7 @@ async def test_trace_propagation(services):
         assert resp.status_code == 200
         # The trace ID should propagate to the gateway span
         # and onward to the worker dispatch
-```
+```text
 
 For full verification, use `InMemorySpanExporter` in the test process or
 check `OTEL_EXPORTER_CONSOLE=true` output in subprocess stderr.
@@ -321,14 +321,14 @@ check `OTEL_EXPORTER_CONSOLE=true` output in subprocess stderr.
 Following the project's rust-style convention (tests in source module
 subdirectories), integration tests should live in:
 
-```
+```yaml
 tests/                          # Top-level: cross-module integration
   test_e2e_smoke.py             # VERIFY-01: full chain smoke test
   test_crash_recovery.py        # Worker crash + circuit breaker
   test_ipc_heartbeat.py         # IPC batch relay + heartbeat staleness
   test_mcp_e2e.py               # MCP stdio -> gateway -> worker
   conftest.py                   # Shared fixtures (subprocess spawning)
-```
+```text
 
 These are the **only** tests that belong in the top-level `tests/` directory.
 Unit and module-level tests remain in their respective `tests/` subdirectories.

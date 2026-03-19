@@ -8,7 +8,7 @@ maturity: 25
 summary: 'Provider analysis for Anthropic Claude covering authentication, ACP/A2A support, permission model, and subscription-based billing bypass.'
 ---
 
-# Phase 2 Research: Claude Agent Support and Specificities
+## Phase 2 Research: Claude Agent Support and Specificities
 
 **Date**: 2026-02-25
 **Provider**: Anthropic (Claude Code CLI)
@@ -18,7 +18,8 @@ summary: 'Provider analysis for Anthropic Claude covering authentication, ACP/A2
 
 ## 1. Authentication Process
 
-**Local CLI vs. Direct Online APIs**
+### Local CLI vs. Direct Online APIs
+
 Claude Code CLI is heavily optimized for local terminal workflows. It acts as an
 interactive agent that reads the local file system and invokes Claude's cloud
 APIs for reasoning.
@@ -80,7 +81,8 @@ To successfully integrate Claude into the proposed coding-teams framework:
 
 ## 5. Pricing & API Usage
 
-**Subscriptions vs. API Billing**
+### Subscriptions vs. API Billing
+
 The **Claude Pro** consumer subscription and the **Anthropic API** are entirely
 separate platforms.
 

@@ -11,7 +11,7 @@ related:
   - docs/adrs/026-pipeline-phase-population.md
 ---
 
-# ADR-019: TeamState Enrichment for SDD Blackboard Awareness
+## ADR-019: TeamState Enrichment for SDD Blackboard Awareness
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -94,7 +94,7 @@ class TeamState(TypedDict):
     # Supervisor must not route to FINISH when this list is non-empty.
     # Cleared by returning {"validation_errors": []} from a node.
     validation_errors: Annotated[list[str], _append_validation_errors]
-```
+```text
 
 All four fields are required on every `TeamState`. The graph input patch at
 thread creation (S2.3) always sets them. The SQLite checkpointer migration
@@ -137,7 +137,7 @@ def _append_validation_errors(
     if not new:
         return []
     return existing + new
-```
+```text
 
 `active_feature` and `pipeline_phase` use last-write-wins (the LangGraph
 default for plain typed fields --- the most recent node return value overwrites).
@@ -161,7 +161,7 @@ graph_input = {
                    if metadata and metadata.feature_tag else {},
     "validation_errors": [],
 }
-```
+```text
 
 These four fields are always present in every graph invocation.
 
@@ -205,7 +205,7 @@ def _build_initial_vault_index(
                 str(m.relative_to(workspace_root)) for m in matches
             ]
     return index
-```
+```text
 
 Patterns are validated against the real `.vault/` directory structure at
 `Y:/code/vaultspec-worktrees/main/.vault/` --- subdirectory names are `adr`,
@@ -227,7 +227,7 @@ The migration strategy is a one-time update applied at startup:
 #   pipeline_phase  -> None
 #   vault_index     -> {}
 #   validation_errors -> []
-```
+```text
 
 This is a safe, additive migration --- no existing data is altered, only missing
 keys are filled with their zero values.
@@ -339,7 +339,7 @@ src/vaultspec_a2a/api/
 src/vaultspec_a2a/database/
   migrations.py       NEW: startup migration to backfill missing fields in
                       existing checkpoint rows
-```
+```text
 
 ## 7. References
 

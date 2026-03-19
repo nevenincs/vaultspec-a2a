@@ -77,10 +77,10 @@ def test_otel_correlation_filter_injects_active_span_fields() -> None:
         kept = OTelCorrelationFilter().filter(record)
 
     assert kept is True
-    assert len(record.trace_id) == 32
-    assert len(record.span_id) == 16
-    assert record.trace_sampled is True
-    assert record.service_name == "svc-test"
+    assert len(record.__dict__["trace_id"]) == 32
+    assert len(record.__dict__["span_id"]) == 16
+    assert record.__dict__["trace_sampled"] is True
+    assert record.__dict__["service_name"] == "svc-test"
 
 
 def test_otel_correlation_filter_preserves_existing_fields() -> None:
@@ -105,10 +105,10 @@ def test_otel_correlation_filter_preserves_existing_fields() -> None:
         kept = OTelCorrelationFilter().filter(record)
 
     assert kept is True
-    assert record.trace_id == "existing-trace-id"
-    assert record.span_id == "existing-span-id"
-    assert record.trace_sampled == "existing-sampled"
-    assert record.service_name == "existing-service"
+    assert record.__dict__["trace_id"] == "existing-trace-id"
+    assert record.__dict__["span_id"] == "existing-span-id"
+    assert record.__dict__["trace_sampled"] == "existing-sampled"
+    assert record.__dict__["service_name"] == "existing-service"
 
 
 def test_json_formatter_outputs_correlation_fields_from_filter() -> None:

@@ -4,7 +4,7 @@ source: vaultspec-a2a research session
 relevance: 10
 ---
 
-# Rule Propagation in A2A Pipeline
+## Rule Propagation in A2A Pipeline
 
 ## Executive Summary
 

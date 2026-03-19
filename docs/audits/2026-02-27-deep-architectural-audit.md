@@ -43,7 +43,7 @@ no code did this; the`_loop_router`conditional edge is the enforcement point.
 
 ```python
 return state.get("next", "revise")
-```
+```text
 
 Workers that want to exit early return `next="FINISH"`; the max_loops guard
 forces FINISH
@@ -76,7 +76,7 @@ allow_origins=[
     "http://127.0.0.1:8000",
 ],
 allow_credentials=True,
-```
+```text
 
 ---
 
@@ -100,7 +100,7 @@ for lib_logger_name in ("uvicorn.access", "uvicorn.error"):
     lib_logger = logging.getLogger(lib_logger_name)
     lib_logger.handlers = [log_handler]
     lib_logger.propagate = False
-```
+```text
 
 ---
 
@@ -343,7 +343,7 @@ AgentConfigNotFoundError`.
 
 ```text
 339 passed, 7 deselected in 54.95s
-```
+```text
 
 All existing tests pass. The `pipeline_loop` routing fix changes default
 behavior from

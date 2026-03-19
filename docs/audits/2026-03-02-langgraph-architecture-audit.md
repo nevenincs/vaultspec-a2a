@@ -85,7 +85,7 @@ routing state + edge dispatch into one step.
 
 ```python
 lambda state: state["next"]   # raises KeyError if next not in state
-```
+```text
 
 The initial state supplied by the API client contains only `messages`. `next`
 is not in `TeamState` as `NotRequired`, it has no default value, and the client
@@ -135,7 +135,7 @@ _WORKER_RETRY = RetryPolicy(
 )
 
 builder.add_node(agent_cfg.id, worker_node, retry=_WORKER_RETRY, metadata={...})
-```
+```text
 
 Apply the same policy to the supervisor node. Do NOT apply to nodes with
 irreversible side effects.
@@ -167,7 +167,7 @@ except Exception as exc:
     raise WorkerExecutionError(
         f"worker={name!r} model={model_type} messages={len(messages)}"
     ) from exc
-```
+```yaml
 
 Note: `WorkerExecutionError` inherits `RuntimeError`, which is NOT retried by
 `default_retry_on`. This is intentional — retries are handled by `RetryPolicy`
@@ -194,7 +194,7 @@ working_state = (
     else state
 )
 messages = [SystemMessage(content=full_prompt), *working_state["messages"]]
-```
+```text
 
 Import `_CONTEXT_LIMIT`, `compact_context`, `should_compact` from
 `..context`.
@@ -246,7 +246,7 @@ from langgraph.constants import TAG_NOSTREAM
 
 routing_model = model.with_config({"tags": [TAG_NOSTREAM]})
 response = await routing_model.ainvoke(messages)
-```
+```text
 
 ---
 
@@ -287,7 +287,7 @@ for option in sorted(options, key=len, reverse=True):
     if option.lower() in text.lower():
         next_route = option
         break
-```
+```text
 
 ---
 

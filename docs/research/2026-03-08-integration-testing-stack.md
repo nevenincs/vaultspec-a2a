@@ -80,7 +80,7 @@ for conn in psutil.net_connections(kind="inet"):
 # Alternative: per-process connections
 proc = psutil.Process(pid)
 connections = proc.net_connections()
-```
+```text
 
 ### Python 3.13 + Windows Compatibility
 
@@ -108,7 +108,7 @@ async def _kill_process_tree(pid: int) -> None:
         parent.kill()
     # Wait for all to exit
     psutil.wait_procs(children + [parent], timeout=5)
-```
+```text
 
 ### Port-Available Guard
 
@@ -119,7 +119,7 @@ def _port_is_free(port: int) -> bool:
         if conn.laddr.port == port and conn.status == "LISTEN":
             return False
     return True
-```
+```text
 
 ### Conflicts with Existing Stack
 
@@ -160,7 +160,7 @@ class InMemorySpanExporter(SpanExporter):
 
     def force_flush(self, timeout_millis: int = 30000) -> bool:
         return True
-```
+```text
 
 ### Key Properties
 
@@ -192,7 +192,7 @@ exporter = InMemorySpanExporter()
 provider.add_span_processor(SimpleSpanProcessor(exporter))
 # SimpleSpanProcessor exports synchronously — spans are immediately available
 # after span.end(). BatchSpanProcessor would delay export.
-```
+```text
 
 ### Asserting Trace Parent Relationships
 
@@ -210,7 +210,7 @@ assert worker_span.parent.span_id == gateway_span.context.span_id
 # Same trace: all spans share the same trace_id
 trace_id = gateway_span.context.trace_id
 assert all(s.context.trace_id == trace_id for s in spans)
-```
+```text
 
 ### Resetting Between Tests
 
@@ -219,7 +219,7 @@ assert all(s.context.trace_id == trace_id for s in spans)
 def _reset_spans(otel_exporter):
     yield
     otel_exporter.clear()
-```
+```text
 
 ### Cross-Process Limitation
 
@@ -267,7 +267,7 @@ if _utils.is_coroutine_callable(f) or (
     sleep is not None and _utils.is_coroutine_callable(sleep)
 ):
     r = AsyncRetrying(*dargs, **dkw)
-```
+```text
 
 `AsyncRetrying` (in `tenacity/asyncio/__init__.py:67`) uses `asyncio.sleep()`
 by default (via `_portable_async_sleep` which also supports trio).
@@ -295,7 +295,7 @@ async def _wait_for_healthy(base_url: str) -> None:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{base_url}/health", timeout=2.0)
         resp.raise_for_status()
-```
+```text
 
 ### Alternative: Inline Context Manager
 
@@ -310,7 +310,7 @@ async for attempt in AsyncRetrying(
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{base_url}/health", timeout=2.0)
             resp.raise_for_status()
-```
+```text
 
 ### Fixture Pattern
 
@@ -332,7 +332,7 @@ async def gateway_url():
     finally:
         proc.terminate()
         await proc.wait()
-```
+```python
 
 ### Python 3.13 + Windows Compatibility
 
@@ -363,7 +363,7 @@ Already in dev deps: `pytest-timeout>=2.4.0`
 
 ```toml
 timeout = "300"  # 5 minutes global default
-```
+```text
 
 ### Windows Behavior
 
@@ -375,7 +375,7 @@ if HAVE_SIGALRM:
     DEFAULT_METHOD = "signal"
 else:
     DEFAULT_METHOD = "thread"
-```
+```text
 
 Windows does NOT have `SIGALRM`, so it defaults to `"thread"` method. The
 thread method uses a `threading.Timer` that calls `os._exit(1)` on timeout.
@@ -392,7 +392,7 @@ async def test_full_dispatch_cycle(gateway_url):
 async def test_crash_recovery(gateway_url):
     """Crash recovery may need more time."""
     ...
-```
+```text
 
 ### pyproject.toml Configuration
 
@@ -402,7 +402,7 @@ Already configured:
 [tool.pytest.ini_options]
 timeout = "300"              # Global default: 5 minutes
 # timeout_method not set — defaults to "thread" on Windows, "signal" on POSIX
-```
+```text
 
 ### Integration Test Override
 
@@ -414,7 +414,7 @@ markers = [
     "live: marks tests requiring live ACP backend processes",
     "integration: marks multi-service integration tests",
 ]
-```
+```text
 
 ### Conflicts with Existing Stack
 
@@ -445,7 +445,7 @@ httpx.AsyncClient(
         "response": [list of callables],
     }
 )
-```
+```text
 
 In the async client, hooks are **awaited** (`_client.py:1691-1697`):
 
@@ -455,7 +455,7 @@ for hook in self._event_hooks["request"]:
 # ...
 for hook in self._event_hooks["response"]:
     await hook(response)
-```
+```text
 
 Hooks receive the actual `httpx.Request` or `httpx.Response` object. They
 run on **real outgoing requests** — no transport replacement needed.
@@ -475,7 +475,7 @@ client = httpx.AsyncClient(
     base_url="http://localhost:8001",
     timeout=httpx.Timeout(10.0, connect=5.0),
 )
-```
+```text
 
 ### Assertion Pattern
 
@@ -488,7 +488,7 @@ parts = traceparent.split("-")
 assert len(parts) == 4
 assert len(parts[1]) == 32  # trace_id
 assert len(parts[2]) == 16  # span_id
-```
+```python
 
 ### Advantage Over MockTransport
 
@@ -530,7 +530,7 @@ def test_worker_startup(caplog):
     with caplog.at_level(logging.INFO, logger="vaultspec_a2a.worker"):
         # ... start worker ...
         assert "Worker started" in caplog.text
-```
+```text
 
 For structured assertions on log records:
 
@@ -545,7 +545,7 @@ def test_dispatch_logged(caplog):
         ]
         assert len(dispatch_records) >= 1
         assert hasattr(dispatch_records[0], "dispatch_id")
-```
+```text
 
 ### Recommendation
 
@@ -565,7 +565,7 @@ Source: `.venv/Lib/site-packages/pytest_asyncio/plugin.py`
 ```toml
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
-```
+```text
 
 ### The Problem
 
@@ -587,7 +587,7 @@ pytest-asyncio supports `scope="session"` with `loop_scope="session"`:
 async def gateway_process():
     """Spawn gateway once for entire test session."""
     ...
-```
+```text
 
 The `loop_scope` parameter (`plugin.py:162`) controls which event loop the
 fixture runs on. When `loop_scope="session"`, the fixture shares the
@@ -597,12 +597,12 @@ session-level event loop.
 
 From `plugin.py:222-228`:
 
-```
+```text
 The event loop scope for asynchronous fixtures will default to the fixture
 caching scope. Future versions of pytest-asyncio will default the loop scope
 for asynchronous fixtures to function scope.
 Valid fixture loop scopes are: "function", "class", "module", "package", "session"
-```
+```text
 
 Our current setting `asyncio_default_fixture_loop_scope = "function"` means
 session-scoped fixtures **must** explicitly set `loop_scope="session"` or
@@ -706,17 +706,17 @@ async def gateway_url(_gateway_worker_stack):
 @pytest_asyncio.fixture(scope="session", loop_scope="session")
 async def worker_url(_gateway_worker_stack):
     return _gateway_worker_stack[1]
-```
+```text
 
 ### Event Loop Scope Warning
 
 If tests use `scope="session"` fixtures but the test itself runs on a
 function-scoped loop (the default), pytest-asyncio will raise:
 
-```
+```yaml
 ScopeMismatch: You tried to access a session scoped fixture from a
 function scoped test
-```
+```yaml
 
 **Fix**: Tests using session-scoped fixtures must declare their loop scope:
 
@@ -724,7 +724,7 @@ function scoped test
 @pytest.mark.asyncio(loop_scope="session")
 async def test_dispatch(gateway_url):
     ...
-```
+```text
 
 Or configure globally for integration tests via a conftest:
 
@@ -736,7 +736,7 @@ def pytest_collection_modifyitems(items):
     for item in items:
         if "integration" in item.keywords:
             item.add_marker(pytest.mark.asyncio(loop_scope="session"))
-```
+```text
 
 ### Conflicts with Existing Stack
 
@@ -785,7 +785,7 @@ host = container.get_container_host_ip()
 
 # When done:
 container.stop()
-```
+```text
 
 Context manager:
 
@@ -793,7 +793,7 @@ Context manager:
 with DockerContainer("jaegertracing/jaeger:latest") as jaeger:
     jaeger.with_exposed_ports(4317, 16686)
     # Container is started in __enter__, stopped in __exit__
-```
+```text
 
 ### Jaeger Fixture (Session-Scoped, Hard-Fail)
 
@@ -828,7 +828,7 @@ async def jaeger():
         }
     finally:
         container.stop()
-```
+```text
 
 ### otelcol Fixture (Session-Scoped, Hard-Fail)
 
@@ -861,7 +861,7 @@ async def otelcol(tmp_path_factory):
         }
     finally:
         container.stop()
-```
+```text
 
 ### Configuring Subprocesses to Export to Containerized Collector
 
@@ -879,7 +879,7 @@ async def _gateway_worker_stack(jaeger):
         "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
     }
     # ... spawn gateway + worker with this env ...
-```
+```python
 
 ### Python 3.13 + Windows Compatibility
 
@@ -935,13 +935,13 @@ dev = [
   "psutil>=6.0.0",           # Process tree inspection for integration tests
   "testcontainers>=4.14.0",  # Docker container lifecycle (Jaeger, otelcol)
 ]
-```
+```text
 
 ---
 
 ## 10. Recommended Test File Structure
 
-```
+```text
 src/vaultspec_a2a/
   api/tests/
     integration/
@@ -955,7 +955,7 @@ src/vaultspec_a2a/
   worker/tests/
     integration/
       test_executor.py     # Real executor against live worker
-```
+```text
 
 ### conftest.py (integration)
 
@@ -970,7 +970,7 @@ async def api_client(gateway_url):
         timeout=httpx.Timeout(30.0, connect=5.0),
     ) as client:
         yield client
-```
+```text
 
 ---
 
@@ -1002,7 +1002,7 @@ Docker Desktop is a prerequisite for integration tests (hard-fail if absent).
 async def _wait_healthy(url: str) -> None:
     async with httpx.AsyncClient() as c:
         (await c.get(f"{url}/health", timeout=2.0)).raise_for_status()
-```
+```text
 
 ### Trace assertion with InMemorySpanExporter
 
@@ -1011,7 +1011,7 @@ spans = exporter.get_finished_spans()
 dispatch_span = next(s for s in spans if s.name == "POST /dispatch")
 assert dispatch_span.status.is_ok
 assert dispatch_span.attributes["thread_id"] == thread_id
-```
+```text
 
 ### Process cleanup with psutil
 
@@ -1021,7 +1021,7 @@ for child in parent.children(recursive=True):
     child.kill()
 parent.kill()
 psutil.wait_procs(parent.children(recursive=True) + [parent], timeout=5)
-```
+```text
 
 ### Per-test timeout
 
@@ -1029,7 +1029,7 @@ psutil.wait_procs(parent.children(recursive=True) + [parent], timeout=5)
 @pytest.mark.timeout(60)
 @pytest.mark.asyncio(loop_scope="session")
 async def test_full_cycle(gateway_url): ...
-```
+```text
 
 ### Header capture with event hooks
 
@@ -1037,7 +1037,7 @@ async def test_full_cycle(gateway_url): ...
 headers_log = []
 async def _log(req): headers_log.append(dict(req.headers))
 client = httpx.AsyncClient(event_hooks={"request": [_log]}, base_url=url)
-```
+```text
 
 ---
 
@@ -1049,11 +1049,11 @@ Trace verification uses a **tiered architecture** where each tier is
 independently useful. All tiers are REQUIRED -- fixtures own the full
 lifecycle and hard-fail if services cannot start.
 
-```
+```yaml
 TIER 1: httpx event_hooks        [ALWAYS WORKS — zero deps]
 TIER 2: InMemorySpanExporter     [ALWAYS WORKS — zero deps]
 TIER 3: testcontainers Jaeger    [HARD-FAIL if Docker unavailable]
-```
+```text
 
 ---
 
@@ -1071,7 +1071,7 @@ for hook in self._event_hooks["request"]:
 # ... actual HTTP request goes out ...
 for hook in self._event_hooks["response"]:
     await hook(response)
-```
+```text
 
 Hooks receive the actual `httpx.Request` / `httpx.Response` objects. The
 request is sent to the real server after hooks run. This is NOT interception
@@ -1107,7 +1107,7 @@ async def traced_worker_client(worker_url):
         yield client
     finally:
         await client.aclose()
-```
+```text
 
 #### Assertion pattern
 
@@ -1127,7 +1127,7 @@ async def test_traceparent_propagated(traced_worker_client):
     assert len(parts[1]) == 32       # trace_id (16 bytes hex)
     assert len(parts[2]) == 16       # span_id (8 bytes hex)
     assert parts[3] in ("00", "01")  # flags (sampled or not)
-```
+```text
 
 #### Why this always works
 
@@ -1177,7 +1177,7 @@ async def otel_test_exporter():
 
     # Cleanup
     processor.shutdown()
-```
+```yaml
 
 **Why SimpleSpanProcessor (not BatchSpanProcessor)**: `SimpleSpanProcessor`
 exports synchronously in `on_end()`. Spans are immediately available in the
@@ -1194,7 +1194,7 @@ def _reset_otel_spans(otel_test_exporter):
     otel_test_exporter.clear()
     yield
     # Optionally clear after too, but before is sufficient
-```
+```text
 
 #### Asserting parent/child relationships
 
@@ -1221,7 +1221,7 @@ def assert_trace_chain(exporter, parent_name: str, child_name: str) -> None:
         f"Span '{child_name}' parent is not '{parent_name}': "
         f"expected={parent.context.span_id:#018x}, got={child.parent.span_id:#018x}"
     )
-```
+```text
 
 #### Cross-process limitation
 
@@ -1272,7 +1272,7 @@ async def jaeger():
         }
     finally:
         container.stop()
-```
+```text
 
 #### Test pattern (hard-fail, no skip)
 
@@ -1310,7 +1310,7 @@ async def test_cross_process_trace_chain(
 
     services = {s.get("processID") for s in all_spans}
     assert len(services) >= 2, f"Expected spans from 2+ services, got {services}"
-```
+```text
 
 #### Configuring subprocesses to export to Jaeger
 
@@ -1328,7 +1328,7 @@ async def _gateway_worker_stack(jaeger):
         "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
     }
     # ... spawn gateway + worker with this env ...
-```
+```text
 
 ---
 
@@ -1353,7 +1353,7 @@ for retry_num in range(_MAX_RETRYS):  # 6 retries
             logger.error("Failed to export %s to %s, error code: %s", ...)
             return self._result.FAILURE   # <-- returns FAILURE, never raises
         logger.warning("Transient error ... retrying in %.2fs.", ...)
-```
+```text
 
 The exporter catches `RpcError` (gRPC connection refused, timeout, etc.),
 retries up to 6 times with exponential backoff + jitter, then returns
@@ -1369,7 +1369,7 @@ def _export(self, batch_strategy):
                 self._exporter.export([...])
             except Exception:   # <-- catches ALL exceptions
                 _logger.exception("Exception while exporting %s.", self._exporting)
-```
+```text
 
 Even if an exporter violates the contract and raises, `BatchProcessor`
 catches `Exception` and logs it. **It never propagates.**
@@ -1381,7 +1381,7 @@ def worker(self):
     while not self._shutdown:
         self._worker_awaken.wait(self._schedule_delay)
         self._export(...)
-```
+```text
 
 The worker runs in a **daemon thread**. Any unhandled exception would kill
 only the daemon thread, not the main thread. But as shown above, `_export()`
@@ -1395,7 +1395,7 @@ def on_end(self, span):
         self.span_exporter.export((span,))
     except Exception:   # <-- catches ALL exceptions
         logger.exception("Exception while exporting Span.")
-```
+```text
 
 Same pattern. **Never raises.** The span is silently dropped if export fails.
 
@@ -1408,7 +1408,7 @@ are silently dropped with a warning log:
 if len(self._queue) == self._max_queue_size:
     _logger.warning("Queue full, dropping %s.", self._exporting)
 self._queue.appendleft(data)  # drops oldest from right side
-```
+```text
 
 #### Summary: OTel never breaks your tests
 
@@ -1446,7 +1446,7 @@ async def jaeger():
     container.with_exposed_ports(4317, 16686)
     container.start()  # Raises if Docker not available = test FAILS
     # ...
-```
+```yaml
 
 The hard-fail signal tells the developer: "Docker is a prerequisite for
 integration tests. Install and start it before running the suite."

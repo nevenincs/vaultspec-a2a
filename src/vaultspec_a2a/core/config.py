@@ -1,9 +1,9 @@
 """Configuration settings for the A2A Orchestrator."""
 
 from pathlib import Path
-from typing import Literal
+from typing import Literal, Self
 
-from pydantic import AliasChoices, Field, field_validator
+from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from ..utils.enums import Environment, LogLevel
@@ -27,17 +27,27 @@ class Settings(BaseSettings):
     environment: Environment = Field(default=Environment.DEVELOPMENT)
     log_level: LogLevel = Field(default=LogLevel.INFO)
     database_backend: Literal["sqlite", "postgres"] = Field(
-        default="postgres",
+        default="sqlite",
         alias="VAULTSPEC_DATABASE_BACKEND",
-        description="Primary application database backend.",
+        description=(
+            "Primary application database backend.  SQLite is the local/dev "
+            "default (ADR-035).  Production deployments set 'postgres' via env."
+        ),
     )
     checkpoint_backend: Literal["sqlite", "postgres"] = Field(
-        default="postgres",
+        default="sqlite",
         alias="VAULTSPEC_CHECKPOINT_BACKEND",
-        description="LangGraph checkpointer persistence backend.",
+        description=(
+            "LangGraph checkpointer persistence backend.  Follows the same "
+            "convention as database_backend: sqlite for dev, postgres for prod."
+        ),
     )
     database_url: str = Field(
-        default="postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec"
+        default="sqlite+aiosqlite:///vaultspec.db",
+        description=(
+            "SQLAlchemy async database URL.  Must match the selected "
+            "database_backend scheme (sqlite+aiosqlite or postgresql+asyncpg)."
+        ),
     )
     checkpoint_database_url: str | None = Field(
         default=None,
@@ -95,7 +105,8 @@ class Settings(BaseSettings):
         ),
     )
     provider_timeout_seconds: int = Field(
-        default=300, description="Global timeout for LLM provider API calls."
+        default=120,
+        description="Global timeout (seconds) for LLM provider API calls.",
     )
     # API Keys — bare ecosystem names only; no VAULTSPEC_ prefix aliases.
     # These are the canonical names used by every external tool and SDK.
@@ -152,9 +163,17 @@ class Settings(BaseSettings):
         description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
     )
 
-    mcp_api_base_url: str = Field(
-        default="http://localhost:8000",
-        description="Base URL for MCP tool loopback calls.",
+    gateway_url: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_GATEWAY_URL",
+            "VAULTSPEC_MCP_API_BASE_URL",
+        ),
+        description=(
+            "Base URL for reaching the gateway HTTP API. Used by the worker "
+            "IPC bridge and the MCP tool server. Auto-derived from host+port "
+            "when not set explicitly."
+        ),
     )
     mcp_host: str = Field(
         default="0.0.0.0",
@@ -191,8 +210,11 @@ class Settings(BaseSettings):
         alias="VAULTSPEC_WORKER_HOST",
     )
     worker_url: str = Field(
-        default="http://127.0.0.1:8001",
-        description="Worker base URL for dispatch calls",
+        default="",
+        description=(
+            "Worker base URL for dispatch calls. "
+            "Auto-derived from worker_host + worker_port."
+        ),
         alias="VAULTSPEC_WORKER_URL",
     )
     internal_token: str | None = Field(
@@ -575,6 +597,22 @@ class Settings(BaseSettings):
         if isinstance(value, str) and not value.strip():
             return None
         return value
+
+    @model_validator(mode="after")
+    def _derive_service_urls(self) -> Self:
+        """Auto-derive gateway_url and worker_url from host+port when not set.
+
+        This eliminates the config mismatch that caused the permission
+        pipeline to break silently: changing the gateway port no longer
+        requires updating a separate URL field.
+        """
+        if not self.gateway_url:
+            # Can't connect to INADDR_ANY — use loopback instead.
+            host = "127.0.0.1" if self.host in ("0.0.0.0", "::") else self.host
+            self.gateway_url = f"http://{host}:{self.port}"
+        if not self.worker_url:
+            self.worker_url = f"http://{self.worker_host}:{self.worker_port}"
+        return self
 
     @property
     def is_dev(self) -> bool:

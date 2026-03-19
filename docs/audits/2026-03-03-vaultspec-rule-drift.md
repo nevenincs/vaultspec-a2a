@@ -5,7 +5,7 @@ scope: .vaultspec behavioural rules vs A2A engine (src/vaultspec_a2a/core/, src/
 auditor: docs-researcher-2
 ---
 
-# VaultSpec Rule Drift Audit
+## VaultSpec Rule Drift Audit
 
 **Date:** 2026-03-03
 **Scope:** All behavioural rules in `Y:/code/vaultspec-worktrees/main/.vaultspec/` vs

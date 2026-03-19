@@ -13,7 +13,7 @@ related:
   - docs/adrs/009-approved-module-hierarchy.md
 ---
 
-# ADR-011: Frontend-Backend Wire Contract
+## ADR-011: Frontend-Backend Wire Contract
 
 **Date:** 2026-02-26
 **Status:** Proposed
@@ -263,7 +263,7 @@ src/vaultspec_a2a/api/schemas/
     tests/
         __init__.py
         test_schemas.py
-```
+```text
 
 ## 7. References
 

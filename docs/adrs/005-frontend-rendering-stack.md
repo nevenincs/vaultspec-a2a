@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-005: Frontend Rendering Stack
+## ADR-005: Frontend Rendering Stack
 
 **Date:** 2026-02-26  
 **Status:** Proposed

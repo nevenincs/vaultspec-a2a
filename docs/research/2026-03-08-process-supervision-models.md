@@ -9,11 +9,11 @@
 The VaultSpec A2A system requires **three cooperating processes** for a single
 MCP tool invocation to work:
 
-```
+```text
 IDE ──stdio──▶ MCP Server ──HTTP──▶ Gateway :8000 ──HTTP──▶ Worker :8001
                                         ▲                        │
                                         └────── events ──────────┘
-```
+```text
 
 A user who types `start_thread("fix the login bug")` in Cursor must wait for:
 
@@ -93,9 +93,9 @@ From the MCP specification and best practices:
 
 ### Option A: Status Quo — 3-Process Chain with Auto-Spawn (Current)
 
-```
+```text
 MCP (stdio) → spawns Gateway (subprocess) → spawns Worker (subprocess)
-```
+```text
 
 **Pros:**
 
@@ -115,9 +115,9 @@ MCP (stdio) → spawns Gateway (subprocess) → spawns Worker (subprocess)
 
 ### Option B: 2-Process — Gateway Embeds MCP (Recommended for Desktop)
 
-```
+```text
 IDE ──stdio──▶ MCP+Gateway (single process :8000) ──HTTP──▶ Worker :8001
-```
+```text
 
 **How it works:**
 
@@ -164,7 +164,7 @@ async def _mcp_lifespan(server: FastMCP[None]) -> AsyncIterator[None]:
     finally:
         uvi_server.should_exit = True
         await serve_task
-```
+```text
 
 MCP tool functions would use in-process calls:
 
@@ -176,16 +176,16 @@ async def start_thread(...):
     from ..api.endpoints import create_thread_endpoint
     result = await create_thread_endpoint(body, services)
     return format_result(result)
-```
+```text
 
 **Verdict:** Best option for desktop developer UX. Eliminates the most painful
 subprocess (gateway) while preserving worker isolation.
 
 ### Option C: Single Process — Everything In-Process
 
-```
+```text
 IDE ──stdio──▶ MCP+Gateway+Worker (single process)
-```
+```text
 
 **How it works:**
 
@@ -211,9 +211,9 @@ IDE ──stdio──▶ MCP+Gateway+Worker (single process)
 
 ### Option D: Daemon Mode — Background Service + Thin MCP Client
 
-```
+```text
 IDE ──stdio──▶ MCP client (thin) ──HTTP──▶ Daemon (Gateway+Worker) :8000
-```
+```text
 
 **How it works:**
 

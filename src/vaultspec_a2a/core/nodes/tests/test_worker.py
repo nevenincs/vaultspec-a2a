@@ -138,9 +138,10 @@ def test_build_worker_messages_handles_large_context() -> None:
     assert messages[1].content
 
 
-def test_build_worker_messages_adds_workspace_rules() -> None:
-    workspace_root = Path(".tmp-worker-node-rules")
-    rules_dir = workspace_root / ".vaultspec" / "rules" / "rules"
+def test_build_worker_messages_adds_workspace_rules(
+    tmp_path: Path,
+) -> None:
+    rules_dir = tmp_path / ".vaultspec" / "rules" / "rules"
     rules_dir.mkdir(parents=True)
     (rules_dir / "project.md").write_text(
         "# Repo Rules\n\nDo the thing.\n",
@@ -150,7 +151,7 @@ def test_build_worker_messages_adds_workspace_rules() -> None:
     messages = _build_worker_messages(
         state=_make_state(),
         system_prompt="You are a coder.",
-        workspace_root=workspace_root,
+        workspace_root=tmp_path,
     )
 
     assert any(

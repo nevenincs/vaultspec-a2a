@@ -9,7 +9,7 @@ related:
   - docs/adrs/2026-02-26-011-frontend-backend-contract-adr.md
 ---
 
-# Phase 6 Deliverable: Integration & Complexity Assessment
+## Phase 6 Deliverable: Integration & Complexity Assessment
 
 **Date**: 2026-02-25
 **Phase**: 6 (Integration and Complexity Assessment)
@@ -55,7 +55,7 @@ Browser (React)
   │ Update status badge, append to message stream, render artifact
   ▼
 Rendered UI
-```
+```text
 
 ### 1.2 Serialization Boundaries
 
@@ -190,7 +190,7 @@ These components have **no protocol support and no library coverage**:
 │ MCP Client ─────┼─┤ MCP Client ─────┼──► MCP Tool Server
 │                 │ │                 │    (per-agent scoped)
 └─────────────────┘ └─────────────────┘
-```
+```text
 
 ### 3.1 Boundary Failure Analysis
 

@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'Implementation risk analysis for reading .vault/ file content and injecting it into worker context per-invocation.'
 ---
 
-# Derisking: Blackboard Content Mounting
+## Derisking: Blackboard Content Mounting
 
 **Date:** 2026-03-03
 
@@ -51,7 +51,7 @@ from pathlib import Path
 
 async def _read_vault_doc(path: Path) -> str:
     return await asyncio.to_thread(path.read_text, encoding="utf-8")
-```
+```text
 
 `asyncio.to_thread` is stdlib since Python 3.9, requires no new dependency, and is
 consistent with the existing codebase's pattern for blocking I/O offloading.

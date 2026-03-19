@@ -8,7 +8,7 @@ related:
   - docs/adrs/2026-03-01-019-figma-developer-workflow-adr.md
 ---
 
-# Code Connect Final Audit Report
+## Code Connect Final Audit Report
 
 **Date**: 2026-03-01
 **Auditor**: opus (auditor agent)
@@ -89,13 +89,13 @@ when specific Figma component node IDs are available.
 
 ```bash
 npx tsc --noEmit: PASS (0 errors)
-```
+```text
 
 ### Build
 
 ```bash
 npm run build: PASS (3433 modules, 6.34s)
-```
+```text
 
 ### Dry-Run Publish
 
@@ -108,7 +108,7 @@ npx figma connect publish --dry-run: PASS
     MessageStream, UserBubble, AgentBubble, MarkdownEditor, InputBar,
     ErrorAlert, ArtifactCard, PermissionModal, TabBar, StatusBar,
     Sidebar, AppShell, InspectorPanel
-```
+```text
 
 ### CVA Variant Enum Verification
 

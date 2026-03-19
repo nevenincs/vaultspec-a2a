@@ -111,7 +111,7 @@ requiring the Figma application to be open.
   "componentSets": { ... },
   "styles": { "<node_id>": { "key": "...", "name": "...", "styleType": "FILL" } }
 }
-```
+```text
 
 #### GET Image Parameters
 
@@ -288,7 +288,7 @@ your pipeline. The format structure:
     }
   }
 }
-```
+```text
 
 ---
 
@@ -326,7 +326,7 @@ hierarchical token systems:
 ```text
 color/primary  -->  resolved: #0066FF
 button/bg      -->  alias to: color/primary  -->  resolved: #0066FF
-```
+```text
 
 #### Variable Scoping
 
@@ -417,7 +417,7 @@ Code Repository                         Figma File
      |                                      |
      |  8. Publish in Figma                 |
      |                                      |
-```
+```text
 
 ### 5.5 Plugin API Write Capabilities
 
@@ -480,7 +480,7 @@ interactive UI elements within the canvas.
 
 ```text
 GET /v1/files/:file_key/variables/local
-```
+```text
 
 **Scope:** `file_variables:read`
 **Tier:** 2
@@ -530,7 +530,7 @@ Remote variables are identified by their `subscribed_id`.
     }
   }
 }
-```
+```text
 
 ### Key details
 
@@ -544,7 +544,7 @@ Remote variables are identified by their `subscribed_id`.
 
 ```text
 GET /v1/files/:file_key/variables/published
-```
+```text
 
 **Scope:** `file_variables:read`
 **Tier:** 2
@@ -561,7 +561,7 @@ Differences from local endpoint:
 
 ```text
 POST /v1/files/:file_key/variables
-```
+```text
 
 **Scope:** `file_variables:write`
 **Tier:** 3
@@ -610,7 +610,7 @@ Request body contains four arrays:
     }
   ]
 }
-```
+```text
 
 ### Key behaviors
 
@@ -726,7 +726,7 @@ Code generation (components, tokens, assets)
     |
     v
 Codebase
-```
+```text
 
 #### Pattern B: Token-Centric Pipeline
 
@@ -744,7 +744,7 @@ Generate platform-specific tokens
     |
     v
 CSS / SCSS / Tailwind / iOS / Android
-```
+```text
 
 #### Pattern C: Webhook-Driven Continuous Sync
 
@@ -765,7 +765,7 @@ Create PR / commit to repository
     |
     v
 CI/CD deploys updated design system
-```
+```text
 
 #### Pattern D: MCP-Augmented AI Pipeline (Most Relevant to VaultSpec)
 
@@ -783,7 +783,7 @@ Agent generates implementation using actual codebase components
     |
     v
 Browser verification via Playwright/DevTools
-```
+```text
 
 ### 9.2 Key Tools in the Ecosystem
 
@@ -871,7 +871,7 @@ curl -X POST 'https://api.figma.com/v2/webhooks' \
     "passcode": "your-secret-passcode",
     "description": "Design system sync trigger"
   }'
-```
+```text
 
 ### 10.6 Design System Automation with Webhooks
 
@@ -904,7 +904,7 @@ Practical workflow:
 
 ```text
 X-Figma-Token: <YOUR_TOKEN>
-```
+```text
 
 ### Constraints (as of 2025)
 
@@ -930,13 +930,13 @@ GET https://www.figma.com/oauth?
   scope=:scope&
   state=:state&
   response_type=code
-```
+```text
 
 ### Token exchange
 
 ```text
 POST https://api.figma.com/v1/oauth/token
-```
+```text
 
 Using HTTP Basic Auth with Base64-encoded `client_id:client_secret`.
 
@@ -952,13 +952,13 @@ Using HTTP Basic Auth with Base64-encoded `client_id:client_secret`.
   "expires_in": 7776000,
   "refresh_token": "<REFRESH_TOKEN>"
 }
-```
+```text
 
 ### Token refresh
 
 ```text
 POST https://api.figma.com/v1/oauth/token
-```
+```text
 
 (Previously `/v1/oauth/refresh`, legacy endpoint still works)
 
@@ -970,7 +970,7 @@ POST https://api.figma.com/v1/oauth/token
 
 ```text
 Authorization: Bearer <ACCESS_TOKEN>
-```
+```text
 
 ### 11.3 Complete Scope Reference
 

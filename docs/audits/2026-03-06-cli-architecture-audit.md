@@ -6,7 +6,7 @@ Status: **In progress**
 
 ## Current CLI (implemented)
 
-```
+```bash
 vaultspec serve            [--host] [--port] [--log-level]
 vaultspec worker           [--port] [--log-level]
 vaultspec test             [TARGET] [-- PYTEST_ARGS]
@@ -16,11 +16,11 @@ vaultspec config
 vaultspec preps            [SCENARIO]
 vaultspec eval smoke
 vaultspec eval nightly
-```
+```text
 
 ## Target CLI (approved)
 
-```
+```bash
 vaultspec --show-config
 
 vaultspec test                              # defaults to: test unit
@@ -52,7 +52,7 @@ vaultspec database update  [--target REVISION]
 vaultspec database snapshot
 vaultspec database snapshot list
 vaultspec database restore --name SNAPSHOT  # refuses if service is running
-```
+```text
 
 ---
 

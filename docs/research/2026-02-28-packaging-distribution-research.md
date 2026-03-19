@@ -86,7 +86,7 @@ src/ui/ (React source)
        └── hatch_build.py copies to → src/vaultspec_a2a/api/static/
             └── uv build → wheel includes src/vaultspec_a2a/api/static/**
                  └── FastAPI serves via StaticFiles(html=True)
-```
+```text
 
 ### 3.2 pyproject.toml Changes
 
@@ -99,7 +99,7 @@ artifacts = [
 
 [tool.hatch.build.targets.wheel.hooks.custom]
 path = "hatch_build.py"
-```
+```text
 
 ### 3.3 Build Hook (hatch_build.py)
 
@@ -129,7 +129,7 @@ class CustomBuildHook(BuildHookInterface):
         if target.exists():
             shutil.rmtree(target)
         shutil.copytree(build_dir, target)
-```
+```text
 
 ### 3.4 FastAPI Static Serving
 
@@ -148,7 +148,7 @@ app.include_router(api_router, prefix="/api")
 
 # SPA catch-all: serves index.html for unknown routes
 app.mount("/", StaticFiles(directory=static_dir, html=True), name="frontend")
-```
+```text
 
 ### 3.5 React Adapter
 
@@ -198,7 +198,7 @@ USER appuser
 
 EXPOSE 8000
 CMD ["uv", "run", "uvicorn", "lib.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
-```
+```text
 
 ### 4.2 Base Image Decision
 
@@ -245,7 +245,7 @@ services:
 
 volumes:
   db-data:
-```
+```text
 
 ### 4.4 SQLite in Docker
 
@@ -277,7 +277,7 @@ volumes:
     }
   }
 }
-```
+```text
 
 ---
 
@@ -348,7 +348,7 @@ _check-uv:
 
 _check-node:
     @node --version || (echo "Install Node via volta or fnm" && exit 1)
-```
+```text
 
 ### 5.3 Node Version Pinning
 
@@ -361,7 +361,7 @@ _check-node:
     "npm": "10.0.0"
   }
 }
-```
+```yaml
 
 **Alternative: fnm** (Rust-based, uses `.node-version`file). Both work on
 Windows natively. nvm does NOT work on Windows.

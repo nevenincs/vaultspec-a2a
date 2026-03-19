@@ -63,7 +63,7 @@ class Printer:
     def error(self, msg: str): ...    # Red styling
     def warn(self, msg: str): ...     # Yellow styling
     def step(self, msg: str): ...     # Highlighting workflow progression
-```
+```text
 
 ## Conclusion
 

@@ -48,7 +48,7 @@ results = client.evaluate(
     description="Testing baseline",   # optional
     max_concurrency=4,                # optional, parallelism
 )
-```
+```text
 
 For large jobs, `aevaluate()` is the async variant with identical interface. Requires `langsmith>=0.3.13`.
 
@@ -72,7 +72,7 @@ def perform_eval(run, example):
     actual = run['outputs']['answer']
     expected = example['outputs']['answer']
     return {"exact_match": actual == expected}
-```
+```text
 
 #### LLM-as-Judge
 
@@ -94,7 +94,7 @@ def valid_reasoning(inputs: dict, outputs: dict) -> bool:
         response_format=Response
     )
     return response.choices[0].message.parsed.reasoning_is_valid
-```
+```yaml
 
 **Prebuilt evaluators**: The `openevals` package (open source, LangChain-maintained) provides prebuilt LLM-as-judge evaluators including `CORRECTNESS_PROMPT` (source: <https://docs.langchain.com/langsmith/prebuilt-evaluators>).
 
@@ -122,7 +122,7 @@ evaluation = evaluator(
     reference_outputs=reference_trajectory,
 )
 # {"key": "trajectory_superset_match", "score": True, "comment": None}
-```
+```text
 
 **`create_trajectory_llm_as_judge`** — flexible, LLM-scored:
 
@@ -135,7 +135,7 @@ evaluator = create_trajectory_llm_as_judge(
 )
 evaluation = evaluator(outputs=result["messages"])
 # {"key": "trajectory_accuracy", "score": True, "comment": "The trajectory is reasonable..."}
-```
+```text
 
 Reference trajectory is optional for the LLM judge variant.
 
@@ -188,7 +188,7 @@ experiment_results = Client().evaluate(
     data="my-dataset",
     evaluators=[trajectory_evaluator],
 )
-```
+```text
 
 ### 2.2 `openevals` Package
 

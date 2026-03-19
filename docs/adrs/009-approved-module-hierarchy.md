@@ -15,7 +15,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-009: Approved Module Hierarchy (LangGraph Core)
+## ADR-009: Approved Module Hierarchy (LangGraph Core)
 
 **Date:** 2026-02-26
 **Status:** Proposed
@@ -43,7 +43,7 @@ paths begin with `lib.*`.
 │   └── (see §2.2)
 └── src/
     └── ui/                  # Frontend React project (see §2.3)
-```
+```text
 
 ### 2.2 Backend Module Hierarchy (`lib/`)
 
@@ -103,7 +103,7 @@ lib/
     ├── logging.py           # Structured logging setup
     ├── printer.py           # Console output formatting
     └── tests/
-```
+```text
 
 #### Key Architectural Shifts vs. Subprocess Hierarchy
 
@@ -135,7 +135,7 @@ ui/src/lib/
 └── api/                     # Data fetching
     ├── websocket.ts         # Backpressure-aware multiplexed client
     └── rest.ts              # Terminal replay buffer & snapshot fetchers
-```
+```text
 
 ### 2.4 Test Structure
 
@@ -145,7 +145,7 @@ Unit tests are co-located per domain (Rust-style, per GEMINI.md):
 src/vaultspec_a2a/core/tests/test_graph.py
 src/vaultspec_a2a/core/nodes/tests/test_tools.py
 ...
-```
+```python
 
 All tests use `pytest` with real processes and network calls. No mocks,
 patches, stubs, or skips.

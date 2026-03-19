@@ -91,7 +91,7 @@ def prune_sequences(self, active_thread_ids: set[str]) -> int:
     for tid in stale:
         del self._sequences[tid]
     return len(stale)
-```
+```text
 
 **Status:** Implemented. Never called by worker code. The gateway's
 `sync_worker_event` relay path could call this, but doesn't.
@@ -107,7 +107,7 @@ def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
     for rid in stale_ids:
         del self._pending_permissions[rid]
     return len(stale_ids)
-```
+```text
 
 **Status:** Implemented. Called by the gateway on a periodic schedule (AGG-01/05).
 Not called by the worker.
@@ -157,7 +157,7 @@ class EventAggregator:
             self._chunk_buffer_meta.pop(tid, None)
             self._last_activity.pop(tid, None)
         return len(stale)
-```
+```text
 
 ### 3.2 Pros/Cons
 
@@ -214,7 +214,7 @@ class EventAggregator:
         for k in stale_tool_keys:
             del self._tool_update_last_emit[k]
         self._plan_update_last_emit.pop(thread_id, None)
-```
+```text
 
 ### 4.2 Where to Call It
 
@@ -227,7 +227,7 @@ outcome = await self._aggregator.ingest(...)
 # outcome is "completed", "failed", "cancelled", "interrupted"
 if outcome in ("completed", "failed", "cancelled"):
     self._aggregator.cleanup_thread(thread_id)
-```
+```text
 
 ### 4.3 Pros/Cons
 
@@ -293,7 +293,7 @@ class EventAggregator:
     def deactivate_thread(self, thread_id: str) -> None:
         self._thread_refs.pop(thread_id, None)
         # WeakValueDictionary auto-removes when state is GC'd
-```
+```text
 
 ### 5.2 Why This Does NOT Work Well for asyncio
 
@@ -345,7 +345,7 @@ class BoundedThreadState:
         while len(self._data) > self._maxsize:
             self._data.popitem(last=False)  # evict oldest
         return self._data[thread_id]
-```
+```text
 
 ### 6.2 Pros/Cons
 
@@ -452,7 +452,7 @@ def cleanup_thread(self, thread_id: str) -> None:
     for k in stale_tool_keys:
         del self._tool_update_last_emit[k]
     self._plan_update_last_emit.pop(thread_id, None)
-```
+```text
 
 **Step 2:** Call from `Executor.handle_dispatch()` on terminal outcomes:
 
@@ -461,7 +461,7 @@ outcome = await self._aggregator.ingest(...)
 if outcome in ("completed", "failed", "cancelled"):
     self._aggregator.cleanup_thread(thread_id)
     self._thread_to_cache_key.pop(thread_id, None)
-```
+```text
 
 **Step 3:** Add TTL safety net as a background task in the worker lifespan:
 
@@ -471,13 +471,13 @@ async def _prune_loop(aggregator: EventAggregator, interval: float = 60.0):
         await asyncio.sleep(interval)
         aggregator.prune_stale_permissions()
         # Additional TTL prune if needed
-```
+```text
 
 **Step 4:** Wire the prune loop into the worker's `_lifespan()`:
 
 ```python
 tg.start_soon(_prune_loop, executor.aggregator)
-```
+```text
 
 ### 8.3 Memory After Fix
 

@@ -7,7 +7,7 @@ maturity: 45
 feature: protocol-foundations
 ---
 
-# Phase 1 Deliverable: Protocol Foundations for Gateway
+## Phase 1 Deliverable: Protocol Foundations for Gateway
 
 **Date**: 2026-02-25
 **Phase**: 1 (Protocol Foundations)
@@ -47,7 +47,7 @@ File artifacts stream via multiple`TaskArtifactUpdateEvent` messages:
 Event 1: {artifactId: "abc", append: false, lastChunk: false, parts: [{text: "def foo():"}]}
 Event 2: {artifactId: "abc", append: true,  lastChunk: false, parts: [{text: "    return 42"}]}
 Event 3: {artifactId: "abc", append: true,  lastChunk: true,  parts: [{text: "\n# done"}]}
-```
+```yaml
 
 - Same `artifactId`= same file -`append: true`= concatenate with previous -`lastChunk: true`= file complete -`Part.filename`and`Part.media_type`identify the file
 
@@ -107,7 +107,7 @@ class WebSocketStreamReader:
 class WebSocketStreamWriter:
     async def write(self, data: bytes) -> None:
         await websocket.send_str(data.decode().rstrip("\n"))
-```
+```yaml
 
 **Verdict**: Web-native ACP host is 100% feasible with no protocol changes.
 
@@ -148,7 +148,7 @@ SessionSnapshot:
   user_messages: tuple[UserMessageChunk, ...]
   agent_messages: tuple[AgentMessageChunk, ...]
   agent_thoughts: tuple[AgentThoughtChunk, ...]
-```
+```text
 
 Snapshots are frozen (immutable). Each `apply()`returns a new snapshot.
 Subscribers receive`(snapshot, notification)`pairs.
@@ -177,7 +177,7 @@ browser sends response via WebSocket, adapter routes response back to the
 ```text
 Browser ←—WebSocket—→ Gateway Server ←—SSE/stdio—→ Agents
           (single)                              (per-agent)
-```
+```text
 
 The server maintains per-agent connections (A2A SSE or ACP stdio) and
 multiplexes all events onto a single WebSocket to the browser. The browser
@@ -195,7 +195,7 @@ WebSocket.
   "event_type": "status_update",
   "data": { ... }
 }
-```
+```text
 
 ### Server → Browser (permissions)
 
@@ -210,7 +210,7 @@ WebSocket.
     { "id": "reject", "label": "Reject", "kind": "reject_once" }
   ]
 }
-```
+```text
 
 ### Browser → Server (commands)
 
@@ -232,7 +232,7 @@ WebSocket.
   "agent_id": "coder-a",
   "action": "terminate"
 }
-```
+```text
 
 ### 3.3 Channel multiplexing
 

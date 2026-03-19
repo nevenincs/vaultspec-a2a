@@ -7,7 +7,7 @@ maturity: 25
 feature: coding-teams-monitoring
 ---
 
-# Research: External Control and Monitoring Surface for Active A2A Teams
+## Research: External Control and Monitoring Surface for Active A2A Teams
 
 **Date**: 2026-02-25
 **Status**: Preliminary Investigation
@@ -105,7 +105,7 @@ class TeamTelemetryHub:
             span_id=event.task_id,
             name=f"[{agent_id}] {event.status}"
         )
-```
+```text
 
 ### 3.3 Dashboard UX Requirements (Derived from Research)
 
@@ -134,7 +134,8 @@ The lack of empirical backing for the A2A monitoring surface is resolved by
 adopting the **OTel/Hierarchical Span model** used by Langfuse/AgentOps,
 combined with the **SessionAccumulator** pattern from Toad.
 
-**Architectural Decision required:**
+### Architectural Decision Required
+
 Should the A2A Orchestrator attempt to build its own bespoke time-series
 database for the Dashboard, or should it rely on exporting OpenTelemetry data to
 a self-hosted Langfuse container for the historical view, restricting the

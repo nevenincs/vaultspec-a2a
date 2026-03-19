@@ -8,7 +8,7 @@ related:
   - '[[2026-03-03-sdd-blackboard-integration-022-contextual-anchoring]]'
 ---
 
-# sdd-blackboard-integration — implementation derisking notes
+## sdd-blackboard-integration — implementation derisking notes
 
 **Date:** 2026-03-03
 **Feeds into:** ADR-019, ADR-022
@@ -31,7 +31,7 @@ from typing_extensions import TypedDict
 class State(TypedDict):
     url: str
     result: NotRequired[str]   # absent until the node sets it
-```
+```python
 
 **Source:** <https://docs.langchain.com/oss/python/langgraph/durable-execution>
 
@@ -67,7 +67,7 @@ class State(TypedDict):
 
     # LangGraph built-in:
     messages: Annotated[list[BaseMessage], add_messages]
-```
+```text
 
 **Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>,
 <https://docs.langchain.com/oss/python/langgraph/graph-api>
@@ -80,7 +80,7 @@ def _merge_vault_index(
     new: dict[str, list[str]],         # value returned by node
 ) -> dict[str, list[str]]:             # new state value
     ...
-```
+```text
 
 LangGraph calls `reducer(existing_value, node_return_value)` on every state
 update where the key appears in the node's return dict. The reducer's return
@@ -161,7 +161,7 @@ graph_input: dict[str, Any] = {
     "token_usage": {},
 }
 result = await graph.ainvoke(graph_input, config={"configurable": {"thread_id": thread_id}})
-```
+```text
 
 LangGraph applies reducers to the initial input values exactly as it does for
 node return values. For `Annotated` fields, the reducer is called with
@@ -201,7 +201,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
         "validation_errors": ["frontmatter missing required field: related"],
     }
     # → _append_validation_errors(existing_errors, ["frontmatter..."]) is called
-```
+```text
 
 **Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>
 
@@ -237,7 +237,7 @@ async def supervisor_node(state: TeamState) -> dict[str, Any]:
 
     # Only the routing decision is returned to state:
     return {"next": next_route}
-```
+```text
 
 The constructed `messages` list is **never returned** — it is local to the node
 invocation. `state["messages"]` is untouched by this node. The `add_messages`
@@ -265,7 +265,7 @@ builder.add_conditional_edges(
     path: Callable[[State], str | list[str]],
     path_map: dict[str, str] | None = None,
 )
-```
+```text
 
 The `path` function receives the **full current state** after the source node
 has run and its return values have been merged. It returns the name of the next
@@ -281,7 +281,7 @@ builder.add_conditional_edges(
     lambda state: state["next"],  # reads state["next"] set by supervisor_node
     route_map,
 )
-```
+```text
 
 **Source:** <https://docs.langchain.com/oss/python/langgraph/use-graph-api>
 
@@ -299,7 +299,7 @@ def route_with_error_gate(state: TeamState) -> str:
     return state["next"]
 
 builder.add_conditional_edges("supervisor", route_with_error_gate, route_map)
-```
+```text
 
 This is also valid. Implementing in the edge avoids mutating `routing_error`
 state from within `supervisor_node`. **Recommendation:** keep the gate inside
@@ -333,7 +333,7 @@ def _build_supervisor_prompt(
     if directive:
         result = result + f"\n\n## Team Directive\n\n{directive.strip()}"
     return result
-```
+```yaml
 
 The ADR-022 extension adds `feature_context: str | None = None` following the
 same pattern:
@@ -352,7 +352,7 @@ def _build_supervisor_prompt(
         else:
             result = result + f"\n\n## Feature Context\n\n{feature_context}"
     return result
-```
+```text
 
 **Call site in `_compile_star()`** (`graph.py:357`):
 
@@ -363,7 +363,7 @@ supervisor_prompt = _build_supervisor_prompt(
     directive=team_config.persona.directive,
     feature_context=f"Active feature: {feature_tag}" if feature_tag else None,
 )
-```
+```text
 
 `feature_tag` is available at compile time if passed as a parameter to
 `compile_team_graph()`. The compile-time block is static (feature tag only).

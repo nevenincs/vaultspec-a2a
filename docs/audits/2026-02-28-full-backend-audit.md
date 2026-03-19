@@ -52,7 +52,7 @@ the configured frontend URL; in debug, allow`["*"]`.
 
 ```python
 from ..api.schemas.events import ...  # should be .schemas.events
-```
+```python
 
 The import `..api.schemas.*`from within`src/vaultspec_a2a/api/websocket.py`traverses up
 to`lib/`then back down into`src/vaultspec_a2a/api/`. This works by coincidence but is

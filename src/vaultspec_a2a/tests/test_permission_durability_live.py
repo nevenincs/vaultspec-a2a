@@ -92,7 +92,7 @@ def _build_service_env(
         "VAULTSPEC_CHECKPOINT_DATABASE_URL": postgres_checkpoint_url,
         "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
         "VAULTSPEC_INTERNAL_TOKEN": "",
-        "VAULTSPEC_MCP_API_BASE_URL": f"http://127.0.0.1:{gateway_port}",
+        "VAULTSPEC_GATEWAY_URL": f"http://127.0.0.1:{gateway_port}",
         "LANGSMITH_TRACING": "false",
     }
 

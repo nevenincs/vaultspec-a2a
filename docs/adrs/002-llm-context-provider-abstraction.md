@@ -14,7 +14,7 @@ related:
   - docs/agents/2026-25-02-glm5-agent-support.md
 ---
 
-# ADR-002: LLM Context & Provider Abstraction
+## ADR-002: LLM Context & Provider Abstraction
 
 **Date:** 2026-02-25  
 **Status:** Proposed

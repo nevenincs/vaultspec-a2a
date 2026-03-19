@@ -37,7 +37,7 @@ container.with_env("COLLECTOR_OTLP_ENABLED", "true")
 container.start()  # Raises if Docker unavailable = hard-fail (mandate compliant)
 wait_for_logs(container, "Starting HTTP server", timeout=30)
 otlp_port = container.get_exposed_port(4317)
-```
+```text
 
 **Pros:**
 
@@ -78,7 +78,7 @@ def docker_services(docker_ip, docker_services):
         check=lambda: _is_healthy(f"http://{docker_ip}:{port}/health")
     )
     return {"gateway_url": f"http://{docker_ip}:{port}"}
-```
+```text
 
 **Pros:**
 
@@ -119,7 +119,7 @@ proxy = toxiproxy.create(
 # Simulate network partition
 proxy.add_toxic(type="timeout", attributes={"timeout": 0})
 # Test circuit breaker behavior
-```
+```text
 
 **Pros:**
 
@@ -158,7 +158,7 @@ process = await asyncio.create_subprocess_exec(
     stdout=asyncio.subprocess.PIPE,
     stderr=asyncio.subprocess.PIPE,
 )
-```
+```text
 
 **Pros:**
 
@@ -202,7 +202,7 @@ provider.add_span_processor(SimpleSpanProcessor(exporter))
 # After test:
 spans = exporter.get_finished_spans()
 assert any(s.name == "POST /api/threads" for s in spans)
-```
+```text
 
 **Pros:**
 
@@ -238,7 +238,7 @@ async def test_message_content_roundtrip(content):
     """Any valid string round-trips through the message pipeline."""
     resp = await client.post("/api/threads/.../messages", json={"content": content})
     assert resp.status_code == 200
-```
+```text
 
 **Pros:**
 

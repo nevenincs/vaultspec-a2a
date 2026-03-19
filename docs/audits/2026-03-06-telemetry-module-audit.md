@@ -23,7 +23,7 @@
 ```python
 _LANGSMITH_ENABLED = os.environ.get("LANGCHAIN_TRACING_V2", "").lower() in (...)
 _LANGSMITH_PROJECT = os.environ.get("LANGCHAIN_PROJECT", "default")
-```
+```text
 
 The ADR-027 compliance sprint established `LANGSMITH_*` as the canonical env var names, with `LANGCHAIN_*` as legacy aliases. The Settings model in `core/config.py` uses `LANGSMITH_TRACING`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT` as primary names with `AliasChoices` for legacy fallback.
 
@@ -39,7 +39,7 @@ The docstring at lines 26-28 also only documents the legacy names.
 
 ```python
 from .instrumentation import _SDK_DISABLED, get_tracer
-```
+```python
 
 Cross-module import of a private symbol (leading underscore). If `_SDK_DISABLED` is renamed or refactored, `middleware.py` breaks. This should be exposed as a public function (`is_sdk_disabled()`) or a public constant.
 
@@ -68,7 +68,7 @@ except Exception as exc:
     span.set_status(StatusCode.ERROR, str(exc))
     span.record_exception(exc)
     raise
-```
+```text
 
 The `span` variable from the `with` block (line 132) is referenced in the `except` clause. If the `with` block's `start_as_current_span` itself raises (e.g., SDK initialization error), `span` would be unbound, causing `NameError`. This is extremely unlikely in practice since `start_as_current_span` is well-tested OTel SDK code, but the M33 comment suggests this was a conscious simplification.
 
@@ -86,7 +86,7 @@ The `span` variable from the `with` block (line 132) is referenced in the `excep
 def _check_sdk() -> bool:
     """Return True — opentelemetry-sdk is a mandatory dependency (ADR-015)."""
     return importlib.util.find_spec("opentelemetry.sdk.trace") is not None
-```
+```python
 
 If the SDK is mandatory (ADR-015), why check if it's installed? The docstring and body contradict. Either the SDK should be imported directly (and crash if missing) or the docstring should say "Check if the optional SDK is available."
 

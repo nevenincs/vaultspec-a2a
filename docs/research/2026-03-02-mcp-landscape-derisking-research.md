@@ -7,7 +7,7 @@ maturity: 80
 feature: mcp-landscape
 ---
 
-# Research: MCP Landscape Deep-Dive for Coding Task Derisking
+## Research: MCP Landscape Deep-Dive for Coding Task Derisking
 
 **Date**: 2026-03-02
 **Status**: Complete
@@ -42,7 +42,7 @@ if __name__ == "__main__":
 # Production — HTTP transport, deployed as network service
 if __name__ == "__main__":
     mcp.run(transport="streamable-http")
-```
+```text
 
 ### 1.3 Subprocess Deployment Gotchas
 
@@ -75,7 +75,7 @@ When deployed as a **streamable-http** service:
 ```python
 # Recommended production config
 mcp = FastMCP("StatelessServer", stateless_http=True, json_response=True)
-```
+```text
 
 ### 1.5 Recommendation for Vaultspec
 
@@ -104,7 +104,7 @@ async def start_thread(initial_message: str, count: int = 5) -> str:
     ...
 # Generates: {"type":"object","properties":{"initial_message":{"type":"string"},
 #              "count":{"type":"integer","default":5}},"required":["initial_message"]}
-```
+```text
 
 ### 2.2 How Type Errors Surface
 
@@ -132,7 +132,7 @@ class ThreadRequest(BaseModel):
 @mcp.tool()
 async def start_thread(request: ThreadRequest) -> str:
     ...
-```
+```text
 
 This gives us Pydantic validation (min/max length, regex, etc.) with automatic
 JSON Schema generation.
@@ -173,7 +173,7 @@ The MCP spec defines two distinct error surfaces:
     "isError": true
   }
 }
-```
+```text
 
 ### 3.2 When to Use Which
 
@@ -210,7 +210,7 @@ async def get_thread(thread_id: str) -> str:
 @mcp.tool()
 async def get_thread(thread_id: str) -> str:
     return f"Error: Thread {thread_id!r} not found"
-```
+```yaml
 
 **Critical finding**: Our current tools return error strings (e.g.,
 `return f"Error: ..."`) which do NOT set `isError: true`. The LLM sees
@@ -330,7 +330,7 @@ async def start_thread(
     client = ctx.request_context.lifespan_context.http_client
     resp = await client.post(...)
     ...
-```
+```text
 
 ### 5.2 How It Works
 
@@ -386,7 +386,7 @@ async def summarize(text: str, ctx: Context[ServerSession, None]) -> str:
         max_tokens=200,
     )
     return result.content.text
-```
+```text
 
 ### 6.2 Configuration Options
 
@@ -399,7 +399,7 @@ result = await ctx.session.create_message(
     stop_sequences=["\n\n"],
     model_preferences=ModelPreferences(hints=[ModelHint(name="claude-3")])
 )
-```
+```text
 
 ### 6.3 Client Support
 
@@ -409,7 +409,7 @@ Sampling requires the client to implement a **sampling callback**:
 async def sampling_callback(context, params) -> CreateMessageResult:
     # Client decides how to handle the LLM request
     return CreateMessageResult(model="...", role="assistant", content=...)
-```
+```yaml
 
 **Critical caveat**: Not all MCP clients support sampling. Claude Code and
 Cursor may not implement the sampling callback. If the client doesn't support

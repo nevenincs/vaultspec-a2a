@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'Precise code-level gap analysis comparing the current src/vaultspec_a2a/core implementation against the four SDD blackboard mandate areas.'
 ---
 
-# Gap Analysis: Current A2A Engine vs. SDD Blackboard Integration Mandate
+## Gap Analysis: Current A2A Engine vs. SDD Blackboard Integration Mandate
 
 **Date:** 2026-03-03
 **Feature tag:** `#sdd-blackboard-integration`
@@ -32,7 +32,7 @@ class TeamState(TypedDict):
     routing_error: NotRequired[str]                          # line 105
     thread_id: str                                           # line 108
     token_usage: Annotated[dict[str, dict[str, int]], ...]   # line 111
-```
+```text
 
 The `artifacts` field (line 84) stores in-memory `dict[str, str]` records — not pointers to physical `.vault/` files. The `current_plan` field (line 87) stores a plain list of dicts, not references to a `.vault/plan/` markdown file. There is no field tracking which feature is active, what phase the pipeline is in, or a live index of physical `.vault/` documents.
 
@@ -69,7 +69,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
         else state
     )
     messages = [SystemMessage(content=system_prompt), *working_state["messages"]]
-```
+```text
 
 The message list passed to the LLM is constructed at `worker.py:137`:
 
@@ -92,12 +92,12 @@ There is no step where `.vault/` document content is read from disk and injected
 
 The correct insertion point is `worker.py` between lines 136 and 137 — after the compaction decision and before `messages` is finalised. Concretely:
 
-```
+```text
 # INJECT HERE: resolve state["active_feature"] + state["vault_index"]
 # → read physical .vault/ files for the current feature
 # → prepend as read-only SystemMessage blocks (highest-priority context)
 # → THEN append working_state["messages"] (compacted history)
-```
+```text
 
 This would require:
 
@@ -151,7 +151,7 @@ builder.add_conditional_edges(
     lambda state: state["next"],
     route_map,
 )
-```
+```text
 
 The conditional edge at `graph.py:412–415` is a pure passthrough of `state["next"]`. There is no verifier intercept, no phase-gate, and no back-edge to a quality-check node. Adding a verifier loop would require a new conditional branch here.
 

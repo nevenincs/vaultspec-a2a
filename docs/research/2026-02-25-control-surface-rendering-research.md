@@ -8,7 +8,7 @@ maturity: 25
 summary: 'Deep analysis of xterm.js terminal emulation, syntax highlighting options, streaming markdown renderers, and diff rendering for agent output.'
 ---
 
-# Research Phase 2: Terminal Emulation, Syntax Highlighting, and Agent Output Rendering
+## Research Phase 2: Terminal Emulation, Syntax Highlighting, and Agent Output Rendering
 
 **Date**: 2026-02-25
 **Status**: Research Complete
@@ -92,7 +92,7 @@ The standard backend integration pattern follows this flow:
 
 ```text
 Browser (xterm.js) <--WebSocket--> Backend Server <--PTY--> Shell Process
-```
+```text
 
 **Common implementation stacks**:
 
@@ -441,7 +441,7 @@ ContentRenderer.React (entry point)
       -> CodeBlock.React (syntax highlighted code with execution support)
       -> KaTeX (math formulas, inline + block)
       -> DOMPurify (HTML sanitization for XSS prevention)
-```
+```text
 
 #### Streaming Architecture
 
@@ -704,7 +704,7 @@ Gateway Frontend
     +-- Code Viewer (optional)
           +-- CodeMirror 6 (read-only mode)
           +-- For file inspection / code review features
-```
+```text
 
 ### Key Risks and Mitigations
 

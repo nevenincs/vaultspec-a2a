@@ -32,7 +32,7 @@ compiled = graph.compile()
 # Invoke a single node directly
 result = compiled.nodes["my_node"].invoke({"my_key": "initial_value"})
 assert result["my_key"] == "expected_value"
-```
+```yaml
 
 This is the correct Layer 1 approach: deterministic, no LLM routing involved.
 
@@ -49,7 +49,7 @@ compiled = graph.compile(checkpointer=checkpointer)
 config = {"configurable": {"thread_id": "test-thread-1"}}
 result = compiled.invoke({"input": "test input"}, config)
 assert result["output"] == "expected output"
-```
+```text
 
 `MemorySaver` is the canonical in-process, in-memory checkpointer for tests.
 Do NOT use `AsyncSqliteSaver` in Layer 1 tests — it requires file I/O and
@@ -75,7 +75,7 @@ assert snapshot.values["intermediate_key"] == "expected"
 # Inject modified state and resume
 compiled.update_state(config, {"intermediate_key": "overridden"}, as_node="node_a")
 final = compiled.invoke(None, config)
-```
+```yaml
 
 Note: `interrupt_after` is a compile-time or invoke-time option, not a node
 configuration. This differs from `interrupt()` (runtime suspension for human-in-the-loop).
@@ -102,7 +102,7 @@ assert interrupt_value["type"] == "permission_request"
 # Resume with a response
 final = compiled.invoke(Command(resume="approved_option_id"), config)
 assert final["status"] == "completed"
-```
+```python
 
 This is the pattern established in `src/vaultspec_a2a/core/tests/test_supervisor.py` lines 663-688.
 The `Command` type is imported from `langgraph.types`.
@@ -138,7 +138,7 @@ LANGSMITH_API_KEY=<your-key>
 # Legacy aliases — also accepted by LangGraph runtime (backward-compatible)
 # LANGCHAIN_TRACING_V2=true
 # LANGCHAIN_API_KEY=<your-key>
-```
+```text
 
 The project `.env` uses `LANGSMITH_TRACING` and `LANGSMITH_API_KEY` — the canonical
 current names per the LangSmith SDK. No code changes are required to enable tracing.
@@ -171,7 +171,7 @@ config = {
     },
 }
 result = await graph.ainvoke(input_state, config)
-```
+```text
 
 For programmatic trace grouping without modifying call sites, use the context manager:
 
@@ -184,13 +184,13 @@ with ls.tracing_context(
     metadata={"test_case": "structured-coder-plan-phase"},
 ):
     result = await graph.ainvoke(input_state, config)
-```
+```text
 
 ### 2.4 Trace Structure in the LangSmith UI
 
 Each `ainvoke` / `astream` call produces one **root run**. Within it:
 
-```
+```text
 Root Run (graph invocation)
 ├── Node Run: supervisor
 │   └── LLM Run: ChatAnthropic
@@ -205,7 +205,7 @@ Root Run (graph invocation)
 └── Node Run: reviewer
     └── LLM Run: ChatAnthropic
         └── ...
-```
+```yaml
 
 Each node run shows: name, input state dict, output state delta, wall-clock latency.
 Checkpoint state is captured at every node boundary (when using a checkpointer).
@@ -216,7 +216,7 @@ Traces are grouped by project. The project is set via:
 
 ```bash
 LANGSMITH_PROJECT=vaultspec-dev   # set in .env (legacy alias: LANGCHAIN_PROJECT)
-```
+```text
 
 Or per-run via config `metadata["ls_project"]` or `ls.tracing_context(project_name=...)`.
 
@@ -239,7 +239,7 @@ async for chunk in graph.astream(input, config, stream_mode="updates"):
     # chunk = {node_name: state_delta_dict}
     node_name, delta = next(iter(chunk.items()))
     print(f"Node {node_name!r} produced: {delta}")
-```
+```text
 
 - Yields once per node completion
 - Contains only the keys that the node wrote (not the full state)
@@ -252,7 +252,7 @@ async for chunk in graph.astream(input, config, stream_mode="updates"):
 async for state in graph.astream(input, config, stream_mode="values"):
     # state = full TeamState dict after each node
     print(f"Current phase: {state.get('pipeline_phase')}")
-```
+```text
 
 - Yields the complete state snapshot after every node
 - Higher bandwidth than `"updates"` — use when you need the full picture
@@ -266,7 +266,7 @@ async for msg, metadata in graph.astream(input, config, stream_mode="messages"):
     # metadata = {"langgraph_node": "planner", "ls_model_name": "claude-sonnet-4-6", ...}
     if hasattr(msg, "content") and msg.content:
         print(msg.content, end="", flush=True)
-```
+```text
 
 - Yields `(AIMessageChunk, metadata)` tuples as tokens stream from the LLM
 - `metadata["langgraph_node"]` identifies which node is generating the chunk
@@ -279,7 +279,7 @@ async for msg, metadata in graph.astream(input, config, stream_mode="messages"):
 async for event in graph.astream(input, config, stream_mode="debug"):
     # event = {"type": "task"|"task_result"|"checkpoint", "payload": {...}}
     print(event)
-```
+```yaml
 
 - Yields structured debug events: node start, node result, checkpoint written
 - Highest verbosity — use only for deep debugging
@@ -297,7 +297,7 @@ async for chunk in graph.astream(
         msg, metadata = data
     elif mode == "updates":
         node_name, delta = next(iter(data.items()))
-```
+```text
 
 When multiple modes are combined, each chunk is a `(mode_name, payload)` tuple.
 This is the pattern used in `src/vaultspec_a2a/core/aggregator.py` post-LG-018.
@@ -336,7 +336,7 @@ result = await compiled.ainvoke(input_state, config)
 
 # Assert routing was applied — this is a code-correctness assertion (ALLOWED)
 assert result["pipeline_phase"] == "plan"
-```
+```text
 
 ### 4.2 Multi-Agent Collaboration — Layer 2 Pattern
 
@@ -364,7 +364,7 @@ async def main():
     print("Run complete — inspect trace in LangSmith")
 
 asyncio.run(main())
-```
+```text
 
 ### 4.3 Checkpoint / Resume — Layer 1 Pattern
 
@@ -394,7 +394,7 @@ result2 = await compiled.ainvoke(Command(resume=option_id), config)
 
 # Verify post-resume state (code-correctness assertion — ALLOWED)
 assert result2.get("routing_error") is None
-```
+```text
 
 ### 4.4 State Injection via `update_state`
 
@@ -411,7 +411,7 @@ compiled.update_state(
 # Resume from that injected state
 result = await compiled.ainvoke(None, config)
 assert result["pipeline_phase"] == "review"
-```
+```text
 
 `as_node` tells LangGraph to treat this as if the named node produced this state,
 so the conditional edges from that node are re-evaluated.
@@ -424,7 +424,7 @@ Each test MUST use a unique `thread_id` to avoid state leakage between tests:
 import uuid
 
 config = {"configurable": {"thread_id": str(uuid.uuid4())}}
-```
+```text
 
 Alternatively, create a fresh `MemorySaver()` per test (via pytest fixture):
 
@@ -436,7 +436,7 @@ def checkpointer():
 @pytest.fixture
 def compiled_graph(checkpointer):
     return graph.compile(checkpointer=checkpointer)
-```
+```text
 
 A new `MemorySaver()` instance is always empty — no cross-test contamination.
 
@@ -478,7 +478,7 @@ import langsmith as ls
 from langgraph.errors import GraphInterrupt, GraphRecursionError
 
 # NOTE: GraphBubbleUp is NOT documented — import with try/except guard (LG-NEW-002)
-```
+```text
 
 ---
 

@@ -7,7 +7,7 @@ maturity: 65
 feature: control-surface-gaps
 ---
 
-# Gateway Gaps Research
+## Gateway Gaps Research
 
 **Date**: 2026-02-25
 **Domain**: Gateway & Rendering
@@ -49,7 +49,7 @@ ecosystem.
 <div class="agent-output">
   <Markdown source={streamedContent} />
 </div>
-```
+```text
 
 ## 2. xterm.js Backpressure (Gap G1)
 
@@ -84,7 +84,7 @@ term.onDrain(() => {
     socket.send(JSON.stringify({ action: 'resume', agent_id: payload.agent_id }));
   }
 });
-```
+```text
 
 ## 3. Terminal State Recovery: Server-Side Replay (Gap G3)
 
@@ -135,7 +135,7 @@ offload rendering to the GPU.
     background-color: transparent !important;
   }
 }
-```
+```yaml
 
 **Mandate**: The React application _must_ initialize `xterm.js`using
 the`@xterm/addon-webgl`plugin to bypass DOM-styling conflicts entirely,

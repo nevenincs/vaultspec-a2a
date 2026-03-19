@@ -29,7 +29,7 @@ async with engine.begin() as conn:
         )
     except OperationalError:
         pass
-```
+```python
 
 With Alembic migrations in place (ADR-029), `init_db()` should NOT use `Base.metadata.create_all` for production databases. The Alembic migration `0001_initial_schema.py` already creates all tables including `team_preset`. Running both `create_all` AND Alembic migrations means:
 
@@ -59,9 +59,9 @@ Uses `sqlite3.connect()` (blocking) to manipulate LangGraph checkpoint tables. C
 
 **File:** `database/__init__.py:3`
 
-```
+```text
 Facade re-exporting all public types from the ``lib.database`` subpackage.
-```
+```text
 
 Should be `vaultspec_a2a.database`.
 
@@ -69,9 +69,9 @@ Should be `vaultspec_a2a.database`.
 
 **File:** `models.py:9`
 
-```
+```yaml
 - ADR-009: Module hierarchy (``lib/database/``)
-```
+```python
 
 Should be `vaultspec_a2a/database/`.
 
@@ -81,7 +81,7 @@ Should be `vaultspec_a2a/database/`.
 
 ```python
 # NOTE (DB-M1): This cross-module import (lib/database -> lib/core) is intentional
-```
+```text
 
 Should say `vaultspec_a2a.database -> vaultspec_a2a.core`.
 
@@ -89,9 +89,9 @@ Should say `vaultspec_a2a.database -> vaultspec_a2a.core`.
 
 **File:** `migrations/versions/0001_initial_schema.py:5`
 
-```
+```text
 ``lib/database/models.py``.
-```
+```python
 
 Should be `vaultspec_a2a/database/models.py`.
 
@@ -107,7 +107,7 @@ Directly manipulates LangGraph's `checkpoints` table `channel_values` JSON. This
 
 ```python
 from ..core.config import settings  # noqa: TID252
-```
+```python
 
 Module-level import means `import vaultspec_a2a.database.session` requires `core.config` to resolve settings (including env vars). Tests that want to use the session module must have a valid settings environment. The `settings` object is only used as a default fallback in `get_engine()` and `init_db()` -- both accept explicit `db_path` parameters. Could be deferred to inside those functions.
 
@@ -121,7 +121,7 @@ Module-level import means `import vaultspec_a2a.database.session` requires `core
 
 ```python
 _ALEMBIC_INI = Path(__file__).resolve().parent.parent.parent.parent / "alembic.ini"
-```
+```python
 
 Four `.parent` calls to reach the repo root. If `migrate.py` is moved to a different depth, this silently resolves to the wrong path. The `cli.py:13` uses a similar pattern but from a different depth.
 
@@ -220,10 +220,10 @@ All CRUD functions verified:
 
 Thread lifecycle state machine:
 
-```
+```text
 SUBMITTED → RUNNING → ??? (never transitions to COMPLETED or FAILED)
          → CANCELLED (via cancel endpoint)
-```
+```text
 
 Evidence:
 
@@ -251,7 +251,7 @@ The only references to COMPLETED/FAILED are:
 
 ```python
 CREATED = "created"
-```
+```text
 
 Searching for `ThreadStatus.CREATED` or `status.*created` yields zero results outside the enum definition. No code path ever sets or checks for this status. It's dead code in the enum.
 
@@ -263,7 +263,7 @@ Re-verified: `backfill_teamstate_sdd_fields` is imported directly at `api/app.py
 
 ```python
 from ..database.migrations import backfill_teamstate_sdd_fields
-```
+```python
 
 Still a deep import violating the facade pattern. HIGH-02 from Cycle 1 remains OPEN.
 

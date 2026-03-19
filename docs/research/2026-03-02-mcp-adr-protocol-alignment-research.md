@@ -108,7 +108,7 @@ team/status    → MISSING (should expose team agent statuses)
 team/artifacts → MISSING (should expose thread artifacts/files)
 team/respond   → MISSING (should wrap permission response)
 team/cancel    → MISSING (should cancel running thread)
-```
+```text
 
 ---
 

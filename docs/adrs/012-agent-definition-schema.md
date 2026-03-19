@@ -10,7 +10,7 @@ related:
   - docs/adrs/013-team-composition-topology.md
 ---
 
-# ADR-012: Agent Definition Schema (TOML Config)
+## ADR-012: Agent Definition Schema (TOML Config)
 
 **Date:** 2026-02-27
 **Status:** Proposed
@@ -38,7 +38,7 @@ Each logical agent role is defined by a TOML file located at:
 
 ```text
 {workspace_root}/.vaultspec/agents/{agent_id}.toml
-```
+```text
 
 A set of **built-in default agent definitions** is bundled inside the package
 at `src/vaultspec_a2a/core/presets/agents/` and loaded as fallbacks when no workspace
@@ -84,7 +84,7 @@ terminal         = false
 # Node names listed here map to compile(..., interrupt_before=[...])
 # Populated at graph compilation time from all agents' permission lists.
 require_approval_for = ["fs.writeTextFile"]
-```
+```text
 
 ### 2.2 Full Field Reference
 
@@ -147,7 +147,7 @@ class AgentConfig(BaseModel):
         with path.open("rb") as f:
             data = tomllib.load(f)
         return cls.model_validate(data["agent"])
-```
+```text
 
 ### 2.4 SDK Mapping — How Each Field Becomes LangGraph Code
 
@@ -179,7 +179,7 @@ builder.add_node(
         "description": agent_config.description,
     },
 )
-```
+```text
 
 The event aggregator extracts `metadata` from the compiled graph's
 `StateNodeSpec` when emitting `AgentStatusEvent` and `TeamStatusEvent`.
@@ -207,7 +207,7 @@ map 1:1:
     },
     "terminal": agent_config.capabilities.terminal,
 }
-```
+```yaml
 
 | `AcpChatModel` gains an `agent_config: AgentConfig | None = None` field. |
 `compile_team_graph()` injects the config when constructing each model
@@ -233,7 +233,7 @@ Workspace-local files at `.vaultspec/agents/{id}.toml` shadow preset defaults.
 1. {workspace_root}/.vaultspec/agents/{agent_id}.toml   (workspace override)
 2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml               (bundled default)
 3. Raise AgentConfigNotFoundError                         (fail fast)
-```
+```text
 
 ## 3. Rationale
 
@@ -322,7 +322,7 @@ class AgentSummary(BaseModel):
     role: str
     display_name: str
     description: str
-```
+```yaml
 
 Source: node metadata extracted from `compiled_graph.nodes[node_name].metadata`
 at aggregator emit time.

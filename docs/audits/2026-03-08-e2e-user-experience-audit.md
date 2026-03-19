@@ -20,7 +20,7 @@ git clone <repo>
 cd vaultspec-a2a
 uv sync              # Python deps
 cd src/ui && npm ci   # Frontend deps (optional — only for UI development)
-```
+```text
 
 ### What `uv sync` sets up
 
@@ -84,7 +84,7 @@ From `.env.example` (105 lines):
     }
   }
 }
-```
+```text
 
 ### Example configuration (Cursor / Windsurf)
 
@@ -98,13 +98,13 @@ From `.env.example` (105 lines):
     }
   }
 }
-```
+```text
 
 ### Streamable HTTP (alternative — for network clients)
 
 ```bash
 uv run vaultspec-mcp --transport streamable-http --port 8100
-```
+```text
 
 Then configure IDE to connect to `http://localhost:8100/mcp`.
 
@@ -125,7 +125,7 @@ Then configure IDE to connect to `http://localhost:8100/mcp`.
 
 **Phase 1: MCP server lifespan** (server.py:324-366)
 
-```
+```text
 IDE spawns: uv run vaultspec-mcp     (__main__.py:47 → mcp.run_stdio_async())
   → _mcp_lifespan(server)             (server.py:325)
   → _mcp_settings.mcp_auto_start_gateway == True  (default)
@@ -137,11 +137,11 @@ IDE spawns: uv run vaultspec-mcp     (__main__.py:47 → mcp.run_stdio_async())
         stdout=DEVNULL, stderr=DEVNULL     ← KEY: stderr is lost
       )
     → Polls _check_gateway_health() every 0.5s for 120 iterations (60s max)
-```
+```yaml
 
 **Phase 2: Gateway lifespan** (api/app.py:540-600)
 
-```
+```text
 uvicorn starts → create_app() → lifespan()
   → init_db()                    (database/migrate.py — Alembic auto-migrate)
   → backfill_checkpoint_fields() (database/session.py)
@@ -153,11 +153,11 @@ uvicorn starts → create_app() → lifespan()
   → httpx.AsyncClient()          (worker client)
   → LazyWorkerSpawner()          (app.py:435-503 — defers worker spawn)
   → /health responds 200         (MCP poll succeeds)
-```
+```yaml
 
 **Phase 3: First tool call** (e.g., `start_thread`)
 
-```
+```text
 IDE calls MCP tool "start_thread"
   → server.py:430 start_thread()
   → _require_gateway()          (server.py:408 — checks _gateway_connected flag)
@@ -172,7 +172,7 @@ IDE calls MCP tool "start_thread"
       → compile_graph()         (core/graph.py)
       → graph.astream()         (LangGraph — first LLM call happens HERE)
     → Returns thread_id to gateway → MCP → IDE
-```
+```python
 
 ### Timing breakdown
 
@@ -219,24 +219,24 @@ still lost.
 
 ### `list_threads` (read-only, needs gateway only)
 
-```
+```text
 User: "List my threads"
 → MCP calls GET /api/threads
 → Returns thread list
-```
+```yaml
 
 **Current**: Works after cold start completes (~10-15s wait).
 **After Phase 1**: Should work in <3s (no worker needed).
 
 ### `start_thread` (write, needs gateway + worker)
 
-```
+```text
 User: "Start a coding task: refactor the auth module"
 → MCP calls POST /api/threads with initial_message
 → Gateway dispatches to worker
 → Worker compiles graph, starts execution
 → Returns thread_id
-```
+```yaml
 
 **Current**: Works after cold start. Execution time depends on LLM provider.
 

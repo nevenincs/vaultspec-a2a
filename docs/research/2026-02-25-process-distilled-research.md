@@ -50,7 +50,7 @@ creation from worker threads must delegate back to the main event loop.
 Agent subprocess
   stdout=PIPE ──→ asyncio readline task ──→ broadcast to WebSocket clients
   stderr=PIPE ──→ asyncio readline task ──→ broadcast to WebSocket clients
-```
+```text
 
 ### Key considerations
 
@@ -78,7 +78,7 @@ Windows lacks POSIX signals.`process.terminate()`calls`TerminateProcess()`
 2. If still alive: terminate() → wait 2 seconds
 3. If still alive: taskkill /T /F /PID {pid}  (kills entire tree)
 4. Always: await process.wait()  to release handle
-```
+```yaml
 
 **Prerequisite**: Create subprocess with
 `creationflags=CREATE_NEW_PROCESS_GROUP`
@@ -107,7 +107,7 @@ python.exe (uvicorn)
   └─ cmd.exe               ← process.pid points here
        └─ node.exe         ← actual claude-agent-acp worker
             └─ ...         ← any grandchildren
-```
+```text
 
 `process.terminate()`and`process.kill()`both call`TerminateProcess()`on
 **cmd.exe only**. node.exe and its descendants become orphans.
@@ -122,7 +122,7 @@ killer = await asyncio.create_subprocess_exec(
     stderr=asyncio.subprocess.DEVNULL,
 )
 await asyncio.wait_for(killer.wait(), timeout=5.0)
-```
+```text
 
 This is implemented in `src/vaultspec_a2a/providers/acp_chat_model._kill_process_tree`and
 mirrored in`src/vaultspec_a2a/providers/probes/_protocol._kill_process_tree`.
@@ -135,7 +135,7 @@ process = await asyncio.create_subprocess_shell(
     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP,
     ...
 )
-```
+```text
 
 Prevents Ctrl+C in the parent terminal from propagating into the subprocess
 group, avoiding unintended partial teardown.
@@ -146,7 +146,7 @@ group, avoiding unintended partial teardown.
 transport = getattr(process, "_transport", None)
 if transport is not None:
     transport.close()
-```
+```text
 
 Prevents OS handle leaks when the event loop finalizer runs on an already-closed
 loop (cpython#114177).
@@ -164,7 +164,7 @@ def find_free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
         s.bind(('', 0))
         return s.getsockname()[1]
-```
+```text
 
 Race condition window is microseconds — acceptable for local dev tool. Keep a
 registry of allocated ports to avoid double-allocation.
@@ -197,7 +197,7 @@ CREATED ──→ STARTING ──→ READY ──→ RUNNING                    
                │    └── (retry) ──────┘
                v
             FATAL
-```
+```text
 
 ### 2.1 State Definitions
 
@@ -221,7 +221,7 @@ mode: "always" | "on_failure" | "never"
 max_retries: 3
 backoff: 1s → 2s → 4s (exponential, capped at 30s)
 stable_threshold: 30s uptime resets retry counter
-```
+```text
 
 ### 2.3 Health Check Layers
 
@@ -258,7 +258,7 @@ Current "coder" at port 8001 (RUNNING)
   → Health check passes
   → Update registry: "coder" → port 8002
   → Old at port 8001: DRAINING → STOPPING → STOPPED
-```
+```yaml
 
 Default for v1: simple stop-then-start. Blue-green for agents with expensive
 startup (LLM context loading).
@@ -285,7 +285,7 @@ CanUseTool = Callable[
     [str, dict[str, Any], ToolPermissionContext],
     Awaitable[PermissionResult]  # Allow (optionally modify input) or Deny
 ]
-```
+```text
 
 The callback can consult a database, in-memory config, or API. Changes take
 effect immediately — no agent restart needed.

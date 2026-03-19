@@ -7,7 +7,7 @@ maturity: 65
 feature: agent-gaps
 ---
 
-# Agents Gaps Research
+## Agents Gaps Research
 
 **Date**: 2026-02-25
 **Domain**: Agent Providers
@@ -57,7 +57,7 @@ mid-task, the orchestrator will crash due to unhandled`401 Unauthorized`errors.
 ```powershell
 # Required provisioning step for the Orchestrator environment
 claude setup-token
-```
+```text
 
 This generates a static OAuth token valid for **1 year**. The orchestrator will
 inject this token into the subprocess environment

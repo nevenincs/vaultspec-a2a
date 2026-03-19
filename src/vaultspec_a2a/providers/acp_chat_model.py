@@ -25,7 +25,7 @@ from collections.abc import AsyncIterator, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast, override
 from uuid import uuid4
 
 from langchain_core.callbacks import (
@@ -260,12 +260,13 @@ class AcpChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "acp-chat-model"
 
+    @override
     async def _astream(
         self,
         messages: list[BaseMessage],
-        _stop: list[str] | None = None,
-        _run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **_kwargs: object,
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Streams responses from the ACP subprocess."""
         prompt_blocks: list[dict[str, str]] = []
@@ -335,7 +336,7 @@ class AcpChatModel(BaseChatModel):
             await self._setup_session(ctx)
             prompt_future = await self._setup_prompt(prompt_blocks, ctx)
 
-            async for chunk in self._yield_chunks(ctx, prompt_future, _run_manager):
+            async for chunk in self._yield_chunks(ctx, prompt_future, run_manager):
                 yield chunk
         finally:
             await self._cleanup_session(ctx, stdout_task, stderr_task)
@@ -468,7 +469,7 @@ class AcpChatModel(BaseChatModel):
         messages: list[BaseMessage],
         stop: list[str] | None = None,
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
-        **kwargs: object,
+        **kwargs: Any,
     ) -> ChatResult:
         """Collect _astream chunks into a ChatResult."""
         chunks: list[ChatGenerationChunk] = []
@@ -606,7 +607,8 @@ class AcpChatModel(BaseChatModel):
         """Return True when an auth error indicates operator cancellation."""
         if not isinstance(error, dict):
             return False
-        message = str(error.get("message", "")).lower()
+        err = cast("dict[str, Any]", error)
+        message = str(err.get("message", "")).lower()
         return bool(
             "cancelled" in message
             or "canceled" in message
@@ -619,7 +621,8 @@ class AcpChatModel(BaseChatModel):
         """Return True when an auth error indicates explicit auth rejection."""
         if not isinstance(error, dict):
             return False
-        message = str(error.get("message", "")).lower()
+        err = cast("dict[str, Any]", error)
+        message = str(err.get("message", "")).lower()
         return bool(
             "access_denied" in message
             or "access denied" in message
@@ -1352,10 +1355,12 @@ class AcpChatModel(BaseChatModel):
 
     def _select_auth_method_id(self, env: Mapping[str, str]) -> str:
         """Select the best advertised ACP auth method for the current env."""
-        method_ids = [
-            method.get("id")
+        method_ids: list[str] = [
+            mid
             for method in self._auth_methods
-            if isinstance(method, dict) and isinstance(method.get("id"), str)
+            if isinstance(method, dict)
+            for mid in (method.get("id"),)
+            if isinstance(mid, str)
         ]
         if not method_ids:
             return "oauth"
@@ -1380,9 +1385,10 @@ class AcpChatModel(BaseChatModel):
         """Return True when an ACP error indicates authentication is required."""
         if not isinstance(error, dict):
             return False
-        message = str(error.get("message", "")).lower()
+        err = cast("dict[str, Any]", error)
+        message = str(err.get("message", "")).lower()
         return bool(
-            error.get("code") == AcpErrorCode.UNAUTHENTICATED
+            err.get("code") == AcpErrorCode.UNAUTHENTICATED
             or "authrequired" in message
             or "authentication required" in message
             or "unauthenticated" in message
@@ -1484,11 +1490,12 @@ class AcpChatModel(BaseChatModel):
                 auth_url=auth_url,
             )
         if "error" in resp:
-            err = resp["error"]
-            err_msg = str(err.get("message", "")) if isinstance(err, dict) else str(err)
-            err_code = (
+            raw_err = resp["error"]
+            err = cast("dict[str, Any]", raw_err) if isinstance(raw_err, dict) else {}
+            err_msg = str(err.get("message", "")) if err else str(raw_err)
+            err_code: int = (
                 err.get("code", AcpErrorCode.INTERNAL_ERROR)
-                if isinstance(err, dict)
+                if err
                 else AcpErrorCode.INTERNAL_ERROR
             )
             if self._is_auth_cancelled_error(err):
@@ -1513,7 +1520,8 @@ class AcpChatModel(BaseChatModel):
                 auth_outcome="auth_failed",
                 auth_url=auth_url,
             )
-        return resp.get("result", {})
+        result = resp.get("result")
+        return cast("dict[str, object]", result) if isinstance(result, dict) else {}
 
     async def _wait_for_authenticate_response(
         self,

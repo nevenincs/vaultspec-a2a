@@ -24,7 +24,7 @@ Entry point: `pyproject.toml:33` → `vaultspec = "vaultspec_a2a.cli:cli"`
 
 ## 3. Target CLI Surface
 
-```
+```text
 vaultspec --show-config
 vaultspec test [unit | smoke | benchmark [smoke|nightly]]
 vaultspec run [mock [SCENARIO] | probe [PROVIDER]]
@@ -32,7 +32,7 @@ vaultspec team [start | status | resume | stop | delete | archive | list]
 vaultspec agent [ask | list]
 vaultspec service [start | stop | kill | delete]
 vaultspec database [update | clear | snapshot | snapshot list | restore]
-```
+```text
 
 ## 4. Backend Surface Audit
 
@@ -59,7 +59,7 @@ RUNNING = "running"
 COMPLETED = "completed"
 FAILED = "failed"
 CANCELLED = "cancelled"
-```
+```yaml
 
 **No ARCHIVED status.** Adding it requires: enum value + Alembic migration (for
 any existing CHECK constraints) + endpoint to transition.
@@ -128,7 +128,7 @@ Uses Click 9.x+ with **reusable option constants**:
 
 ```python
 OPT_CONFIG = click.option("--config", "-c", help="Config path")
-```
+```text
 
 Good pattern for shared options across `service` and `team` subcommands.
 

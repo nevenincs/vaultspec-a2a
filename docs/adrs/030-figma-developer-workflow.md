@@ -9,7 +9,7 @@ related:
   - docs/figma/2026-01-03-figma-architecture-research.md
 ---
 
-# ADR-030: Figma Developer Workflow
+## ADR-030: Figma Developer Workflow
 
 <!-- Renumbered 2026-03-04: was ADR-018 (duplicate); substantive ADR-018 is 018-react-tailwind-figma-migration.md -->
 
@@ -92,7 +92,7 @@ via:
 
 ```bash
 npx figma connect publish --token $FIGMA_ACCESS_TOKEN
-```
+```text
 
 The `figma.config.json` at project root governs inclusion, label, and language:
 
@@ -104,7 +104,7 @@ The `figma.config.json` at project root governs inclusion, label, and language:
     "language": "html"
   }
 }
-```
+```text
 
 **Plan requirement:** Code Connect CLI publishing requires a Figma
 **Organization or
@@ -133,7 +133,7 @@ Token JSON file (or Style Dictionary input)
        ▼ (Style Dictionary / custom transform)
 CSS Custom Properties (src/ui/tokens.css)
 Tailwind v4 token config
-```
+```typescript
 
 The REST API call for token extraction requires a PAT with `file_variables:read`
 scope.

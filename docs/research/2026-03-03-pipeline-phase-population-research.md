@@ -6,7 +6,7 @@ feature: sdd-blackboard-integration
 description: 'How should a multi-stage agent pipeline track which phase it is in? Analysis of deterministic inference, LLM-driven, and hybrid approaches for setting pipeline_phase in TeamState.'
 ---
 
-# Research: pipeline_phase Population
+## Research: pipeline_phase Population
 
 **Date:** 2026-03-03
 
@@ -50,7 +50,7 @@ def supervisor_node(state: TeamState) -> Command[Literal["worker_a", "worker_b"]
         update={"pipeline_phase": "exec", "next": "worker_a"},
         goto="worker_a"
     )
-```
+```yaml
 
 This is the canonical LangGraph pattern for combining routing with state updates. The supervisor can return `{"pipeline_phase": inferred_phase, "next": worker_id}` in a single return dict without requiring the `Command` type if using `add_conditional_edges`.
 
@@ -60,7 +60,7 @@ LangGraph's `with_structured_output` enables LLM-driven phase output:
 class RoutingDecision(BaseModel):
     next: str = Field(description="Worker to route to, or FINISH")
     phase: str = Field(description="Current pipeline phase")
-```
+```text
 
 However, this requires the LLM to produce a valid phase name on every invocation — a hallucination risk for a field with binding consequences (ADR-022 anchoring, ADR-020 mounting, ADR-021 queue injection all key off `pipeline_phase`).
 
@@ -86,9 +86,9 @@ For phase tracking, this maps directly to: the supervisor (acting as control uni
 
 **Mechanism:** A Python function inspects `state["vault_index"]` to determine the most advanced phase with artifacts. The phase ordering is:
 
-```
+```text
 research < reference < adr < plan < exec < audit
-```
+```text
 
 The inferred phase is the highest phase that has at least one entry in `vault_index`. If `vault_index["exec"]` has entries, phase = `exec`. If only `vault_index["adr"]` has entries, phase = `adr`.
 
@@ -104,7 +104,7 @@ def _infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
         if vault_index.get(phase):
             return phase
     return "research"
-```
+```text
 
 **Pros:**
 
@@ -129,7 +129,7 @@ def _infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
 class RoutingDecision(BaseModel):
     next: str
     phase: Literal["research", "reference", "adr", "plan", "exec", "audit", "FINISH"]
-```
+```text
 
 **Pros:**
 
@@ -157,7 +157,7 @@ if llm_phase and _PHASE_ORDER.index(llm_phase) >= _PHASE_ORDER.index(inferred):
     final_phase = llm_phase
 else:
     final_phase = inferred
-```
+```text
 
 **Pros:**
 

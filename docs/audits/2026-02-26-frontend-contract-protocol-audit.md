@@ -69,7 +69,7 @@ class TaskState(str, Enum):
     rejected = 'rejected'
     auth_required = 'auth-required'    # NOTE: hyphenated
     unknown = 'unknown'
-```
+```text
 
 **Our schema** (`enums.py:AgentLifecycleState`):
 
@@ -81,7 +81,7 @@ class AgentLifecycleState(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"            # double 'l'
-```
+```text
 
 ### Gaps identified
 
@@ -118,7 +118,7 @@ class DataPart(A2ABaseModel):
 
 class Part(RootModel[TextPart | FilePart | DataPart]):
     root: TextPart | FilePart | DataPart
-```
+```text
 
 ### Our schema
 
@@ -152,7 +152,7 @@ class Artifact(A2ABaseModel):
     metadata: dict[str, Any] | None = None
     name: str | None = None
     parts: list[Part]  # <-- typed content blocks
-```
+```text
 
 **A2A streaming** (`types.py:1603-1636`):
 
@@ -165,7 +165,7 @@ class TaskArtifactUpdateEvent(A2ABaseModel):
     last_chunk: bool | None = None
     metadata: dict[str, Any] | None = None
     task_id: str
-```
+```text
 
 ### Our schema: (2)
 
@@ -176,7 +176,7 @@ class ArtifactUpdateEvent(EventEnvelope):
     content: str                # <-- flat string, not parts
     append: bool = False
     last_chunk: bool = False
-```
+```text
 
 ### Gaps
 
@@ -200,7 +200,7 @@ class Task(A2ABaseModel):
     history: list[Message] | None = None
     kind: Literal['task'] = 'task'
     metadata: dict[str, Any] | None = None
-```
+```text
 
 **A2A SDK** — `Message` (`types.py:1436-1477`):
 
@@ -215,7 +215,7 @@ class Message(A2ABaseModel):
     reference_task_ids: list[str] | None = None
     extensions: list[str] | None = None
     metadata: dict[str, Any] | None = None
-```
+```text
 
 **Our schema** — We have no `Task`or`Message`model. Our`thread_id`maps
 to A2A's`context_id`. Our `ThreadStateSnapshot`partially covers`Task`.
@@ -246,7 +246,7 @@ class TaskArtifactUpdateEvent(A2ABaseModel):
     last_chunk: bool | None = None
     kind: Literal['artifact-update'] = 'artifact-update'
     metadata: dict[str, Any] | None = None
-```
+```text
 
 **Our schema** — 12 granular event types covering agent status, message
 chunks, thought chunks, tool calls, permissions, artifacts, plans, team
@@ -285,7 +285,7 @@ class ToolCall(SchemaDict, total=False):
     rawInput: dict
     rawOutput: dict
     sessionUpdate: Required[Literal["tool_call"]]
-```
+```text
 
 ### Our schema: (3)
 
@@ -297,7 +297,7 @@ class ToolCallStartEvent(EventEnvelope):
     status: ToolCallStatus = ToolCallStatus.PENDING
     locations: list[ToolCallLocation]
     content: list[ToolCallContent]
-```
+```text
 
 **Alignment:** Good. Our `ToolCallStartEvent`and`ToolCallUpdateEvent`mirror
 the Toad/ACP split correctly. Field names are snake_case (our convention) vs
@@ -327,7 +327,7 @@ class ToolCallContentDiff(SchemaDict, total=False):
 class ToolCallContentTerminal(SchemaDict, total=False):
     terminalId: Required[str]
     type: Required[Literal["terminal"]]
-```
+```text
 
 ### Our schema: (4)
 
@@ -345,7 +345,7 @@ class ToolCallContentDiff(BaseModel):
 class ToolCallContentTerminal(BaseModel):
     content_type: Literal["terminal"] = "terminal"
     terminal_id: str
-```
+```text
 
 ### Gaps: (3)
 
@@ -369,7 +369,7 @@ class PermissionOption(TypedDict, total=False):
     kind: Required[PermissionOptionKind]
     name: Required[str]
     optionId: Required[PermissionOptionId]
-```
+```text
 
 ### Our schema: (5)
 
@@ -384,7 +384,7 @@ class PermissionOption(BaseModel):
     option_id: str
     name: str
     kind: PermissionOptionKind
-```
+```text
 
 **Assessment:** Exact match. Field names differ only in case convention
 (snake_case vs camelCase), which is our standard.
@@ -398,7 +398,7 @@ class PlanEntry(SchemaDict, total=False):
     content: Required[str]
     priority: Literal["high", "medium", "low"]
     status: Literal["pending", "in_progress", "completed"]
-```
+```text
 
 ### Our schema: (6)
 
@@ -407,7 +407,7 @@ class PlanEntry(BaseModel):
     content: str
     status: PlanEntryStatus = PlanEntryStatus.PENDING
     priority: PlanEntryPriority = PlanEntryPriority.MEDIUM
-```
+```text
 
 **Assessment:** Exact match with proper defaults.
 
@@ -433,7 +433,7 @@ LangGraph thread_id  ←→  A2A context_id
 LangGraph stream items  ←→  A2A streaming events
 LangGraph AIMessage  ←→  A2A Message (role=agent)
 Pydantic ResponseFormat  ←→  A2A Artifact
-```
+```text
 
 **Relevance to our schemas:** This pattern confirms that our event
 aggregator should:

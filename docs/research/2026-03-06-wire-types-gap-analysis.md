@@ -6,7 +6,7 @@ related:
   - docs/adrs/011-frontend-backend-contract.md
 ---
 
-# Wire Types Gap Analysis
+## Wire Types Gap Analysis
 
 ## 1. Codegen Status
 
@@ -17,7 +17,7 @@ The regeneration command (per ADR-011 audit notes) is:
 
 ```bash
 npx openapi-typescript http://localhost:8000/openapi.json -o src/app/data/wire-types.ts
-```
+```text
 
 This requires the API server to be running. No CI step validates freshness.
 
@@ -45,7 +45,7 @@ class _PermissionSnapshot(BaseModel):
     description: str
     options: list["_PermissionOptionSnapshot"]
     tool_call: str | None = None
-```
+```text
 
 No `tool_kind` field — so wire-types matches here. Not a gap.
 
@@ -123,7 +123,7 @@ If regeneration is not practical right now, these are the 4 minimal edits:
 
 ```typescript
 tool_kind: components["schemas"]["ToolKind"] | null;
-```
+```text
 
 **B. Add 3 fields to `_AgentSnapshot` (after line 788):**
 
@@ -143,7 +143,7 @@ display_name: string;
  * @default
  */
 description: string;
-```
+```text
 
 ## 4. Summary
 

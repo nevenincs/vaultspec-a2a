@@ -19,7 +19,7 @@ async def from_conn_string(
 ) -> AsyncIterator[AsyncSqliteSaver]:
     async with aiosqlite.connect(conn_string) as conn:
         yield cls(conn)
-```
+```text
 
 - Async context manager (must be used with `async with`)
 - Accepts a file path string or `":memory:"`
@@ -33,7 +33,7 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
     await checkpointer.setup()
-```
+```python
 
 ### Validation
 
@@ -71,7 +71,7 @@ async def setup(self) -> None:
         """):
             await self.conn.commit()
         self.is_setup = True
-```
+```text
 
 Key properties:
 
@@ -137,7 +137,7 @@ class AsyncSqliteSaver(BaseCheckpointSaver[str]):
         self.lock = asyncio.Lock()
         self.loop = asyncio.get_running_loop()
         self.is_setup = False
-```
+```text
 
 The `self.loop = asyncio.get_running_loop()` captures the event loop at
 construction time. Synchronous methods (`get_tuple`, `list`, `put`) use
@@ -174,7 +174,7 @@ execution. We never call synchronous methods directly.
 ```python
 async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
     # ... entire worker lifespan ...
-```
+```text
 
 The `async with` ensures the connection is closed on worker shutdown.
 This is exactly the recommended pattern.
@@ -192,13 +192,13 @@ Use `":memory:"` for test isolation:
 ```python
 async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
     graph = builder.compile(checkpointer=saver)
-```
+```text
 
 ### Our Test Usage (`api/tests/conftest.py:136`)
 
 ```python
 checkpointer = MemorySaver()
-```
+```text
 
 The test conftest uses `MemorySaver` (langgraph in-memory checkpointer)
 instead of `AsyncSqliteSaver.from_conn_string(":memory:")`. Per the team

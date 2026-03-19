@@ -269,8 +269,8 @@ None. eval.yml (#24), test.yml (#25-27), dev-real (#16) remain unchanged.
 | 9 | LOW | cli.py | `vaultspec test` requires `uv` |
 | 22 | LOW | pyproject.toml | `pytest-cov` not in deptry DEP002 |
 
-**Total: 0 CRITICAL, 1 HIGH, 4 MEDIUM, 4 LOW**
-**Resolved: 15 of 24 findings (62.5%)**
+Total: 0 CRITICAL, 1 HIGH, 4 MEDIUM, 4 LOW
+Resolved: 15 of 24 findings (62.5%)
 
 ---
 
@@ -295,8 +295,8 @@ None. eval.yml (#24), test.yml (#25-27), dev-real (#16) remain unchanged.
 | 9 | LOW | cli.py | `vaultspec test` requires `uv` |
 | 22 | LOW | pyproject.toml | `pytest-cov` not in deptry DEP002 |
 
-**Total: 0 CRITICAL, 1 HIGH, 2 MEDIUM, 4 LOW**
-**Resolved: 17 of 24 findings (70.8%)**
+Total: 0 CRITICAL, 1 HIGH, 2 MEDIUM, 4 LOW
+Resolved: 17 of 24 findings (70.8%)
 
 ---
 

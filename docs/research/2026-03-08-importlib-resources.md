@@ -12,7 +12,7 @@ traversal that breaks in non-editable (pip/uv) installs:
    # Expects: project_root/src/ui/dist
    # In non-editable: site-packages/vaultspec_a2a/api/app.py
    #   -> traverses to site-packages/../../../ -> WRONG
-   ```
+   ```text
 
 2. **`providers/factory.py` line 28-32 (`_PROJECT_ROOT`):**
 
@@ -21,7 +21,7 @@ traversal that breaks in non-editable (pip/uv) installs:
    # Expects: project_root (to find node_modules/)
    # In non-editable: site-packages/vaultspec_a2a/providers/factory.py
    #   -> traverses to site-packages/../../../ -> WRONG
-   ```
+   ```text
 
 Both have environment variable overrides (`VAULTSPEC_UI_BUILD_DIR`,
 `VAULTSPEC_PROJECT_ROOT`) that work in Docker. The question is whether there's
@@ -36,7 +36,7 @@ a more robust approach using Python's packaging APIs.
 Files that are **part of the Python package** and shipped inside the package
 directory. Examples: templates, default configs, SQL migration scripts.
 
-```
+```text
 vaultspec_a2a/
   database/
     migrations/          # Package data: inside the package
@@ -45,7 +45,7 @@ vaultspec_a2a/
   core/
     presets/              # Package data: inside the package
       default.yaml
-```
+```text
 
 These are locatable via `importlib.resources.files("vaultspec_a2a")`.
 
@@ -79,7 +79,7 @@ ref = importlib.resources.files("vaultspec_a2a")
 # Navigate within the package
 migrations = ref / "database" / "migrations"
 presets = ref / "core" / "presets"
-```
+```text
 
 **Verified on Python 3.13 (Windows 11):**
 
@@ -87,7 +87,7 @@ presets = ref / "core" / "presets"
 >>> importlib.resources.files("vaultspec_a2a")
 WindowsPath('Y:\\code\\...\\src\\vaultspec_a2a')
 # Returns a real Path object (not an abstract Traversable)
-```
+```text
 
 ### 2.2 `importlib.resources.as_file()` — Context Manager
 
@@ -99,7 +99,7 @@ ref = importlib.resources.files("vaultspec_a2a") / "core" / "presets" / "default
 with importlib.resources.as_file(ref) as path:
     # path is a real filesystem Path, even if the package is in a zip
     config = yaml.safe_load(path.read_text())
-```
+```text
 
 Not needed for our case -- `uv sync --no-editable` installs to a real
 filesystem directory, not a zip.
@@ -128,7 +128,7 @@ import importlib.metadata
 d = importlib.metadata.distribution("vaultspec-a2a")
 # d._path = .venv/Lib/site-packages/vaultspec_a2a-0.1.0.dist-info
 # d._path.parent = .venv/Lib/site-packages/
-```
+```text
 
 **This only gives you site-packages**, not the project root. In a non-editable
 install, there is no connection between site-packages and the original source
@@ -145,7 +145,7 @@ for f in d.files:
 # _vaultspec_a2a.pth
 # vaultspec_a2a-0.1.0.dist-info/INSTALLER
 # ...
-```
+```text
 
 Paths are relative to the dist-info directory. This can locate installed
 package files but NOT external assets.
@@ -165,7 +165,7 @@ _UI_BUILD_DIR = (
     if "VAULTSPEC_UI_BUILD_DIR" in os.environ
     else Path(__file__).resolve().parent.parent.parent.parent / "src" / "ui" / "dist"
 )
-```
+```text
 
 **Evaluation:**
 
@@ -183,13 +183,13 @@ can find them.
 # pyproject.toml
 [tool.setuptools.package-data]
 "vaultspec_a2a" = ["ui_dist/**/*"]
-```
+```text
 
 Then in code:
 
 ```python
 ui_dist = importlib.resources.files("vaultspec_a2a") / "ui_dist"
-```
+```text
 
 **Problem for SPA assets:**
 
@@ -227,7 +227,7 @@ UI_BUILD_DIR = (
     if "VAULTSPEC_UI_BUILD_DIR" in os.environ
     else _PACKAGE_ROOT.parent.parent / "ui" / "dist"  # src/ui/dist relative to src/vaultspec_a2a
 )
-```
+```text
 
 **Problem:** The `_PACKAGE_ROOT.parent.parent` traversal has the same issue as
 `__file__` traversal in non-editable installs. `_PACKAGE_ROOT` points to
@@ -290,7 +290,7 @@ def resolve_acp_entry_point() -> Path | None:
         / "claude-agent-acp" / "dist" / "index.js"
     )
     return candidate if candidate.is_file() else None
-```
+```text
 
 **Validation guard:** The `_dev_project_root()` function checks for
 `pyproject.toml` at the traversed path. If absent (non-editable install without
@@ -319,7 +319,7 @@ _MIGRATIONS = Path(__file__).parent / "migrations"
 
 # Use:
 _MIGRATIONS = importlib.resources.files("vaultspec_a2a") / "database" / "migrations"
-```
+```text
 
 This works in both editable and non-editable installs because migrations are
 inside the package.
@@ -332,7 +332,7 @@ _PRESETS_DIR = Path(__file__).parent / "presets"
 
 # Use:
 _PRESETS_DIR = importlib.resources.files("vaultspec_a2a") / "core" / "presets"
-```
+```text
 
 ### 5.3 Rules Discovery
 
@@ -340,7 +340,7 @@ _PRESETS_DIR = importlib.resources.files("vaultspec_a2a") / "core" / "presets"
 # Rules are in .vaultspec/rules/ which is project-level, not package-level
 # importlib.resources does NOT help here
 # Use workspace_root from settings instead
-```
+```text
 
 ---
 

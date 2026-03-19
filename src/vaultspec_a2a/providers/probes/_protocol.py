@@ -17,6 +17,7 @@ import time
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any, cast
 
 from .._subprocess import kill_process_tree as _kill_process_tree
 from .._subprocess import spawn_acp_process as _spawn_acp_process
@@ -127,9 +128,10 @@ class _ProbeSession:
         """Return True when the ACP error indicates auth is required."""
         if not isinstance(error, dict):
             return False
-        message = str(error.get("message", "")).lower()
+        err = cast("dict[str, Any]", error)
+        message = str(err.get("message", "")).lower()
         return bool(
-            error.get("code") == _ACP_UNAUTHENTICATED_CODE
+            err.get("code") == _ACP_UNAUTHENTICATED_CODE
             or "authrequired" in message
             or "authentication required" in message
             or "unauthenticated" in message

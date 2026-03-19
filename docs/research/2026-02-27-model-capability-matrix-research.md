@@ -241,7 +241,8 @@ From Google's February 2026 multi-agent scaling research:
 - Critical saturation point: **0.39 messages/turn** — beyond this, additional
   coordination yields diminishing returns
 
-**Validated architecture (Cursor's production system):**
+### Validated Architecture (Cursor's Production System)
+
 3 roles: **Planners → Workers → Judge**
 
 - Equal-status agents with locking (20 agents) → throughput of 2–3

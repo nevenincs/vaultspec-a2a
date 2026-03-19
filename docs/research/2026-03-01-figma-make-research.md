@@ -410,7 +410,7 @@ Figma components support four property types:
    Windsurf, VS Code)
 
   [Code to Canvas] = Claude Code -> Figma Design (bidirectional via MCP)
-```
+```text
 
 ### Data Flow
 

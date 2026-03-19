@@ -33,7 +33,7 @@ autorestart=true
 startsecs=5
 startretries=3
 stopwaitsecs=10
-```
+```text
 
 **How it works**:
 
@@ -83,7 +83,7 @@ numprocesses = 1
 warmup_delay = 3
 graceful_timeout = 10
 max_retry = 5
-```
+```text
 
 **Key feature — flapping detection**:
 
@@ -91,7 +91,7 @@ max_retry = 5
 # If a process restarts more than `max_retry` times within
 # `retry_in` seconds, circus marks it as "flapping" and stops it.
 # Similar to our circuit breaker but at the supervisor level.
-```
+```yaml
 
 **Windows compatibility**: LIMITED. Circus relies on ZeroMQ which supports
 Windows, but the core process management uses `os.waitpid()` and Unix signals.
@@ -114,15 +114,15 @@ process group management.
 **Language**: Python 3
 **Architecture**: Procfile-based multi-process runner (not a daemon).
 
-```
+```text
 # Procfile
 gateway: uv run uvicorn vaultspec_a2a.api.app:app --port 8000
 worker: uv run uvicorn vaultspec_a2a.worker.app:app --port 8001
-```
+```text
 
 ```bash
 honcho start
-```
+```text
 
 **How it works**:
 
@@ -187,7 +187,7 @@ class Multiprocess:
             # Respawn if signaled
             if self.should_restart:
                 self._spawn_process(sockets)
-```
+```yaml
 
 **Windows behavior**: On Windows, uvicorn uses `subprocess.Popen` instead of
 `os.fork()`. The parent polls child processes via `process.poll()` instead of
@@ -216,7 +216,7 @@ self.tmp.notify()  # Writes current time to a temp file
 age = time.time() - os.fstat(self.tmp.fileno()).st_ctime
 if age > self.timeout:
     self.kill_worker(pid)  # Worker is stuck
-```
+```yaml
 
 **Windows compatibility**: NONE. Gunicorn is Unix-only (`os.fork()`,
 `SIGCHLD`, `os.getppid()`).
@@ -270,7 +270,7 @@ class VaultSpecService(win32serviceutil.ServiceFramework):
     def SvcStop(self):
         self.gateway.terminate()
         self.worker.terminate()
-```
+```yaml
 
 **Registration**: `python service.py install` / `sc create VaultSpecA2A ...`
 
@@ -306,7 +306,7 @@ subprocess.run([
     "/sc", "onlogon",  # Start on user login
     "/rl", "limited",  # No admin required
 ])
-```
+```yaml
 
 **Pros**: No admin privileges, survives logoff, built-in.
 **Cons**: Not a real supervisor (no restart-on-crash), polling-based, clunky.
@@ -327,12 +327,12 @@ WatchdogSec=30
 
 [Install]
 WantedBy=default.target
-```
+```text
 
 ```bash
 systemctl --user enable vaultspec-a2a
 systemctl --user start vaultspec-a2a
-```
+```yaml
 
 **Key feature — WatchdogSec**: systemd sends `WATCHDOG=1` notifications. If
 the service does not call `sd_notify(0, "WATCHDOG=1")` within `WatchdogSec`
@@ -343,7 +343,7 @@ Python integration via `python-systemd`:
 ```python
 from systemd.daemon import notify
 notify("WATCHDOG=1")  # Call periodically from health check loop
-```
+```yaml
 
 **Pros**: Built into every modern Linux, robust, well-understood.
 **Cons**: Linux-only, requires user-level systemd support.
@@ -371,11 +371,11 @@ notify("WATCHDOG=1")  # Call periodically from health check loop
     <true/>
 </dict>
 </plist>
-```
+```text
 
 ```bash
 launchctl load ~/Library/LaunchAgents/com.vaultspec.a2a.plist
-```
+```yaml
 
 **Pros**: Built into macOS, persistent across login, `KeepAlive` = auto-restart.
 **Cons**: macOS-only, XML plist format, debugging via `Console.app`.
@@ -415,7 +415,7 @@ processes:
     availability:
       restart: always
       backoff_seconds: 2
-```
+```text
 
 **Features**:
 
@@ -452,7 +452,7 @@ nssm install VaultSpec "C:\Users\user\.local\bin\uv.exe" run vaultspec service s
 nssm set VaultSpec AppStdout C:\logs\vaultspec.log
 nssm set VaultSpec AppStderr C:\logs\vaultspec-err.log
 nssm set VaultSpec AppRestartDelay 5000
-```
+```yaml
 
 **Assessment**: Simple but Windows-only. Better than raw SCM for non-Python
 developers. Not a cross-platform solution.
@@ -466,7 +466,7 @@ and deployment system.
 
 ```bash
 pm2 start "uv run vaultspec service start" --name vaultspec-a2a
-```
+```yaml
 
 **Windows compatibility**: FULL (via `pm2-windows-service` for auto-start).
 
@@ -490,7 +490,7 @@ print(proc.status())        # running, sleeping, zombie, etc.
 print(proc.memory_info())   # RSS, VMS
 print(proc.cpu_percent())   # CPU usage
 print(proc.children())      # Child processes (for tree kill)
-```
+```yaml
 
 **Our usage**: `_kill_process_tree()` in `conftest.py` and `app.py` uses
 `psutil.Process(pid).children(recursive=True)` for Windows process tree kill.
@@ -523,7 +523,7 @@ async def _wait_for_health(url: str) -> None:
     async with httpx.AsyncClient() as client:
         resp = await client.get(f"{url}/health")
         resp.raise_for_status()
-```
+```yaml
 
 **Our usage**: Health-check polling in `conftest.py` uses tenacity with
 `reraise=True` for hard-fail on timeout.
@@ -626,7 +626,7 @@ processes:
     availability:
       restart: always
       backoff_seconds: 2
-```
+```text
 
 ```bash
 # CLI integration
@@ -634,7 +634,7 @@ $ vaultspec daemon start     # Starts process-compose in background
 $ vaultspec daemon status    # Queries process-compose REST API
 $ vaultspec daemon stop      # Sends shutdown signal
 $ vaultspec daemon logs      # Streams multiplexed logs
-```
+```text
 
 This would **replace** our custom `LazyWorkerSpawner`, `WorkerWatchdog`, and
 the subprocess spawning code in `api/app.py`. The `WorkerCircuitBreaker`
@@ -664,7 +664,7 @@ def install_autostart() -> None:
         unit = _generate_systemd_unit(config_path)
         Path("~/.config/systemd/user/vaultspec-a2a.service").write_text(unit)
         subprocess.run(["systemctl", "--user", "enable", "vaultspec-a2a"])
-```
+```text
 
 ---
 

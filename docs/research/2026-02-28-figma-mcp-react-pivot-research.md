@@ -114,7 +114,7 @@ Code Connect mappings, it generates`<CodeConnectSnippet>` wrappers containing:
 ```bash
 npm install --global @figma/code-connect@latest
 npx figma connect --token=$FIGMA_ACCESS_TOKEN
-```
+```text
 
 ### Interactive Setup Flow
 
@@ -138,7 +138,7 @@ npx figma connect --token=$FIGMA_ACCESS_TOKEN
     }
   }
 }
-```
+```text
 
 ### CLI Commands
 
@@ -172,7 +172,7 @@ figma.connect(Button, 'https://figma.com/design/FILE?node-id=XX:YY', {
     </Button>
   ),
 });
-```
+```text
 
 ### Prop Mapping Functions
 

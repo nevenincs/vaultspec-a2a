@@ -13,7 +13,7 @@ sources:
   - docs/agents/2026-25-02-glm5-agent-support.md
 ---
 
-# Agents Domain — Distilled
+## Agents Domain — Distilled
 
 **Date**: 2026-02-25
 **Status**: Distilled from Phase 1–4 research
@@ -52,7 +52,7 @@ pattern**:
 
 ```text
 Claude Code (Client) → MCP → A2A Bridge Server → A2A Protocol → Target Agent
-```
+```text
 
 The A2A-MCP bridge server (e.g., `a2a-mcp`) is configured in
 `.claude/settings.json`. It translates MCP tool calls into A2A network requests,
@@ -75,7 +75,7 @@ $150/mo); API key triggers per-token billing.
 
 ## Gemini (Google)
 
-### Authentication (2)
+### Authentication
 
 The orchestrator authenticates Gemini CLI via API key or cloud credentials:
 
@@ -89,14 +89,14 @@ The orchestrator authenticates Gemini CLI via API key or cloud credentials:
 **Canonical path**: Set `GEMINI_API_KEY`for non-GCP environments; use ADC for
 GCP-native deployments.
 
-### ACP Support (2)
+### ACP Support
 
 Gemini CLI has **native ACP support** (solidified in v0.28.0+). Capabilities
 include persistent sessions, agent thought streaming, terminal process
 management, and user permission flows. Gemini can act as either an ACP host or a
 controlled agent within an ACP-compliant system.
 
-### A2A Support (2)
+### A2A Support
 
 Gemini CLI has **native A2A support** (experimental). Remote agents are
 discovered via Markdown files with YAML frontmatter specifying`agent_card_url`.
@@ -104,12 +104,12 @@ Enabled via `settings.json`:
 
 ```json
 { "experimental": { "enableAgents": true } }
-```
+```text
 
 Gemini exposes both local and remote sub-agents as tools to its main agent,
 delegating tasks based on Agent Cards per the A2A standard.
 
-### Integration Requirements (2)
+### Integration Requirements
 
 - Inject `GEMINI_API_KEY` or Vertex AI credentials.
 - Launch in headless/ACP mode (not interactive TUI).
@@ -117,7 +117,7 @@ delegating tasks based on Agent Cards per the A2A standard.
   human-in-the-loop.
 - Gemini natively supports MCP servers for both consuming and exposing tools.
 
-### Pricing (2)
+### Pricing
 
 OAuth login inherits subscription limits (AI Pro ~$20/mo, AI Ultra ~$250/mo);
 API key billed separately with free tier available. Subscriptions include
@@ -127,7 +127,7 @@ $10–$100/mo in Cloud credits.
 
 ## Codex (OpenAI)
 
-### Authentication (3)
+### Authentication
 
 The orchestrator authenticates the Codex CLI (Rust binary) via session token or
 API key:
@@ -141,27 +141,27 @@ API key:
 inject
 into orchestrator environment for subsequent headless use.
 
-### ACP Support (3)
+### ACP Support
 
 Codex CLI has **no native ACP support**. Integration requires a custom ACP
 wrapper that translates ACP JSON-RPC requests into Codex CLI commands or
 terminal
 streams. No established community package exists at time of research.
 
-### A2A Support (3)
+### A2A Support
 
 Codex CLI natively supports MCP. A2A integration follows the same **bridge
 pattern** as Claude:
 
 ```text
 Codex CLI (Client) → MCP → A2A Bridge Server → A2A Protocol → Target Agent
-```
+```text
 
 Additionally, Codex has an experimental **multi-agent mode** for task
 parallelization and a **local code review** feature using a separate agent
 instance.
 
-### Integration Requirements (3)
+### Integration Requirements
 
 - Store and inject cached session token for subscription billing.
 - Write or source a custom ACP adapter (none exists off-the-shelf).
@@ -172,7 +172,7 @@ instance.
   pathing, terminal emulation, or execution bugs. Thorough testing or resilient
   error-handling wrappers are required.
 
-### Pricing (3)
+### Pricing
 
 Session token enables flat-rate subscription bypass (Plus $20/mo, Pro $200/mo);
 API key triggers per-token billing.
@@ -181,7 +181,7 @@ API key triggers per-token billing.
 
 ## GLM-5 (Zhipu AI)
 
-### Authentication (4)
+### Authentication
 
 GLM-5 integration uses **direct API calls only** — no CLI wrapper is needed or
 recommended.
@@ -197,19 +197,19 @@ recommended.
 **Canonical path**: Subscribe to Coding Plan, use the issued API key directly.
 No OAuth bypass or CLI wrapping needed.
 
-### ACP Support (4)
+### ACP Support
 
 **No native support.** Requires a custom ACP server. Given the OpenAI-compatible
 API surface, an ACP wrapper built for OpenAI can be adapted by changing the base
 URL and injecting the Coding Plan API key.
 
-### A2A Support (4)
+### A2A Support
 
 Requires a **custom A2A server** (e.g., using`a2a-python`). The server defines
 an `AgentCard`, uses the GLM-5 REST API for its `AgentExecutor`, and translates
 A2A SSE streams and task state management into stateless API calls.
 
-### Integration Requirements (4)
+### Integration Requirements
 
 - Provide the Zhipu Coding Plan `API_KEY` to the custom A2A server.
 - Deploy a lightweight Python A2A server wrapping the GLM-5 API.
@@ -218,7 +218,7 @@ A2A SSE streams and task state management into stateless API calls.
 - Target the Coding Plan endpoint specifically (not the standard Open Platform
   endpoint) for correct billing.
 
-### Pricing (4)
+### Pricing
 
 Coding Plan subscription (Max ~$65–200/mo) issues an API key with built-in
 quota; no CLI wrapping or OAuth bypass needed. Standard API is ~$1/1M input

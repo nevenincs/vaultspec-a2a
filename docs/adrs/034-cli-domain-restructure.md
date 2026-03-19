@@ -12,7 +12,7 @@ related:
   - docs/research/2026-06-03-cli-refactor-research.md
 ---
 
-# ADR-034: CLI Domain Restructure
+## ADR-034: CLI Domain Restructure
 
 **Date:** 2026-03-06
 **Status:** Proposed
@@ -39,7 +39,7 @@ restructures into 6 domain groups plus 1 global flag.
 Replace the flat command list with 6 domain groups. Each group completes a
 sentence: "I want to ______."
 
-```
+```bash
 vaultspec --show-config
 
 vaultspec test                              # defaults to: test unit
@@ -71,14 +71,14 @@ vaultspec database update  [--target REVISION]
 vaultspec database snapshot
 vaultspec database snapshot list
 vaultspec database restore --name SNAPSHOT
-```
+```text
 
 ### 2.2 CLI Module Structure
 
 Split `cli.py` (monolith) into a `cli/` package with one module per domain
 group:
 
-```
+```text
 src/vaultspec_a2a/cli/
 ├── __init__.py          # root group, --show-config, imports subgroups
 ├── _test.py             # test group (unit, smoke, benchmark)
@@ -88,7 +88,7 @@ src/vaultspec_a2a/cli/
 ├── _service.py          # service group (start, stop, kill, delete)
 ├── _database.py         # database group (clear, update, snapshot, restore)
 └── _util.py             # shared helpers (_mask, _api_client, _print_table)
-```
+```text
 
 Underscore-prefixed module names signal internal implementation. The public API
 is `cli/__init__.py` exporting `cli` (the Click group) and `main = cli`.
@@ -106,7 +106,7 @@ is `cli/__init__.py` exporting `cli` (the Click group) and `main = cli`.
     help="Print resolved settings and exit.",
 )
 def cli() -> None: ...
-```
+```text
 
 This replaces the `config` subcommand. The eager callback prints settings using
 the existing `_mask()` helper and calls `ctx.exit()`.
@@ -123,7 +123,7 @@ a fallback:
 def test(ctx: click.Context) -> None:
     if ctx.invoked_subcommand is None:
         ctx.invoke(unit)
-```
+```text
 
 ### 2.5 Team & Agent Commands — REST Client Pattern
 
@@ -134,7 +134,7 @@ httpx client:
 def _api_client() -> httpx.Client:
     from .._core.config import settings
     return httpx.Client(base_url=settings.api_base_url, timeout=30.0)
-```
+```text
 
 Synchronous httpx (not async) — Click commands are sync. The REST API handles
 async internally.

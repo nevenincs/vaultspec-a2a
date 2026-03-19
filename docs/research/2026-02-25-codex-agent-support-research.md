@@ -8,7 +8,7 @@ maturity: 25
 summary: 'Provider analysis for OpenAI Codex CLI covering authentication, MCP support, experimental multi-agent mode, and Windows reliability concerns.'
 ---
 
-# Phase 3 Research: Codex Agent Support and Specificities
+## Phase 3 Research: Codex Agent Support and Specificities
 
 **Date**: 2026-02-25
 **Provider**: OpenAI (Codex / GPT-4o Models)
@@ -18,7 +18,8 @@ summary: 'Provider analysis for OpenAI Codex CLI covering authentication, MCP su
 
 ## 1. Authentication Process
 
-**Local CLI vs. Direct Online APIs**
+### Local CLI vs. Direct Online APIs
+
 OpenAI provides an official **Codex CLI** (built in Rust). This completely
 changes the orchestration dynamic, as it provides a first-party local agent to
 wrap.
@@ -81,7 +82,8 @@ To successfully integrate Codex/OpenAI into the proposed coding-teams framework:
 
 ## 5. Pricing & API Usage
 
-**Subscriptions vs. API Billing**
+### Subscriptions vs. API Billing
+
 The introduction of the Codex CLI bridges the gap between OpenAI's consumer
 subscriptions and developer tools.
 

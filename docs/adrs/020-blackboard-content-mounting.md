@@ -9,7 +9,7 @@ related:
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
 ---
 
-# ADR-020: Blackboard Content Mounting
+## ADR-020: Blackboard Content Mounting
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -45,7 +45,7 @@ ADR-022 anchoring and ADR-020 mounting are **complementary, not redundant**:
 | **Injects**          | Feature tag, phase, vault path list  | Actual file content     |
 | **When**             | Every supervisor + worker invocation | Worker invocations only |
 | **Token cost**       | ~200–400 tokens                      | Up to 20,000 tokens     |
-| **Message position** | [2] — after persona                  | [3] — after anchoring   |
+| **Message position** | 2 — after persona                  | 3 — after anchoring   |
 
 ### 1.2 Prior Art
 
@@ -77,7 +77,7 @@ class TeamState(TypedDict):
     # Never persisted as content — only the string reference lives briefly in state.
     # None when active_feature is unset or vault_index is empty.
     mounted_context: NotRequired[str | None]
-```
+```text
 
 `mounted_context` uses last-write-wins (LangGraph default for plain typed fields).
 It is intentionally transient — the string content represents assembled file text for
@@ -203,7 +203,7 @@ def create_mount_node(workspace_root: Path) -> Callable:
         return {"mounted_context": "\n\n".join(blocks)}
 
     return mount_node
-```
+```text
 
 ### 2.3 Graph Wiring
 
@@ -228,7 +228,7 @@ graph.add_conditional_edges(
         for agent_name in worker_agent_names
     } | {"FINISH": END},
 )
-```
+```text
 
 Each worker gets its own `create_mount_node(workspace_root)` call, producing an
 independent closure with its own cache. Cache lifetime matches graph compilation
@@ -266,19 +266,19 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
         "messages": [response],
         "mounted_context": None,
     }
-```
+```text
 
 ### 2.5 Message Ordering
 
 After both ADR-022 and ADR-020 are applied, the full message stack per worker
 invocation is:
 
-```
+```toml
 [1] SystemMessage(content=system_prompt)        ← TOML agent persona
 [2] SystemMessage(content=anchoring_summary)    ← ADR-022: feature tag, phase, vault paths
 [3] SystemMessage(content=mounted_content)      ← ADR-020: actual .vault/ file text
 [4..] *working_state["messages"]                ← compacted conversation history
-```
+```text
 
 Position [3] sits between the lightweight metadata anchor and the conversation
 history. This ordering is intentional: the LLM reads persona → what exists → what
@@ -418,7 +418,7 @@ src/vaultspec_a2a/core/
 │   ├── test_mount.py   NEW: mount_node unit tests (selection, truncation,
 │   │                   cache scoping, no-feature skip, async I/O)
 │   └── test_graph.py   AMENDED: graph wiring tests for mount_node insertion
-```
+```text
 
 ## 7. References
 
@@ -428,7 +428,7 @@ src/vaultspec_a2a/core/
 - `src/vaultspec_a2a/core/graph.py` — compile_team_graph() mount node wiring
 - [ADR-014](014-thread-metadata-context-injection.md) — workspace_root threading pattern
 - [ADR-019](019-teamstate-enrichment-sdd-blackboard.md) — vault_index, reference-in-state principle
-- [ADR-022](022-contextual-anchoring-graph-lifecycle.md) — anchoring summary, message positions [1][2]
+- [ADR-022](022-contextual-anchoring-graph-lifecycle.md) — anchoring summary, message positions 2 and 3
 - [docs/research/2026-03-03-content-mounting-derisking.md](../research/2026-03-03-content-mounting-derisking.md) — token ceiling, async I/O, mount step pattern
 - [arXiv 2507.01701](https://arxiv.org/abs/2507.01701) — blackboard content injection, phase-scoped selection
 - [MetaGPT arXiv 2308.00352](https://arxiv.org/html/2308.00352v6) — role-relevant document injection

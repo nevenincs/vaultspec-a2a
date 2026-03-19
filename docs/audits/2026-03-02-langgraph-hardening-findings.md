@@ -19,7 +19,9 @@ CRITICAL → HIGH → MEDIUM → LOW → INFO.
 invocation because the initial state supplied by the API client contains only
 `messages` — `next` is not set. Combined with `next: str` (no `NotRequired`, no
 default) in `TeamState`, this crashes the graph before any node runs.
-**Fix direction:** Change lambda to `lambda state: state.get("next", "")`. Mark
+
+### Fix direction Change lambda to `lambda state: state.get("next", "")`. Mark
+
 `next: NotRequired[str]` in `state.py`. Add `test_star_missing_next_field`.
 **Task:** T01
 **Status:** resolved
@@ -33,7 +35,9 @@ default) in `TeamState`, this crashes the graph before any node runs.
 **Issue:** `next: str` (no `NotRequired`) means the TypedDict technically requires
 `next` on construction. The API's initial state never sets it, making the first
 star-topology invocation fragile (see C3 above).
-**Fix direction:** Change to `next: NotRequired[str]`.
+
+### Fix direction Change to `next: NotRequired[str]`
+
 **Task:** T01 (part of same fix)
 **Status:** resolved
 
@@ -47,7 +51,9 @@ star-topology invocation fragile (see C3 above).
 response, it silently returns `{"next": "FINISH"}`. No state field records why
 the graph ended; the client sees a normal completion with no indication of the
 routing failure.
-**Fix direction:** Add `routing_error: NotRequired[str]` to `TeamState`. On parse
+
+### Fix direction Add `routing_error: NotRequired[str]` to `TeamState`. On parse
+
 failure return `{"next": "FINISH", "routing_error": f"supervisor could not parse
 route from: {text!r}"}`. Add `test_supervisor_sets_routing_error_on_parse_failure`
 and negative test `test_supervisor_no_routing_error_on_clean_finish`.
@@ -63,7 +69,9 @@ and negative test `test_supervisor_no_routing_error_on_clean_finish`.
 **Issue:** `for option in options` iterates in insertion order. When workers include
 `"code"` and `"coder"`, the response `"the coder should handle this"` matches
 `"code"` first (wrong). Order of names in the team config determines correctness.
-**Fix direction:** Sort options by descending length before scanning:
+
+### Fix direction Sort options by descending length before scanning
+
 `for option in sorted(options, key=len, reverse=True)`. Add
 `test_supervisor_routing_substring_collision`.
 **Task:** T02
@@ -79,7 +87,9 @@ and negative test `test_supervisor_no_routing_error_on_clean_finish`.
 **Issue:** All `builder.add_node()` calls across all three topology compilers lack
 a `retry=` argument. Every transient LLM failure (rate limit, 429, connection
 reset, 5xx) immediately fails the entire multi-agent run.
-**Fix direction:** Define `_WORKER_RETRY = RetryPolicy(initial_interval=1.0,
+
+### Fix direction Define `_WORKER_RETRY = RetryPolicy(initial_interval=1.0
+
 backoff_factor=2.0, max_interval=30.0, max_attempts=3, jitter=True)` and pass
 `retry_policy=_WORKER_RETRY` to all `add_node()` calls for workers and supervisor.
 Import `RetryPolicy` from `langgraph.types`.
@@ -95,7 +105,9 @@ Import `RetryPolicy` from `langgraph.types`.
 **Issue:** `from langgraph._internal._retry import default_retry_on` accesses a
 private module. The `_internal` prefix signals an unstable API that could break
 on any minor LangGraph version bump without deprecation warning.
-**Fix direction:** Either (a) inline the `default_retry_on` logic (retry
+
+### Fix direction Either (a) inline the `default_retry_on` logic (retry
+
 `ConnectionError` and `httpx.HTTPStatusError` with status ≥ 500) to remove the
 private import, or (b) wrap with try/except ImportError that degrades to a
 simpler predicate. Option (a) is more robust.
@@ -112,7 +124,9 @@ simpler predicate. Option (a) is more robust.
 exception (`BadRequestError`, etc.). The caller has no indication of which agent
 failed, what model was in use, or how many messages were in context when
 `RetryPolicy` exhausts its attempts.
-**Fix direction:** Wrap in `WorkerExecutionError(RuntimeError)` with `agent_id` and
+
+### Fix direction Wrap in `WorkerExecutionError(RuntimeError)` with `agent_id` and
+
 `model_type` kwargs, raised `from exc` to preserve the chain. Note:
 `WorkerExecutionError` inherits `RuntimeError` which is NOT retried by
 `default_retry_on` — retries happen at the LangGraph level via `RetryPolicy`.
@@ -129,7 +143,9 @@ failed, what model was in use, or how many messages were in context when
 (120k tokens). The supervisor passes the raw `state["messages"]` list directly.
 On long sessions, the supervisor will hit provider context limits while workers
 do not.
-**Fix direction:** Apply the same guard as `worker.py`: import and apply
+
+### Fix direction Apply the same guard as `worker.py`: import and apply
+
 `should_compact` / `compact_context` from `..context`. Use `_CONTEXT_LIMIT = 120_000`.
 Add `test_supervisor_compacts_on_large_state`.
 **Task:** T06
@@ -144,7 +160,9 @@ Add `test_supervisor_compacts_on_large_state`.
 **Issue:** `_wrap_loop_node` increments `loop_count` silently. No log entry when a
 loop iteration begins, completes, or when `max_loops` is hit. Diagnosing runaway
 `pipeline_loop` runs requires querying the checkpointer directly.
-**Fix direction:** Pass `max_loops` and `loop_node_id` into the wrapper factory.
+
+### Fix direction Pass `max_loops` and `loop_node_id` into the wrapper factory
+
 Log at DEBUG on each iteration, WARNING when `max_loops` is hit.
 **Task:** T08
 **Status:** open
@@ -158,7 +176,9 @@ Log at DEBUG on each iteration, WARNING when `max_loops` is hit.
 **Issue:** Supervisor routing is an internal control-flow decision. Its tokens
 stream to the client as visible `on_chat_model_stream` events, polluting the UI
 with internal "coder | reviewer | FINISH" tokens.
-**Fix direction:** `routing_model = model.with_config({"tags": [TAG_NOSTREAM]})` and
+
+### Fix direction `routing_model = model.with_config({"tags": [TAG_NOSTREAM]})` and
+
 use `routing_model` for `ainvoke`. Import `TAG_NOSTREAM` from `langgraph.constants`.
 **Task:** T07
 **Status:** resolved (supervisor.py:8 imports TAG_NOSTREAM; line 69 applies with_config; line 71 uses routing_model)
@@ -173,7 +193,9 @@ use `routing_model` for `ainvoke`. Import `TAG_NOSTREAM` from `langgraph.constan
 uses dict-subscript. If `messages` is absent from state on first invocation (edge
 case where graph_input is `{}`), this raises `KeyError`. Worker node accesses
 messages via `compact_context` which uses `.get("messages", [])`.
-**Fix direction:** Change to `state.get("messages", [])` for consistency with
+
+### Fix direction Change to `state.get("messages", [])` for consistency with
+
 worker.py pattern. Bundled into T03 per orchestrator instruction.
 **Task:** T03 (bundled)
 **Status:** resolved (supervisor.py:61 uses working_state.get("messages", []))
@@ -186,7 +208,9 @@ worker.py pattern. Bundled into T03 per orchestrator instruction.
 **File:** `src/vaultspec_a2a/api/endpoints.py:487-502`
 **Issue:** `_MinimalState` TypedDict is defined as an inline class inside a
 function, recreated on every request. Should be a module-level definition.
-**Fix direction:** Hoist `_MinimalState` to module level.
+
+### Fix direction Hoist `_MinimalState` to module level
+
 **Task:** INFO — no task
 **Status:** open
 
@@ -199,7 +223,9 @@ function, recreated on every request. Should be a module-level definition.
 **Issue:** `self._aggregator._subscriptions.get(client_id, set())` accesses a
 private attribute of `EventAggregator`. If `_subscriptions` is refactored, this
 will silently break.
-**Fix direction:** Add a public `subscribed_threads(client_id)` method to
+
+### Fix direction Add a public `subscribed_threads(client_id)` method to
+
 `EventAggregator` and use that instead.
 **Task:** INFO — no task
 **Status:** open
@@ -212,7 +238,9 @@ will silently break.
 **File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 **Issue:** No test exercises star-topology invocation with initial state omitting
 `next`. This was the exact condition causing C3.
-**Fix direction:** Add `test_star_missing_next_field`.
+
+### Fix direction Add `test_star_missing_next_field`
+
 **Task:** T01 (test included in task)
 **Status:** resolved
 
@@ -224,7 +252,9 @@ will silently break.
 **File:** `src/vaultspec_a2a/core/tests/test_graph.py`
 **Issue:** No test creates a supervisor with workers `"code"` and `"coder"` and
 verifies the correct one is selected.
-**Fix direction:** Add `test_supervisor_routing_substring_collision` to `test_supervisor.py`.
+
+### Fix direction Add `test_supervisor_routing_substring_collision` to `test_supervisor.py`
+
 **Task:** T02 (test included in task)
 **Status:** resolved
 
@@ -239,7 +269,9 @@ separator logic at `context.py:79-83` classifies any `SystemMessage` at the head
 of the message list as a system prefix. On a second compaction pass, this summary
 will be moved into `system_msgs`, inflating the system prefix and consuming
 budget incorrectly.
-**Fix direction:** Change `SystemMessage(...)` to `HumanMessage(...)` for the
+
+### Fix direction Change `SystemMessage(...)` to `HumanMessage(...)` for the
+
 summary so it stays in the conversation body on subsequent compaction passes.
 **Task:** T14
 **Status:** open
@@ -256,7 +288,9 @@ into the generic `else` branch and is emitted as a generic `INGEST_ERROR` with
 code (e.g. `"RECURSION_LIMIT_EXCEEDED"`) and `recoverable=True`. Also, once T05
 adds `RetryPolicy`, `GraphRecursionError` must NOT be retried — it is
 deterministic, not transient.
-**Fix direction:** Import `GraphRecursionError` from `langgraph.errors`. Add
+
+### Fix direction Import `GraphRecursionError` from `langgraph.errors`. Add
+
 `isinstance(exc, GraphRecursionError)` check before the generic else branch.
 Emit with distinct code and `recoverable=True`.
 **Task:** T15
@@ -271,7 +305,9 @@ Emit with distinct code and `recoverable=True`.
 **Issue:** No `step_timeout` argument is passed to `builder.compile()`. In
 production, a hung LLM call (network stall, streaming timeout) will block a
 graph superstep indefinitely with no timeout protection.
-**Fix direction:** Pass `step_timeout=` to `builder.compile()`. Recommended value
+
+### Fix direction Pass `step_timeout=` to `builder.compile()`. Recommended value
+
 from docs: 300s (5 min) for LLM-backed nodes. Make it configurable via settings.
 **Task:** T11
 **Status:** open
@@ -287,7 +323,9 @@ Only `messages` is set. Required fields `active_agent`, `thread_id`, `artifacts`
 `current_plan`, `token_usage` have no defaults in `TeamState` and no `NotRequired`
 annotation. On first invocation their absence may cause `KeyError` or channel
 reducer errors.
-**Fix direction:** Initialize all required fields in `graph_input` before passing
+
+### Fix direction Initialize all required fields in `graph_input` before passing
+
 to `astream_events`. At minimum: `thread_id`, `active_agent`, `artifacts`,
 `current_plan`, `token_usage`.
 **Task:** T13
@@ -302,7 +340,9 @@ to `astream_events`. At minimum: `thread_id`, `active_agent`, `artifacts`,
 **Issue:** `return new if new else existing` means a node that intentionally clears
 the plan by returning `[]` has no effect — the old plan is preserved. There is no
 way to explicitly reset the plan to empty.
-**Fix direction:** Change to `return new` (unconditional replacement). Update
+
+### Fix direction Change to `return new` (unconditional replacement). Update
+
 `test_state.py:100` which currently asserts the broken behavior.
 **Task:** T12
 **Status:** open
@@ -317,7 +357,9 @@ way to explicitly reset the plan to empty.
 `_replace_plan(old, [])` is called. This validates the broken T12 behavior. When
 T12 is fixed, this test must be updated: the correct assertion becomes
 `assert result == []`.
-**Fix direction:** Update assertion when T12 is implemented. Rename test to
+
+### Fix direction Update assertion when T12 is implemented. Rename test to
+
 `test_empty_new_plan_clears_existing`.
 **Task:** T12 (test update required alongside fix)
 **Status:** open
@@ -331,7 +373,9 @@ T12 is fixed, this test must be updated: the correct assertion becomes
 **Issue:** `test_all_contains_every_public_name` hardcodes the `__all__` expected
 set without `WorkerExecutionError`. When T04 adds it to `__all__`, this test
 fails with a set mismatch.
-**Fix direction:** Add `"WorkerExecutionError"` to expected set. Also add
+
+### Fix direction Add `"WorkerExecutionError"` to expected set. Also add
+
 `WorkerExecutionError is _exceptions_module.WorkerExecutionError` to
 `test_facade_reexports_are_same_objects`.
 **Task:** T04 (test update required alongside fix)
@@ -347,7 +391,9 @@ fails with a set mismatch.
 as `dict[str, Any]`, but `executor.py` passes `Command(resume=...)` on resume —
 which is not a dict. The `cast()` call suppresses the type error but the protocol
 is incorrect.
-**Fix direction:** Update `StreamableGraph.astream_events` signature and `ingest()`
+
+### Fix direction Update `StreamableGraph.astream_events` signature and `ingest()`
+
 to accept `dict[str, Any] | Command`.
 **Task:** T16
 **Status:** open
@@ -362,7 +408,9 @@ to accept `dict[str, Any] | Command`.
 worker process was restarted, `_graphs` is empty even though the checkpointer
 has persisted state. Resume will fail with "No graph for thread" instead of
 recompiling from the team preset.
-**Fix direction:** On resume when graph is absent, attempt to recompile using
+
+### Fix direction On resume when graph is absent, attempt to recompile using
+
 `req.team_preset` (if present in `DispatchRequest`) before failing.
 **Task:** T17
 **Status:** open
@@ -375,7 +423,9 @@ recompiling from the team preset.
 **File:** `src/vaultspec_a2a/core/tests/test_supervisor.py`
 **Issue:** `test_supervisor_routing_unparseable_defaults_to_finish` only asserted
 `result["next"] == "FINISH"` — no assertion on `routing_error` key presence.
-**Fix direction:** Add `test_supervisor_sets_routing_error_on_parse_failure` (positive)
+
+### Fix direction Add `test_supervisor_sets_routing_error_on_parse_failure` (positive)
+
 and `test_supervisor_no_routing_error_on_clean_finish` (negative) tests.
 **Task:** T03 (test update required alongside fix)
 **Status:** resolved
@@ -388,7 +438,9 @@ and `test_supervisor_no_routing_error_on_clean_finish` (negative) tests.
 **File:** `src/vaultspec_a2a/core/tests/test_state.py:179-192`
 **Issue:** `test_has_required_keys` expected set hardcoded without `routing_error`.
 Would fail immediately on CI once T03 committed.
-**Fix direction:** Add `"routing_error"` to expected set.
+
+### Fix direction Add `"routing_error"` to expected set
+
 **Task:** T03 (test update required alongside fix)
 **Status:** resolved
 
@@ -400,7 +452,9 @@ Would fail immediately on CI once T03 committed.
 **File:** `src/vaultspec_a2a/core/nodes/worker.py:171-177`
 **Issue:** `WorkerExecutionError` was imported and class defined, but the except
 block still had bare `raise` — the wrapping was not applied.
-**Fix direction:** Replace `raise` with `raise WorkerExecutionError(...) from exc`
+
+### Fix direction Replace `raise` with `raise WorkerExecutionError(...) from exc`
+
 using `agent_id=name, model_type=model_type` kwargs.
 **Task:** T04
 **Status:** resolved
@@ -413,7 +467,9 @@ using `agent_id=name, model_type=model_type` kwargs.
 **File:** `src/vaultspec_a2a/core/tests/test_exceptions.py:301-320`
 **Issue:** `test_all_contains_every_public_name` expected set did not include
 `"WorkerExecutionError"` — would fail on CI once T04 committed.
-**Fix direction:** Add `"WorkerExecutionError"` to expected set.
+
+### Fix direction Add `"WorkerExecutionError"` to expected set
+
 **Task:** T04 (test update required alongside fix)
 **Status:** resolved
 
@@ -426,7 +482,9 @@ using `agent_id=name, model_type=model_type` kwargs.
 **Issue:** `test_facade_reexports_are_same_objects` does not include
 `WorkerExecutionError is _exceptions_module.WorkerExecutionError`, even though
 the core facade (`src/vaultspec_a2a/core/__init__.py:35`) re-exports it.
-**Fix direction:** The identity check is covered by `test_worker.py` facade test.
+
+### Fix direction The identity check is covered by `test_worker.py` facade test
+
 Acceptable as-is — no separate action required.
 **Task:** INFO — no task (covered by test_worker.py)
 **Status:** open
@@ -446,7 +504,9 @@ name communicates "non-retriable by default_retry_on". The LangGraph
 `default_retry_on` is selective (only `ConnectionError` and `httpx.HTTPStatusError`
 ≥500), so the inheritance choice doesn't affect retry behavior, but the
 `severity=TRANSIENT` attribute is misleading.
-**Fix direction:** Change `severity = ErrorSeverity.PERMANENT` (worker failures
+
+### Fix direction Change `severity = ErrorSeverity.PERMANENT` (worker failures
+
 after retries exhausted are not transient) or use `ErrorSeverity.UNKNOWN`. Low
 priority — does not affect runtime behavior.
 **Task:** INFO — no task (cosmetic severity inconsistency)
@@ -461,7 +521,8 @@ priority — does not affect runtime behavior.
 **Issue:** ~~Originally filed as a regression risk: `GraphBubbleUp` inheriting from `Exception`
 would be caught by the `except Exception` block before Pregel could handle it.~~
 
-**RETRACTED — Authoritative team-lead decision (Cycle 10):**
+### RETRACTED — Authoritative team-lead decision (Cycle 10)
+
 LangGraph's Pregel task runner (`pregel/main.py`) intercepts `GraphBubbleUp` at the task
 runner level BEFORE the node's local exception handler sees it. The `except Exception` in
 `worker.py` wraps only `effective_model.ainvoke()` — `GraphBubbleUp` raised during node
@@ -483,7 +544,9 @@ in `knowledge/repositories/langgraph/…/graph/state.py:647-653`) accepts
 `retry_policy=` as the canonical parameter name. `retry=` is a deprecated alias
 that still works but emits a `DeprecationWarning`. All four call sites should
 use `retry_policy=` to avoid deprecation noise in production logs.
-**Fix direction:** When implementing T05, use `retry_policy=_WORKER_RETRY` (not
+
+### Fix direction When implementing T05, use `retry_policy=_WORKER_RETRY` (not
+
 `retry=`).
 **Task:** T05 (correction to fix direction)
 **Status:** open
@@ -499,7 +562,9 @@ use `retry_policy=` to avoid deprecation noise in production logs.
 `step_timeout` parameter. `step_timeout` is an attribute on the `Pregel` class
 (which `CompiledStateGraph` inherits). It must be set post-compile via attribute
 assignment.
-**Fix direction:** After `graph = builder.compile(checkpointer=checkpointer)`,
+
+### Fix direction After `graph = builder.compile(checkpointer=checkpointer)`
+
 add `if step_timeout is not None: graph.step_timeout = step_timeout`. The
 `compile_team_graph` signature should accept `step_timeout: float | None = None`
 and the caller (executor) should pass `settings.graph_node_timeout_seconds`.
@@ -518,12 +583,14 @@ model_type=...)` kwargs. The actual implemented constructor (confirmed in
 message_count: int)`. The T18 fix direction showing
 `WorkerExecutionError(f"worker={name!r}…", agent_id=name, model_type=…)` is
 incorrect for the current implementation.
-**Fix direction:** Use `WorkerExecutionError(worker=name, model=model_type,
+
+### Fix direction Use `WorkerExecutionError(worker=name, model=model_type
+
 message_count=len(messages))` when fixing T04b/T18. Ensure tests in
-`test_worker.py` assert `err.worker`, `err.model`, `err.message_count` (not
+`test_worker.py` assert `err.worker`,`err.model`,`err.message_count` (not
 `err.agent_id`).
 **Task:** T18 (correction to fix direction)
-**Status:** resolved (worker.py:172 confirmed `except GraphBubbleUp: raise` guard present; constructor uses correct kwargs)
+**Status:** resolved (worker.py:172 confirmed`except GraphBubbleUp: raise` guard present; constructor uses correct kwargs)
 
 ---
 
@@ -536,7 +603,9 @@ message_count=len(messages))` when fixing T04b/T18. Ensure tests in
 `_worker_retry_on` callable and `_WORKER_RETRY = RetryPolicy(...)` are
 defined at lines 47-74. `GraphRecursionError` and ACP deterministic errors
 excluded; `TimeoutError` explicitly included (Python 3.11+ OSError subclass).
-**Fix direction:** N/A — resolved.
+
+### Fix direction N/A — resolved
+
 **Task:** T05
 **Status:** resolved
 
@@ -572,7 +641,8 @@ machinery with a confusing error that hides the original exception.
 Note: `httpx` IS a project dependency so the httpx branch is safe. The
 `requests` branch is the risk.
 
-**Fix direction:** Replace the `default_retry_on(exc)` fallback in
+### Fix direction Replace the `default_retry_on(exc)` fallback in
+
 `_worker_retry_on` with an inlined safe equivalent that does not require
 `requests`:
 
@@ -586,7 +656,7 @@ except ImportError:
     pass
 # ConnectionError covered above; all other unrecognised exceptions: retry
 return isinstance(exc, ConnectionError)
-```
+```python
 
 This also removes the `_internal` private import entirely.
 **Task:** T05 (follow-up — should be addressed before shipping)
@@ -605,7 +675,9 @@ current loop. Since `monitor()` is an `async def` function (called within an
 anyio task group), there IS a running loop, so it won't crash — but it is
 nonetheless the wrong API to use. The correct call is
 `asyncio.get_running_loop().time()` inside an async context.
-**Fix direction:** Replace all three occurrences of `asyncio.get_event_loop()`
+
+### Fix direction Replace all three occurrences of `asyncio.get_event_loop()`
+
 with `asyncio.get_running_loop()` in `supervisor.py`.
 **Task:** INFO — no task (low risk, cosmetic)
 **Status:** open
@@ -629,7 +701,7 @@ gateway can:
 In the current architecture these endpoints are intended only for the worker
 child process. There is no shared secret, token, or bind-address restriction.
 
-**Fix direction:** Options in ascending complexity:
+### Fix direction Options in ascending complexity
 
 1. **Bind to loopback only** — add a separate uvicorn bind for internal
    endpoints on `127.0.0.1` only (simplest, process-level isolation).
@@ -681,7 +753,9 @@ can ingest arbitrary content into any thread, resume suspended graphs with
 arbitrary option IDs, or cancel in-progress runs. This is lower severity than
 the `/internal/*` issue (loopback bind limits exposure) but still a concern
 in shared or CI environments.
-**Fix direction:** Same shared-secret header approach as `/internal/*`. Pass
+
+### Fix direction Same shared-secret header approach as `/internal/*`. Pass
+
 `VAULTSPEC_INTERNAL_TOKEN` to the worker via env (already passed at spawn via
 `subprocess.Popen(env=...)` or inherited from parent). Validate in a FastAPI
 dependency on `/dispatch`.
@@ -698,7 +772,9 @@ dependency on `/dispatch`.
 `worker/app.py` defines its own inline `/health` handler and does not use
 `HealthCheck` at all. The class is exported in `__all__` of `health.py` but
 serves no purpose.
-**Fix direction:** Either implement the intended `HealthCheck` functionality
+
+### Fix direction Either implement the intended `HealthCheck` functionality
+
 (periodic self-check logic, readiness tracking) or delete the file and remove
 its export from `src/vaultspec_a2a/worker/__init__.py`.
 **Task:** INFO — no task (dead code)
@@ -717,7 +793,9 @@ stops the heartbeat task. The heartbeat loop is still running when
 `send_heartbeat()` will raise `httpx.HTTPError` (client already closed).
 This is caught and logged at DEBUG level in `send_heartbeat()` — not a crash —
 but produces spurious log noise on every clean shutdown.
-**Fix direction:** Reorder to: cancel task group first (`tg.cancel_scope.cancel()`),
+
+### Fix direction Reorder to: cancel task group first (`tg.cancel_scope.cancel()`)
+
 then await executor and bridge cleanup. Or add a `_closed` flag to
 `WorkerBridge.send_heartbeat()` that silently skips the HTTP call after
 `close()` has been called.
@@ -735,7 +813,9 @@ in the exclusion list. Session errors are non-transient infrastructure failures 
 incompatible server), so retrying wastes time and fires 3x ACP RPCs.
 Additionally, `AcpProtocolError` IS excluded but is never raised anywhere in
 `acp_chat_model.py` — it is a preemptive/dead exclusion.
-**Fix direction:** Add `AcpSessionError` to the `isinstance` exclusion tuple in
+
+### Fix direction Add `AcpSessionError` to the `isinstance` exclusion tuple in
+
 `_worker_retry_on`. Optionally remove `AcpProtocolError` (or keep for safety against future
 raises).
 **Task:** T05 follow-up
@@ -756,7 +836,9 @@ recompile. Full DB layer investigation reveals the scope is larger:
    persisted at creation time.
    The full T17 chain: ThreadModel column → create_thread param → creation endpoint stores it
    → resume endpoint reads and forwards → executor lazy recompile on miss.
-   **Fix direction:** (1) Add `team_preset: str | None` column to `ThreadModel` with Alembic
+
+   ### Fix direction (1) Add `team_preset: str | None` column to `ThreadModel` with Alembic
+
    migration; (2) add `team_preset: str | None = None` param to `create_thread()`; (3) update
    create-thread endpoint to pass through; (4) update resume endpoint to look up from DB before
    forwarding DispatchRequest; (5) implement lazy recompile in `_handle_resume`.
@@ -779,7 +861,7 @@ if agent_id == loop_node_id:
     worker_node = _wrap_loop_node(
         worker_node, loop_node_id=loop_node_id, max_loops=max_loops
     )
-```
+```python
 
 Both keyword args are passed. Pre-summary analysis of a stale snapshot was incorrect.
 `_wrap_loop_node` signature and implementation at lines 521-559 confirmed correct.
@@ -836,13 +918,15 @@ branches (ConnectionError, httpx.HTTPStatusError), the `import requests` stateme
 execute and raise `ModuleNotFoundError: No module named 'requests'` — crashing the retry
 predicate and propagating an unexpected ImportError up to LangGraph's retry engine.
 The T05 task is now marked completed but this residual issue remains.
-**Fix direction:** Replace the `requests.HTTPError` branch (lines 75-76) with a no-op or
+
+### Fix direction Replace the `requests.HTTPError` branch (lines 75-76) with a no-op or
+
 simply remove it entirely. The project uses `httpx` for all HTTP calls; `requests` objects
 will never reach `_worker_retry_on`. The safe replacement:
 
 ```python
 # requests.HTTPError branch removed — project uses httpx exclusively
-```
+```python
 
 Also remove `import requests` at line 69.
 **Task:** T05 residual (new follow-up needed)
@@ -859,13 +943,14 @@ Also remove `import requests` at line 69.
 `_worker_retry_on` has no `AcpSessionError` exclusion. The `WorkerExecutionError` unwrapping
 at line 62 correctly reveals the cause, but `AcpSessionError` at `acp_chat_model.py:1161,1191`
 would fall through to `return True` (retry), consuming 3 attempts unnecessarily.
-**Fix direction:** Add a local import and isinstance guard:
+
+### Fix direction Add a local import and isinstance guard
 
 ```python
 from ..providers.acp_exceptions import AcpAuthError, AcpSessionError  # noqa: PLC0415
 if isinstance(cause, (AcpAuthError, AcpSessionError)):
     return False
-```
+```text
 
 **Task:** T05 residual
 **Status:** open
@@ -906,7 +991,9 @@ old plan is intentional.
 If the fix direction for T12 is "allow explicit plan clearing" (supervisor returns `[]` to mean
 "clear"), then the test itself must also change — and the fix approach would differ (e.g.,
 use `None` as a sentinel for "no change" vs. `[]` for "clear").
-**Fix direction:** Clarify with task owner whether T12 means: (a) the test is wrong and empty
+
+### Fix direction Clarify with task owner whether T12 means: (a) the test is wrong and empty
+
 list should overwrite, or (b) we need a three-way sentinel (None=no change, []=clear,
 [...]=replace). Current coder has T12 in_progress — this observation should be reviewed
 before committing.
@@ -933,7 +1020,7 @@ graph_input: dict[str, Any] = {
     "thread_id": req.thread_id,
     "token_usage": {},
 }
-```
+```yaml
 
 Task list confirms completed. Fix is clean — empty `messages: []` is safe with the
 `add_messages` reducer (appends nothing on merge).
@@ -972,7 +1059,7 @@ From `knowledge/repositories/langgraph/libs/langgraph/langgraph/errors.py:45`:
 ```python
 class GraphRecursionError(RecursionError):
     pass
-```
+```text
 
 `GraphRecursionError` inherits `RecursionError → Exception → BaseException`. It IS caught
 by the `except BaseException` block in `aggregator.ingest()` (line 1117), falls into the
@@ -1013,7 +1100,7 @@ elif _is_recursion_limit:
     )
 else:
     ...  # existing INGEST_ERROR handling
-```
+```python
 
 The `_is_interrupt` / `_is_recursion_limit` flags must both be initialised to `False`
 before the try block (already done for `_is_interrupt`).
@@ -1036,7 +1123,7 @@ In `aggregator.py`:
    graph_input: dict[str, Any] | None,
    # After:
    graph_input: dict[str, Any] | Command | None,
-   ```
+   ```text
 
 3. Change `ingest()` signature identically:
 
@@ -1045,7 +1132,7 @@ In `aggregator.py`:
    graph_input: dict[str, Any] | None,
    # After:
    graph_input: dict[str, Any] | Command | None,
-   ```
+   ```text
 
    This removes the `cast(StreamableGraph, graph)` workaround in `executor.py` and makes the
    type system accurate. No runtime behaviour changes.
@@ -1069,7 +1156,7 @@ From `pregel/main.py:601-602` and `640-688`:
   `asyncio.TimeoutError("Timed out")` — specifically `asyncio.TimeoutError`, not the base
   `TimeoutError`.
 
-**Critical: `compile()` does NOT accept `step_timeout`.**
+**Critical:** `compile()` does NOT accept `step_timeout`.
 From `graph/state.py:1035-1044`, `StateGraph.compile()` parameters are:
 `checkpointer`, `cache`, `store`, `interrupt_before`, `interrupt_after`, `debug`, `name`.
 There is no `step_timeout` parameter on `compile()`.
@@ -1083,7 +1170,7 @@ compiled = builder.compile(checkpointer=checkpointer, interrupt_before=interrupt
 if step_timeout is not None:
     compiled.step_timeout = step_timeout
 return compiled
-```
+```text
 
 This is safe — `step_timeout` is a plain instance attribute on `CompiledStateGraph` (which
 inherits from `Pregel`). Setting it after compile does not re-validate or re-compile
@@ -1100,7 +1187,7 @@ Three changes needed:
        default=300,
        description="Per-node step timeout for compiled LangGraph graphs (seconds).",
    )
-   ```
+   ```text
 
 2. **`src/vaultspec_a2a/core/graph.py`** — add `step_timeout` param to `compile_team_graph()` and set
    post-compile:
@@ -1118,7 +1205,7 @@ Three changes needed:
        if step_timeout is not None:
            compiled.step_timeout = step_timeout
        return compiled
-   ```
+   ```text
 
 3. **`src/vaultspec_a2a/worker/executor.py`** — pass `settings.graph_node_timeout_seconds` when calling
    `compile_team_graph()`:
@@ -1128,7 +1215,7 @@ Three changes needed:
        ...,
        step_timeout=float(settings.graph_node_timeout_seconds),
    )
-   ```
+   ```text
 
 ### Timeout exception surface
 
@@ -1139,7 +1226,7 @@ generic `INGEST_ERROR` branch. Consider adding a third branch alongside the T15
 
 ```python
 _is_step_timeout = isinstance(exc, asyncio.TimeoutError)
-```
+```yaml
 
 If matched: emit `code="STEP_TIMEOUT"` with `recoverable=True` (user can retry with a
 larger timeout or a simpler task). This is a separate finding but naturally companion to T15.
@@ -1177,7 +1264,7 @@ async with engine.begin() as conn:
     await conn.execute(text(
         "ALTER TABLE threads ADD COLUMN team_preset TEXT"
     ))
-```
+```text
 
 SQLite's `ALTER TABLE … ADD COLUMN` is safe to run even when the column already exists
 — it raises `OperationalError: duplicate column name` which should be caught and ignored:
@@ -1187,7 +1274,7 @@ try:
     await conn.execute(text("ALTER TABLE threads ADD COLUMN team_preset TEXT"))
 except Exception:
     pass  # Column already exists
-```
+```text
 
 Run this BEFORE `create_all` so fresh and existing DBs both end up with the column.
 
@@ -1197,7 +1284,7 @@ Run this BEFORE `create_all` so fresh and existing DBs both end up with the colu
 
 ```python
 team_preset: Mapped[str | None] = mapped_column(default=None)
-```
+```text
 
 **2. `src/vaultspec_a2a/database/session.py`** — add migration guard in `init_db()` before `create_all`:
 
@@ -1208,7 +1295,7 @@ async with engine.begin() as conn:
     except Exception:
         pass  # Already exists
     await conn.run_sync(Base.metadata.create_all)
-```
+```text
 
 **3. `src/vaultspec_a2a/database/crud.py`** — add `team_preset` param to `create_thread()`:
 
@@ -1232,7 +1319,7 @@ async def create_thread(
         nickname=nickname,
         team_preset=team_preset,       # <-- add
     )
-```
+```text
 
 **4. `src/vaultspec_a2a/api/endpoints.py`** — two changes:
 
@@ -1245,7 +1332,7 @@ thread = await create_thread(
     ...
     team_preset=body.team_preset,
 )
-```
+```text
 
 b) At the resume endpoint (`~line 711`), look up `team_preset` from DB before dispatching:
 
@@ -1259,7 +1346,7 @@ dispatch = DispatchRequest(
     team_preset=team_preset,      # <-- add
     # also forward workspace_root if stored — see note below
 )
-```
+```text
 
 **5. `src/vaultspec_a2a/worker/executor.py`** — implement lazy recompile in `_handle_resume()`:
 
@@ -1289,7 +1376,7 @@ async def _handle_resume(self, req: DispatchRequest) -> None:
             )
             return
     ...  # rest of _handle_resume unchanged
-```
+```text
 
 ### workspace_root gap
 
@@ -1307,7 +1394,7 @@ second schema migration:
 import json
 meta = json.loads(thread.thread_metadata) if thread.thread_metadata else {}
 workspace_root = meta.get("workspace_root")
-```
+```python
 
 ---
 
@@ -1352,14 +1439,16 @@ Stale docstring at `graph.py:57` still references T04/T18 rationale (now retract
 
 ### New findings (Cycle 14)
 
-**[LOW] Stale docstring in `_worker_retry_on` references retracted T04/T18 rationale**
+#### [LOW] Stale docstring in `_worker_retry_on` references retracted T04/T18 rationale
+
 `src/vaultspec_a2a/core/graph.py:57`: "GraphRecursionError is excluded by the GraphBubbleUp guard in
 worker.py" — this was the retracted T04/T18 reasoning. The actual exclusion is now at
 line 66-67 in the same function. The docstring should read: "GraphRecursionError is
 explicitly excluded at line 66 of this function — retrying would immediately hit the
 limit again."
 
-**[LOW] No test coverage for T11/T15 new branches**
+#### [LOW] No test coverage for T11/T15 new branches
+
 `src/vaultspec_a2a/core/tests/test_aggregator.py` — no tests for `_is_recursion_limit` path or
 `RECURSION_LIMIT_EXCEEDED` emission.
 `src/vaultspec_a2a/core/tests/test_graph.py` — no tests for `step_timeout` post-compile assignment or
@@ -1488,7 +1577,7 @@ retried 3× unnecessarily.
 represent non-transient subprocess lifecycle failures; retrying them delays
 surfacing the real error and wastes 3× the latency budget (3 attempts × backoff).
 
-**Fix direction:**
+### Fix direction
 
 ```python
 # Near top of _worker_retry_on, after the GraphRecursionError guard:
@@ -1498,7 +1587,7 @@ try:
         return False
 except ImportError:
     pass
-```
+```python
 
 **Task:** Open — MEDIUM severity, no task yet
 **Status:** open
@@ -1521,11 +1610,12 @@ going through the deprecated policy lookup.
 healthy_since = asyncio.get_event_loop().time()
 # Correct:
 healthy_since = asyncio.get_running_loop().time()
-```
+```text
 
 All three occurrences at lines 100, 101, and 104 should be updated.
 
-**Fix direction:** Simple search-and-replace within `supervisor.py`'s `monitor()` method:
+### Fix direction Simple search-and-replace within `supervisor.py`'s `monitor()` method
+
 `asyncio.get_event_loop()` → `asyncio.get_running_loop()`.
 
 **Task:** Open — LOW severity, no task yet
@@ -1566,14 +1656,14 @@ zero test coverage. `src/vaultspec_a2a/core/tests/test_aggregator.py` has no tes
 The T15 test at `test_graph.py:465` only covers the retry predicate, not the aggregator
 event emission. These are separate code paths.
 
-**Fix direction:** Add a test in `test_aggregator.py`:
+### Fix direction Add a test in `test_aggregator.py`
 
 ```python
 async def test_ingest_recursion_limit_emits_correct_event(fake_graph, ...):
     # fake_graph raises GraphRecursionError on astream_events
     # assert ErrorEvent.code == "RECURSION_LIMIT_EXCEEDED"
     # assert ErrorEvent.recoverable == False
-```
+```text
 
 **Task:** Open — LOW severity, no task yet
 **Status:** open
@@ -1593,7 +1683,7 @@ fall through to the `else` branch and are emitted as:
 
 ```python
 ErrorEvent(code="INGEST_ERROR", recoverable=False)
-```
+```text
 
 This is wrong on two counts:
 
@@ -1605,7 +1695,7 @@ This is wrong on two counts:
 
 The variable name `_is_step_timeout` indicates this branch was planned but not connected.
 
-**Fix direction:** Add `elif _is_step_timeout:` before the `else` block:
+### Fix direction Add `elif _is_step_timeout:` before the `else` block
 
 ```python
 elif _is_step_timeout:
@@ -1618,7 +1708,7 @@ elif _is_step_timeout:
         message="A graph node exceeded the configured step timeout",
         recoverable=True,
     )
-```
+```text
 
 **Task:** Open — HIGH severity (wrong recoverable flag + wrong error code surfaced to frontend)
 **Status:** open
@@ -1653,14 +1743,15 @@ the worker has no signal that events are being silently discarded.
 In practice this means events emitted during a connection_manager initialisation race
 are lost with no retry or alerting at the worker side.
 
-**Fix direction:** Return HTTP 503 (or a non-200 body field) when `connection_manager`
+### Fix direction Return HTTP 503 (or a non-200 body field) when `connection_manager`
+
 is None so the worker bridge can log a proper warning (currently already logged at
 WARNING level on the gateway side — the gap is the worker side has no signal):
 
 ```python
 if cm is None:
     return JSONResponse({"status": "dropped", "reason": "no_connection_manager"}, status_code=503)
-```
+```text
 
 **Task:** Open — MEDIUM severity
 **Status:** open
@@ -1679,7 +1770,8 @@ This is a design-level risk — the internal router is mounted at `/internal/` w
 middleware guard. For local-dev use this is acceptable, but for multi-tenant or
 network-exposed deployments it is a meaningful attack surface.
 
-**Fix direction:** Add a shared secret (`X-Worker-Token` header) checked by a FastAPI
+### Fix direction Add a shared secret (`X-Worker-Token` header) checked by a FastAPI
+
 dependency on the `internal_router`. The `WorkerBridge` sends the token; the control
 surface validates it. Token generated at worker startup and passed via env var or
 startup handshake.
@@ -1719,7 +1811,7 @@ both fields.
 `workspace_root` can be extracted from `thread_metadata` JSON (the `ThreadMetadata` model
 has a `workspace_root` field stored as JSON in the `thread_metadata` column).
 
-**Fix direction:**
+### Fix direction
 
 ```python
 # In respond_to_permission_endpoint, after extracting thread_id:
@@ -1737,7 +1829,7 @@ dispatch = DispatchRequest(
     team_preset=team_preset,
     workspace_root=workspace_root,
 )
-```
+```text
 
 **Task:** Open — HIGH severity (cold-restart resume is silently broken without this)
 **Status:** open
@@ -1772,19 +1864,19 @@ The aggregator already has `subscribe()`, `unsubscribe()` and `get_active_thread
 public methods; a matching `is_subscribed(client_id, thread_id) -> bool` accessor would
 close this gap.
 
-**Fix direction:** Add a method to `EventAggregator`:
+### Fix direction Add a method to `EventAggregator`
 
 ```python
 def is_subscribed(self, client_id: str, thread_id: str) -> bool:
     return thread_id in self._subscriptions.get(client_id, set())
-```
+```text
 
 Then replace the private access in `broadcast_to_thread`:
 
 ```python
 if not self._aggregator.is_subscribed(client_id, thread_id):
     continue
-```
+```python
 
 **Task:** INFO — no task needed; minor encapsulation note
 **Status:** open (low priority)
@@ -1836,21 +1928,22 @@ fail-closed denial on exception, correct H9 JSON-RPC denial response — all cor
 except GraphBubbleUp:
     # if interrupted, end
     raise
-```
+```text
 
 **Finding:** `GraphBubbleUp` is caught in a DEDICATED `except GraphBubbleUp` clause that
 appears BEFORE the `except Exception` retry clause. This is an explicit guard — Pregel's
 retry runner intercepts `GraphBubbleUp` before any `RetryPolicy` evaluation and
 immediately re-raises without calling `_should_retry_on` at all.
 
-**Corollary — what exception does retry_on receive?**
+#### Corollary — what exception does retry_on receive?
+
 The `except Exception as exc` clause at line 64 (async: 160) receives the OUTERMOST
 exception. If `WorkerExecutionError` wraps the original cause, `retry_on` receives
 `WorkerExecutionError` as `exc`. Our `_worker_retry_on` correctly handles this:
 
 ```python
 cause = exc.__cause__ if isinstance(exc, WorkerExecutionError) and exc.__cause__ is not None else exc
-```
+```text
 
 This is the right pattern since `_should_retry_on` passes the raw outermost exc to the callable.
 
@@ -1862,7 +1955,8 @@ This is the right pattern since `_should_retry_on` passes the raw outermost exc 
 
 **Source:** `langchain_core/language_models/chat_models.py:1697-1723`
 
-**Without `include_raw` (default False):**
+#### Without `include_raw` (default False)
+
 Chain is `llm | output_parser`. If the model returns a malformed tool call or Pydantic
 validation fails, `output_parser` raises `OutputParserException` immediately. There is
 NO internal retry. The exception propagates to the node and then to `_worker_retry_on`.
@@ -1870,7 +1964,8 @@ NO internal retry. The exception propagates to the node and then to `_worker_ret
 → retried 3× unnecessarily. **New finding: T09 gap — `OutputParserException` should be
 excluded from `_worker_retry_on`.**
 
-**With `include_raw=True`:**
+#### With `include_raw=True`
+
 Chain becomes `RunnableMap(raw=llm) | parser_with_fallback`:
 
 ```python
@@ -1880,7 +1975,7 @@ parser_assign = RunnablePassthrough.assign(
 )
 parser_none = RunnablePassthrough.assign(parsed=lambda _: None)
 parser_with_fallback = parser_assign.with_fallbacks([parser_none], exception_key="parsing_error")
-```
+```text
 
 Parsing failures are CAUGHT by `with_fallbacks` — stored in `result["parsing_error"]`
 while `result["parsed"]` is `None`. The chain DOES NOT RAISE on parse failure. You get:
@@ -1906,13 +2001,13 @@ fall back to `result["raw"].content` (plain text routing) when `parsed` is None.
    ```python
    for k, v in cmd._update_as_tuples():
        yield (NULL_TASK_ID, k, v)   # ← (task_id, channel, value) write tuples
-   ```
+   ```text
 
 2. `apply_writes()` in `_algo.py:280-296` groups writes by channel and calls:
 
    ```python
    channels[chan].update(vals)   # ← invokes the channel's reducer
-   ```
+   ```text
 
 3. For `messages` (annotated with `add_messages`), this merges. For `current_plan`
    with `_replace_plan` reducer, this replaces. Behaviour is identical to a normal node
@@ -1956,7 +2051,7 @@ Out-of-steps check:
 ```python
 if self.step > self.stop:   # _loop.py:467
     self.status = "out_of_steps"
-```
+```text
 
 `self.stop = self.step + self.config["recursion_limit"] + 1` — set once at init.
 
@@ -1969,7 +2064,8 @@ if self.step > self.stop:   # _loop.py:467
 
 **Source:** `pregel/main.py:601,644,688,2648,2976`, `pregel/_loop.py:1120`
 
-**`step_timeout`:**
+#### `step_timeout`
+
 Instance attribute on `Pregel` at line 601, applied in the task runner at lines 2648/2976
 as `timeout=self.step_timeout`. A subgraph is a **separate `Pregel` instance** with its
 OWN `step_timeout`. When the parent graph runs a subgraph node, the parent's `step_timeout`
@@ -1980,13 +2076,15 @@ own `step_timeout`.
 Net effect: parent `step_timeout=300`, subgraph `step_timeout=None` → parent fires if
 the whole subgraph exceeds 300s; individual inner node steps have no per-step limit.
 
-**`recursion_limit`:**
+#### `recursion_limit`
+
 Comes from `config["recursion_limit"]` at `_loop.py:1120`. Config is propagated from
 parent to subgraph invocation (same dict, namespace-patched). Subgraph steps count against
 their OWN `stop = step + config["recursion_limit"] + 1` — initialized from their own
 checkpoint's saved step. Each graph has an independent counter.
 
-**Architecture implication for pipeline_loop-as-subgraph:**
+#### Architecture implication for pipeline_loop-as-subgraph
+
 If `pipeline_loop` were a subgraph inside `star`, the inner loop's `recursion_limit`
 inherits from the outer graph's config unless explicitly overridden. The parent's
 `step_timeout` would fire if the entire inner loop exceeds it as a single node. To set a
@@ -2170,7 +2268,7 @@ Topics from original research queue: 9 (InMemorySaver vs AsyncSqliteSaver thread
 Source: `knowledge/repositories/langgraph/libs/checkpoint/langgraph/checkpoint/memory/__init__.py`
 and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoint/sqlite/aio.py`.
 
-**InMemorySaver threading model:**
+#### InMemorySaver threading model
 
 - Stores state in a plain `defaultdict` — no locking of any kind.
 - `aget_tuple`, `alist`, `aput`, `aput_writes` are all thin `async def` wrappers that call
@@ -2185,7 +2283,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
   or testing purposes." Our codebase correctly uses `AsyncSqliteSaver` in production (executor.py:68).
   Tests that were previously using `InMemorySaver` were correct for the test context.
 
-**AsyncSqliteSaver threading model:**
+#### AsyncSqliteSaver threading model
 
 - `self.lock = asyncio.Lock()` at init (line 120) — a single asyncio lock guards all DB operations.
 - Every async operation (`aget_tuple`, `alist`, `aput`, `aput_writes`, `adelete_thread`) acquires
@@ -2200,7 +2298,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
 - Sync fallback (`get_tuple`, `list`, `put`, `put_writes`) uses `asyncio.run_coroutine_threadsafe`
   with an explicit "only allowed from a different thread" guard — not relevant to our async-only paths.
 
-**Codebase assessment:**
+#### Codebase assessment
 
 - Our `executor.py` uses a single shared `AsyncSqliteSaver` instance across all concurrent graph
   runs on the worker. This is safe (lock ensures consistency) but creates a serialization bottleneck
@@ -2213,7 +2311,7 @@ and `knowledge/repositories/langgraph/libs/checkpoint-sqlite/langgraph/checkpoin
 
 Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/graph/state.py` (already read in earlier cycles).
 
-**LangGraph channel initialization:**
+#### LangGraph channel initialization
 
 - LangGraph uses `TypedDict` annotations to discover channels. For each key in the TypedDict:
   - `Annotated[T, reducer]` → creates a `BinaryOperatorAggregate` channel with that reducer.
@@ -2226,7 +2324,7 @@ Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/graph/state.p
 - No `__defaults__` mechanism exists in LangGraph TypedDict channels — defaults must be supplied
   via `graph_input` at invocation time.
 
-**Codebase assessment:**
+#### Codebase assessment
 
 - `executor.py:180-195` builds graph_input with: `messages`, `active_agent`, `artifacts`,
   `token_usage`, `thread_id`, `current_plan` — all six required fields.
@@ -2252,7 +2350,7 @@ channel type catalogue (LastValue / AnyValue / EphemeralValue), and `LastValue` 
 Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/pregel/main.py:2394,2658`
 and `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py:62`.
 
-**How Durability works:**
+#### How Durability works
 
 - Default is `"async"` (from `CONFIG_KEY_DURABILITY` config or hardcoded fallback at line 2394-2395).
   Checkpoint writes are fired asynchronously in the background while the NEXT superstep is already
@@ -2263,7 +2361,8 @@ and `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py:62`.
   durably written before the next superstep begins. Safe for interrupt scenarios.
 - `"exit"` mode: checkpoint is written only when the graph exits entirely.
 
-**Codebase assessment:**
+#### Codebase assessment
+
 Our `aggregator.ingest()` calls `graph.astream_events(graph_input, config, version="v2")` at
 line 1103 — no `durability` keyword passed. This means the default `"async"` mode is used.
 
@@ -2286,16 +2385,16 @@ For the interrupt / permission flow specifically:
 Source: `knowledge/repositories/langgraph/libs/langgraph/langgraph/types.py:144-153`
 and `_internal/_cache.py` (not read, but API understood from types.py).
 
-**CachePolicy definition:**
+#### CachePolicy definition
 
 ```python
 @dataclass(kw_only=True, slots=True, frozen=True)
 class CachePolicy(Generic[KeyFuncT]):
     key_func: KeyFuncT = default_cache_key  # hashes input with pickle
     ttl: int | None = None  # None = never expires
-```
+```text
 
-**Codebase assessment — none of our nodes are cache-eligible:**
+#### Codebase assessment — none of our nodes are cache-eligible
 
 - `worker_node` calls an LLM with the full message history. Output is non-deterministic.
   Caching by input state would produce stale LLM responses. Not suitable.
@@ -2310,7 +2409,7 @@ class CachePolicy(Generic[KeyFuncT]):
 
 Source: channel source files read this cycle.
 
-**Channel types available:**
+#### Channel types available
 
 | Type | Behaviour | Our usage |
 |------|-----------|-----------|
@@ -2319,7 +2418,7 @@ Source: channel source files read this cycle.
 | `EphemeralValue` | Stores last write, clears to `MISSING` after each superstep | not used |
 | `BinaryOperatorAggregate` | Applies `Annotated[T, reducer]` | `messages`, `artifacts`, `current_plan`, `token_usage` |
 
-**NEW FINDING — LastValue collision risk on parallel star topology:**
+#### NEW FINDING — LastValue collision risk on parallel star topology
 
 - `active_agent: str`, `thread_id: str`, `next: NotRequired[str]`, `routing_error: NotRequired[str]`,
   `loop_count: NotRequired[int]` — all use plain `LastValue` channels (no `Annotated`).
@@ -2373,7 +2472,7 @@ Full trace:
        if tid == task.id and n == INTERRUPT   # ← INTERRUPT sentinel channel
        for v in (vv if isinstance(vv, Sequence) else [vv])
    )
-   ```
+   ```text
 
 4. `PregelTask(task.id, task.name, task.path, task_error, task_interrupts, ...)` is created.
 5. `StateSnapshot.interrupts` is the flat union: `tuple([i for task in tasks_with_writes for i in task.interrupts])`.
@@ -2383,13 +2482,14 @@ sentinel. This is stored in the checkpointer's `writes` table when `interrupt()`
 The `pending_writes` are NOT part of the main checkpoint blob — they are separate rows in the
 `writes` table keyed by `(thread_id, checkpoint_ns, checkpoint_id)`.
 
-**Correctness of `_emit_interrupt_events`:**
+#### Correctness of `_emit_interrupt_events`
+
 Our implementation at `aggregator.py:1005-1050` reads `state.tasks` and iterates
 `task.interrupts`. This is the correct field to read — `task.interrupts` comes from
 `pending_writes[INTERRUPT]` which are written synchronously (the SQLite `aput_writes` call
 happens inside the same checkpoint transaction that records the interrupt).
 
-**NEW FINDING — StateSnapshot.interrupts is also available directly:**
+#### NEW FINDING — StateSnapshot.interrupts is also available directly
 
 `StateSnapshot.interrupts` at `main.py:1112` is the flat tuple of ALL interrupts across all
 tasks: `tuple([i for task in tasks_with_writes for i in task.interrupts])`. Our code iterates
@@ -2407,14 +2507,14 @@ for task in tasks:
 for interrupt_obj in state.interrupts:
     # But we lose task.name for agent_id attribution
     ...
-```
+```text
 
 The current per-task loop is actually BETTER than using `state.interrupts` flat because it
 preserves `task.name` for the `agent_id` attribution in the emitted `PermissionRequestEvent`.
 Using `state.interrupts` would lose the per-task agent attribution. Finding: our approach
 is the correct and more informative choice. CLEAN.
 
-**FINDING — `apply_pending_writes` flag and pending write skipping:**
+#### FINDING — `apply_pending_writes` flag and pending write skipping
 
 At `_prepare_state_snapshot:1086-1092`, when `apply_pending_writes=True` (which is the case
 when no `checkpoint_id` is in config — i.e., normal `aget_state()` without pinning):
@@ -2424,7 +2524,7 @@ for tid, k, v in saved.pending_writes:
     if k in (ERROR, INTERRUPT):
         continue   # ← INTERRUPT writes are EXCLUDED from state application
     ...
-```
+```text
 
 `INTERRUPT` pending writes are deliberately NOT applied to channel state — they are kept as
 pending writes and surface only through `task.interrupts`. This is the correct design:
@@ -2508,7 +2608,7 @@ By ADR-002 design (structural state over history), this is architecturally inten
 
 ## Cycle 32 — endpoints.py full audit + send_message ingest gaps
 
-**Files read:** `src/vaultspec_a2a/api/endpoints.py` (full), `src/vaultspec_a2a/api/schemas/internal.py`, `src/vaultspec_a2a/worker/executor.py:100-320`, `src/vaultspec_a2a/core/state.py`
+### Files read `src/vaultspec_a2a/api/endpoints.py` (full), `src/vaultspec_a2a/api/schemas/internal.py`, `src/vaultspec_a2a/worker/executor.py:100-320`, `src/vaultspec_a2a/core/state.py`
 
 ### Finding 1: [MEDIUM] send_message_endpoint omits team_preset/workspace_root from ingest dispatch
 
@@ -2517,7 +2617,7 @@ By ADR-002 design (structural state over history), this is architecturally inten
 
 Compare: `respond_to_permission_endpoint` was already fixed (T22) to look up `team_preset` and `workspace_root` from the DB and pass them in the resume `DispatchRequest`. The same fix is needed for `send_message_endpoint`.
 
-**Fix direction:**
+### Fix direction
 
 ```python
 # In send_message_endpoint, before dispatching:
@@ -2540,7 +2640,7 @@ dispatch = DispatchRequest(
     team_preset=team_preset,
     workspace_root=workspace_root,
 )
-```
+```yaml
 
 - Severity: MEDIUM
 - Impact: Silent message loss after worker restart during active threads
@@ -2552,7 +2652,7 @@ dispatch = DispatchRequest(
 
 This is a correctness bug: the supervisor's plan built during the first turn is erased when the user sends any subsequent message. On the next graph run, the supervisor starts from an empty plan with no context of what was already decided.
 
-**Fix direction:** Two options:
+### Fix direction Two options
 
 1. Change `graph_input` to omit `current_plan` key entirely when it's a follow-up (not initial creation) — LangGraph only calls the reducer if the key is present in the update dict.
 2. Change `_replace_plan` to treat empty list as "no-op": `return new if new else existing` — but this prevents intentional plan clearing.
@@ -2617,7 +2717,7 @@ Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only se
 
 ## Cycle 33 — Worker event relay audit: CRITICAL gap found
 
-**Files read:** `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, `src/vaultspec_a2a/worker/executor.py:1-100,320-352`, `src/vaultspec_a2a/core/aggregator.py:408-452` (subscriber/broadcast path)
+### Files read `src/vaultspec_a2a/worker/app.py`, `src/vaultspec_a2a/worker/ipc.py`, `src/vaultspec_a2a/worker/executor.py:1-100,320-352`, `src/vaultspec_a2a/core/aggregator.py:408-452` (subscriber/broadcast path)
 
 ### Finding 1: [CRITICAL] Worker EventAggregator never relays events to gateway
 
@@ -2629,14 +2729,14 @@ Same fix: omit `active_agent` from `graph_input` for follow-up messages. Only se
 
 **Impact:** End-to-end streaming is completely broken in the ADR-019 separated-process architecture. All LangGraph events processed by the worker are silently discarded. The frontend receives no updates while agents are running.
 
-**Fix direction:** Register a bridge-forwarding subscriber in the worker aggregator. One clean approach:
+### Fix direction Register a bridge-forwarding subscriber in the worker aggregator. One clean approach
 
 ```python
 # In Executor.__init__, after creating self._aggregator:
 _BRIDGE_CLIENT_ID = "_bridge"
 queue = self._aggregator.add_subscriber(_BRIDGE_CLIENT_ID)
 # Start a relay task that drains the queue and calls bridge.send_event
-```
+```text
 
 Or simpler — add a `bridge_subscriber` callback registration API to `EventAggregator` that is called from `_broadcast` in addition to queue delivery, allowing the worker to register `bridge.send_event` as a post-broadcast hook.
 
@@ -2674,7 +2774,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 ## Cycle 34 — supervisor.py + websocket.py + event relay chain verification
 
-**Files read:** `src/vaultspec_a2a/api/supervisor.py` (full), `src/vaultspec_a2a/api/websocket.py` (full)
+### Files read `src/vaultspec_a2a/api/supervisor.py` (full), `src/vaultspec_a2a/api/websocket.py` (full)
 
 ### Finding 1: [HIGH] supervisor.stop() calls process.wait(timeout=30) synchronously — blocks event loop
 
@@ -2682,7 +2782,7 @@ Teardown sequence: `executor.shutdown()` → `bridge.close()` → `tg.cancel_sco
 
 `subprocess.Popen.wait(timeout=30)` is a **synchronous** blocking call. It is called from `stop()` which is called from the gateway's async lifespan shutdown handler. If the worker is slow to exit, this blocks the entire asyncio event loop for up to 30 seconds during API shutdown, preventing any other coroutines (including Starlette's WebSocket close handshakes) from running.
 
-**Fix direction:** Either:
+### Fix direction Either
 
 1. Run `process.wait()` in a thread pool: `await asyncio.get_event_loop().run_in_executor(None, self._process.wait, 30)`
 2. Switch to `asyncio.create_subprocess_exec` (non-blocking) and `await proc.wait()`
@@ -2757,7 +2857,7 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 
 ## Cycle 35 — app.py lifespan full audit
 
-**Files read:** `src/vaultspec_a2a/api/app.py` (full), `src/vaultspec_a2a/worker/executor.py:260-289`
+### Files read `src/vaultspec_a2a/api/app.py` (full), `src/vaultspec_a2a/worker/executor.py:260-289`
 
 ### Finding 1: [MEDIUM] \_dispatch_message (WS SEND_MESSAGE path) also missing team_preset/workspace_root
 
@@ -2773,7 +2873,7 @@ H10 fix confirmed: heartbeat and writer tasks are cross-cancelled via `add_done_
 
 The correct permission response flow is `POST /permissions/{id}/respond` (REST) per ADR-011 §3.1. The `AGENT_CONTROL.RESUME` WS path appears to be a general-purpose graph resume (non-permission) — but since `interrupt()` in our worker node is always a permission request, `resume=None` is semantically wrong.
 
-**Fix direction:** Either:
+### Fix direction Either
 
 1. Remove/document `AGENT_CONTROL.RESUME` as not for permission responses (permissions are REST-only — already enforced via `PERMISSION_RESPONSE` WS rejection).
 2. Add `option_id` to `AgentControlCommand` schema and thread it through `_dispatch_control`.
@@ -2786,12 +2886,12 @@ The correct permission response flow is `POST /permissions/{id}/respond` (REST) 
 
 Shutdown sequence calls `supervisor.stop()` (line 272) before `tg.cancel_scope.cancel()` (line 280). Between these calls, `supervisor.monitor()` in the task group sees `not self.is_alive()` and calls `self.start()` — spawning a new worker. When `tg.cancel_scope.cancel()` fires, the monitor task is killed but the freshly spawned OS process becomes an orphan.
 
-**Fix direction:** Cancel the task group first, then stop the supervisor:
+### Fix direction Cancel the task group first, then stop the supervisor
 
 ```python
 tg.cancel_scope.cancel()  # kill monitor task first
 supervisor.stop()         # then terminate worker cleanly
-```
+```yaml
 
 - Severity: HIGH — orphan worker process spawned during graceful shutdown
 
@@ -2812,7 +2912,7 @@ CORS always-on (C1 fix), `settings.cors_allowed_origins` used, checkpointer open
 
 ## Cycle 36 — Database CRUD + session layer full audit
 
-**Files read:** `src/vaultspec_a2a/database/crud.py` (full), `src/vaultspec_a2a/database/session.py` (full)
+### Files read `src/vaultspec_a2a/database/crud.py` (full), `src/vaultspec_a2a/database/session.py` (full)
 
 ### Overall: CLEAN — well-implemented layer with prior fixes all confirmed
 
@@ -2861,7 +2961,7 @@ H19 warning: the path mismatch check compares `resolved_requested != resolved_de
 
 ## Cycle 37 — Database models + provider layer quick-scan
 
-**Files read:** `src/vaultspec_a2a/database/models.py` (full), `src/vaultspec_a2a/providers/acp_chat_model.py:1-200` (key sections), targeted grep scans
+### Files read `src/vaultspec_a2a/database/models.py` (full), `src/vaultspec_a2a/providers/acp_chat_model.py:1-200` (key sections), targeted grep scans
 
 ### models.py: CLEAN
 
@@ -2900,13 +3000,16 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 ## [Cycle 38] — src/vaultspec_a2a/api/ audit (endpoints, websocket, app, supervisor, internal, auth, database/crud)
 
 **Reported:** Cycle 38 (codebase-researcher, post-context-compaction)
-**Files read:** `src/vaultspec_a2a/api/endpoints.py`, `src/vaultspec_a2a/api/websocket.py`, `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/supervisor.py`, `src/vaultspec_a2a/api/internal.py`, `src/vaultspec_a2a/api/auth.py`, `src/vaultspec_a2a/database/crud.py`
+
+### Files read `src/vaultspec_a2a/api/endpoints.py`, `src/vaultspec_a2a/api/websocket.py`, `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/supervisor.py`, `src/vaultspec_a2a/api/internal.py`, `src/vaultspec_a2a/api/auth.py`, `src/vaultspec_a2a/database/crud.py`
 
 ### API-01 — MEDIUM: `_dispatch_message` handler in app.py omits `team_preset` and `workspace_root`
 
 **File:** `src/vaultspec_a2a/api/app.py:103-125`
 **Issue:** `_create_dispatch_message_handler` builds the dispatch payload with only `action`, `thread_id`, `agent_id`, and `content`. It does NOT look up `team_preset` or `workspace_root` from the DB — unlike `send_message_endpoint` (endpoints.py:563-582) which correctly looks them up for lazy recompilation. WS `SEND_MESSAGE` commands routed through the app-level handler will reach the worker without the context needed for lazy recompile, causing `W-02` (silent continue on AgentConfigNotFoundError) to trigger.
-**Fix direction:** Look up `team_preset` and `workspace_root` from DB inside `_dispatch_message`, same pattern as `send_message_endpoint`. Requires access to a DB session from within the closure — either inject a session factory or call the REST endpoint internally. This is the previously-tracked **T26b** gap.
+
+### Fix direction Look up `team_preset` and `workspace_root` from DB inside `_dispatch_message`, same pattern as `send_message_endpoint`. Requires access to a DB session from within the closure — either inject a session factory or call the REST endpoint internally. This is the previously-tracked **T26b** gap
+
 **Severity:** MEDIUM (existing task T26b — confirm it covers this specific code path)
 **Status:** open (pending T26b)
 
@@ -2916,7 +3019,9 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 **File:** `src/vaultspec_a2a/api/internal.py:44`
 **Issue:** `worker_ws_endpoint` calls `await websocket.receive_text()` with no size guard. The `ConnectionManager` client WS path has `_MAX_WS_MESSAGE_BYTES = 1 MiB` enforcement (websocket.py:81, 239-247). The internal WS endpoint (worker→gateway) has no equivalent cap. A misbehaving or compromised worker could push arbitrarily large frames.
-**Fix direction:** Apply same `len(raw.encode()) > MAX_INTERNAL_WS_MESSAGE_BYTES` check before `json.loads(raw)`. A reasonable limit (e.g. 4 MiB) would accommodate large event payloads.
+
+### Fix direction Apply same `len(raw.encode()) > MAX_INTERNAL_WS_MESSAGE_BYTES` check before `json.loads(raw)`. A reasonable limit (e.g. 4 MiB) would accommodate large event payloads
+
 **Severity:** MEDIUM
 **Status:** open
 
@@ -2936,7 +3041,9 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 **File:** `src/vaultspec_a2a/api/supervisor.py:94, 106`
 **Issue:** `WorkerSupervisor.monitor()` uses `await asyncio.sleep(delay)` and `await asyncio.sleep(check_interval)`. The rest of the codebase uses `anyio.sleep` for portability (T28 fixed `ipc.py`). While `monitor()` is only ever called from within an `anyio.create_task_group()` (app.py:258), using `asyncio.sleep` inside an anyio task group is technically compatible but inconsistent with project policy.
-**Fix direction:** Replace both `asyncio.sleep` calls with `anyio.sleep`. Import anyio at top of file. Trivial two-line change.
+
+### Fix direction Replace both `asyncio.sleep` calls with `anyio.sleep`. Import anyio at top of file. Trivial two-line change
+
 **Severity:** LOW (style/consistency)
 **Status:** open
 
@@ -2981,7 +3088,9 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 **File:** `src/vaultspec_a2a/api/endpoints.py:655-660`, `src/vaultspec_a2a/protocols/mcp/server.py` (MCP-02)
 **Issue:** Two separate hardcoded lists of preset IDs. When a new preset is added, both must be updated. Already tracked under MCP-07 (docstring drift) as a pattern. Flagging here for the endpoints.py side.
-**Fix direction:** Extract to a single constant in `src/vaultspec_a2a/core/team_config.py` or a dedicated `src/vaultspec_a2a/core/presets.py` and import everywhere. Not urgent — low risk of divergence given the small preset count.
+
+### Fix direction Extract to a single constant in `src/vaultspec_a2a/core/team_config.py` or a dedicated `src/vaultspec_a2a/core/presets.py` and import everywhere. Not urgent — low risk of divergence given the small preset count
+
 **Severity:** LOW
 **Status:** open
 
@@ -3015,7 +3124,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ## Cycle 38 — preamble.py, metadata.py, environment.py, telemetry/instrumentation.py
 
-**Files read:**
+### Files read
 
 - `src/vaultspec_a2a/core/preamble.py`
 - `src/vaultspec_a2a/core/metadata.py`
@@ -3037,7 +3146,7 @@ INFO: `_spawn_acp_process` on Windows uses `create_subprocess_shell` with `list2
 
 ### environment.py — LOW finding
 
-**WS-L2 [LOW]: `FIGMA_ACCESS_TOKEN` and project-specific API keys not in `scrub_keys`**
+#### WS-L2 [LOW]: `FIGMA_ACCESS_TOKEN` and project-specific API keys not in `scrub_keys`
 
 `resolve_env_vars()` scrubs known secret env vars before passing the environment to agent subprocesses. The scrub list covers common provider keys. However, project-local secrets present in the live `.env` are not covered:
 
@@ -3074,7 +3183,7 @@ The `VAULTSPEC_*` prefix scrub provides a generic escape hatch, but Figma and pr
 
 ## Cycle 39 — health.py, **main**.py, auth.py, mcp/server.py
 
-**Files read:**
+### Files read
 
 - `src/vaultspec_a2a/worker/health.py`
 - `src/vaultspec_a2a/worker/__main__.py`
@@ -3095,7 +3204,7 @@ No-op stub with correct docstring documenting intent. Not wired into any endpoin
 
 ### mcp/server.py — 2 findings
 
-**MCP-M3 [MEDIUM]: Hardcoded preset fallback + docstring becomes stale after TOML-01 rename**
+#### MCP-M3 [MEDIUM]: Hardcoded preset fallback + docstring becomes stale after TOML-01 rename
 
 `_HARDCODED_PRESETS` (line 51) hardcodes the old preset IDs:
 
@@ -3103,7 +3212,7 @@ No-op stub with correct docstring documenting intent. Not wired into any endpoin
 _HARDCODED_PRESETS: frozenset[str] = frozenset(
     {"coding-star", "coding-pipeline", "coding-loop", "solo-coder"}
 )
-```
+```text
 
 The `_discovered` path (dynamic glob of TOML files) will self-correct after TOML-01 renames the files. However:
 
@@ -3118,14 +3227,14 @@ After TOML-01 completes, both the fallback set and the docstring must be updated
 
 ---
 
-**MCP-L1 [LOW]: thread_id interpolated directly into URL path without encoding**
+#### MCP-L1 [LOW]: thread_id interpolated directly into URL path without encoding
 
 In `get_thread_status` (line 185) and `send_message` (line 239):
 
 ```python
 f"{settings.api_base_url}/api/threads/{thread_id}/state"
 f"{settings.api_base_url}/api/threads/{thread_id}/messages"
-```
+```yaml
 
 `thread_id` is a user-supplied string from the MCP tool call. A crafted value containing `/`, `?`, `#`, or `..` sequences would produce malformed URLs. Example: `thread_id = "abc/../other"` → `/api/threads/abc/../other/state`.
 
@@ -3149,7 +3258,7 @@ Impact is LOW — the server-side endpoint validates against the DB (thread won'
 
 ## Cycle 40 — nodes/supervisor.py, context.py
 
-**Files read:**
+### Files read
 
 - `src/vaultspec_a2a/core/nodes/supervisor.py`
 - `src/vaultspec_a2a/core/context.py`
@@ -3186,7 +3295,8 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 ## [Cycle 40] — src/vaultspec_a2a/core/aggregator.py + src/vaultspec_a2a/database/session.py + src/vaultspec_a2a/workspace/ audit
 
 **Reported:** Cycle 40 (codebase-researcher, post-context-compaction continuation)
-**Files read:** `src/vaultspec_a2a/core/aggregator.py` (~1247 lines), `src/vaultspec_a2a/database/session.py`, `src/vaultspec_a2a/workspace/environment.py`, `src/vaultspec_a2a/workspace/git_manager.py`
+
+### Files read `src/vaultspec_a2a/core/aggregator.py` (~1247 lines), `src/vaultspec_a2a/database/session.py`, `src/vaultspec_a2a/workspace/environment.py`, `src/vaultspec_a2a/workspace/git_manager.py`
 
 ### AGG-01 — INFO: asyncio.create_task in debounce — documented asyncio-native architecture
 
@@ -3201,7 +3311,9 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **File:** `src/vaultspec_a2a/core/aggregator.py:314-330`
 **Issue:** `prune_sequences` was implemented as M2 fix but has no callers. `_sequences` will accumulate one int entry per thread indefinitely. The dict is small but the cleanup path is wired to nothing.
-**Fix direction:** Call `aggregator.prune_sequences({thread_id})` at end of `ingest()` finally block, or from a periodic maintenance task. Very low urgency.
+
+### Fix direction Call `aggregator.prune_sequences({thread_id})` at end of `ingest()` finally block, or from a periodic maintenance task. Very low urgency
+
 **Severity:** LOW
 **Status:** open
 
@@ -3211,7 +3323,9 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **File:** `src/vaultspec_a2a/core/aggregator.py:217-219`
 **Issue:** Debounce timestamp dicts accumulate entries for every `(thread_id, tool_call_id)` pair and every `thread_id` over the lifetime of the process. No cleanup on ingest completion, no entry in `shutdown()`. In high-volume deployments (thousands of tool calls), this is a slow memory leak distinct from `_sequences`.
-**Fix direction:** Add cleanup of stale debounce keys in the `ingest()` finally block for the completed thread_id, or include in `shutdown()`.
+
+### Fix direction Add cleanup of stale debounce keys in the `ingest()` finally block for the completed thread_id, or include in `shutdown()`
+
 **Severity:** MEDIUM (memory leak, no correctness issue)
 **Status:** open
 
@@ -3230,7 +3344,9 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **File:** `src/vaultspec_a2a/database/session.py:190-195`
 **Issue:** Single `try: ALTER TABLE threads ADD COLUMN team_preset TEXT; except OperationalError: pass` inline migration. Works for one column but won't scale. `src/vaultspec_a2a/database/migrations/__init__.py` exists but is empty — no Alembic or migration version table.
-**Fix direction:** Not urgent for v1. Document as technical debt. Before adding a second migration, adopt Alembic or a minimal version table.
+
+### Fix direction Not urgent for v1. Document as technical debt. Before adding a second migration, adopt Alembic or a minimal version table
+
 **Severity:** LOW (technical debt)
 **Status:** INFO
 
@@ -3240,7 +3356,9 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 **File:** `src/vaultspec_a2a/workspace/environment.py:72-86`
 **Issue:** Already caught as WS-L2 in Cycle 38 (preamble audit). Confirming same finding: `FIGMA_ACCESS_TOKEN` (present in live `.env`) is not in `scrub_keys` and would leak to agent subprocess environments. `NANOBANANA_GEMINI_API_KEY` similarly not covered. The `VAULTSPEC_*` prefix check does not help for these keys.
-**Fix direction:** Add `FIGMA_ACCESS_TOKEN` to `scrub_keys`. Consider suffix-based `*_API_KEY`/`*_ACCESS_TOKEN` pattern for future-proofing.
+
+### Fix direction Add `FIGMA_ACCESS_TOKEN` to `scrub_keys`. Consider suffix-based `*_API_KEY`/`*_ACCESS_TOKEN` pattern for future-proofing
+
 **Severity:** LOW
 **Status:** open (duplicate of WS-L2 — same fix)
 
@@ -3249,7 +3367,8 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 ### WS-02/WS-03 — CLEAN: git_manager.py validation and mutex
 
 **File:** `src/vaultspec_a2a/workspace/git_manager.py`
-**Verified:**
+
+Verified:
 
 - `_AGENT_ID_RE` enforced on `create_worktree` ✓
 - `_BRANCH_NAME_RE` enforced on `create_worktree`, `has_conflicts`, `merge_worktree` ✓
@@ -3277,7 +3396,7 @@ INFO: `prepare_handoff()` is exported and tested but called nowhere in productio
 
 ## Cycle 41 — state.py, exceptions.py (final production module sweep)
 
-**Files read:**
+### Files read
 
 - `src/vaultspec_a2a/core/state.py`
 - `src/vaultspec_a2a/core/exceptions.py`
@@ -3354,7 +3473,8 @@ All production modules in `lib/` have been audited across Cycles 1-41:
 ## [Cycle 41] — src/vaultspec_a2a/protocols/a2a/ + src/vaultspec_a2a/protocols/adapter/ — CLEAN (stubs)
 
 **Reported:** Cycle 41 (codebase-researcher)
-**Files read:** `src/vaultspec_a2a/protocols/a2a/__init__.py`, `src/vaultspec_a2a/protocols/adapter/__init__.py`
+
+### Files read `src/vaultspec_a2a/protocols/a2a/__init__.py`, `src/vaultspec_a2a/protocols/adapter/__init__.py`
 
 Both files are empty stubs: single docstring + `__all__: list[str] = []`. No logic to audit.
 
@@ -3398,7 +3518,9 @@ All `lib/` modules audited across Cycles 1-41. No remaining unexamined source fi
 
 **File:** `src/vaultspec_a2a/providers/acp_chat_model.py:976`
 **Issue:** `timeout = params.get("timeout") or 60.0` — uses the ACP subprocess-supplied timeout with no upper bound cap. An agent (or a compromised ACP subprocess) can supply `{"timeout": 86400}` to block a background RPC task for 24 hours. The background task holds a slot in `ctx.background_tasks` and will not be cancelled until `_cleanup_session()` runs.
-**Fix direction:** Cap timeout: `timeout = min(params.get("timeout") or 60.0, 300.0)`. 5 minutes is a reasonable maximum for any terminal command.
+
+### Fix direction Cap timeout: `timeout = min(params.get("timeout") or 60.0, 300.0)`. 5 minutes is a reasonable maximum for any terminal command
+
 **Severity:** LOW
 **Status:** open
 
@@ -3412,7 +3534,9 @@ All `lib/` modules audited across Cycles 1-41. No remaining unexamined source fi
 The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 **Note:** This is partially intentional — agents need PATH, VIRTUAL_ENV, etc. But the server's secrets should be scrubbed before passing to the subprocess. The `resolve_env_vars()` function in `src/vaultspec_a2a/workspace/environment.py` exists for exactly this purpose but is NOT called here.
-**Fix direction:** Replace `env = os.environ.copy()` with `env = resolve_env_vars(Path(self.workspace_root or self.cwd or "."))`, then apply `env.update(self.env_vars)` on top. This uses the already-audited scrub logic.
+
+### Fix direction Replace `env = os.environ.copy()` with `env = resolve_env_vars(Path(self.workspace_root or self.cwd or "."))`, then apply `env.update(self.env_vars)` on top. This uses the already-audited scrub logic
+
 **Severity:** MEDIUM
 **Status:** open
 
@@ -3422,7 +3546,9 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 **File:** `src/vaultspec_a2a/providers/acp_chat_model.py:754-773`
 **Issue:** `_on_fs_read_text_file` calls `fh.read(limit) if limit is not None else fh.read()` inside `asyncio.to_thread`. When the agent does not supply a `limit`, the entire file is read. A large file (log, database dump, or binary) would load completely into memory and then be JSON-serialized into the response frame.
-**Fix direction:** Apply a default cap, e.g. `limit = min(limit, 10 * 1024 * 1024) if limit is not None else 10 * 1024 * 1024` (10 MiB). Return a `"truncated": true` flag in the result when the cap was hit.
+
+### Fix direction Apply a default cap, e.g. `limit = min(limit, 10 * 1024 * 1024) if limit is not None else 10 * 1024 * 1024` (10 MiB). Return a `"truncated": true` flag in the result when the cap was hit
+
 **Severity:** MEDIUM
 **Status:** open
 
@@ -3432,7 +3558,9 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 **File:** `src/vaultspec_a2a/providers/acp_chat_model.py:682-683, 702-704`
 **Issue:** The deny fallback `options[-1]["optionId"] if options else "deny"` assumes the last element has an `optionId` key. If the ACP subprocess returns a malformed options list where the last dict lacks `optionId`, this raises `KeyError` inside the permission handler, unhandled (only the outer `except Exception` at line 690 catches it for the callback path, but the `elif options and "optionId" in options[0]` path on line 711 has the same fallback exposed).
-**Fix direction:** Use `.get("optionId", "deny")` on the fallback subscript: `options[-1].get("optionId", "deny") if options else "deny"`.
+
+### Fix direction Use `.get("optionId", "deny")` on the fallback subscript: `options[-1].get("optionId", "deny") if options else "deny"`
+
 **Severity:** LOW
 **Status:** open
 
@@ -3502,7 +3630,7 @@ The ACP agent (claude-agent-acp) runs with the full server credential surface.
 
 **Scope:** Verify current state of TOML-01 through TOML-05 after session compaction.
 
-**Files read:**
+### Files read
 
 - `src/vaultspec_a2a/core/team_config.py` — full
 - `src/vaultspec_a2a/core/presets/teams/vaultspec-adaptive-coder.toml` — representative sample
@@ -3547,7 +3675,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 **Scope:** `src/vaultspec_a2a/api/schemas/` — all 7 source files: `__init__.py`, `base.py`, `enums.py`, `commands.py`, `events.py`, `rest.py`, `snapshots.py`, `internal.py`, plus `tests/test_schemas.py`.
 
-**Files read:** All of the above in full.
+### Files read All of the above in full
 
 ---
 
@@ -3670,7 +3798,7 @@ None of the 4 new preset TOML files (`vaultspec-adaptive-coder.toml`, `vaultspec
 
 **Scope:** All 6 files in `src/vaultspec_a2a/worker/`: `__init__.py`, `__main__.py`, `health.py`, `ipc.py`, `app.py`, `executor.py`.
 
-**Files read:** All in full.
+### Files read All in full
 
 ---
 
@@ -3756,7 +3884,7 @@ Note: TOML-05 is marked complete — if that task wired `team_config.graph.step_
 except AgentConfigNotFoundError:
     logger.warning("Agent config not found for %s", worker_ref.agent_id)
     # continues — agent_configs left missing this entry
-```
+```text
 
 `compile_team_graph` receives an incomplete `agent_configs` dict. The error surfaces only at graph traversal time as a confusing `KeyError` or node-not-found exception.
 **Severity:** MEDIUM — already tracked as W-02.
@@ -4024,7 +4152,7 @@ time. ALL 9 MCP tools are completely unavailable until fixed.
         resp.raise_for_status()
         data = resp.json()
         presets = data.get("presets", [])
-```
+```text
 
 **Fix required** (server.py:756-761):
 
@@ -4037,7 +4165,7 @@ time. ALL 9 MCP tools are completely unavailable until fixed.
         )
         resp.raise_for_status()
         data = resp.json()
-```
+```text
 
 ### Other Findings
 

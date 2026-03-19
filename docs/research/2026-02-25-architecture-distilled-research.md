@@ -14,7 +14,7 @@ sources:
 feature: architecture-distilled
 ---
 
-# Architecture Domain — Distilled
+## Architecture Domain — Distilled
 
 > [!WARNING]
 > **DEPRECATION NOTICE: LANGGRAPH MIGRATION (2026-02-26)**
@@ -68,7 +68,7 @@ MCP Tool Surface:
   team/approve(session_id, request_id, decision)
   team/message(session_id, text)
   team/cancel(session_id)
-```
+```text
 
 Uses stable MCP tools (not experimental MCP tasks). Custom polling via
 `team/status`. No dependency on experimental features.
@@ -83,7 +83,7 @@ WebSocket Events:
   agent_artifact_update(agent_id, artifact)
   permission_request(agent_id, tool_call, options)
   team_progress(overall_status, task_graph)
-```
+```text
 
 Per-agent panels, live code streaming, permission queue, chat input.
 
@@ -115,7 +115,7 @@ Hybrid architecture (orchestrator process + on-demand agent spawning):
         │ A2A Server  │  │ A2A Server  │
         │ MCP Client  │  │ MCP Client  │
         └─────────────┘  └─────────────┘
-```
+```text
 
 - Orchestrator is the only long-lived process
 - Agents spawned as subprocesses on demand, ports auto-assigned
@@ -132,7 +132,7 @@ Orchestrator (Supervisor)
 ├── Coder Agent(s)    → implements according to plan
 ├── Reviewer Agent    → reviews implementation
 └── (loop: Coder fixes → Reviewer re-reviews → done)
-```
+```text
 
 The supervisor LLM routes to agents. The coder→reviewer loop runs as a
 sub-pipeline within the flat team structure.
@@ -154,7 +154,7 @@ to its worktree and an allowed command set:
 Planner:  read_file (any), NO write_file
 Coder:    read_file (any), write_file (worktree only), run_command (build/test)
 Reviewer: read_file (any), read_diff, NO write_file
-```
+```text
 
 ### 1.7 Workspace Isolation
 
@@ -165,7 +165,7 @@ Git worktrees provide per-task filesystem isolation:
 ├── .worktrees/
 │   ├── task-001/   ← Coder A (dedicated branch)
 │   └── task-002/   ← Coder B (dedicated branch)
-```
+```text
 
 Merge happens after review, not during coding. Orchestrator manages worktree
 lifecycle.
@@ -312,7 +312,7 @@ WebSocket broadcast → Browser
   │ React 5 runes → per-agent component update
   ▼
 Rendered UI
-```
+```text
 
 ### 4.2 Serialization Boundaries
 
@@ -351,7 +351,7 @@ Layer 3 (needs Layer 2):
   Web Frontend (React)
   Workspace Manager
 
-```
+```typescript
 
 ### Sizing Estimate
 

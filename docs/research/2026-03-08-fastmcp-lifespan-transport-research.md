@@ -26,7 +26,7 @@ lifespan: Callable[
     [FastMCP[LifespanResultT]],
     AbstractAsyncContextManager[LifespanResultT]
 ] | None = None
-```
+```text
 
 The lifespan is a callable that:
 
@@ -49,7 +49,7 @@ def lifespan_wrapper(
         async with app._lifespan_manager(app) as context:
             yield context
     return wrapper
-```
+```text
 
 **Key insight:** FastMCP stores the user's lifespan in `_lifespan_manager`.
 If no lifespan is provided, `_lifespan_manager` defaults to a no-op context
@@ -80,7 +80,7 @@ mcp = FastMCP(
     instructions="...",
     lifespan=_mcp_lifespan,
 )
-```
+```text
 
 **Validation:** Signature matches. `FastMCP[None]` matches `FastMCP[LifespanResultT]`
 with `LifespanResultT=None`. Yielding `None` is correct since we don't use
@@ -101,7 +101,7 @@ async def _mcp_lifespan(server: FastMCP[dict]) -> AsyncIterator[dict]:
 async def my_tool(ctx: Context) -> str:
     gateway_url = ctx.lifespan_context["gateway_url"]
     # ...
-```
+```text
 
 **Current decision:** We use module-level `_gateway_connected` flag instead.
 Simpler and sufficient for boolean connected/disconnected state.
@@ -131,7 +131,7 @@ async def run_stdio_async(self) -> None:
             write_stream,
             self._mcp_server.create_initialization_options(),
         )
-```
+```text
 
 **Internals:**
 
@@ -145,7 +145,7 @@ async def run_stdio_async(self) -> None:
 
 ```python
 mcp.run(transport="stdio")
-```
+```text
 
 This calls `anyio.run(self.run_stdio_async)`, which creates a new event loop
 and runs the stdio transport until stdin closes (IDE disconnects).
@@ -164,7 +164,7 @@ async def run_streamable_http_async(self) -> None:
     )
     server = uvicorn.Server(config)
     await server.serve()
-```
+```text
 
 **Critical caveat:** This method **unconditionally starts its own uvicorn
 instance**. You cannot embed a streamable-http FastMCP server inside an
@@ -193,7 +193,7 @@ def streamable_http_app(self) -> Starlette:
         lifespan=...,
     )
     return app
-```
+```text
 
 **Key insight:** This returns a raw Starlette app that CAN be mounted into an
 existing application:
@@ -204,7 +204,7 @@ from starlette.routing import Mount
 
 mcp_app = mcp.streamable_http_app()
 gateway_app.mount("/mcp", mcp_app)
-```
+```text
 
 This would allow exposing MCP over HTTP alongside the REST API on the same
 port. However, we currently run MCP over stdio (for IDE integration), so this
@@ -231,7 +231,7 @@ def run(self, transport: str = "stdio") -> None:
             anyio.run(self.run_sse_async)
         case "streamable-http":
             anyio.run(self.run_streamable_http_async)
-```
+```text
 
 All three transports call `anyio.run()`, which creates a new event loop. This
 means `mcp.run()` is a blocking call that owns the event loop. You cannot call
@@ -264,7 +264,7 @@ uvicorn process. You must use `streamable_http_app()` instead.
 The lifespan is nested inside the transport context. The startup/shutdown
 sequence is:
 
-```
+```text
 mcp.run() → anyio.run()
   → run_stdio_async() / run_streamable_http_async()
     → MCPServer.run()
@@ -272,7 +272,7 @@ mcp.run() → anyio.run()
         → _mcp_lifespan() [our code]
           → yield  ← server processes messages here
         → cleanup
-```
+```text
 
 This means:
 
@@ -300,7 +300,7 @@ async def start_thread(
 ) -> str:
     """Docstring becomes the tool description."""
     return "result"
-```
+```text
 
 FastMCP extracts:
 
@@ -320,7 +320,7 @@ async def my_tool() -> str:
     if not healthy:
         raise ToolError("Gateway is not running. Start with: uv run vaultspec service start")
     return "result"
-```
+```text
 
 `ToolError` is caught by FastMCP and returned as an MCP error response (not
 an unhandled exception). This is the correct way to report tool-level errors
@@ -337,7 +337,7 @@ async def my_tool(ctx: Context) -> str:
     await ctx.report_progress(50, 100)
     gateway = ctx.lifespan_context  # Access lifespan yield value
     return "result"
-```
+```text
 
 We don't currently use `Context` injection. Our tools use module-level state
 (`_gateway_connected`, `_mcp_settings`). Adding `Context` would enable MCP

@@ -41,7 +41,7 @@ def _sandbox_path(self, path: str) -> Path:
     if not str(resolved).startswith(str(cwd.resolve())):
         raise ValueError(f"Path {path!r} escapes sandbox")
     return resolved
-```
+```text
 
 **Fix:** Replace
 `str(resolved).startswith(str(cwd.resolve()))`with`resolved.is_relative_to(cwd.resolve())`(Python
@@ -77,7 +77,7 @@ process = await asyncio.create_subprocess_exec(
     stderr=asyncio.subprocess.PIPE,
     cwd=terminal_cwd,
 )
-```
+```text
 
 There is **zero validation** of the `command`parameter. No allowlist. No sandbox
 check on`terminal_cwd`. The `cwd`parameter is also attacker-controlled and not
@@ -121,7 +121,7 @@ process = await asyncio.create_subprocess_shell(
     cwd=self.cwd or str(Path.cwd()),
     limit=10 * 1024 * 1024,
 )
-```
+```text
 
 **Mitigating factors:** The `command`list is typically set
 by`ProviderFactory`from a hardcoded enum, not from user input. However, the
@@ -161,7 +161,7 @@ if settings.is_dev:
         allow_methods=["*"],
         allow_headers=["*"],
     )
-```
+```text
 
 `allow_origins=["*"]`with`allow_credentials=True`is a dangerous combination.
 Note: per CORS spec, browsers should reject`Access-Control-Allow-Origin: *`with
@@ -195,7 +195,7 @@ async def websocket_endpoint(websocket: WebSocket) -> None:
     cm: ConnectionManager = app.state.connection_manager
     client_id = await cm.connect(websocket)
     await cm.listen(client_id)
-```
+```text
 
 No origin header check before `accept()`. No authentication of any kind.
 **Fix:** Before `websocket.accept()`, validate
@@ -247,7 +247,7 @@ thread_id = ""
 if ":" in request_id:
     thread_id, _ = request_id.split(":", 1)
 graph = registry.get(thread_id) if thread_id else None
-```
+```text
 
 The `request_id`format is documented as`{thread_id}:{uuid}`but there is no
 validation that:
@@ -274,7 +274,7 @@ no`maxsize` bound.
 # src/vaultspec_a2a/providers/acp_chat_model.py:183
 
 chunk_queue=asyncio.Queue(),
-```
+```text
 
 No `maxsize`parameter. Compare with the`EventAggregator`which correctly
 uses`maxsize=512`.
@@ -302,7 +302,7 @@ raw = await asyncio.wait_for(
     websocket.receive_json(),
     timeout=_DEAD_CLIENT_TIMEOUT,
 )
-```
+```text
 
 **Fix:** Configure Uvicorn's `--ws-max-size`or implement a size check before
 JSON parsing.
@@ -328,7 +328,7 @@ if body.team_preset:
         team_config = load_team_config(body.team_preset)
     except TeamConfigNotFoundError as exc:
         raise HTTPException(...)
-```
+```text
 
 **Fix:** Validate `team_preset`against a strict pattern:`^[a-z0-9-]+$`(no
 slashes, no dots).
@@ -352,7 +352,7 @@ thread's events.
 case ClientCommandType.SUBSCRIBE:
     cmd = cast(SubscribeCommand, command)
     self._aggregator.subscribe(client_id, cmd.thread_ids)
-```
+```text
 
 No ownership check on the `thread_ids`.
 **Fix:** Check that the client has permission to subscribe to the requested
@@ -392,7 +392,7 @@ text = file_path.read_text(encoding="utf-8", errors="ignore")
 # acp_chat_model.py:496
 
 file_path.write_text(params["content"], encoding="utf-8")
-```
+```text
 
 **Fix:** Use `asyncio.to_thread()`or`aiofiles`for file I/O in async handlers.
 
@@ -417,7 +417,7 @@ warning about this.
 asyncio.create_task(  # noqa: RUF006
     aggregator.ingest(thread_id, agent_id, graph, graph_input, config)
 )
-```
+```text
 
 **Fix:** Store task references in a set (like
 `ctx.background_tasks`in`AcpChatModel`) and add done callbacks for exception
@@ -454,7 +454,7 @@ responses are invisible.
 
 if rid in ctx.response_futures and not ctx.response_futures[rid].done():
     ctx.response_futures[rid].set_result(data)
-```
+```text
 
 Correctly guarded. This is actually well-implemented. The check for `not
 fut.done()` prevents double-set errors.
@@ -509,7 +509,7 @@ because`prompt_done`is never set and`prompt_future` is never resolved.
 
 ```python
 while line := await ctx.stdout.readline():
-```
+```text
 
 No timeout wrapper. The only way this exits is if the subprocess writes a `\n`or
 closes stdout.
@@ -536,7 +536,7 @@ for client_id, queue in list(self._subscribers.items()):
     client_subs = self._subscriptions.get(client_id, set())
     if thread_id is None or thread_id in client_subs:
         await queue.put(event)
-```
+```text
 
 **Fix:** Use `queue.put_nowait()`with a try/except for`asyncio.QueueFull`,
 dropping the event (or disconnecting the slow client). Alternatively, use a
@@ -560,7 +560,7 @@ except GraphBubbleUp as exc:
     ctx.interrupt_exc.append(exc)
     await ctx.chunk_queue.put(None)
     return {}
-```
+```text
 
 **Fix:** Return a properly formatted JSON-RPC error response (e.g., `{"jsonrpc":
 "2.0", "id": rpc_id, "error": {"code": -32603, "message": "Graph
@@ -583,7 +583,7 @@ except Exception:
         "Permission callback raised; auto-granting first option"
     )
     option_id = options[0]["optionId"] if options else "allow_once"
-```
+```text
 
 **Fix:** Fail-closed. If the permission callback fails, deny the permission or
 re-raise to abort the agent.
@@ -607,7 +607,7 @@ if await self.has_conflicts(worktree_path, target_branch):
     # ... raise MergeConflictError
 async with _git_mutex:
     # ... do merge
-```
+```text
 
 **Fix:** Move `has_conflicts()`inside the`_git_mutex`context, or catch merge
 failures gracefully inside the mutex.
@@ -668,7 +668,7 @@ credentials.
 ```python
 if not settings.claude_code_oauth_token:
     pytest.skip("CLAUDE_CODE_OAUTH_TOKEN not set -- Claude ACP unavailable.")
-```
+```text
 
 **Mitigating factor:** These are `@pytest.mark.live`tests that genuinely require
 external credentials. The Gemini tests do NOT skip (they expect credentials to
@@ -689,7 +689,7 @@ that require real external services.
 def _generate(self, ...) -> ChatResult:
     """Synchronous generate not supported."""
     raise NotImplementedError("AcpChatModel only supports async.")
-```
+```text
 
 **Assessment:** ACCEPTABLE. This is a `BaseChatModel`abstract method override.
 The`_generate`synchronous path is intentionally unsupported per ADR-001 (all
@@ -750,7 +750,7 @@ lazy imports with comments identifying the circular chain:
 # - core.aggregator <-> api.websocket
 # - core.graph -> providers.factory -> providers.acp_chat_model -> core.team_config -> core.__init__
 
-```
+```python
 
 **Assessment:** The comments explain WHAT the cycle is but not WHY it cannot be
 resolved structurally. The circular dependency is: `core.__init__`eagerly

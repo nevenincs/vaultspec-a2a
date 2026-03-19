@@ -237,12 +237,12 @@ class TestHandleDispatch:
                     for rec in caplog.records
                     if "No graph for thread" in rec.message
                 )
-                assert record.thread_id == "t-no-graph"
-                assert record.dispatch_id == req.dispatch_id
-                assert record.dispatch_action == "ingest"
-                assert record.runtime_mode == "ingest"
-                assert record.worker_id == "test-worker"
-                assert record.action == "graph_missing"
+                assert record.__dict__["thread_id"] == "t-no-graph"
+                assert record.__dict__["dispatch_id"] == req.dispatch_id
+                assert record.__dict__["dispatch_action"] == "ingest"
+                assert record.__dict__["runtime_mode"] == "ingest"
+                assert record.__dict__["worker_id"] == "test-worker"
+                assert record.__dict__["action"] == "graph_missing"
             finally:
                 await bridge.close()
 
@@ -271,12 +271,12 @@ class TestHandleDispatch:
                     for rec in caplog.records
                     if "No graph for thread" in rec.message
                 )
-                assert record.thread_id == "t-no-graph"
-                assert record.dispatch_id == req.dispatch_id
-                assert record.dispatch_action == "resume"
-                assert record.runtime_mode == "resume"
-                assert record.worker_id == "test-worker"
-                assert record.action == "graph_missing"
+                assert record.__dict__["thread_id"] == "t-no-graph"
+                assert record.__dict__["dispatch_id"] == req.dispatch_id
+                assert record.__dict__["dispatch_action"] == "resume"
+                assert record.__dict__["runtime_mode"] == "resume"
+                assert record.__dict__["worker_id"] == "test-worker"
+                assert record.__dict__["action"] == "graph_missing"
             finally:
                 await bridge.close()
 
@@ -315,13 +315,13 @@ class TestHandleDispatch:
                     for rec in caplog.records
                     if "Ingest already active" in rec.message
                 )
-                assert record.thread_id == "t-1"
-                assert record.dispatch_id == req.dispatch_id
-                assert record.dispatch_action == "ingest"
-                assert record.runtime_mode == "ingest"
-                assert record.worker_id == "test-worker"
-                assert record.active_thread_count == 1
-                assert record.action == "ingest_rejected_active"
+                assert record.__dict__["thread_id"] == "t-1"
+                assert record.__dict__["dispatch_id"] == req.dispatch_id
+                assert record.__dict__["dispatch_action"] == "ingest"
+                assert record.__dict__["runtime_mode"] == "ingest"
+                assert record.__dict__["worker_id"] == "test-worker"
+                assert record.__dict__["active_thread_count"] == 1
+                assert record.__dict__["action"] == "ingest_rejected_active"
             finally:
                 await bridge.close()
 
@@ -525,12 +525,12 @@ class TestLazyRecompilation:
                     for rec in caplog.records
                     if "No graph for thread" in rec.message
                 )
-                assert record.thread_id == "t-no-graph"
-                assert record.dispatch_id == req.dispatch_id
-                assert record.dispatch_action == "resume"
-                assert record.runtime_mode == "resume"
-                assert record.worker_id == "test-worker"
-                assert record.action == "graph_missing"
+                assert record.__dict__["thread_id"] == "t-no-graph"
+                assert record.__dict__["dispatch_id"] == req.dispatch_id
+                assert record.__dict__["dispatch_action"] == "resume"
+                assert record.__dict__["runtime_mode"] == "resume"
+                assert record.__dict__["worker_id"] == "test-worker"
+                assert record.__dict__["action"] == "graph_missing"
             finally:
                 await bridge.close()
 

@@ -13,7 +13,7 @@ as the foundation for auditing Phases 2-5.
 
 ### Current CLI Package Structure
 
-```
+```text
 src/vaultspec_a2a/cli/
   __init__.py     34 lines  Root group, --show-config, subcommand registration
   _util.py        33 lines  _mask(), _show_config_callback()
@@ -21,7 +21,7 @@ src/vaultspec_a2a/cli/
   _test.py        72 lines  test unit/smoke/benchmark
   _run.py         53 lines  run mock/probe
   _database.py    39 lines  database update
-```
+```text
 
 ### Entry Point
 
@@ -29,7 +29,7 @@ src/vaultspec_a2a/cli/
 # pyproject.toml:32-33
 [project.scripts]
 vaultspec = "vaultspec_a2a.cli:cli"
-```
+```text
 
 Resolves to `cli/__init__.py:cli` (the Click group). Entry point is valid.
 
@@ -38,7 +38,7 @@ Resolves to `cli/__init__.py:cli` (the Click group). Entry point is valid.
 ```toml
 # pyproject.toml:28
 "click>=8.1",
-```
+```text
 
 ### `__all__` Declarations
 
@@ -119,7 +119,7 @@ remain relevant for Phases 2-5:
 
 ### Command Tree (Current vs Target)
 
-```
+```text
 CURRENT (Phase 1 complete):
 vaultspec --show-config
 vaultspec test [unit|smoke|benchmark]
@@ -149,7 +149,7 @@ vaultspec team archive --id ID                             [Phase 3]
 vaultspec team list [running|completed|archived]           [Phase 3]
 vaultspec agent ask --agent NAME --message TEXT            [Phase 3]
 vaultspec agent list                                       [Phase 3]
-```
+```text
 
 ---
 
@@ -360,7 +360,7 @@ async def list_threads(
     offset: int = 0,
     limit: int = 50,
 ) -> tuple[Sequence[ThreadModel], int]:
-```
+```yaml
 
 **Gap: No `status` filter parameter.** The function queries all threads regardless of status.
 Phase 3 `team list [running|completed|archived]` needs a `status: ThreadStatus | None = None`
@@ -382,7 +382,7 @@ class ThreadStatus(StrEnum):
     COMPLETED = "completed"
     FAILED = "failed"
     CANCELLED = "cancelled"
-```
+```python
 
 **Gap: No `ARCHIVED` value.** Phase 3 `team archive` command needs `ARCHIVED = "archived"` added.
 

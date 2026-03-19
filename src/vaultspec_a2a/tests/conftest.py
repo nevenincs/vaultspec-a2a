@@ -361,8 +361,8 @@ def service_env(
         "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
         # Dev mode -- no auth token required
         "VAULTSPEC_INTERNAL_TOKEN": "",
-        # MCP loopback URL -- point at our test gateway
-        "VAULTSPEC_MCP_API_BASE_URL": f"http://127.0.0.1:{free_port}",
+        # Gateway loopback URL -- point at our test gateway
+        "VAULTSPEC_GATEWAY_URL": f"http://127.0.0.1:{free_port}",
         # Disable LangSmith tracing in tests
         "LANGSMITH_TRACING": "false",
         # Real OTLP pipeline -- gateway and worker export to the persistent

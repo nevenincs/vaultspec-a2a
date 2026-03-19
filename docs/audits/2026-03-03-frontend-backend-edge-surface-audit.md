@@ -26,14 +26,15 @@ All messages sent from the UI to the backend must be JSON objects with a top-lev
 
 All messages sent from the backend to the UI have a `type` discriminator. Thread-scoped events also carry a `sequence` integer. The frontend must track the `sequence` to drop stale messages during reconnection.
 
-**Connection-Scoped Events:**
+### Connection-Scoped Events
 
 | Event Type | Payload Fields |
 | :--- | :--- |
 | `connected` | `client_id: string`<br>`server_version: string`<br>`active_threads: string[]` |
 | `heartbeat` | `timestamp: string (ISO)`<br>`server_uptime_seconds: float` |
 
-**Thread-Scoped Events (Streaming LangGraph Data):**
+### Thread-Scoped Events (Streaming LangGraph Data)
+
 _(All include `thread_id: string` and `sequence: int`)_
 
 | Event Type | Payload Fields | Description |

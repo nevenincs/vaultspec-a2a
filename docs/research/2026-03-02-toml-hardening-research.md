@@ -85,7 +85,7 @@ description = """
 Single coder worker, no supervisor. Minimal overhead for simple,
 self-contained tasks. Fastest to spin up; no planning or review phase.
 """
-```
+```text
 
 ### Migration
 
@@ -108,7 +108,7 @@ Option 2 is lower risk: keep the old `.toml` files as symlinks or thin wrappers 
 class TeamDefaultsConfig(BaseModel):
     provider: Provider = Provider.CLAUDE
     capability: ModelCapability = ModelCapability.STANDARD
-```
+```text
 
 No `provider_fallback` list. The `ModelConfig` used in `WorkerRef` and `AgentConfig` similarly has no fallback list.
 
@@ -122,7 +122,7 @@ provider = (
     or Provider.CLAUDE
 )
 # ... single ProviderFactory.create(provider, ...) call — raises ValueError on failure
-```
+```text
 
 **`src/vaultspec_a2a/providers/factory.py`** — `ProviderFactory.create()`:
 
@@ -136,7 +136,7 @@ def create(self, provider: Provider, ...) -> BaseChatModel:
         ...
     else:
         raise ValueError(f"Unsupported provider: {provider}")
-```
+```text
 
 Raises `ValueError` immediately. No retry, no fallback.
 
@@ -149,7 +149,7 @@ Add `provider_fallback` at the `[team.defaults]` level:
 provider = "claude"
 capability = "standard"
 provider_fallback = ["gemini", "openai"]   # NEW: ordered fallback list
-```
+```text
 
 Also add at per-worker `[model]` level (within `[[team.workers]]`):
 
@@ -162,7 +162,7 @@ agent = "coder"
   provider = "claude"
   capability = "high"
   provider_fallback = ["gemini"]            # NEW: worker-level override
-```
+```text
 
 ### Pydantic Schema Changes
 
@@ -179,7 +179,7 @@ class ModelConfig(BaseModel):
     capability: ModelCapability | None = None
     name: str | None = None
     provider_fallback: list[Provider] = Field(default_factory=list)  # NEW
-```
+```text
 
 ### Implementation Path in `_resolve_model_for_worker()`
 
@@ -213,7 +213,7 @@ def _resolve_model_for_worker(...) -> BaseChatModel:
         f"All providers exhausted for worker {worker_ref.name}: "
         f"{providers_to_try}"
     ) from last_exc
-```
+```text
 
 ### ADR Impact
 
@@ -231,7 +231,7 @@ ADR-012 §3 (model block) and ADR-013 §2.3 (model resolution precedence) need a
 
 **`autonomous` flag flow** (traced through codebase):
 
-```
+```yaml
 CreateThreadRequest.autonomous: bool = False
   → POST /threads endpoint
     → DispatchRequest(autonomous=req.autonomous)
@@ -243,7 +243,7 @@ CreateThreadRequest.autonomous: bool = False
                     effective_model = model.model_copy(
                         update={"permission_callback": _interrupt_permission_callback}
                     )
-```
+```text
 
 `interrupt_before=[]` always — the interrupt mechanism is the `interrupt()` call inside `worker_node`, not pre-node graph pauses.
 
@@ -252,7 +252,7 @@ CreateThreadRequest.autonomous: bool = False
 ```python
 class AgentPermissionsConfig(BaseModel):
     require_approval_for: list[str] = Field(default_factory=list)
-```
+```yaml
 
 ADR-013 §2.7 states that `require_approval_for` populates `interrupt_before` at compile time — but the actual code uses `interrupt_before=[]` always. This is an ADR-013 violation that was intentionally superseded during the autonomous mode implementation sprint (per MEMORY.md: "interrupt_before=[] always — this is a hard architectural decision, overriding ADR-013 §2.7").
 
@@ -273,7 +273,7 @@ Add `[team.permissions]` block:
 [team.permissions]
 auto_approve = true           # NEW: team defaults to autonomous mode
                               # Overridden per-request by CreateThreadRequest.autonomous
-```
+```text
 
 ### Pydantic Schema Changes
 
@@ -283,7 +283,7 @@ auto_approve = true           # NEW: team defaults to autonomous mode
 class TeamPermissionsConfig(BaseModel):
     auto_approve: bool = False           # default: supervised
     require_approval_for: list[str] = Field(default_factory=list)  # reserved (future)
-```
+```text
 
 **Updated `TeamConfig`**:
 
@@ -291,7 +291,7 @@ class TeamPermissionsConfig(BaseModel):
 class TeamConfig(BaseModel):
     ...
     permissions: TeamPermissionsConfig = Field(default_factory=TeamPermissionsConfig)
-```
+```text
 
 ### Endpoint Integration
 
@@ -306,7 +306,7 @@ effective_autonomous = (
     if req.autonomous is not None          # explicit override
     else team_config.permissions.auto_approve  # team default
 )
-```
+```text
 
 This requires `CreateThreadRequest.autonomous` to become `bool | None` (currently `bool = False`). `None` means "use team default"; `False` means "supervised even if team default is auto_approve".
 
@@ -328,7 +328,7 @@ The solo-coder preset has no supervisor, minimal overhead, and is most likely to
 # solo-coder.toml (or vaultspec-solo-coder.toml)
 [team.permissions]
 auto_approve = true    # solo-coder is headless by default
-```
+```text
 
 ---
 
@@ -351,7 +351,7 @@ You are Grand Architect, an expert software engineering team supervisor...
 ...routing instructions...
 ...vaultspec pipeline docs...
 """
-```
+```text
 
 **`src/vaultspec_a2a/core/graph.py`** — `_build_supervisor_prompt()`:
 
@@ -362,7 +362,7 @@ def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig)
     if "{{AGENT_ROSTER}}" in base:
         return base.replace("{{AGENT_ROSTER}}", roster)
     return base + "\n\n" + roster
-```
+```text
 
 The supervisor persona is entirely defined in `supervisor.toml`. There is no mechanism for a team TOML to inject team-specific behavioral directives into the supervisor prompt.
 
@@ -386,7 +386,7 @@ route back to the coder. Accept output only when the reviewer explicitly
 marks the task APPROVED. Prioritize correctness over speed — loop up to
 3 times before escalating.
 """
-```
+```text
 
 Also add an optional `supervisor_display_name` override:
 
@@ -394,7 +394,7 @@ Also add an optional `supervisor_display_name` override:
 [team.persona]
 supervisor_display_name = "Quality Arbiter"   # overrides supervisor.toml display_name for this team
 directive = "..."
-```
+```text
 
 ### Pydantic Schema Changes
 
@@ -404,7 +404,7 @@ directive = "..."
 class TeamPersonaConfig(BaseModel):
     directive: str | None = None
     supervisor_display_name: str | None = None
-```
+```text
 
 **Updated `TeamConfig`**:
 
@@ -412,7 +412,7 @@ class TeamPersonaConfig(BaseModel):
 class TeamConfig(BaseModel):
     ...
     persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
-```
+```text
 
 ### Implementation in `_build_supervisor_prompt()`
 
@@ -432,7 +432,7 @@ def _build_supervisor_prompt(team_config: TeamConfig, agent_config: AgentConfig)
         prompt = prompt + "\n\n## Team Directive\n\n" + team_config.persona.directive
 
     return prompt
-```
+```text
 
 ### Display Name Override
 
@@ -444,31 +444,31 @@ supervisor_name = (
     or agent_config.display_name
     or "Supervisor"
 )
-```
+```text
 
 ### Recommended Directives per Preset
 
 **`vaultspec-adaptive-coder`**:
 
-```
+```text
 Route dynamically based on task needs. You may skip the planning phase
 for simple tasks. Use the reviewer only when correctness is uncertain.
-```
+```text
 
 **`vaultspec-structured-coder`**:
 
-```
+```text
 Always route planner → coder → reviewer in strict sequence. Do not skip
 phases. Each agent must complete before the next begins.
-```
+```text
 
 **`vaultspec-iterative-coder`**:
 
-```
+```text
 Route planner → coder → reviewer. If the reviewer requests changes, route
 back to the coder. Accept output only when the reviewer explicitly outputs
 APPROVED. Maximum iterations: 3.
-```
+```yaml
 
 **`vaultspec-solo-coder`**: No supervisor, no directive needed.
 
@@ -503,7 +503,7 @@ compiled = graph.compile(
     checkpointer=checkpointer,
     interrupt_before=[],
 ).with_config({"step_timeout": settings.graph_node_timeout_seconds})
-```
+```text
 
 `step_timeout` is a Pregel-level config — it limits per-node execution time. Currently only configurable globally via env var.
 
@@ -512,7 +512,7 @@ compiled = graph.compile(
 ```toml
 [team.graph]
 step_timeout_seconds = 120    # per-node timeout; overrides global settings value
-```
+```yaml
 
 **Implementation**: Pass through `TeamConfig.graph.step_timeout_seconds` to `compiled.with_config()` in `compile_team_graph()`.
 
@@ -525,7 +525,7 @@ step_timeout_seconds = 120    # per-node timeout; overrides global settings valu
 ```toml
 [team.graph]
 recursion_limit = 50    # max supersteps; default 25 in LangGraph
-```
+```yaml
 
 **Implementation**: `compiled.with_config({"recursion_limit": team_config.graph.recursion_limit})`.
 
@@ -540,7 +540,7 @@ recursion_limit = 50    # max supersteps; default 25 in LangGraph
 retry_on_exception = true       # enable RetryPolicy on graph nodes
 max_attempts = 3                # RetryPolicy(max_attempts=3)
 retry_on_timeout = true         # retry on asyncio.TimeoutError
-```
+```text
 
 **Implementation** (`src/vaultspec_a2a/core/graph.py`):
 
@@ -554,7 +554,7 @@ if team_config.graph.retry_on_exception:
         retry_on=(asyncio.TimeoutError,) if team_config.graph.retry_on_timeout else (Exception,),
     )
 # Then pass to graph.add_node(..., retry=retry_policy)
-```
+```yaml
 
 Note: RetryPolicy is attached per-node at `add_node()` time, not at `compile()`. This means `team_config.graph` settings must be threaded into `_compile_*_graph()` functions.
 
@@ -567,7 +567,7 @@ Note: RetryPolicy is attached per-node at `add_node()` time, not at `compile()`.
 ```toml
 [team]
 thread_id_prefix = "vs-adaptive-"    # prepended to UUID for readable thread IDs
-```
+```text
 
 Low priority — thread IDs are internal. Cosmetic only.
 
@@ -591,7 +591,7 @@ step_timeout_seconds = 300     # per-node execution timeout (seconds); default: 
 recursion_limit = 25           # max LangGraph supersteps; default: 25
 retry_on_exception = false     # enable RetryPolicy on worker nodes
 max_attempts = 3               # RetryPolicy max_attempts (only if retry_on_exception=true)
-```
+```text
 
 ### Pydantic Schema Changes
 
@@ -603,7 +603,7 @@ class TeamGraphConfig(BaseModel):
     recursion_limit: int = 25
     retry_on_exception: bool = False
     max_attempts: int = 3
-```
+```text
 
 **Updated `TeamConfig`**:
 
@@ -611,7 +611,7 @@ class TeamGraphConfig(BaseModel):
 class TeamConfig(BaseModel):
     ...
     graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
-```
+```text
 
 ---
 

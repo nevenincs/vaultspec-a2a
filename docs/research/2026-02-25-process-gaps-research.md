@@ -7,7 +7,7 @@ maturity: 75
 feature: process-gaps
 ---
 
-# Process Gaps Research
+## Process Gaps Research
 
 **Date**: 2026-02-25
 **Domain**: Process Lifecycle
@@ -61,7 +61,7 @@ def spawn_agent_in_job(cmd: list[str]):
 
     # Crucial: The orchestrator MUST keep `hJob` in memory. If hJob is garbage collected, the child dies.
     return proc, hJob
-```
+```text
 
 ## 2. Process State Machine: Startup Stability Threshold (Gap G2)
 

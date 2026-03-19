@@ -9,7 +9,7 @@ related:
   - docs/adrs/031-worker-process-architecture.md
 ---
 
-# Derisking Coding Challenges: Event Pipeline Implementation
+## Derisking Coding Challenges: Event Pipeline Implementation
 
 This document addresses four implementation risk areas in the multi-layer event
 pipeline: LangGraph `astream_events` -> EventAggregator -> WorkerBridge -> API
@@ -33,7 +33,7 @@ class ToolCall(TypedDict, total=False):
     rawInput: dict           # Raw tool arguments
     rawOutput: dict          # Raw tool result
     sessionUpdate: Literal["tool_call"]
-```
+```text
 
 ### 1.2 ToolCallContent Types
 
@@ -89,7 +89,7 @@ if self._event_hook and update.get("status") == "completed":
             "filename": (update.get("locations") or [{}])[0].get("path", ""),
             "content": ...,  # extract from content blocks
         })
-```
+```yaml
 
 **Option B: Stash rich data in AIMessageChunk.additional_kwargs**
 
@@ -104,7 +104,7 @@ chunk = ChatGenerationChunk(
         additional_kwargs={"acp_tool_call": dict(update)},
     )
 )
-```
+```text
 
 The aggregator can then inspect `chunk.additional_kwargs.get("acp_tool_call")`
 in `on_tool_start`/`on_tool_end`. Risk: LangChain may strip or merge
@@ -125,7 +125,7 @@ deltas:
 async for chunk in graph.astream(input, config, stream_mode="updates"):
     # chunk = {"node_name": {"current_plan": [...], "artifacts": [...]}}
     print(chunk)
-```
+```text
 
 This yields ONLY the fields a node returned — exactly the state diff. However,
 using this mode means giving up `astream_events` (which provides token-level
@@ -138,7 +138,7 @@ async for chunk in graph.astream(
 ):
     # chunk is a tuple: (stream_mode, data)
     pass
-```
+```yaml
 
 **Pattern B: Cache + compare in aggregator**
 
@@ -154,7 +154,7 @@ if node and event_kind == "on_chain_end":
     if new_plan is not None and new_plan != self._cached_plan.get(thread_id):
         self._cached_plan[thread_id] = new_plan
         await self._emit_plan_update(thread_id, new_plan)
-```
+```yaml
 
 **Risk**: `on_chain_end` `data.output` may contain the full state (not just the
 node's return value) depending on the LangGraph version and graph structure.
@@ -172,7 +172,7 @@ def supervisor_node(state):
     new_plan = compute_plan(state)
     writer({"type": "plan_update", "entries": new_plan})
     return {"current_plan": new_plan}
-```
+```text
 
 The aggregator's `on_custom_event` handler picks these up. This is the most
 explicit and reliable pattern, but requires modifying every node that changes
@@ -221,7 +221,7 @@ async def execute_mock_team(api_base: str, preset_id: str) -> None:
         resp.raise_for_status()
         thread_id = resp.json()["thread_id"]
         logger.info("Created mock thread %s for preset %s", thread_id, preset_id)
-```
+```text
 
 Changes required:
 
@@ -279,7 +279,7 @@ wsClient.setConnectedCallback((connectedEvent) => {
   queryClient.invalidateQueries({ queryKey: queryKeys.threads.list() });
   queryClient.invalidateQueries({ queryKey: queryKeys.team.status() });
 });
-```
+```text
 
 **B. `websocket-client.ts` — Expose subscribed thread IDs:**
 
@@ -287,7 +287,7 @@ wsClient.setConnectedCallback((connectedEvent) => {
 getSubscribedThreadIds(): string[] {
   return [...this.subscribedThreads];
 }
-```
+```text
 
 **C. `use-thread-state.ts` — No changes needed.**
 

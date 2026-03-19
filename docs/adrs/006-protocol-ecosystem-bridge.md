@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-006: Protocol Ecosystem & Bridge Strategy (LangGraph vs MCP)
+## ADR-006: Protocol Ecosystem & Bridge Strategy (LangGraph vs MCP)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

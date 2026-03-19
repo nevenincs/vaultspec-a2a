@@ -94,7 +94,7 @@ rigour with which tokens and component mappings are maintained upstream.
          │            Code Connect component refs   │
          │  Generates: React/React components  │
          └──────────────────────────────────────────┘
-```
+```text
 
 ---
 
@@ -171,7 +171,7 @@ MCP get_variable_defs
        │
        ▼
 AI Agent generates code using token name, not raw value
-```
+```text
 
 The **code syntax** field on a Figma Variable is the CSS custom property name.
 If it is
@@ -190,7 +190,7 @@ development.
 Base: https://api.figma.com
 Auth: X-Figma-Token: <PAT>   (for server-side / scripted access)
       OAuth 2.0              (for third-party registered apps)
-```
+```text
 
 ### File Key and Node ID Extraction
 
@@ -199,7 +199,7 @@ Every Figma URL encodes both identifiers:
 ```text
 https://www.figma.com/design/<fileKey>/Name?node-id=<nodeId>
                               ^^^^^^^^^              ^^^^^^^
-```
+```yaml
 
 - `fileKey`: path segment after file type (`/design/ABC123/`→`ABC123`)
 - `nodeId`: `node-id`query parameter in`row-col` hyphen format; convert to colon
@@ -244,7 +244,7 @@ etc.
 ```text
 POST /v2/webhooks          # Create subscription
 GET  /v2/webhooks/:id/requests  # Inspect delivery history (7 days)
-```
+```python
 
 Key events:
 
@@ -283,7 +283,7 @@ Developer-written mapping files published to Figma via the `figma` CLI.
 ```bash
 npm install @figma/code-connect
 npx figma connect publish --token $FIGMA_ACCESS_TOKEN
-```
+```yaml
 
 **Authentication:** PAT with `Code Connect: Write`+`File content: Read`scopes.
 
@@ -322,7 +322,7 @@ Placed at project root:
     }
   }
 }
-```
+```text
 
 ### Framework Support and File Formats
 
@@ -373,7 +373,7 @@ export default {
 </Button>`;
   },
 };
-```
+```text
 
 `figma.config.json` for this project:
 
@@ -385,7 +385,7 @@ export default {
     "language": "html"
   }
 }
-```
+```text
 
 ### The `figma`Property Mapping API (React/HTML parsers)
 
@@ -410,7 +410,7 @@ Multiple`figma.connect()` calls on the same URL, each scoped to a variant combo:
 ```tsx
 figma.connect(PrimaryButton, URL, { variant: { Type: 'Primary' }, example: ... })
 figma.connect(DangerButton,  URL, { variant: { Type: 'Danger'  }, example: ... })
-```
+```python
 
 ### How Code Connect Appears in Dev Mode and MCP
 
@@ -508,7 +508,7 @@ Returns all variables and styles used in the selected nodes:
   "--spacing-4": { "value": "16px" },
   "--radius-md": { "value": "6px" }
 }
-```
+```text
 
 Enables the agent to use token names in generated Tailwind/CSS rather than
 hard-coded
@@ -529,7 +529,7 @@ Returns the mapping from Figma node IDs to codebase component paths:
     "codeConnectName": "Card"
   }
 }
-```
+```text
 
 Without this, the agent invents components. With it, it uses the real ones.
 
@@ -556,7 +556,7 @@ Images served by the desktop server are content-addressed:
 
 ```text
 http://localhost:3845/assets/89f254d1a998c9a6d1d324d43c73539c3993b16e.png
-```
+```text
 
 Use these URLs directly in generated code during development. They are stable
 for the
@@ -577,7 +577,7 @@ session.
      - Generates new components where not mapped
      - Applies token names from variable defs
      - Validates against screenshot
-```
+```text
 
 ### Rate Limits
 
@@ -605,7 +605,7 @@ MCP Server  ────► REST API calls (nodes, images, variables)
          - resolves token refs to names
          - injects Code Connect snippets
          → returned as pseudo-code to agent
-```
+```text
 
 Teams without the MCP server can replicate this with the REST API directly, but
 the
@@ -706,7 +706,7 @@ but its output cannot be directly integrated into the React codebase.
                          │    using shadcn-React primitives        │
                          │    with Tailwind token classes           │
                          └──────────────────────────────────────────┘
-```
+```text
 
 ### The Canonical Implementation Loop (from CLAUDE.md)
 
@@ -718,7 +718,7 @@ Figma (get_design_context)
   → React MCP (verify React 5 syntax)
   → implement
   → browser verification (Playwright/Chrome DevTools)
-```
+```typescript
 
 Code Connect is the missing piece that elevates step 1 from "approximate layout
 from

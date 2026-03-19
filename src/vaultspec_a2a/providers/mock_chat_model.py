@@ -3,7 +3,7 @@
 import json
 import logging
 from collections.abc import AsyncIterator
-from typing import Any
+from typing import Any, override
 
 import httpx
 from langchain_core.callbacks import (
@@ -105,11 +105,12 @@ class MockChatModel(BaseChatModel):
         message = generation.message if generation else AIMessage(content="")
         return ChatResult(generations=[ChatGeneration(message=message)])
 
+    @override
     async def _astream(
         self,
         messages: list[BaseMessage],
-        _stop: list[str] | None = None,
-        _run_manager: AsyncCallbackManagerForLLMRun | None = None,
+        stop: list[str] | None = None,
+        run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
         """Proxy to VidaiMock via native SSE streaming (ADR-032 §2).

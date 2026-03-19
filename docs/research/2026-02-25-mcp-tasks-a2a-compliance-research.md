@@ -7,7 +7,7 @@ maturity: 40
 feature: mcp-a2a-compliance
 ---
 
-# Research: MCP Async Tasks — A2A Compliance, Risk, and Stack Implications
+## Research: MCP Async Tasks — A2A Compliance, Risk, and Stack Implications
 
 **Date**: 2026-02-25
 **Status**: Preliminary Investigation
@@ -24,7 +24,7 @@ MCP's async task system lives behind `.experimental` namespace access:
 ```python
 server.experimental.enable_tasks()           # server-side
 session.experimental.call_tool_as_task(...)   # client-side
-```
+```text
 
 This is not a soft label. The SDK explicitly states at every level:
 
@@ -90,7 +90,7 @@ SendMessage(config={blocking=true})
 → Server holds HTTP connection
 → Returns only when task reaches terminal or interrupted state
 → Client blocks synchronously
-```
+```text
 
 This is A2A's simplest async pattern. The client sends a message and waits.
 No polling needed. But it locks the connection.
@@ -102,7 +102,7 @@ SendMessage(config={blocking=false}) → returns Task with state=SUBMITTED
 GetTask(task_id) → returns current Task state
 Loop until terminal (COMPLETED, FAILED, CANCELED, REJECTED)
   or interrupted (INPUT_REQUIRED, AUTH_REQUIRED)
-```
+```text
 
 Standard polling. Client controls frequency. No persistent connection.
 
@@ -122,7 +122,7 @@ A2A defines a full push notification wire protocol:
 
 1. Client webhook handler processes notifications
    - May call GetTask for full state
-```
+```text
 
 Push notifications require the agent's AgentCard to declare
 `capabilities.push_notifications = true`.
@@ -142,7 +142,7 @@ elicitation:
    - Same task_id and context_id
    - Parts contain the user's answer
 4. Agent resumes processing
-```
+```yaml
 
 **`auth_required`**: Agent needs credentials for an external system.
 
@@ -153,7 +153,7 @@ elicitation:
    (OAuth flow, browser redirect, key exchange — not defined by A2A)
 3. Client responds with SendMessage containing credentials
 4. Agent resumes with new credentials
-```
+```text
 
 Both are **non-terminal** — the task stays open and resumes when the client
 responds.
@@ -200,7 +200,7 @@ A2A → MCP (lossy):
 
 MCP → A2A (clean):
   All 5 MCP states map directly to A2A equivalents
-```
+```text
 
 ### 3.2 Lifecycle Differences
 
@@ -224,7 +224,7 @@ This matters at the wire level:
 ```text
 MCP:  "status": "working"           (lowercase)
 A2A:  "state": "TASK_STATE_WORKING"  (SCREAMING_SNAKE_CASE, ProtoJSON)
-```
+```text
 
 Direct string comparison fails. Translation layer must normalize.
 
@@ -237,13 +237,13 @@ Direct string comparison fails. Translation layer must normalize.
 ```text
 CLI ──MCP tool call──► Orchestrator ──A2A SendMessage──► Agent
 CLI ◄──MCP task poll── Orchestrator ◄──A2A GetTask────── Agent
-```
+```text
 
 The orchestrator maintains a mapping table:
 
 ```python
 mcp_task_id="mcp-123" ↔ a2a_task_id="a2a-uuid-456"
-```
+```text
 
 ### 4.2 Where It Works Cleanly
 
@@ -255,7 +255,7 @@ mcp_task_id="mcp-123" ↔ a2a_task_id="a2a-uuid-456"
 3. Orchestrator stores mapping: mcp-123 → a2a-456
 4. CLI polls MCP task → Orchestrator polls A2A task → translates state
 5. A2A task completes → MCP task completes → CLI gets result
-```
+```yaml
 
 **Elicitation path**: Agent needs input.
 
@@ -266,7 +266,7 @@ mcp_task_id="mcp-123" ↔ a2a_task_id="a2a-uuid-456"
 4. CLI prompts user, gets answer
 5. Orchestrator sends A2A SendMessage with answer (same task_id)
 6. A2A task resumes
-```
+```text
 
 ### 4.3 Where It Gets Messy
 
@@ -278,7 +278,7 @@ MCP task mcp-123 maps to:
   - a2a-task-coder-a (working)
   - a2a-task-coder-b (working)
   - a2a-task-reviewer (submitted, waiting)
-```
+```yaml
 
 The MCP task status must aggregate: what does "working" mean when one agent
 is done and two are active? The orchestrator needs aggregation logic that
@@ -289,7 +289,7 @@ doesn't exist in either protocol.
 ```text
 Coder A: INPUT_REQUIRED "Delete old_auth.py?"
 Coder B: INPUT_REQUIRED "Use JWT or session tokens?"
-```
+```text
 
 MCP elicitation is sequential — one request at a time. Handling concurrent
 agent inputs requires queuing or serialization.
@@ -393,7 +393,7 @@ Optional MCP task enhancement (if CLI supports it):
   team/delegate becomes TASK_OPTIONAL
   Elicitation replaces team/respond
   Polling replaces team/status
-```
+```text
 
 The stable tools work without MCP tasks. If a CLI supports MCP tasks, the
 same orchestrator can expose the enhanced experience. Both paths hit the

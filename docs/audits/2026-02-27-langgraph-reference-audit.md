@@ -40,7 +40,7 @@ def _loop_router(state: TeamState) -> str:
     if loop_count >= max_loops:
         return "FINISH"
     return state.get("next", "FINISH")  # ← BUG: Returns FINISH if "next" missing
-```
+```text
 
 **Problem:**
 The conditional edge callback `_loop_router`reads`state["next"]`, but the worker
@@ -51,7 +51,7 @@ node **never sets this key**:
 response = await model.ainvoke(messages)
 response.name = name
 return {"messages": [response]}  # ← Only returns "messages", never "next"
-```
+```text
 
 **Consequence:**
 After 1 iteration, `state.get("next", "FINISH")`returns`"FINISH"`(the sentinel),
@@ -65,7 +65,7 @@ In the fanout_to_subgraph.py example
 ```python
 async def bump_loop(state: JokeOutput):
     return END if state["jokes"][0].endswith(" a" * 10) else "bump"
-```
+```text
 
 The router **explicitly returns the target node name** ("bump") when NOT
 finishing. Our code defaults to "FINISH" instead.
@@ -80,7 +80,7 @@ return {"messages": [response], "next": "revise"}  # or "FINISH"
 
 # Option 2: Router checks a different state field or uses different sentinel
 return state.get("next_action", "FINISH")  # with explicit "revise" set
-```
+```text
 
 **Severity:** CRITICAL — Loop termination is broken.
 
@@ -100,7 +100,7 @@ async def _loop_node_with_counter(
     result = await _inner(state)
     result["loop_count"] = state.get("loop_count", 0) + 1  # ← Increments AFTER node runs
     return result
-```
+```text
 
 **Problem:**
 When the loop node has `interrupt_before=["loop_node_id"]`, the interrupt fires
@@ -128,7 +128,7 @@ async def _loop_node_with_counter(state):
     state["loop_count"] = state.get("loop_count", 0) + 1  # Increment FIRST
     result = await _inner(state)
     return result
-```
+```yaml
 
 Or better: handle counter in a separate node AFTER the loop_node:
 
@@ -137,7 +137,7 @@ Or better: handle counter in a separate node AFTER the loop_node:
 def increment_counter(state: TeamState):
     state["loop_count"] = state.get("loop_count", 0) + 1
     return state
-```
+```text
 
 **Severity:** HIGH — Can cause incorrect loop termination under interrupts.
 
@@ -177,7 +177,7 @@ if event_kind == "on_tool_error":
         message=event_data.get("data", {}).get("error", "Tool failed"),
     )
     return
-```
+```text
 
 **Severity:** MEDIUM — Incomplete observability but not a correctness bug.
 
@@ -194,20 +194,20 @@ return builder.compile(
     checkpointer=checkpointer,
     interrupt_before=interrupt_nodes,
 )
-```
+```text
 
 **Evidence from LangGraph Benchmarks:**
 knowledge/repositories/langgraph/bench/react_agent.py:
 
 ```python
 config = {"configurable": {"thread_id": "1"}, "recursion_limit": 20000000000}
-```
+```text
 
 knowledge/repositories/langgraph/langgraph/errors.py documents the error:
 
 ```text
 "run your graph with a config specifying a higher `recursion_limit`."
-```
+```text
 
 **Default Value:**
 LangGraph's default `recursion_limit`is **25** (from pregel/main.py logic). For
@@ -232,7 +232,7 @@ return builder.compile(
 
 # Option 2: Document in API that callers must set config recursion_limit
 # config = {"recursion_limit": max_loops + 10, "configurable": {"thread_id": "..."}}
-```
+```text
 
 **Severity:** MEDIUM — Manifests only under high-iteration pipeline_loop
 scenarios.
@@ -249,7 +249,7 @@ scenarios.
 class TeamState(TypedDict):
     ...
     loop_count: NotRequired[int]
-```
+```text
 
 **Pattern in LangGraph Reference:**
 test_managed_values.py and test_deprecation.py use NotRequired for optional
@@ -258,7 +258,7 @@ fields:
 ```python
 class StateNotRequired(TypedDict):
     remaining_steps: NotRequired[RemainingSteps]
-```
+```text
 
 These are tested with checkpointers
 (test_deprecation.py:test_checkpoint_during_deprecation_state_graph) and work
@@ -295,7 +295,7 @@ if isinstance(resume_value, str):
     return resume_value
 if isinstance(resume_value, dict):
     return resume_value.get("option_id", _first_option_id(options))
-```
+```text
 
 **Evidence from LangGraph Tests:**
 test_interruption.py shows that `interrupt()` calls are replayed in order:
@@ -303,7 +303,7 @@ test_interruption.py shows that `interrupt()` calls are replayed in order:
 ```python
 await graph.ainvoke(None, thread, durability=durability)
 assert (await graph.aget_state(thread)).next == ("step_2",)  # Pauses after step_1
-```
+```text
 
 On `Command(resume=value)`, the graph re-executes the same node, and each
 `interrupt()`in order returns its stored resume value.
@@ -314,7 +314,7 @@ If a node calls`interrupt()` twice:
 ```python
 result1 = interrupt({"type": "perm_req_1", ...})  # Raises, stores resume_value[0]
 result2 = interrupt({"type": "perm_req_2", ...})  # On replay, returns resume_value[1]
-```
+```text
 
 **Finding:**
 Our implementation calls `interrupt()`exactly once per permission request.
@@ -358,7 +358,7 @@ async def ingest(
             thread_id=thread_id,
             agent_id=agent_id,  # ← ALL events attributed to same agent
         )
-```
+```text
 
 **Problem:**
 In a multi-node graph (star, pipeline, pipeline_loop), different nodes run with
@@ -407,7 +407,7 @@ async def process_langgraph_event(
         agent_id=event_agent_id,  # ← Now correct
         ...
     )
-```
+```text
 
 **Severity:** HIGH — Frontend misattributes events to agents.
 

@@ -32,7 +32,7 @@ propagate.inject(headers)
 # headers == {"traceparent": "00-{trace_id}-{span_id}-01", "tracestate": ""}
 
 resp = await client.post("/dispatch", json=body, headers=headers)
-```
+```yaml
 
 **Pros**: Zero new dependencies, explicit control, works with any HTTP client.
 **Cons**: Must remember every call site. If a new dispatch path is added without
@@ -58,7 +58,7 @@ client = httpx.AsyncClient(
     base_url="http://localhost:8001",
     event_hooks={"request": [_inject_traceparent]},
 )
-```
+```yaml
 
 **Pros**: Configures once at client creation. Every request through this client
 automatically carries trace context. No new dependency.
@@ -78,7 +78,7 @@ HTTPXClientInstrumentor().instrument()
 
 # Per-client: instruments only the given client
 HTTPXClientInstrumentor.instrument_client(client)
-```
+```text
 
 **What it does**:
 
@@ -120,7 +120,7 @@ Our `TelemetryMiddleware` already extracts trace context on the gateway side:
 carrier: dict[str, str] = dict(request.headers)
 ctx = propagate.extract(carrier)
 token = otel_context.attach(ctx)
-```
+```text
 
 This correctly links incoming HTTP requests to the upstream caller's trace.
 
@@ -158,7 +158,7 @@ async def dispatch_endpoint(
         executor: Executor = app.state.executor
         tg.start_soon(executor.handle_dispatch, req)
         return DispatchResponse(status="dispatched", thread_id=req.thread_id)
-```
+```yaml
 
 **Critical detail**: The `context=ctx` parameter on `start_as_current_span`
 makes the new span a child of the gateway's span. Without this parameter,
@@ -180,7 +180,7 @@ event = {"thread_id": tid, "payload": data, "ts": mono, "trace_ctx": carrier}
 ctx = propagate.extract(event.get("trace_ctx", {}))
 with tracer.start_as_current_span("process_event", context=ctx):
     ...
-```
+```text
 
 ---
 
@@ -200,7 +200,7 @@ VaultSpec A2A runs two independent tracing systems:
 
 These systems produce independent trace trees with no correlation:
 
-```
+```text
 OTel Trace:
   Gateway: POST /api/threads/send (trace_id=abc)
     -> POST /dispatch (trace_id=abc)
@@ -210,7 +210,7 @@ LangSmith Trace:
   ChatModel.astream (run_id=xyz)
     -> ToolCall: read_file (run_id=...)
     -> ToolCall: edit_file (run_id=...)
-```
+```text
 
 The `trace_id=abc` and `run_id=xyz` are completely unrelated. An operator
 cannot look at an OTel trace and find the corresponding LangSmith run, or
@@ -240,7 +240,7 @@ config = {
     },
 }
 result = await graph.ainvoke(state, config)
-```
+```text
 
 LangSmith stores `config.metadata` as run metadata, making it searchable:
 
@@ -253,7 +253,7 @@ runs = client.list_runs(
     project_name="vaultspec-a2a",
     filter='eq(metadata_key, "otel_trace_id", "abc...")',
 )
-```
+```text
 
 ### 3.3 Bridge Strategy: LangSmith Run ID as OTel Span Attribute
 
@@ -271,7 +271,7 @@ async for event in graph.astream_events(state, config, version="v2"):
     if run_id and span.is_recording():
         span.set_attribute("langsmith.run_id", str(run_id))
         break  # Only need the root run_id
-```
+```text
 
 This allows OTel trace viewers (Jaeger, Grafana Tempo) to display the
 LangSmith run_id, enabling manual cross-reference.
@@ -316,7 +316,7 @@ class OTelBridgeCallback(AsyncCallbackHandler):
         span = self._spans.pop(str(run_id), None)
         if span:
             span.end()
-```
+```text
 
 **Trade-offs**:
 
@@ -342,7 +342,7 @@ When available, this would be the ideal bridge:
 # Future: configure OTel to export to LangSmith's OTLP endpoint
 # This is NOT yet available in the stable SDK
 exporter = OTLPSpanExporter(endpoint="https://api.smith.langchain.com/otel")
-```
+```text
 
 Until this ships, the metadata/attribute approach is the best option.
 
@@ -380,7 +380,7 @@ worker_client = httpx.AsyncClient(
     base_url=f"http://localhost:{worker_port}",
     event_hooks={"request": [_inject_trace_context]},
 )
-```
+```text
 
 **Alternative** (if event_hooks are awkward with the existing client setup):
 inject directly in `_dispatch_to_worker()`:
@@ -403,7 +403,7 @@ async def _dispatch_to_worker(
             json=dispatch.model_dump(),
             headers=headers,
         )
-```
+```text
 
 ### 4.3 Worker Side: Extract in Dispatch Handler
 
@@ -432,7 +432,7 @@ async def dispatch_endpoint(
         executor: Executor = app.state.executor
         tg.start_soon(executor.handle_dispatch, req)
         return DispatchResponse(status="dispatched", thread_id=req.thread_id)
-```
+```yaml
 
 **Important**: The `start_as_current_span` context manager sets the extracted
 context as the active span context. All spans created within this block
@@ -454,7 +454,7 @@ worker_span = next(s for s in spans if s.name == "worker.dispatch")
 assert worker_span.parent is not None
 assert worker_span.parent.trace_id == gateway_span.context.trace_id
 assert worker_span.parent.span_id == gateway_span.context.span_id
-```
+```yaml
 
 **Cross-process testing challenge**: Gateway and worker run in separate
 processes with separate `TracerProvider` instances. The `InMemorySpanExporter`
@@ -489,7 +489,7 @@ for full distributed trace verification in `@pytest.mark.live` tests.
 
 ```python
 {"thread_id": tid, "payload": payload, "ts": time.monotonic()}
-```
+```text
 
 No trace context is included. The gateway processes these events without
 any trace lineage.
@@ -509,7 +509,7 @@ async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
         "ts": time.monotonic(),
         "trace_ctx": carrier,  # NEW
     })
-```
+```text
 
 **Gateway side** (`api/internal.py`):
 
@@ -523,7 +523,7 @@ for event in batch:
         attributes={"thread_id": event["thread_id"]},
     ):
         await process_event(event)
-```
+```text
 
 ### 5.3 Schema Consideration
 
@@ -558,7 +558,7 @@ process = await asyncio.create_subprocess_exec(
     sys.executable, "-m", "uvicorn", ...,
     env=env,
 )
-```
+```yaml
 
 **Limitation**: The standard `TraceContextTextMapPropagator` injects lowercase
 `traceparent` (HTTP header convention). For environment variables, the OTel
@@ -591,7 +591,7 @@ Focus on HTTP-level propagation (TEL-GAP-03) which has much higher value.
 
 ## 7. Complete Trace Flow After All Fixes
 
-```
+```text
 CLI / IDE
   | HTTP POST /api/threads/send
   | Headers: traceparent: 00-{trace_id}-{span_A}-01
@@ -620,7 +620,7 @@ Gateway (internal event handler)
 Browser / Frontend
   | Reads _trace.traceparent from WS JSON frame
   | Full distributed trace reconstructible
-```
+```text
 
 **Correlation chain**:
 
@@ -668,7 +668,7 @@ resp = await client.post("/dispatch", json={
     **dispatch.model_dump(),
     "traceparent": carrier["traceparent"],  # Bad: schema pollution
 })
-```
+```text
 
 HTTP headers are the correct carrier for W3C trace context. Embedding
 in JSON body:
@@ -682,7 +682,7 @@ in JSON body:
 ```python
 # DANGEROUS in gateway: instruments ALL httpx clients including test clients
 HTTPXClientInstrumentor().instrument()
-```
+```text
 
 The gateway may have multiple httpx clients (worker IPC, external APIs).
 Global instrumentation cannot distinguish between them. Use per-client
@@ -695,7 +695,7 @@ configuration (event_hooks or `instrument_client()`).
 ctx = propagate.extract(dict(request.headers))
 with tracer.start_as_current_span("worker.dispatch"):  # Missing context=ctx!
     ...  # This span is a NEW ROOT, not a child of the gateway span
-```
+```text
 
 The `context` parameter is required to link the new span to the extracted
 parent. Without it, `start_as_current_span` uses the current (empty) context
@@ -711,7 +711,7 @@ with tracer.start_as_current_span("dispatch"):
 # inject() here captures the PARENT span, not the dispatch span
 headers = {}
 propagate.inject(headers)
-```
+```text
 
 Always inject WITHIN the span's context manager, before the HTTP call.
 

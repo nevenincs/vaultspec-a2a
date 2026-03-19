@@ -57,7 +57,7 @@ silently destroy FK-linked table data.
 
 ```python
 render_as_batch=connection.dialect.name == "sqlite",
-```
+```text
 
 The offline path retains `render_as_batch=True` because offline SQL generation
 is exclusively used for SQLite schema inspection in this codebase.
@@ -124,12 +124,12 @@ error-safe.
 
 **Finding — crud.py:**
 
-3–6. `_UNSET = object()` was used as a sentinel for optional CRUD parameters
-(`approval_status`, `approval_request_id`, `approval_reason`,
-`approval_response_action_id`). Type narrowing via `if x is not _UNSET` does
-not work with bare `object()` instances — `ty` could not narrow the type after
-the guard, producing `invalid-assignment` errors on SQLAlchemy `Mapped[]`
-columns.
+3. `_UNSET = object()` was used as a sentinel for optional CRUD parameters
+   (`approval_status`, `approval_request_id`, `approval_reason`,
+   `approval_response_action_id`). Type narrowing via `if x is not _UNSET` does
+   not work with bare `object()` instances — `ty` could not narrow the type after
+   the guard, producing `invalid-assignment` errors on SQLAlchemy `Mapped[]`
+   columns.
 
 **Fix applied (checkpoints.py):**
 
@@ -146,7 +146,7 @@ columns.
       _instance: _UnsetType | None = None
       def __new__(cls) -> _UnsetType: ...
   _UNSET = _UnsetType()
-  ```
+  ```text
 
 - Changed all `if x is not _UNSET:` guards to `if not isinstance(x, _UnsetType):`.
   `ty` now correctly narrows the type inside the guard branch.
@@ -204,7 +204,7 @@ def with_allowlist(
     if self._saver is not None:
         self.serde = self._saver.serde
     return self
-```
+```text
 
 **Verification:** `checkpoints.py` reviewed post-fix. `self._saver` is updated
 before `serde` is synced.

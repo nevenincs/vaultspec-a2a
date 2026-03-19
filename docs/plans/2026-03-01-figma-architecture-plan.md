@@ -96,7 +96,7 @@ confirmed.)_
 
 ```bash
 npm install --save-dev @figma/code-connect
-```
+```text
 
 ### 1.2 Create `figma.config.json`
 
@@ -111,7 +111,7 @@ At the project root (alongside `package.json`):
     "language": "html"
   }
 }
-```
+```text
 
 ### 1.3 Add npm scripts
 
@@ -125,7 +125,7 @@ In `package.json`:
     "figma:create": "figma connect create"
   }
 }
-```
+```text
 
 ---
 
@@ -139,7 +139,7 @@ corresponding`.React` source.
 ```text
 src/ui/components/ui/button/button.React
 src/ui/components/ui/button/button.figma.js    ← new
-```
+```text
 
 ### 2.2 Template Structure
 
@@ -177,7 +177,7 @@ export default {
 </Button>`;
   },
 };
-```
+```yaml
 
 To get the `node-id`for each component: open the component in Figma →
 right-click →
@@ -197,7 +197,7 @@ generates a boilerplate file 2. Fill in variant/prop mappings based on the compo
 
 ```bash
 FIGMA_ACCESS_TOKEN=<token> npx figma connect publish
-```
+```yaml
 
 Expected output: list of published components with their node IDs and labels.
 
@@ -219,7 +219,7 @@ With the Figma desktop app open and the file in Dev Mode:
 Tool call: get_code_connect_map
   fileKey: <FILE_KEY>
   nodeId:  <any published component node ID>
-```
+```text
 
 Expected response:
 
@@ -230,7 +230,7 @@ Expected response:
     "codeConnectName": "Button"
   }
 }
-```
+```text
 
 If the response is `{}`, Code Connect has not published correctly. Re-run
 `figma connect publish`and check the output for errors.
@@ -241,7 +241,7 @@ With a frame selected that uses Figma Variables:
 
 ```text
 Tool call: get_variable_defs
-```
+```python
 
 Expected: token names with values (e.g., `"--color-primary-500": { "light":
 "#0066CC" }`).
@@ -287,7 +287,7 @@ Figma library publish
   → update src/ui/tokens.css
   → update Tailwind v4 token config
   → open PR
-```
+```text
 
 This phase is deferred and tracked separately.
 

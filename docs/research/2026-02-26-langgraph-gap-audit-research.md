@@ -7,7 +7,7 @@ maturity: 60
 feature: langgraph-gaps
 ---
 
-# Gap Audit & LangGraph Architecture Evaluation
+## Gap Audit & LangGraph Architecture Evaluation
 
 This document consolidates and explicitly identifies all contradictions, gaps,
 and oversights across the 5 core domains of the distilled documentation logic.

@@ -10,7 +10,7 @@ related:
   - docs/adrs/025-mandatory-review-gate.md
 ---
 
-# ADR-024: Plan Approval Interrupt
+## ADR-024: Plan Approval Interrupt
 
 **Date:** 2026-03-03
 **Status:** Revised (supersedes supervisor-inline interrupt — see §2.2, §4)
@@ -58,7 +58,7 @@ class TeamState(TypedDict):
     # exec routing decisions within the same thread.
     # NotRequired: legacy threads without this field default to False (unapproved).
     plan_approved: NotRequired[bool]
-```
+```text
 
 Uses last-write-wins (default LangGraph semantics — no reducer). `NotRequired`
 because existing checkpoint rows without this field must default to `False` at
@@ -132,7 +132,7 @@ def create_plan_approval_node(workers: list[str], autonomous: bool = False):
 
     plan_approval_node.__name__ = "plan_approval_node"
     return plan_approval_node
-```
+```text
 
 The supervisor node itself **never calls `interrupt()`**. It sets `state["next"]`
 to the intended exec worker and returns. The conditional edge in `graph.py`
@@ -165,7 +165,7 @@ def _make_supervisor_router(
 builder.add_node("plan_approval", create_plan_approval_node(workers, autonomous))
 builder.add_conditional_edges("supervisor", _make_supervisor_router(...))
 # plan_approval_node uses Command(goto=...) — no static edges needed from it
-```
+```text
 
 ### 2.3 Interrupt Payload
 
@@ -176,7 +176,7 @@ interrupt({
     "plan_paths": vault_index.get("plan", []),
     "exec_worker": state["next"],
 })
-```
+```text
 
 The payload carries enough context for the UI to render a useful approval
 modal: the active feature name, the list of plan document paths for the user
@@ -270,7 +270,7 @@ clients. It must be extended to handle `type == "plan_approval_request"`:
 ```python
 if payload.get("type") in ("permission_request", "plan_approval_request"):
     # build and emit PermissionRequestEvent with appropriate options
-```
+```text
 
 For `plan_approval_request` payloads, the emitted `PermissionRequestEvent`
 carries approve and reject options. The UI permission modal is extended to
@@ -428,7 +428,7 @@ src/vaultspec_a2a/core/
 src/vaultspec_a2a/api/
   schemas/rest.py       AMENDED (if needed): PermissionRequestEvent options
                         for plan approval (approve/reject option_id values)
-```
+```text
 
 ## 7. References
 

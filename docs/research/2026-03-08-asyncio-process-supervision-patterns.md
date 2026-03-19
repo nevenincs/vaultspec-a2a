@@ -22,7 +22,7 @@ within the asyncio event loop.
 Production asyncio applications that manage child processes need three
 cooperating components:
 
-```
+```text
 ┌──────────────────────────────────────────────────────┐
 │                   Parent Process                     │
 │                                                      │
@@ -42,7 +42,7 @@ cooperating components:
               │  Child Process  │
               │  (Worker)       │
               └─────────────────┘
-```
+```text
 
 ### 1.1 Spawner — Lifecycle Management
 
@@ -99,7 +99,7 @@ class LazyWorkerSpawner:
             self._process = await self._spawn()
             await self._wait_for_health()
             self._spawned = True
-```
+```text
 
 **Why double-check is required:** In asyncio, multiple coroutines can be
 suspended at the `async with self._lock` line simultaneously. Without the
@@ -139,7 +139,7 @@ async def _spawn_worker(worker_url: str, worker_port: int) -> Process | None:
         return None
 
     return process
-```
+```text
 
 **Key patterns:**
 
@@ -158,7 +158,7 @@ class LazyWorkerSpawner:
         self._process = new_proc
         self._spawned = True  # Mark as spawned even if proc is None
                                # (external worker detected by health check)
-```
+```text
 
 **Our implementation:** `api/app.py` `LazyWorkerSpawner.replace_process()`.
 Called by `WorkerWatchdog._attempt_restart()` after successful respawn.
@@ -206,7 +206,7 @@ class WorkerWatchdog:
 
         except asyncio.CancelledError:
             pass  # Clean shutdown
-```
+```text
 
 **Our implementation:** `api/app.py:611-742` `WorkerWatchdog` class.
 
@@ -250,7 +250,7 @@ async def _attempt_restart(self) -> bool:
             return True
 
     return False  # All retries exhausted
-```
+```text
 
 **Our backoff sequence:**
 
@@ -266,7 +266,7 @@ desktop tool users expect fast recovery. 19s total is acceptable; 31s+ is not.
 
 ### 3.4 Worker Status State Machine
 
-```
+```text
                        ┌───────────┐
                        │  pending  │  (initial, before first spawn)
                        └─────┬─────┘
@@ -285,7 +285,7 @@ desktop tool users expect fast recovery. 19s total is acceptable; 31s+ is not.
               │        ┌───────────┐
               └────────│   down    │  (manual intervention required)
                        └───────────┘
-```
+```text
 
 Exposed on `/health` endpoint as `worker_status` field. The "down" state is
 terminal until the gateway is restarted (which re-initializes the watchdog).
@@ -331,13 +331,13 @@ class WorkerCircuitBreaker:
         if self._consecutive_failures >= self._failure_threshold:
             self._state = "open"
             self._opened_at = time.monotonic()
-```
+```text
 
 **Our implementation:** `api/app.py:89-164` `WorkerCircuitBreaker`.
 
 ### 4.2 Circuit Breaker State Transitions
 
-```
+```text
                         ┌──────────┐
             success ───▶│  CLOSED  │◀─── success (from half_open)
                         └────┬─────┘
@@ -351,7 +351,7 @@ class WorkerCircuitBreaker:
                         ┌──────────┐
             failure ───▶│HALF_OPEN │──── 1 probe dispatch allowed
                         └──────────┘
-```
+```text
 
 ### 4.3 Watchdog-Circuit Breaker Coordination
 
@@ -416,13 +416,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         # Kill worker subprocess tree
         if spawner.process and spawner.process.returncode is None:
             await _kill_process_tree(spawner.process)
-```
+```text
 
 ### 5.2 Shutdown Ordering
 
 Critical: components must be shut down in reverse dependency order:
 
-```
+```text
 Shutdown sequence:
 1. Cancel watchdog task      (stop monitoring — no more restarts)
 2. Cancel heartbeat task     (stop receiving heartbeats)
@@ -430,7 +430,7 @@ Shutdown sequence:
 4. Kill worker subprocess    (tree kill — process + children)
 5. Close httpx clients       (IPC bridge, health probe)
 6. Close database            (SQLAlchemy engine disposal)
-```
+```text
 
 **Why watchdog first:** If we kill the worker before cancelling the watchdog,
 the watchdog detects the crash and tries to restart — racing with shutdown.
@@ -575,7 +575,7 @@ os.waitpid(pid, 0)  # Synchronous wait
 # CORRECT: use process.returncode (updated by asyncio child watcher)
 if process.returncode is not None:
     # Process has exited
-```
+```text
 
 ### 8.2 Spawning in Endpoint Handlers
 
@@ -589,7 +589,7 @@ async def dispatch():
 @app.post("/dispatch")
 async def dispatch():
     await spawner.ensure_worker()  # Thread-safe, exactly once
-```
+```text
 
 ### 8.3 Restarting Without Backoff
 
@@ -607,7 +607,7 @@ for attempt in range(MAX_RETRIES):
     process = await spawn()
     if process_healthy():
         break
-```
+```text
 
 ### 8.4 Ignoring Process Tree on Windows
 
@@ -619,7 +619,7 @@ process.terminate()  # Windows: TerminateProcess() on parent only
 await asyncio.create_subprocess_exec(
     "taskkill", "/T", "/F", "/PID", str(process.pid)
 )
-```
+```text
 
 ---
 

@@ -189,9 +189,9 @@ class TestInternalHeartbeat:
         record = next(
             rec for rec in caplog.records if "Worker heartbeat (HTTP)" in rec.message
         )
-        assert record.message_type == "heartbeat"
-        assert record.active_thread_count == 2
-        assert record.transport == "http"
+        assert record.__dict__["message_type"] == "heartbeat"
+        assert record.__dict__["active_thread_count"] == 2
+        assert record.__dict__["transport"] == "http"
 
 
 # ---------------------------------------------------------------------------
@@ -512,11 +512,11 @@ class TestInternalWebSocketLogging:
             for rec in caplog.records
             if "Malformed worker event envelope" in rec.message
         )
-        assert record.thread_id == ""
-        assert record.event_type == ""
-        assert record.message_type == "event"
-        assert record.transport == "ws"
-        assert record.frame_size > 0
+        assert record.__dict__["thread_id"] == ""
+        assert record.__dict__["event_type"] == ""
+        assert record.__dict__["message_type"] == "event"
+        assert record.__dict__["transport"] == "ws"
+        assert record.__dict__["frame_size"] > 0
 
     def test_missing_connection_manager_log_includes_runtime_fields(
         self, caplog
@@ -542,10 +542,10 @@ class TestInternalWebSocketLogging:
             for rec in caplog.records
             if "ConnectionManager not available -- dropping event" in rec.message
         )
-        assert record.thread_id == "t-drop"
-        assert record.event_type == "chunk"
-        assert record.transport == "ws"
-        assert record.action == "relay_drop_event"
+        assert record.__dict__["thread_id"] == "t-drop"
+        assert record.__dict__["event_type"] == "chunk"
+        assert record.__dict__["transport"] == "ws"
+        assert record.__dict__["action"] == "relay_drop_event"
 
     def test_ws_heartbeat_log_includes_runtime_fields(self, caplog) -> None:
         """Internal WS heartbeat logs should carry count and transport metadata."""
@@ -566,9 +566,9 @@ class TestInternalWebSocketLogging:
         record = next(
             rec for rec in caplog.records if "Worker heartbeat:" in rec.message
         )
-        assert record.message_type == "heartbeat"
-        assert record.active_thread_count == 2
-        assert record.transport == "ws"
+        assert record.__dict__["message_type"] == "heartbeat"
+        assert record.__dict__["active_thread_count"] == 2
+        assert record.__dict__["transport"] == "ws"
 
     def test_unknown_ws_message_log_includes_runtime_fields(self, caplog) -> None:
         """Unknown WS message types should log bounded frame metadata."""
@@ -586,9 +586,9 @@ class TestInternalWebSocketLogging:
             for rec in caplog.records
             if "Unknown internal WS message type" in rec.message
         )
-        assert record.message_type == "mystery"
-        assert record.transport == "ws"
-        assert record.frame_size > 0
+        assert record.__dict__["message_type"] == "mystery"
+        assert record.__dict__["transport"] == "ws"
+        assert record.__dict__["frame_size"] > 0
 
 
 # ---------------------------------------------------------------------------
@@ -726,10 +726,10 @@ class TestAggregatorGCOnTerminal:
         record = next(
             rec for rec in caplog.records if "status updated to" in rec.message
         )
-        assert record.thread_id == "t-logged"
-        assert record.status == "completed"
-        assert record.event_type == "thread_terminal"
-        assert record.action == "thread_terminal_status_updated"
+        assert record.__dict__["thread_id"] == "t-logged"
+        assert record.__dict__["status"] == "completed"
+        assert record.__dict__["event_type"] == "thread_terminal"
+        assert record.__dict__["action"] == "thread_terminal_status_updated"
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_transition_skip_log_includes_runtime_fields(
@@ -761,7 +761,7 @@ class TestAggregatorGCOnTerminal:
             )
 
         record = next(rec for rec in caplog.records if "transition to" in rec.message)
-        assert record.thread_id == "t-terminal-skip"
-        assert record.status == "completed"
-        assert record.event_type == "thread_terminal"
-        assert record.action == "thread_terminal_status_skipped"
+        assert record.__dict__["thread_id"] == "t-terminal-skip"
+        assert record.__dict__["status"] == "completed"
+        assert record.__dict__["event_type"] == "thread_terminal"
+        assert record.__dict__["action"] == "thread_terminal_status_skipped"

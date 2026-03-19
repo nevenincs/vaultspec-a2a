@@ -146,7 +146,7 @@
       name=opt.get("name", ""),
       kind=_map_acp_option_kind(opt.get("option_id", "")),
   )
-  ```
+  ```text
 
 ### [MED] BE-14 -- `resolve_permission()` clears from API aggregator that was never populated (pre-BE-13 fix)
 
@@ -261,7 +261,7 @@
 
   ```python
   {"type": "permission_request", "tool_name": ..., "options": options}
-  ```
+  ```text
 
   where `options` is the raw ACP options list with `optionId` keys (camelCase).
 
@@ -270,7 +270,7 @@
   ```python
   "option_id": opt.get("optionId", opt.get("option_id", "allow_once"))
   "name": opt.get("label", opt.get("name", opt.get("optionId", "Allow")))
-  ```
+  ```text
 
   This dual-key lookup (`optionId` OR `option_id`, `label` OR `name`) is a defensive pattern that handles both ACP format and wire format. Currently correct since the worker always passes ACP format.
 
@@ -319,7 +319,7 @@
   content = getattr(chunk, "content", "")
   if isinstance(content, str) and content:
       await self._buffer_message_chunk(...)
-  ```
+  ```text
 
   Claude and other models emit reasoning/thinking tokens in two ways:
   1. `chunk.additional_kwargs.reasoning` (Anthropic extended thinking)
@@ -330,6 +330,7 @@
   The aggregator has `emit_thought_chunk()` (line 690-706) ready to emit `ThoughtChunkEvent`, but it's only called from the `on_custom_event` handler. The `on_chat_model_stream` handler never checks for reasoning content.
 
 - **Impact**: All reasoning/thinking tokens from Claude extended thinking are silently dropped. The frontend `ThoughtBlock` component never receives data from the primary reasoning path. Mock tapes that produce reasoning tokens are invisible.
+
 - **Fix**: In `on_chat_model_stream`, check for:
   1. `content` as list: iterate blocks, route `type=="thinking"` to `emit_thought_chunk()`, `type=="text"` to `_buffer_message_chunk()`
   2. `chunk.additional_kwargs.get("reasoning")`: route to `emit_thought_chunk()`
@@ -413,22 +414,22 @@
 
 ### Tier 2: Silent data loss (high UX impact)
 
-4. **BE-26** (HIGH) -- Reasoning/thought token extraction from `on_chat_model_stream`. Medium effort -- handle list content blocks + `additional_kwargs.reasoning`.
-5. **BE-27** (MED) -- Add `finish_reason` signal via `on_chat_model_end` handler. Low effort.
-6. **BE-10** (HIGH) -- Add missing fields to `_AgentSnapshot`. Low effort.
-7. **BE-09** (HIGH) -- Enrich snapshot with agents, plan, artifacts from checkpoint + aggregator state. Medium effort.
+1. **BE-26** (HIGH) -- Reasoning/thought token extraction from `on_chat_model_stream`. Medium effort -- handle list content blocks + `additional_kwargs.reasoning`.
+2. **BE-27** (MED) -- Add `finish_reason` signal via `on_chat_model_end` handler. Low effort.
+3. **BE-10** (HIGH) -- Add missing fields to `_AgentSnapshot`. Low effort.
+4. **BE-09** (HIGH) -- Enrich snapshot with agents, plan, artifacts from checkpoint + aggregator state. Medium effort.
 
 ### Tier 3: Missing features (event pipeline completeness)
 
-8. **BE-28/BE-01** (HIGH) -- Implement PlanUpdateEvent emission (supervisor writes plan + aggregator detects). Medium effort.
-9. **BE-29/BE-02** (HIGH) -- Implement ArtifactUpdateEvent emission. Medium effort.
-10. **BE-12** (HIGH) -- Sync node metadata to API aggregator for team status display names. Medium effort.
-11. **BE-03** (MED) -- Wire `emit_team_status()` caller after agent state transitions.
-12. **BE-30** (LOW) -- Enrich tool call events with input/output/kind. Low-Medium effort.
+1. **BE-28/BE-01** (HIGH) -- Implement PlanUpdateEvent emission (supervisor writes plan + aggregator detects). Medium effort.
+2. **BE-29/BE-02** (HIGH) -- Implement ArtifactUpdateEvent emission. Medium effort.
+3. **BE-12** (HIGH) -- Sync node metadata to API aggregator for team status display names. Medium effort.
+4. **BE-03** (MED) -- Wire `emit_team_status()` caller after agent state transitions.
+5. **BE-30** (LOW) -- Enrich tool call events with input/output/kind. Low-Medium effort.
 
 ### Tier 4: Infrastructure
 
-13. **BE-17** (HIGH) -- Convert mock-seeder to use event pipeline. Medium effort.
+1. **BE-17** (HIGH) -- Convert mock-seeder to use event pipeline. Medium effort.
 
 ---
 
@@ -523,7 +524,7 @@
       "running": {"completed", "failed", "cancelled"},
       # Terminal states: no transitions allowed
   }
-  ```
+  ```text
 
   Reject transitions from terminal states (`completed`, `failed`, `cancelled`) to any other state.
 

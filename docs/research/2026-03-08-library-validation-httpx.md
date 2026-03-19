@@ -23,7 +23,7 @@ class Timeout:
         write: None | float | UnsetType = UNSET,
         pool: None | float | UnsetType = UNSET,
     ) -> None:
-```
+```text
 
 Usage patterns from docstring:
 
@@ -33,7 +33,7 @@ Timeout(5.0)                # 5s timeout on all operations
 Timeout(None, connect=5.0)  # 5s timeout on connect, no other timeouts
 Timeout(5.0, connect=10.0)  # 10s timeout on connect, 5s elsewhere
 Timeout(5.0, pool=None)     # No pool timeout, 5s elsewhere
-```
+```yaml
 
 Default httpx timeout: 5.0 seconds on all operations.
 
@@ -45,7 +45,7 @@ Default httpx timeout: 5.0 seconds on all operations.
 _shared_client = httpx.AsyncClient(
     timeout=httpx.Timeout(30.0, connect=5.0),
 )
-```
+```text
 
 **Worker IPC bridge** (`worker/ipc.py:66-69`):
 
@@ -55,7 +55,7 @@ self._client = httpx.AsyncClient(
     timeout=httpx.Timeout(10.0, connect=5.0),
     headers=headers,
 )
-```
+```text
 
 **Gateway health check** (`protocols/mcp/server.py:228`):
 
@@ -65,7 +65,7 @@ async with httpx.AsyncClient() as client:
         f"{api_base}/health",
         timeout=_GATEWAY_HEALTH_TIMEOUT,  # 2.0
     )
-```
+```text
 
 ### Validation
 
@@ -105,7 +105,7 @@ class MockTransport(AsyncBaseTransport, BaseTransport):
         if not isinstance(response, Response):
             response = await response
         return response
-```
+```yaml
 
 Key: MockTransport accepts either sync or async handlers. For `AsyncClient`,
 it calls `handle_async_request`.
@@ -121,7 +121,7 @@ def _make_test_worker_transport(captured):
             return httpx.Response(200, json={...})
         return httpx.Response(404, json={"detail": "Not found"})
     return httpx.MockTransport(_handler)
-```
+```text
 
 ### Validation
 
@@ -152,7 +152,7 @@ httpx.AsyncClient(
     timeout=...,           # Timeout config
     headers=...,           # Default headers
 )
-```
+```text
 
 ### Our Usage Across Codebase
 
@@ -160,7 +160,7 @@ httpx.AsyncClient(
 
 ```python
 httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=5.0))
-```
+```text
 
 No `base_url` -- uses full URLs in each request. This is intentional because
 the API base URL comes from runtime settings.
@@ -173,7 +173,7 @@ httpx.AsyncClient(
     timeout=httpx.Timeout(10.0, connect=5.0),
     headers=headers,
 )
-```
+```text
 
 Uses `base_url` because all requests go to the same gateway.
 
@@ -183,7 +183,7 @@ Uses `base_url` because all requests go to the same gateway.
 worker_client = httpx.AsyncClient(
     transport=transport, base_url="http://test-worker:8001"
 )
-```
+```text
 
 Uses `transport` override (MockTransport) + `base_url`.
 
@@ -215,7 +215,7 @@ try:
     ...
 finally:
     await client.aclose()
-```
+```text
 
 ### Our Usage
 
@@ -230,7 +230,7 @@ def _reset_client() -> None:
         with contextlib.suppress(Exception):
             _shared_client._transport.close()  # sync close
     _shared_client = None
-```
+```yaml
 
 **Finding: LIB-VAL-03** (LOW): `_reset_client()` uses synchronous
 `_transport.close()` instead of `await client.aclose()`. This is a test-only
@@ -259,7 +259,7 @@ pattern -- correct.
 
 ```python
 httpx.AsyncHTTPTransport(retries=3)
-```
+```text
 
 Retries only `ConnectError` and `ConnectTimeout` -- does NOT retry on HTTP
 errors, read timeouts, or write failures.

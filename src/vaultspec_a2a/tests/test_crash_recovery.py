@@ -73,7 +73,7 @@ async def _create_autospawn_gateway(
         # Auto-spawn ON -- gateway owns the worker process handle
         "VAULTSPEC_AUTO_SPAWN_WORKER": "true",
         "VAULTSPEC_INTERNAL_TOKEN": "",
-        "VAULTSPEC_MCP_API_BASE_URL": f"http://127.0.0.1:{gw_port}",
+        "VAULTSPEC_GATEWAY_URL": f"http://127.0.0.1:{gw_port}",
         "LANGSMITH_TRACING": "false",
     }
 

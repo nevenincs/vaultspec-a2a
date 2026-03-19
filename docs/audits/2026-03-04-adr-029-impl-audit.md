@@ -24,7 +24,7 @@ Scope: `src/vaultspec_a2a/database/`, `src/vaultspec_a2a/api/app.py`, `src/vault
   from ..database.crud import get_thread
   from ..database.migrations import backfill_teamstate_sdd_fields
   from ..database.session import close_db, get_session_factory, init_db
-  ```
+  ```python
 
   CLAUDE.md Import Policy states: "Consumers should prefer importing from the sub-module root (e.g., `from lib.core import Registry`) rather than deep-importing from sub-sub-modules."
 - **Recommendation**: Change to `from ..database import get_thread, close_db, get_session_factory, init_db`. Note: `backfill_teamstate_sdd_fields` is also not in the facade — add it, or this import is forced to deep-import.

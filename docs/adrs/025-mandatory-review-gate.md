@@ -9,7 +9,7 @@ related:
   - docs/adrs/026-pipeline-phase-population.md
 ---
 
-# ADR-025: Mandatory Review Gate
+## ADR-025: Mandatory Review Gate
 
 **Date:** 2026-03-03
 **Status:** Proposed
@@ -79,7 +79,7 @@ if next_route == "FINISH":
         return {"next": next_route, "pipeline_phase": inferred_phase,
                 "routing_error": "FINISH blocked: no review artifact in vault_index[\"audit\"]. "
                                  "A reviewer agent must produce an audit artifact before completion."}
-```
+```text
 
 No new node types or edge types are introduced. The gate is a pure extension of
 the existing conditional return-path logic in `supervisor_node`.
@@ -204,7 +204,7 @@ src/vaultspec_a2a/core/
                         exec non-empty + audit empty; verify FINISH proceeds
                         when audit non-empty; verify gate skipped when
                         active_feature is None
-```
+```text
 
 ## 7. References
 

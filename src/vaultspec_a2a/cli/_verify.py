@@ -13,6 +13,7 @@ import tempfile
 import time
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from urllib import error, parse, request
 
 _ROOT = Path(__file__).resolve().parent.parent.parent.parent
@@ -399,7 +400,7 @@ def _capture_container_inspect(
             )
 
 
-def _extract_trace_ids(result: dict[str, object]) -> list[str]:
+def _extract_trace_ids(result: dict[str, Any]) -> list[str]:
     data = result.get("data")
     if not isinstance(data, list):
         return []
@@ -485,7 +486,10 @@ def _write_evidence_manifest(
     run_context: dict[str, object] | None = None,
 ) -> None:
     run_context = run_context or {}
-    health = run_context.get("health")
+    raw_health = run_context.get("health")
+    health: dict[str, object] | None = (
+        cast("dict[str, object]", raw_health) if isinstance(raw_health, dict) else None
+    )
     thread_id = run_context.get("thread_id")
     failure = run_context.get("failure")
     provider = run_context.get("provider")

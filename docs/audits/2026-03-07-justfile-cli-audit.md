@@ -22,7 +22,7 @@
 clean:
     rm -rf dist/ *.egg-info
     fd -t d __pycache__ --exclude .venv -x rm -rf {}
-```
+```text
 
 The Justfile sets `windows-shell := ["powershell.exe", "-c"]` but `clean` uses
 bash-only `rm -rf`. PowerShell's `rm` alias (`Remove-Item`) does not accept
@@ -34,7 +34,7 @@ bash-only `rm -rf`. PowerShell's `rm` alias (`Remove-Item`) does not accept
 clean:
     Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
     fd -t d __pycache__ --exclude .venv -x Remove-Item -Recurse -Force
-```
+```text
 
 ---
 
@@ -65,7 +65,7 @@ exclude = ["fix_*.py", "_to_oragnize"]
 
 [tool.ty]
 exclude = ["_to_oragnize"]
-```
+```text
 
 ---
 
@@ -107,10 +107,10 @@ adding a `snapshots` alias via `@database.command("snapshots")` pointing to
 
 When run without arguments, `vaultspec run mock` prints:
 
-```
+```text
 Available preps scenarios:
   python -m vaultspec_a2a.tests.preps.solo_coder  -- Single coder agent...
-```
+```text
 
 The CLI command is `mock` but output says "preps". Minor naming mismatch.
 

@@ -8,7 +8,7 @@ related:
   - docs/research/2026-26-02-langgraph-gap-audit-research.md
 ---
 
-# ADR-003: Protocol Bridging & Translation (LangGraph ↔ MCP)
+## ADR-003: Protocol Bridging & Translation (LangGraph ↔ MCP)
 
 **Date:** 2026-02-26  
 **Status:** Proposed

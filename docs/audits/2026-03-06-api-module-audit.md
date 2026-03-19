@@ -22,7 +22,7 @@
 
 ```python
 from ..core.graph import _build_initial_vault_index
-```
+```python
 
 This imports a private function (leading underscore) from `core.graph`. Private symbols are not part of the public API and can be renamed/removed without notice. The function is used at line 276 to populate `vault_index` in the dispatch request. It should be exported via `core/__init__.py` or made public.
 
@@ -32,7 +32,7 @@ This imports a private function (leading underscore) from `core.graph`. Private 
 
 ```python
 import json as _json  # noqa: PLC0415
-```
+```python
 
 This import is inside the closure body, executed on every WS message dispatch. While Python caches module imports, the `noqa` suppression and inline placement indicate this was added hastily. `json` is already used at module level in `endpoints.py` — it should be a module-level import in `app.py` too.
 
@@ -45,7 +45,7 @@ checkpoint = await asyncio.wait_for(
     checkpointer.aget({"configurable": {"thread_id": thread_id}}),
     timeout=10.0,
 )
-```
+```text
 
 The memory notes from the LangGraph Alignment Sprint (WS1, LG-027) specifically state that `aget_tuple()` is the documented API and `aget()` is undocumented. This endpoint uses the undocumented `aget()` instead. While the code handles the return format correctly, this could break on LangGraph version upgrades.
 
@@ -59,7 +59,7 @@ class _MinimalState:
     def __init__(self, values: dict, config: dict | None = None) -> None:
         self.values = values
         self.config = config
-```
+```typescript
 
 A class is defined inside `get_thread_state_endpoint` and instantiated on every request. This works but is architecturally odd — the class is recreated on every call. It should be a module-level private class or the `_enrich_snapshot_from_state` function should accept a simpler interface (dict instead of StateSnapshot-like object).
 
@@ -67,9 +67,9 @@ A class is defined inside `get_thread_state_endpoint` and instantiated on every 
 
 **File:** `endpoints.py:697`
 
-```
+```text
 Dynamically discovers presets by globbing ``lib/core/presets/teams/*.toml``.
-```
+```text
 
 Should reference `src/vaultspec_a2a/core/presets/teams/*.toml` after the migration sprint.
 
@@ -92,10 +92,10 @@ The WS path bypasses Pydantic validation entirely. If `DispatchRequest` adds req
 
 **File:** `schemas/enums.py:8`
 
-```
+```text
 Note: ``Provider`` and ``Model`` live in ``lib.utils.enums`` and are
 imported (not duplicated) where needed.
-```
+```text
 
 Should be `vaultspec_a2a.utils.enums`.
 
@@ -103,9 +103,9 @@ Should be `vaultspec_a2a.utils.enums`.
 
 **File:** `schemas/__init__.py:5`
 
-```
+```text
 Facade re-exporting all public types from the ``lib.api.schemas`` subpackage.
-```
+```text
 
 Should be `vaultspec_a2a.api.schemas`.
 
@@ -113,9 +113,9 @@ Should be `vaultspec_a2a.api.schemas`.
 
 **File:** `internal.py:9`
 
-```
+```text
 The ``WorkerBridge`` in ``lib.worker.ipc`` uses this approach.
-```
+```text
 
 Should be `vaultspec_a2a.worker.ipc`.
 
@@ -123,9 +123,9 @@ Should be `vaultspec_a2a.worker.ipc`.
 
 **File:** `websocket.py:513`
 
-```
+```text
 Used by the internal WebSocket relay (``lib.api.internal``) to forward
-```
+```text
 
 Should be `vaultspec_a2a.api.internal`.
 
@@ -142,7 +142,7 @@ These three private models are used in `ThreadStateSnapshot` (which IS exported)
 ```python
 websocket.app.state.worker_ws = websocket
 websocket.app.state.worker_last_heartbeat_ts = time.monotonic()
-```
+```text
 
 These attributes are set dynamically on `app.state` without being initialized in the lifespan. If any code reads `app.state.worker_ws` before the worker connects, it would get an `AttributeError`. The lifespan in `app.py` does not initialize these attributes.
 
@@ -152,7 +152,7 @@ These attributes are set dynamically on `app.state` without being initialized in
 
 ```python
 self._process = subprocess.Popen(cmd, stdout=None, stderr=None)
-```
+```text
 
 The `start()` method is synchronous, using `subprocess.Popen` directly. While `stop()` correctly uses `run_in_executor` for the blocking `wait()`, the `start()` call blocks the event loop briefly during `Popen` initialization. This is acceptable for a one-time startup but inconsistent with the async patterns used elsewhere.
 
@@ -164,7 +164,7 @@ The `start()` method is synchronous, using `subprocess.Popen` directly. While `s
 message_id = (
     stored_id or hashlib.sha256(f"{role}:{content}".encode()).hexdigest()[:32]
 )
-```
+```text
 
 The deterministic hash approach is sound, but `role:content` as the hash input can collide if the same role sends identical content (e.g., two identical system messages). Adding the message index would eliminate this edge case.
 
@@ -176,7 +176,7 @@ The deterministic hash approach is sound, but `role:content` as the hash input c
 # Update DB status regardless of dispatch success
 await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
 await db.commit()
-```
+```python
 
 The comment explicitly documents this as intentional, but it means the DB and worker can be out of sync: the DB says "cancelled" while the worker continues executing. There's no mechanism to reconcile this state.
 
@@ -202,7 +202,7 @@ The auth module is a placeholder with no implementation. This is fine for develo
 
 ```python
 _SERVER_VERSION = "0.1.0"
-```
+```text
 
 Hardcoded version string that will drift from `pyproject.toml`. Should use `importlib.metadata.version("vaultspec-a2a")` or similar.
 
@@ -212,7 +212,7 @@ Hardcoded version string that will drift from `pyproject.toml`. Should use `impo
 
 ```python
 status: str
-```
+```text
 
 `CreateThreadResponse` and `ThreadSummary` also use `str` for status. These could use the `ThreadStatus` enum from `database.crud` for type safety, but this would couple the schema layer to the database layer.
 
@@ -280,7 +280,7 @@ The main concerns are:
 
 **Key dependency:** `sync_worker_event()` handles 4 event types: `agent_status`, `permission_request`, `permission_resolved`, and `graph_registered` (BE-12). The `graph_registered` event populates `_node_metadata` which `get_node_summaries()` reads. **However, the worker must explicitly emit this event** — if the worker fails to relay `graph_registered` after graph compilation, the API aggregator's `agents` list stays empty.
 
-**Affected REST endpoints:**
+##### Affected REST endpoints
 
 1. **`GET /team/status`** (`endpoints.py:732-773`): Returns `agents: []` until the worker sends `graph_registered`. After that, agent metadata (role, display_name, description) is available, but lifecycle states only appear after `agent_status` events.
 
@@ -330,13 +330,13 @@ This is by design (the docstring says "without round-tripping through the EventA
 ```python
 They depend on ``lib.core.aggregator``, which in turn imports from
 ``lib.api.schemas``, creating a circular import if exposed here.
-```
+```text
 
 Should be `vaultspec_a2a.core.aggregator` and `vaultspec_a2a.api.schemas`.
 
 #### HIGH-10: 10 stale `lib.` path references across api/ module (including tests)
 
-**Files and locations:**
+##### Files and locations
 
 1. `websocket.py:511` — `lib.api.internal`
 2. `internal.py:9` — `lib.worker.ipc`
@@ -360,7 +360,7 @@ All should reference `vaultspec_a2a.*` paths. Consolidating MED-01/02/03/04 from
 
 ```python
 active_threads=self._aggregator.get_active_thread_ids(),
-```
+```yaml
 
 `get_active_thread_ids()` (aggregator.py:397-406) returns threads that have at least one WS subscriber. On first client connection, this is always `[]` (no one is subscribed yet). The client receives `active_threads: []` even if there are running threads in the database. This makes the `ConnectedEvent` useless for the frontend's initial thread list hydration.
 
@@ -374,7 +374,7 @@ payload = (
     if hasattr(event, "model_dump")
     else event
 )
-```
+```text
 
 The `hasattr(event, "model_dump")` check suggests non-Pydantic objects can enter the queue. But `asyncio.Queue[ServerEvent]` type annotation says only `ServerEvent` (all Pydantic models) should enter. Either the type annotation is wrong or the duck-type fallback is dead code.
 
@@ -385,7 +385,7 @@ The `hasattr(event, "model_dump")` check suggests non-Pydantic objects can enter
 ```python
 _req_id = cmd.request_id or ""
 _thread_id = _req_id.split(":", 1)[0] if ":" in _req_id else ""
-```
+```text
 
 This parsing assumes `request_id` format is `{thread_id}:{uuid}`. If the format changes, this silently produces wrong thread_ids. Same pattern exists in `respond_to_permission_endpoint` at `endpoints.py:846-848`. Should have a shared utility or documented format contract.
 
@@ -393,7 +393,7 @@ This parsing assumes `request_id` format is `{thread_id}:{uuid}`. If the format 
 
 ### Discriminated Union Verification (schemas/events.py)
 
-**Status: CORRECT**
+Status: CORRECT
 
 The `ServerEvent` union at `events.py:257-271` uses `Field(discriminator="type")` with each member having a `Literal[ServerEventType.X]` type field. This enables O(1) dispatch via Pydantic's discriminated union mechanism. Verified all 12 event types have proper `Literal` discriminators:
 
@@ -418,14 +418,14 @@ Connection-scoped events (Connected, Heartbeat) correctly extend `BaseModel` dir
 
 ### WebSocket Subscriber Wiring (websocket.py)
 
-**Status: CORRECT but dual-path**
+Status: CORRECT but dual-path
 
 The `ConnectionManager` is wired at `app.py:257`:
 
 ```python
 cm = ConnectionManager(aggregator)
 app.state.connection_manager = cm
-```
+```text
 
 Subscriber lifecycle:
 
@@ -446,9 +446,9 @@ This dual path means a client can receive the same logical event twice if both p
 
 ### EventAggregator Wiring (app.py lifespan)
 
-**Summary for coder implementing Task #11 fix:**
+Summary for coder implementing Task #11 fix:
 
-```
+```text
 app.py:254  aggregator = EventAggregator()        # empty, no graphs
 app.py:255  app.state.aggregator = aggregator      # stored on app.state
 app.py:257  cm = ConnectionManager(aggregator)     # WS manager holds ref
@@ -462,7 +462,7 @@ internal.py:89-107  (WS relay):
 
 internal.py:128-161  (HTTP POST relay):
   → same pattern: broadcast_to_thread + sync_worker_event
-```
+```text
 
 The aggregator's `sync_worker_event()` is the ONLY mechanism that populates API-side state from worker events. It handles `agent_status`, `permission_request`, and `team_status` event types. All other event types are silently dropped (HIGH-07).
 
@@ -477,7 +477,7 @@ The aggregator's `sync_worker_event()` is the ONLY mechanism that populates API-
 | MEDIUM   | 3   | 9               | Active threads semantics, duck-type fallback, fragile parsing |
 | LOW      | 0   | 4               | — |
 
-**Total open: 1 CRIT, 10 HIGH, 12 MED, 4 LOW**
+Total open: 1 CRIT, 10 HIGH, 12 MED, 4 LOW
 
 ### Key Findings for Task #11 (Dual Aggregator Fix)
 

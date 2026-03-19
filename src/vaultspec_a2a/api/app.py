@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import os
 import re
 import subprocess
 import sys
@@ -100,11 +101,11 @@ def _read_log_tail(log_path: Path, max_bytes: int = _WORKER_STDERR_TAIL_BYTES) -
 def _build_worker_restart_detail(
     *,
     returncode: int | None,
-    stderr_log_path: Path,
+    stderr_log_path: Path | None,
 ) -> str:
     """Build a compact diagnostic string for health/readiness surfaces."""
     detail = f"returncode={returncode}"
-    stderr_tail = _read_log_tail(stderr_log_path)
+    stderr_tail = _read_log_tail(stderr_log_path) if stderr_log_path is not None else ""
     if stderr_tail:
         compact_tail = re.sub(r"\s+", " ", stderr_tail)[:500]
         detail += f"; stderr_tail={compact_tail}"
@@ -647,11 +648,29 @@ async def _spawn_worker(
         worker_port,
     )
     logger.info(
-        "Worker spawn env snapshot: gateway_port=%s worker_port=%s worker_url=%s",
+        "Worker spawn env snapshot: gateway_port=%s worker_port=%s"
+        " worker_url=%s gateway_url=%s",
         settings.port,
         settings.worker_port,
         settings.worker_url,
+        settings.gateway_url,
     )
+
+    # Phase 6: explicitly propagate critical config to the worker subprocess.
+    # While Python's subprocess.Popen() inherits the parent env by default,
+    # the gateway may have auto-derived gateway_url from host+port.  That
+    # computed value is NOT in os.environ, so the child would re-derive it
+    # and potentially get a different result (e.g. 0.0.0.0 vs 127.0.0.1).
+    # Injecting VAULTSPEC_GATEWAY_URL ensures the worker always points at
+    # the correct gateway regardless of how it was started.
+    spawn_env = os.environ.copy()
+    spawn_env["VAULTSPEC_GATEWAY_URL"] = settings.gateway_url
+    spawn_env["VAULTSPEC_PORT"] = str(settings.port)
+    spawn_env["VAULTSPEC_WORKER_PORT"] = str(settings.worker_port)
+    spawn_env["VAULTSPEC_WORKER_HOST"] = settings.worker_host
+    if settings.internal_token is not None:
+        spawn_env["VAULTSPEC_INTERNAL_TOKEN"] = settings.internal_token
+
     stderr_log_path = _worker_stderr_log_path(worker_port)
     stderr_log_path.parent.mkdir(parents=True, exist_ok=True)
     with stderr_log_path.open("wb") as stderr_handle:
@@ -664,6 +683,7 @@ async def _spawn_worker(
             stdout=subprocess.DEVNULL,
             stdin=subprocess.DEVNULL,
             stderr=stderr_handle,
+            env=spawn_env,
         )
     logger.info(
         "Worker process spawned (PID %d) via"

@@ -8,7 +8,7 @@ related:
   - docs/adrs/2026-03-01-019-figma-developer-workflow-adr.md
 ---
 
-# Code Connect Audit Report
+## Code Connect Audit Report
 
 **Date**: 2026-02-28 (deep pass: 2026-03-01)
 **Auditor**: opus (auditor agent)
@@ -248,7 +248,7 @@ Files that would be published: 28 mappings across 27 files
   UserBubble, AgentBubble, MarkdownEditor, InputBar, ErrorAlert, ArtifactCard,
   PermissionModal, TabBar, StatusBar, Sidebar, AppShell, InspectorPanel
 Status: PASS (fails at auth token step, expected for dry-run without credentials)
-```
+```text
 
 ---
 
@@ -259,7 +259,7 @@ vite build: PASS (3433 modules, 6.87s)
 TypeScript (tsc --noEmit): FAIL (12 errors in 9 files)
 @figma/code-connect: Installed (^1.4.1 in devDependencies)
 figma connect publish --dry-run: PASS (28 mappings detected)
-```
+```python
 
 ---
 

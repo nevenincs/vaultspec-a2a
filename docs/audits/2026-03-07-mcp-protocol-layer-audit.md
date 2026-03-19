@@ -74,13 +74,13 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
   ```python
   limit = max(1, min(limit, 200))
   offset = max(0, offset)
-  ```
+  ```text
 
 - `endpoints.py:348`:
 
   ```python
   limit: int = Query(default=50, ge=1, le=200),
-  ```
+  ```yaml
 
 **Issue**: MCP silently clamps out-of-range params; REST returns 422 validation error. Inconsistent UX.
 
@@ -125,7 +125,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
            "capabilities": {...},
            "tools": [...9 tools...]
        }
-   ```
+   ```yaml
 
 2. **OR**: Use FastMCP's built-in discovery (check if available in newer versions)
 3. **OR**: Extract from FastMCP registry at runtime
@@ -168,7 +168,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
   ```python
   raise ToolError(
       f"Network error: could not connect to {settings.mcp_api_base_url}. "
-  ```
+  ```yaml
 
 **Issue**: If `mcp_api_base_url` is localhost but server is on Docker/remote, leaks internal networking details.
 
@@ -188,7 +188,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
   perm_event = aggregator._pending_permissions.get(request_id)
   if perm_event and perm_event.tool_call == "plan_approval":
       resume_value = {"approved": body.option_id == "approve"}
-  ```
+  ```text
 
 **Issue**:
 
@@ -237,7 +237,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
 
   # Update DB regardless of dispatch success
   await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
-  ```
+  ```text
 
 **Issue**:
 
@@ -302,7 +302,7 @@ Comprehensive audit of MCP server tools, protocol adapters, IDE discovery, and p
       }
     }
   }
-  ```
+  ```yaml
 
 **Recommendation**: Add documentation in `README.md` or `docs/IDE_SETUP.md`.
 
@@ -326,7 +326,7 @@ Add this to ~/.cursor/mcp.json:
     }
   }
 }
-```
+```text
 
 ---
 
@@ -455,7 +455,7 @@ Add this to ~/.cursor/mcp.json:
   except httpx.HTTPError:
       logger.warning("Failed to dispatch ingest to worker...")
       # No retry — thread created but work never sent to worker
-  ```
+  ```text
 
 **Impact**:
 
@@ -607,7 +607,7 @@ Add this to ~/.cursor/mcp.json:
 
   hb_task.add_done_callback(lambda t: _cancel_partner(t, wr_task))
   wr_task.add_done_callback(lambda t: _cancel_partner(t, hb_task))
-  ```
+  ```yaml
 
 **Issue**: If one task crashes before setting up callback, other continues forever.
 
@@ -662,7 +662,7 @@ Add this to ~/.cursor/mcp.json:
       if request_id:
           self._pending_permissions.pop(request_id, None)  # Silent if not found
       self._next_sequence(thread_id)
-  ```
+  ```yaml
 
 **Issue**: If worker sends `permission_resolved` for a non-existent request, it silently succeeds.
 
@@ -706,7 +706,7 @@ Add this to ~/.cursor/mcp.json:
   def _next_sequence(self, thread_id: str) -> int:
       self._sequences[thread_id] += 1
       return self._sequences[thread_id]
-  ```
+  ```yaml
 
 **Impact**: After 1M threads, sequence map has 1M entries. No cleanup on thread completion.
 
@@ -858,7 +858,7 @@ Unbounded array growth on high event rate; timer-based flushing inconsistent.
   @internal_router.websocket("/ws")
   async def worker_ws_endpoint(websocket: WebSocket) -> None:
       await websocket.accept()
-  ```
+  ```text
 
 - No `Depends(_verify_internal_token)` on decorator
 - HTTP endpoints have auth (line 111), but WS doesn't
@@ -874,7 +874,7 @@ if settings.internal_token:
     if token != f"Bearer {settings.internal_token}":
         raise WebSocketException(code=1008, reason="Unauthorized")
 await websocket.accept()
-```
+```text
 
 ### AUTH-01 & AUTH-03: Dev-Mode Bypass & Timing Attack ⚠️ MEDIUM
 
@@ -943,14 +943,14 @@ Payload validation, buffer bounds, timing attacks, dev mode, rate limiting, logg
 
 **Example Race** (concurrent creates):
 
-```
+```text
 Request A: Create thread_id=X, nickname="feature-1", flush() ✓
 Request B: Create thread_id=Y, nickname="feature-1", flush() ✓
 Request A: commit() → thread X written
 Request B: commit() → IntegrityError caught, raises NicknameConflictError ✓
 BUT: If Request A crashes after flush() but before commit(),
      Request B will overwrite with its commit() (reuse of same session).
-```
+```yaml
 
 **Recommendation**: Use explicit transaction context:
 
@@ -958,7 +958,7 @@ BUT: If Request A crashes after flush() but before commit(),
 async with db.begin_nested():  # Savepoint
     await create_thread(db, ...)
 # Auto-commit on exit
-```
+```text
 
 Or wrap all CRUD calls in `async with db.begin()`.
 
@@ -979,7 +979,7 @@ if coerced_status not in allowed:                    # (2) Check
     raise InvalidTransitionError(...)
 thread.status = coerced_status                       # (3) Update
 await session.flush()                                # (4) Flush
-```
+```text
 
 **Race Scenario**:
 
@@ -999,14 +999,14 @@ query = select(ThreadModel).where(
     ThreadModel.id == thread_id
 ).with_for_update()  # EXCLUSIVE lock
 thread = await session.scalar(query)
-```
+```text
 
 Or use optimistic locking with version column:
 
 ```python
 thread.version += 1
 await session.flush()  # Raises IntegrityError on version mismatch
-```
+```text
 
 ---
 
@@ -1036,7 +1036,7 @@ _engine = create_async_engine(
     isolation_level="SERIALIZABLE",  # Force SQLite to SERIALIZABLE mode
     connect_args={"timeout": 10},    # Busy timeout (default 5s)
 )
-```
+```text
 
 ---
 
@@ -1048,7 +1048,7 @@ _engine = create_async_engine(
 # Line 232 in crud.py
 await session.delete(thread)
 await session.flush()  # ORM cascade happens here
-```
+```text
 
 SQLAlchemy's ORM cascade is achieved by:
 
@@ -1066,7 +1066,7 @@ ALTER TABLE artifact
   ADD CONSTRAINT fk_artifact_thread
   FOREIGN KEY (thread_id) REFERENCES thread(id)
   ON DELETE CASCADE;
-```
+```text
 
 Then:
 
@@ -1074,7 +1074,7 @@ Then:
 # Simple ORM delete now cascades atomically
 await session.delete(thread)
 await session.flush()  # Single SQL DELETE CASCADE, atomic
-```
+```yaml
 
 **Check**: Verify `models.py` has `cascade="all, delete"` on ORM relationships.
 
@@ -1101,7 +1101,7 @@ await session.flush()  # Single SQL DELETE CASCADE, atomic
 ```python
 # H12/H17: TOCTOU race protection — SELECT pre-check catches most conflicts,
 # but IntegrityError catch ensures atomicity in face of concurrent INSERTs.
-```
+```text
 
 ---
 
@@ -1114,7 +1114,7 @@ await session.flush()  # Single SQL DELETE CASCADE, atomic
 await update_thread_status(db, thread_id, ThreadStatus.CREATED)  # (1)
 # ... dispatch to worker ...
 await update_thread_status(db, thread_id, <new_status>)  # (2) — does this run?
-```
+```text
 
 Actually, reviewing lines 866-931 more carefully:
 
@@ -1126,7 +1126,7 @@ await db.commit()  # Separate call
 # Line 1030 in endpoints.py (archive_thread_endpoint)
 await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
 await db.commit()
-```
+```yaml
 
 **Issue**: Each endpoint calls `update_thread_status()` + `commit()` separately. If second call fails, first may already be committed.
 
@@ -1136,7 +1136,7 @@ await db.commit()
 async with db.begin():
     await update_thread_status(db, thread_id, ThreadStatus.CANCELLED)
     # Auto-commit on exit
-```
+```text
 
 ---
 
@@ -1168,7 +1168,7 @@ async def shutdown(self) -> None:
     self._subscribers.clear()
     self._subscriptions.clear()
     self._sequences.clear()  # ← Clears mapping, but in-flight chunks still pending
-```
+```text
 
 **Race Scenario**:
 
@@ -1195,7 +1195,7 @@ async def shutdown(self) -> None:
     for task in list(self._debounce_tasks):
         task.cancel()
     # ... rest of cleanup ...
-```
+```text
 
 ---
 
@@ -1206,7 +1206,7 @@ async def shutdown(self) -> None:
 ```python
 # aggregator.py:353
 self._pending_permissions: dict[str, PermissionRequestEvent] = {}
-```
+```yaml
 
 **Issue**: If permission responses are lost/delayed, requests accumulate forever:
 
@@ -1235,7 +1235,7 @@ async def _evict_stale_permissions(self) -> None:
     for rid in stale_ids:
         self._pending_permissions.pop(rid, None)
         self._permission_created_at.pop(rid, None)
-```
+```text
 
 ---
 
@@ -1251,7 +1251,7 @@ self._sequences: defaultdict[str, int] = defaultdict(int)
 def _next_sequence(self, thread_id: str) -> int:
     self._sequences[thread_id] += 1  # ← Creates entry if missing
     return self._sequences[thread_id]
-```
+```yaml
 
 **Impact**: After 1M threads, dict has 1M entries (each ≈ 40 bytes) ≈ 40MB leaked memory.
 
@@ -1261,7 +1261,7 @@ def _next_sequence(self, thread_id: str) -> int:
 def on_thread_deleted(self, thread_id: str) -> None:
     """Called by CRUD layer when thread is deleted."""
     self._sequences.pop(thread_id, None)
-```
+```text
 
 Or add TTL-based cleanup during maintenance window.
 
@@ -1276,7 +1276,7 @@ Or add TTL-based cleanup during maintenance window.
 self._tool_call_update_pending: dict[str, ...] = {}
 
 # Accessed from on_tool_end (line ~900), on_chat_model_end (line ~800), etc.
-```
+```text
 
 While Python's GIL prevents true race conditions on dict operations, async context switches between awaits can cause logical races:
 
@@ -1288,7 +1288,7 @@ if tool_id not in self._tool_call_update_pending:  # ← Check
 # Between check and update, Task B runs
 # Task B sees missing key, also sets value
 # Data race: Task B's write overwrites Task A's
-```
+```yaml
 
 **Recommendation**: Use `self._lock` (defined at line 360):
 
@@ -1297,7 +1297,7 @@ async def on_tool_end(self, ...):
     async with self._lock:
         if tool_id not in self._tool_call_update_pending:
             self._tool_call_update_pending[tool_id] = event
-```
+```text
 
 ---
 
@@ -1312,7 +1312,7 @@ async def shutdown(self) -> None:
         task.cancel()
     # ... gather ...
     self._sequences.clear()  # ← Clears counter
-```
+```text
 
 If a chunk is still pending when `_sequences` is cleared, the sequence number is lost. Subscribers may see gaps in event numbering.
 
@@ -1329,7 +1329,7 @@ async def shutdown(self) -> None:
 
     # Now safe to clear
     self._sequences.clear()
-```
+```text
 
 ---
 
@@ -1399,7 +1399,7 @@ async def _orphan_running_threads(self) -> None:
                 thread.status = ThreadStatus.FAILED
             await db.commit()
             logger.info(f"Orphaned {len(running_threads)} RUNNING threads")
-```
+```text
 
 ---
 
@@ -1428,7 +1428,7 @@ async def checkpoint_thread_state(thread_id: str, state: dict[str, Any]) -> None
                 thread.checkpoint_data = json.dumps(state)
                 thread.last_checkpoint_at = datetime.now(UTC)
             await db.commit()
-```
+```text
 
 Then on restart:
 
@@ -1440,7 +1440,7 @@ async def _restore_from_checkpoint(thread_id: str) -> dict[str, Any] | None:
         if thread and thread.checkpoint_data:
             return json.loads(thread.checkpoint_data)
     return None
-```
+```text
 
 ---
 
@@ -1457,7 +1457,7 @@ self.start()  # Spawn worker
 if healthy_since is None:
     healthy_since = asyncio.get_running_loop().time()
 # ← Supervisor marks as healthy, but worker already dead
-```
+```text
 
 If crash occurs during graph compilation (CPU-intensive), supervisor's health check interval (2s) may miss it.
 
@@ -1489,7 +1489,7 @@ async def start(self) -> None:
     logger.error("Worker failed to start within timeout")
     self._process.kill()
     raise RuntimeError("Worker startup failed")
-```
+```text
 
 ---
 
@@ -1502,7 +1502,7 @@ async def start(self) -> None:
 self._event_buffer: list[dict[str, Any]] = []
 
 # On crash, entire buffer discarded
-```
+```yaml
 
 **Impact**: Last batch of events (< 50ms worth) never reach gateway. Thread state inconsistency.
 
@@ -1524,7 +1524,7 @@ async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
             )
         )
         await db.commit(expire_on_commit=True)
-```
+```text
 
 Then on startup, replay unprocessed events:
 
@@ -1540,7 +1540,7 @@ async def replay_pending_events(worker_id: str) -> None:
         )
         for event in pending.scalars():
             await broadcast_to_aggregator(json.loads(event.event_data))
-```
+```text
 
 ---
 
@@ -1554,7 +1554,7 @@ def is_alive(self) -> bool:
     if self._process is None:
         return False
     return self._process.poll() is None  # ← Only checks if process exited
-```
+```text
 
 If worker enters infinite loop or deadlock, `poll()` returns None (process still alive), supervisor thinks it's healthy.
 
@@ -1583,7 +1583,7 @@ async def _check_heartbeat(self, timeout: float = 2.0) -> bool:
         return resp.status_code == 200
     except (httpx.ConnectError, httpx.TimeoutException):
         return False
-```
+```text
 
 ---
 
@@ -1637,7 +1637,7 @@ tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]
 with engine.begin() as conn:
     for table in tables:
         conn.execute(text(f"DELETE FROM {table}"))  # ← f-string, no escape
-```
+```text
 
 While table names are hardcoded in this case, if `tables` ever becomes user input, this is a critical vulnerability.
 
@@ -1650,7 +1650,7 @@ from sqlalchemy import table as sa_table, delete
 for table_name in tables:
     tbl = sa_table(table_name)
     conn.execute(delete(tbl))
-```
+```text
 
 Or use explicit enumeration with validation:
 
@@ -1658,7 +1658,7 @@ Or use explicit enumeration with validation:
 ALLOWED_TABLES = {"threads", "artifacts", "permission_logs", "cost_tracking"}
 if table_name not in ALLOWED_TABLES:
     raise ValueError(f"Invalid table: {table_name}")
-```
+```text
 
 ---
 
@@ -1676,7 +1676,7 @@ result = subprocess.run(
     ],
     capture_output=True, text=True, check=False,
 )
-```
+```yaml
 
 **Risk**: If `port` is user-controlled or contaminated, PowerShell interprets special characters:
 
@@ -1698,7 +1698,7 @@ result = subprocess.run(
     ],
     capture_output=True, text=True, check=False,
 )
-```
+```text
 
 ---
 
@@ -1711,7 +1711,7 @@ result = subprocess.run(
 if not snapshot_path.resolve().is_relative_to(db_path.parent.resolve()):
     click.echo("Invalid snapshot name.", err=True)
     raise SystemExit(1)
-```
+```yaml
 
 **Issue**: Project specifies Python 3.13 in `.claude/CLAUDE.md`, so this is technically safe. However, it's a version dependency that could silently break on older runtimes.
 
@@ -1728,7 +1728,7 @@ except AttributeError:
         snapshot_path.resolve().relative_to(db_path.parent.resolve())
     except ValueError:
         raise ValueError("Invalid snapshot")
-```
+```text
 
 ---
 
@@ -1747,7 +1747,7 @@ def start(target: str | None, host: str | None, port: int | None, log_level: str
             port=port or settings.port,
             log_level=level,
         )  # ← Blocks indefinitely; Ctrl+C raises KeyboardInterrupt
-```
+```yaml
 
 **Issue**: When user presses Ctrl+C, uvicorn's shutdown is not graceful. Worker may not be cleaned up. No context manager or try/finally.
 
@@ -1770,7 +1770,7 @@ async def start(...):
     finally:
         if supervisor:
             await supervisor.stop()
-```
+```text
 
 ---
 
@@ -1788,7 +1788,7 @@ try:
 finally:
     dst_conn.close()
     src_conn.close()
-```
+```yaml
 
 **Risk**: If source DB is corrupted:
 
@@ -1824,7 +1824,7 @@ try:
     dst_conn.close()
 finally:
     src_conn.close()
-```
+```text
 
 ---
 
@@ -1841,7 +1841,7 @@ try:
 finally:
     dst_conn.close()
     src_conn.close()
-```
+```yaml
 
 **Risk**: If snapshot file is corrupted or manually edited:
 
@@ -1866,7 +1866,7 @@ try:
     dst_conn.close()
 finally:
     src_conn.close()
-```
+```text
 
 ---
 
@@ -1885,7 +1885,7 @@ def update(target: str) -> None:
     cfg, _ = _alembic_cfg()
     command.upgrade(cfg, target)  # ← Can raise AlembicError, no except
     click.echo(f"Migrated to {target}.")
-```
+```yaml
 
 **Issue**: If migration fails (e.g., schema conflict, bad migration script), exception propagates as raw traceback. User sees exception but exit code may not indicate failure.
 
@@ -1903,7 +1903,7 @@ def update(target: str) -> None:
     except CommandError as exc:
         click.echo(f"Migration failed: {exc}", err=True)
         raise SystemExit(1) from None
-```
+```text
 
 ---
 
@@ -1922,13 +1922,13 @@ def discovery() -> None:
     except httpx.HTTPStatusError as exc:
         click.echo(f"Error {exc.response.status_code}: {exc.response.text}", err=True)
         raise SystemExit(1) from None
-```
+```yaml
 
 **Current Behavior**: Running `vaultspec mcp discovery` returns:
 
-```
+```text
 Error 404: Not Found
-```
+```yaml
 
 **Recommendation**: Implement endpoint in `app.py` (see MCP-V4 recommendation in Pass 1).
 
@@ -2014,7 +2014,7 @@ wsClient.setConnectedCallback((event) => {
     });
   }
 });
-```
+```text
 
 ---
 
@@ -2038,7 +2038,7 @@ wsClient.setConnectedCallback((event) => {
 const lastSeq = this.lastSequences.get(threadId) ?? 0;
 if (sequence <= lastSeq) return; // Skip stale events
 this.lastSequences.set(threadId, sequence);
-```
+```yaml
 
 No gap check: just monotonic increase validation.
 
@@ -2062,7 +2062,7 @@ if (sequence > lastSeq + 1) {
   });
 }
 this.lastSequences.set(threadId, sequence);
-```
+```text
 
 ---
 
@@ -2080,7 +2080,7 @@ private resetHeartbeatTimer(): void {
     // reconnectAttempt NOT reset
   }, HEARTBEAT_TIMEOUT);
 }
-```
+```yaml
 
 **Issue**: If connection hangs (no heartbeat), then closes:
 
@@ -2102,7 +2102,7 @@ private resetHeartbeatTimer(): void {
     this.ws?.close();
   }, HEARTBEAT_TIMEOUT);
 }
-```
+```text
 
 ---
 
@@ -2118,7 +2118,7 @@ if (this.subscribedThreads.size > 0) {
     thread_ids: [...this.subscribedThreads],
   } as SubscribeCommand);
 }
-```
+```yaml
 
 **Race**: Server could reject subscription (e.g., thread deleted), but frontend assumes it succeeded.
 
@@ -2154,7 +2154,7 @@ private handleMessage(e: MessageEvent): void {
   }
   // ... rest of handling
 }
-```
+```text
 
 ---
 
@@ -2170,7 +2170,7 @@ private lastSequences: Map<string, number> = new Map();
 const lastSeq = this.lastSequences.get(threadId) ?? 0;
 if (sequence <= lastSeq) return; // Skip "stale" events
 this.lastSequences.set(threadId, sequence);
-```
+```text
 
 **Scenario**:
 
@@ -2202,7 +2202,7 @@ private handleMessage(e: MessageEvent): void {
 // Option 2: Per-connection sequence IDs
 private connectionId: string | null = null;
 private sequencesByConnection: Map<string, Map<string, number>> = new Map();
-```
+```text
 
 ---
 
@@ -2257,7 +2257,7 @@ wsClient.setConnectedCallback((event) => {
     logger.error('Hydration failed', err);
   });
 });
-```
+```text
 
 ---
 
@@ -2320,7 +2320,7 @@ def downgrade() -> None:
     op.drop_table("permission_logs")
     op.drop_table("artifacts")
     op.drop_table("threads")  # ← Drops all data
-```
+```yaml
 
 **Risk**: Running `alembic downgrade base` would irreversibly delete all production data.
 
@@ -2342,7 +2342,7 @@ def downgrade() -> None:
     op.drop_table("permission_logs")
     op.drop_table("artifacts")
     op.drop_table("threads")
-```
+```text
 
 ---
 
@@ -2358,7 +2358,7 @@ def do_run_migrations(connection: Connection) -> None:
         context.run_migrations()  # ← Could fail mid-transaction
     # ← On exception, transaction automatically rolls back (good)
     # But no explicit error handling or logging
-```
+```yaml
 
 **Issue**: If a migration fails (e.g., bad SQL syntax, constraint violation):
 
@@ -2379,7 +2379,7 @@ def do_run_migrations(connection: Connection) -> None:
         logger.error(f"Migration failed: {exc}", exc_info=True)
         # Transaction auto-rolls back here
         raise
-```
+```text
 
 ---
 
@@ -2391,7 +2391,7 @@ def do_run_migrations(connection: Connection) -> None:
 # 0001_initial_schema.py:53, 68
 sa.ForeignKeyConstraint(["thread_id"], ["threads.id"]),
 # Missing: ondelete="CASCADE"
-```
+```yaml
 
 **Current Behavior**: When thread deleted:
 
@@ -2404,7 +2404,7 @@ sa.ForeignKeyConstraint(["thread_id"], ["threads.id"]),
 ```sql
 DELETE FROM threads WHERE id='abc';
 -- Artifacts for 'abc' still exist (ORM cascade bypassed)
-```
+```yaml
 
 **Recommendation**: Add SQL-level cascade:
 
@@ -2413,7 +2413,7 @@ sa.ForeignKeyConstraint(
     ["thread_id"], ["threads.id"],
     ondelete="CASCADE"  # ← Atomic cascade at DB level
 )
-```
+```text
 
 ---
 
@@ -2428,7 +2428,7 @@ async def run_migrations(database_url: str) -> None:
     await asyncio.to_thread(command.upgrade, cfg, "head")
     # ← No backup created before upgrade
     logger.info("Alembic migrations complete")
-```
+```yaml
 
 **Risk**: If migration fails mid-execution (e.g., power loss), DB in corrupted/partial state. No rollback possible.
 
@@ -2458,7 +2458,7 @@ async def run_migrations(database_url: str) -> None:
     logger.info("Running Alembic migrations (upgrade head)...")
     await asyncio.to_thread(command.upgrade, cfg, "head")
     logger.info("Alembic migrations complete")
-```
+```text
 
 ---
 
@@ -2473,7 +2473,7 @@ context.configure(
     target_metadata=target_metadata,  # ← ORM tables only
     # alembic_version table created implicitly
 )
-```
+```yaml
 
 **Current State**: Alembic creates `alembic_version` table automatically.
 
@@ -2486,7 +2486,7 @@ context.configure(
 class AlembicVersion(Base):
     __tablename__ = "alembic_version"
     version_num: Mapped[str] = mapped_column(String(32), primary_key=True)
-```
+```text
 
 Then `env.py` would automatically include it.
 
@@ -2501,7 +2501,7 @@ Then `env.py` would automatically include it.
 async def run_migrations(database_url: str) -> None:
     # No lock; concurrent calls possible
     await asyncio.to_thread(command.upgrade, cfg, "head")
-```
+```yaml
 
 **Scenario**: Two workers start simultaneously:
 
@@ -2535,7 +2535,7 @@ async def run_migrations(database_url: str) -> None:
             raise
     finally:
         conn.close()
-```
+```text
 
 ---
 
@@ -2608,7 +2608,7 @@ From Passes 12-16 + **4 new from migration**:
 if dispatched:
     aggregator.resolve_permission(request_id)
 # No idempotency check before this
-```
+```text
 
 **Scenario**:
 
@@ -2634,7 +2634,7 @@ if request_id in self._processed_permissions:
 if dispatched:
     aggregator.resolve_permission(request_id)
     self._processed_permissions[request_id] = datetime.now(UTC)
-```
+```text
 
 ---
 
@@ -2647,7 +2647,7 @@ if dispatched:
 ```python
 aggregator.resolve_permission("malformed_id")  # ← No validation
 aggregator.resolve_permission("../../../admin")  # ← No path traversal check
-```
+```text
 
 While low risk (internal use), should defend against logic errors.
 
@@ -2663,7 +2663,7 @@ def resolve_permission(self, request_id: str) -> None:
         logger.warning(f"Invalid request_id format: {request_id}")
         return
     self._pending_permissions.pop(request_id, None)
-```
+```text
 
 ---
 
@@ -2675,7 +2675,7 @@ def resolve_permission(self, request_id: str) -> None:
 # endpoints.py:895-896
 if perm_event and perm_event.tool_call == "plan_approval":
     resume_value = {"approved": body.option_id == "approve"}
-```
+```yaml
 
 **Risk**: If wire schema defines `option_id` enum with different values, this check fails silently.
 
@@ -2695,7 +2695,7 @@ if perm_event and perm_event.tool_call == "plan_approval":
             detail=f"Invalid option for plan_approval: {body.option_id}"
         )
     resume_value = {"approved": body.option_id == PlanApprovalOption.APPROVE}
-```
+```text
 
 ---
 
@@ -2721,7 +2721,7 @@ if perm_event and perm_event.tool_call == "plan_approval":
 thread_record = await get_thread(db, thread_id)
 if thread_record is None:
     raise HTTPException(status_code=404, detail="Thread not found")
-```
+```yaml
 
 **Risk**: User's permission response is rejected (404), but aggregator still holds permission in `_pending_permissions`.
 
@@ -2745,7 +2745,7 @@ try:
 finally:
     # Always clear, even if thread doesn't exist
     aggregator.resolve_permission(request_id)
-```
+```text
 
 ---
 
@@ -2760,7 +2760,7 @@ perm_event = aggregator._pending_permissions.get(request_id)
 if perm_event and perm_event.tool_call == "plan_approval":
     resume_value = {"approved": body.option_id == "approve"}
 # No check: is body.option_id in perm_event.options?
-```
+```text
 
 **Scenario**:
 
@@ -2780,7 +2780,7 @@ if perm_event:
             status_code=422,
             detail=f"Invalid option_id. Available: {available_ids}"
         )
-```
+```text
 
 ---
 
@@ -2838,7 +2838,7 @@ if perm_event:
 # supervisor.py:60-64
 def is_alive(self) -> bool:
     return self._process.poll() is None  # ← Only checks if exited
-```
+```yaml
 
 **Impact**: Worker in deadlock appears healthy; gateway dispatches work, requests timeout indefinitely.
 
@@ -2863,7 +2863,7 @@ async with get_db() as db:
         for thread in running.scalars():
             thread.status = ThreadStatus.FAILED
         await db.commit()
-```
+```text
 
 ---
 
@@ -2874,7 +2874,7 @@ async with get_db() as db:
 ```python
 # endpoints.py:1083
 os.kill(os.getpid(), signal.SIGINT)  # ← Immediate kill
-```
+```yaml
 
 **Race**: Worker may have in-flight threads. Gateway killed before marking threads CANCELLED.
 
@@ -2896,7 +2896,7 @@ os.kill(os.getpid(), signal.SIGINT)  # ← Immediate kill
 
 ```python
 return {"status": "ok", "service": "control-surface"}
-```
+```text
 
 - ✅ HTTP layer running
 - ❌ DB connectivity unknown
@@ -2905,7 +2905,7 @@ return {"status": "ok", "service": "control-surface"}
 
 ```python
 return {"status": "ok", "service": "worker"}
-```
+```text
 
 - ✅ HTTP layer running
 - ❌ Checkpointer connectivity unknown
@@ -2923,7 +2923,7 @@ return {"status": "ok", "service": "worker"}
 delay = min(2**self._restart_count, self._max_restart_backoff)
 # Backoff maxes at 60s after ~20 attempts
 # But loop continues forever
-```
+```yaml
 
 **Impact**: Worker crash loop causes supervisor to retry infinitely every 60s.
 

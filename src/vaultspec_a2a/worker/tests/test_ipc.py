@@ -231,12 +231,12 @@ class TestSendEvent:
                 for rec in caplog.records
                 if "Batch event relay failed" in rec.message
             )
-            assert record.worker_id == "test-worker-001"
-            assert record.action == "flush_events"
-            assert record.batch_size == 1
-            assert record.flush_attempt == 1
-            assert record.flush_attempt_limit >= 1
-            assert record.http_status_code == 503
+            assert record.__dict__["worker_id"] == "test-worker-001"
+            assert record.__dict__["action"] == "flush_events"
+            assert record.__dict__["batch_size"] == 1
+            assert record.__dict__["flush_attempt"] == 1
+            assert record.__dict__["flush_attempt_limit"] >= 1
+            assert record.__dict__["http_status_code"] == 503
         finally:
             await bridge.close()
 
@@ -254,10 +254,10 @@ class TestSendEvent:
             record = next(
                 rec for rec in caplog.records if "Failed to send" in rec.message
             )
-            assert record.worker_id == "test-worker-001"
-            assert record.action == "flush_events"
-            assert record.batch_size == 1
-            assert record.flush_attempt == 1
+            assert record.__dict__["worker_id"] == "test-worker-001"
+            assert record.__dict__["action"] == "flush_events"
+            assert record.__dict__["batch_size"] == 1
+            assert record.__dict__["flush_attempt"] == 1
         finally:
             await bridge.close()
 

@@ -13,7 +13,7 @@ related_research:
   - docs/research/2026-02-27-backend-gaps-research.md
 ---
 
-# Plan: Autonomous Mode + MCP Implementation
+## Plan: Autonomous Mode + MCP Implementation
 
 ## Context
 
@@ -75,7 +75,7 @@ api_base_url: str = Field(
     default="http://localhost:8000",
     description="Base URL of this server; used by MCP tools for loopback calls.",
 )
-```
+```text
 
 ---
 
@@ -111,7 +111,7 @@ def compile_team_graph(
         checkpointer=checkpointer,
         interrupt_before=interrupt_nodes,   # always []
     )
-```
+```text
 
 Each `_compile_*`helper receives`autonomous`and passes it to
 every`create_worker_node`call.
@@ -138,7 +138,7 @@ def create_worker_node(
             model.permission_callback = _interrupt_permission_callback
         response = await model.ainvoke(messages)
         ...
-```
+```text
 
 ---
 
@@ -155,7 +155,7 @@ class _StreamableGraph(Protocol):
     ) -> AsyncIterator[dict[str, Any]]: ...
 
     async def aget_state(self, config: dict[str, Any]) -> Any: ...
-```
+```text
 
 ### 4b. Module-level ACP option kind mapper (before EventAggregator class)
 
@@ -169,7 +169,7 @@ def _map_acp_option_kind(option_id: str) -> PermissionOptionKind:
     if "deny" in oid or "reject" in oid:
         return PermissionOptionKind.REJECT_ONCE
     return PermissionOptionKind.ALLOW_ONCE
-```
+```text
 
 ### 4c. New private method `_emit_interrupt_events`
 
@@ -240,7 +240,7 @@ async def _emit_interrupt_events(
                 state=AgentLifecycleState.INPUT_REQUIRED,
                 detail=f"Awaiting approval for {tool_name}",
             )
-```
+```text
 
 ### 4d. Call from `ingest()`in the`finally` block
 
@@ -253,7 +253,7 @@ finally:
         time.monotonic() - start,
         {"thread_id": thread_id},
     )
-```
+```text
 
 `_emit_interrupt_events`is safe to call on normal completion —`state.tasks`will
 be empty and it returns immediately.
@@ -273,7 +273,7 @@ class CreateThreadRequest(BaseModel):
     autonomous: bool = False       # NEW — skip interrupts for headless runs
     provider: Provider | None = None
     model: Model | None = None
-```
+```text
 
 `src/vaultspec_a2a/api/endpoints.py`— thread into`compile_team_graph`:
 
@@ -286,7 +286,7 @@ graph = compile_team_graph(
     workspace_root=body.metadata.workspace_root if body.metadata else None,
     autonomous=body.autonomous,    # NEW
 )
-```
+```text
 
 ---
 
@@ -375,7 +375,7 @@ async def send_message(thread_id: str, message: str) -> str:
         return f"Error {exc.response.status_code}: {exc.response.text[:200]}"
     except httpx.RequestError as exc:
         return f"Connection error: {exc}"
-```
+```text
 
 ---
 

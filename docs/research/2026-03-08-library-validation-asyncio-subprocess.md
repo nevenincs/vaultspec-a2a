@@ -17,7 +17,7 @@ asyncio.create_subprocess_exec(
     stdin=None, stdout=None, stderr=None,
     limit=None, **kwds
 ) -> asyncio.subprocess.Process
-```
+```text
 
 On Windows:
 
@@ -40,7 +40,7 @@ process = await asyncio.create_subprocess_exec(
     stdout=asyncio.subprocess.DEVNULL,
     stderr=asyncio.subprocess.DEVNULL,
 )
-```
+```text
 
 **Gateway worker spawn** (`api/app.py` in `_spawn_worker()`):
 Similar pattern with `sys.executable -m uvicorn ...`
@@ -57,7 +57,7 @@ proc = await asyncio.create_subprocess_exec(
     env=env,
     creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0,
 )
-```
+```text
 
 ### Validation
 
@@ -83,7 +83,7 @@ process.terminate()  # SIGTERM on POSIX, TerminateProcess on Windows
 process.kill()       # SIGKILL on POSIX, TerminateProcess on Windows (same as terminate!)
 process.wait()       # Wait for process to exit
 process.returncode   # None if still running, int after exit
-```
+```yaml
 
 **Critical Windows behavior**: On Windows, both `terminate()` and `kill()`
 call `TerminateProcess()`, which ONLY kills the immediate process, NOT child
@@ -104,7 +104,7 @@ if sys.platform == "win32":
 else:
     process.terminate()
     await asyncio.wait_for(process.wait(), timeout=15.0)
-```
+```yaml
 
 **Worker shutdown** (`api/app.py:439-474`): Same pattern.
 
@@ -130,7 +130,7 @@ else:
 
 ```python
 asyncio.subprocess.DEVNULL  # == subprocess.DEVNULL == -3
-```
+```text
 
 Redirects stdout/stderr to the platform's null device (`/dev/null` on POSIX,
 `NUL` on Windows).
@@ -142,7 +142,7 @@ All subprocess spawns for gateway and worker use `DEVNULL`:
 ```python
 stdout=asyncio.subprocess.DEVNULL,
 stderr=asyncio.subprocess.DEVNULL,
-```
+```text
 
 ### Validation
 
@@ -175,7 +175,7 @@ message will never contain useful stderr output.
 ```python
 await process.wait()  # Blocks until process exits
 await asyncio.wait_for(process.wait(), timeout=10.0)  # With timeout
-```
+```text
 
 ### Our Usage
 

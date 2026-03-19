@@ -339,7 +339,7 @@ POST /threads (C2: message discarded)
                 → ACP subprocess (never spawned)
                     → event streaming (never happens)
                         → WebSocket (nothing to stream)
-```
+```text
 
 The interrupt/resume path is entirely dead:
 
@@ -348,7 +348,7 @@ interrupt() in worker.py (C1: no checkpointer → cannot persist)
     → aggregator emits PermissionRequestEvent (never reached)
         → frontend displays modal (never receives event)
             → REST POST /permissions/{id}/respond (C1: Command(resume=...) is dead code)
-```
+```text
 
 **After fixing C1+C2+C3**, the basic path becomes viable:
 

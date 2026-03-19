@@ -8,7 +8,7 @@ maturity: 25
 summary: 'Provider analysis for Google Gemini CLI covering OAuth authentication, native ACP support, experimental A2A configuration, and subscription billing.'
 ---
 
-# Phase 1 Research: Gemini Agent Support and Specificities
+## Phase 1 Research: Gemini Agent Support and Specificities
 
 **Date**: 2026-02-25
 **Provider**: Gemini
@@ -18,7 +18,8 @@ summary: 'Provider analysis for Google Gemini CLI covering OAuth authentication,
 
 ## 1. Authentication Process
 
-**Local CLI vs. Direct Online APIs**
+### Local CLI vs. Direct Online APIs
+
 The Gemini CLI operates as a hybrid system. It utilizes Google's remote Gemini
 APIs (AI Studio or Vertex AI) for model reasoning and text generation, but
 relies on local execution for tool use (e.g., file system access, terminal
@@ -87,7 +88,8 @@ To successfully integrate Gemini into the proposed coding-teams framework:
 
 ## 5. Pricing & API Usage
 
-**Subscriptions vs. API Billing**
+### Subscriptions vs. API Billing
+
 The **Gemini Advanced** consumer subscription (part of Google One AI Premium)
 and the **Gemini API** are completely separate billing systems, though the
 highest tiers now offer a bridge.

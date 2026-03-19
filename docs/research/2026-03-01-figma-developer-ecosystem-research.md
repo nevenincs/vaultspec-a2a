@@ -20,7 +20,7 @@ related:
 feature: figma-developer-ecosystem
 ---
 
-# Figma Developer Ecosystem Research
+## Figma Developer Ecosystem Research
 
 **Date**: 2026-03-01
 **Status**: Active Research
@@ -66,7 +66,7 @@ The **canonical workflow loop** is:
 Figma Design → MCP Server → AI Agent → Local Code → Code Connect → Figma Dev Mode
        ↑                                                                    |
        └────────── generate_figma_design (code → canvas) ──────────────────┘
-```
+```typescript
 
 **Critical pivot**: This research evaluates the ecosystem for **React +
 TanStack + Tailwind CSS** instead of React. The MCP server's default output
@@ -120,7 +120,7 @@ npx figma connect publish --token=<PAT>
 
 # Remove published mappings
 npx figma connect unpublish --node=<NODE_URL> --label=<LABEL>
-```
+```yaml
 
 **Authentication**: Personal Access Token with "Code Connect: Write" and
 "File content: Read" scopes. Can use `FIGMA_ACCESS_TOKEN`env var.
@@ -157,7 +157,7 @@ figma.connect(Button, 'https://figma.com/design/<fileKey>?node-id=<nodeId>', {
     </Button>
   ),
 });
-```
+```text
 
 **Arguments to `figma.connect()`**:
 
@@ -195,7 +195,7 @@ figma.connect(SecondaryButton, 'https://...', {
   variant: { Type: 'Secondary' },
   example: () => <SecondaryButton />,
 });
-```
+```text
 
 ### 2.8 Key Constraint
 
@@ -242,7 +242,7 @@ Cursor, VS Code Copilot, Windsurf, Codex).
 
 ```bash
 claude mcp add --transport http figma https://mcp.figma.com/mcp
-```
+```text
 
 #### Desktop MCP Server
 
@@ -414,7 +414,7 @@ For bidirectional variable/token synchronization:
 
 ```text
 Figma Variables ←→ REST API ←→ Token Transform ←→ CSS Custom Properties / Tailwind Config
-```
+```text
 
 Figma provides a GitHub Action example for automated sync:
 
@@ -457,7 +457,7 @@ Figma Make (prototype) → MCP Server → AI Agent (Claude Code) → Local React
                                                               Code Connect publish
                                                                        ↓
                                                               Figma Dev Mode (snippets)
-```
+```text
 
 **Steps**:
 
@@ -497,7 +497,7 @@ AI Agent (Claude Code / Cursor / VS Code Copilot)
 Local React + TanStack + Tailwind Code
        ↓
 Code Connect publish → Figma Dev Mode
-```
+```text
 
 **Steps**:
 
@@ -544,7 +544,7 @@ MCP Server: get_design_context (captures modifications)
 AI Agent generates updated code reflecting design changes
        ↓
 Developer merges updates into codebase
-```
+```text
 
 **Steps**:
 
@@ -644,7 +644,7 @@ Implement (React + TanStack + Tailwind)
 Browser verification (Playwright / Chrome DevTools)
        ↓
 Code Connect publish (back to Figma)
-```
+```text
 
 ### 7.4 Impact on Existing ADRs
 
@@ -774,7 +774,7 @@ For the full bidirectional experience, configure **both** servers:
     }
   }
 }
-```
+```yaml
 
 - **Remote**: For `generate_figma_design` (code → canvas), link-based prompting
 - **Desktop**: For selection-based prompting, real-time design inspection
@@ -797,7 +797,7 @@ src/ui/
 │   └── ...
 ├── figma.config.json                # Code Connect configuration
 └── ...
-```
+```text
 
 ### 10.3 Design Token Pipeline
 
@@ -812,7 +812,7 @@ CSS Custom Properties (globals.css)
 Tailwind CSS v4 (@theme directive)
        ↓
 Component Styles
-```
+```text
 
 For non-Enterprise plans, token sync is manual or plugin-assisted rather
 than automated via REST API.
@@ -827,7 +827,7 @@ CI runs: npx figma connect publish
 Figma Dev Mode updated with latest code snippets
        ↓
 (Enterprise) CI reads Figma variables → generates tokens → commits
-```
+```text
 
 ---
 

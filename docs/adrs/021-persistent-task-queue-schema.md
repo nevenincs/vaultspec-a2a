@@ -9,7 +9,7 @@ related:
   - docs/adrs/022-contextual-anchoring-graph-lifecycle.md
 ---
 
-# ADR-021: Persistent Task Queue Schema
+## ADR-021: Persistent Task Queue Schema
 
 **Date:** 2026-03-03
 **Status:** Revised (supersedes side-channel drain pattern — see §2.4 and §5)
@@ -62,7 +62,7 @@ The task queue is stored at `.vault/plan/{feature_tag}-queue.md` as a markdown t
 | SBI-001 | completed   | Add 4 new fields to TeamState     |
 | SBI-002 | in_progress | Implement build_anchoring_context |
 | SBI-003 | pending     | Implement mount step node         |
-```
+```text
 
 **Rationale for markdown table:** LLM-readable without prompting, Python-parseable
 with a simple `|`-split, more robust than YAML or JSON under LLM generation pressure
@@ -103,7 +103,7 @@ class TeamState(TypedDict):
     # Updated via Command.update from mark_task_complete tool.
     # Never stores queue content — content lives in the queue file on disk.
     current_task_id: NotRequired[str | None]
-```
+```text
 
 `current_task_id` uses last-write-wins (LangGraph default for plain typed fields).
 Only the ID pointer lives in state; queue content lives on disk and is injected via
@@ -221,7 +221,7 @@ def create_mark_task_complete_tool(
         )
 
     return mark_task_complete
-```
+```text
 
 **Worker integration** in `create_worker_node()` (`src/vaultspec_a2a/core/nodes/worker.py`):
 
@@ -236,7 +236,7 @@ async def worker_node(state: TeamState) -> dict[str, Any]:
     response.name = name
     return {"messages": [response], "mounted_context": None}
     # State updates (current_task_id) flow via Command.update in ToolNode — no drain.
-```
+```text
 
 ### 2.5 Filtered Queue Injection
 
@@ -255,7 +255,7 @@ def _filter_queue_content(
     with many tasks. Workers only need their current task and immediate horizon.
     """
     ...
-```
+```text
 
 Queue content is injected only when `pipeline_phase` is `"plan"` or `"exec"`.
 Other phases (research, adr, reference, audit) do not inject queue content:
@@ -385,7 +385,7 @@ src/vaultspec_a2a/core/
 │   ├── test_task_queue.py  NEW: tool factory, Command.update pattern, ToolMessage
 │   │                       validity, filtered injection, phase gate, async file I/O
 │   └── test_mount.py       AMENDED: queue filtering integration
-```
+```text
 
 ## 7. References
 

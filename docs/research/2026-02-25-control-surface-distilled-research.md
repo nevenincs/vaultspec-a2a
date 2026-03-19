@@ -10,7 +10,7 @@ sources:
 feature: control-surface-distilled
 ---
 
-# Gateway Domain — Distilled
+## Gateway Domain — Distilled
 
 **Date**: 2026-02-25
 **Status**: Distilled from agent UI survey + rendering stack research
@@ -85,7 +85,7 @@ code-server, JupyterLab, and every major web terminal project.
 
 ```text
 Browser (xterm.js) ←—WebSocket—→ Backend Server ←—stdio—→ Agent Process
-```
+```text
 
 Each agent's stdout/stderr is relayed over the multiplexed WebSocket to its
 xterm.js instance. The `@xterm/addon-attach`provides basic WebSocket
@@ -218,7 +218,7 @@ Gateway Frontend
     +-- Code Viewer
           +-- CodeMirror 6 (read-only)
           +-- For artifact inspection / code review
-```
+```text
 
 ### 7.1 Content Type Dispatch
 

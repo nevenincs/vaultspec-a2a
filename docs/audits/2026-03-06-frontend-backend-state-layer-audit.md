@@ -518,24 +518,25 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 - **Location**: `src/ui/src/app/components/permission/permission-modal.tsx:67-73`
 - **Description**: The button variant logic:
 
-  ```
+  ```text
   option.kind === 'allow' ? 'default'
   : option.kind === 'deny' ? 'outline'
   : option.kind === 'allow_always' ? 'secondary'
   : 'ghost'
-  ```
+  ```yaml
 
   And the extra class (line 75-77): `option.kind === 'deny'` for error styling.
   But `types.ts` PermissionOptionKind is now `allow_once | allow_always | reject_once | reject_always`. No option will ever have kind `'allow'` or `'deny'`. The `allow_always` check happens to match. `reject_once` and `reject_always` fall through to `'ghost'` with no error styling.
 - **Impact**: **BROKEN**: Allow-once buttons get `'ghost'` variant (barely visible) instead of `'default'` (primary). Reject buttons get `'ghost'` with no error coloring instead of `'outline'` with red styling. Only `allow_always` renders correctly as `'secondary'`.
+
 - **Suggested Fix**: Update to:
 
-  ```
+  ```text
   option.kind === 'allow_once' ? 'default'
   : option.kind === 'reject_once' ? 'outline'
   : option.kind === 'allow_always' ? 'secondary'
   : 'ghost'
-  ```
+  ```text
 
   And update the `extraClass` check to `option.kind === 'reject_once' || option.kind === 'reject_always'`.
 
@@ -546,11 +547,11 @@ This matrix shows which components need updating when each Pass 1 finding is fix
 - **Location**: `src/ui/src/app/components/stream/permission-card.tsx:91-106`
 - **Description**: Identical pattern to permission-modal.tsx:
 
-  ```
+  ```typescript
   const isAllow = option.kind === 'allow';
   const isDeny = option.kind === 'deny';
   const isAlwaysAllow = option.kind === 'allow_always';
-  ```
+  ```text
 
   With `types.ts` now using `allow_once`/`reject_once`, `isAllow` and `isDeny` are always `false`.
 - **Impact**: **BROKEN**: Same as P7-14. In-stream permission cards render all buttons as ghost variant, no visual distinction between allow and reject.
@@ -707,7 +708,7 @@ This pass traces the complete event emission chain from LangGraph graph executio
 
 ### Complete Event Emission Chain
 
-```
+```text
 LangGraph astream_events(version="v2")
     │
     ▼
@@ -760,7 +761,7 @@ ConnectionManager.broadcast_to_thread() [API server process]
 Browser WebSocket client
     │ onmessage callback
     │ dispatches to Zustand store via ws-bridge.ts
-```
+```text
 
 ### Events Actually Emitted
 
@@ -777,7 +778,7 @@ The aggregator emits these wire-protocol event types:
 | `error` | `emit_error()` | Exception handler | INGEST_ERROR, RECURSION_LIMIT, STEP_TIMEOUT |
 | `team_status` | `emit_team_status()` | **NEVER CALLED** | Method exists but no caller |
 
-**Events NOT emitted by the aggregator:**
+### Events NOT emitted by the aggregator
 
 - `plan_update` — No LangGraph event maps to it. The `emit` method exists on the aggregator but `process_langgraph_event()` never produces a PlanUpdateEvent. Plan data would need to come from graph state inspection or a custom event.
 - `artifact_update` — Same situation. No LangGraph source maps to it.
@@ -914,7 +915,7 @@ The aggregator emits these wire-protocol event types:
 
 ### Event Chain Summary Diagram
 
-```
+```text
                     WORKER PROCESS                          │           API SERVER PROCESS
                                                             │
    LangGraph                                                │
@@ -966,13 +967,13 @@ The aggregator emits these wire-protocol event types:
               │  - get_sequence() → always 0                │
               │  - State tracking → nonexistent             │
               └─────────────────────────────────────────────┘
-```
+```text
 
 ### Mock-Seeder Gap Analysis
 
 The mock-seeder (`docker/run.py`) creates a parallel execution path:
 
-```
+```text
 Mock-Seeder:
   graph.astream(inputs, config, stream_mode="values")
     → writes to SQLite checkpointer (shared volume)
@@ -982,7 +983,7 @@ Mock-Seeder:
     → Threads visible in GET /threads (DB)
     → Threads have checkpoint data for GET /threads/{id}/state
     → But NO live streaming
-```
+```text
 
 To enable mock-seeder live streaming, it must either:
 

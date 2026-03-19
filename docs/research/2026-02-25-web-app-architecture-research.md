@@ -8,7 +8,7 @@ maturity: 30
 summary: 'Backend and frontend framework comparison covering FastAPI vs Starlette, React evaluation, state management strategies, and deployment model.'
 ---
 
-# Phase 3 Research: Web Application Architecture for Agent Team Gateway
+## Phase 3 Research: Web Application Architecture for Agent Team Gateway
 
 **Date**: 2026-02-25
 **Status**: Research
@@ -54,7 +54,7 @@ class ConnectionManager:
     async def broadcast(self, data: dict):
         for ws in self.active_connections.values():
             await ws.send_json(data)
-```
+```text
 
 This pattern works identically in both FastAPI and raw Starlette. The
 `ConnectionManager`lives as application state shared via lifespan.
@@ -75,7 +75,7 @@ authentication, session management, and shared state injection:
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_ws(websocket: WebSocket, agent_id: str, mgr: ConnectionManager = Depends(get_manager)):
     await mgr.connect(agent_id, websocket)
-```
+```text
 
 ### Concurrent Connection Performance
 
@@ -102,7 +102,7 @@ app = FastAPI()
 
 @app.get("/api/agents")          # REST endpoint
 @app.websocket("/ws/events")     # WebSocket endpoint on same app
-```
+```text
 
 Uvicorn handles the HTTP Upgrade handshake transparently.
 
@@ -122,7 +122,7 @@ async def lifespan(app: FastAPI):
         yield {"supervisor": supervisor}
         # Shutdown: cancel task group, cleanup
         supervisor.shutdown()
-```
+```text
 
 Key considerations:
 
@@ -396,7 +396,7 @@ Event schema:
   - payload: JSON
   - timestamp: datetime
   - sequence: per-agent monotonic counter
-```
+```typescript
 
 Events are written to SQLite (see below) and simultaneously broadcast to
 connected WebSocket clients.
@@ -451,7 +451,7 @@ simpler and sufficient.
 pip install vaultspec-control-surface
 # or: uv pip install vaultspec-control-surface
 vaultspec-ui  # CLI entry point that starts uvicorn
-```
+```text
 
 ### How Open WebUI does it
 
@@ -471,14 +471,14 @@ vaultspec-ui  # CLI entry point that starts uvicorn
 
 ```python
  app.mount("/", StaticFiles(directory=static_dir, html=True))
-```
+```text
 
 1. CLI entry point starts uvicorn programmatically:
 
    ```python
    import uvicorn
    uvicorn.run("vaultspec.ui:app", host="127.0.0.1", port=8420)
-   ```
+   ```text
 
 ### Pros
 
@@ -528,7 +528,7 @@ as primary distribution method; consider as future enhancement if needed.
 
 ```bash
 docker run -p 8420:8420 vaultspec/control-surface
-```
+```text
 
 ### Pros: (2)
 
@@ -630,7 +630,7 @@ FastAPI (uvicorn)
     |--- Event Store (SQLite via aiosqlite, WAL mode)
     |
     |--- asyncio.create_subprocess_exec() for agent processes
-```
+```text
 
 ### Key Design Decisions
 

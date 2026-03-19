@@ -16,7 +16,7 @@ uv sync
 uv run vaultspec service start all
 
 # 3. Add the MCP config below to your IDE, then restart it
-```
+```text
 
 That's it. The MCP server auto-starts the gateway subprocess on first
 connection (controlled by `VAULTSPEC_MCP_AUTO_START_GATEWAY=true`), and
@@ -47,7 +47,7 @@ File: `<project-root>/.cursor/mcp.json`
     }
   }
 }
-```
+```text
 
 ### Claude Desktop
 
@@ -64,7 +64,7 @@ File: `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS)
     }
   }
 }
-```
+```text
 
 ### Claude Code
 
@@ -80,7 +80,7 @@ File: `<project-root>/.claude/settings.json` or `~/.claude/settings.json`
     }
   }
 }
-```
+```text
 
 ### VS Code (Copilot MCP)
 
@@ -98,7 +98,7 @@ File: `<project-root>/.vscode/mcp.json`
     }
   }
 }
-```
+```text
 
 **Alternative:** Add to your workspace or user `settings.json`:
 
@@ -116,7 +116,7 @@ File: `<project-root>/.vscode/mcp.json`
     }
   }
 }
-```
+```text
 
 ### Windsurf
 
@@ -133,7 +133,7 @@ File: `~/.codeium/windsurf/mcp_config.json`
     }
   }
 }
-```
+```text
 
 ### VS Code Continue
 
@@ -151,7 +151,7 @@ File: `~/.continue/config.json` (add to `"mcpServers"` array)
     }
   ]
 }
-```
+```text
 
 ### Alternative: Direct venv invocation
 
@@ -162,7 +162,7 @@ If `uv` is not on PATH or you prefer explicit Python invocation:
   "command": "C:\\path\\to\\vaultspec-a2a\\.venv\\Scripts\\python.exe",
   "args": ["-m", "vaultspec_a2a.protocols.mcp"]
 }
-```
+```text
 
 Or via the console script:
 
@@ -171,7 +171,7 @@ Or via the console script:
   "command": "C:\\path\\to\\vaultspec-a2a\\.venv\\Scripts\\vaultspec-mcp.exe",
   "args": []
 }
-```
+```text
 
 ---
 
@@ -191,7 +191,7 @@ All variables use the `VAULTSPEC_` prefix and can be set in your shell, a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VAULTSPEC_MCP_API_BASE_URL` | `http://localhost:8000` | Gateway API base URL that MCP tools call. |
+| `VAULTSPEC_GATEWAY_URL` | `http://localhost:8000` | Gateway API base URL. |
 | `VAULTSPEC_MCP_AUTO_START_GATEWAY` | `true` | Auto-start gateway + worker as subprocesses on MCP server start. |
 | `VAULTSPEC_MCP_HOST` | `0.0.0.0` | Bind host for `streamable-http` transport (not used in stdio mode). |
 | `VAULTSPEC_MCP_PORT` | `8100` | Bind port for `streamable-http` transport (not used in stdio mode). |
@@ -257,7 +257,7 @@ For network clients (not IDEs), run the MCP server as a standalone HTTP service:
 
 ```bash
 uv run python -m vaultspec_a2a.protocols.mcp --transport streamable-http --host 127.0.0.1 --port 8100
-```
+```text
 
 This starts an HTTP server at `http://127.0.0.1:8100` that accepts MCP
 Streamable HTTP requests.
@@ -277,13 +277,13 @@ The MCP server cannot reach the gateway API.
 
    ```bash
    uv run vaultspec service start all
-   ```
+   ```text
 
 3. Verify the gateway is healthy:
 
    ```bash
    curl http://localhost:8000/health
-   ```
+   ```text
 
 ### "Worker unavailable" / dispatch failures
 
@@ -293,7 +293,7 @@ The gateway cannot reach the worker.
 
    ```bash
    curl http://localhost:8001/health
-   ```
+   ```text
 
 2. If using auto-spawn (default), the worker starts on first dispatch. The
    first request may take 5-10s while the worker initializes.
@@ -302,7 +302,7 @@ The gateway cannot reach the worker.
 
    ```bash
    uv run vaultspec service start all
-   ```
+   ```text
 
 ### "Circuit breaker open" / HTTP 503
 
@@ -318,13 +318,13 @@ failures. This typically means the worker crashed.
    ```bash
    curl http://localhost:8000/health
    # Look for "circuit_breaker": {"status": "open"|"closed"|"half_open"}
-   ```
+   ```text
 
 4. If stuck open, restart the gateway:
 
    ```bash
    uv run vaultspec service start all
-   ```
+   ```text
 
 ### Port conflicts
 
@@ -336,29 +336,29 @@ Another process is using port 8000 or 8001.
    # Windows
    netstat -ano | findstr :8000
    taskkill /F /PID <pid>
-   ```
+   ```text
 
    ```bash
    # Linux/macOS
    lsof -i :8000 | grep LISTEN
    kill <pid>
-   ```
+   ```text
 
 2. Change the ports via environment variables:
 
    ```bash
    VAULTSPEC_PORT=9000 VAULTSPEC_WORKER_PORT=9001 uv run vaultspec service start
-   ```
+   ```text
 
-   Update `VAULTSPEC_MCP_API_BASE_URL` accordingly:
+   Update `VAULTSPEC_GATEWAY_URL` accordingly:
 
    ```json
    {
      "env": {
-       "VAULTSPEC_MCP_API_BASE_URL": "http://localhost:9000"
+       "VAULTSPEC_GATEWAY_URL": "http://localhost:9000"
      }
    }
-   ```
+   ```text
 
 ### Windows: orphaned processes after crash
 
@@ -374,7 +374,7 @@ Get-Process -Name python | Where-Object {
 # Or kill by port
 netstat -ano | findstr ":8000 :8001"
 taskkill /F /PID <pid>
-```
+```text
 
 ### LLM calls fail / "No API key"
 
@@ -390,7 +390,7 @@ export ANTHROPIC_API_KEY=sk-ant-...
     "ANTHROPIC_API_KEY": "sk-ant-..."
   }
 }
-```
+```text
 
 The thread will transition to `failed` status if the provider cannot
 authenticate. This is expected behavior -- fix the API key and start a new

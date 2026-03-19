@@ -17,7 +17,7 @@ Convert `src/vaultspec_a2a/cli.py` → `src/vaultspec_a2a/cli/__init__.py`.
 
 **Files created:**
 
-```
+```text
 src/vaultspec_a2a/cli/
 ├── __init__.py     # root group + --show-config + subgroup imports
 ├── _test.py        # test group
@@ -25,7 +25,7 @@ src/vaultspec_a2a/cli/
 ├── _service.py     # service group
 ├── _database.py    # database group
 └── _util.py        # _mask(), shared helpers
-```
+```text
 
 **`__init__.py`:**
 
@@ -64,7 +64,7 @@ cli.add_command(service)
 cli.add_command(database)
 
 main = cli
-```
+```text
 
 **`_util.py`:**
 
@@ -98,7 +98,7 @@ def _show_config_callback(
     for name in settings.model_fields:
         click.echo(f"{name}={_mask(name, getattr(settings, name))}")
     ctx.exit()
-```
+```text
 
 ### Step 1.2 — `_test.py` (test group)
 
@@ -172,7 +172,7 @@ def benchmark(suite: str | None) -> None:
         returncode = subprocess.run(cmd, check=False).returncode
         if returncode != 0:
             sys.exit(returncode)
-```
+```text
 
 ### Step 1.3 — `_run.py` (run group)
 
@@ -227,7 +227,7 @@ def probe(provider: str | None) -> None:
         f"vaultspec_a2a.providers.probes.{provider}",
     ]
     sys.exit(subprocess.run(cmd, check=False).returncode)
-```
+```text
 
 ### Step 1.4 — `_service.py` (service group)
 
@@ -283,7 +283,7 @@ def start(
             port=port or settings.worker_port,
             log_level=level,
         )
-```
+```text
 
 ### Step 1.5 — `_database.py` (database group)
 
@@ -324,7 +324,7 @@ def update(target: str) -> None:
     cfg, _ = _alembic_cfg()
     command.upgrade(cfg, target)
     click.echo(f"Migrated to {target}.")
-```
+```text
 
 ### Step 1.6 — Delete old `cli.py`, update `pyproject.toml`
 
@@ -381,7 +381,7 @@ def clear(yes: bool) -> None:
         for table in tables:
             conn.execute(text(f"DELETE FROM {table}"))  # noqa: S608
     click.echo(f"Cleared {len(tables)} tables.")
-```
+```text
 
 ### Step 2.2 — `database snapshot`
 
@@ -407,7 +407,7 @@ def snapshot() -> None:
     if wal.exists():
         shutil.copy2(wal, dest.with_suffix(f".{ts}-wal"))
     click.echo(f"Snapshot: {dest}")
-```
+```text
 
 ### Step 2.3 — `database snapshot list`
 
@@ -436,7 +436,7 @@ def snapshots() -> None:
     for f in files:
         size_kb = f.stat().st_size / 1024
         click.echo(f"  {f.name}  ({size_kb:.0f} KB)")
-```
+```text
 
 ### Step 2.4 — `database restore --name`
 
@@ -467,7 +467,7 @@ def restore(name: str) -> None:
 
     shutil.copy2(snapshot_path, db_path)
     click.echo(f"Restored from {name}.")
-```
+```text
 
 ### Step 2.5 — Verify
 
@@ -497,7 +497,7 @@ async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
     )
     await session.commit()
     return result.rowcount > 0
-```
+```text
 
 Cascade deletes configured via SQLAlchemy relationship `cascade="all, delete-orphan"`.
 
@@ -628,7 +628,7 @@ def list_cmd(status_filter: str | None) -> None:
         for t in threads:
             nick = t.get("nickname") or t["thread_id"][:8]
             click.echo(f"  {t['thread_id']}  {t['status']:12s}  {nick}")
-```
+```text
 
 ### Step 3.6 — CLI: `_agent.py`
 
@@ -685,7 +685,7 @@ def ask(agent_name: str, message: str) -> None:
         data = resp.json()
         click.echo(f"Thread {data['thread_id']} — streaming response...")
         # TODO: SSE/WS streaming for real-time output
-```
+```text
 
 ### Step 3.7 — Register team + agent groups
 
@@ -697,7 +697,7 @@ from ._team import team
 
 cli.add_command(team)
 cli.add_command(agent)
-```
+```text
 
 ### Step 3.8 — Verify
 
@@ -740,7 +740,7 @@ def delete(docker_service: str) -> None:
         ["docker", "compose", "down", "--rmi", "local", docker_service],
         check=False,
     ).returncode)
-```
+```text
 
 ### Step 4.4 — Verify
 

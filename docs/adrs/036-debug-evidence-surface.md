@@ -10,7 +10,7 @@ related:
   - docs/plans/2026-03-11-observability-pivot-handoff.md
 ---
 
-# ADR-036: Debug Evidence Surface
+## ADR-036: Debug Evidence Surface
 
 **Date:** 2026-03-11
 **Status:** Proposed

@@ -8,7 +8,7 @@ source: 'VaultSpec Mandates (.vaultspec/*) / A2A Implementation'
 relevance: 10
 ---
 
-# Architectural Overview: Implementing VaultSpec SDD in A2A
+## Architectural Overview: Implementing VaultSpec SDD in A2A
 
 **Date:** 2026-03-02
 
@@ -66,7 +66,7 @@ class TeamState(TypedDict):
     pipeline_phase: NotRequired[str]     # "research", "specify", "plan", "execute", "verify"
     vault_index: dict[str, str]          # Mapping of wikilink -> physical file path
     validation_errors: list[str]         # Populated if an agent writes a malformed artifact
-```
+```text
 
 ### Step 2: Implement "Blackboard Context Mounting"
 

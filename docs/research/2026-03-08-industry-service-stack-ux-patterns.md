@@ -103,14 +103,14 @@ Claude Desktop is the canonical MCP host. Its process supervision:
 
 VS Code's process model:
 
-```
+```text
 Main Process (Electron)
   |-- Renderer Process (UI)
   |-- Extension Host (Node.js child process)
   |     |-- Extensions run here
   |     |-- Can spawn arbitrary child processes
   |-- Terminal processes (forked from main)
-```
+```text
 
 Key supervision features:
 
@@ -224,7 +224,7 @@ GitHub's internal design system codifies degradation patterns:
 
 ### Recommended Pattern for Our Stack
 
-```
+```text
 MCP Tool Call Flow:
   1. Tool invoked by IDE
   2. MCP tries to reach gateway
@@ -235,7 +235,7 @@ MCP Tool Call Flow:
       It may be starting up. Retry in a few seconds.")
   3d. HTTP 503 -> ToolError("Worker is unavailable.
       The system is starting up or recovering.")
-```
+```yaml
 
 Key principle: **Every error message must be actionable** -- tell the user
 exactly what to do, not just what went wrong.
@@ -276,14 +276,14 @@ only when the frontend UI or multi-worker scaling is needed.
 
 ### Our Current Latency Estimate
 
-```
+```yaml
 MCP stdio startup:           ~200ms  (Python interpreter)
 Gateway uvicorn startup:     ~1-2s   (DB init, migrations, checkpointer)
 Worker uvicorn startup:      ~1-2s   (DB init, checkpointer, bridge)
 Health check polling:         ~1-3s   (exponential backoff retries)
                               --------
 Total worst case:             ~4-7s
-```
+```text
 
 This exceeds the 3s language server target. Mitigation strategies:
 

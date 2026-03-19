@@ -38,7 +38,7 @@ Lines 66-72 contain a duplicated import block:
     # ADR-028: Universal Rule Propagation
     from .config import settings
     from .rules import RuleManager
-```
+```python
 
 The `from .config import settings` and `from .rules import RuleManager` imports are repeated verbatim. While Python's import system handles this gracefully (no runtime error), this is clearly copy-paste debris.
 
@@ -79,7 +79,7 @@ def _replace_plan(
     new: list[dict[str, str]],
 ) -> list[dict[str, str]]:
     return new if new is not None else existing
-```
+```yaml
 
 The type annotation says `new: list[dict[str, str]]` but the body checks `new is not None`. If LangGraph passes `None` as the new value (which the guard suggests is possible), the type annotation is wrong. If it can never be `None`, the guard is dead code.
 
@@ -126,7 +126,7 @@ _ROLE_TO_PHASE: dict[str, str] = {
     "researcher": "research",
     ...
 }
-```
+```text
 
 This is actually correct per the code — `"researcher"` maps to `"research"` phase. The memory note about removal was likely about a different map. No action needed, but documenting for clarity.
 
@@ -151,7 +151,7 @@ def _append_validation_errors(existing: list[str], new: list[str]) -> list[str]:
     if not new:
         return []
     return existing + new
-```
+```python
 
 An empty `new` list means "clear all errors" rather than "no change". This is a non-obvious convention that could surprise callers who pass `validation_errors=[]` expecting no-op behavior.
 
@@ -182,7 +182,7 @@ When the debounce map exceeds 1000 entries, `_evict_oldest` sorts all entries by
 ```python
 PHASE_ORDER: list[str] = [...]
 _PHASE_ORDER = PHASE_ORDER
-```
+```python
 
 `PHASE_ORDER` is the public name (in `__all__`), but `_PHASE_ORDER` (private alias) is used internally. The alias adds no value — it's the same object.
 
@@ -222,7 +222,7 @@ Both define `_QUEUE_PHASES = frozenset({"plan", "exec"})`.
 
 ```python
 from ..task_queue import _filter_queue_content
-```
+```python
 
 Importing a private function (leading underscore) from another module breaks encapsulation. This should be made public or moved to a shared location.
 

@@ -10,7 +10,7 @@ related:
   - docs/packaging/2026-28-02-packaging-distribution-research.md
 ---
 
-# ADR-015: Dependency Hygiene, Pruning, OTel Mandate & CLI Entry Point
+## ADR-015: Dependency Hygiene, Pruning, OTel Mandate & CLI Entry Point
 
 **Date:** 2026-02-28
 **Status:** Proposed
@@ -153,7 +153,7 @@ Add a `main()` function to `src/vaultspec_a2a/api/app.py` and declare a
 ```toml
 [project.scripts]
 vaultspec = "lib.api.app:main"
-```
+```text
 
 ```python
 def main() -> None:
@@ -166,7 +166,7 @@ def main() -> None:
         host="0.0.0.0",
         port=8000,
     )
-```
+```python
 
 **Rationale:**
 
@@ -197,7 +197,7 @@ dev = [
   # ... existing ...
   "deptry>=0.22.0",
 ]
-```
+```text
 
 The initial audit run is expected to surface additional issues beyond the
 three confirmed dead dependencies. All findings must be triaged and
@@ -255,7 +255,7 @@ resolved before any packaging or distribution work proceeds.
 
 -[tool.hatch.metadata]
 -allow-direct-references = true  # no longer needed (git dep removed)
-```
+```text
 
 **Net result:** 25 → 17 runtime deps. 11 removed, 3 promoted (OTel
 from optional), 1 added (anyio from transitive).
@@ -285,7 +285,7 @@ from optional), 1 added (anyio from transitive).
 -    if _TelemetryMiddleware is not None:
 -        app.add_middleware(cast(Any, _TelemetryMiddleware))
 +    app.add_middleware(cast(Any, TelemetryMiddleware))
-```
+```text
 
 Add `main()` function (CLI entry point):
 
@@ -301,7 +301,7 @@ def main() -> None:
         port=settings.port,
         log_level="info",
     )
-```
+```text
 
 ### 3.3 deptry Configuration
 
@@ -318,14 +318,14 @@ opentelemetry-instrumentation-fastapi = "opentelemetry"
 # CLI tools — invoked as commands, not imported in Python
 DEP002 = ["ruff", "ty", "prek", "identify", "nodeenv",
           "pytest-timeout", "deptry"]
-```
+```text
 
 ### 3.4 Lockfile Regeneration
 
 ```bash
 uv lock    # Resolved 100 packages (down from 144)
 uv sync
-```
+```text
 
 ### 3.5 Verification
 

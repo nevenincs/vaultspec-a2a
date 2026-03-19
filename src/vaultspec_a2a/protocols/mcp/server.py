@@ -100,7 +100,7 @@ async def _get_known_presets() -> frozenset[str]:
     if _known_presets_cache is not None:
         return _known_presets_cache
 
-    api_base = settings.mcp_api_base_url
+    api_base = settings.gateway_url
     try:
         client = _get_client()
         resp = await client.get(
@@ -273,7 +273,7 @@ async def start_thread(
             payload["metadata"] = {"workspace_root": workspace_root}
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads",
+            f"{settings.gateway_url}/api/threads",
             timeout=settings.mcp_create_timeout_seconds,
             json=payload,
         )
@@ -283,19 +283,19 @@ async def start_thread(
         return (
             f"Thread started: {thread_id}\n"
             f"Preset: {preset}\n"
-            f"Monitor: {settings.mcp_api_base_url}/\n"
-            f"Status: GET {settings.mcp_api_base_url}/api/threads/{thread_id}/state"
+            f"Monitor: {settings.gateway_url}/\n"
+            f"Status: GET {settings.gateway_url}/api/threads/{thread_id}/state"
         )
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure (server not running, DNS error, etc.)
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: request timed out waiting for the server
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -305,7 +305,7 @@ async def start_thread(
         # MCP-H1: other transport-level errors (SSL, proxy, etc.)
         raise ToolError(
             f"Connection error (is the server running at"
-            f" {settings.mcp_api_base_url}?): {exc}"
+            f" {settings.gateway_url}?): {exc}"
         ) from exc
 
 
@@ -355,7 +355,7 @@ async def list_threads(
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/threads",
+            f"{settings.gateway_url}/api/threads",
             params={"limit": limit, "offset": offset},
             timeout=settings.mcp_query_timeout_seconds,
         )
@@ -382,12 +382,12 @@ async def list_threads(
         return "".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -446,7 +446,7 @@ async def respond_to_permission(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/permissions/{permission_request_id}/respond",
+            f"{settings.gateway_url}/api/permissions/{permission_request_id}/respond",
             json={"option_id": option_id},
             timeout=settings.mcp_query_timeout_seconds,
         )
@@ -462,12 +462,12 @@ async def respond_to_permission(
         )
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -521,11 +521,11 @@ async def get_thread_status(
                    (in the thread listing), e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
-    ws_live_url = _ws_url_from_api_base(settings.mcp_api_base_url)
+    ws_live_url = _ws_url_from_api_base(settings.gateway_url)
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/state",
+            f"{settings.gateway_url}/api/threads/{thread_id}/state",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -579,13 +579,13 @@ async def get_thread_status(
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -648,7 +648,7 @@ async def send_message(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/messages",
+            f"{settings.gateway_url}/api/threads/{thread_id}/messages",
             json={"content": message},
             timeout=settings.mcp_query_timeout_seconds,
         )
@@ -657,13 +657,13 @@ async def send_message(
     except httpx.ConnectError as exc:
         # MCP-H1: network-level failure
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         # MCP-H1: timeout
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -703,7 +703,7 @@ async def get_team_status() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/team/status",
+            f"{settings.gateway_url}/api/team/status",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -734,12 +734,12 @@ async def get_team_status() -> str:
         return "\n".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -773,7 +773,7 @@ async def get_pending_permissions() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/team/status",
+            f"{settings.gateway_url}/api/team/status",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -794,12 +794,12 @@ async def get_pending_permissions() -> str:
         return "\n".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -829,7 +829,7 @@ async def list_team_presets() -> str:
     try:
         client = _get_client()
         resp = await client.get(
-            f"{settings.mcp_api_base_url}/api/teams",
+            f"{settings.gateway_url}/api/teams",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -853,12 +853,12 @@ async def list_team_presets() -> str:
         return "".join(lines)
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -892,19 +892,19 @@ async def delete_thread(
     try:
         client = _get_client()
         resp = await client.delete(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}",
+            f"{settings.gateway_url}/api/threads/{thread_id}",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
         return f"Thread {thread_id} deleted."
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -944,7 +944,7 @@ async def archive_thread(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/archive",
+            f"{settings.gateway_url}/api/threads/{thread_id}/archive",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -953,12 +953,12 @@ async def archive_thread(
         return f"Thread {thread_id} archived (status: {status})."
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:
@@ -1014,7 +1014,7 @@ async def cancel_thread(
     try:
         client = _get_client()
         resp = await client.post(
-            f"{settings.mcp_api_base_url}/api/threads/{thread_id}/cancel",
+            f"{settings.gateway_url}/api/threads/{thread_id}/cancel",
             timeout=settings.mcp_query_timeout_seconds,
         )
         resp.raise_for_status()
@@ -1026,12 +1026,12 @@ async def cancel_thread(
         return f"Thread {thread_id} not cancelled (current status: {status})."
     except httpx.ConnectError as exc:
         raise ToolError(
-            f"Network error: could not connect to {settings.mcp_api_base_url}. "
+            f"Network error: could not connect to {settings.gateway_url}. "
             f"Is the server running? Detail: {exc}"
         ) from exc
     except httpx.TimeoutException as exc:
         raise ToolError(
-            f"Timeout: the server at {settings.mcp_api_base_url} did not respond. "
+            f"Timeout: the server at {settings.gateway_url} did not respond. "
             f"Detail: {exc}"
         ) from exc
     except httpx.HTTPStatusError as exc:

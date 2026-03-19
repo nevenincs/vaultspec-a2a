@@ -2,7 +2,7 @@
 
 Standalone MCP server that communicates with the gateway over HTTP.
 No internal imports from core/ or api/ — all coupling is via the
-VAULTSPEC_MCP_API_BASE_URL environment variable.
+VAULTSPEC_GATEWAY_URL environment variable.
 
 Run standalone::
 

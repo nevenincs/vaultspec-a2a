@@ -46,7 +46,7 @@ services:
       VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
       VAULTSPEC_DATABASE_BACKEND: sqlite
       VAULTSPEC_CHECKPOINT_BACKEND: sqlite
-      VAULTSPEC_MCP_API_BASE_URL: 'http://gateway:8000'
+      VAULTSPEC_GATEWAY_URL: 'http://gateway:8000'
     healthcheck:
       test:
         [

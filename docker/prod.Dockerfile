@@ -83,7 +83,7 @@ COPY --from=gemini-cli /usr/local/lib/node_modules/@google /usr/local/lib/node_m
 
 # PROV-O02: VAULTSPEC_PROJECT_ROOT prevents path traversal resolving into
 # site-packages in non-editable installs (factory.py _PROJECT_ROOT).
-ENV VAULTSPEC_MCP_API_BASE_URL=http://gateway:8000 \
+ENV VAULTSPEC_GATEWAY_URL=http://gateway:8000 \
     VAULTSPEC_PROJECT_ROOT=/app
 
 EXPOSE 8001

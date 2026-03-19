@@ -39,7 +39,7 @@ def status() -> None:
     click.echo("")
     click.echo("Environment variables:")
     click.echo(
-        "  VAULTSPEC_MCP_API_BASE_URL  "
+        "  VAULTSPEC_GATEWAY_URL       "
         "Gateway API base URL (default: http://localhost:8000)"
     )
     click.echo("  VAULTSPEC_MCP_HOST          Bind host (default: 0.0.0.0)")

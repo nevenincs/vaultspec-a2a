@@ -95,7 +95,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
     async with open_checkpointer() as checkpointer:
         bridge = WorkerBridge(
-            settings.mcp_api_base_url,
+            settings.gateway_url,
             worker_id,
             settings.internal_token,
         )

@@ -191,7 +191,7 @@ All variables use the `VAULTSPEC_` prefix and can be set in your shell, a
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `VAULTSPEC_MCP_API_BASE_URL` | `http://localhost:8000` | Gateway API base URL that MCP tools call. |
+| `VAULTSPEC_GATEWAY_URL` | `http://localhost:8000` | Gateway API base URL. |
 | `VAULTSPEC_MCP_AUTO_START_GATEWAY` | `true` | Auto-start gateway + worker as subprocesses on MCP server start. |
 | `VAULTSPEC_MCP_HOST` | `0.0.0.0` | Bind host for `streamable-http` transport (not used in stdio mode). |
 | `VAULTSPEC_MCP_PORT` | `8100` | Bind port for `streamable-http` transport (not used in stdio mode). |
@@ -350,12 +350,12 @@ Another process is using port 8000 or 8001.
    VAULTSPEC_PORT=9000 VAULTSPEC_WORKER_PORT=9001 uv run vaultspec service start
    ```text
 
-   Update `VAULTSPEC_MCP_API_BASE_URL` accordingly:
+   Update `VAULTSPEC_GATEWAY_URL` accordingly:
 
    ```json
    {
      "env": {
-       "VAULTSPEC_MCP_API_BASE_URL": "http://localhost:9000"
+       "VAULTSPEC_GATEWAY_URL": "http://localhost:9000"
      }
    }
    ```text

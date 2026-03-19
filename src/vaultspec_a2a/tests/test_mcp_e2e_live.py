@@ -61,7 +61,7 @@ async def test_mcp_stdio_tools_hit_live_gateway_and_create_real_thread(
             args=["-m", "vaultspec_a2a.protocols.mcp"],
             env={
                 **env,
-                "VAULTSPEC_MCP_API_BASE_URL": gateway_url,
+                "VAULTSPEC_GATEWAY_URL": gateway_url,
             },
             cwd=tmp_path,
         )

@@ -163,9 +163,17 @@ class Settings(BaseSettings):
         description="Bind port for the uvicorn server (VAULTSPEC_PORT).",
     )
 
-    mcp_api_base_url: str = Field(
+    gateway_url: str = Field(
         default="http://localhost:8000",
-        description="Base URL for MCP tool loopback calls.",
+        validation_alias=AliasChoices(
+            "VAULTSPEC_GATEWAY_URL",
+            "VAULTSPEC_MCP_API_BASE_URL",
+        ),
+        description=(
+            "Base URL for reaching the gateway HTTP API. Used by the worker "
+            "IPC bridge and the MCP tool server. Derived from host/port when "
+            "not set explicitly (see Phase 3)."
+        ),
     )
     mcp_host: str = Field(
         default="0.0.0.0",

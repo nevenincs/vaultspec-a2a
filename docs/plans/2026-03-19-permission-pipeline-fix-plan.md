@@ -1,7 +1,7 @@
 # Permission Pipeline Fix — Phased Execution Plan
 
 **Date**: 2026-03-19
-**Status**: IN PROGRESS
+**Status**: COMPLETE
 **Scope**: Fix the broken supervised workflow (permission request → respond)
 **Audit ref**: `docs/audits/2026-03-19-cli-usability-end-to-end-audit.md`
 **Research ref**: `docs/research/2026-03-19-langgraph-control-plane-layer-mapping.md`
@@ -125,7 +125,7 @@ connectivity check to worker.
 **Files touched**: `worker/ipc.py`, `worker/app.py`
 **Status**: [x] Done — 51 worker tests pass
 
-### Phase 5 — Permission ID Stability
+### Phase 5 — Permission ID Stability ← DONE
 
 **Goal**: Deterministic permission IDs derived from checkpoint data instead
 of random UUIDs.
@@ -133,10 +133,14 @@ of random UUIDs.
 **Changes**:
 
 - `core/aggregator.py`: Replace UUID fallback with
-  `{thread_id}:task{N}:interrupt{M}`, add dedup guard
+  `{thread_id}:task{task_idx}:int{interrupt_idx}` — position-based IDs
+  that are stable across repeated state inspections.
+- Added dedup guard: if `request_id` already exists in
+  `_pending_permissions`, skip re-emission. This ensures `team status`
+  polled 3× returns the same `request_id` every time.
 
 **Files touched**: `core/aggregator.py`
-**Status**: [ ] Not started
+**Status**: [x] Done — 428 core tests pass
 
 ### Phase 6 — Env Propagation on Auto-Spawn ← DONE
 
@@ -175,7 +179,13 @@ any exception is swallowed so read-only commands still work.
 | Commit | Phase | Description |
 |--------|-------|-------------|
 | `0eda0ef` | 0 | fix(types): resolve 82 pre-existing ty type checker errors |
-| (pending) | 1 | fix(config): normalize defaults — sqlite for dev, align .env.example |
+| `02d880e` | 1 | fix(config): normalize defaults — sqlite for dev, align .env.example |
+| `37d6cd5` | 2 | refactor(config): rename mcp\_api\_base\_url → gateway\_url |
+| `48faf6a` | 3 | feat(config): auto-derive gateway\_url and worker\_url from host+port |
+| `2d7a738` | 4 | fix(worker): make gateway unreachability loud |
+| `cb5ec37` | 6 | fix(spawn): explicitly propagate gateway config to worker subprocess |
+| `16aba9e` | 7 | feat(cli): pre-flight health check warns about disconnected worker |
+| (pending) | 5 | fix(aggregator): deterministic permission IDs + dedup guard |
 
 ---
 

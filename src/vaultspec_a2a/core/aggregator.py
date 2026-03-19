@@ -1552,11 +1552,23 @@ class EventAggregator:
                 ):
                     continue
 
+                # Phase 5: deterministic permission IDs from checkpoint
+                # position.  The task index + interrupt index within a
+                # single graph suspension is stable across repeated
+                # state inspections, so polling `team status` returns
+                # the same request_id every time.
+                task_idx = tasks.index(task)
+                interrupt_idx = task.interrupts.index(interrupt_obj)
                 request_id = str(
                     payload.get("request_id")
                     or getattr(interrupt_obj, "id", None)
-                    or f"{thread_id}:{uuid4().hex}"
+                    or f"{thread_id}:task{task_idx}:int{interrupt_idx}"
                 )
+
+                # Phase 5 dedup: skip if this exact request_id was
+                # already emitted and is still pending.
+                if request_id in self._pending_permissions:
+                    continue
 
                 if interrupt_type == "plan_approval_request":
                     feature: str = payload.get("feature") or "unknown"

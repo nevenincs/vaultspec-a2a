@@ -138,15 +138,23 @@ of random UUIDs.
 **Files touched**: `core/aggregator.py`
 **Status**: [ ] Not started
 
-### Phase 6 — Env Propagation on Auto-Spawn
+### Phase 6 — Env Propagation on Auto-Spawn ← DONE
 
 **Goal**: Ensure gateway passes `VAULTSPEC_PORT` (or `VAULTSPEC_GATEWAY_URL`)
 to auto-spawned worker subprocess.
 
-**Needs investigation**: Locate `LazyWorkerSpawner` spawn code.
+**Investigation result**: `_spawn_worker()` in `api/app.py:629-725` calls
+`subprocess.Popen()` without an `env` parameter — relies on implicit OS-level
+inheritance. The gateway's auto-derived `gateway_url` (computed from
+`host`+`port`) is NOT in `os.environ`, so the child would re-derive it and
+could get a wrong result (e.g. `0.0.0.0` vs `127.0.0.1`).
 
-**Files touched**: TBD (likely `api/spawner.py` or similar)
-**Status**: [ ] Not started
+**Fix**: Explicitly construct `spawn_env` dict with `os.environ.copy()` +
+inject `VAULTSPEC_GATEWAY_URL`, `VAULTSPEC_PORT`, `VAULTSPEC_WORKER_PORT`,
+`VAULTSPEC_WORKER_HOST`, and `VAULTSPEC_INTERNAL_TOKEN`. Pass to `Popen(env=)`.
+
+**Files touched**: `api/app.py`
+**Status**: [x] Done
 
 ### Phase 7 — CLI Pre-flight Health Check
 

@@ -1,7 +1,26 @@
-"""Prod-like Docker verification helpers for the CLI."""
+"""Prod-like Docker verification helpers.
+
+Invoked via::
+
+    python -m vaultspec_a2a.control.verify <target> [args]
+
+Targets
+-------
+prodlike_docker
+    Spin up the prod-like Docker/Postgres stack, verify health + thread flow +
+    Jaeger traces, then tear down. Artifacts are written to
+    ``.vault/runtime/verify-prodlike-docker/<timestamp>/``.
+
+provider <name>
+    Like ``prodlike_docker`` but also runs a real provider probe (``claude``
+    or ``gemini``) inside the running Docker worker container.
+"""
 
 from __future__ import annotations
 
+__all__ = ["main", "verify_prodlike_docker", "verify_prodlike_docker_provider"]
+
+import argparse
 import atexit
 import http.client
 import json
@@ -326,7 +345,10 @@ def _verify_thread_flow() -> str:
 
 
 def _capture_compose_logs(
-    artifact_dir: Path, *, compose_files: tuple[str, ...], services: tuple[str, ...]
+    artifact_dir: Path,
+    *,
+    compose_files: tuple[str, ...],
+    services: tuple[str, ...],
 ) -> None:
     try:
         compose_ps = _run_compose(compose_files, "ps", capture=True).stdout
@@ -350,7 +372,9 @@ def _capture_compose_logs(
 
 
 def _capture_compose_config(
-    artifact_dir: Path, *, compose_files: tuple[str, ...]
+    artifact_dir: Path,
+    *,
+    compose_files: tuple[str, ...],
 ) -> None:
     try:
         compose_config = _run_compose(compose_files, "config", capture=True).stdout
@@ -360,7 +384,10 @@ def _capture_compose_config(
 
 
 def _capture_container_inspect(
-    artifact_dir: Path, *, compose_files: tuple[str, ...], services: tuple[str, ...]
+    artifact_dir: Path,
+    *,
+    compose_files: tuple[str, ...],
+    services: tuple[str, ...],
 ) -> None:
     for service in services:
         try:
@@ -442,7 +469,7 @@ def _capture_jaeger_diagnostics(
                         lookback=lookback,
                     )
                 )
-            except Exception as exc:  # pragma: no cover - diagnostics-only path
+            except Exception as exc:
                 result = {"error": str(exc)}
         _write_json(artifact_dir / f"jaeger-{service}.json", result)
         trace_ids = _extract_trace_ids(result) if isinstance(result, dict) else []
@@ -539,9 +566,7 @@ def _write_evidence_manifest(
     _write_json(artifact_dir / "evidence-manifest.json", evidence_manifest)
 
 
-def _resolve_gemini_host_cli_home(
-    env: dict[str, str] | None = None,
-) -> Path | None:
+def _resolve_gemini_host_cli_home(env: dict[str, str] | None = None) -> Path | None:
     source = env or os.environ
     cli_home = source.get("GEMINI_CLI_HOME")
     base = Path(cli_home) if cli_home and cli_home.strip() else Path.home()
@@ -553,20 +578,22 @@ def _require_provider_auth(provider: str) -> None:
     if provider == "claude":
         if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
             return
-        raise RuntimeError(
+        msg = (
             "CLAUDE_CODE_OAUTH_TOKEN is required for Docker Claude provider "
             "verification."
         )
+        raise RuntimeError(msg)
     if provider == "gemini":
         if os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"):
             return
         if _resolve_gemini_host_cli_home() is not None:
             return
-        raise RuntimeError(
+        msg = (
             "Docker Gemini provider verification requires GEMINI_API_KEY, "
             "GOOGLE_API_KEY, or a local Gemini OAuth session under "
             "GEMINI_CLI_HOME/.gemini (defaulting to ~/.gemini)."
         )
+        raise RuntimeError(msg)
 
 
 def verify_prodlike_docker() -> int:
@@ -745,10 +772,11 @@ def verify_prodlike_docker_provider(provider: str) -> int:
             },
         )
         if provider_result.returncode != 0:
-            raise RuntimeError(
+            msg = (
                 f"{provider} provider probe failed with exit code "
                 f"{provider_result.returncode}"
             )
+            raise RuntimeError(msg)
         sys.stdout.write(
             f"verify-prodlike-provider ({provider}) artifacts: {artifact_dir}\n"
         )
@@ -806,3 +834,61 @@ def verify_prodlike_docker_provider(provider: str) -> int:
             check=False,
         )
     return 0
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="python -m vaultspec_a2a.control.verify",
+        description="Prod-like Docker verification helpers.",
+    )
+    sub = parser.add_subparsers(dest="target", metavar="TARGET")
+
+    sub.add_parser(
+        "prodlike_docker",
+        help=(
+            "Spin up the prod-like Docker/Postgres stack, verify end-to-end "
+            "health + thread flow + Jaeger traces, then tear down."
+        ),
+    )
+
+    provider_p = sub.add_parser(
+        "provider",
+        help="Run a real provider probe inside the prod-like Docker worker.",
+    )
+    provider_p.add_argument(
+        "name",
+        metavar="NAME",
+        help="Provider name (claude or gemini).",
+    )
+
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = _build_parser()
+    args = parser.parse_args(argv)
+
+    if args.target is None:
+        parser.print_help()
+        return 1
+
+    if args.target == "prodlike_docker":
+        try:
+            return verify_prodlike_docker()
+        except Exception as exc:
+            print(f"verify prodlike_docker failed: {exc}", file=sys.stderr)
+            return 1
+
+    if args.target == "provider":
+        try:
+            return verify_prodlike_docker_provider(args.name)
+        except Exception as exc:
+            print(f"verify provider {args.name!r} failed: {exc}", file=sys.stderr)
+            return 1
+
+    parser.print_help()
+    return 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

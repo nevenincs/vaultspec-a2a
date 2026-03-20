@@ -1,262 +1,500 @@
 set windows-shell := ["powershell.exe", "-c"]
 set dotenv-load := true
 
-# Bootstrap: install all dependencies
-setup: _check-uv _check-node
-    uv sync --all-groups
-    npm install
-    cd src/ui && npm install
-    @echo "Setup complete. Run 'just dev' for the recommended frontend workflow."
+# ---------------------------------------------------------------------------
+# Default: list all available recipes
+# ---------------------------------------------------------------------------
 
-# Frontend-ready local development guide (split terminals, no Docker)
-dev:
-    @echo "Frontend-ready local workflow:"
-    @echo "  Terminal 1: just dev-gateway"
-    @echo "  Terminal 2: just dev-worker"
-    @echo "  Terminal 3: just dev-ui"
-    @echo ""
-    @echo "Starting the Vite UI in this terminal now..."
-    cd src/ui && npm run dev
+# Show all available recipes
+default:
+    @just --list
 
-# Frontend-ready local gateway process (foreground)
-dev-gateway:
+# ---------------------------------------------------------------------------
+# Top-level dispatchers
+# ---------------------------------------------------------------------------
+
+# Development toolchain — dispatch to dev-<subcommand>
+dev *ARGS:
+    just dev-{{ARGS}}
+
+# Production CLI passthrough — dispatch to prod-<subcommand>
+prod *ARGS:
+    just prod-{{ARGS}}
+
+# ===========================================================================
+# dev hooks — Commit pipeline
+# ===========================================================================
+
+# Dispatch: just dev hooks <action> [*args]
+dev-hooks ACTION *ARGS:
+    just _dev-hooks-{{ACTION}} {{ARGS}}
+
+# Bootstrap the local virtualenv used by the repo hook pipeline.
+_dev-hooks-bootstrap:
+    uv venv .venv --allow-existing
+    uv sync --locked --group dev
+
+# Install the repo-managed, path-agnostic prek hook shim.
+_dev-hooks-install:
+    just _dev-hooks-bootstrap
+    uv run --group dev python -m vaultspec_a2a.control.hooks install
+
+# Remove the repo-managed hook shim.
+_dev-hooks-remove:
+    uv run --group dev python -m vaultspec_a2a.control.hooks remove
+
+# Run the read-only prek pipeline outside a commit attempt.
+_dev-hooks-run *ARGS:
+    uv run --group dev --no-sync --frozen prek run {{ARGS}}
+
+# Apply autofixes outside the Git stash/restore cycle, then rerun hooks.
+_dev-hooks-fix *ARGS:
+    just _dev-code-fix-all
+    just _dev-hooks-run {{ARGS}}
+
+# ===========================================================================
+# dev service — Service lifecycle management
+# ===========================================================================
+
+# Dispatch: just dev service <action> [targets...]
+dev-service *ARGS:
+    just _dev-service-dispatch {{ARGS}}
+
+# Internal dispatcher for service actions
+_dev-service-dispatch ACTION *TARGETS:
+    #!/usr/bin/env pwsh
+    $action = "{{ACTION}}"
+    $targets = "{{TARGETS}}"
+
+    # Handle "db" subgroup
+    if ($action -eq "db") {
+        just _dev-service-db $targets
+        exit $LASTEXITCODE
+    }
+
+    # Default target is "all"
+    if ([string]::IsNullOrWhiteSpace($targets)) {
+        $targets = "all"
+    }
+
+    # Expand group targets
+    $prodTargets = @("gateway", "worker", "ui", "postgres")
+    $devTargets = @("jaeger", "vidaimock")
+    $allTargets = $prodTargets + $devTargets
+
+    $resolvedTargets = @()
+    foreach ($t in ($targets -split '\s+')) {
+        switch ($t) {
+            "all"  { $resolvedTargets += $allTargets }
+            "prod" { $resolvedTargets += $prodTargets }
+            "dev"  { $resolvedTargets += $devTargets }
+            default { $resolvedTargets += $t }
+        }
+    }
+
+    foreach ($target in $resolvedTargets) {
+        $recipe = "_dev-service-${action}-${target}"
+        just $recipe
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    }
+
+# --- start recipes ---
+
+# Start the gateway API server (foreground, hot-reload)
+_dev-service-start-gateway:
     uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
 
-# Frontend-ready local worker process (foreground)
-dev-worker:
+# Start the worker executor (foreground, hot-reload)
+_dev-service-start-worker:
     uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
 
-# Frontend-ready local UI process (foreground)
-dev-ui:
+# Start the Vite frontend dev server (foreground)
+_dev-service-start-ui:
     cd src/ui && npm run dev
 
-# Frontend-ready Docker stack (gateway + worker + Vite)
-up:
-    docker compose -f docker-compose.dev.yml up --build
+# Start PostgreSQL via docker compose
+_dev-service-start-postgres:
+    docker compose -f docker-compose.prod.postgres.yml up -d postgres
 
-# Alias for the frontend-ready Docker stack
-dev-stack:
-    docker compose -f docker-compose.dev.yml up --build
-
-# Full integration Docker stack (frontend + mocks + tracing)
-up-integration:
-    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml up --build
-
-# Alias for the full integration stack
-dev-integration:
-    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml up --build
-
-# Production-like Docker stack (gateway + worker + Jaeger)
-up-prod:
-    docker compose -f docker-compose.prod.yml up --build
-
-# Production-like Postgres Docker stack
-up-prod-postgres:
-    docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml up --build
-
-# Stop the frontend-ready Docker stack
-down:
-    docker compose -f docker-compose.dev.yml down
-
-# Stop the full integration Docker stack
-down-integration:
-    docker compose -f docker-compose.dev.yml -f docker-compose.integration.yml down
-
-# Stop the production-like Docker stack
-down-prod:
-    docker compose -f docker-compose.prod.yml down
-
-# Stop the production-like Postgres Docker stack
-down-prod-postgres:
-    docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml down -v
-
-# Run test suite
-test *ARGS:
-    uv run pytest {{ARGS}}
-
-# Run unit tests only (excludes live tests, same as CI)
-test-unit *ARGS:
-    uv run pytest -m "not live" {{ARGS}}
-
-# Run live tests only (requires live ACP backend)
-test-live *ARGS:
-    uv run pytest -m live {{ARGS}}
-
-# Run requires_jaeger tests against the persistent local Jaeger instance
-# (OTLP gRPC on localhost:4317, UI/query on localhost:16686, health on
-# http://localhost:13133/status). Start it with `just jaeger-up`.
-test-tracing *ARGS:
-    uv run pytest -m requires_jaeger {{ARGS}}
-
-# Start the persistent local Jaeger container used for reviewable tracing tests
-# and local trace inspection.
-jaeger-up:
+# Start Jaeger tracing collector (OTLP gRPC :4317, UI :16686, health :13133)
+_dev-service-start-jaeger:
     docker run -d --name jaeger-local -p 4317:4317 -p 4318:4318 -p 16686:16686 -p 13133:13133 -e COLLECTOR_OTLP_ENABLED=true cr.jaegertracing.io/jaegertracing/jaeger:2.16.0; Write-Host "Jaeger UI: http://localhost:16686  Health: http://localhost:13133/status"
 
-# Stop and remove the local Jaeger container
-jaeger-down:
-    -docker stop jaeger-local
-    -docker rm jaeger-local
-
-# Check persistent local Jaeger health (OpenTelemetry health extension:
-# http://localhost:13133/status must return 200)
-jaeger-health:
-    $code = (Invoke-WebRequest -Uri "http://localhost:13133/status" -UseBasicParsing -ErrorAction SilentlyContinue).StatusCode; if ($code -eq 200) { Write-Host "Jaeger healthy (200)" } else { Write-Host "Jaeger not ready (got: $code)"; exit 1 }
-
-# Run requires_vidaimock tests against a live local VidaiMock instance (start with just vidaimock-up)
-test-mock *ARGS:
-    uv run pytest -m requires_vidaimock {{ARGS}}
-
-# Start VidaiMock via integration compose (serves tapes at http://localhost:8100)
-vidaimock-up:
+# Start VidaiMock LLM provider via integration compose
+_dev-service-start-vidaimock:
     docker compose -f docker-compose.integration.yml up -d --build vidaimock; Write-Host "VidaiMock running at http://localhost:8100/v1/models"
 
-# Stop and remove the local VidaiMock container
-vidaimock-down:
+# --- stop recipes (graceful) ---
+
+# Stop the gateway gracefully
+_dev-service-stop-gateway:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8000" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway stopped." } else { Write-Host "Gateway not running." }
+
+# Stop the worker gracefully
+_dev-service-stop-worker:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8001" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker stopped." } else { Write-Host "Worker not running." }
+
+# Stop the UI dev server
+_dev-service-stop-ui:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "node" -and $_.CommandLine -match "vite" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "UI stopped." } else { Write-Host "UI not running." }
+
+# Stop PostgreSQL container
+_dev-service-stop-postgres:
+    -docker compose -f docker-compose.prod.postgres.yml stop postgres
+
+# Stop Jaeger container
+_dev-service-stop-jaeger:
+    -docker stop jaeger-local
+
+# Stop VidaiMock container
+_dev-service-stop-vidaimock:
     docker compose -f docker-compose.integration.yml stop vidaimock
-    docker compose -f docker-compose.integration.yml rm -f vidaimock
 
-# Check VidaiMock health (/v1/models must return 200)
-vidaimock-health:
-    $code = (Invoke-WebRequest -Uri "http://localhost:8100/v1/models" -UseBasicParsing -ErrorAction SilentlyContinue).StatusCode; if ($code -eq 200) { Write-Host "VidaiMock healthy (200)" } else { Write-Host "VidaiMock not ready (got: $code)"; exit 1 }
+# --- kill recipes (force) ---
 
-# Run tests with coverage report
-test-cov *ARGS:
-    uv run pytest --cov=src/vaultspec_a2a --cov-report=term-missing {{ARGS}}
+# Force-kill the gateway process
+_dev-service-kill-gateway:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8000" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway killed." } else { Write-Host "Gateway not running." }
 
-# Quick pre-push check: lint + typecheck
-check:
-    just lint
-    just typecheck
+# Force-kill the worker process
+_dev-service-kill-worker:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8001" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker killed." } else { Write-Host "Worker not running." }
 
-# Full CI pipeline: lint + typecheck + unit tests
-ci:
-    just lint
-    just typecheck
-    just test-unit
+# Force-kill the UI dev server
+_dev-service-kill-ui:
+    #!/usr/bin/env pwsh
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "node" -and $_.CommandLine -match "vite" }
+    if ($procs) { $procs | Stop-Process -Force; Write-Host "UI killed." } else { Write-Host "UI not running." }
 
-# Lint check
-lint:
+# Force-kill PostgreSQL container
+_dev-service-kill-postgres:
+    -docker kill postgres
+
+# Force-kill Jaeger container
+_dev-service-kill-jaeger:
+    -docker kill jaeger-local
+
+# Force-kill VidaiMock container
+_dev-service-kill-vidaimock:
+    docker compose -f docker-compose.integration.yml kill vidaimock
+
+# --- restart recipes ---
+
+# Restart the gateway (stop then start)
+_dev-service-restart-gateway:
+    just _dev-service-stop-gateway
+    just _dev-service-start-gateway
+
+# Restart the worker (stop then start)
+_dev-service-restart-worker:
+    just _dev-service-stop-worker
+    just _dev-service-start-worker
+
+# Restart the UI dev server (stop then start)
+_dev-service-restart-ui:
+    just _dev-service-stop-ui
+    just _dev-service-start-ui
+
+# Restart PostgreSQL (stop then start)
+_dev-service-restart-postgres:
+    just _dev-service-stop-postgres
+    just _dev-service-start-postgres
+
+# Restart Jaeger (remove old container then start)
+_dev-service-restart-jaeger:
+    just _dev-service-stop-jaeger
+    -docker rm jaeger-local
+    just _dev-service-start-jaeger
+
+# Restart VidaiMock (stop then start)
+_dev-service-restart-vidaimock:
+    just _dev-service-stop-vidaimock
+    just _dev-service-start-vidaimock
+
+# --- rebuild recipes ---
+
+# Rebuild gateway: re-sync deps then restart
+_dev-service-rebuild-gateway:
+    uv sync --all-groups
+    just _dev-service-restart-gateway
+
+# Rebuild worker: re-sync deps then restart
+_dev-service-rebuild-worker:
+    uv sync --all-groups
+    just _dev-service-restart-worker
+
+# Rebuild UI: reinstall npm deps then restart
+_dev-service-rebuild-ui:
+    cd src/ui && npm install
+    just _dev-service-restart-ui
+
+# Rebuild PostgreSQL: destroy volume and recreate
+_dev-service-rebuild-postgres:
+    docker compose -f docker-compose.prod.postgres.yml down -v
+    just _dev-service-start-postgres
+
+# Rebuild Jaeger: remove container and restart
+_dev-service-rebuild-jaeger:
+    just _dev-service-stop-jaeger
+    -docker rm jaeger-local
+    just _dev-service-start-jaeger
+
+# Rebuild VidaiMock: rebuild docker image and restart
+_dev-service-rebuild-vidaimock:
+    docker compose -f docker-compose.integration.yml up -d --build --force-recreate vidaimock
+
+# --- health recipes ---
+
+# Check gateway health via doctor.py
+_dev-service-health-gateway:
+    uv run python -m vaultspec_a2a.control.doctor services gateway
+
+# Check worker health via doctor.py
+_dev-service-health-worker:
+    uv run python -m vaultspec_a2a.control.doctor services worker
+
+# Check UI dev server health via doctor.py
+_dev-service-health-ui:
+    uv run python -m vaultspec_a2a.control.doctor services ui
+
+# Check PostgreSQL health via doctor.py
+_dev-service-health-postgres:
+    uv run python -m vaultspec_a2a.control.doctor services postgres
+
+# Check Jaeger health via doctor.py
+_dev-service-health-jaeger:
+    uv run python -m vaultspec_a2a.control.doctor services jaeger
+
+# Check VidaiMock health via doctor.py
+_dev-service-health-vidaimock:
+    uv run python -m vaultspec_a2a.control.doctor services vidaimock
+
+# --- logs recipes ---
+
+# Tail gateway logs (foreground services print to terminal — this is a no-op hint)
+_dev-service-logs-gateway:
+    @echo "Gateway runs in foreground. Start it with: just dev service start gateway"
+
+# Tail worker logs (foreground services print to terminal — this is a no-op hint)
+_dev-service-logs-worker:
+    @echo "Worker runs in foreground. Start it with: just dev service start worker"
+
+# Tail UI logs (foreground services print to terminal — this is a no-op hint)
+_dev-service-logs-ui:
+    @echo "UI runs in foreground. Start it with: just dev service start ui"
+
+# Tail PostgreSQL container logs
+_dev-service-logs-postgres:
+    docker compose -f docker-compose.prod.postgres.yml logs -f postgres
+
+# Tail Jaeger container logs
+_dev-service-logs-jaeger:
+    docker logs -f jaeger-local
+
+# Tail VidaiMock container logs
+_dev-service-logs-vidaimock:
+    docker compose -f docker-compose.integration.yml logs -f vidaimock
+
+# --- probe recipe ---
+
+# Run a provider connectivity probe (claude | gemini | openai | zhipu | --list)
+dev-service-probe PROVIDER:
+    uv run python -m vaultspec_a2a.providers.probes.{{PROVIDER}}
+
+# --- db subgroup ---
+
+# Dispatch database operations: migrate, snapshot, restore, clear
+_dev-service-db *ARGS:
+    uv run python -m vaultspec_a2a.control.db {{ARGS}}
+
+# ===========================================================================
+# dev code — Code quality
+# ===========================================================================
+
+# Dispatch: just dev code <action> [target]
+dev-code ACTION TARGET="all":
+    just _dev-code-{{ACTION}}-{{TARGET}}
+
+# --- check recipes (read-only) ---
+
+# Run ruff linter (check only)
+_dev-code-check-lint:
     uv run ruff check .
-    uv run ruff format --check .
 
-# Auto-fix lint + format
-format:
+# Run ty type checker
+_dev-code-check-type:
+    uv run ty check
+
+# Run frontend type/lint checks
+_dev-code-check-ui:
+    cd src/ui && npm run check
+
+# Run all code quality checks: lint + type + ui
+_dev-code-check-all:
+    just _dev-code-check-lint
+    just _dev-code-check-type
+    just _dev-code-check-ui
+
+# --- fix recipes (auto-repair) ---
+
+# Auto-fix lint errors and format code
+_dev-code-fix-lint:
     uv run ruff check --fix .
     uv run ruff format .
 
-# Type check
-typecheck:
-    uv run ty check
+# Auto-fix frontend lint/format issues
+_dev-code-fix-ui:
+    cd src/ui && npm run fix
 
-# Frontend type check
-check-ui:
-    cd src/ui && npm run check
+# Auto-fix all: lint + ui
+_dev-code-fix-all:
+    just _dev-code-fix-lint
+    just _dev-code-fix-ui
 
-# Dependency audit
-audit:
-    uv run deptry src/
+# ===========================================================================
+# dev test — Testing
+# ===========================================================================
 
-# Build distribution package
-build:
+# Dispatch: just dev test <target> [*args]
+dev-test TARGET *ARGS:
+    just _dev-test-{{TARGET}} {{ARGS}}
+
+# Run unit tests (excludes live, requires_jaeger, requires_vidaimock)
+_dev-test-unit *ARGS:
+    uv run pytest -m "not live and not requires_jaeger and not requires_vidaimock" {{ARGS}}
+
+# Run live tests (requires running backend + live ACP provider)
+_dev-test-live *ARGS:
+    uv run pytest -m live {{ARGS}}
+
+# Run smoke tests against local gateway + worker stack
+_dev-test-smoke *ARGS:
+    uv run pytest src/vaultspec_a2a/tests/test_smoke.py -m live {{ARGS}}
+
+# Run tracing tests (requires local Jaeger: just dev service start jaeger)
+_dev-test-tracing *ARGS:
+    uv run pytest -m requires_jaeger {{ARGS}}
+
+# Run mock tests (requires VidaiMock: just dev service start vidaimock)
+_dev-test-mock *ARGS:
+    uv run pytest -m requires_vidaimock {{ARGS}}
+
+# Run verification suites: docker, provider, endpoints, core
+_dev-test-verify *ARGS:
+    uv run python -m vaultspec_a2a.control.verify {{ARGS}}
+
+# CI gate: unit tests + tracing (matches CI pipeline)
+_dev-test-ci *ARGS:
+    just _dev-test-unit {{ARGS}}
+    just _dev-test-tracing {{ARGS}}
+
+# Run the complete test suite
+_dev-test-all *ARGS:
+    uv run pytest {{ARGS}}
+
+# Run tests with coverage report
+_dev-test-cov *ARGS:
+    uv run pytest --cov=src/vaultspec_a2a --cov-report=term-missing {{ARGS}}
+
+# ===========================================================================
+# dev build — Build artifacts
+# ===========================================================================
+
+# Dispatch: just dev build <target>
+dev-build TARGET:
+    just _dev-build-{{TARGET}}
+
+# Build Python sdist + wheel
+_dev-build-package:
     uv build
 
-# Remove build artifacts and caches
-clean:
-    Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
-    fd -t d __pycache__ --exclude .venv -x Remove-Item -Recurse -Force
+# Build local dev Docker images (gateway + worker)
+_dev-build-docker:
+    docker compose -f docker-compose.dev.yml build
 
-# Build production Docker images
-docker-build:
+# Build production multi-stage Docker images
+_dev-build-docker-prod:
     docker build -t vaultspec-a2a-gateway -f docker/prod.Dockerfile --target gateway .
     docker build -t vaultspec-a2a-worker -f docker/prod.Dockerfile --target worker .
 
-# Run a preps scenario (solo_coder | pipeline_team | plan_approval | autonomous)
+# Remove dist/, egg-info, and __pycache__ directories
+_dev-build-clean:
+    Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
+    fd -t d __pycache__ --exclude .venv -x Remove-Item -Recurse -Force
+
+# ===========================================================================
+# dev deps — Dependency management
+# ===========================================================================
+
+# Dispatch: just dev deps <action>
+dev-deps ACTION:
+    just _dev-deps-{{ACTION}}
+
+# Full bootstrap: install all Python and Node dependencies
+_dev-deps-install: _check-uv _check-node
+    uv sync --all-groups
+    npm install
+    cd src/ui && npm install
+    @echo "Dependencies installed. Run 'just dev service start gateway' to begin."
+
+# Sync to lockfile (dev group only)
+_dev-deps-sync:
+    uv sync --locked --group dev
+
+# Upgrade all dependencies
+_dev-deps-upgrade:
+    uv sync --upgrade --all-groups
+
+# Regenerate the lockfile
+_dev-deps-lock:
+    uv lock
+
+# ===========================================================================
+# prod — Production CLI passthrough
+# ===========================================================================
+
+# Passthrough to Python CLI: vaultspec team <args>
+prod-team *ARGS:
+    uv run vaultspec team {{ARGS}}
+
+# Passthrough to Python CLI: vaultspec agent <args>
+prod-agent *ARGS:
+    uv run vaultspec agent {{ARGS}}
+
+# ===========================================================================
+# Convenience aliases (backward compat during transition)
+# ===========================================================================
+
+# Run a preps scenario (backward compat — use: just dev test mock <scenario>)
 preps SCENARIO:
-    uv run vaultspec run mock {{SCENARIO}}
+    uv run python -m vaultspec_a2a.tests.preps.{{SCENARIO}}
 
-# List available preps scenarios
+# List available preps scenarios (backward compat — use: just dev test mock --list)
 preps-list:
-    uv run vaultspec run mock
-
-# Run smoke evaluation suite (routing + gate compliance)
-eval-smoke:
-    uv run vaultspec test benchmark smoke
-
-# Run nightly evaluation suite (all 6 dimensions, requires LANGSMITH_API_KEY)
-eval-nightly:
-    uv run vaultspec test benchmark nightly
-
-# Run a provider connectivity probe (claude | gemini | openai | zhipu)
-probe PROVIDER:
-    uv run vaultspec run probe {{PROVIDER}}
-
-# Hard-fail provider readiness check for certifying live suites
-verify-live-provider PROVIDER:
-    just probe {{PROVIDER}}
-
-# Hard-fail selection of the first healthy real provider for certifying live suites
-verify-live-provider-certifying:
-    uv run python -m vaultspec_a2a.providers.probes.certifying
-
-# Phase 2 live Postgres recovery verification
-verify-live-recovery-postgres:
-    $provider = uv run python -m vaultspec_a2a.providers.probes.certifying; if (-not $provider) { exit 1 }; $env:VAULTSPEC_LIVE_TEST_PROVIDER = ($provider | Select-Object -Last 1).Trim(); uv run pytest src/vaultspec_a2a/tests/test_crash_recovery.py src/vaultspec_a2a/tests/test_permission_durability_live.py -m live -q
-
-# Live orchestration verification on the certifying Postgres backend
-verify-live-orchestration:
-    $provider = uv run python -m vaultspec_a2a.providers.probes.certifying; if (-not $provider) { exit 1 }; $env:VAULTSPEC_LIVE_TEST_PROVIDER = ($provider | Select-Object -Last 1).Trim(); uv run pytest src/vaultspec_a2a/tests/test_ipc_heartbeat_live.py src/vaultspec_a2a/tests/test_mcp_e2e_live.py -m live -q
-
-# Prod-like Docker/Postgres verification using the production compose stack
-verify-prodlike-docker:
-    uv run vaultspec test prodlike-docker
-
-# Provider-specific prod-like Docker verification for Claude
-verify-claude-docker:
-    uv run vaultspec test claude-docker
-
-# Provider-specific prod-like Docker verification for Gemini
-verify-gemini-docker:
-    uv run vaultspec test gemini-docker
-
-# Provider-specific prod-like Docker verification (claude | gemini)
-verify-prodlike-docker-provider PROVIDER:
-    uv run vaultspec test prodlike-provider {{PROVIDER}}
-
-# List teams (optional status filter)
-teams *STATUS:
-    uv run vaultspec team list {{STATUS}}
-
-# Check tracked local service health
-service-status:
-    uv run vaultspec service status
-
-# Stop tracked local services
-service-stop:
-    uv run vaultspec service stop
+    uv run python -m vaultspec_a2a.tests.preps
 
 # Start standalone MCP server (stdio by default, use TRANSPORT=streamable-http for HTTP)
 mcp TRANSPORT="stdio" *ARGS:
     uv run vaultspec-mcp --transport {{TRANSPORT}} {{ARGS}}
 
-# Frontend-critical backend verification (repo-local temp/cache dirs)
-verify-frontend-backend:
-    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_internal.py src\vaultspec_a2a\api\schemas\tests\test_schemas.py src\vaultspec_a2a\worker\tests\test_executor.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\api\tests\test_endpoints.py src\vaultspec_a2a\api\tests\test_internal.py src\vaultspec_a2a\api\schemas\tests\test_schemas.py src\vaultspec_a2a\worker\tests\test_executor.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
+# ===========================================================================
+# Internal helpers
+# ===========================================================================
 
-# Core routing/gating verification (repo-local temp/cache dirs)
-verify-core:
-    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\core\tests\test_graph.py src\vaultspec_a2a\core\tests\test_supervisor.py src\vaultspec_a2a\core\tests\test_worker.py src\vaultspec_a2a\core\nodes\tests\test_supervisor.py src\vaultspec_a2a\core\nodes\tests\test_worker.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\core\tests\test_graph.py src\vaultspec_a2a\core\tests\test_supervisor.py src\vaultspec_a2a\core\tests\test_worker.py src\vaultspec_a2a\core\nodes\tests\test_supervisor.py src\vaultspec_a2a\core\nodes\tests\test_worker.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
-
-# Live backend smoke checks against the local gateway + worker stack
-smoke-backend:
-    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\tests\test_smoke.py -m live --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\tests\test_smoke.py -m live --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
-
-# Check checked-in compose/env files for obvious secret material
-check-secrets:
-    $pytestRoot=Join-Path (Join-Path $HOME ".codex\memories") "vaultspec-pytest"; $tmpDir=Join-Path $pytestRoot "tmp"; $cacheDir=Join-Path $pytestRoot "cache"; New-Item -ItemType Directory -Force $tmpDir, $cacheDir | Out-Null; $env:TMP=$tmpDir; $env:TEMP=$tmpDir; $env:TMPDIR=$tmpDir; $env:PYTEST_DEBUG_TEMPROOT=$tmpDir; $env:LANGSMITH_TRACING="false"; $env:OTEL_SDK_DISABLED="true"; if (Test-Path .\.venv\Scripts\python.exe) { .\.venv\Scripts\python.exe -m pytest src\vaultspec_a2a\tests\test_repo_hygiene.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir } else { uv run python -m pytest src\vaultspec_a2a\tests\test_repo_hygiene.py --capture=sys -o cache_dir=$cacheDir --basetemp=$tmpDir }
-
+# Verify uv is installed
 _check-uv:
     @uv --version || (echo "Install uv: https://docs.astral.sh/uv/" && exit 1)
 
+# Verify Node.js is installed
 _check-node:
     @node --version || (echo "Install Node 22: https://nodejs.org/" && exit 1)

@@ -79,13 +79,13 @@ def _preflight_check(client: httpx.Client) -> None:
 
         if worker.get("status") == "error":
             click.echo(
-                "⚠ Worker is not connected — agent dispatch"
+                "WARNING: Worker is not connected — agent dispatch"
                 " and supervised workflows will fail.",
                 err=True,
             )
         if cb.get("status") == "open":
             click.echo(
-                "⚠ Circuit breaker OPEN — the worker has"
+                "WARNING: Circuit breaker OPEN — the worker has"
                 " repeated failures. Dispatches are paused.",
                 err=True,
             )
@@ -111,7 +111,11 @@ def _api_client() -> Generator[httpx.Client]:
             yield client
     except (httpx.ConnectError, httpx.ConnectTimeout):
         click.echo(
-            "Gateway not running. Start with: vaultspec service start gateway",
+            f"Error: Gateway not running at {base_url}\n"
+            f"\n"
+            f"Start the backend first:\n"
+            f"  just dev service start gateway    (gateway only)\n"
+            f"  just dev service start            (all services)\n",
             err=True,
         )
         raise SystemExit(1) from None

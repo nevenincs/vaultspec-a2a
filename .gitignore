@@ -39,6 +39,8 @@ node_modules/
 # Python caches
 .pytest_cache/
 .ruff_cache/
+.uv-cache/
+.prek-home/
 
 # Editor settings
 .vscode/

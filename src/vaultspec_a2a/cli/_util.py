@@ -119,6 +119,16 @@ def _api_client() -> Generator[httpx.Client]:
             err=True,
         )
         raise SystemExit(1) from None
+    except httpx.RemoteProtocolError:
+        click.echo(
+            f"Error: Port {settings.port} is in use but not responding as a gateway.\n"
+            f"A stale process may be holding the port.\n"
+            f"\n"
+            f"Start the backend first:\n"
+            f"  just dev service start gateway\n",
+            err=True,
+        )
+        raise SystemExit(1) from None
     except httpx.ReadTimeout:
         click.echo("Request timed out. The backend may be overloaded.", err=True)
         raise SystemExit(1) from None

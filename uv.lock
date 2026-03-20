@@ -2188,6 +2188,7 @@ dependencies = [
     { name = "sqlalchemy", extra = ["asyncio"] },
     { name = "starlette" },
     { name = "uvicorn" },
+    { name = "websockets" },
 ]
 
 [package.optional-dependencies]
@@ -2245,6 +2246,7 @@ requires-dist = [
     { name = "sqlalchemy", extras = ["asyncio"], specifier = ">=2.0.40" },
     { name = "starlette", specifier = ">=0.52.1" },
     { name = "uvicorn", specifier = ">=0.41.0" },
+    { name = "websockets", specifier = ">=16.0" },
 ]
 provides-extras = ["eval"]
 

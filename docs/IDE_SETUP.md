@@ -13,7 +13,7 @@ tools (start_thread, send_message, get_thread_status, etc.).
 uv sync
 
 # 2. (Optional) Pre-start the gateway+worker — MCP auto-starts them if omitted
-uv run vaultspec service start all
+just dev service start gateway
 
 # 3. Add the MCP config below to your IDE, then restart it
 ```text
@@ -276,7 +276,7 @@ The MCP server cannot reach the gateway API.
 2. If running the gateway separately:
 
    ```bash
-   uv run vaultspec service start all
+   just dev service start gateway
    ```text
 
 3. Verify the gateway is healthy:
@@ -301,7 +301,7 @@ The gateway cannot reach the worker.
 4. Restart the service:
 
    ```bash
-   uv run vaultspec service start all
+   just dev service start gateway
    ```text
 
 ### "Circuit breaker open" / HTTP 503
@@ -323,7 +323,7 @@ failures. This typically means the worker crashed.
 4. If stuck open, restart the gateway:
 
    ```bash
-   uv run vaultspec service start all
+   just dev service start gateway
    ```text
 
 ### Port conflicts
@@ -347,7 +347,7 @@ Another process is using port 8000 or 8001.
 2. Change the ports via environment variables:
 
    ```bash
-   VAULTSPEC_PORT=9000 VAULTSPEC_WORKER_PORT=9001 uv run vaultspec service start
+   VAULTSPEC_PORT=9000 VAULTSPEC_WORKER_PORT=9001 just dev service start gateway
    ```text
 
    Update `VAULTSPEC_GATEWAY_URL` accordingly:

@@ -332,6 +332,13 @@ class EventAggregator:
         # and sync_worker_event().
         self._agent_states: dict[str, AgentLifecycleState] = {}
 
+        # F-38: track tool call state for REST snapshot enrichment.
+        # Maps (thread_id, tool_call_id) -> {title, kind, status, agent_id}.
+        # Updated by emit_tool_call_start(), emit_tool_call_update(), and
+        # sync_worker_event(). Used by get_tool_call_states() to provide
+        # tool call metadata when checkpoint data is unavailable.
+        self._tool_call_states: dict[tuple[str, str], dict[str, str]] = {}
+
         self._lock = asyncio.Lock()
 
     # ------------------------------------------------------------------
@@ -411,6 +418,28 @@ class EventAggregator:
         """Return the number of threads that have received at least one event."""
         return len(self._sequences)
 
+    def _prune_completed_tool_calls(self, thread_id: str, cap: int = 50) -> None:
+        """Remove oldest completed tool call entries when they exceed cap.
+
+        Called after any tool call status transition to "completed" or "failed"
+        to bound per-thread memory for long-running threads with many tool calls
+        (P4-01 fix).
+
+        Args:
+            thread_id: The thread whose completed tool call entries to prune.
+            cap: Maximum number of completed/failed entries to retain per thread.
+                 Oldest entries (by dict insertion order) are removed first.
+        """
+        completed_keys = [
+            k
+            for k, v in self._tool_call_states.items()
+            if k[0] == thread_id and v.get("status") in ("completed", "failed")
+        ]
+        if len(completed_keys) > cap:
+            # Remove the excess (oldest first — dict insertion order)
+            for key in completed_keys[:-cap]:
+                self._tool_call_states.pop(key, None)
+
     def prune_sequences(self, active_thread_ids: set[str]) -> int:
         """Remove sequence counters for threads not in *active_thread_ids*.
 
@@ -427,6 +456,12 @@ class EventAggregator:
         stale = [tid for tid in self._sequences if tid not in active_thread_ids]
         for tid in stale:
             del self._sequences[tid]
+        # F-38: also prune tool call states for stale threads.
+        stale_tc_keys = [
+            k for k in self._tool_call_states if k[0] not in active_thread_ids
+        ]
+        for k in stale_tc_keys:
+            del self._tool_call_states[k]
         return len(stale)
 
     def get_subscriptions(self, client_id: str) -> frozenset[str]:
@@ -809,6 +844,13 @@ class EventAggregator:
             if len(args_str) > settings.tool_arg_truncate_len:
                 args_str = args_str[: settings.tool_arg_truncate_len] + "..."
             content.append(ToolCallContentText(text=args_str))
+        # F-38: track tool call state for REST snapshot enrichment.
+        self._tool_call_states[(thread_id, tool_call_id)] = {
+            "title": title,
+            "kind": kind.value,
+            "status": ToolCallStatus.PENDING.value,
+            "agent_id": agent_id,
+        }
         event = ToolCallStartEvent(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -837,6 +879,29 @@ class EventAggregator:
         """
         now = time.monotonic()
         key = (thread_id, tool_call_id)
+
+        # F-38: merge update fields into tracked tool call state.
+        existing = self._tool_call_states.get(key)
+        if existing is not None:
+            if status is not None:
+                existing["status"] = status.value
+            if title is not None:
+                existing["title"] = title
+        elif status is not None or title is not None:
+            # Tool call update without a prior start event (e.g. relayed from
+            # worker after gateway restart): create a minimal state entry.
+            self._tool_call_states[key] = {
+                "title": title or "unknown_tool",
+                "kind": ToolKind.OTHER.value,
+                "status": (status or ToolCallStatus.PENDING).value,
+                "agent_id": agent_id,
+            }
+
+        # P4-01: prune oldest completed/failed entries when the cap is exceeded
+        # to prevent unbounded growth on long-running threads.
+        if status in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED):
+            self._prune_completed_tool_calls(thread_id)
+
         event = ToolCallUpdateEvent(
             thread_id=thread_id,
             agent_id=agent_id,
@@ -949,6 +1014,20 @@ class EventAggregator:
         """Return a snapshot of current agent lifecycle states (P8-02)."""
         return dict(self._agent_states)
 
+    def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
+        """Return tool call state dicts for *thread_id* (F-38).
+
+        Returns a mapping of ``tool_call_id -> {title, kind, status, agent_id}``
+        for all tool calls tracked in the given thread. Used by the REST
+        snapshot endpoint to populate tool call metadata when the LangGraph
+        checkpoint data is unavailable or incomplete.
+        """
+        return {
+            tc_id: dict(state)
+            for (tid, tc_id), state in self._tool_call_states.items()
+            if tid == thread_id
+        }
+
     def sync_worker_event(
         self,
         thread_id: str,
@@ -1045,6 +1124,51 @@ class EventAggregator:
             filename = payload.get("filename", "")
             if artifact_id and filename:
                 self._next_sequence(thread_id)
+
+        elif event_type == "tool_call_start":
+            # F-38: track tool call state from relayed worker events so the
+            # REST snapshot endpoint can populate title/kind metadata.
+            tc_id = payload.get("tool_call_id", "")
+            tc_title = payload.get("title", "unknown_tool")
+            tc_kind = payload.get("kind", ToolKind.OTHER.value)
+            agent_id = payload.get("agent_id", "")
+            if tc_id:
+                self._tool_call_states[(thread_id, tc_id)] = {
+                    "title": tc_title,
+                    "kind": tc_kind,
+                    "status": ToolCallStatus.PENDING.value,
+                    "agent_id": agent_id,
+                }
+            self._next_sequence(thread_id)
+
+        elif event_type == "tool_call_update":
+            # F-38: merge update into tracked tool call state.
+            tc_id = payload.get("tool_call_id", "")
+            if tc_id:
+                key = (thread_id, tc_id)
+                existing = self._tool_call_states.get(key)
+                if existing is not None:
+                    if payload.get("status"):
+                        existing["status"] = payload["status"]
+                    if payload.get("title"):
+                        existing["title"] = payload["title"]
+                else:
+                    # Update without prior start: create a minimal entry.
+                    self._tool_call_states[key] = {
+                        "title": payload.get("title", "unknown_tool"),
+                        "kind": payload.get("kind", ToolKind.OTHER.value),
+                        "status": payload.get("status", ToolCallStatus.PENDING.value),
+                        "agent_id": payload.get("agent_id", ""),
+                    }
+                # P4-01: prune oldest completed/failed entries when the cap is
+                # exceeded to prevent unbounded growth on long-running threads.
+                updated_status = payload.get("status", "")
+                if updated_status in (
+                    ToolCallStatus.COMPLETED.value,
+                    ToolCallStatus.FAILED.value,
+                ):
+                    self._prune_completed_tool_calls(thread_id)
+            self._next_sequence(thread_id)
 
         # API CRIT-01 / HIGH-07: advance sequence for ALL event types that
         # carry a thread_id so last_sequence is reliable for reconnection
@@ -1849,3 +1973,4 @@ class EventAggregator:
         self._cancel_events.clear()
         self._tool_update_last_emit.clear()
         self._plan_update_last_emit.clear()
+        self._tool_call_states.clear()

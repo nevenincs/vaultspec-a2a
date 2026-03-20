@@ -28,17 +28,17 @@ certify production readiness.
 Use one of these three workflows depending on what you need:
 
 1. Local split-terminal development
-   Run the gateway, worker, and Vite UI in separate terminals:
-   - `just dev-gateway`
-   - `just dev-worker`
-   - `just dev-ui`
-   Or run `just dev` to print the recommended commands and start the UI.
+   Run the gateway, worker, and Vite UI in separate terminals (each in its own
+   terminal, as they run in the foreground):
+   - `just dev service start gateway`
+   - `just dev service start worker`
+   - `just dev service start ui`
 2. Frontend-ready Docker stack
-   Run `just up` or `just dev-stack` to start `gateway`, `worker`, and `frontend`.
+   Run `just up dev` to start `gateway`, `worker`, and `frontend` via Docker.
    This is the lowest-friction shared stack for frontend work.
 3. Full integration Docker stack
-   Run `just up-integration` or `just dev-integration` to add `vidaimock`,
-   `mock-seeder`, and Jaeger tracing.
+   Run `just up integration` to add `vidaimock`, `mock-seeder`, and Jaeger
+   tracing.
 
 Expected URLs:
 
@@ -49,17 +49,16 @@ Expected URLs:
 
 ## Service Management
 
-`vaultspec service ...` is a local process manager only. It tracks gateway and
-worker processes that were started by the CLI itself and does not manage Docker
-containers.
+Use `just dev service <action> [target]` to manage local processes. All services
+run in the foreground so each requires its own terminal.
 
 Examples:
 
-- `uv run vaultspec service start gateway`
-- `uv run vaultspec service start worker`
-- `uv run vaultspec service start all`
-- `uv run vaultspec service status`
-- `uv run vaultspec service stop all`
+- `just dev service start gateway` — start the gateway API server (port 8000)
+- `just dev service start worker` — start the worker executor (port 8001)
+- `just dev service start ui` — start the Vite frontend dev server (port 5173)
+- `just dev service health` — check health of all services
+- `just dev service stop` — stop all running services
 
 ## Verification
 

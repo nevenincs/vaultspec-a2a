@@ -102,11 +102,15 @@ _dev-service-dispatch ACTION *TARGETS:
 
 # Start the gateway API server (foreground, hot-reload)
 _dev-service-start-gateway:
-    uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --host 127.0.0.1 --port 8000
+    #!/usr/bin/env pwsh
+    $port = if ($env:VAULTSPEC_PORT) { $env:VAULTSPEC_PORT } else { "8000" }
+    uv run uvicorn vaultspec_a2a.api.app:create_app --factory --reload --host 127.0.0.1 --port $port
 
 # Start the worker executor (foreground, hot-reload)
 _dev-service-start-worker:
-    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port 8001
+    #!/usr/bin/env pwsh
+    $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
+    uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port $port
 
 # Start the Vite frontend dev server (foreground)
 _dev-service-start-ui:
@@ -129,13 +133,15 @@ _dev-service-start-vidaimock:
 # Stop the gateway gracefully
 _dev-service-stop-gateway:
     #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8000" }
+    $port = if ($env:VAULTSPEC_PORT) { $env:VAULTSPEC_PORT } else { "8000" }
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
     if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway stopped." } else { Write-Host "Gateway not running." }
 
 # Stop the worker gracefully
 _dev-service-stop-worker:
     #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8001" }
+    $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
     if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker stopped." } else { Write-Host "Worker not running." }
 
 # Stop the UI dev server
@@ -161,13 +167,15 @@ _dev-service-stop-vidaimock:
 # Force-kill the gateway process
 _dev-service-kill-gateway:
     #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8000" }
+    $port = if ($env:VAULTSPEC_PORT) { $env:VAULTSPEC_PORT } else { "8000" }
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
     if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway killed." } else { Write-Host "Gateway not running." }
 
 # Force-kill the worker process
 _dev-service-kill-worker:
     #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match "8001" }
+    $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
+    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
     if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker killed." } else { Write-Host "Worker not running." }
 
 # Force-kill the UI dev server

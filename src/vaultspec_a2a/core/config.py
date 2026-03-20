@@ -181,7 +181,7 @@ class Settings(BaseSettings):
         description="Bind host for MCP streamable-http transport.",
     )
     mcp_port: int = Field(
-        default=8100,
+        default=8200,
         alias="VAULTSPEC_MCP_PORT",
         description="Bind port for MCP streamable-http transport.",
     )

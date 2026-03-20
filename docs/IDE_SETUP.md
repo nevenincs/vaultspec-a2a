@@ -194,7 +194,7 @@ All variables use the `VAULTSPEC_` prefix and can be set in your shell, a
 | `VAULTSPEC_GATEWAY_URL` | `http://localhost:8000` | Gateway API base URL. |
 | `VAULTSPEC_MCP_AUTO_START_GATEWAY` | `true` | Auto-start gateway + worker as subprocesses on MCP server start. |
 | `VAULTSPEC_MCP_HOST` | `0.0.0.0` | Bind host for `streamable-http` transport (not used in stdio mode). |
-| `VAULTSPEC_MCP_PORT` | `8100` | Bind port for `streamable-http` transport (not used in stdio mode). |
+| `VAULTSPEC_MCP_PORT` | `8200` | Bind port for `streamable-http` transport (not used in stdio mode). |
 
 ### Gateway & Worker
 
@@ -256,10 +256,10 @@ or gateway. Write tools require the full service chain to be healthy.
 For network clients (not IDEs), run the MCP server as a standalone HTTP service:
 
 ```bash
-uv run python -m vaultspec_a2a.protocols.mcp --transport streamable-http --host 127.0.0.1 --port 8100
+uv run python -m vaultspec_a2a.protocols.mcp --transport streamable-http --host 127.0.0.1 --port 8200
 ```text
 
-This starts an HTTP server at `http://127.0.0.1:8100` that accepts MCP
+This starts an HTTP server at `http://127.0.0.1:8200` that accepts MCP
 Streamable HTTP requests.
 
 ---

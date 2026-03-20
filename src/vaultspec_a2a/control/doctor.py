@@ -78,7 +78,7 @@ class _Row:
 _DEFAULT_PORTS: list[tuple[str, int]] = [
     ("gateway", 8000),
     ("worker", 8001),
-    ("mcp", 8100),
+    ("mcp", 8200),
     ("vite-dev", 5173),
     ("vite-preview", 4173),
     ("jaeger-ui", 16686),
@@ -259,15 +259,15 @@ def _check_services(service_filter: str | None = None) -> list[_Row]:
         else:
             rows.append(_Row("worker", "warn", f"status {code} (:{worker_port})"))
 
-    # Jaeger (optional sidecar)
+    # Jaeger (optional sidecar) — probes OTel health extension port 13133
     if _want("jaeger"):
-        code, _ = _http_probe("127.0.0.1", 14269, "/")
+        code, _ = _http_probe("127.0.0.1", 13133, "/status")
         if code is None:
             rows.append(_Row("jaeger", "info", "not running"))
-        elif code in (200, 204):
-            rows.append(_Row("jaeger", "ok", "healthy (:14269)"))
+        elif code == 200:
+            rows.append(_Row("jaeger", "ok", "healthy (:13133)"))
         else:
-            rows.append(_Row("jaeger", "warn", f"status {code} (:14269)"))
+            rows.append(_Row("jaeger", "warn", f"status {code} (:13133)"))
 
     # Postgres (only meaningful when configured)
     if _want("postgres"):

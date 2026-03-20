@@ -10,6 +10,7 @@ __all__ = [
     "_show_config_callback",
 ]
 
+import logging
 from contextlib import contextmanager
 from typing import TYPE_CHECKING
 
@@ -18,6 +19,8 @@ if TYPE_CHECKING:
 
 import click
 import httpx
+
+logger = logging.getLogger(__name__)
 
 _SENSITIVE_SUBSTRINGS = ("key", "token", "secret", "password")
 _MASK_MIN_LEN = 4
@@ -64,14 +67,14 @@ def _handle_response(resp: httpx.Response) -> httpx.Response:
 def _preflight_check(client: httpx.Client) -> None:
     """Probe ``/health`` and warn if the worker is disconnected.
 
-    Phase 7: Non-fatal check — prints a warning to stderr so the user
-    knows supervised workflows (permissions) won't work, but doesn't
-    block read-only commands like ``team status``.
+    Non-fatal check -- prints a warning to stderr so the user knows
+    supervised workflows (permissions) won't work, but doesn't block
+    read-only commands like ``team status``.
     """
     try:
         resp = client.get("/health", timeout=5.0)
         if resp.status_code != 200:
-            return  # gateway returned something unexpected; don't add noise
+            return
         data = resp.json()
         checks = data.get("checks", {})
         worker = checks.get("worker", {})
@@ -79,14 +82,17 @@ def _preflight_check(client: httpx.Client) -> None:
 
         if worker.get("status") == "error":
             click.echo(
-                "WARNING: Worker is not connected — agent dispatch"
-                " and supervised workflows will fail.",
+                "WARNING: Worker is not connected -- agent dispatch"
+                " and supervised workflows will fail.\n"
+                "  Ensure the worker is running: just dev service start worker",
                 err=True,
             )
         if cb.get("status") == "open":
             click.echo(
-                "WARNING: Circuit breaker OPEN — the worker has"
-                " repeated failures. Dispatches are paused.",
+                "WARNING: Circuit breaker is OPEN -- the worker has"
+                " repeated failures. Dispatches are paused.\n"
+                "  Check worker health: just dev service health worker\n"
+                "  Restart the worker:  just dev service restart worker",
                 err=True,
             )
     except Exception:
@@ -98,37 +104,70 @@ def _preflight_check(client: httpx.Client) -> None:
 def _api_client() -> Generator[httpx.Client]:
     """Yield a sync httpx client pointed at the gateway API.
 
-    Catches network-level errors (connect failures, timeouts) and prints
-    a clean message instead of a raw traceback.  Runs a non-fatal pre-flight
-    health check to warn about worker connectivity (Phase 7).
+    Catches network-level errors (connect failures, timeouts, protocol
+    errors) and prints a clean, actionable message instead of a raw
+    traceback. Runs a non-fatal pre-flight health check to warn about
+    worker connectivity.
     """
     from ..core.config import settings
 
-    base_url = f"http://127.0.0.1:{settings.port}/api"
+    port = settings.port
+    base_url = f"http://127.0.0.1:{port}/api"
     try:
         with httpx.Client(base_url=base_url, timeout=30.0) as client:
             _preflight_check(client)
             yield client
-    except (httpx.ConnectError, httpx.ConnectTimeout):
+
+    except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+        logger.debug("Gateway connection failed: %s", exc, exc_info=True)
         click.echo(
-            f"Error: Gateway not running at {base_url}\n"
+            f"Error: Could not connect to the Team Gateway service on port {port}.\n"
             f"\n"
-            f"Start the backend first:\n"
-            f"  just dev service start gateway    (gateway only)\n"
-            f"  just dev service start            (all services)\n",
+            f"The gateway is either not running or not reachable at {base_url}.\n"
+            f"\n"
+            f"To fix this:\n"
+            f"  1. Start the gateway:   just dev service start gateway\n"
+            f"  2. Start all services:  just dev service start\n"
+            f"  3. Check health:        just dev service health\n"
+            f"\n"
+            f"If the gateway is already running on a different port, set:\n"
+            f"  VAULTSPEC_PORT=<port>",
             err=True,
         )
         raise SystemExit(1) from None
-    except httpx.RemoteProtocolError:
+
+    except httpx.RemoteProtocolError as exc:
+        logger.debug("Gateway protocol error on port %s: %s", port, exc, exc_info=True)
         click.echo(
-            f"Error: Port {settings.port} is in use but not responding as a gateway.\n"
-            f"A stale process may be holding the port.\n"
+            f"Error: Port {port} is in use but did not respond as a Team Gateway.\n"
             f"\n"
-            f"Start the backend first:\n"
-            f"  just dev service start gateway\n",
+            f"Something is listening on port {port} but it is not the vaultspec\n"
+            f"gateway service. This is usually caused by a stale process from a\n"
+            f"previous session or another application using the same port.\n"
+            f"\n"
+            f"To fix this:\n"
+            f"  1. Check what is on port {port}:  just dev service health gateway\n"
+            f"  2. Stop stale services:           just dev service kill gateway\n"
+            f"  3. Restart the gateway:           just dev service restart gateway\n"
+            f"\n"
+            f"If another application owns port {port}, use a different port:\n"
+            f"  VAULTSPEC_PORT=9000 just dev service start gateway",
             err=True,
         )
         raise SystemExit(1) from None
-    except httpx.ReadTimeout:
-        click.echo("Request timed out. The backend may be overloaded.", err=True)
+
+    except httpx.ReadTimeout as exc:
+        logger.debug("Gateway read timeout: %s", exc, exc_info=True)
+        click.echo(
+            f"Error: The Team Gateway on port {port} did not respond in time.\n"
+            f"\n"
+            f"The gateway is running but took too long to respond. This can\n"
+            f"happen when the service is overloaded or starting up.\n"
+            f"\n"
+            f"To fix this:\n"
+            f"  1. Check gateway health:  just dev service health gateway\n"
+            f"  2. Wait and retry -- the gateway may still be starting up\n"
+            f"  3. Restart if stuck:      just dev service restart gateway",
+            err=True,
+        )
         raise SystemExit(1) from None

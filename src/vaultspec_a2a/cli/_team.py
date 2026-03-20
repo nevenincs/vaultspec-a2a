@@ -463,7 +463,7 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
             "Error: 'websockets' package is required for the watch command.\n"
             "\n"
             "Install it with:\n"
-            "  uv add websockets\n",
+            "  uv sync\n",
             err=True,
         )
         raise SystemExit(1) from None
@@ -753,15 +753,25 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
                         if rendered is not None:
                             click.echo(rendered)
 
-                # Check for terminal agent states.
+                # Thread-level terminal signal — works for all topologies
+                # (pipeline, star, etc.) regardless of whether a supervisor exists.
+                if event_type == "thread_terminal":
+                    status = evt.get("status", "unknown")
+                    click.echo(f"\nThread {thread_id} {status}.")
+                    disconnected_cleanly = True
+                    break
+
+                # Fallback: supervisor agent_status for star topologies.
+                # node_name is always "supervisor"; agent_id is "vaultspec-supervisor".
                 if event_type == "agent_status":
                     state = evt.get("state", "")
                     if state in terminal_states:
-                        # Check if ALL agents are terminal by fetching status.
-                        # For now, treat the thread-level terminal signal as
-                        # definitive when the supervisor reaches a terminal state.
                         node = evt.get("node_name", "")
-                        if node in ("supervisor", "vaultspec-supervisor"):
+                        agent = evt.get("agent_id", "")
+                        is_supervisor = (
+                            node == "supervisor" or agent == "vaultspec-supervisor"
+                        )
+                        if is_supervisor:
                             click.echo(
                                 f"\nThread {thread_id} reached terminal state: {state}"
                             )

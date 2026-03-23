@@ -10,11 +10,7 @@ if TYPE_CHECKING:
 from .config import Settings, settings
 
 # Lazy imports: deferred to break circular dependencies and reduce cold-start.
-_LAZY_IMPORTS = {
-    # aggregator — LangGraph machinery + websocket (circular dep)
-    "EventAggregator": ".aggregator",
-    "StreamableGraph": ".aggregator",
-}
+_LAZY_IMPORTS: dict[str, str] = {}
 
 # Compatibility redirects: as files move to new top-level packages during the
 # core-layer decomposition, entries are added here so existing ``from ..core
@@ -136,6 +132,15 @@ _REDIRECTS: dict[str, tuple[str, str]] = {
     "create_mark_task_complete_tool": (
         "vaultspec_a2a.graph.tools.task_queue",
         "create_mark_task_complete_tool",
+    ),
+    # Phase 6: streaming/ — aggregator
+    "EventAggregator": (
+        "vaultspec_a2a.streaming.aggregator",
+        "EventAggregator",
+    ),
+    "StreamableGraph": (
+        "vaultspec_a2a.streaming.aggregator",
+        "StreamableGraph",
     ),
 }
 

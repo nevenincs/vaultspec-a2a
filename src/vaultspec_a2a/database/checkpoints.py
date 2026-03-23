@@ -19,7 +19,7 @@ if TYPE_CHECKING:
 
     from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 
-from ..core.config import settings
+from ..control.config import settings
 
 logger = logging.getLogger(__name__)
 

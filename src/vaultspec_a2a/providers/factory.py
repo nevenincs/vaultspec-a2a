@@ -9,9 +9,9 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-from ..core.config import settings
-from ..core.exceptions import ConfigError
-from ..core.team_config import AgentConfig
+from ..control.config import settings
+from ..team.team_config import AgentConfig
+from ..thread.errors import ConfigError
 from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
 

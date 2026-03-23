@@ -48,8 +48,8 @@ from langchain_core.outputs import ChatGenerationChunk, ChatResult
 from langgraph.errors import GraphBubbleUp
 from pydantic import Field, PrivateAttr
 
-from ..core.config import settings
-from ..core.team_config import AgentConfig
+from ..control.config import settings
+from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
 from ._subprocess import kill_process_tree as _kill_process_tree

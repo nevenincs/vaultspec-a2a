@@ -7,7 +7,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from ...core.config import settings
+from ...control.config import settings
 
 __all__ = [
     "DispatchRequest",

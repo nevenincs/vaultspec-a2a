@@ -44,17 +44,17 @@ from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
 from ..control.config import settings
-from ..core import EventAggregator
-from ..core.reconciliation import reconcile_threads_on_startup
 from ..database.checkpoints import open_checkpointer
 from ..database.crud import ThreadStatus, get_thread, list_threads, update_thread_status
 from ..database.migrations import backfill_teamstate_sdd_fields
+from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.session import (
     close_db,
     get_session_factory,
     init_db,
     inspect_sqlite_database,
 )
+from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from .endpoints import router

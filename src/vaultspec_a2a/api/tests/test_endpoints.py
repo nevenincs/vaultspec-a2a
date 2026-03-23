@@ -18,9 +18,9 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from ...core.aggregator import EventAggregator
-from ...core.config import settings
+from ...control.config import settings
 from ...database.crud import record_permission_request
+from ...streaming.aggregator import EventAggregator
 from .conftest import make_app
 
 # ---------------------------------------------------------------------------

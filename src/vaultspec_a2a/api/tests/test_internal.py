@@ -16,8 +16,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from ...core.aggregator import EventAggregator
 from ...database.crud import create_thread, get_thread_execution_state
+from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 from ..websocket import ConnectionManager
 
@@ -644,7 +644,7 @@ class TestWorkerBridgeRetry:
         from fastapi.responses import JSONResponse as _JSONResponse
         from httpx import ASGITransport as _ASGITransport
 
-        from ...core.config import settings
+        from ...control.config import settings
         from ...worker.ipc import WorkerBridge
 
         noop_app = _FastAPI()

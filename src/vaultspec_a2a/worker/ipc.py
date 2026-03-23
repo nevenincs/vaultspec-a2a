@@ -19,7 +19,7 @@ import anyio
 import httpx
 from fastapi.encoders import jsonable_encoder
 
-from ..core.config import settings
+from ..control.config import settings
 
 __all__ = ["WorkerBridge"]
 

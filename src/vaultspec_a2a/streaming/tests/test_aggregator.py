@@ -975,7 +975,7 @@ class TestExports:
         assert "EventAggregator" in agg_module.__all__
 
     def test_facade_reexports(self) -> None:
-        """vaultspec_a2a.core re-exports EventAggregator and it is the same class."""
+        """streaming package re-exports EventAggregator and it is the same class."""
         assert CoreAggregator is EventAggregator
 
 

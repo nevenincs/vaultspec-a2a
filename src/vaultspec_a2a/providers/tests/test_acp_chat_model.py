@@ -17,7 +17,7 @@ import sys
 import pytest
 from langchain_core.messages import HumanMessage
 
-from ...core.config import settings
+from ...control.config import settings
 from ...utils.enums import MODEL_MAP, AcpRequestId, Model, Provider
 from ..acp_chat_model import AcpChatModel, _AcpSessionContext
 from ..acp_exceptions import AcpAuthError

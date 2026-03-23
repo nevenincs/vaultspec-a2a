@@ -11,27 +11,18 @@ import logging
 import os
 import random
 import signal
-
 from datetime import UTC, datetime
 from types import FrameType
 from typing import Any
 
 import uvicorn
-
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi import FastAPI
 from langchain_core.runnables import RunnableConfig
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from vaultspec_a2a.core.config import settings
-from vaultspec_a2a.core.graph import compile_team_graph
-from vaultspec_a2a.core.team_config import (
-    AgentConfigNotFoundError,
-    discover_team_preset_ids,
-    load_agent_config,
-    load_team_config,
-)
+from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.database import run_migrations
 from vaultspec_a2a.database.crud import (
     ThreadStatus,
@@ -39,7 +30,13 @@ from vaultspec_a2a.database.crud import (
     update_thread_status,
 )
 from vaultspec_a2a.database.session import close_db, get_session_factory, init_db
-
+from vaultspec_a2a.graph.compiler import compile_team_graph
+from vaultspec_a2a.team.team_config import (
+    AgentConfigNotFoundError,
+    discover_team_preset_ids,
+    load_agent_config,
+    load_team_config,
+)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -63,7 +60,7 @@ async def health() -> dict[str, Any]:
 shutdown_event = asyncio.Event()
 
 
-def handle_shutdown(sig: int, frame: FrameType | None) -> None:
+def handle_shutdown(_sig: int, _frame: FrameType | None) -> None:
     """Signal handler for graceful stop."""
     logger.info("Shutdown signal received, initiating graceful exit...")
     try:

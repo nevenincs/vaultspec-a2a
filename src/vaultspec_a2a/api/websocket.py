@@ -22,7 +22,7 @@ from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
 from ..control.config import settings
-from ..core import EventAggregator
+from ..streaming.aggregator import EventAggregator
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
 from .schemas.commands import (

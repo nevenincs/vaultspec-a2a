@@ -15,7 +15,7 @@ import asyncio
 import logging
 import sys
 
-from ...core.config import settings
+from ...control.config import settings
 from ...utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...utils.logging import setup_logging
 from ..factory import ProviderFactory

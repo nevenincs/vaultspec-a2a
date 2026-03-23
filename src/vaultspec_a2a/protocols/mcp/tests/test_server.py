@@ -37,9 +37,9 @@ from sqlalchemy.ext.asyncio import (
 )
 
 from ....api.app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
-from ....core.aggregator import EventAggregator
 from ....database.crud import record_permission_request
 from ....database.models import Base
+from ....streaming.aggregator import EventAggregator
 from ..server import (
     _reset_client,
     _reset_known_presets,

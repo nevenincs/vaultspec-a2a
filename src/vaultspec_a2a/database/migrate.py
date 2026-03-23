@@ -15,7 +15,7 @@ from pathlib import Path
 from alembic import command
 from alembic.config import Config
 
-from ..core.config import settings
+from ..control.config import settings
 
 __all__ = ["run_migrations"]
 

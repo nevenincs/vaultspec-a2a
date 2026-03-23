@@ -22,8 +22,8 @@ from langchain_core.messages import (
 from langchain_core.outputs import ChatGeneration, ChatGenerationChunk, ChatResult
 from pydantic import Field, PrivateAttr
 
-from ..core.config import settings
-from ..core.team_config import AgentConfig
+from ..control.config import settings
+from ..team.team_config import AgentConfig
 
 logger = logging.getLogger(__name__)
 

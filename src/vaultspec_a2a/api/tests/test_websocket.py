@@ -12,8 +12,8 @@ from starlette.routing import WebSocketRoute
 from starlette.testclient import TestClient
 from starlette.websockets import WebSocket
 
-from ...core.aggregator import EventAggregator
-from ...core.config import settings
+from ...control.config import settings
+from ...streaming.aggregator import EventAggregator
 from .. import websocket as websocket_module
 from ..schemas.enums import AgentControlAction, AgentLifecycleState, ServerEventType
 from ..websocket import ConnectionManager, WebSocketCommandRejectedError

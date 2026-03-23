@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from ...core.config import settings
+from ...control.config import settings
 from ..gemini_auth import (
     _default_creds_path,
     _is_expired,

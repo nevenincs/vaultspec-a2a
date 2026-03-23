@@ -19,8 +19,8 @@ import logging
 import shutil
 import sys
 
-from ...core.config import settings
-from ...core.exceptions import ConfigError
+from ...control.config import settings
+from ...thread.errors import ConfigError
 from ...utils.logging import setup_logging
 from ..factory import _build_acp_command
 from ._protocol import ProbeResult, run_probe

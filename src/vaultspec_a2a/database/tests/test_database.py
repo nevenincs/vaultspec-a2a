@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import (
 from starlette.datastructures import State
 from starlette.requests import Request
 
-from ...core.exceptions import NicknameConflictError
+from ...thread.errors import NicknameConflictError
 from .. import session as _session_module
 from ..crud import (
     ApprovalStatus,

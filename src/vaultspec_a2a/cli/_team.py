@@ -475,7 +475,7 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
 
     import httpx
 
-    from ..core.config import settings
+    from ..control.config import settings
 
     base_url = f"http://127.0.0.1:{settings.port}"
     api_url = f"{base_url}/api"

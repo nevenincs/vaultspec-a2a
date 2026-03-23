@@ -1,8 +1,0 @@
-matcher: ^/mock-coder-fail-tool/v1/chat/completions$
-name: mock-coder-fail-tool
-priority: 100
-request_mapping:
-  model: mock-coder-fail-tool
-response_body: '{%- set n = json.messages | length -%}{%- if n <= 1 -%}{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"I''ll try to run a command that I expect to fail."}],"tool_calls":[{"id":"call_fail","type":"function","function":{"name":"run_command","arguments":"{\"CommandLine\": \"exit 1\", \"Cwd\": \"/app\", \"SafeToAutoRun\": true}"}}]}}]}{%- else -%}{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"The command failed as expected. Investigation complete."}]}}]}{%- endif -%}'
-stream:
-  enabled: false

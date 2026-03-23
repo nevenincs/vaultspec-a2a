@@ -42,8 +42,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.config import settings
-from ..core import EventAggregator
-from ..core.aggregator import classify_tool_kind
 from ..database.checkpoints import Checkpointer
 from ..database.crud import (
     ApprovalStatus,
@@ -68,6 +66,7 @@ from ..database.crud import (
 )
 from ..database.session import get_db
 from ..graph.compiler import build_initial_vault_index
+from ..streaming.aggregator import EventAggregator, classify_tool_kind
 from ..team.team_config import discover_team_preset_ids, load_team_config
 from ..thread.errors import (
     ConfigError,

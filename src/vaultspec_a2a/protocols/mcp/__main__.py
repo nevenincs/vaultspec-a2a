@@ -17,7 +17,7 @@ Environment variables:
 import argparse
 import asyncio
 
-from ...core.config import settings
+from ...control.config import settings
 from .server import mcp
 
 

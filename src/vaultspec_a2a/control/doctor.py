@@ -91,7 +91,7 @@ def _check_ports() -> list[_Row]:
     rows: list[_Row] = []
 
     try:
-        from ..core.config import settings
+        from ..control.config import settings
 
         configured: list[tuple[str, int]] = [
             ("gateway", settings.port),
@@ -135,7 +135,7 @@ def _check_config() -> list[_Row]:
     rows: list[_Row] = []
 
     try:
-        from ..core.config import settings
+        from ..control.config import settings
     except Exception as exc:
         rows.append(_Row("config", "fail", f"settings load failed: {exc}"))
         return rows
@@ -226,7 +226,7 @@ def _check_services(service_filter: str | None = None) -> list[_Row]:
     rows: list[_Row] = []
 
     try:
-        from ..core.config import settings
+        from ..control.config import settings
 
         gateway_port = settings.port
         worker_port = settings.worker_port
@@ -278,7 +278,7 @@ def _check_services(service_filter: str | None = None) -> list[_Row]:
                 if importlib.util.find_spec("psycopg") is not None:
                     import psycopg
 
-                    from ..core.config import settings as s
+                    from ..control.config import settings as s
 
                     conn_str = s.checkpoint_connection_string
                     with psycopg.connect(conn_str, connect_timeout=2):

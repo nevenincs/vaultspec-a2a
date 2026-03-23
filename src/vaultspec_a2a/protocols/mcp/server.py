@@ -36,7 +36,7 @@ from mcp.server.fastmcp import FastMCP
 from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from ...core.config import settings
+from ...control.config import settings
 
 __all__ = ["mcp"]
 

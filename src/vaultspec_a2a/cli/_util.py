@@ -43,7 +43,7 @@ def _show_config_callback(
 ) -> None:
     if not value or ctx.resilient_parsing:
         return
-    from ..core.config import settings
+    from ..control.config import settings
 
     for name in settings.model_fields:
         click.echo(f"{name}={_mask(name, getattr(settings, name))}")
@@ -109,7 +109,7 @@ def _api_client() -> Generator[httpx.Client]:
     traceback. Runs a non-fatal pre-flight health check to warn about
     worker connectivity.
     """
-    from ..core.config import settings
+    from ..control.config import settings
 
     port = settings.port
     base_url = f"http://127.0.0.1:{port}/api"

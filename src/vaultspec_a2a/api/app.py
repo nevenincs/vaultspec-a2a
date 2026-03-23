@@ -44,7 +44,6 @@ from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
 from ..core import EventAggregator, settings
-from ..core.asyncio_compat import configure_asyncio_runtime
 from ..core.reconciliation import reconcile_threads_on_startup
 from ..database.checkpoints import open_checkpointer
 from ..database.crud import ThreadStatus, get_thread, list_threads, update_thread_status
@@ -56,6 +55,7 @@ from ..database.session import (
     inspect_sqlite_database,
 )
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..utils.asyncio_compat import configure_asyncio_runtime
 from .endpoints import router
 from .internal import internal_router
 from .schemas.enums import AgentControlAction

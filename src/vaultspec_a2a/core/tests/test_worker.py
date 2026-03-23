@@ -1,7 +1,8 @@
 from langgraph.errors import GraphBubbleUp, GraphInterrupt
 from langgraph.types import Interrupt
 
-from ..exceptions import WorkerExecutionError
+from vaultspec_a2a.thread.errors import WorkerExecutionError
+
 from ..nodes.worker import _wrap_worker_exception
 
 # ---------------------------------------------------------------------------

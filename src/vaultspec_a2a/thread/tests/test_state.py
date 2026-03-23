@@ -144,7 +144,7 @@ class TestStateJsonRoundTrip:
         }
 
     def test_round_trip_json(self, sample_state: dict) -> None:
-        """All non-message fields must survive JSON encode → decode."""
+        """All non-message fields must survive JSON encode -> decode."""
         encoded = json.dumps(sample_state)
         decoded = json.loads(encoded)
         assert decoded == sample_state

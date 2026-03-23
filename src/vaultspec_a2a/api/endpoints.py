@@ -40,10 +40,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..core import (
-    ConfigError,
     EventAggregator,
-    NicknameConflictError,
-    TeamConfigNotFoundError,
     ThreadMetadata,
     build_context_preamble,
     build_initial_vault_index,
@@ -77,6 +74,11 @@ from ..database.crud import (
     update_thread_status,
 )
 from ..database.session import get_db
+from ..thread.errors import (
+    ConfigError,
+    NicknameConflictError,
+    TeamConfigNotFoundError,
+)
 from .projection import (
     apply_checkpoint_projection,
     enrich_snapshot_from_durable_state,

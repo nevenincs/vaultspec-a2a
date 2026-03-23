@@ -10,12 +10,13 @@ from langchain_core.messages import BaseMessage, SystemMessage
 from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import interrupt
 
+from vaultspec_a2a.thread.state import TeamState
+
 from ..anchoring import build_anchoring_context
 from ..config import settings
 from ..context import compact_context, should_compact
 from ..phase import infer_phase_from_vault_index
 from ..rules import RuleManager
-from ..state import TeamState
 
 _logger = logging.getLogger(__name__)
 

@@ -15,7 +15,8 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
 
-from ..exceptions import ConfigError
+from vaultspec_a2a.thread.errors import ConfigError
+
 from ..graph import compile_team_graph
 from ..team_config import (
     TopologyConfig,
@@ -390,7 +391,8 @@ def test_worker_retry_on_timeout_wrapped_in_worker_error_is_retried() -> None:
     T05: Pregel passes WorkerExecutionError to the predicate. We inspect
     __cause__ to evaluate the original failure — TimeoutError is transient.
     """
-    from ..exceptions import WorkerExecutionError
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
     from ..graph import _worker_retry_on
 
     cause = TimeoutError("connection timed out")
@@ -410,7 +412,8 @@ def test_worker_retry_on_connection_error_is_retried() -> None:
 
 def test_worker_retry_on_connection_error_wrapped_in_worker_error_is_retried() -> None:
     """WorkerExecutionError wrapping ConnectionError is retried via __cause__."""
-    from ..exceptions import WorkerExecutionError
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
     from ..graph import _worker_retry_on
 
     cause = ConnectionError("refused")
@@ -430,7 +433,8 @@ def test_worker_retry_on_runtime_error_not_retried() -> None:
 
 def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
     """WorkerExecutionError wrapping RuntimeError is not retried."""
-    from ..exceptions import WorkerExecutionError
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
     from ..graph import _worker_retry_on
 
     cause = RuntimeError("deterministic failure")

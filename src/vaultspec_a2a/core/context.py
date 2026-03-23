@@ -9,8 +9,9 @@ from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
+from vaultspec_a2a.thread.state import TeamState
+
 from .config import settings
-from .state import TeamState
 
 __all__ = [
     "compact_context",

@@ -5,13 +5,14 @@ import json
 import pytest
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+from vaultspec_a2a.thread.state import TeamState
+
 from ..context import (
     compact_context,
     estimate_tokens,
     prepare_handoff,
     should_compact,
 )
-from ..state import TeamState
 
 # ---------------------------------------------------------------------------
 # Token estimation

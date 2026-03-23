@@ -10,8 +10,9 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage
 
+from vaultspec_a2a.thread.state import TeamState
+
 from ....providers.acp_chat_model import AcpChatModel
-from ...state import TeamState
 from ..worker import create_worker_node
 
 SIMULATOR_PATH = Path(__file__).parent.parent.parent / "tests" / "acp_simulator.py"

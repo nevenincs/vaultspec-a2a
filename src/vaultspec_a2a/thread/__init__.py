@@ -1,72 +1,81 @@
-"""Compatibility shim — re-exports from vaultspec_a2a.thread.errors.
+"""Thread-level domain types: state, models, and errors.
 
-This module exists solely so that ``from ..core.exceptions import X``
-continues to work during the core-layer decomposition.  It will be
-removed in Phase 7 when all consumers are updated to import from
-``vaultspec_a2a.thread.errors`` directly.
+This is a Layer 1 leaf module with zero internal dependencies beyond
+standard-library and LangGraph/LangChain framework types.
 """
 
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     AgentConfigNotFoundError as AgentConfigNotFoundError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     AgentProcessError as AgentProcessError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     ConfigError as ConfigError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     ContextOverflowError as ContextOverflowError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     DatabaseError as DatabaseError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     ErrorSeverity as ErrorSeverity,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     EventAggregatorError as EventAggregatorError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     GitWorkspaceError as GitWorkspaceError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     MergeConflictError as MergeConflictError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     NicknameConflictError as NicknameConflictError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     PermissionDeniedError as PermissionDeniedError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     ProtocolError as ProtocolError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     ProviderSessionError as ProviderSessionError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     RecoveryAction as RecoveryAction,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     TeamConfigNotFoundError as TeamConfigNotFoundError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     TokenBudgetExceededError as TokenBudgetExceededError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     VaultspecError as VaultspecError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     WorkerExecutionError as WorkerExecutionError,
 )
-from vaultspec_a2a.thread.errors import (
+from .errors import (
     WorkspaceError as WorkspaceError,
 )
+from .models import (
+    ArtifactRef as ArtifactRef,
+)
+from .models import (
+    PlanStep as PlanStep,
+)
+from .models import (
+    TokenUsageEntry as TokenUsageEntry,
+)
+from .state import TeamState as TeamState
 
 __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
+    "ArtifactRef",
     "ConfigError",
     "ContextOverflowError",
     "DatabaseError",
@@ -76,11 +85,14 @@ __all__ = [
     "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
+    "PlanStep",
     "ProtocolError",
     "ProviderSessionError",
     "RecoveryAction",
     "TeamConfigNotFoundError",
+    "TeamState",
     "TokenBudgetExceededError",
+    "TokenUsageEntry",
     "VaultspecError",
     "WorkerExecutionError",
     "WorkspaceError",

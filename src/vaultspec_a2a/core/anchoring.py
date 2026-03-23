@@ -12,7 +12,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from .state import TeamState
+    from vaultspec_a2a.thread.state import TeamState
 
 from .config import settings
 

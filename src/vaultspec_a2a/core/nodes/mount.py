@@ -13,7 +13,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-    from ..state import TeamState
+    from vaultspec_a2a.thread.state import TeamState
 
 from ..task_queue import _filter_queue_content
 

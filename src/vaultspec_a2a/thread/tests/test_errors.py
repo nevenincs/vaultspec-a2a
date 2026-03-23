@@ -2,7 +2,6 @@
 
 import pytest
 
-# All other exception types are imported from the core facade to test re-exports
 from .. import (
     AgentProcessError,
     ConfigError,
@@ -13,6 +12,7 @@ from .. import (
     MergeConflictError,
     PermissionDeniedError,
     ProtocolError,
+    ProviderSessionError,
     RecoveryAction,
     TokenBudgetExceededError,
     VaultspecError,
@@ -20,10 +20,10 @@ from .. import (
 )
 
 # Module object used for __all__ introspection
-from .. import exceptions as _exceptions_module
+from .. import errors as _errors_module
 
-# GitWorkspaceError lives in exceptions but is NOT re-exported by the core facade
-from ..exceptions import GitWorkspaceError
+# GitWorkspaceError lives in errors but is NOT re-exported by the thread facade
+from ..errors import GitWorkspaceError
 
 # ---------------------------------------------------------------------------
 # ErrorSeverity enum
@@ -104,6 +104,7 @@ class TestInheritanceHierarchy:
             PermissionDeniedError,
             TokenBudgetExceededError,
             ContextOverflowError,
+            ProviderSessionError,
         ],
     )
     def test_direct_subclasses_of_vaultspec_error(
@@ -136,6 +137,11 @@ _EXPECTED_DEFAULTS: list[tuple[type[VaultspecError], ErrorSeverity, RecoveryActi
         RecoveryAction.RETRY_WITH_BACKOFF,
     ),
     (ProtocolError, ErrorSeverity.PERMANENT, RecoveryAction.ABORT),
+    (
+        ProviderSessionError,
+        ErrorSeverity.TRANSIENT,
+        RecoveryAction.RETRY_WITH_BACKOFF,
+    ),
     (EventAggregatorError, ErrorSeverity.TRANSIENT, RecoveryAction.RETRY),
     (
         DatabaseError,
@@ -282,6 +288,11 @@ class TestCatchability:
         assert err.recovery_action is RecoveryAction.ESCALATE_TO_USER
         assert str(err) == "not allowed"
 
+    def test_provider_session_error_catchable(self) -> None:
+        """ProviderSessionError is catchable as VaultspecError."""
+        with pytest.raises(VaultspecError):
+            raise ProviderSessionError("session died")
+
 
 # ---------------------------------------------------------------------------
 # __all__ exports
@@ -289,11 +300,11 @@ class TestCatchability:
 
 
 class TestAllExports:
-    """Tests for the public API surface of the exceptions module."""
+    """Tests for the public API surface of the errors module."""
 
     def test_all_defined(self) -> None:
-        """The exceptions module exposes __all__."""
-        assert hasattr(_exceptions_module, "__all__")
+        """The errors module exposes __all__."""
+        assert hasattr(_errors_module, "__all__")
 
     def test_all_contains_every_public_name(self) -> None:
         """__all__ matches the expected set of public names."""
@@ -310,6 +321,7 @@ class TestAllExports:
             "NicknameConflictError",
             "PermissionDeniedError",
             "ProtocolError",
+            "ProviderSessionError",
             "RecoveryAction",
             "TeamConfigNotFoundError",
             "TokenBudgetExceededError",
@@ -317,20 +329,21 @@ class TestAllExports:
             "WorkerExecutionError",
             "WorkspaceError",
         }
-        assert set(_exceptions_module.__all__) == expected
+        assert set(_errors_module.__all__) == expected
 
     def test_facade_reexports_are_same_objects(self) -> None:
-        """Facade re-exports are identity-equal to exceptions module objects.
+        """Facade re-exports are identity-equal to errors module objects.
 
-        The module-level imports from ``..`` (the core facade) must refer to
-        the exact same class objects as ``..exceptions``.  ``is`` proves
+        The module-level imports from ``..`` (the thread facade) must refer to
+        the exact same class objects as ``..errors``.  ``is`` proves
         they are not accidental copies or shadowed names.
         """
-        assert ContextOverflowError is _exceptions_module.ContextOverflowError
-        assert DatabaseError is _exceptions_module.DatabaseError
-        assert ErrorSeverity is _exceptions_module.ErrorSeverity
-        assert EventAggregatorError is _exceptions_module.EventAggregatorError
-        assert MergeConflictError is _exceptions_module.MergeConflictError
-        assert PermissionDeniedError is _exceptions_module.PermissionDeniedError
-        assert RecoveryAction is _exceptions_module.RecoveryAction
-        assert TokenBudgetExceededError is _exceptions_module.TokenBudgetExceededError
+        assert ContextOverflowError is _errors_module.ContextOverflowError
+        assert DatabaseError is _errors_module.DatabaseError
+        assert ErrorSeverity is _errors_module.ErrorSeverity
+        assert EventAggregatorError is _errors_module.EventAggregatorError
+        assert MergeConflictError is _errors_module.MergeConflictError
+        assert PermissionDeniedError is _errors_module.PermissionDeniedError
+        assert RecoveryAction is _errors_module.RecoveryAction
+        assert TokenBudgetExceededError is _errors_module.TokenBudgetExceededError
+        assert ProviderSessionError is _errors_module.ProviderSessionError

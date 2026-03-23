@@ -8,6 +8,8 @@ import pytest
 from langchain_core.messages import AIMessageChunk
 from langgraph.errors import GraphInterrupt
 
+from vaultspec_a2a.thread.errors import EventAggregatorError
+
 from ...api.schemas.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -29,7 +31,6 @@ from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
 from ..aggregator import EventAggregator
 from ..config import settings
-from ..exceptions import EventAggregatorError
 
 # ---------------------------------------------------------------------------
 # Fixtures

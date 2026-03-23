@@ -22,6 +22,8 @@ from uuid import uuid4
 
 from langgraph.types import Command
 
+from vaultspec_a2a.thread.errors import EventAggregatorError
+
 from ..api.schemas.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -49,7 +51,6 @@ from ..api.schemas.events import (
 )
 from ..telemetry.instrumentation import get_meter, get_tracer
 from .config import settings
-from .exceptions import EventAggregatorError
 
 # M6: import GraphInterrupt for isinstance check vs string comparison.
 try:

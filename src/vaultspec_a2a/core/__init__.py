@@ -15,30 +15,9 @@ if TYPE_CHECKING:
     from .nodes.supervisor import create_supervisor_node as create_supervisor_node
     from .nodes.worker import create_worker_node as create_worker_node
     from .preamble import build_context_preamble as build_context_preamble
-    from .state import TeamState as TeamState
 
 from .anchoring import build_anchoring_context as build_anchoring_context
 from .config import Settings, settings
-from .exceptions import (
-    AgentConfigNotFoundError,
-    AgentProcessError,
-    ConfigError,
-    ContextOverflowError,
-    DatabaseError,
-    ErrorSeverity,
-    EventAggregatorError,
-    GitWorkspaceError,
-    MergeConflictError,
-    NicknameConflictError,
-    PermissionDeniedError,
-    ProtocolError,
-    RecoveryAction,
-    TeamConfigNotFoundError,
-    TokenBudgetExceededError,
-    VaultspecError,
-    WorkerExecutionError,
-    WorkspaceError,
-)
 from .metadata import (
     ContextRef as ContextRef,
 )
@@ -50,15 +29,6 @@ from .metadata import (
 )
 from .metadata import (
     generate_nickname as generate_nickname,
-)
-from .models import (
-    ArtifactRef as ArtifactRef,
-)
-from .models import (
-    PlanStep as PlanStep,
-)
-from .models import (
-    TokenUsageEntry as TokenUsageEntry,
 )
 from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
 from .task_queue import create_mark_task_complete_tool as create_mark_task_complete_tool
@@ -143,12 +113,60 @@ _LAZY_IMPORTS = {
     "create_worker_node": ".nodes.worker",
     # preamble — langchain_core.messages
     "build_context_preamble": ".preamble",
-    # state — langchain_core.messages + langgraph.graph.message
-    "TeamState": ".state",
+}
+
+# Compatibility redirects: as files move to new top-level packages during the
+# core-layer decomposition, entries are added here so existing ``from ..core
+# import X`` statements continue to resolve.  Format:
+#   "SymbolName": ("new.absolute.module.path", "SymbolName")
+# Populated incrementally during Phases 1-6; removed in Phase 7 cleanup.
+_REDIRECTS: dict[str, tuple[str, str]] = {
+    # Phase 1: thread/ — exceptions
+    "AgentConfigNotFoundError": (
+        "vaultspec_a2a.thread.errors",
+        "AgentConfigNotFoundError",
+    ),
+    "AgentProcessError": ("vaultspec_a2a.thread.errors", "AgentProcessError"),
+    "ConfigError": ("vaultspec_a2a.thread.errors", "ConfigError"),
+    "ContextOverflowError": ("vaultspec_a2a.thread.errors", "ContextOverflowError"),
+    "DatabaseError": ("vaultspec_a2a.thread.errors", "DatabaseError"),
+    "ErrorSeverity": ("vaultspec_a2a.thread.errors", "ErrorSeverity"),
+    "EventAggregatorError": ("vaultspec_a2a.thread.errors", "EventAggregatorError"),
+    "GitWorkspaceError": ("vaultspec_a2a.thread.errors", "GitWorkspaceError"),
+    "MergeConflictError": ("vaultspec_a2a.thread.errors", "MergeConflictError"),
+    "NicknameConflictError": ("vaultspec_a2a.thread.errors", "NicknameConflictError"),
+    "PermissionDeniedError": ("vaultspec_a2a.thread.errors", "PermissionDeniedError"),
+    "ProtocolError": ("vaultspec_a2a.thread.errors", "ProtocolError"),
+    "RecoveryAction": ("vaultspec_a2a.thread.errors", "RecoveryAction"),
+    "TeamConfigNotFoundError": (
+        "vaultspec_a2a.thread.errors",
+        "TeamConfigNotFoundError",
+    ),
+    "TokenBudgetExceededError": (
+        "vaultspec_a2a.thread.errors",
+        "TokenBudgetExceededError",
+    ),
+    "VaultspecError": ("vaultspec_a2a.thread.errors", "VaultspecError"),
+    "WorkerExecutionError": ("vaultspec_a2a.thread.errors", "WorkerExecutionError"),
+    "WorkspaceError": ("vaultspec_a2a.thread.errors", "WorkspaceError"),
+    # Phase 1: thread/ — state
+    "TeamState": ("vaultspec_a2a.thread.state", "TeamState"),
+    # Phase 1: thread/ — models
+    "ArtifactRef": ("vaultspec_a2a.thread.models", "ArtifactRef"),
+    "PlanStep": ("vaultspec_a2a.thread.models", "PlanStep"),
+    "TokenUsageEntry": ("vaultspec_a2a.thread.models", "TokenUsageEntry"),
+    # Phase 2: domain_config + control/config
+    "DomainConfig": ("vaultspec_a2a.domain_config", "DomainConfig"),
 }
 
 
 def __getattr__(name: str) -> object:
+    if name in _REDIRECTS:
+        module_path, attr = _REDIRECTS[name]
+        mod = importlib.import_module(module_path)
+        value = getattr(mod, attr)
+        globals()[name] = value
+        return value
     if name in _LAZY_IMPORTS:
         module = importlib.import_module(_LAZY_IMPORTS[name], __name__)
         value = getattr(module, name)

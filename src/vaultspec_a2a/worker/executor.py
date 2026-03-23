@@ -28,16 +28,15 @@ from ..api.schemas.internal import (
 )
 from ..core import (
     AgentConfig,
-    AgentConfigNotFoundError,
     EventAggregator,
     StreamableGraph,
-    TeamConfigNotFoundError,
     compile_team_graph,
     load_agent_config,
     load_team_config,
     settings,
 )
 from ..telemetry import ws_span
+from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph

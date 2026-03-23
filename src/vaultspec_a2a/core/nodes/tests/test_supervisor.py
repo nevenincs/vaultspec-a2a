@@ -4,7 +4,8 @@ from pathlib import Path
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
-from ...state import TeamState
+from vaultspec_a2a.thread.state import TeamState
+
 from ..supervisor import _build_supervisor_messages, _evaluate_supervisor_response
 
 

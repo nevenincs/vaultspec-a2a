@@ -4,8 +4,9 @@ from pathlib import Path
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from vaultspec_a2a.thread.state import TeamState
+
 from ..nodes.supervisor import _build_supervisor_messages, _evaluate_supervisor_response
-from ..state import TeamState
 
 
 def _make_state() -> TeamState:

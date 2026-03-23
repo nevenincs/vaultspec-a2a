@@ -1,15 +1,10 @@
-"""Asyncio compatibility helpers for backend-specific runtime constraints."""
+"""Compatibility shim — re-exports from vaultspec_a2a.utils.asyncio_compat.
 
-from __future__ import annotations
+Removed in Phase 7.
+"""
+
+from vaultspec_a2a.utils.asyncio_compat import (
+    configure_asyncio_runtime as configure_asyncio_runtime,
+)
 
 __all__ = ["configure_asyncio_runtime"]
-
-
-def configure_asyncio_runtime() -> None:
-    """Keep the default runtime loop policy.
-
-    Windows subprocess support requires the default Proactor event loop. The
-    Postgres checkpointer's selector-only requirements are isolated behind the
-    checkpointer factory instead of changing the loop policy for the whole
-    gateway/worker process.
-    """

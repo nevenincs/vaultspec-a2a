@@ -7,8 +7,9 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 from langchain_openai import ChatOpenAI
 from pydantic import SecretStr
 
+from vaultspec_a2a.thread.state import TeamState
+
 from ....providers.acp_chat_model import AcpChatModel
-from ...state import TeamState
 from ..worker import (
     _build_worker_messages,
     _finalize_worker_response,

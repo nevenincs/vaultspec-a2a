@@ -6,33 +6,14 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .aggregator import EventAggregator as EventAggregator
     from .aggregator import StreamableGraph as StreamableGraph
-    from .graph import build_initial_vault_index as build_initial_vault_index
-    from .graph import compile_team_graph as compile_team_graph
-    from .nodes.supervisor import create_supervisor_node as create_supervisor_node
-    from .nodes.worker import create_worker_node as create_worker_node
 
 from .config import Settings, settings
-from .task_queue import create_mark_task_complete_tool as create_mark_task_complete_tool
 
-# Lazy imports for two reasons:
-# 1. Break circular dependencies:
-#    - core.aggregator <-> api.websocket
-#    - core.graph -> providers.factory -> acp_chat_model -> team_config -> core.__init__
-# 2. CFG-J06: Defer heavy LangGraph/LangChain imports until first use to
-#    reduce gateway/MCP cold-start time.  TeamState, create_supervisor_node,
-#    and create_worker_node each pull in langgraph.graph machinery.
-#    context.py and preamble.py import langchain_core.messages (+ state.py
-#    which imports langgraph.graph.message), so they are also lazy.
+# Lazy imports: deferred to break circular dependencies and reduce cold-start.
 _LAZY_IMPORTS = {
     # aggregator — LangGraph machinery + websocket (circular dep)
     "EventAggregator": ".aggregator",
     "StreamableGraph": ".aggregator",
-    # graph — full LangGraph compilation (circular dep)
-    "build_initial_vault_index": ".graph",
-    "compile_team_graph": ".graph",
-    # nodes — LangGraph node factories (circular dep)
-    "create_supervisor_node": ".nodes.supervisor",
-    "create_worker_node": ".nodes.worker",
 }
 
 # Compatibility redirects: as files move to new top-level packages during the
@@ -139,6 +120,23 @@ _REDIRECTS: dict[str, tuple[str, str]] = {
     ),
     "load_agent_config": ("vaultspec_a2a.team.team_config", "load_agent_config"),
     "load_team_config": ("vaultspec_a2a.team.team_config", "load_team_config"),
+    # Phase 5: graph/ — compiler
+    "build_initial_vault_index": (
+        "vaultspec_a2a.graph.compiler",
+        "build_initial_vault_index",
+    ),
+    "compile_team_graph": ("vaultspec_a2a.graph.compiler", "compile_team_graph"),
+    # Phase 5: graph/ — nodes
+    "create_supervisor_node": (
+        "vaultspec_a2a.graph.nodes.supervisor",
+        "create_supervisor_node",
+    ),
+    "create_worker_node": ("vaultspec_a2a.graph.nodes.worker", "create_worker_node"),
+    # Phase 5: graph/ — tools
+    "create_mark_task_complete_tool": (
+        "vaultspec_a2a.graph.tools.task_queue",
+        "create_mark_task_complete_tool",
+    ),
 }
 
 

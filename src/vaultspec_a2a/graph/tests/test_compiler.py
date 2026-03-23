@@ -1,0 +1,572 @@
+"""Tests for the team graph compilation and execution."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import pytest
+import pytest_asyncio
+from langchain_core.messages import HumanMessage
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+
+if TYPE_CHECKING:
+    from collections.abc import AsyncGenerator
+
+    from langchain_core.runnables import RunnableConfig
+
+from vaultspec_a2a.team.team_config import (
+    TopologyConfig,
+    TopologyType,
+    WorkerRef,
+    load_agent_config,
+    load_team_config,
+)
+from vaultspec_a2a.thread.errors import ConfigError
+
+from ..compiler import (
+    _build_supervisor_prompt,
+    _resolve_worker_model_preferences,
+    _worker_retry_on,
+    compile_team_graph,
+)
+
+
+@pytest_asyncio.fixture
+async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
+    """Provide an in-memory SQLite checkpointer for tests."""
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
+        await saver.setup()
+        yield saver
+
+
+# ---------------------------------------------------------------------------
+# Parametrized compilation (C7 rewrite)
+# ---------------------------------------------------------------------------
+
+# (preset, topology, expected_worker_nodes, has_supervisor)
+_PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
+    (
+        "vaultspec-adaptive-coder",
+        "star",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        True,
+    ),
+    (
+        "vaultspec-structured-coder",
+        "pipeline",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        False,
+    ),
+    (
+        "vaultspec-iterative-coder",
+        "pipeline_loop",
+        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
+        False,
+    ),
+    ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
+]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("preset", "topology", "expected_workers", "has_supervisor"),
+    _PRESET_CASES,
+    ids=[c[0] for c in _PRESET_CASES],
+)
+async def test_compile_graph_structure(
+    checkpointer: AsyncSqliteSaver,
+    preset: str,
+    topology: str,
+    expected_workers: set[str],
+    has_supervisor: bool,
+) -> None:
+    """Compiled graph has the correct node set and empty interrupt_before."""
+    team = load_team_config(preset)
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    supervisor_cfg = (
+        load_agent_config("vaultspec-supervisor") if has_supervisor else None
+    )
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+    )
+
+    assert team.topology.type == topology
+
+    node_keys = {k for k in graph.nodes if not k.startswith("__")}
+    assert expected_workers <= node_keys
+
+    if has_supervisor:
+        assert "supervisor" in node_keys
+    else:
+        assert "supervisor" not in node_keys
+
+    assert list(graph.interrupt_before_nodes) == []
+
+
+# ---------------------------------------------------------------------------
+# workspace_root kwarg (ADR-014)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compile_team_graph_accepts_workspace_root(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """compile_team_graph accepts workspace_root and produces a valid graph."""
+    team = load_team_config("vaultspec-adaptive-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    supervisor_cfg = load_agent_config("vaultspec-supervisor")
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+        workspace_root=Path("Y:/code/test-workspace"),
+    )
+
+    node_keys = {k for k in graph.nodes if not k.startswith("__")}
+    assert {
+        "vaultspec-planner",
+        "vaultspec-coder",
+        "vaultspec-reviewer",
+        "supervisor",
+        "mount_vaultspec-planner",
+        "mount_vaultspec-coder",
+        "mount_vaultspec-reviewer",
+    } == node_keys
+
+
+# ---------------------------------------------------------------------------
+# Autonomous vs. supervised mode
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "autonomous",
+    [False, True],
+    ids=["supervised", "autonomous"],
+)
+async def test_compile_interrupt_before_always_empty(
+    checkpointer: AsyncSqliteSaver,
+    autonomous: bool,
+) -> None:
+    """interrupt_before is [] in both supervised and autonomous modes."""
+    team = load_team_config("vaultspec-structured-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        autonomous=autonomous,
+    )
+
+    assert list(graph.interrupt_before_nodes) == []
+    node_keys = {k for k in graph.nodes if not k.startswith("__")}
+    worker_ids = {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"}
+    mount_ids = {f"mount_{wid}" for wid in worker_ids}
+    assert worker_ids | mount_ids == node_keys
+
+
+# ---------------------------------------------------------------------------
+# Invalid topology
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compile_unknown_topology_raises(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """An unknown topology type raises ValueError."""
+    team = load_team_config("vaultspec-structured-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+
+    bad_topology = team.topology.model_copy(update={"type": "unknown_topology"})
+    bad_team = team.model_copy(update={"topology": bad_topology})
+    with pytest.raises(ValueError, match="Unknown topology type"):
+        compile_team_graph(
+            team_config=bad_team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline-loop specific tests
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_compile_pipeline_loop_structure(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """vaultspec-iterative-coder (pipeline_loop) produces correct node set."""
+    team = load_team_config("vaultspec-iterative-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+    )
+
+    node_keys = {k for k in graph.nodes if not k.startswith("__")}
+    assert "supervisor" not in node_keys
+    assert {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"} <= node_keys
+    assert list(graph.interrupt_before_nodes) == []
+
+
+@pytest.mark.asyncio
+async def test_compile_pipeline_loop_single_agent_raises(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """pipeline_loop with only the loop_node raises ConfigError."""
+    team = load_team_config("vaultspec-iterative-coder")
+    bad_topology = TopologyConfig(
+        type=TopologyType.PIPELINE_LOOP,
+        order=["vaultspec-reviewer"],
+        loop_node="vaultspec-reviewer",
+        max_loops=3,
+    )
+    reviewer_ref = WorkerRef(agent_id="vaultspec-reviewer")
+    bad_team = team.model_copy(
+        update={"topology": bad_topology, "workers": [reviewer_ref]}
+    )
+    agent_configs = {"vaultspec-reviewer": load_agent_config("vaultspec-reviewer")}
+    with pytest.raises(ConfigError, match="degenerate self-loop"):
+        compile_team_graph(
+            team_config=bad_team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+        )
+
+
+@pytest.mark.asyncio
+async def test_compile_pipeline_missing_agent_config_raises(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Referencing an agent_id not in agent_configs raises ConfigError."""
+    team = load_team_config("vaultspec-structured-coder")
+    agent_configs = {
+        w.agent_id: load_agent_config(w.agent_id)
+        for w in team.workers
+        if w.agent_id != "vaultspec-planner"
+    }
+    with pytest.raises(ConfigError, match="vaultspec-planner"):
+        compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+        )
+
+
+@pytest.mark.asyncio
+async def test_compile_pipeline_empty_order_raises(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Empty pipeline_order raises ConfigError."""
+    team = load_team_config("vaultspec-structured-coder")
+    bad_topology = team.topology.model_copy(update={"order": []})
+    bad_team = team.model_copy(update={"topology": bad_topology})
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    with pytest.raises(ConfigError, match="empty"):
+        compile_team_graph(
+            team_config=bad_team,
+            agent_configs=agent_configs,
+            checkpointer=checkpointer,
+        )
+
+
+@pytest.mark.asyncio
+async def test_loop_router_worker_can_signal_finish(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """_loop_router returns FINISH when state['next'] is set to 'FINISH'."""
+    team = load_team_config("vaultspec-iterative-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+    )
+
+    node_keys = {k for k in graph.nodes if not k.startswith("__")}
+    assert "vaultspec-reviewer" in node_keys
+    assert graph is not None
+
+
+# ---------------------------------------------------------------------------
+# T01 -- star topology conditional edge with missing 'next' field
+# ---------------------------------------------------------------------------
+
+
+def test_star_missing_next_field() -> None:
+    """Star topology conditional edge must not raise KeyError."""
+    edge_fn = lambda state: state.get("next", "")  # noqa: E731
+
+    state_without_next: dict = {
+        "messages": [],
+        "active_agent": "",
+        "artifacts": [],
+        "current_plan": [],
+        "thread_id": "test-thread",
+        "token_usage": {},
+    }
+
+    result = edge_fn(state_without_next)
+    assert result == ""
+
+    state_with_next = {**state_without_next, "next": "planner"}
+    assert edge_fn(state_with_next) == "planner"
+
+    state_finish = {**state_without_next, "next": "FINISH"}
+    assert edge_fn(state_finish) == "FINISH"
+
+
+# ---------------------------------------------------------------------------
+# T05 -- _worker_retry_on predicate
+# ---------------------------------------------------------------------------
+
+
+def test_worker_retry_on_timeout_wrapped_in_worker_error_is_retried() -> None:
+    """WorkerExecutionError wrapping TimeoutError must be retried."""
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
+    cause = TimeoutError("connection timed out")
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=5
+    )
+    wrapped.__cause__ = cause
+    assert _worker_retry_on(wrapped) is True
+
+
+def test_worker_retry_on_connection_error_is_retried() -> None:
+    """ConnectionError is retried via default_retry_on delegation."""
+    assert _worker_retry_on(ConnectionError("connection refused")) is True
+
+
+def test_worker_retry_on_connection_error_wrapped_in_worker_error_is_retried() -> None:
+    """WorkerExecutionError wrapping ConnectionError is retried via __cause__."""
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
+    cause = ConnectionError("refused")
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=3
+    )
+    wrapped.__cause__ = cause
+    assert _worker_retry_on(wrapped) is True
+
+
+def test_worker_retry_on_runtime_error_not_retried() -> None:
+    """RuntimeError is not retried."""
+    assert _worker_retry_on(RuntimeError("boom")) is False
+
+
+def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
+    """WorkerExecutionError wrapping RuntimeError is not retried."""
+    from vaultspec_a2a.thread.errors import WorkerExecutionError
+
+    cause = RuntimeError("deterministic failure")
+    wrapped = WorkerExecutionError(
+        worker="coder", model="AcpChatModel", message_count=2
+    )
+    wrapped.__cause__ = cause
+    assert _worker_retry_on(wrapped) is False
+
+
+# ---------------------------------------------------------------------------
+# T11 -- step_timeout wired to compiled graph
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_compile_team_graph_step_timeout_set() -> None:
+    """compile_team_graph sets step_timeout on the compiled Pregel graph."""
+    team = load_team_config("vaultspec-adaptive-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+            step_timeout=42.0,
+        )
+    assert graph.step_timeout == 42.0
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
+    """When step_timeout=None, the team TOML step_timeout_seconds is used."""
+    team = load_team_config("vaultspec-adaptive-coder")
+    assert team.graph.step_timeout_seconds == 300
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+            step_timeout=None,
+        )
+    assert graph.step_timeout == 300.0
+
+
+# ---------------------------------------------------------------------------
+# TOML-05 -- directive injection + recursion_limit
+# ---------------------------------------------------------------------------
+
+
+def test_build_supervisor_prompt_injects_directive() -> None:
+    """_build_supervisor_prompt appends team directive after roster when set."""
+    from vaultspec_a2a.team.team_config import AgentConfig
+
+    agents: list[AgentConfig] = []
+    base = "You are a supervisor."
+    result = _build_supervisor_prompt(agents, base, directive="Always plan first.")
+    assert "## Team Directive" in result
+    assert "Always plan first." in result
+
+
+def test_build_supervisor_prompt_no_directive() -> None:
+    """_build_supervisor_prompt omits directive section when directive is None."""
+    base = "You are a supervisor."
+    result = _build_supervisor_prompt([], base, directive=None)
+    assert "## Team Directive" not in result
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_compile_team_graph_recursion_limit_from_toml() -> None:
+    """compile_team_graph sets recursion_limit from team TOML."""
+    team = load_team_config("vaultspec-solo-coder")
+    assert team.graph.recursion_limit == 10
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+        await cp.setup()
+        graph = compile_team_graph(
+            team_config=team,
+            agent_configs=agent_configs,
+            checkpointer=cp,
+        )
+    assert graph.recursion_limit == 10  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# TOML-05 Scope 2 -- provider_fallback chain
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
+    """Worker-level provider/capability/fallback overrides win over defaults."""
+    from vaultspec_a2a.utils.enums import Model, Provider
+
+    team = load_team_config("vaultspec-solo-coder")
+    agent_cfg = load_agent_config("vaultspec-coder")
+    worker_ref = team.workers[0]
+
+    worker_ref = worker_ref.model_copy(
+        update={
+            "model": worker_ref.model.model_copy(
+                update={
+                    "provider": Provider.GEMINI,
+                    "capability": Model.MID,
+                    "provider_fallback": [Provider.OPENAI, Provider.ZHIPU],
+                }
+            )
+        }
+    )
+
+    provider, capability, fallback_chain = _resolve_worker_model_preferences(
+        worker_ref,
+        agent_cfg,
+        team,
+    )
+    assert provider == Provider.GEMINI
+    assert capability == Model.MID
+    assert fallback_chain == [Provider.OPENAI, Provider.ZHIPU]
+
+
+# ---------------------------------------------------------------------------
+# T15 -- GraphRecursionError excluded from retry
+# ---------------------------------------------------------------------------
+
+
+def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
+    """GraphRecursionError must never be retried."""
+    from langgraph.errors import GraphRecursionError
+
+    exc = GraphRecursionError("Recursion limit of 100 reached")
+    assert _worker_retry_on(exc) is False
+
+
+# ---------------------------------------------------------------------------
+# Live execution test
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.live
+@pytest.mark.asyncio
+async def test_graph_execution_routing(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """End-to-end: supervisor routes, checkpointer persists state."""
+    team = load_team_config("vaultspec-adaptive-coder")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    supervisor_cfg = load_agent_config("vaultspec-supervisor")
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+    )
+
+    initial_state = {
+        "messages": [
+            HumanMessage(
+                content=(
+                    "Calculate 25 * 4 and have the coder return"
+                    " the expected numerical result."
+                    " Then immediately FINISH."
+                )
+            )
+        ],
+    }
+
+    config: RunnableConfig = {
+        "configurable": {"thread_id": "test_routing_thread"},
+        "recursion_limit": 5,
+    }
+
+    executed_nodes: list[str] = []
+    async for event in graph.astream_events(initial_state, config, version="v2"):
+        if event["event"] == "on_chain_end":
+            node_name = event["name"]
+            if node_name in (
+                "supervisor",
+                "vaultspec-coder",
+                "vaultspec-planner",
+                "vaultspec-reviewer",
+            ):
+                executed_nodes.append(node_name)
+
+    saved_state = await checkpointer.aget(config)
+    assert saved_state is not None
+    channel_values = saved_state["channel_values"]
+    assert "messages" in channel_values
+
+    assert "supervisor" in executed_nodes
+
+    messages = channel_values["messages"]
+    assert len(messages) > 1
+
+    ai_messages = [msg for msg in messages if msg.type == "ai"]
+    assert len(ai_messages) > 0, f"No AI messages found: {messages}"

@@ -1,6 +1,11 @@
-"""Node definitions for LangGraph agent orchestration."""
+"""Backwards-compatibility shim — delegates to graph.nodes.
 
-from .supervisor import create_supervisor_node as create_supervisor_node
-from .worker import create_worker_node as create_worker_node
+New code should import from ``vaultspec_a2a.graph.nodes`` directly.
+"""
+
+from vaultspec_a2a.graph.nodes.supervisor import (
+    create_supervisor_node as create_supervisor_node,
+)
+from vaultspec_a2a.graph.nodes.worker import create_worker_node as create_worker_node
 
 __all__ = ["create_supervisor_node", "create_worker_node"]

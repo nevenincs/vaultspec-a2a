@@ -27,7 +27,8 @@ from ..api.schemas.internal import (
     ExecutionTaskProjectionPayload,
 )
 from ..control.config import settings
-from ..core import EventAggregator, StreamableGraph, compile_team_graph
+from ..core import EventAggregator, StreamableGraph
+from ..graph.compiler import compile_team_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
 from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError

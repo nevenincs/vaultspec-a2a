@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: docker/vidaimock.Dockerfile
     ports:
-      - '8100:8100'
+      - '${VIDAIMOCK_PORT:-8100}:8100'
     command:
       [
         'vidaimock',
@@ -85,9 +85,9 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
     ports:
-      - '4317:4317'
+      - '${JAEGER_OTLP_PORT:-4317}:4317'
       - '4318:4318'
-      - '16686:16686'
+      - '${JAEGER_UI_PORT:-16686}:16686'
       - '13133:13133'
     healthcheck:
       test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:13133/status']

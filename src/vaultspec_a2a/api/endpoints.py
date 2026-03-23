@@ -24,6 +24,7 @@ import contextlib
 import hashlib
 import json
 import logging
+import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -52,7 +53,7 @@ from ..core import (
     load_team_config,
     settings,
 )
-from ..core.aggregator import _classify_tool_kind
+from ..core.aggregator import classify_tool_kind
 from ..database.checkpoints import Checkpointer
 from ..database.crud import (
     ApprovalStatus,
@@ -82,7 +83,7 @@ from .projection import (
     enrich_snapshot_from_execution_state,
     project_checkpoint_tuple,
 )
-from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus
+from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus, ToolKind
 from .schemas.events import PlanEntry
 from .schemas.internal import DispatchRequest
 from .schemas.rest import (
@@ -141,6 +142,21 @@ def _trace_headers() -> dict[str, str]:
     carrier: dict[str, str] = {}
     _otel_propagate.inject(carrier)
     return carrier
+
+
+def _mark_worker_connected(request: Request) -> None:
+    """Update the gateway heartbeat timestamp after a confirmed worker dispatch.
+
+    Sets ``worker_last_heartbeat_ts`` to the current monotonic clock value so
+    that the ``/health`` endpoint reports ``worker_connected: true`` immediately
+    after the first successful dispatch rather than waiting for the worker's
+    next periodic heartbeat (F-23 fix).
+
+    The value written here is identical in shape to the timestamp written by
+    ``POST /internal/heartbeat``, so existing liveness logic is reused without
+    any new state fields.
+    """
+    request.app.state.worker_last_heartbeat_ts = time.monotonic()
 
 
 # ---------------------------------------------------------------------------
@@ -359,6 +375,7 @@ def _process_metadata(
 
 @router.post("/threads", response_model=CreateThreadResponse, status_code=201)
 async def create_thread_endpoint(
+    request: Request,
     body: CreateThreadRequest,
     services: tuple[
         AsyncSession,
@@ -535,6 +552,7 @@ async def create_thread_endpoint(
                         detail="Worker at capacity — try again later",
                     ) from None
                 circuit_breaker.record_success()
+                _mark_worker_connected(request)
             except httpx.HTTPError:
                 circuit_breaker.record_failure()
                 logger.warning(
@@ -818,16 +836,18 @@ def _enrich_snapshot_from_state(
         if isinstance(m, ToolMessage) and hasattr(m, "tool_call_id")
     }
     tool_call_snapshots: list[ToolCallSnapshot] = []
+    checkpoint_tc_ids: set[str] = set()
     for m in state.values.get("messages", []):
         if isinstance(m, AIMessage) and m.tool_calls:
             for tc in m.tool_calls:
                 tc_id = tc.get("id", "")
                 tc_name = tc.get("name", "unknown_tool")
+                checkpoint_tc_ids.add(tc_id)
                 tool_call_snapshots.append(
                     ToolCallSnapshot(
                         tool_call_id=tc_id,
                         title=tc_name,
-                        kind=_classify_tool_kind(tc_name),
+                        kind=classify_tool_kind(tc_name),
                         status=(
                             ToolCallStatus.COMPLETED
                             if tc_id in answered_tool_ids
@@ -835,6 +855,36 @@ def _enrich_snapshot_from_state(
                         ),
                     )
                 )
+
+    # F-38: Merge tool calls from aggregator in-memory state for tool calls
+    # not present in the checkpoint.  This covers cases where: (a) the
+    # checkpoint is stale / not yet written, (b) the gateway restarted but
+    # the worker relayed tool_call events that the aggregator tracked, or
+    # (c) the checkpoint's channel_values are not deserialized objects.
+    if aggregator is not None:
+        thread_id = snapshot.thread_id
+        aggregator_tc_states = aggregator.get_tool_call_states(thread_id)
+        for tc_id, tc_state in aggregator_tc_states.items():
+            if tc_id in checkpoint_tc_ids:
+                continue
+            try:
+                kind = ToolKind(tc_state.get("kind", ToolKind.OTHER.value))
+            except ValueError:
+                kind = ToolKind.OTHER
+            try:
+                status = ToolCallStatus(
+                    tc_state.get("status", ToolCallStatus.PENDING.value)
+                )
+            except ValueError:
+                status = ToolCallStatus.PENDING
+            tool_call_snapshots.append(
+                ToolCallSnapshot(
+                    tool_call_id=tc_id,
+                    title=tc_state.get("title", "unknown_tool"),
+                    kind=kind,
+                    status=status,
+                )
+            )
 
     return snapshot.model_copy(
         update={
@@ -1031,6 +1081,7 @@ async def get_thread_state_endpoint(
 async def send_message_endpoint(
     thread_id: str,
     body: SendMessageRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     _aggregator: EventAggregator = Depends(get_aggregator),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
@@ -1171,6 +1222,7 @@ async def send_message_endpoint(
                 detail="Worker at capacity — try again later",
             ) from None
         circuit_breaker.record_success()
+        _mark_worker_connected(request)
     except httpx.HTTPError:
         circuit_breaker.record_failure()
         logger.warning(
@@ -1327,6 +1379,7 @@ async def list_team_presets_endpoint() -> TeamPresetsResponse:
 async def respond_to_permission_endpoint(
     request_id: str,
     body: PermissionResponseRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
     aggregator: EventAggregator = Depends(get_aggregator),
@@ -1541,6 +1594,8 @@ async def respond_to_permission_endpoint(
         )
         dispatched = resp.is_success
         circuit_breaker.record_success()
+        if dispatched:
+            _mark_worker_connected(request)
     except httpx.HTTPError:
         circuit_breaker.record_failure()
         logger.warning(
@@ -1608,6 +1663,7 @@ async def respond_to_permission_endpoint(
 )
 async def cancel_thread_endpoint(
     thread_id: str,
+    request: Request,
     db: AsyncSession = Depends(get_db),
     worker_client: httpx.AsyncClient = Depends(get_worker_client),
     circuit_breaker: Any = Depends(get_circuit_breaker),
@@ -1697,6 +1753,7 @@ async def cancel_thread_endpoint(
         # 2xx → worker alive; record success so the CB can recover.
         if resp.is_success:
             circuit_breaker.record_success()
+            _mark_worker_connected(request)
     except httpx.HTTPError:
         circuit_breaker.record_failure()
         logger.warning(

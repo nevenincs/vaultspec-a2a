@@ -1,10 +1,13 @@
-"""agent group: list, ask."""
+"""Agent CLI group: list, show.
+
+Agents are preset definitions. To run an agent, use
+``team start --preset <agent-name>``.
+"""
 
 from __future__ import annotations
 
 __all__ = ["agent"]
 
-import secrets
 from pathlib import Path
 
 import click
@@ -12,12 +15,15 @@ import click
 
 @click.group()
 def agent() -> None:
-    """Single-agent operations."""
+    """Inspect agent preset definitions."""
 
 
 @agent.command("list")
-def list_cmd() -> None:
+@click.option("--json", "emit_json", is_flag=True, help="Output as JSON.")
+def list_cmd(emit_json: bool) -> None:
     """List available agent presets."""
+    import json as json_mod
+
     presets_dir = Path(__file__).resolve().parent.parent / "core" / "presets" / "agents"
     if not presets_dir.exists():
         click.echo("No agent presets directory found.", err=True)
@@ -27,32 +33,47 @@ def list_cmd() -> None:
     if not tomls:
         click.echo("No agent presets found.")
         return
+
+    if emit_json:
+        click.echo(json_mod.dumps([t.stem for t in tomls], indent=2))
+        return
+
     for t in tomls:
         click.echo(f"  {t.stem}")
 
+    click.echo('\n  Use: vaultspec team start --preset <name> --message "..."')
+
 
 @agent.command()
-@click.option(
-    "--agent", "agent_name", default="vaultspec-solo-coder", help="Agent preset name."
-)
-@click.option("--message", required=True, help="Message to send.")
-def ask(agent_name: str, message: str) -> None:
-    """Send a question to an agent preset (solo-coder by default)."""
-    from ._util import _api_client, _handle_response
+@click.argument("name")
+@click.option("--json", "emit_json", is_flag=True, help="Output as JSON.")
+def show(name: str, emit_json: bool) -> None:
+    """Show the configuration of an agent preset."""
+    import json as json_mod
 
-    with _api_client() as client:
-        # CLI-I01: append a 6-char hex suffix so each invocation gets a unique
-        # nickname — calling `agent ask` twice with the same agent would otherwise
-        # cause a NicknameConflictError on the second request.
-        unique_nickname = f"{agent_name}-{secrets.token_hex(3)}"
-        resp = client.post(
-            "/threads",
-            json={
-                "team_preset": agent_name,
-                "initial_message": message,
-                "nickname": unique_nickname,
-            },
-        )
-        _handle_response(resp)
-        data = resp.json()
-        click.echo(f"Thread {data['thread_id']} created (agent: {agent_name}).")
+    presets_dir = Path(__file__).resolve().parent.parent / "core" / "presets" / "agents"
+    preset_path = presets_dir / f"{name}.toml"
+
+    if not preset_path.exists():
+        # Also check team presets
+        team_presets_dir = presets_dir.parent / "teams"
+        preset_path = team_presets_dir / f"{name}.toml"
+        if not preset_path.exists():
+            click.echo(f"Preset not found: {name}", err=True)
+            click.echo("  Available: vaultspec agent list", err=True)
+            raise SystemExit(1)
+
+    content = preset_path.read_text(encoding="utf-8")
+
+    if emit_json:
+        try:
+            import tomllib
+
+            data = tomllib.loads(content)
+            click.echo(json_mod.dumps(data, indent=2, default=str))
+        except Exception:
+            click.echo(content)
+        return
+
+    click.echo(f"# {preset_path.name}\n")
+    click.echo(content)

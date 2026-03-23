@@ -11,7 +11,7 @@ Run independently of the gateway via stdio or Streamable HTTP transport::
 Environment variables:
     VAULTSPEC_GATEWAY_URL         Gateway API base URL (default: http://localhost:8000)
     VAULTSPEC_MCP_HOST            Bind host for streamable-http (default: 0.0.0.0)
-    VAULTSPEC_MCP_PORT            Bind port for streamable-http (default: 8100)
+    VAULTSPEC_MCP_PORT            Bind port for streamable-http (default: 8200)
 """
 
 import argparse

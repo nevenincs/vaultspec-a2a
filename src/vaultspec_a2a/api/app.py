@@ -47,7 +47,7 @@ from ..core import EventAggregator, settings
 from ..core.asyncio_compat import configure_asyncio_runtime
 from ..core.reconciliation import reconcile_threads_on_startup
 from ..database.checkpoints import open_checkpointer
-from ..database.crud import ThreadStatus, get_thread, update_thread_status
+from ..database.crud import ThreadStatus, get_thread, list_threads, update_thread_status
 from ..database.migrations import backfill_teamstate_sdd_fields
 from ..database.session import (
     close_db,
@@ -391,6 +391,7 @@ def _create_dispatch_message_handler(
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
     connection_manager: Any,
+    app_state: Any,
 ) -> Callable:
     """Create message handler that dispatches to the worker process.
 
@@ -499,6 +500,7 @@ def _create_dispatch_message_handler(
                     recoverable=True,
                 )
             circuit_breaker.record_success()
+            app_state.worker_last_heartbeat_ts = time.monotonic()
         except WebSocketCommandRejectedError:
             raise
         except httpx.HTTPError:
@@ -525,6 +527,7 @@ def _create_dispatch_control_handler(
     checkpointer: Any,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: "LazyWorkerSpawner",
+    app_state: Any,
 ) -> Callable:
     """Create agent control handler that dispatches to the worker.
 
@@ -577,6 +580,7 @@ def _create_dispatch_control_handler(
             )
             if resp.is_success:
                 circuit_breaker.record_success()
+                app_state.worker_last_heartbeat_ts = time.monotonic()
         except httpx.HTTPError:
             circuit_breaker.record_failure()
             logger.warning(
@@ -1196,6 +1200,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             circuit_breaker,
             worker_spawner,
             connection_manager,
+            app.state,
         )
         connection_manager.set_message_handler(msg_handler)
 
@@ -1205,12 +1210,82 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             checkpointer,
             circuit_breaker,
             worker_spawner,
+            app.state,
         )
         connection_manager.set_agent_control_handler(ctrl_handler)
+
+        # F-36 fix: re-dispatch RECONCILING threads after worker is ready.
+        # reconcile_threads_on_startup marks threads but never dispatches them.
+        async def _redispatch_reconciling() -> None:
+            try:
+                await worker_spawner.ensure_worker()
+                session_factory = get_session_factory()
+                async with session_factory() as db:
+                    threads, _ = await list_threads(
+                        db, status=ThreadStatus.RECONCILING, limit=100
+                    )
+                    if not threads:
+                        return
+                    logger.info("Re-dispatching %d reconciling threads", len(threads))
+                    for thread in threads:
+                        meta = {}
+                        if thread.thread_metadata:
+                            try:
+                                meta = json.loads(thread.thread_metadata)
+                            except Exception:
+                                logger.debug(
+                                    "Failed to parse thread metadata for %s",
+                                    thread.id,
+                                    exc_info=True,
+                                )
+                        dispatch = DispatchRequest(
+                            action="ingest",
+                            thread_id=thread.id,
+                            team_preset=thread.team_preset,
+                            workspace_root=meta.get("workspace_root"),
+                        )
+                        try:
+                            if circuit_breaker.state == "open":
+                                logger.warning(
+                                    "Circuit breaker open, skipping re-dispatch for %s",
+                                    thread.id,
+                                )
+                                continue
+                            resp = await worker_client.post(
+                                "/dispatch",
+                                json=dispatch.model_dump(),
+                                headers=_trace_headers(),
+                            )
+                            if resp.is_success:
+                                circuit_breaker.record_success()
+                                app.state.worker_last_heartbeat_ts = time.monotonic()
+                                logger.info(
+                                    "Re-dispatched reconciling thread %s",
+                                    thread.id,
+                                )
+                            else:
+                                logger.warning(
+                                    "Re-dispatch failed for thread %s: %s",
+                                    thread.id,
+                                    resp.status_code,
+                                )
+                        except Exception as exc:
+                            logger.warning(
+                                "Re-dispatch error for thread %s: %s",
+                                thread.id,
+                                exc,
+                            )
+            except Exception as exc:
+                logger.error("Reconciling re-dispatch task failed: %s", exc)
+
+        reconcile_task = asyncio.create_task(_redispatch_reconciling())
 
         logger.info("Gateway startup complete")
 
         yield
+
+        reconcile_task.cancel()
+        await asyncio.gather(reconcile_task, return_exceptions=True)
 
         # --- Shutdown ---
         logger.info("Shutting down gateway")

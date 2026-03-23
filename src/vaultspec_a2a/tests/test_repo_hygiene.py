@@ -16,8 +16,7 @@ _FILES = [
 ]
 _RUNTIME_PATH_FILES = [
     _ROOT / "src" / "vaultspec_a2a" / "api" / "app.py",
-    _ROOT / "src" / "vaultspec_a2a" / "cli" / "_service.py",
-    _ROOT / "src" / "vaultspec_a2a" / "cli" / "_verify.py",
+    _ROOT / "src" / "vaultspec_a2a" / "control" / "verify.py",
 ]
 _SECRET_PATTERNS = [
     re.compile(r"sk-[A-Za-z0-9_-]{12,}"),

@@ -217,6 +217,21 @@ class Executor:
                     case "cancel":
                         span.add_event("thread_cancelled")
                         self._aggregator.cancel_thread(req.thread_id)
+                        # If no ingest is active, the cooperative cancel
+                        # flag has no listener.  Emit the terminal event
+                        # directly so the gateway can transition
+                        # cancelling → cancelled.
+                        async with self._ingest_lock:
+                            is_active = req.thread_id in self._active_ingests
+                        # TOCTOU: There is a small window between checking is_active and
+                        # emitting the terminal event. If an ingest starts between the
+                        # check and the emit, a duplicate terminal event may fire.
+                        # This is safe because:
+                        # 1. The cooperative cancel flag is set BEFORE the check
+                        # 2. The DB transition validator rejects duplicate
+                        #    terminal transitions
+                        if not is_active:
+                            await self._emit_terminal_status(req.thread_id, "cancelled")
                     case _:
                         logger.warning(
                             "Unknown dispatch action: %s",
@@ -716,6 +731,15 @@ class Executor:
         if error_detail:
             payload["error_detail"] = error_detail
         await self._bridge.send_event(thread_id, payload)
+        # F-17 fix: flush terminal events immediately — do not batch.
+        # A lost thread_terminal event leaves the thread stuck in RUNNING
+        # forever.  The cost is one extra HTTP POST per thread completion.
+        try:
+            await self._bridge.flush_events()
+        except Exception:
+            logger.warning(
+                "Failed to flush terminal event for %s", thread_id, exc_info=True
+            )
 
     def _normalize_execution_state(
         self,

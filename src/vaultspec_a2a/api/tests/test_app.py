@@ -245,6 +245,7 @@ async def test_dispatch_message_handler_rejects_missing_thread(
         app.state.circuit_breaker,
         app.state.worker_spawner,
         None,
+        app.state,
     )
 
     with pytest.raises(WebSocketCommandRejectedError) as excinfo:

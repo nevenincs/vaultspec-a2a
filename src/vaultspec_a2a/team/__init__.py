@@ -1,63 +1,63 @@
-"""Backwards-compatibility shim — canonical source: vaultspec_a2a.team.team_config"""
+"""Agent and team configuration — canonical home for team_config and presets."""
 
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentCapabilitiesConfig as AgentCapabilitiesConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentConfig as AgentConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentConfigNotFoundError as AgentConfigNotFoundError,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentModelConfig as AgentModelConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentPermissionsConfig as AgentPermissionsConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     AgentPersonaConfig as AgentPersonaConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     SupervisorConfig as SupervisorConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamConfig as TeamConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamConfigNotFoundError as TeamConfigNotFoundError,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamDefaultsConfig as TeamDefaultsConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamGraphConfig as TeamGraphConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamPermissionsConfig as TeamPermissionsConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TeamPersonaConfig as TeamPersonaConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TopologyConfig as TopologyConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     TopologyType as TopologyType,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     WorkerOverrideConfig as WorkerOverrideConfig,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     WorkerRef as WorkerRef,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     discover_team_preset_ids as discover_team_preset_ids,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     load_agent_config as load_agent_config,
 )
-from vaultspec_a2a.team.team_config import (
+from .team_config import (
     load_team_config as load_team_config,
 )
 

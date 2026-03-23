@@ -43,7 +43,8 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
-from ..core import EventAggregator, settings
+from ..control.config import settings
+from ..core import EventAggregator
 from ..core.reconciliation import reconcile_threads_on_startup
 from ..database.checkpoints import open_checkpointer
 from ..database.crud import ThreadStatus, get_thread, list_threads, update_thread_status

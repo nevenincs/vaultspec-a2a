@@ -39,17 +39,10 @@ from opentelemetry import propagate as _otel_propagate
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core import (
-    EventAggregator,
-    ThreadMetadata,
-    build_context_preamble,
-    build_initial_vault_index,
-    discover_context_refs,
-    discover_team_preset_ids,
-    generate_nickname,
-    load_team_config,
-    settings,
-)
+from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
+from ..context.preamble import build_context_preamble
+from ..control.config import settings
+from ..core import EventAggregator, build_initial_vault_index
 from ..core.aggregator import classify_tool_kind
 from ..database.checkpoints import Checkpointer
 from ..database.crud import (
@@ -74,6 +67,7 @@ from ..database.crud import (
     update_thread_status,
 )
 from ..database.session import get_db
+from ..team.team_config import discover_team_preset_ids, load_team_config
 from ..thread.errors import (
     ConfigError,
     NicknameConflictError,

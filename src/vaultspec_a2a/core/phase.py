@@ -1,21 +1,10 @@
-"""Pipeline phase inference from vault index."""
+"""Backwards-compatibility shim — canonical source: vaultspec_a2a.context.stage"""
 
-from __future__ import annotations
+from vaultspec_a2a.context.stage import (
+    PHASE_ORDER as PHASE_ORDER,
+)
+from vaultspec_a2a.context.stage import (
+    infer_phase_from_vault_index as infer_phase_from_vault_index,
+)
 
 __all__ = ["PHASE_ORDER", "infer_phase_from_vault_index"]
-
-PHASE_ORDER: list[str] = ["research", "reference", "adr", "plan", "exec", "audit"]
-
-_PHASE_ORDER = PHASE_ORDER
-
-
-def infer_phase_from_vault_index(vault_index: dict[str, list[str]]) -> str:
-    """Return the highest phase that has at least one entry in vault_index.
-
-    Iterates phases in reverse order (audit -> research). Returns "research"
-    when vault_index is empty or no phase has entries.
-    """
-    for phase in reversed(_PHASE_ORDER):
-        if vault_index.get(phase):
-            return phase
-    return "research"

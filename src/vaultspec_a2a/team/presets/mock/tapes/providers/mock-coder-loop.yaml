@@ -1,0 +1,8 @@
+matcher: ^/mock-coder-loop/v1/chat/completions$
+name: mock-coder-loop
+priority: 100
+request_mapping:
+  model: mock-coder-loop
+response_body: '{%- set n = json.messages | length -%}{%- if n <= 1 -%}{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"I need to start by understanding the workspace. I''ll search for Python files."},{"type":"text","text":"Initializing workspace discovery."},{"type":"image","url":"https://vaultspec.dev/mock-init.png"}],"tool_calls":[{"id":"call_0","type":"function","function":{"name":"run_command","arguments":"{\"CommandLine\": \"fd . -e py -t f\", \"Cwd\": \"/app\", \"SafeToAutoRun\": true, \"WaitMsBeforeAsync\": 2000}"}}]}}]}{%- else -%}{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"All tasks completed successfully."},{"type":"text","text":"The system represents a robust and scalable architecture."}]}}]}{%- endif -%}'
+stream:
+  enabled: false

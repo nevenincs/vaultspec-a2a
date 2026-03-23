@@ -17,8 +17,9 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
-from ...core import compile_team_graph, load_agent_config, load_team_config
-from ...core.team_config import AgentConfigNotFoundError
+from ...core import compile_team_graph
+from ...team.team_config import load_agent_config, load_team_config
+from ...thread.errors import AgentConfigNotFoundError
 
 
 @asynccontextmanager

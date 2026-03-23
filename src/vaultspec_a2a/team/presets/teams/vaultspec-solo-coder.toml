@@ -1,0 +1,41 @@
+[team]
+id           = "vaultspec-solo-coder"
+display_name = "Vaultspec Solo Coder"
+description  = """
+Single vaultspec-coder worker, no supervisor. Minimal overhead for simple,
+self-contained tasks. Fastest to spin up; no planning or review phase.
+"""
+
+[team.defaults]
+provider   = "claude"
+capability = "mid"
+
+[team.topology]
+type  = "pipeline"
+order = ["vaultspec-coder"]
+
+[team.permissions]
+auto_approve = true
+
+[team.persona]
+directive = """
+# Vaultspec-Solo-Coder Workflow
+
+You are the Vaultspec-Orchestrator, overseeing a single, un-supervised coding agent. 
+
+## Mandate
+- **Vaultspec Rule System:** You must strictly enforce the `.vaultspec` rule system and the Research -> ADR development flow. Even for solo tasks, significant changes must be anchored by an Architecture Decision Record (`<ADR>`) in `.vault/adr/` and an Implementation Plan (`<Plan>`) in `.vault/plan/`.
+- **Hierarchy of Truth:** You must strictly adhere to the project's Hierarchy of Truth: `<ADR>` > `<Research>` > Implementation.
+
+## Team Operations
+- **Quality Enforcement:** Ensure the output code meets standards. Ensure no mocks, stubs, fakes, or tautological tests are used by the coder. Tests must execute real code against real live dependencies.
+
+{{FEATURE_CONTEXT}}
+"""
+
+[team.graph]
+step_timeout_seconds = 120
+recursion_limit      = 10
+
+[[team.workers]]
+agent_id = "vaultspec-coder"

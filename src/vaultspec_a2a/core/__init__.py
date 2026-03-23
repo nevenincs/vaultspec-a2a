@@ -6,86 +6,13 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from .aggregator import EventAggregator as EventAggregator
     from .aggregator import StreamableGraph as StreamableGraph
-    from .context import compact_context as compact_context
-    from .context import estimate_tokens as estimate_tokens
-    from .context import prepare_handoff as prepare_handoff
-    from .context import should_compact as should_compact
     from .graph import build_initial_vault_index as build_initial_vault_index
     from .graph import compile_team_graph as compile_team_graph
     from .nodes.supervisor import create_supervisor_node as create_supervisor_node
     from .nodes.worker import create_worker_node as create_worker_node
-    from .preamble import build_context_preamble as build_context_preamble
 
-from .anchoring import build_anchoring_context as build_anchoring_context
 from .config import Settings, settings
-from .metadata import (
-    ContextRef as ContextRef,
-)
-from .metadata import (
-    ThreadMetadata as ThreadMetadata,
-)
-from .metadata import (
-    discover_context_refs as discover_context_refs,
-)
-from .metadata import (
-    generate_nickname as generate_nickname,
-)
-from .phase import infer_phase_from_vault_index as infer_phase_from_vault_index
 from .task_queue import create_mark_task_complete_tool as create_mark_task_complete_tool
-from .team_config import (
-    AgentCapabilitiesConfig as AgentCapabilitiesConfig,
-)
-from .team_config import (
-    AgentConfig as AgentConfig,
-)
-from .team_config import (
-    AgentModelConfig as AgentModelConfig,
-)
-from .team_config import (
-    AgentPermissionsConfig as AgentPermissionsConfig,
-)
-from .team_config import (
-    AgentPersonaConfig as AgentPersonaConfig,
-)
-from .team_config import (
-    SupervisorConfig as SupervisorConfig,
-)
-from .team_config import (
-    TeamConfig as TeamConfig,
-)
-from .team_config import (
-    TeamDefaultsConfig as TeamDefaultsConfig,
-)
-from .team_config import (
-    TeamGraphConfig as TeamGraphConfig,
-)
-from .team_config import (
-    TeamPermissionsConfig as TeamPermissionsConfig,
-)
-from .team_config import (
-    TeamPersonaConfig as TeamPersonaConfig,
-)
-from .team_config import (
-    TopologyConfig as TopologyConfig,
-)
-from .team_config import (
-    TopologyType as TopologyType,
-)
-from .team_config import (
-    WorkerOverrideConfig as WorkerOverrideConfig,
-)
-from .team_config import (
-    WorkerRef as WorkerRef,
-)
-from .team_config import (
-    discover_team_preset_ids as discover_team_preset_ids,
-)
-from .team_config import (
-    load_agent_config as load_agent_config,
-)
-from .team_config import (
-    load_team_config as load_team_config,
-)
 
 # Lazy imports for two reasons:
 # 1. Break circular dependencies:
@@ -100,19 +27,12 @@ _LAZY_IMPORTS = {
     # aggregator — LangGraph machinery + websocket (circular dep)
     "EventAggregator": ".aggregator",
     "StreamableGraph": ".aggregator",
-    # context — langchain_core.messages + state (langgraph.graph.message)
-    "compact_context": ".context",
-    "estimate_tokens": ".context",
-    "prepare_handoff": ".context",
-    "should_compact": ".context",
     # graph — full LangGraph compilation (circular dep)
     "build_initial_vault_index": ".graph",
     "compile_team_graph": ".graph",
     # nodes — LangGraph node factories (circular dep)
     "create_supervisor_node": ".nodes.supervisor",
     "create_worker_node": ".nodes.worker",
-    # preamble — langchain_core.messages
-    "build_context_preamble": ".preamble",
 }
 
 # Compatibility redirects: as files move to new top-level packages during the
@@ -157,6 +77,68 @@ _REDIRECTS: dict[str, tuple[str, str]] = {
     "TokenUsageEntry": ("vaultspec_a2a.thread.models", "TokenUsageEntry"),
     # Phase 2: domain_config + control/config
     "DomainConfig": ("vaultspec_a2a.domain_config", "DomainConfig"),
+    # Phase 3: context/ — metadata
+    "ContextRef": ("vaultspec_a2a.context.metadata", "ContextRef"),
+    "ThreadMetadata": ("vaultspec_a2a.context.metadata", "ThreadMetadata"),
+    "discover_context_refs": (
+        "vaultspec_a2a.context.metadata",
+        "discover_context_refs",
+    ),
+    "generate_nickname": ("vaultspec_a2a.context.metadata", "generate_nickname"),
+    # Phase 3: context/ — preamble
+    "build_context_preamble": (
+        "vaultspec_a2a.context.preamble",
+        "build_context_preamble",
+    ),
+    # Phase 3: context/ — anchoring
+    "build_anchoring_context": (
+        "vaultspec_a2a.context.anchoring",
+        "build_anchoring_context",
+    ),
+    # Phase 3: context/ — stage (was phase.py)
+    "infer_phase_from_vault_index": (
+        "vaultspec_a2a.context.stage",
+        "infer_phase_from_vault_index",
+    ),
+    "PHASE_ORDER": ("vaultspec_a2a.context.stage", "PHASE_ORDER"),
+    # Phase 3: context/ — token_budget (was context.py)
+    "compact_context": ("vaultspec_a2a.context.token_budget", "compact_context"),
+    "estimate_tokens": ("vaultspec_a2a.context.token_budget", "estimate_tokens"),
+    "prepare_handoff": ("vaultspec_a2a.context.token_budget", "prepare_handoff"),
+    "should_compact": ("vaultspec_a2a.context.token_budget", "should_compact"),
+    # Phase 3: context/ — rules
+    "RuleManager": ("vaultspec_a2a.context.rules", "RuleManager"),
+    # Phase 4: team/ — team_config
+    "AgentCapabilitiesConfig": (
+        "vaultspec_a2a.team.team_config",
+        "AgentCapabilitiesConfig",
+    ),
+    "AgentConfig": ("vaultspec_a2a.team.team_config", "AgentConfig"),
+    "AgentModelConfig": ("vaultspec_a2a.team.team_config", "AgentModelConfig"),
+    "AgentPermissionsConfig": (
+        "vaultspec_a2a.team.team_config",
+        "AgentPermissionsConfig",
+    ),
+    "AgentPersonaConfig": ("vaultspec_a2a.team.team_config", "AgentPersonaConfig"),
+    "SupervisorConfig": ("vaultspec_a2a.team.team_config", "SupervisorConfig"),
+    "TeamConfig": ("vaultspec_a2a.team.team_config", "TeamConfig"),
+    "TeamDefaultsConfig": ("vaultspec_a2a.team.team_config", "TeamDefaultsConfig"),
+    "TeamGraphConfig": ("vaultspec_a2a.team.team_config", "TeamGraphConfig"),
+    "TeamPermissionsConfig": (
+        "vaultspec_a2a.team.team_config",
+        "TeamPermissionsConfig",
+    ),
+    "TeamPersonaConfig": ("vaultspec_a2a.team.team_config", "TeamPersonaConfig"),
+    "TopologyConfig": ("vaultspec_a2a.team.team_config", "TopologyConfig"),
+    "TopologyType": ("vaultspec_a2a.team.team_config", "TopologyType"),
+    "WorkerOverrideConfig": ("vaultspec_a2a.team.team_config", "WorkerOverrideConfig"),
+    "WorkerRef": ("vaultspec_a2a.team.team_config", "WorkerRef"),
+    "discover_team_preset_ids": (
+        "vaultspec_a2a.team.team_config",
+        "discover_team_preset_ids",
+    ),
+    "load_agent_config": ("vaultspec_a2a.team.team_config", "load_agent_config"),
+    "load_team_config": ("vaultspec_a2a.team.team_config", "load_team_config"),
 }
 
 

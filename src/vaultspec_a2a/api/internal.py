@@ -30,7 +30,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
-from ..core import settings
+from ..control.config import settings
 from .schemas.internal import ExecutionStateProjectionPayload
 
 __all__ = ["internal_router"]

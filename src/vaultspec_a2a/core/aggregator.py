@@ -66,7 +66,7 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["EventAggregator", "StreamableGraph"]
+__all__ = ["EventAggregator", "StreamableGraph", "classify_tool_kind"]
 
 # ---------------------------------------------------------------------------
 # OTel instrumentation (ADR-010)
@@ -243,7 +243,7 @@ _TOOL_KIND_SUBSTRING_RULES: list[tuple[str, ToolKind]] = [
 ]
 
 
-def _classify_tool_kind(tool_name: str) -> ToolKind:
+def classify_tool_kind(tool_name: str) -> ToolKind:
     """Classify a tool name into a ``ToolKind`` category.
 
     Two-pass: exact match on lowered name, then substring scan.
@@ -956,7 +956,7 @@ class EventAggregator:
         # Derive tool_kind from tool_call name if not explicitly provided
         resolved_kind = tool_kind
         if resolved_kind is None and tool_call:
-            resolved_kind = _classify_tool_kind(tool_call)
+            resolved_kind = classify_tool_kind(tool_call)
 
         event = PermissionRequestEvent(
             thread_id=thread_id,
@@ -1425,7 +1425,7 @@ class EventAggregator:
                     agent_id=effective_agent_id,
                     tool_call_id=run_id,
                     title=tool_name,
-                    kind=_classify_tool_kind(tool_name),
+                    kind=classify_tool_kind(tool_name),
                     input_args=input_args,
                 )
             return

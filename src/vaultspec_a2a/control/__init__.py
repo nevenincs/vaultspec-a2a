@@ -17,4 +17,4 @@ Justfile and other dev-tooling scripts only.
 
 from __future__ import annotations
 
-__all__ = ["db", "doctor", "hooks", "verify"]
+__all__ = ["db", "doctor", "verify"]

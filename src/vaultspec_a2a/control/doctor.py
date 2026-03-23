@@ -364,28 +364,15 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[_Row] = []
 
     if target in ("all", "ports"):
-        if target == "all":
-            print("ports")
         rows.extend(_check_ports())
 
     if target in ("all", "config"):
-        if target == "all":
-            print("\nconfig")
-        rows_config = _check_config()
-        rows.extend(rows_config)
+        rows.extend(_check_config())
 
     if target in ("all", "services"):
-        if target == "all":
-            print("\nservices")
-        rows_services = _check_services(service_filter=service)
-        rows.extend(rows_services)
+        rows.extend(_check_services(service_filter=service))
 
-    if target == "all":
-        # Re-render with a combined label_width for the full dashboard.
-        print()
-        _render_dashboard(rows)
-    else:
-        _render_dashboard(rows)
+    _render_dashboard(rows)
 
     # Return non-zero if any hard failures were found.
     has_fail = any(r.status == "fail" for r in rows)

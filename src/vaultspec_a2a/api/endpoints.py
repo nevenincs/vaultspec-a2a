@@ -53,7 +53,7 @@ from ..core import (
     load_team_config,
     settings,
 )
-from ..core.aggregator import _classify_tool_kind
+from ..core.aggregator import classify_tool_kind
 from ..database.checkpoints import Checkpointer
 from ..database.crud import (
     ApprovalStatus,
@@ -847,7 +847,7 @@ def _enrich_snapshot_from_state(
                     ToolCallSnapshot(
                         tool_call_id=tc_id,
                         title=tc_name,
-                        kind=_classify_tool_kind(tc_name),
+                        kind=classify_tool_kind(tc_name),
                         status=(
                             ToolCallStatus.COMPLETED
                             if tc_id in answered_tool_ids

@@ -253,6 +253,10 @@ def status(thread_id: str, emit_json: bool) -> None:
         data = resp.json()
 
         if emit_json:
+            meta = _fetch_thread_metadata(client, thread_id)
+            data["_nickname"] = meta["nickname"]
+            data["_team_preset"] = meta["team_preset"]
+            data["_created_at"] = meta["created_at"]
             click.echo(json.dumps(data, indent=2))
             return
 
@@ -396,7 +400,8 @@ def list_cmd(status_filter: str | None, emit_json: bool) -> None:
             s = t.get("status", "unknown")
             counts[s] = counts.get(s, 0) + 1
 
-        active = counts.get("running", 0) + counts.get("input_required", 0)
+        _active_states = ("submitted", "running", "input_required", "cancelling")
+        active = sum(counts.get(s, 0) for s in _active_states)
         total = len(threads)
         click.echo(f"  {total} threads ({active} active)\n")
 

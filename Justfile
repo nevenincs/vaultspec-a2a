@@ -1,4 +1,5 @@
 set windows-shell := ["powershell.exe", "-c"]
+set shell := ["bash", "-cu"]
 set dotenv-load := true
 
 # ---------------------------------------------------------------------------
@@ -20,6 +21,11 @@ dev *ARGS:
 # Production CLI passthrough — dispatch to prod-<subcommand>
 prod *ARGS:
     just prod-{{ARGS}}
+
+# Full CI pipeline: lint + typecheck + unit tests
+ci:
+    just dev code check all
+    just dev test unit
 
 # ===========================================================================
 # dev hooks — Commit pipeline
@@ -122,11 +128,11 @@ _dev-service-start-postgres:
 
 # Start Jaeger tracing collector (OTLP gRPC :4317, UI :16686, health :13133)
 _dev-service-start-jaeger:
-    docker run -d --name jaeger-local -p 4317:4317 -p 4318:4318 -p 16686:16686 -p 13133:13133 -e COLLECTOR_OTLP_ENABLED=true cr.jaegertracing.io/jaegertracing/jaeger:2.16.0; Write-Host "Jaeger UI: http://localhost:16686  Health: http://localhost:13133/status"
+    docker run -d --name jaeger-local -p 4317:4317 -p 4318:4318 -p 16686:16686 -p 13133:13133 -e COLLECTOR_OTLP_ENABLED=true cr.jaegertracing.io/jaegertracing/jaeger:2.16.0; echo "Jaeger UI: http://localhost:16686  Health: http://localhost:13133/status"
 
 # Start VidaiMock LLM provider via integration compose
 _dev-service-start-vidaimock:
-    docker compose -f docker-compose.integration.yml up -d --build vidaimock; Write-Host "VidaiMock running at http://localhost:8100/v1/models"
+    docker compose -f docker-compose.integration.yml up -d --build vidaimock; echo "VidaiMock running at http://localhost:8100/v1/models"
 
 # --- stop recipes (graceful) ---
 
@@ -186,7 +192,7 @@ _dev-service-kill-ui:
 
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:
-    -docker kill postgres
+    -docker compose -f docker-compose.prod.postgres.yml kill postgres
 
 # Force-kill Jaeger container
 _dev-service-kill-jaeger:
@@ -437,8 +443,9 @@ _dev-build-docker-prod:
 
 # Remove dist/, egg-info, and __pycache__ directories
 _dev-build-clean:
+    #!/usr/bin/env pwsh
     Remove-Item -Recurse -Force dist/, *.egg-info -ErrorAction SilentlyContinue
-    fd -t d __pycache__ --exclude .venv -x Remove-Item -Recurse -Force
+    Get-ChildItem -Path . -Directory -Recurse -Filter __pycache__ | Where-Object { $_.FullName -notmatch '\.venv' } | Remove-Item -Recurse -Force -ErrorAction SilentlyContinue
 
 # ===========================================================================
 # dev deps — Dependency management

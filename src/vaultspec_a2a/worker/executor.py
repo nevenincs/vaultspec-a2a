@@ -223,6 +223,13 @@ class Executor:
                         # cancelling → cancelled.
                         async with self._ingest_lock:
                             is_active = req.thread_id in self._active_ingests
+                        # TOCTOU: There is a small window between checking is_active and
+                        # emitting the terminal event. If an ingest starts between the
+                        # check and the emit, a duplicate terminal event may fire.
+                        # This is safe because:
+                        # 1. The cooperative cancel flag is set BEFORE the check
+                        # 2. The DB transition validator rejects duplicate
+                        #    terminal transitions
                         if not is_active:
                             await self._emit_terminal_status(req.thread_id, "cancelled")
                     case _:

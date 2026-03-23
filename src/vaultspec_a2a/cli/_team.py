@@ -410,7 +410,7 @@ def list_cmd(status_filter: str | None, emit_json: bool) -> None:
             f"  {'THREAD_ID':34s}  {'STATUS':16s}  {'ELAPSED':8s}  "
             f"{'PRESET / NICKNAME'}"
         )
-        click.echo(f"  {'─' * 34}  {'─' * 16}  {'─' * 8}  {'─' * 30}")
+        click.echo(f"  {'-' * 34}  {'-' * 16}  {'-' * 8}  {'-' * 30}")
         for t in threads:
             tid = t["thread_id"]
             tst = t.get("status", "unknown")

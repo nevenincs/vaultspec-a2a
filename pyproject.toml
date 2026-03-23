@@ -59,8 +59,12 @@ dev = [
   "tenacity>=9.0.0",
   "testcontainers[generic]>=4.12.0",
   "ty>=0.0.15",
+  "vaultspec-core",
   "websockets>=16.0",
 ]
+
+[tool.uv.sources]
+vaultspec-core = { path = "Y:/code/vaultspec-core-worktrees/main", editable = true }
 
 [build-system]
 requires = ["hatchling"]
@@ -147,6 +151,7 @@ DEP002 = [
   "pytest-timeout",
   "pytest-cov",
   "deptry",
+  "vaultspec-core",
   # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
   # "sqlite+aiosqlite://..." — never imported directly.
   "aiosqlite",

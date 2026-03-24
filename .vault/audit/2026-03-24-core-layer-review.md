@@ -600,7 +600,314 @@ Required before this branch can be marked complete:
    emit domain events from `graph/events.py`; remove all `api.schemas` imports from the file.
 2. P7-006 / V-02 — Wire `TelemetryHook` into `EventAggregator.__init__` with
    `NullTelemetryHook` as default; remove module-level `get_tracer`/`get_meter` calls.
-3. P7-007 / V-04 — Delete `_get_provider_factory()` fallback in `graph/compiler.py`;
-   require explicit `provider_factory` injection at all call sites.
+3. P7-007 / V-04 — ~~Delete `_get_provider_factory()` fallback in `graph/compiler.py`;
+   require explicit `provider_factory` injection at all call sites.~~ **CLOSED by Phase 8d.**
 4. P7-008 / V-06 — Replace `from control.config import settings` with `DomainConfig`
    parameter injection in 5 `graph/` files and `streaming/aggregator.py`.
+
+---
+
+## Phase 8d: Provider Factory DI Review
+
+**Status:** PASS
+
+### Findings
+
+- `_get_provider_factory()` is completely absent from `graph/compiler.py`. No trace of
+  the function or any `from vaultspec_a2a.providers` import at module level.
+
+- `compile_team_graph()` declares `provider_factory: ProviderFactoryProtocol` as a
+  required keyword-only parameter (after `*`, line 265). There is no default value and
+  no `None`-fallback path. A missing argument raises `TypeError` at the call site before
+  any graph compilation begins.
+
+- The three internal topology helpers all carry the same keyword-only signature:
+  - `_compile_star()` — `*, provider_factory: ProviderFactoryProtocol` (line 394)
+  - `_compile_pipeline()` — `*, provider_factory: ProviderFactoryProtocol` (line 528)
+  - `_compile_pipeline_loop()` — `*, provider_factory: ProviderFactoryProtocol` (line 699)
+
+  All three receive `provider_factory=provider_factory` forwarded from `compile_team_graph()`
+  and pass it down to `_resolve_model_for_worker()` and `_resolve_supervisor_model()`, which
+  are also keyword-only.
+
+- All call sites pass `provider_factory=` explicitly:
+
+  | File | Call site |
+  |---|---|
+  | `graph/tests/test_compiler.py` | All 11 `compile_team_graph()` calls use `provider_factory=pf` or `provider_factory=ProviderFactory` |
+  | `graph/tests/test_graph_execution.py` | All 3 `compile_team_graph()` calls use `provider_factory=pf` |
+  | `graph/tests/test_e2e_live.py` | line 136 — `provider_factory=pf` |
+  | `worker/executor.py` | line 972 — `provider_factory=self._provider_factory` |
+  | `tests/preps/_runner.py` | line 64 — `provider_factory=ProviderFactory` |
+  | `docker/run.py` | line 130 — `provider_factory=ProviderFactory` |
+
+- The only remaining `providers` import in `graph/` is in test files
+  (`from vaultspec_a2a.providers.factory import ProviderFactory`). Test files are outside
+  the Layer 1 boundary rule; this is the correct injection point for the concrete factory.
+
+- ADR D-02 satisfied: `graph/compiler.py` imports zero symbols from
+  `vaultspec_a2a.providers`. The `ProviderFactoryProtocol` it consumes lives in
+  `graph/protocols.py` (Layer 1 peer). P7-007 / V-04 is fully closed.
+
+---
+
+## Phase 8b+8c: Settings Swap Review
+
+**Status:** PASS
+
+### Findings
+
+- P8BC-001 | PASS | `domain_config.py` exports `DomainConfig` class and `domain_config` singleton at module scope (line 138), both in `__all__` (line 141).
+- P8BC-002 | PASS | `context/metadata.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 18); usage `domain_config.max_context_refs` (line 130). Field exists on `DomainConfig`.
+- P8BC-003 | PASS | `context/anchoring.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 17); usage `domain_config.anchor_path_cap` (line 50). Field exists on `DomainConfig`.
+- P8BC-004 | PASS | `context/token_budget.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 12); usage `domain_config.chars_per_token` (line 42). Field exists on `DomainConfig`.
+- P8BC-005 | PASS | `graph/compiler.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 26); usage `domain_config.vault_index_cap` confirmed present. No `control.config` import. The only `settings` string in the file is a comment token inside a code comment (line 368: `# TOML-05: apply per-preset graph settings.`), not an import.
+- P8BC-006 | PASS | `graph/nodes/supervisor.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 17); usage `domain_config.context_limit_tokens` (lines 231–232). Field exists on `DomainConfig`.
+- P8BC-007 | PASS | `graph/nodes/worker.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 16); usage `domain_config.context_limit_tokens` (lines 46–47). Field exists on `DomainConfig`.
+- P8BC-008 | PASS | `graph/nodes/vault_reader.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 10); usage `domain_config.mount_token_ceiling` (line 97) and `domain_config.min_remaining_tokens_for_mount` (line 101). Both fields exist on `DomainConfig`.
+- P8BC-009 | PASS | `graph/tools/task_queue.py` — import is `from vaultspec_a2a.domain_config import domain_config` (line 12); usage `domain_config.task_queue_pending_horizon` (line 69). Field exists on `DomainConfig`.
+- P8BC-010 | PASS | Zero `from vaultspec_a2a.control.config import settings` occurrences in any `context/` or `graph/` production file.
+- P8BC-011 | INFO | Stale docstring in `context/metadata.py` line 93 reads `"Returns at most ``settings.max_context_refs`` results."` — references old symbol name. Production code is correct; only the docstring is stale. Not a functional defect.
+- P8BC-012 | INFO | Two test files (`context/tests/test_anchoring.py:81`, `context/tests/test_metadata.py:198`) contain comments referencing `settings.anchor_path_cap` / `settings.max_context_refs`. Per plan Phase 8b step 2 these were in scope for update but are comments only — no import or runtime impact.
+
+### Summary
+
+All 8 production files correctly import `domain_config` from `vaultspec_a2a.domain_config` and access the expected field names. Every field accessed (`max_context_refs`, `anchor_path_cap`, `chars_per_token`, `vault_index_cap`, `context_limit_tokens`, `mount_token_ceiling`, `min_remaining_tokens_for_mount`, `task_queue_pending_horizon`) is present on `DomainConfig` with matching names. The singleton and `__all__` are correctly established in Phase 8a. Two stale docstring/comment references to the old `settings` symbol are cosmetic and carry no runtime risk.
+
+## Phase 8e: Domain Event Conversion Review
+
+**Status:** REVISION REQUIRED
+
+### Findings
+
+**Checklist Results**
+
+- P8E-001 | PASS | `streaming/aggregator.py` has ZERO `from ..api` imports. Grep for `from.*api` returns no matches. The module-level `api.schemas.events` imports that existed pre-refactor are fully removed.
+- P8E-002 | PASS | Aggregator imports enums from `..graph.enums` (lines 32–38: `AgentLifecycleState`, `PermissionOptionKind`, `PermissionType`, `ToolCallStatus`, `ToolKind`). Zero `api.schemas.enums` imports. Zero `control.config` imports.
+- P8E-003 | PASS | All 10 domain event types are imported from `..graph.events` (lines 39–51). Every emit method constructs domain dataclasses: `MessageChunk` (lines 659, 792), `ThoughtChunk` (811), `ToolCallStart` (848), `ToolCallUpdate` (899), `PermissionRequest` (957, 1070), `ArtifactUpdate` (1187), `PlanUpdate` (1210), `ErrorOccurred` (1237), `AgentStatus` (769), `TeamStatus` (1295). No Pydantic wire-event constructors appear.
+- P8E-004 | PASS | `SequencedEvent` is correctly defined as a plain `@dataclass` wrapping `event: DomainEvent` and `sequence: int` (lines 72–83). The subscriber queue type is `asyncio.Queue[SequencedEvent]` (line 278). The docstring correctly documents its role as a wire-protocol-concern carrier.
+- P8E-005 | PASS | `api/event_adapter.py` exists and handles all 10 domain event types in `domain_to_wire()` via a `match` statement. A fallback `case _:` raises `TypeError` for unmapped types. The `sequenced_to_wire()` convenience wrapper is present. No domain event type is absent.
+- P8E-006 | FAIL | **`locations` field dropped in `ToolCallStartEvent` and `ToolCallUpdateEvent` construction.** Both domain events carry `locations: list[dict[str, str | int | None]]` and both wire schema models declare `locations: list[ToolCallLocation]` (with `default_factory=list`). The adapter constructs `ToolCallStartEvent` (lines 96–106) and `ToolCallUpdateEvent` (lines 116–126) without mapping domain `locations` dicts to `ToolCallLocation(path=..., line=...)` objects. File-location data present in domain events is silently discarded before wire delivery. **This is a functional data-loss defect.**
+- P8E-007 | PASS | `PlanEntry` mapping correctly constructs `PlanEntry(content=..., status=PlanEntryStatus(...), priority=PlanEntryPriority(...))` from domain `list[dict[str, str]]`. `PermissionOption` mapping correctly constructs `PermissionOption(option_id=..., name=..., kind=PermissionOptionKind(...))`. `AgentSummary` mapping handles all six required fields; `provider` and `model` are correctly omitted (both optional on wire schema, absent from domain dict). `ToolCallContentText` is correctly constructed from dicts filtering on `content_type == "text"`.
+- P8E-008 | PASS | `api/websocket.py` imports `sequenced_to_wire` from `.event_adapter` (line 28) and calls it in `_writer_loop` (lines 627–631): `wire_event = sequenced_to_wire(event) if isinstance(event, SequencedEvent) else event`. The branch handles both domain-originated `SequencedEvent` objects and pre-serialised relay dicts from `broadcast_to_thread`.
+- P8E-009 | PASS | `streaming/__init__.py` re-exports `SequencedEvent` in both the import list (line 5) and `__all__` (line 12).
+- P8E-010 | INFO | `AgentSummary` wire model has `provider: Provider | None = None` and `model: Model | None = None` fields. The `TeamStatus` domain event stores agents as `list[dict[str, str]]` — plain string dicts that cannot carry typed `Provider`/`Model` enum values. Provider and model are silently absent from team status wire events. This is an existing domain model limitation, not introduced by Phase 8e, and carries no regression risk.
+- P8E-011 | INFO | `api/event_adapter.py` imports `AgentLifecycleState` from `..api.schemas.enums` (line 32) for use in the `TeamStatus` → `AgentSummary` mapping. This is correct: the adapter sits in Layer 2 (`api/`) and constructing wire-protocol Pydantic models from `api.schemas.enums` types is its explicit responsibility. No boundary violation.
+- P8E-012 | INFO | The `sequenced_to_dict()` function (lines 231–235) uses `dataclasses.asdict()` on the domain event. For events with enum fields (`ToolKind`, `ToolCallStatus`, `AgentLifecycleState`, `PermissionType`), `asdict()` preserves the enum objects — callers consuming the dict via the relay path must handle enum serialisation separately. This is not introduced by Phase 8e but is worth noting for the relay path.
+
+### Required Fix Before Merge
+
+**P8E-006 — `locations` mapping in `api/event_adapter.py`**
+
+The adapter must map `event.locations` to `list[ToolCallLocation]` for both `ToolCallStart` and `ToolCallUpdate` cases. The fix is mechanical:
+
+```python
+# ToolCallStart case — add before constructing ToolCallStartEvent:
+locations = [
+    ToolCallLocation(
+        path=loc.get("path", ""),
+        line=loc.get("line"),  # int | None
+    )
+    for loc in event.locations
+]
+# then pass locations=locations to ToolCallStartEvent(...)
+
+# ToolCallUpdate case — add conditional mapping:
+upd_locations: list[ToolCallLocation] | None = None
+if event.locations is not None:
+    upd_locations = [
+        ToolCallLocation(path=loc.get("path", ""), line=loc.get("line"))
+        for loc in event.locations
+    ]
+# then pass locations=upd_locations to ToolCallUpdateEvent(...)
+```
+
+`ToolCallLocation` is already exported from `api.schemas.events` — only the import and mapping lines need adding.
+
+### Summary
+
+Phase 8e is architecturally sound. The aggregator is fully clean of `api.schemas` imports, all 10 domain event types are correctly emitted as dataclasses, `SequencedEvent` is correctly defined and re-exported, and `websocket.py` correctly calls the adapter before sending. One functional defect (P8E-006) requires a fix before merge: `locations` data carried on `ToolCallStart` and `ToolCallUpdate` domain events is not mapped to `ToolCallLocation` objects in the adapter, causing silent data loss for file-location annotations on tool calls.
+
+---
+
+## Phase 8f+8g: Telemetry Hooks + Settings Swap Review
+
+**Status:** PASS
+
+### Findings
+
+**Checklist 1 — `streaming/aggregator.py` free of `telemetry/` imports**
+
+PASS. The import block (lines 16–52) contains zero imports from any
+`telemetry/` package. The only telemetry-related import is
+`from ..graph.protocols import NullTelemetryHook, TelemetryHook` — a
+Layer 1 peer import, not a Layer 2 import.
+
+**Checklist 2 — `streaming/aggregator.py` free of `control.config` imports**
+
+PASS. No `control.config` or `settings` import exists anywhere in the file.
+The settings swap (Phase 8g) is complete: `domain_config` is imported at
+line 31 via `from ..domain_config import domain_config` and used at all
+13 former `settings.*` access sites (verified below).
+
+**Checklist 3 — ALL 6 module-level OTel instruments removed**
+
+PASS. The plan identified module-level definitions at lines 75–94 of the
+pre-refactor file (`_tracer`, `_meter`, and 4 instrument variables). None
+of these exist in the current file. There are no module-level `get_tracer`,
+`get_meter`, `_counter`, or `_histogram` definitions anywhere in the file.
+
+**Checklist 4 — `NullTelemetryHook.start_span()` yields a usable object**
+
+PASS. `NullTelemetryHook.start_span()` is a `@contextmanager` that yields
+`_NULL_SPAN` — a singleton `_NullSpan` instance. `_NullSpan` has a
+`set_attribute(key, value) -> None` method. The aggregator calls
+`span.set_attribute(...)` at two sites (lines 1843, 1939) — both within
+`with self._telemetry.start_span(...) as span:` blocks. `_NullSpan`
+silently absorbs these calls. The other two `start_span` usages (lines 566,
+652) use `with ... :` without `as span:`, so no attribute access occurs.
+All four call sites are handled correctly.
+
+**Checklist 5 — `OTelAggregatorHook` matches `TelemetryHook` protocol**
+
+PASS. Protocol signature comparison:
+
+| Method | Protocol | `OTelAggregatorHook` |
+|---|---|---|
+| `start_span(name, **attrs)` | `AbstractContextManager[Any]` | `@contextmanager` — structurally satisfies |
+| `increment_counter(name, value=1, **attrs)` | `None` | `None` — exact match |
+| `record_histogram(name, value, **attrs)` | `None` | `None` — exact match |
+
+One observation: `OTelAggregatorHook.start_span` is annotated `-> Any`
+rather than `-> AbstractContextManager[Any]`. This is minor annotation
+looseness, not a runtime violation — `@contextmanager` functions return
+`contextlib.GeneratorContextManager` which satisfies `AbstractContextManager`.
+
+The class satisfies `TelemetryHook` structurally via duck typing, which is
+correct for `@runtime_checkable Protocol` usage.
+
+**Checklist 6 — Hook wired correctly in `api/app.py`**
+
+PASS. Line 1149 of `api/app.py`:
+
+```python
+aggregator = EventAggregator(telemetry=OTelAggregatorHook())
+```
+
+`OTelAggregatorHook` is imported at line 59 via
+`from ..telemetry.aggregator_hook import OTelAggregatorHook`. The `telemetry=`
+keyword matches `EventAggregator.__init__`'s parameter name exactly. The hook
+is passed at construction time as required by ADR D-04.
+
+**Checklist 7 — All 13 `settings.X` → `domain_config.X` swaps correct**
+
+PASS. All 13 usages confirmed — all call `domain_config.<field>`:
+
+| Line | Field accessed |
+|---|---|
+| 475 | `domain_config.event_queue_maxsize` |
+| 616 | `domain_config.tool_call_debounce_seconds` |
+| 627 | `domain_config.plan_update_debounce_seconds` |
+| 670 | `domain_config.chunk_flush_interval_seconds` |
+| 708 | `domain_config.chunk_buffer_max_bytes` |
+| 837 | `domain_config.tool_arg_truncate_len` |
+| 838 | `domain_config.tool_arg_truncate_len` (truncation suffix) |
+| 911 | `domain_config.tool_call_debounce_seconds` |
+| 915 | `domain_config.debounce_map_max_entries` |
+| 1219 | `domain_config.plan_update_debounce_seconds` |
+| 1452 | `domain_config.tool_arg_truncate_len` |
+| 1641 | comment referencing `domain_config.aget_state_timeout_seconds` |
+| 1643 | `domain_config.aget_state_timeout_seconds` |
+
+Zero `settings` references remain in the file.
+
+**Additional: `telemetry/aggregator_hook.py` structure**
+
+The new file exists at `src/vaultspec_a2a/telemetry/aggregator_hook.py`.
+It implements the three required methods. Lazy instrument creation in
+`increment_counter` and `record_histogram` (dict-backed `_counters` /
+`_histograms`) is correct — instruments are created once on first use.
+`get_tracer` and `get_meter` are called eagerly at `__init__` time (standard
+OTel practice). No concerns.
+
+**Minor observations (non-blocking)**
+
+- P8fg-001 | LOW | `OTelAggregatorHook.start_span` return annotation is `Any`
+  Tightening to `-> AbstractContextManager[Any]` would match the protocol
+  declaration and improve type-checker visibility. Runtime behaviour is
+  unaffected.
+
+- P8fg-002 | INFO | `flush_chunks` span does not capture the yielded span object
+  The `with self._telemetry.start_span("aggregator.flush_chunks", ...):` at
+  line 652 uses no `as span:`. No attributes are set on it. This is consistent
+  with the intent — the span marks duration only. Not an issue.
+
+**ADR D-04 compliance:** Fully implemented. `streaming/aggregator.py` has
+zero `telemetry/` imports, zero `control.config` imports, zero module-level
+OTel instrument definitions, and relies entirely on the injected
+`TelemetryHook`. `NullTelemetryHook` is the default. The real OTel hook is
+isolated in `telemetry/aggregator_hook.py` and wired at the API boundary in
+`api/app.py`.
+
+---
+
+## Phase 8h: Final Boundary + Architecture Gate Review
+
+**Status:** PASS
+
+### Layer 1 Boundary
+
+Searched all production `.py` files in `thread/`, `context/`, `team/`, `graph/`, `lifecycle/`, and `domain_config.py` for imports from Layer 2+ packages (`api/`, `database/`, `providers/`, `telemetry/`, `control/`, `worker/`, `streaming/`).
+
+**Result: ZERO violations.**
+
+Evidence:
+- `thread/` — zero live import matches. One grep hit in `errors.py` is a docstring comment, not an import statement.
+- `context/` — zero matches. All previously-flagged files (P3-001) now correctly import `domain_config` from `vaultspec_a2a.domain_config` (P8BC-002 through P8BC-004 confirmed).
+- `team/` — zero matches.
+- `graph/` — zero absolute cross-layer import paths. All `..` relative imports within `graph/` resolve only to sibling submodules (`nodes/` → `tools/`, `compiler.py` → `nodes/`). No path targets `api/`, `database/`, `providers/`, `telemetry/`, `control/`, `worker/`, or `streaming/`.
+- `lifecycle/` — zero matches. `lifecycle/reconciliation.py` imports only `dataclasses`, `enum`, and `typing`.
+- `domain_config.py` — imports only `pydantic` and `pydantic_settings`. Zero application-layer imports.
+
+### Layer 1.5 Boundary
+
+Searched all production `.py` files in `streaming/` (excluding `tests/`) for imports from `api/`, `database/`, `providers/`, `telemetry/`, `control/`, `worker/`.
+
+**Result: ZERO violations.**
+
+Evidence from `streaming/aggregator.py` top-level imports (lines 16–52): `asyncio`, `json`, `logging`, `time`, `collections`, `dataclasses`, `datetime`, `typing`, `uuid`, `langgraph.types`, `vaultspec_a2a.thread.errors` (Layer 1 peer), `vaultspec_a2a.domain_config` (Layer 1 peer), `vaultspec_a2a.graph.enums` (Layer 1 peer), `vaultspec_a2a.graph.events` (Layer 1 peer), `vaultspec_a2a.graph.protocols` (Layer 1 peer). The previously CRITICAL V-01 (`api.schemas.*`) and V-02 (`telemetry.instrumentation`) imports are fully absent.
+
+### Violation Resolution Matrix
+
+| Violation | Status | Evidence |
+|-----------|--------|----------|
+| V-01 (aggregator → api.schemas) | RESOLVED | `streaming/aggregator.py` has zero `api` imports. `api/event_adapter.py` exists. Aggregator emits domain events from `graph/events.py`. All 10 domain event constructors confirmed (Phase 8e P8E-003). |
+| V-02 (aggregator → telemetry) | RESOLVED | `streaming/aggregator.py` has zero `telemetry` imports. Module-level `get_tracer`/`get_meter` calls removed. `NullTelemetryHook` wired at construction time (Phase 8fg confirmed). `telemetry/aggregator_hook.py` exists as real OTel hook. |
+| V-03 (graph → database.checkpoints) | RESOLVED | `graph/compiler.py` uses `BaseCheckpointSaver` from `langgraph.checkpoint.base` only. Zero `database` imports in any `graph/` production file. |
+| V-04 (graph → providers) | RESOLVED | `_get_provider_factory()` deleted. `compile_team_graph()` requires `provider_factory: ProviderFactoryProtocol` as mandatory keyword-only parameter. Zero `providers` imports in any `graph/` production file (Phase 8d PASS). |
+| V-05 (reconciliation → database.crud) | RESOLVED | `lifecycle/reconciliation.py` is stdlib-only. `database/reconciliation.py` holds the I/O executor. Call site in `api/app.py` confirmed correct. |
+| V-06 (settings singleton) | RESOLVED | Zero `from vaultspec_a2a.control.config import settings` in any Layer 1 production file. All 9 previously-coupled files import `domain_config` from `vaultspec_a2a.domain_config`. `domain_config.py` exports singleton with no infrastructure coupling. |
+
+### Architecture Completeness
+
+| Artifact | Location | Status |
+|---|---|---|
+| `graph/events.py` — domain event dataclasses | `src/vaultspec_a2a/graph/events.py` | PRESENT |
+| `graph/enums.py` — domain enums | `src/vaultspec_a2a/graph/enums.py` | PRESENT |
+| `graph/protocols.py` — `ProviderFactoryProtocol`, `TelemetryHook`, `NullTelemetryHook` | `src/vaultspec_a2a/graph/protocols.py` | PRESENT |
+| `api/event_adapter.py` — domain → wire translation | `src/vaultspec_a2a/api/event_adapter.py` | PRESENT |
+| `telemetry/aggregator_hook.py` — real OTel hook | `src/vaultspec_a2a/telemetry/aggregator_hook.py` | PRESENT |
+| `lifecycle/reconciliation.py` — pure decision logic | `src/vaultspec_a2a/lifecycle/reconciliation.py` | PRESENT |
+| `database/reconciliation.py` — I/O executor | `src/vaultspec_a2a/database/reconciliation.py` | PRESENT |
+
+All 7 required architecture artifacts are present.
+
+### Open Non-Blocking Item
+
+**P8E-006** (carried from Phase 8e): `api/event_adapter.py` drops `locations` data when constructing `ToolCallStartEvent` and `ToolCallUpdateEvent` wire objects. This is a functional data-loss defect in the adapter (Layer 2), not a boundary violation. It does not affect Layer 1 purity and is not a gate blocker for boundary enforcement, but must be resolved before production shipment.
+
+### Overall Verdict
+
+**PASS**
+
+All 6 ADR boundary violations are fully resolved. Layer 1 boundary is clean across all five directories (`thread/`, `context/`, `team/`, `graph/`, `lifecycle/`) and `domain_config.py`. Layer 1.5 (`streaming/`) boundary is clean. All 7 required architecture artifacts exist. The `core/` module is fully deleted with zero stale imports. Domain event dataclasses, enums, protocols, telemetry hook wiring, and reconciliation I/O split are correctly implemented and wired. This branch satisfies all criteria of `docs/adrs/040-layer-boundary-enforcement.md`.

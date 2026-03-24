@@ -49,6 +49,7 @@ from .schemas.events import (
     ThoughtChunkEvent,
     ToolCallContent,
     ToolCallContentText,
+    ToolCallLocation,
     ToolCallStartEvent,
     ToolCallUpdateEvent,
 )
@@ -59,6 +60,15 @@ __all__ = ["domain_to_wire", "sequenced_to_wire"]
 def _ts(epoch: float) -> datetime:
     """Convert a Unix epoch timestamp to a timezone-aware datetime."""
     return datetime.fromtimestamp(epoch, tz=UTC)
+
+
+def _loc_to_wire(loc: dict[str, str | int | None]) -> ToolCallLocation:
+    """Convert a domain location dict to a wire ToolCallLocation."""
+    raw_line = loc.get("line")
+    return ToolCallLocation(
+        path=str(loc.get("path") or ""),
+        line=raw_line if isinstance(raw_line, int) else None,
+    )
 
 
 def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
@@ -93,6 +103,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 for c in event.content
                 if c.get("content_type") == "text"
             ]
+            locations = [_loc_to_wire(loc) for loc in event.locations]
             return ToolCallStartEvent(
                 thread_id=event.thread_id,
                 agent_id=event.agent_id,
@@ -103,6 +114,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 kind=event.kind,
                 status=event.status,
                 content=content,
+                locations=locations,
             )
 
         case ToolCallUpdate():
@@ -113,6 +125,9 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                     for c in event.content
                     if c.get("content_type") == "text"
                 ]
+            upd_locations = None
+            if event.locations is not None:
+                upd_locations = [_loc_to_wire(loc) for loc in event.locations]
             return ToolCallUpdateEvent(
                 thread_id=event.thread_id,
                 agent_id=event.agent_id,
@@ -123,6 +138,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
                 kind=event.kind,
                 status=event.status,
                 content=upd_content,
+                locations=upd_locations,
             )
 
         case PermissionRequest():

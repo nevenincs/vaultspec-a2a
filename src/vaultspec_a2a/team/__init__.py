@@ -7,9 +7,6 @@ from .team_config import (
     AgentConfig as AgentConfig,
 )
 from .team_config import (
-    AgentConfigNotFoundError as AgentConfigNotFoundError,
-)
-from .team_config import (
     AgentModelConfig as AgentModelConfig,
 )
 from .team_config import (
@@ -23,9 +20,6 @@ from .team_config import (
 )
 from .team_config import (
     TeamConfig as TeamConfig,
-)
-from .team_config import (
-    TeamConfigNotFoundError as TeamConfigNotFoundError,
 )
 from .team_config import (
     TeamDefaultsConfig as TeamDefaultsConfig,
@@ -64,13 +58,11 @@ from .team_config import (
 __all__ = [
     "AgentCapabilitiesConfig",
     "AgentConfig",
-    "AgentConfigNotFoundError",
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
     "SupervisorConfig",
     "TeamConfig",
-    "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
     "TeamGraphConfig",
     "TeamPermissionsConfig",

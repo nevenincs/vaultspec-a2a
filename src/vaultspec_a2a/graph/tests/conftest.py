@@ -22,6 +22,32 @@ if TYPE_CHECKING:
 __all__: list[str] = []
 
 
+_PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
+
+_INFRA_MARKERS = frozenset(
+    {
+        "live",
+        "requires_vidaimock",
+        "requires_jaeger",
+        "requires_postgres",
+    }
+)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark pure Layer 1 tests in this directory as ``core``.
+
+    Tests that carry infrastructure markers (live, requires_vidaimock, etc.)
+    are NOT marked ``core`` — they depend on Layer 2 services.
+    """
+    for item in items:
+        if not str(item.path).startswith(_PACKAGE_DIR):
+            continue
+        if any(item.get_closest_marker(m) for m in _INFRA_MARKERS):
+            continue
+        item.add_marker(pytest.mark.core)
+
+
 # ---------------------------------------------------------------------------
 # Layer 1 test stub — avoids importing the Layer 2 ProviderFactory
 # ---------------------------------------------------------------------------

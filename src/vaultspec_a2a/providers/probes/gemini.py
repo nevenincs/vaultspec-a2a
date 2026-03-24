@@ -19,7 +19,7 @@ import logging
 import sys
 
 from ...control.config import settings
-from ...utils.enums import MODEL_MAP, Model, Provider
+from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.logging import setup_logging
 from ..factory import _build_gemini_command, _build_gemini_env
 from ..gemini_auth import refresh_gemini_token

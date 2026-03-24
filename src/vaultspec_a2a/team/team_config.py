@@ -23,12 +23,12 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
+from vaultspec_a2a.graph.enums import Model, Provider
 from vaultspec_a2a.thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
     TeamConfigNotFoundError,
 )
-from vaultspec_a2a.utils.enums import Model, Provider
 
 # H5: safe agent_id pattern — alphanumeric, underscores, hyphens only.
 # Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").

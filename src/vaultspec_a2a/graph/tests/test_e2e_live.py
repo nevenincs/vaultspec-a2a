@@ -17,6 +17,7 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
+from vaultspec_a2a.graph.enums import Model, Provider
 from vaultspec_a2a.team.team_config import (
     AgentConfig,
     AgentModelConfig,
@@ -25,7 +26,6 @@ from vaultspec_a2a.team.team_config import (
     load_agent_config,
     load_team_config,
 )
-from vaultspec_a2a.utils.enums import Model, Provider
 
 from ..compiler import compile_team_graph
 

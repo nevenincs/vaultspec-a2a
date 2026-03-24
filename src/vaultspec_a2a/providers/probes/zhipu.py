@@ -17,7 +17,7 @@ import logging
 import sys
 
 from ...control.config import settings
-from ...utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
+from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...utils.logging import setup_logging
 from ..factory import ProviderFactory
 from ._http import run_http_probe

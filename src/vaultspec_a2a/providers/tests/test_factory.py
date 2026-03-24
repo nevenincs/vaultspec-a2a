@@ -7,8 +7,8 @@ from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
+from ...graph.enums import MODEL_MAP, Model, Provider
 from ...thread.errors import ConfigError
-from ...utils.enums import MODEL_MAP, Model, Provider
 from ..acp_chat_model import AcpChatModel
 from ..factory import (
     _BIN_PATH,

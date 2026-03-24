@@ -10,9 +10,9 @@ from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
 from ..control.config import settings
+from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ..team.team_config import AgentConfig
 from ..thread.errors import ConfigError
-from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from .acp_chat_model import AcpChatModel
 
 __all__ = ["ProviderFactory"]

@@ -30,8 +30,8 @@ from vaultspec_a2a.thread.errors import (
     WorkerExecutionError,
 )
 from vaultspec_a2a.thread.state import TeamState
-from vaultspec_a2a.utils.enums import Model, Provider
 
+from .enums import Model, Provider
 from .nodes.supervisor import create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node

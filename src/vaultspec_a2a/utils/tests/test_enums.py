@@ -4,15 +4,12 @@ Exercises membership, value types, MODEL_MAP completeness, and
 PROVIDER_DEFAULT_MODELS consistency.
 """
 
+from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
 from ..enums import (
-    MODEL_MAP,
-    PROVIDER_DEFAULT_MODELS,
     AcpRequestId,
     AgentState,
     Environment,
     LogLevel,
-    Model,
-    Provider,
 )
 
 # ---------------------------------------------------------------------------

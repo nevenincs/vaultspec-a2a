@@ -1,16 +1,12 @@
-"""Enums and constants for the vaultspec-a2a library."""
+"""Utility enums and constants for the vaultspec-a2a library."""
 
 from enum import IntEnum, StrEnum
 
 __all__ = [
-    "MODEL_MAP",
-    "PROVIDER_DEFAULT_MODELS",
     "AcpRequestId",
     "AgentState",
     "Environment",
     "LogLevel",
-    "Model",
-    "Provider",
 ]
 
 
@@ -41,73 +37,6 @@ class Environment(StrEnum):
     TESTING = "testing"
     STAGING = "staging"
     PRODUCTION = "production"
-
-
-class Provider(StrEnum):
-    """Supported LLM providers."""
-
-    CLAUDE = "claude"
-    GEMINI = "gemini"
-    MOCK = "mock"
-    OPENAI = "openai"
-    ZHIPU = "zhipu"
-
-
-class Model(StrEnum):
-    """LLM capability levels.
-
-    Abstracts specific version strings to reduce maintenance burden.
-    """
-
-    LOW = "low"
-    MID = "mid"
-    HIGH = "high"
-    MAX = "max"
-
-
-# Concrete model name mapping as of February 2026
-MODEL_MAP: dict[Provider, dict[Model, str]] = {
-    Provider.CLAUDE: {
-        Model.LOW: "claude-4.5-haiku",
-        Model.MID: "claude-4.6-sonnet",
-        Model.HIGH: "claude-4.6-opus",
-        Model.MAX: "claude-4.6-opus",
-    },
-    Provider.GEMINI: {
-        Model.LOW: "gemini-2.5-flash",
-        Model.MID: "gemini-3-flash-preview",
-        Model.HIGH: "gemini-3.1-pro-preview",
-        Model.MAX: "gemini-3.1-pro-preview",
-    },
-    Provider.OPENAI: {
-        Model.LOW: "gpt-5-mini",
-        Model.MID: "gpt-5.2-pro",
-        Model.HIGH: "gpt-5.3-codex",
-        Model.MAX: "gpt-5.3-codex",
-    },
-    Provider.MOCK: {
-        Model.LOW: "mock-low",
-        Model.MID: "mock-mid",
-        Model.HIGH: "mock-high",
-        Model.MAX: "mock-max",
-    },
-    Provider.ZHIPU: {
-        Model.LOW: "glm-4.7-flash",
-        Model.MID: "glm-4.7-flagship",
-        Model.HIGH: "glm-5",
-        Model.MAX: "glm-5",
-    },
-}
-
-
-# Default model mapping (capability level per provider)
-PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
-    Provider.CLAUDE: Model.MID,
-    Provider.GEMINI: Model.MID,
-    Provider.MOCK: Model.MID,
-    Provider.OPENAI: Model.HIGH,
-    Provider.ZHIPU: Model.HIGH,
-}
 
 
 class AcpRequestId(IntEnum):

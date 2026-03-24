@@ -11,7 +11,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
-from ...utils.enums import Model, Provider
+from ...graph.enums import Model, Provider
 from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [

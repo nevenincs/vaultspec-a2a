@@ -10,12 +10,12 @@ from typing import cast
 import pytest
 from pydantic import ValidationError
 
+from vaultspec_a2a.graph.enums import Model, Provider
 from vaultspec_a2a.thread.errors import (
     AgentConfigNotFoundError,
     ConfigError,
     TeamConfigNotFoundError,
 )
-from vaultspec_a2a.utils.enums import Model, Provider
 
 from ..team_config import (
     AgentConfig,

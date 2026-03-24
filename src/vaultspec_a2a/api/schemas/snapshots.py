@@ -9,7 +9,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from ...utils.enums import Model, Provider
+from ...graph.enums import Model, Provider
 from .enums import (
     AgentLifecycleState,
     PermissionOptionKind,

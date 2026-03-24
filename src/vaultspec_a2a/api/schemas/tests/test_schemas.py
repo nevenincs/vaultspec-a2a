@@ -12,7 +12,7 @@ from typing import Any, TypedDict
 import pytest
 from pydantic import TypeAdapter
 
-from ....utils.enums import Model, Provider
+from ....graph.enums import Model, Provider
 from .. import (
     AgentControlAction,
     AgentControlCommand,

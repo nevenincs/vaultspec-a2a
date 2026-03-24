@@ -45,7 +45,7 @@ class _StubProviderFactory:
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
     """Stub provider factory for graph compilation tests (Layer 1 only)."""
-    return _StubProviderFactory()  # type: ignore[return-value]
+    return _StubProviderFactory()
 
 
 _DEFAULT_VIDAIMOCK_URL = "http://localhost:8100"

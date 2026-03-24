@@ -493,7 +493,7 @@ async def test_compile_team_graph_recursion_limit_from_toml(
 
 def test_resolve_worker_model_preferences_honors_worker_override_precedence() -> None:
     """Worker-level provider/capability/fallback overrides win over defaults."""
-    from vaultspec_a2a.utils.enums import Model, Provider
+    from vaultspec_a2a.graph.enums import Model, Provider
 
     team = load_team_config("vaultspec-solo-coder")
     agent_cfg = load_agent_config("vaultspec-coder")

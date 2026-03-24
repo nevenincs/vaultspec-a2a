@@ -6,7 +6,6 @@ from pathlib import Path
 import pytest
 from langchain_core.messages import BaseMessage, HumanMessage
 
-from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
 from vaultspec_a2a.thread.state import TeamState
 
 from ...nodes.worker import create_worker_node
@@ -30,6 +29,8 @@ def _make_state() -> TeamState:
 @pytest.mark.asyncio
 async def test_worker_execution_integration() -> None:
     """Worker node executes correctly using a real ACP subprocess."""
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "HelloWorld"],
         env_vars={},
@@ -49,6 +50,8 @@ async def test_worker_execution_integration() -> None:
 @pytest.mark.asyncio
 async def test_worker_context_compaction_integration() -> None:
     """Worker node handles large context with compaction."""
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "Compacted"],
         env_vars={},
@@ -70,6 +73,8 @@ async def test_worker_context_compaction_integration() -> None:
 @pytest.mark.asyncio
 async def test_worker_error_handling_integration() -> None:
     """Worker node handles ACP subprocess errors correctly."""
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
     model = AcpChatModel(
         command=[PYTHON_EXE, str(SIMULATOR_PATH), "--error", "Internal agent failure"],
         env_vars={},

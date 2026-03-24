@@ -19,7 +19,6 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
-from vaultspec_a2a.providers.factory import ProviderFactory
 from vaultspec_a2a.team.team_config import load_agent_config, load_team_config
 
 from ..compiler import compile_team_graph
@@ -37,7 +36,9 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
-    """Concrete ProviderFactory for graph compilation tests."""
+    """Concrete ProviderFactory — lazy import keeps module-level Layer 2-free."""
+    from vaultspec_a2a.providers.factory import ProviderFactory
+
     return ProviderFactory()
 
 

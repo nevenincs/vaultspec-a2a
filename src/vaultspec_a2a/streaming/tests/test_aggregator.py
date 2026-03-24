@@ -10,7 +10,7 @@ from langgraph.errors import GraphInterrupt
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ...control.config import settings
+from ...domain_config import domain_config
 from ...graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -85,10 +85,10 @@ class TestSubscriberManagement:
     def test_add_subscriber_returns_bounded_queue(
         self, aggregator: EventAggregator
     ) -> None:
-        """add_subscriber returns a Queue with maxsize=settings.event_queue_maxsize."""
+        """add_subscriber returns a bounded Queue."""
         queue = aggregator.add_subscriber("client-1")
         assert isinstance(queue, asyncio.Queue)
-        assert queue.maxsize == settings.event_queue_maxsize
+        assert queue.maxsize == domain_config.event_queue_maxsize
 
     def test_remove_subscriber(self, aggregator: EventAggregator) -> None:
         """remove_subscriber is idempotent — double-remove does not raise."""
@@ -501,7 +501,7 @@ class TestLangGraphEventProcessing:
         assert queue.empty()
 
         # Wait for the 50ms flush timer
-        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
+        await asyncio.sleep(domain_config.chunk_flush_interval_seconds + 0.02)
 
         sequenced = queue.get_nowait()
         event = sequenced.event
@@ -518,7 +518,7 @@ class TestLangGraphEventProcessing:
         aggregator.subscribe("client-1", ["thread-1"])
 
         # Build a chunk larger than 4KB
-        large_content = "x" * (settings.chunk_buffer_max_bytes + 100)
+        large_content = "x" * (domain_config.chunk_buffer_max_bytes + 100)
 
         await aggregator.process_langgraph_event(
             event_data={
@@ -535,7 +535,7 @@ class TestLangGraphEventProcessing:
         sequenced = queue.get_nowait()
         event = sequenced.event
         assert isinstance(event, MessageChunk)
-        assert len(event.content) > settings.chunk_buffer_max_bytes
+        assert len(event.content) > domain_config.chunk_buffer_max_bytes
 
     @pytest.mark.asyncio
     async def test_on_tool_start_with_node_metadata(
@@ -760,7 +760,7 @@ class TestLangGraphEventProcessing:
         )
 
         # Wait for potential flush
-        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
+        await asyncio.sleep(domain_config.chunk_flush_interval_seconds + 0.02)
         assert queue.empty()
 
 
@@ -796,7 +796,7 @@ class TestTokenChunkBatching:
         assert queue.empty()
 
         # Wait for flush
-        await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
+        await asyncio.sleep(domain_config.chunk_flush_interval_seconds + 0.02)
 
         sequenced = queue.get_nowait()
         event = sequenced.event
@@ -876,7 +876,7 @@ class TestBackpressure:
         aggregator.subscribe("client-1", ["thread-1"])
 
         # Fill the queue to capacity with distinct content
-        for i in range(settings.event_queue_maxsize):
+        for i in range(domain_config.event_queue_maxsize):
             await aggregator.emit_message_chunk(
                 thread_id="thread-1",
                 agent_id="agent-1",
@@ -895,7 +895,7 @@ class TestBackpressure:
         )
 
         # Queue remains at capacity (not exceeding maxsize)
-        assert queue.qsize() == settings.event_queue_maxsize
+        assert queue.qsize() == domain_config.event_queue_maxsize
 
         # First event dequeued is msg-1 (msg-0 was dropped)
         first = queue.get_nowait()
@@ -921,7 +921,7 @@ class TestBackpressure:
         aggregator.subscribe("slow", ["thread-1"])
 
         # Pre-fill the slow queue to capacity
-        for i in range(settings.event_queue_maxsize):
+        for i in range(domain_config.event_queue_maxsize):
             q_slow.put_nowait(_make_sequenced_event(aggregator, f"pre-{i}"))
 
         assert q_slow.full()
@@ -942,7 +942,7 @@ class TestBackpressure:
         assert fast_sequenced.event.content == "new-event"
 
         # Slow client still at capacity (oldest was dropped, newest inserted)
-        assert q_slow.qsize() == settings.event_queue_maxsize
+        assert q_slow.qsize() == domain_config.event_queue_maxsize
 
 
 def _make_sequenced_event(aggregator: EventAggregator, content: str) -> SequencedEvent:

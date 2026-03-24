@@ -17,7 +17,6 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
-from vaultspec_a2a.providers.factory import ProviderFactory
 from vaultspec_a2a.team.team_config import (
     TopologyConfig,
     TopologyType,
@@ -41,12 +40,6 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         yield saver
-
-
-@pytest.fixture
-def pf() -> ProviderFactoryProtocol:
-    """Concrete ProviderFactory for graph compilation tests."""
-    return ProviderFactory()
 
 
 # ---------------------------------------------------------------------------
@@ -415,7 +408,7 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_step_timeout_set() -> None:
+async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
     """compile_team_graph sets step_timeout on the compiled Pregel graph."""
     team = load_team_config("vaultspec-adaptive-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -426,13 +419,15 @@ async def test_compile_team_graph_step_timeout_set() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=42.0,
-            provider_factory=ProviderFactory(),
+            provider_factory=pf,
         )
     assert graph.step_timeout == 42.0
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
+async def test_compile_team_graph_step_timeout_falls_back_to_toml(
+    pf: ProviderFactoryProtocol,
+) -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
     team = load_team_config("vaultspec-adaptive-coder")
     assert team.graph.step_timeout_seconds == 300
@@ -444,7 +439,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=None,
-            provider_factory=ProviderFactory(),
+            provider_factory=pf,
         )
     assert graph.step_timeout == 300.0
 
@@ -473,7 +468,9 @@ def test_build_supervisor_prompt_no_directive() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_recursion_limit_from_toml() -> None:
+async def test_compile_team_graph_recursion_limit_from_toml(
+    pf: ProviderFactoryProtocol,
+) -> None:
     """compile_team_graph sets recursion_limit from team TOML."""
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.recursion_limit == 10
@@ -484,7 +481,7 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
             team_config=team,
             agent_configs=agent_configs,
             checkpointer=cp,
-            provider_factory=ProviderFactory(),
+            provider_factory=pf,
         )
     assert graph.recursion_limit == 10  # type: ignore[attr-defined]
 
@@ -546,9 +543,11 @@ def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
 @pytest.mark.asyncio
 async def test_graph_execution_routing(
     checkpointer: AsyncSqliteSaver,
-    pf: ProviderFactoryProtocol,
 ) -> None:
     """End-to-end: supervisor routes, checkpointer persists state."""
+    from vaultspec_a2a.providers.factory import ProviderFactory
+
+    pf = ProviderFactory()
     team = load_team_config("vaultspec-adaptive-coder")
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")

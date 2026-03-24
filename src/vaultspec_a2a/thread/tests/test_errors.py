@@ -3,6 +3,7 @@
 import pytest
 
 from .. import (
+    AgentConfigNotFoundError,
     AgentProcessError,
     ConfigError,
     ContextOverflowError,
@@ -10,10 +11,12 @@ from .. import (
     ErrorSeverity,
     EventAggregatorError,
     MergeConflictError,
+    NicknameConflictError,
     PermissionDeniedError,
     ProtocolError,
     ProviderSessionError,
     RecoveryAction,
+    TeamConfigNotFoundError,
     TokenBudgetExceededError,
     VaultspecError,
     WorkspaceError,
@@ -292,6 +295,33 @@ class TestCatchability:
         """ProviderSessionError is catchable as VaultspecError."""
         with pytest.raises(VaultspecError):
             raise ProviderSessionError("session died")
+
+
+# ---------------------------------------------------------------------------
+# Custom __init__ exception classes
+# ---------------------------------------------------------------------------
+
+
+class TestCustomInitExceptions:
+    """Tests for exception classes with custom __init__ signatures."""
+
+    def test_agent_config_not_found_contains_agent_id(self) -> None:
+        """AgentConfigNotFoundError message contains the agent_id."""
+        err = AgentConfigNotFoundError("coder")
+        assert "coder" in str(err)
+        assert err.agent_id == "coder"
+
+    def test_team_config_not_found_contains_team_id(self) -> None:
+        """TeamConfigNotFoundError message contains the preset name."""
+        err = TeamConfigNotFoundError("my-team")
+        assert "my-team" in str(err)
+        assert err.team_id == "my-team"
+
+    def test_nickname_conflict_contains_nickname(self) -> None:
+        """NicknameConflictError message contains the nickname."""
+        err = NicknameConflictError("nick")
+        assert "nick" in str(err)
+        assert err.nickname == "nick"
 
 
 # ---------------------------------------------------------------------------

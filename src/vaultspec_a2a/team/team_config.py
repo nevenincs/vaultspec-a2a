@@ -117,7 +117,7 @@ class AgentPermissionsConfig(BaseModel):
     Note: ``interrupt_before`` is no longer used. The graph always compiles
     with ``interrupt_before=[]``; approval gating is handled by the
     ``permission_callback`` closure wired into each worker node at compile
-    time (see ``src/vaultspec_a2a/core/graph.py``).
+    time (see ``src/vaultspec_a2a/graph/compiler.py``).
     """
 
     require_approval_for: list[str] = Field(default_factory=list)

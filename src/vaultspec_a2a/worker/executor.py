@@ -88,7 +88,7 @@ class Executor:
 
         self._checkpointer = checkpointer
         self._bridge = bridge
-        self._provider_factory = ProviderFactory  # type: ignore[assignment]
+        self._provider_factory = ProviderFactory
         self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
         # Maps thread_id -> cache key so _handle_resume can find the graph
         # and recompile if evicted.

@@ -90,7 +90,7 @@ def discover_context_refs(
     """Scan .vault/ for documents matching the feature tag.
 
     Uses filename-based glob discovery (O(1) filesystem calls per stage
-    pattern). Returns at most ``settings.max_context_refs`` results.
+    pattern). Returns at most ``domain_config.max_context_refs`` results.
 
     Args:
         workspace_root: Absolute path to the workspace directory.

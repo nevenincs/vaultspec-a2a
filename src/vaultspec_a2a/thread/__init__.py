@@ -25,6 +25,10 @@ from .errors import (
 from .errors import (
     EventAggregatorError as EventAggregatorError,
 )
+
+# GitWorkspaceError is re-exported for convenience, but semantically belongs
+# to the workspace layer — not the thread facade.  Callers that only need
+# thread-level errors should prefer the VaultspecError hierarchy.
 from .errors import (
     GitWorkspaceError as GitWorkspaceError,
 )

@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
 
 from .instrumentation import get_meter, get_tracer
 
@@ -31,7 +34,7 @@ class OTelAggregatorHook:
         self._histograms: dict[str, Any] = {}
 
     @contextmanager
-    def start_span(self, name: str, **attrs: Any) -> Any:
+    def start_span(self, name: str, **attrs: Any) -> Iterator[Any]:
         with self._tracer.start_as_current_span(name, attributes=attrs) as span:
             yield span
 

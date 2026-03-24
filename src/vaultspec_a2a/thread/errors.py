@@ -259,7 +259,7 @@ class AgentConfigNotFoundError(ConfigError):
 
     Checked locations (in order):
     1. {workspace_root}/.vaultspec/agents/{agent_id}.toml
-    2. src/vaultspec_a2a/core/presets/agents/{agent_id}.toml
+    2. src/vaultspec_a2a/team/presets/agents/{agent_id}.toml
     """
 
     __slots__ = ("agent_id",)
@@ -270,7 +270,7 @@ class AgentConfigNotFoundError(ConfigError):
             f"No agent config found for '{agent_id}'. "
             f"Expected workspace override at .vaultspec/agents/{agent_id}.toml "
             "or bundled preset at "
-            f"src/vaultspec_a2a/core/presets/agents/{agent_id}.toml."
+            f"src/vaultspec_a2a/team/presets/agents/{agent_id}.toml."
         )
         self.agent_id = agent_id
 
@@ -280,7 +280,7 @@ class TeamConfigNotFoundError(ConfigError):
 
     Checked locations (in order):
     1. {workspace_root}/.vaultspec/teams/{team_id}.toml
-    2. src/vaultspec_a2a/core/presets/teams/{team_id}.toml
+    2. src/vaultspec_a2a/team/presets/teams/{team_id}.toml
     """
 
     __slots__ = ("team_id",)
@@ -290,7 +290,7 @@ class TeamConfigNotFoundError(ConfigError):
         super().__init__(
             f"No team config found for '{team_id}'. "
             f"Expected workspace override at .vaultspec/teams/{team_id}.toml "
-            f"or bundled preset at src/vaultspec_a2a/core/presets/teams/{team_id}.toml."
+            f"or bundled preset at src/vaultspec_a2a/team/presets/teams/{team_id}.toml."
         )
         self.team_id = team_id
 

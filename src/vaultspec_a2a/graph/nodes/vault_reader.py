@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -94,11 +94,11 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
             block = f"{header}\n{content}\n{_DOC_FOOTER}"
             block_tokens = count_tokens_approximately(block)
 
-            remaining = settings.mount_token_ceiling - tokens_used
+            remaining = domain_config.mount_token_ceiling - tokens_used
             if block_tokens <= remaining:
                 blocks.append(block)
                 tokens_used += block_tokens
-            elif remaining > settings.min_remaining_tokens_for_mount:
+            elif remaining > domain_config.min_remaining_tokens_for_mount:
                 ratio = remaining / block_tokens
                 truncate_at = int(len(content) * ratio * 0.9)
                 truncated = content[:truncate_at]

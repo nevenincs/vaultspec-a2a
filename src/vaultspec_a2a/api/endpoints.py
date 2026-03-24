@@ -79,7 +79,13 @@ from .projection import (
     enrich_snapshot_from_execution_state,
     project_checkpoint_tuple,
 )
-from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus, ToolKind
+from .schemas.enums import (
+    AgentLifecycleState,
+    PermissionOptionKind,
+    PermissionType,
+    ToolCallStatus,
+    ToolKind,
+)
 from .schemas.events import PlanEntry
 from .schemas.internal import DispatchRequest
 from .schemas.rest import (
@@ -815,9 +821,9 @@ def _enrich_snapshot_from_state(
                     tool_call=perm.tool_call,
                     options=[
                         _PermissionOptionSnapshot(
-                            option_id=opt.option_id,
-                            name=opt.name,
-                            kind=opt.kind,
+                            option_id=opt.get("option_id", ""),
+                            name=opt.get("name", ""),
+                            kind=PermissionOptionKind(opt.get("kind", "allow_once")),
                         )
                         for opt in perm.options
                     ],

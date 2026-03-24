@@ -10,7 +10,7 @@ from vaultspec_a2a.context.metadata import (
     discover_context_refs,
     generate_nickname,
 )
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 
 # ---------------------------------------------------------------------------
 # ContextRef validation
@@ -198,11 +198,11 @@ class TestDiscoverContextRefs:
         """Discovery stops at the settings.max_context_refs limit."""
         research_dir = tmp_path / ".vault" / "research"
         research_dir.mkdir(parents=True)
-        for i in range(settings.max_context_refs + 10):
+        for i in range(domain_config.max_context_refs + 10):
             (research_dir / f"auth-flow-doc-{i:04d}.md").write_text(f"# Doc {i}")
 
         refs = discover_context_refs(tmp_path, "auth-flow")
-        assert len(refs) == settings.max_context_refs
+        assert len(refs) == domain_config.max_context_refs
 
     def test_paths_are_relative(self, tmp_path: Path) -> None:
         """Discovered paths are relative to workspace_root."""

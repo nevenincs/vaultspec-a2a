@@ -392,18 +392,16 @@ class TestTeamStatus:
         self, session_factory, checkpointer
     ) -> None:
         """Pending permissions stored in aggregator appear in team status."""
-        from datetime import UTC, datetime
+        import time
 
-        from ...api.schemas.events import PermissionRequestEvent, ServerEventType
+        from ...graph.events import PermissionRequest
 
         agg = EventAggregator()
         # Directly inject a pending permission into the aggregator
-        event = PermissionRequestEvent(
-            type=ServerEventType.PERMISSION_REQUEST,
+        event = PermissionRequest(
             thread_id="thread-abc",
             agent_id="vaultspec-coder",
-            timestamp=datetime.now(UTC),
-            sequence=1,
+            timestamp=time.time(),
             request_id="thread-abc:perm-001",
             description="Allow file write?",
             options=[],

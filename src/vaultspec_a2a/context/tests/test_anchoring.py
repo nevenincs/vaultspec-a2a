@@ -1,7 +1,7 @@
 """Tests for build_anchoring_context (ADR-022)."""
 
 from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 
 
 def _make_state(**overrides):
@@ -70,7 +70,7 @@ class TestBuildAnchoringContext:
         assert "`docs/adrs/001.md`" in result
 
     def test_vault_paths_capped_at_anchor_path_cap(self) -> None:
-        paths = [f"docs/spec/{i}.md" for i in range(settings.anchor_path_cap + 5)]
+        paths = [f"docs/spec/{i}.md" for i in range(domain_config.anchor_path_cap + 5)]
         state = _make_state(
             active_feature="auth-flow",
             vault_index={"spec": paths},
@@ -79,9 +79,9 @@ class TestBuildAnchoringContext:
         assert result is not None
         assert "(+ 5 more)" in result
         # The last visible path should be index settings.anchor_path_cap - 1
-        assert f"`docs/spec/{settings.anchor_path_cap - 1}.md`" in result
+        assert f"`docs/spec/{domain_config.anchor_path_cap - 1}.md`" in result
         # The first over-cap path should NOT appear
-        assert f"`docs/spec/{settings.anchor_path_cap}.md`" not in result
+        assert f"`docs/spec/{domain_config.anchor_path_cap}.md`" not in result
 
     def test_no_more_label_when_paths_within_cap(self) -> None:
         paths = [f"docs/spec/{i}.md" for i in range(3)]

@@ -21,6 +21,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Command, StateSnapshot
 
+from ..api.event_adapter import sequenced_to_dict
 from ..api.schemas.internal import (
     DispatchRequest,
     ExecutionStateProjectionPayload,
@@ -28,7 +29,7 @@ from ..api.schemas.internal import (
 )
 from ..control.config import settings
 from ..graph.compiler import compile_team_graph
-from ..streaming.aggregator import EventAggregator, StreamableGraph
+from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
 from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
@@ -95,10 +96,10 @@ class Executor:
         # surface via HTTP (ADR-031).  Closure captures bridge reference.
         _bridge_ref = bridge
 
-        async def _relay_event(event: Any) -> None:
-            thread_id = getattr(event, "thread_id", "")
+        async def _relay_event(sequenced: SequencedEvent) -> None:
+            thread_id = getattr(sequenced.event, "thread_id", "")
             if thread_id:
-                await _bridge_ref.send_event(thread_id, event.model_dump(mode="json"))
+                await _bridge_ref.send_event(thread_id, sequenced_to_dict(sequenced))
 
         self._aggregator.add_broadcast_hook(_relay_event)
 

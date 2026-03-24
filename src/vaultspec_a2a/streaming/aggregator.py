@@ -1,9 +1,12 @@
 """Central Event Aggregator for LangGraph stream broadcasting.
 
 Ingests LangGraph ``astream_events`` callbacks, transforms them into
-wire-protocol event models (``vaultspec_a2a.api.schemas.events``), assigns
+domain event dataclasses (``vaultspec_a2a.graph.events``), assigns
 per-thread monotonic sequence numbers, applies debouncing rules, and
 fans out to connected WebSocket clients.
+
+Wire-protocol conversion (Pydantic models for WebSocket serialisation)
+happens at the API boundary via ``api.event_adapter.domain_to_wire()``.
 
 See: ADR-004 (Event Aggregation & State Replay)
      ADR-011 (Frontend-Backend Wire Contract)
@@ -16,6 +19,7 @@ import logging
 import time
 from collections import defaultdict
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol
 from uuid import uuid4
@@ -24,32 +28,27 @@ from langgraph.types import Command
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ..api.schemas.enums import (
+from ..control.config import settings
+from ..graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
     PermissionType,
     ToolCallStatus,
     ToolKind,
 )
-from ..api.schemas.events import (
-    AgentStatusEvent,
-    AgentSummary,
-    ArtifactUpdateEvent,
-    ErrorEvent,
-    MessageChunkEvent,
-    PermissionOption,
-    PermissionRequestEvent,
-    PlanEntry,
-    PlanUpdateEvent,
-    ServerEvent,
-    TeamStatusEvent,
-    ThoughtChunkEvent,
-    ToolCallContent,
-    ToolCallContentText,
-    ToolCallStartEvent,
-    ToolCallUpdateEvent,
+from ..graph.events import (
+    AgentStatus,
+    ArtifactUpdate,
+    DomainEvent,
+    ErrorOccurred,
+    MessageChunk,
+    PermissionRequest,
+    PlanUpdate,
+    TeamStatus,
+    ThoughtChunk,
+    ToolCallStart,
+    ToolCallUpdate,
 )
-from ..control.config import settings
 from ..telemetry.instrumentation import get_meter, get_tracer
 
 # M6: import GraphInterrupt for isinstance check vs string comparison.
@@ -67,7 +66,22 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
-__all__ = ["EventAggregator", "StreamableGraph", "classify_tool_kind"]
+__all__ = ["EventAggregator", "SequencedEvent", "StreamableGraph", "classify_tool_kind"]
+
+
+@dataclass
+class SequencedEvent:
+    """Pairs a domain event with its per-thread monotonic sequence number.
+
+    The sequence is a wire-protocol concern (ADR-011 §5) and does not belong
+    on the domain event itself.  This lightweight wrapper carries both values
+    through the subscriber queue so the API boundary can translate to wire
+    format via ``api.event_adapter.domain_to_wire()``.
+    """
+
+    event: DomainEvent
+    sequence: int
+
 
 # ---------------------------------------------------------------------------
 # OTel instrumentation (ADR-010)
@@ -263,15 +277,15 @@ def classify_tool_kind(tool_name: str) -> ToolKind:
 
 
 class EventAggregator:
-    """Central event bus that transforms LangGraph events into wire events.
+    """Central event bus that transforms LangGraph events into domain events.
 
     The aggregator maintains per-thread monotonic sequence counters
     (ADR-011 §5) and broadcasts transformed events to registered
     subscriber callbacks.
 
-    Subscribers are async callables ``(ServerEvent) -> None`` keyed by
-    a client_id. Each subscriber can declare which thread_ids it wants
-    to receive events for.
+    Subscribers receive ``SequencedEvent`` wrappers (domain event + sequence)
+    via bounded ``asyncio.Queue`` instances, keyed by client_id.  Each
+    subscriber can declare which thread_ids it wants to receive events for.
 
     Designed as a FastAPI lifespan singleton injected via DI (ADR-007).
     """
@@ -282,12 +296,12 @@ class EventAggregator:
         self._sequences: dict[str, int] = defaultdict(int)
 
         # Subscriber queues: client_id -> bounded asyncio.Queue
-        self._subscribers: dict[str, asyncio.Queue[ServerEvent]] = {}
+        self._subscribers: dict[str, asyncio.Queue[SequencedEvent]] = {}
         # Which threads each client is subscribed to: client_id -> set of thread_ids
         self._subscriptions: dict[str, set[str]] = defaultdict(set)
 
         # Broadcast hooks: called on every event (used by worker bridge relay).
-        self._broadcast_hooks: list[Callable[[ServerEvent], Awaitable[None]]] = []
+        self._broadcast_hooks: list[Callable[[SequencedEvent], Awaitable[None]]] = []
 
         # Per-thread ingest queues for backpressure (research §1.3)
         self._ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
@@ -310,8 +324,8 @@ class EventAggregator:
         self._plan_update_last_emit: dict[str, float] = {}
 
         # Pending debounced events
-        self._tool_update_pending: dict[tuple[str, str], ToolCallUpdateEvent] = {}
-        self._plan_update_pending: dict[str, Any] = {}
+        self._tool_update_pending: dict[tuple[str, str], SequencedEvent] = {}
+        self._plan_update_pending: dict[str, SequencedEvent] = {}
 
         # Node metadata cache: node_name -> {role, display_name, description}
         # Populated by register_graph() after compile_team_graph() (ADR-012 §6).
@@ -324,9 +338,9 @@ class EventAggregator:
         self._debounce_tasks: set[asyncio.Task[None]] = set()
 
         # MCP-R5: track pending permission requests per thread.
-        # Maps request_id -> (PermissionRequestEvent, created_at_monotonic).
+        # Maps request_id -> (PermissionRequest, created_at_monotonic).
         # Cleared when a permission response is received.
-        self._pending_permissions: dict[str, tuple[PermissionRequestEvent, float]] = {}
+        self._pending_permissions: dict[str, tuple[PermissionRequest, float]] = {}
 
         # P8-02: track agent lifecycle states for team status endpoint.
         # Maps agent_id -> AgentLifecycleState. Updated by emit_agent_status()
@@ -473,19 +487,21 @@ class EventAggregator:
     # Subscriber management
     # ------------------------------------------------------------------
 
-    def add_subscriber(self, client_id: str) -> asyncio.Queue[ServerEvent]:
+    def add_subscriber(self, client_id: str) -> asyncio.Queue[SequencedEvent]:
         """Register a new subscriber and return its bounded event queue.
 
         Uses ``event_queue_maxsize`` for backpressure (research §1.5).
         """
-        queue: asyncio.Queue[ServerEvent] = asyncio.Queue(
+        queue: asyncio.Queue[SequencedEvent] = asyncio.Queue(
             maxsize=settings.event_queue_maxsize
         )
         self._subscribers[client_id] = queue
         self._subscriptions[client_id] = set()
         return queue
 
-    def get_subscriber_queue(self, client_id: str) -> asyncio.Queue[ServerEvent] | None:
+    def get_subscriber_queue(
+        self, client_id: str
+    ) -> asyncio.Queue[SequencedEvent] | None:
         """Return the event queue for a subscriber, or None if not registered."""
         return self._subscribers.get(client_id)
 
@@ -506,7 +522,7 @@ class EventAggregator:
             self._subscriptions[client_id].difference_update(thread_ids)
 
     def add_broadcast_hook(
-        self, hook: Callable[[ServerEvent], Awaitable[None]]
+        self, hook: Callable[[SequencedEvent], Awaitable[None]]
     ) -> None:
         """Register a hook called on every broadcast (worker bridge relay)."""
         self._broadcast_hooks.append(hook)
@@ -556,8 +572,8 @@ class EventAggregator:
     # Broadcasting
     # ------------------------------------------------------------------
 
-    async def _broadcast(self, event: ServerEvent) -> None:
-        """Fan out a server event to all interested subscribers.
+    async def _broadcast(self, sequenced: SequencedEvent) -> None:
+        """Fan out a sequenced domain event to all interested subscribers.
 
         Uses a drop-oldest strategy: if a subscriber queue is full,
         the oldest buffered event is discarded before inserting the new
@@ -565,8 +581,8 @@ class EventAggregator:
         per-client memory (research §1.5).  A slow client loses tail
         events rather than stalling the whole broadcast path.
         """
-        thread_id = getattr(event, "thread_id", None)
-        event_type = getattr(event, "type", "unknown")
+        thread_id = getattr(sequenced.event, "thread_id", None)
+        event_type = type(sequenced.event).__name__
 
         with _tracer.start_as_current_span(
             "aggregator.broadcast",
@@ -591,7 +607,7 @@ class EventAggregator:
                     # is still full after the drop-oldest attempt (race condition
                     # or concurrent producers).  Log and skip rather than crash.
                     try:
-                        queue.put_nowait(event)
+                        queue.put_nowait(sequenced)
                     except asyncio.QueueFull:
                         logger.warning(
                             "Event dropped for client %s — queue still full after "
@@ -603,7 +619,7 @@ class EventAggregator:
             _events_emitted_counter.add(1, {"event.type": str(event_type)})
             for hook in self._broadcast_hooks:
                 try:
-                    await hook(event)
+                    await hook(sequenced)
                 except Exception:
                     logger.warning("Broadcast hook failed", exc_info=True)
 
@@ -647,7 +663,7 @@ class EventAggregator:
     # ------------------------------------------------------------------
 
     async def _flush_chunk_buffer(self, thread_id: str) -> None:
-        """Flush accumulated token chunks as a single MessageChunkEvent."""
+        """Flush accumulated token chunks as a single MessageChunk."""
         chunks = self._chunk_buffers.pop(thread_id, [])
         meta = self._chunk_buffer_meta.pop(thread_id, None)
         self._chunk_flush_tasks.pop(thread_id, None)
@@ -657,15 +673,15 @@ class EventAggregator:
                 attributes={"thread_id": thread_id, "chunk_count": len(chunks)},
             ):
                 combined = "".join(chunks)
-                event = MessageChunkEvent(
+                seq = self._next_sequence(thread_id)
+                event = MessageChunk(
                     thread_id=thread_id,
-                    agent_id=meta.get("agent_id"),
+                    agent_id=meta.get("agent_id", ""),
+                    timestamp=datetime.now(UTC).timestamp(),
                     content=combined,
                     message_id=meta.get("message_id", ""),
-                    timestamp=datetime.now(UTC),
-                    sequence=self._next_sequence(thread_id),
                 )
-                await self._broadcast(event)
+                await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def _scheduled_chunk_flush(self, thread_id: str) -> None:
         """Timer-based flush: waits 50ms then flushes."""
@@ -745,23 +761,15 @@ class EventAggregator:
     # Event emission (public API)
     # ------------------------------------------------------------------
 
-    async def emit(self, event: ServerEvent) -> None:
-        """Emit a pre-built server event directly.
+    async def emit(self, event: DomainEvent) -> None:
+        """Emit a pre-built domain event directly.
 
         Assigns a sequence number if the event is thread-scoped
         (has a ``thread_id`` attribute), then broadcasts.
-        Uses model_copy() rather than object.__setattr__() to respect Pydantic
-        model immutability (H3 fix).
         """
         thread_id = getattr(event, "thread_id", None)
-        if thread_id is not None and hasattr(event, "sequence"):
-            event = event.model_copy(
-                update={
-                    "sequence": self._next_sequence(thread_id),
-                    "timestamp": datetime.now(UTC),
-                }
-            )
-        await self._broadcast(event)
+        seq = self._next_sequence(thread_id) if thread_id is not None else 0
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_agent_status(
         self,
@@ -773,16 +781,16 @@ class EventAggregator:
     ) -> None:
         """Emit an agent lifecycle state transition event."""
         self._agent_states[agent_id] = state
-        event = AgentStatusEvent(
+        seq = self._next_sequence(thread_id)
+        event = AgentStatus(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             node_name=node_name,
             state=state,
             detail=detail,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
         # BE-03: push team_status on every agent transition so browsers
         # see the full agent table update in real time.
         await self._emit_team_status_from_agent_states(thread_id)
@@ -796,16 +804,16 @@ class EventAggregator:
         finish_reason: str | None = None,
     ) -> None:
         """Emit a streaming message token event."""
-        event = MessageChunkEvent(
+        seq = self._next_sequence(thread_id)
+        event = MessageChunk(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             content=content,
             message_id=message_id,
             finish_reason=finish_reason,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_thought_chunk(
         self,
@@ -815,15 +823,15 @@ class EventAggregator:
         message_id: str,
     ) -> None:
         """Emit a streaming thought/reasoning token event."""
-        event = ThoughtChunkEvent(
+        seq = self._next_sequence(thread_id)
+        event = ThoughtChunk(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             content=content,
             message_id=message_id,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_tool_call_start(
         self,
@@ -835,7 +843,7 @@ class EventAggregator:
         input_args: dict[str, Any] | None = None,
     ) -> None:
         """Emit a tool invocation start event."""
-        content: list[ToolCallContent] = []
+        content: list[dict[str, str | None]] = []
         if input_args:
             # Summarise input args as a text content block (truncate large values)
             try:
@@ -844,7 +852,7 @@ class EventAggregator:
                 args_str = str(input_args)
             if len(args_str) > settings.tool_arg_truncate_len:
                 args_str = args_str[: settings.tool_arg_truncate_len] + "..."
-            content.append(ToolCallContentText(text=args_str))
+            content.append({"content_type": "text", "text": args_str})
         # F-38: track tool call state for REST snapshot enrichment.
         self._tool_call_states[(thread_id, tool_call_id)] = {
             "title": title,
@@ -852,18 +860,18 @@ class EventAggregator:
             "status": ToolCallStatus.PENDING.value,
             "agent_id": agent_id,
         }
-        event = ToolCallStartEvent(
+        seq = self._next_sequence(thread_id)
+        event = ToolCallStart(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             tool_call_id=tool_call_id,
             title=title,
             kind=kind,
             status=ToolCallStatus.PENDING,
             content=content,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_tool_call_update(
         self,
@@ -872,7 +880,7 @@ class EventAggregator:
         tool_call_id: str,
         status: ToolCallStatus | None = None,
         title: str | None = None,
-        content: list[ToolCallContent] | None = None,
+        content: list[dict[str, str | None]] | None = None,
     ) -> None:
         """Emit a tool call update event (debounced per ADR-011 §5).
 
@@ -903,16 +911,17 @@ class EventAggregator:
         if status in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED):
             self._prune_completed_tool_calls(thread_id)
 
-        event = ToolCallUpdateEvent(
+        seq = self._next_sequence(thread_id)
+        event = ToolCallUpdate(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             tool_call_id=tool_call_id,
             status=status,
             title=title,
             content=content,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
+        sequenced = SequencedEvent(event=event, sequence=seq)
 
         last_emit = self._tool_update_last_emit.get(key, 0.0)
         if now - last_emit >= settings.tool_call_debounce_seconds:
@@ -923,12 +932,12 @@ class EventAggregator:
                 _evict_oldest(
                     self._tool_update_last_emit, settings.debounce_map_max_entries
                 )
-            await self._broadcast(event)
+            await self._broadcast(sequenced)
         else:
             # Debounce: store pending and schedule flush
             async with self._lock:
                 already_pending = key in self._tool_update_pending
-                self._tool_update_pending[key] = event
+                self._tool_update_pending[key] = sequenced
             if not already_pending:
                 self._schedule_debounce(self._broadcast_debounced_tool_update(key))
 
@@ -943,14 +952,16 @@ class EventAggregator:
         tool_kind: ToolKind | None = None,
     ) -> None:
         """Emit a permission request event (LangGraph interrupt)."""
-        parsed_options = [
-            PermissionOption(
-                option_id=opt.get("option_id", str(uuid4())),
-                name=opt.get("name", ""),
-                kind=PermissionOptionKind(
-                    opt.get("kind", PermissionOptionKind.ALLOW_ONCE)
+        parsed_options: list[dict[str, str]] = [
+            {
+                "option_id": opt.get("option_id", str(uuid4())),
+                "name": opt.get("name", ""),
+                "kind": str(
+                    PermissionOptionKind(
+                        opt.get("kind", PermissionOptionKind.ALLOW_ONCE)
+                    )
                 ),
-            )
+            }
             for opt in options
         ]
 
@@ -959,20 +970,20 @@ class EventAggregator:
         if resolved_kind is None and tool_call:
             resolved_kind = classify_tool_kind(tool_call)
 
-        event = PermissionRequestEvent(
+        seq = self._next_sequence(thread_id)
+        event = PermissionRequest(
             thread_id=thread_id,
             agent_id=agent_id,
+            timestamp=datetime.now(UTC).timestamp(),
             request_id=request_id,
             description=description,
             options=parsed_options,
             tool_call=tool_call,
             tool_kind=resolved_kind,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
         # MCP-R5: track pending permission for REST query
         self._pending_permissions[request_id] = (event, time.monotonic())
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     def resolve_permission(self, request_id: str) -> None:
         """Remove a permission request from the pending set (MCP-R5).
@@ -1001,7 +1012,7 @@ class EventAggregator:
     def get_pending_permissions(
         self,
         thread_id: str | None = None,
-    ) -> list[PermissionRequestEvent]:
+    ) -> list[PermissionRequest]:
         """Return pending permissions, optionally filtered by thread."""
         if thread_id is None:
             return [evt for evt, _ts in self._pending_permissions.values()]
@@ -1063,28 +1074,28 @@ class EventAggregator:
                 description = payload.get("description", "")
                 options = payload.get("options", [])
                 tool_call = payload.get("tool_call")
-                perm_options = []
+                perm_options: list[dict[str, str]] = []
                 for opt in options:
                     perm_options.append(
-                        PermissionOption(
-                            option_id=opt.get("option_id", ""),
-                            name=opt.get("name", ""),
-                            kind=_map_acp_option_kind(opt.get("option_id", "")),
-                        )
+                        {
+                            "option_id": opt.get("option_id", ""),
+                            "name": opt.get("name", ""),
+                            "kind": str(_map_acp_option_kind(opt.get("option_id", ""))),
+                        }
                     )
                 self._pending_permissions[request_id] = (
-                    PermissionRequestEvent(
+                    PermissionRequest(
                         thread_id=thread_id,
                         agent_id=payload.get("agent_id", ""),
+                        timestamp=datetime.now(UTC).timestamp(),
                         request_id=request_id,
                         description=description,
                         options=perm_options,
                         tool_call=str(tool_call) if tool_call is not None else None,
-                        timestamp=datetime.now(UTC),
-                        sequence=self._next_sequence(thread_id),
                     ),
                     time.monotonic(),
                 )
+                self._next_sequence(thread_id)
 
         elif event_type == "permission_resolved":
             request_id = payload.get("request_id", "")
@@ -1189,42 +1200,45 @@ class EventAggregator:
         last_chunk: bool = True,
     ) -> None:
         """Emit an artifact update event (BE-29)."""
-        event = ArtifactUpdateEvent(
+        seq = self._next_sequence(thread_id)
+        event = ArtifactUpdate(
             thread_id=thread_id,
+            agent_id="",
+            timestamp=datetime.now(UTC).timestamp(),
             artifact_id=artifact_id,
             filename=filename,
             content=content,
             append=append,
             last_chunk=last_chunk,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_plan_update(
         self,
         thread_id: str,
-        entries: list[PlanEntry],
+        entries: list[dict[str, str]],
     ) -> None:
         """Emit a plan update event (debounced, BE-28).
 
         Uses the existing ``_plan_update_pending`` / ``_plan_update_last_emit``
         debounce infrastructure to coalesce rapid plan changes.
         """
-        event = PlanUpdateEvent(
+        seq = self._next_sequence(thread_id)
+        event = PlanUpdate(
             thread_id=thread_id,
+            agent_id="",
+            timestamp=datetime.now(UTC).timestamp(),
             entries=entries,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
+        sequenced = SequencedEvent(event=event, sequence=seq)
         now = time.monotonic()
         last = self._plan_update_last_emit.get(thread_id, 0.0)
         if now - last >= settings.plan_update_debounce_seconds:
             self._plan_update_last_emit[thread_id] = now
-            await self._broadcast(event)
+            await self._broadcast(sequenced)
         else:
             async with self._lock:
-                self._plan_update_pending[thread_id] = event
+                self._plan_update_pending[thread_id] = sequenced
             self._schedule_debounce(self._broadcast_debounced_plan_update(thread_id))
 
     async def emit_error(
@@ -1236,16 +1250,16 @@ class EventAggregator:
         agent_id: str | None = None,
     ) -> None:
         """Emit a server-side error notification."""
-        event = ErrorEvent(
+        seq = self._next_sequence(thread_id)
+        event = ErrorOccurred(
             thread_id=thread_id,
-            agent_id=agent_id,
+            agent_id=agent_id or "",
+            timestamp=datetime.now(UTC).timestamp(),
             code=code,
             message=message,
             recoverable=recoverable,
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def _emit_team_status_from_agent_states(
         self,
@@ -1279,7 +1293,7 @@ class EventAggregator:
         populated by ``register_graph()`` (ADR-012 §6).  Values already present
         in each agent dict take precedence; the cache fills any gaps.
         """
-        agent_summaries: list[AgentSummary] = []
+        agent_summaries: list[dict[str, str]] = []
         for agent_data in agents:
             data = dict(agent_data)
             node_name = data.get("node_name", "")
@@ -1287,16 +1301,22 @@ class EventAggregator:
             data.setdefault("role", node_meta.get("role", ""))
             data.setdefault("display_name", node_meta.get("display_name", ""))
             data.setdefault("description", node_meta.get("description", ""))
-            agent_summaries.append(AgentSummary(**data))
+            # Coerce enum values to strings for the domain event dict
+            if hasattr(data.get("state"), "value"):
+                data["state"] = data["state"].value
+            agent_summaries.append(
+                {k: str(v) if v is not None else "" for k, v in data.items()}
+            )
 
-        event = TeamStatusEvent(
+        seq = self._next_sequence(thread_id)
+        event = TeamStatus(
             thread_id=thread_id,
+            agent_id="",
+            timestamp=datetime.now(UTC).timestamp(),
             agents=agent_summaries,
             active_thread_ids=active_thread_ids or [],
-            timestamp=datetime.now(UTC),
-            sequence=self._next_sequence(thread_id),
         )
-        await self._broadcast(event)
+        await self._broadcast(SequencedEvent(event=event, sequence=seq))
 
     # ------------------------------------------------------------------
     # LangGraph astream_events integration (research §1.2)
@@ -1436,7 +1456,7 @@ class EventAggregator:
                 # BE-30: extract tool output for content enrichment
                 tool_name = event_data.get("name", "")
                 output = event_data.get("data", {}).get("output")
-                output_content: list[ToolCallContent] | None = None
+                output_content: list[dict[str, str | None]] | None = None
                 if output is not None:
                     output_str = ""
                     if hasattr(output, "content"):
@@ -1450,7 +1470,7 @@ class EventAggregator:
                             output_str = (
                                 output_str[: settings.tool_arg_truncate_len] + "..."
                             )
-                        output_content = [ToolCallContentText(text=output_str)]
+                        output_content = [{"content_type": "text", "text": output_str}]
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
                     agent_id=effective_agent_id,
@@ -1510,8 +1530,8 @@ class EventAggregator:
                     node,
                     error_msg,
                 )
-                error_content: list[ToolCallContent] | None = (
-                    [ToolCallContentText(text=error_msg)] if error_msg else None
+                error_content: list[dict[str, str | None]] | None = (
+                    [{"content_type": "text", "text": error_msg}] if error_msg else None
                 )
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
@@ -1551,17 +1571,17 @@ class EventAggregator:
                     node_name=node,
                     state=AgentLifecycleState.IDLE,
                 )
-                # BE-28: detect current_plan in node output and emit PlanUpdateEvent.
+                # BE-28: detect current_plan in node output and emit PlanUpdate.
                 output = event_data.get("data", {}).get("output")
                 if isinstance(output, dict):
                     raw_plan = output.get("current_plan")
                     if raw_plan and isinstance(raw_plan, list):
                         entries = [
-                            PlanEntry(
-                                content=str(entry.get("content", "")),
-                                status=entry.get("status", "pending"),
-                                priority=entry.get("priority", "medium"),
-                            )
+                            {
+                                "content": str(entry.get("content", "")),
+                                "status": entry.get("status", "pending"),
+                                "priority": entry.get("priority", "medium"),
+                            }
                             for entry in raw_plan
                             if isinstance(entry, dict) and entry.get("content")
                         ]

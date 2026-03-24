@@ -9,7 +9,7 @@ from collections.abc import Sequence
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.state import TeamState
 
 __all__ = [
@@ -39,7 +39,7 @@ def estimate_tokens(messages: Sequence[BaseMessage]) -> int:
                     total_chars += len(part)
                 elif isinstance(part, dict):
                     total_chars += len(part.get("text", ""))
-    return total_chars // settings.chars_per_token
+    return total_chars // domain_config.chars_per_token
 
 
 def should_compact(state: TeamState, max_tokens: int) -> bool:

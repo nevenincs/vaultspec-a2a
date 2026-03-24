@@ -10,27 +10,26 @@ from langgraph.errors import GraphInterrupt
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ...api.schemas.enums import (
+from ...control.config import settings
+from ...graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
-    ServerEventType,
     ToolCallStatus,
     ToolKind,
 )
-from ...api.schemas.events import (
-    AgentStatusEvent,
-    ErrorEvent,
-    MessageChunkEvent,
-    PermissionRequestEvent,
-    TeamStatusEvent,
-    ThoughtChunkEvent,
-    ToolCallStartEvent,
-    ToolCallUpdateEvent,
+from ...graph.events import (
+    AgentStatus,
+    ErrorOccurred,
+    MessageChunk,
+    PermissionRequest,
+    TeamStatus,
+    ThoughtChunk,
+    ToolCallStart,
+    ToolCallUpdate,
 )
-from ...control.config import settings
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
-from ..aggregator import EventAggregator
+from ..aggregator import EventAggregator, SequencedEvent
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -149,16 +148,17 @@ class TestEventEmission:
             detail="processing task",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, AgentStatusEvent)
-        assert event.type == ServerEventType.AGENT_STATUS
+        sequenced = queue.get_nowait()
+        assert isinstance(sequenced, SequencedEvent)
+        event = sequenced.event
+        assert isinstance(event, AgentStatus)
         assert event.thread_id == "thread-1"
         assert event.agent_id == "agent-1"
         assert event.node_name == "worker"
         assert event.state == AgentLifecycleState.WORKING
         assert event.detail == "processing task"
         expected_seq = 1
-        assert event.sequence == expected_seq
+        assert sequenced.sequence == expected_seq
 
     @pytest.mark.asyncio
     async def test_emit_message_chunk(self, aggregator: EventAggregator) -> None:
@@ -173,8 +173,9 @@ class TestEventEmission:
             message_id="msg-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, MessageChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, MessageChunk)
         assert event.content == "Hello"
         assert event.message_id == "msg-1"
 
@@ -191,8 +192,9 @@ class TestEventEmission:
             message_id="msg-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ThoughtChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ThoughtChunk)
         assert event.content == "thinking..."
 
     @pytest.mark.asyncio
@@ -209,8 +211,9 @@ class TestEventEmission:
             kind=ToolKind.READ,
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ToolCallStartEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ToolCallStart)
         assert event.tool_call_id == "tc-1"
         assert event.title == "read_file"
         assert event.kind == ToolKind.READ
@@ -241,13 +244,14 @@ class TestEventEmission:
             ],
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, PermissionRequestEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, PermissionRequest)
         assert event.request_id == "perm-1"
         expected_option_count = 2
         assert len(event.options) == expected_option_count
-        assert event.options[0].option_id == "allow"
-        assert event.options[0].kind == PermissionOptionKind.ALLOW_ONCE
+        assert event.options[0]["option_id"] == "allow"
+        assert event.options[0]["kind"] == str(PermissionOptionKind.ALLOW_ONCE)
 
     @pytest.mark.asyncio
     async def test_emit_error(self, aggregator: EventAggregator) -> None:
@@ -262,8 +266,9 @@ class TestEventEmission:
             recoverable=True,
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ErrorEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ErrorOccurred)
         assert event.code == "PROVIDER_TIMEOUT"
         assert event.recoverable is True
 
@@ -287,11 +292,12 @@ class TestEventEmission:
             active_thread_ids=["thread-1"],
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, TeamStatusEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, TeamStatus)
         expected_agent_count = 1
         assert len(event.agents) == expected_agent_count
-        assert event.agents[0].agent_id == "a1"
+        assert event.agents[0]["agent_id"] == "a1"
 
     @pytest.mark.asyncio
     async def test_emit_team_status_node_metadata(
@@ -333,11 +339,12 @@ class TestEventEmission:
             active_thread_ids=["thread-1"],
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, TeamStatusEvent)
-        assert event.agents[0].role == "reviewer"
-        assert event.agents[0].display_name == "Code Reviewer"
-        assert event.agents[0].description == "Reviews code for correctness"
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, TeamStatus)
+        assert event.agents[0]["role"] == "reviewer"
+        assert event.agents[0]["display_name"] == "Code Reviewer"
+        assert event.agents[0]["description"] == "Reviews code for correctness"
 
 
 # ---------------------------------------------------------------------------
@@ -418,12 +425,12 @@ class TestSequenceOnEvents:
             message_id="msg-2",
         )
 
-        e1 = cast("MessageChunkEvent", queue.get_nowait())
-        e2 = cast("MessageChunkEvent", queue.get_nowait())
+        s1 = cast("SequencedEvent", queue.get_nowait())
+        s2 = cast("SequencedEvent", queue.get_nowait())
         first_seq = 1
         second_seq = 2
-        assert e1.sequence == first_seq
-        assert e2.sequence == second_seq
+        assert s1.sequence == first_seq
+        assert s2.sequence == second_seq
 
     @pytest.mark.asyncio
     async def test_sequences_independent_per_thread(
@@ -452,9 +459,9 @@ class TestSequenceOnEvents:
             message_id="msg-3",
         )
 
-        events = [cast("MessageChunkEvent", queue.get_nowait()) for _ in range(3)]
-        a_events = [e for e in events if e.thread_id == "thread-a"]
-        b_events = [e for e in events if e.thread_id == "thread-b"]
+        sequenced_all = [cast("SequencedEvent", queue.get_nowait()) for _ in range(3)]
+        a_events = [s for s in sequenced_all if s.event.thread_id == "thread-a"]
+        b_events = [s for s in sequenced_all if s.event.thread_id == "thread-b"]
 
         first_seq = 1
         second_seq = 2
@@ -496,8 +503,9 @@ class TestLangGraphEventProcessing:
         # Wait for the 50ms flush timer
         await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
 
-        event = queue.get_nowait()
-        assert isinstance(event, MessageChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, MessageChunk)
         assert event.content == "Hello world"
         assert event.message_id == "run-123"
 
@@ -524,8 +532,9 @@ class TestLangGraphEventProcessing:
         )
 
         # Should flush immediately (4KB threshold exceeded)
-        event = queue.get_nowait()
-        assert isinstance(event, MessageChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, MessageChunk)
         assert len(event.content) > settings.chunk_buffer_max_bytes
 
     @pytest.mark.asyncio
@@ -547,8 +556,9 @@ class TestLangGraphEventProcessing:
             agent_id="agent-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ToolCallStartEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ToolCallStart)
         assert event.tool_call_id == "run-456"
         assert event.title == "search_code"
 
@@ -591,8 +601,9 @@ class TestLangGraphEventProcessing:
             agent_id="agent-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ToolCallUpdateEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ToolCallUpdate)
         assert event.tool_call_id == "run-456"
         assert event.status == ToolCallStatus.COMPLETED
 
@@ -635,8 +646,9 @@ class TestLangGraphEventProcessing:
             agent_id="agent-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, AgentStatusEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, AgentStatus)
         assert event.state == AgentLifecycleState.WORKING
         assert event.node_name == "coder"
 
@@ -657,8 +669,9 @@ class TestLangGraphEventProcessing:
             agent_id="agent-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, AgentStatusEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, AgentStatus)
         assert event.state == AgentLifecycleState.IDLE
         assert event.node_name == "coder"
 
@@ -702,8 +715,9 @@ class TestLangGraphEventProcessing:
             agent_id="agent-1",
         )
 
-        event = queue.get_nowait()
-        assert isinstance(event, ThoughtChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ThoughtChunk)
         assert event.content == "Let me think about this..."
 
     @pytest.mark.asyncio
@@ -784,8 +798,9 @@ class TestTokenChunkBatching:
         # Wait for flush
         await asyncio.sleep(settings.chunk_flush_interval_seconds + 0.02)
 
-        event = queue.get_nowait()
-        assert isinstance(event, MessageChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, MessageChunk)
         assert event.content == "Hello world"
 
     @pytest.mark.asyncio
@@ -807,8 +822,9 @@ class TestTokenChunkBatching:
         # Explicit flush via public API
         await aggregator.flush_chunk_buffer("thread-1")
 
-        event = queue.get_nowait()
-        assert isinstance(event, MessageChunkEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, MessageChunk)
         assert event.content == "pending data"
 
 
@@ -836,8 +852,9 @@ class TestToolCallUpdateDebouncing:
         )
 
         assert queue.qsize() == 1
-        event = queue.get_nowait()
-        assert isinstance(event, ToolCallUpdateEvent)
+        sequenced = queue.get_nowait()
+        event = sequenced.event
+        assert isinstance(event, ToolCallUpdate)
         assert event.status == ToolCallStatus.IN_PROGRESS
 
 
@@ -882,14 +899,16 @@ class TestBackpressure:
 
         # First event dequeued is msg-1 (msg-0 was dropped)
         first = queue.get_nowait()
-        assert isinstance(first, MessageChunkEvent)
-        assert first.content == "msg-1"
+        assert isinstance(first, SequencedEvent)
+        assert isinstance(first.event, MessageChunk)
+        assert first.event.content == "msg-1"
 
         # Last event dequeued is the newly inserted one
-        events = [queue.get_nowait() for _ in range(queue.qsize())]
-        last = events[-1]
-        assert isinstance(last, MessageChunkEvent)
-        assert last.content == "newest"
+        items = [queue.get_nowait() for _ in range(queue.qsize())]
+        last = items[-1]
+        assert isinstance(last, SequencedEvent)
+        assert isinstance(last.event, MessageChunk)
+        assert last.event.content == "newest"
 
     @pytest.mark.asyncio
     async def test_slow_client_does_not_block_fast_client(
@@ -903,7 +922,7 @@ class TestBackpressure:
 
         # Pre-fill the slow queue to capacity
         for i in range(settings.event_queue_maxsize):
-            q_slow.put_nowait(await _make_chunk_event(aggregator, f"pre-{i}"))
+            q_slow.put_nowait(_make_sequenced_event(aggregator, f"pre-{i}"))
 
         assert q_slow.full()
 
@@ -917,24 +936,25 @@ class TestBackpressure:
 
         # Fast client received the event
         assert q_fast.qsize() == 1
-        fast_event = q_fast.get_nowait()
-        assert isinstance(fast_event, MessageChunkEvent)
-        assert fast_event.content == "new-event"
+        fast_sequenced = q_fast.get_nowait()
+        assert isinstance(fast_sequenced, SequencedEvent)
+        assert isinstance(fast_sequenced.event, MessageChunk)
+        assert fast_sequenced.event.content == "new-event"
 
         # Slow client still at capacity (oldest was dropped, newest inserted)
         assert q_slow.qsize() == settings.event_queue_maxsize
 
 
-async def _make_chunk_event(
-    aggregator: EventAggregator, content: str
-) -> MessageChunkEvent:
-    """Helper: return a MessageChunkEvent without broadcasting it."""
-    return MessageChunkEvent(
-        thread_id="thread-1",
-        agent_id="agent-1",
-        content=content,
-        message_id="helper",
-        timestamp=datetime.now(UTC),
+def _make_sequenced_event(aggregator: EventAggregator, content: str) -> SequencedEvent:
+    """Helper: return a SequencedEvent without broadcasting it."""
+    return SequencedEvent(
+        event=MessageChunk(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            timestamp=datetime.now(UTC).timestamp(),
+            content=content,
+            message_id="helper",
+        ),
         sequence=aggregator.advance_sequence("thread-1"),
     )
 
@@ -1114,16 +1134,18 @@ class TestEmitInterruptEvents:
         )
 
         # Drain all events from the queue
-        events = []
+        sequenced_events = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_events.append(queue.get_nowait())
 
-        # Must have at least a PermissionRequestEvent and an AgentStatusEvent
-        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
-        status_events = [e for e in events if isinstance(e, AgentStatusEvent)]
+        domain_events = [s.event for s in sequenced_events]
+
+        # Must have at least a PermissionRequest and an AgentStatus
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
+        status_events = [e for e in domain_events if isinstance(e, AgentStatus)]
 
         assert len(perm_events) >= 1, (
-            f"No PermissionRequestEvent emitted; got: {events}"
+            f"No PermissionRequest emitted; got: {domain_events}"
         )
         perm = perm_events[0]
         assert perm.thread_id == "thread-interrupt"
@@ -1158,11 +1180,12 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        events = []
+        sequenced_all = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
 
-        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
         assert len(perm_events) == 0
 
     @pytest.mark.asyncio
@@ -1189,11 +1212,12 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        events = []
+        sequenced_all = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
 
-        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
         assert len(perm_events) == 0
 
     @pytest.mark.asyncio
@@ -1222,11 +1246,12 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        events = []
+        sequenced_all = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
 
-        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
         assert len(perm_events) == 0
 
     @pytest.mark.asyncio
@@ -1258,14 +1283,15 @@ class TestEmitInterruptEvents:
             config=config,
         )
 
-        events = []
+        sequenced_all = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
 
-        perm_events = [e for e in events if isinstance(e, PermissionRequestEvent)]
+        perm_events = [e for e in domain_events if isinstance(e, PermissionRequest)]
         assert len(perm_events) == 1
         perm = perm_events[0]
-        option_ids = {opt.option_id for opt in perm.options}
+        option_ids = {opt["option_id"] for opt in perm.options}
         assert "allow_once" in option_ids
         assert "deny_once" in option_ids
 
@@ -1314,11 +1340,12 @@ class TestRecursionLimitDetection:
             config=config,
         )
 
-        events = []
+        sequenced_all = []
         while not queue.empty():
-            events.append(queue.get_nowait())
+            sequenced_all.append(queue.get_nowait())
+        domain_events = [s.event for s in sequenced_all]
 
-        error_events = [e for e in events if isinstance(e, ErrorEvent)]
+        error_events = [e for e in domain_events if isinstance(e, ErrorOccurred)]
         assert len(error_events) >= 1
         err = error_events[-1]
         assert err.code == "RECURSION_LIMIT_EXCEEDED"

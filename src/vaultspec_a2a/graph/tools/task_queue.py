@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 
 __all__ = ["create_mark_task_complete_tool"]
 
@@ -66,7 +66,7 @@ def _filter_queue_content(
     # Collect up to task_queue_pending_horizon next pending rows
     pending_count = 0
     for line in data_lines:
-        if pending_count >= settings.task_queue_pending_horizon:
+        if pending_count >= domain_config.task_queue_pending_horizon:
             break
         parts = [p.strip() for p in line.split("|") if p.strip()]
         if (

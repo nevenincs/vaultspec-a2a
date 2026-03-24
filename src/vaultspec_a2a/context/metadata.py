@@ -15,7 +15,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, field_validator
 
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 
 __all__ = [
     "ContextRef",
@@ -127,7 +127,7 @@ def discover_context_refs(
             except ValueError:
                 continue
             refs.append(ContextRef(path=rel_path, stage=stage))
-            if len(refs) >= settings.max_context_refs:
+            if len(refs) >= domain_config.max_context_refs:
                 return refs
     return refs
 

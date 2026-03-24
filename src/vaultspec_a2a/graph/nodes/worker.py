@@ -13,7 +13,7 @@ from langgraph.types import interrupt
 from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import WorkerExecutionError
 from vaultspec_a2a.thread.state import TeamState
 
@@ -43,8 +43,8 @@ def _build_worker_messages(
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation."""
     working_state = (
-        compact_context(state, settings.context_limit_tokens)
-        if should_compact(state, settings.context_limit_tokens)
+        compact_context(state, domain_config.context_limit_tokens)
+        if should_compact(state, domain_config.context_limit_tokens)
         else state
     )
     anchoring = build_anchoring_context(state)
@@ -204,7 +204,7 @@ def create_worker_node(
             system_prompt=system_prompt,
             workspace_root=workspace_root,
         )
-        compacted = should_compact(state, settings.context_limit_tokens)
+        compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(
             model=model,
             autonomous=autonomous,

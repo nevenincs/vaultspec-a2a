@@ -23,7 +23,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.pregel._retry import RetryPolicy
 
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import (
     ConfigError,
     ProviderSessionError,
@@ -224,7 +224,7 @@ def build_initial_vault_index(
     index: dict[str, list[str]] = {}
     for stage, pattern in _VAULT_STAGE_PATTERNS.items():
         resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[: settings.vault_index_cap]
+        matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
         if matches:
             index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
     return index

@@ -14,7 +14,7 @@ from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.stage import infer_phase_from_vault_index
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
-from vaultspec_a2a.control.config import settings
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.state import TeamState
 
 _logger = logging.getLogger(__name__)
@@ -228,8 +228,8 @@ def _build_supervisor_messages(
 ) -> list[BaseMessage]:
     """Build the supervisor prompt/message list before model invocation."""
     working_state = (
-        compact_context(state, settings.context_limit_tokens)
-        if should_compact(state, settings.context_limit_tokens)
+        compact_context(state, domain_config.context_limit_tokens)
+        if should_compact(state, domain_config.context_limit_tokens)
         else state
     )
     anchoring = build_anchoring_context(state)

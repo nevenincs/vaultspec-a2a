@@ -133,3 +133,9 @@ class DomainConfig(BaseSettings):
             "Maximum compiled LangGraph objects held in the executor LRU cache."
         ),
     )
+
+
+domain_config = DomainConfig()
+"""Module-level singleton consumed by Layer 1 production code."""
+
+__all__ = ["DomainConfig", "domain_config"]

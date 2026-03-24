@@ -16,8 +16,8 @@ import asyncio
 import logging
 import sys
 
-from ...core.config import settings
-from ...utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
+from ...control.config import settings
+from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...utils.logging import setup_logging
 from ..factory import ProviderFactory
 from ._http import run_http_probe
@@ -46,7 +46,7 @@ async def main() -> ProbeResult:
     model_name = MODEL_MAP[Provider.ZHIPU][PROVIDER_DEFAULT_MODELS[Provider.ZHIPU]]
     logger.info("Starting Zhipu GLM probe (model=%s)...", model_name)
 
-    model = ProviderFactory.create(Provider.ZHIPU)
+    model = ProviderFactory().create(Provider.ZHIPU)
     result = await run_http_probe(model, model_name, prompt=_PROMPT)
 
     if result.success:

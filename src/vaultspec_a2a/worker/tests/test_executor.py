@@ -197,7 +197,7 @@ class TestHandleDispatch:
 
                 # Pre-register a cancel event (as ingest would create one)
                 cancel_event = _asyncio.Event()
-                executor.aggregator._cancel_events["t-cancel-me"] = cancel_event
+                executor.aggregator._ingest._cancel_events["t-cancel-me"] = cancel_event
                 assert not cancel_event.is_set()
 
                 req = DispatchRequest(

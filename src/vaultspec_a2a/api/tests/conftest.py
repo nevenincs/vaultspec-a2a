@@ -30,9 +30,9 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ...core.aggregator import EventAggregator
-from ...core.config import settings
+from ...control.config import settings
 from ...database.models import Base
+from ...streaming.aggregator import EventAggregator
 from ..app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
 
 __all__: list[str] = []

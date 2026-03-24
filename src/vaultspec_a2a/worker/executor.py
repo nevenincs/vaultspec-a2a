@@ -21,23 +21,18 @@ from typing import TYPE_CHECKING, Any, cast
 from langchain_core.messages import HumanMessage, SystemMessage
 from langgraph.types import Command, StateSnapshot
 
+from ..api.event_adapter import sequenced_to_dict
 from ..api.schemas.internal import (
     DispatchRequest,
     ExecutionStateProjectionPayload,
     ExecutionTaskProjectionPayload,
 )
-from ..core import (
-    AgentConfig,
-    AgentConfigNotFoundError,
-    EventAggregator,
-    StreamableGraph,
-    TeamConfigNotFoundError,
-    compile_team_graph,
-    load_agent_config,
-    load_team_config,
-    settings,
-)
+from ..control.config import settings
+from ..graph.compiler import compile_team_graph
+from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
+from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
+from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
@@ -89,8 +84,11 @@ class Executor:
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
     ) -> None:
+        from vaultspec_a2a.providers.factory import ProviderFactory
+
         self._checkpointer = checkpointer
         self._bridge = bridge
+        self._provider_factory = ProviderFactory()
         self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
         # Maps thread_id -> cache key so _handle_resume can find the graph
         # and recompile if evicted.
@@ -101,10 +99,10 @@ class Executor:
         # surface via HTTP (ADR-031).  Closure captures bridge reference.
         _bridge_ref = bridge
 
-        async def _relay_event(event: Any) -> None:
-            thread_id = getattr(event, "thread_id", "")
+        async def _relay_event(sequenced: SequencedEvent) -> None:
+            thread_id = getattr(sequenced.event, "thread_id", "")
             if thread_id:
-                await _bridge_ref.send_event(thread_id, event.model_dump(mode="json"))
+                await _bridge_ref.send_event(thread_id, sequenced_to_dict(sequenced))
 
         self._aggregator.add_broadcast_hook(_relay_event)
 
@@ -971,6 +969,7 @@ class Executor:
             step_timeout=None,
             # MED-05: thread feature_tag so vault indexing works in worker
             feature_tag=req.active_feature,
+            provider_factory=self._provider_factory,
         )
 
     # ------------------------------------------------------------------

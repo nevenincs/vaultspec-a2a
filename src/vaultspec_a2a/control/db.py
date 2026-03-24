@@ -47,7 +47,7 @@ _ALEMBIC_INI = _REPO_ROOT / "alembic.ini"
 def _alembic_cfg() -> tuple[AlembicConfig, object]:
     from alembic.config import Config as AlembicConfig
 
-    from ..core.config import settings
+    from ..control.config import settings
 
     cfg = AlembicConfig(str(_ALEMBIC_INI))
     cfg.set_main_option("sqlalchemy.url", settings.database_url)
@@ -55,7 +55,7 @@ def _alembic_cfg() -> tuple[AlembicConfig, object]:
 
 
 def _get_db_path() -> Path:
-    from ..core.config import settings
+    from ..control.config import settings
 
     if settings.resolved_database_backend != "sqlite":
         print(
@@ -151,7 +151,7 @@ def _action_restore(name: str, yes: bool) -> None:
     import sqlite3
     from urllib import error, request
 
-    from ..core.config import settings
+    from ..control.config import settings
 
     checks = [
         (settings.port, "/internal/health"),
@@ -204,7 +204,7 @@ def _action_clear(yes: bool) -> None:
 
     from sqlalchemy import create_engine, text
 
-    from ..core.config import settings
+    from ..control.config import settings
 
     engine = create_engine(settings.database_sync_url)
     tables = ["cost_tracking", "permission_logs", "artifacts", "threads"]

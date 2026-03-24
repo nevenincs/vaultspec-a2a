@@ -15,8 +15,8 @@ import asyncio
 import logging
 import sys
 
-from ...core.config import settings
-from ...utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
+from ...control.config import settings
+from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...utils.logging import setup_logging
 from ..factory import ProviderFactory
 from ._http import run_http_probe
@@ -45,7 +45,7 @@ async def main() -> ProbeResult:
     model_name = MODEL_MAP[Provider.OPENAI][PROVIDER_DEFAULT_MODELS[Provider.OPENAI]]
     logger.info("Starting OpenAI probe (model=%s)...", model_name)
 
-    model = ProviderFactory.create(Provider.OPENAI)
+    model = ProviderFactory().create(Provider.OPENAI)
     result = await run_http_probe(model, model_name, prompt=_PROMPT)
 
     if result.success:

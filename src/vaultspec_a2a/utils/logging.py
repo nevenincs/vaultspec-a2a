@@ -14,7 +14,7 @@ __all__ = ["JSONFormatter", "OTelCorrelationFilter", "setup_logging"]
 
 
 if TYPE_CHECKING:
-    from ..core.config import Settings
+    from ..control.config import Settings
 
 
 # Standard LogRecord attributes that should not be included as extra fields.
@@ -108,7 +108,7 @@ def setup_logging(
     settings_override: "Settings | None" = None,
 ) -> None:
     """Configure structured JSON logging or rich terminal logging."""
-    from ..core.config import settings as core_settings
+    from ..control.config import settings as core_settings
 
     active_settings = settings_override or core_settings
 

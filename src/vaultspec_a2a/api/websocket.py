@@ -21,9 +21,11 @@ from uuid import uuid4
 from pydantic import TypeAdapter, ValidationError
 from starlette.websockets import WebSocket, WebSocketDisconnect, WebSocketState
 
-from ..core import EventAggregator, settings
+from ..control.config import settings
+from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
+from .event_adapter import sequenced_to_wire
 from .schemas.commands import (
     AgentControlCommand,
     ClientMessage,
@@ -37,7 +39,7 @@ from .schemas.enums import (
     AgentLifecycleState,
     ClientCommandType,
 )
-from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent, ServerEvent
+from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent
 
 logger = logging.getLogger(__name__)
 
@@ -573,7 +575,7 @@ class ConnectionManager:
     async def _writer_loop(
         self,
         client_id: str,
-        queue: asyncio.Queue[ServerEvent],
+        queue: asyncio.Queue,
     ) -> None:
         """Drain the event queue and write to the WebSocket.
 
@@ -622,10 +624,15 @@ class ConnectionManager:
                     continue
 
                 try:
-                    payload = (
-                        event.model_dump(mode="json")
-                        if hasattr(event, "model_dump")
+                    wire_event = (
+                        sequenced_to_wire(event)
+                        if isinstance(event, SequencedEvent)
                         else event
+                    )
+                    payload = (
+                        wire_event.model_dump(mode="json")
+                        if hasattr(wire_event, "model_dump")
+                        else wire_event
                     )
                     # ADR-010 §5: inject trace context into WS frames
                     trace_carrier: dict[str, str] = {}

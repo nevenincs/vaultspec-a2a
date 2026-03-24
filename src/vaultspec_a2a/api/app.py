@@ -43,19 +43,21 @@ from starlette.requests import Request as StarletteRequest
 from starlette.responses import Response as StarletteResponse
 from starlette.websockets import WebSocket
 
-from ..core import EventAggregator, settings
-from ..core.asyncio_compat import configure_asyncio_runtime
-from ..core.reconciliation import reconcile_threads_on_startup
+from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
 from ..database.crud import ThreadStatus, get_thread, list_threads, update_thread_status
 from ..database.migrations import backfill_teamstate_sdd_fields
+from ..database.reconciliation import reconcile_threads_on_startup
 from ..database.session import (
     close_db,
     get_session_factory,
     init_db,
     inspect_sqlite_database,
 )
+from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..telemetry.aggregator_hook import OTelAggregatorHook
+from ..utils.asyncio_compat import configure_asyncio_runtime
 from .endpoints import router
 from .internal import internal_router
 from .schemas.enums import AgentControlAction
@@ -1144,7 +1146,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         # Event aggregator -- lightweight in the gateway.
         # No graphs are registered here; the worker runs ingest.
-        aggregator = EventAggregator()
+        aggregator = EventAggregator(telemetry=OTelAggregatorHook())
         app.state.aggregator = aggregator
 
         # Connection manager (depends on aggregator)

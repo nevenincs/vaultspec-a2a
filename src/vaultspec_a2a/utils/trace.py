@@ -39,7 +39,7 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
         project_name: LangSmith project name. Defaults to settings.langsmith_project,
                       then "default".
     """
-    from ..core.config import settings
+    from ..control.config import settings
 
     if not settings.langsmith_api_key:
         _trace_print("[trace] LANGSMITH_API_KEY not set — skipping trace query.")

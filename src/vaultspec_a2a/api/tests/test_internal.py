@@ -16,8 +16,8 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from ...core.aggregator import EventAggregator
 from ...database.crud import create_thread, get_thread_execution_state
+from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 from ..websocket import ConnectionManager
 
@@ -644,7 +644,7 @@ class TestWorkerBridgeRetry:
         from fastapi.responses import JSONResponse as _JSONResponse
         from httpx import ASGITransport as _ASGITransport
 
-        from ...core.config import settings
+        from ...control.config import settings
         from ...worker.ipc import WorkerBridge
 
         noop_app = _FastAPI()
@@ -683,8 +683,8 @@ class TestAggregatorGCOnTerminal:
         from ..internal import _handle_terminal_event
 
         aggregator = EventAggregator()
-        aggregator._sequences["t-pruned"] = 5
-        aggregator._sequences["t-active"] = 3
+        aggregator._emitters._sequences["t-pruned"] = 5
+        aggregator._emitters._sequences["t-active"] = 3
         async with session_factory() as session:
             await create_thread(session, thread_id="t-pruned")
             await session.commit()
@@ -696,8 +696,8 @@ class TestAggregatorGCOnTerminal:
             session_factory=session_factory,
         )
 
-        assert "t-pruned" not in aggregator._sequences
-        assert "t-active" in aggregator._sequences
+        assert "t-pruned" not in aggregator._emitters._sequences
+        assert "t-active" in aggregator._emitters._sequences
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_event_log_includes_runtime_fields(

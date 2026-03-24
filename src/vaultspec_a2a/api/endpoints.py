@@ -39,21 +39,9 @@ from opentelemetry import propagate as _otel_propagate
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core import (
-    ConfigError,
-    EventAggregator,
-    NicknameConflictError,
-    TeamConfigNotFoundError,
-    ThreadMetadata,
-    build_context_preamble,
-    build_initial_vault_index,
-    discover_context_refs,
-    discover_team_preset_ids,
-    generate_nickname,
-    load_team_config,
-    settings,
-)
-from ..core.aggregator import classify_tool_kind
+from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
+from ..context.preamble import build_context_preamble
+from ..control.config import settings
 from ..database.checkpoints import Checkpointer
 from ..database.crud import (
     ApprovalStatus,
@@ -77,13 +65,27 @@ from ..database.crud import (
     update_thread_status,
 )
 from ..database.session import get_db
+from ..graph.compiler import build_initial_vault_index
+from ..streaming.aggregator import EventAggregator, classify_tool_kind
+from ..team.team_config import discover_team_preset_ids, load_team_config
+from ..thread.errors import (
+    ConfigError,
+    NicknameConflictError,
+    TeamConfigNotFoundError,
+)
 from .projection import (
     apply_checkpoint_projection,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     project_checkpoint_tuple,
 )
-from .schemas.enums import AgentLifecycleState, PermissionType, ToolCallStatus, ToolKind
+from .schemas.enums import (
+    AgentLifecycleState,
+    PermissionOptionKind,
+    PermissionType,
+    ToolCallStatus,
+    ToolKind,
+)
 from .schemas.events import PlanEntry
 from .schemas.internal import DispatchRequest
 from .schemas.rest import (
@@ -819,9 +821,9 @@ def _enrich_snapshot_from_state(
                     tool_call=perm.tool_call,
                     options=[
                         _PermissionOptionSnapshot(
-                            option_id=opt.option_id,
-                            name=opt.name,
-                            kind=opt.kind,
+                            option_id=opt.get("option_id", ""),
+                            name=opt.get("name", ""),
+                            kind=PermissionOptionKind(opt.get("kind", "allow_once")),
                         )
                         for opt in perm.options
                     ],

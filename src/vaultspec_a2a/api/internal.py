@@ -30,7 +30,7 @@ from fastapi import (
     WebSocketDisconnect,
 )
 
-from ..core import settings
+from ..control.config import settings
 from .schemas.internal import ExecutionStateProjectionPayload
 
 __all__ = ["internal_router"]
@@ -153,9 +153,9 @@ async def _handle_terminal_event(
         try:
             aggregator.prune_stale_permissions()
             # Remove the sequence counter for the now-terminal thread.
-            active: set[str] = set(getattr(aggregator, "_sequences", {}).keys()) - {
-                thread_id
-            }
+            active: set[str] = set(
+                getattr(aggregator._emitters, "_sequences", {}).keys()
+            ) - {thread_id}
             aggregator.prune_sequences(active)
         except Exception:
             logger.warning(

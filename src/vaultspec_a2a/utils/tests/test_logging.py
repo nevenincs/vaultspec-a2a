@@ -10,7 +10,7 @@ import pytest
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
 
-from ...core import Settings
+from ...control.config import Settings
 from ..enums import Environment, LogLevel
 from ..logging import JSONFormatter, OTelCorrelationFilter, setup_logging
 

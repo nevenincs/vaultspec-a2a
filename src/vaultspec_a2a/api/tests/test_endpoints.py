@@ -18,9 +18,9 @@ import logging
 
 from fastapi.testclient import TestClient
 
-from ...core.aggregator import EventAggregator
-from ...core.config import settings
+from ...control.config import settings
 from ...database.crud import record_permission_request
+from ...streaming.aggregator import EventAggregator
 from .conftest import make_app
 
 # ---------------------------------------------------------------------------
@@ -392,23 +392,24 @@ class TestTeamStatus:
         self, session_factory, checkpointer
     ) -> None:
         """Pending permissions stored in aggregator appear in team status."""
-        from datetime import UTC, datetime
+        import time
 
-        from ...api.schemas.events import PermissionRequestEvent, ServerEventType
+        from ...graph.events import PermissionRequest
 
         agg = EventAggregator()
-        # Directly inject a pending permission into the aggregator
-        event = PermissionRequestEvent(
-            type=ServerEventType.PERMISSION_REQUEST,
+        # Inject a pending permission via the emitters sub-component
+        event = PermissionRequest(
             thread_id="thread-abc",
             agent_id="vaultspec-coder",
-            timestamp=datetime.now(UTC),
-            sequence=1,
+            timestamp=time.time(),
             request_id="thread-abc:perm-001",
             description="Allow file write?",
             options=[],
         )
-        agg._pending_permissions["thread-abc:perm-001"] = (event, 0.0)
+        agg._emitters._pending_permissions["thread-abc:perm-001"] = (
+            event,
+            0.0,
+        )
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg
@@ -430,11 +431,15 @@ class TestTeamStatus:
     ) -> None:
         """Agents registered via aggregator node metadata appear in response."""
         agg = EventAggregator()
-        agg._node_metadata["vaultspec-coder"] = {
-            "role": "coder",
-            "display_name": "Coder Agent",
-            "description": "Writes code",
-        }
+        agg._subscribers_mgr.set_node_metadata(
+            {
+                "vaultspec-coder": {
+                    "role": "coder",
+                    "display_name": "Coder Agent",
+                    "description": "Writes code",
+                },
+            }
+        )
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg

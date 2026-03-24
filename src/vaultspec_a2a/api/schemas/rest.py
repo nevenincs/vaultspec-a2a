@@ -10,8 +10,8 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
 
-from ...core.metadata import ThreadMetadata
-from ...utils.enums import Model, Provider
+from ...context.metadata import ThreadMetadata
+from ...graph.enums import Model, Provider
 from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [

@@ -32,10 +32,10 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 
 from ..api.schemas.internal import DispatchRequest, DispatchResponse
-from ..core import settings
-from ..core.asyncio_compat import configure_asyncio_runtime
+from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.enums import Environment
 from .executor import Executor
 from .ipc import WorkerBridge

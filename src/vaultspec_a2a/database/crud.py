@@ -16,7 +16,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from ..core.exceptions import NicknameConflictError
+from ..thread.errors import NicknameConflictError
 from .models import (
     ArtifactModel,
     ControlActionModel,

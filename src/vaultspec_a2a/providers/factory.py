@@ -9,10 +9,10 @@ from typing import Any
 from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-from ..core.config import settings
-from ..core.exceptions import ConfigError
-from ..core.team_config import AgentConfig
-from ..utils.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ..control.config import settings
+from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
+from ..team.team_config import AgentConfig
+from ..thread.errors import ConfigError
 from .acp_chat_model import AcpChatModel
 
 __all__ = ["ProviderFactory"]
@@ -235,9 +235,8 @@ def _build_acp_command(backend: str) -> list[str]:
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
-    @classmethod
     def create(
-        cls,
+        self,
         provider: Provider,
         model: "Model | str | None" = None,
         agent_config: AgentConfig | None = None,

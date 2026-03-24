@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from ..core.config import settings
+from ..control.config import settings
 from .models import Base
 
 logger = logging.getLogger(__name__)

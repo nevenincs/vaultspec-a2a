@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
-from ..core.exceptions import MergeConflictError, WorkspaceError
+from ..thread.errors import MergeConflictError, WorkspaceError
 
 # Validates agent_id: must start with alphanumeric, contain only [a-zA-Z0-9_-].
 # Prevents path traversal (../) and git flag injection (--flag).

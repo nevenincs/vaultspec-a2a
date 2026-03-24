@@ -9,7 +9,7 @@ from typing import ClassVar
 
 import pytest
 
-from ...core.exceptions import WorkspaceError
+from ...thread.errors import WorkspaceError
 from ..environment import resolve_env_vars, resolve_venv
 from ..git_manager import GitManager, MergeStrategy
 

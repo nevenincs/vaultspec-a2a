@@ -18,6 +18,7 @@ if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
 from ...graph.compiler import compile_team_graph
+from ...providers.factory import ProviderFactory
 from ...team.team_config import load_agent_config, load_team_config
 from ...thread.errors import AgentConfigNotFoundError
 
@@ -60,6 +61,7 @@ async def setup_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
+            provider_factory=ProviderFactory,  # type: ignore[arg-type]
         )
         yield graph
 

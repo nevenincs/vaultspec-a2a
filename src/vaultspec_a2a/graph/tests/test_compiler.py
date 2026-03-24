@@ -15,6 +15,9 @@ if TYPE_CHECKING:
 
     from langchain_core.runnables import RunnableConfig
 
+    from ..protocols import ProviderFactoryProtocol
+
+from vaultspec_a2a.providers.factory import ProviderFactory
 from vaultspec_a2a.team.team_config import (
     TopologyConfig,
     TopologyType,
@@ -38,6 +41,12 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         yield saver
+
+
+@pytest.fixture
+def pf() -> ProviderFactoryProtocol:
+    """Concrete ProviderFactory for graph compilation tests."""
+    return ProviderFactory  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -76,6 +85,7 @@ _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
 )
 async def test_compile_graph_structure(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
     preset: str,
     topology: str,
     expected_workers: set[str],
@@ -93,6 +103,7 @@ async def test_compile_graph_structure(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
+        provider_factory=pf,
     )
 
     assert team.topology.type == topology
@@ -116,6 +127,7 @@ async def test_compile_graph_structure(
 @pytest.mark.asyncio
 async def test_compile_team_graph_accepts_workspace_root(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """compile_team_graph accepts workspace_root and produces a valid graph."""
     team = load_team_config("vaultspec-adaptive-coder")
@@ -128,6 +140,7 @@ async def test_compile_team_graph_accepts_workspace_root(
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
         workspace_root=Path("Y:/code/test-workspace"),
+        provider_factory=pf,
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -155,6 +168,7 @@ async def test_compile_team_graph_accepts_workspace_root(
 )
 async def test_compile_interrupt_before_always_empty(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
     autonomous: bool,
 ) -> None:
     """interrupt_before is [] in both supervised and autonomous modes."""
@@ -166,6 +180,7 @@ async def test_compile_interrupt_before_always_empty(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=autonomous,
+        provider_factory=pf,
     )
 
     assert list(graph.interrupt_before_nodes) == []
@@ -183,6 +198,7 @@ async def test_compile_interrupt_before_always_empty(
 @pytest.mark.asyncio
 async def test_compile_unknown_topology_raises(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """An unknown topology type raises ValueError."""
     team = load_team_config("vaultspec-structured-coder")
@@ -195,6 +211,7 @@ async def test_compile_unknown_topology_raises(
             team_config=bad_team,
             agent_configs=agent_configs,
             checkpointer=checkpointer,
+            provider_factory=pf,
         )
 
 
@@ -206,6 +223,7 @@ async def test_compile_unknown_topology_raises(
 @pytest.mark.asyncio
 async def test_compile_pipeline_loop_structure(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """vaultspec-iterative-coder (pipeline_loop) produces correct node set."""
     team = load_team_config("vaultspec-iterative-coder")
@@ -215,6 +233,7 @@ async def test_compile_pipeline_loop_structure(
         team_config=team,
         agent_configs=agent_configs,
         checkpointer=checkpointer,
+        provider_factory=pf,
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -226,6 +245,7 @@ async def test_compile_pipeline_loop_structure(
 @pytest.mark.asyncio
 async def test_compile_pipeline_loop_single_agent_raises(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """pipeline_loop with only the loop_node raises ConfigError."""
     team = load_team_config("vaultspec-iterative-coder")
@@ -245,12 +265,14 @@ async def test_compile_pipeline_loop_single_agent_raises(
             team_config=bad_team,
             agent_configs=agent_configs,
             checkpointer=checkpointer,
+            provider_factory=pf,
         )
 
 
 @pytest.mark.asyncio
 async def test_compile_pipeline_missing_agent_config_raises(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """Referencing an agent_id not in agent_configs raises ConfigError."""
     team = load_team_config("vaultspec-structured-coder")
@@ -264,12 +286,14 @@ async def test_compile_pipeline_missing_agent_config_raises(
             team_config=team,
             agent_configs=agent_configs,
             checkpointer=checkpointer,
+            provider_factory=pf,
         )
 
 
 @pytest.mark.asyncio
 async def test_compile_pipeline_empty_order_raises(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """Empty pipeline_order raises ConfigError."""
     team = load_team_config("vaultspec-structured-coder")
@@ -281,12 +305,14 @@ async def test_compile_pipeline_empty_order_raises(
             team_config=bad_team,
             agent_configs=agent_configs,
             checkpointer=checkpointer,
+            provider_factory=pf,
         )
 
 
 @pytest.mark.asyncio
 async def test_loop_router_worker_can_signal_finish(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """_loop_router returns FINISH when state['next'] is set to 'FINISH'."""
     team = load_team_config("vaultspec-iterative-coder")
@@ -296,6 +322,7 @@ async def test_loop_router_worker_can_signal_finish(
         team_config=team,
         agent_configs=agent_configs,
         checkpointer=checkpointer,
+        provider_factory=pf,
     )
 
     node_keys = {k for k in graph.nodes if not k.startswith("__")}
@@ -399,6 +426,7 @@ async def test_compile_team_graph_step_timeout_set() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=42.0,
+            provider_factory=ProviderFactory,  # type: ignore[arg-type]
         )
     assert graph.step_timeout == 42.0
 
@@ -416,6 +444,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=None,
+            provider_factory=ProviderFactory,  # type: ignore[arg-type]
         )
     assert graph.step_timeout == 300.0
 
@@ -455,6 +484,7 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
             team_config=team,
             agent_configs=agent_configs,
             checkpointer=cp,
+            provider_factory=ProviderFactory,  # type: ignore[arg-type]
         )
     assert graph.recursion_limit == 10  # type: ignore[attr-defined]
 
@@ -516,6 +546,7 @@ def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
 @pytest.mark.asyncio
 async def test_graph_execution_routing(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """End-to-end: supervisor routes, checkpointer persists state."""
     team = load_team_config("vaultspec-adaptive-coder")
@@ -527,6 +558,7 @@ async def test_graph_execution_routing(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
+        provider_factory=pf,
     )
 
     initial_state = {

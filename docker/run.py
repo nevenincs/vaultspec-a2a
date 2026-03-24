@@ -122,9 +122,12 @@ async def execute_mock_team(
     try:
         async with AsyncSqliteSaver.from_conn_string(str(db_path)) as checkpointer:
             await checkpointer.setup()
+            from vaultspec_a2a.providers.factory import ProviderFactory
+
             graph = compile_team_graph(
                 team_config=team_config,
                 agent_configs=agent_configs,
+                provider_factory=ProviderFactory,  # type: ignore[arg-type]
                 supervisor_agent_config=supervisor_config,
                 autonomous=True,
                 checkpointer=checkpointer,

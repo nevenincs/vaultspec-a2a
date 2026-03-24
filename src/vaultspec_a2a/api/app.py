@@ -56,6 +56,7 @@ from ..database.session import (
 )
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from .endpoints import router
 from .internal import internal_router
@@ -1145,7 +1146,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         # Event aggregator -- lightweight in the gateway.
         # No graphs are registered here; the worker runs ingest.
-        aggregator = EventAggregator()
+        aggregator = EventAggregator(telemetry=OTelAggregatorHook())
         app.state.aggregator = aggregator
 
         # Connection manager (depends on aggregator)

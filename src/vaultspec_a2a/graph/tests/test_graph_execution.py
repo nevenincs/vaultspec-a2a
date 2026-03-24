@@ -17,6 +17,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
 
+    from ..protocols import ProviderFactoryProtocol
+
+from vaultspec_a2a.providers.factory import ProviderFactory
 from vaultspec_a2a.team.team_config import load_agent_config, load_team_config
 
 from ..compiler import compile_team_graph
@@ -30,6 +33,12 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         yield saver
+
+
+@pytest.fixture
+def pf() -> ProviderFactoryProtocol:
+    """Concrete ProviderFactory for graph compilation tests."""
+    return ProviderFactory  # type: ignore[return-value]
 
 
 def _make_config(thread_id: str) -> RunnableConfig:
@@ -51,6 +60,7 @@ def _ai_messages(states: list[dict]) -> list[AIMessage]:
 @pytest.mark.asyncio
 async def test_mock_single_agent_pipeline_runs_to_completion(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """mock-success-single executes two LLM turns and finishes."""
     team = load_team_config("mock-success-single")
@@ -61,6 +71,7 @@ async def test_mock_single_agent_pipeline_runs_to_completion(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     inputs = {"messages": [HumanMessage(content="Execute the mock protocol.")]}
@@ -93,6 +104,7 @@ async def test_mock_single_agent_pipeline_runs_to_completion(
 @pytest.mark.asyncio
 async def test_mock_tool_failure_pipeline_surfaces_failure_summary(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """mock-failure-tool executes a failing command then reports it."""
     team = load_team_config("mock-failure-tool")
@@ -103,6 +115,7 @@ async def test_mock_tool_failure_pipeline_surfaces_failure_summary(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     inputs = {"messages": [HumanMessage(content="Execute the mock failure protocol.")]}
@@ -127,6 +140,7 @@ async def test_mock_tool_failure_pipeline_surfaces_failure_summary(
 @pytest.mark.asyncio
 async def test_mock_human_in_loop_pauses_on_permission_request(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """mock-human-in-loop tape pauses on permission request."""
     from langgraph.errors import GraphInterrupt
@@ -139,6 +153,7 @@ async def test_mock_human_in_loop_pauses_on_permission_request(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     inputs = {"messages": [HumanMessage(content="Execute the mock human protocol.")]}

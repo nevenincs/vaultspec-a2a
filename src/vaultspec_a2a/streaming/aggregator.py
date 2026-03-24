@@ -28,7 +28,7 @@ from langgraph.types import Command
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ..control.config import settings
+from ..domain_config import domain_config
 from ..graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -49,7 +49,7 @@ from ..graph.events import (
     ToolCallStart,
     ToolCallUpdate,
 )
-from ..telemetry.instrumentation import get_meter, get_tracer
+from ..graph.protocols import NullTelemetryHook, TelemetryHook
 
 # M6: import GraphInterrupt for isinstance check vs string comparison.
 try:
@@ -81,31 +81,6 @@ class SequencedEvent:
 
     event: DomainEvent
     sequence: int
-
-
-# ---------------------------------------------------------------------------
-# OTel instrumentation (ADR-010)
-# ---------------------------------------------------------------------------
-_tracer = get_tracer(__name__)
-_meter = get_meter(__name__)
-
-_events_emitted_counter = _meter.create_counter(
-    "aggregator.events_emitted",
-    description="Number of wire-protocol events emitted by type",
-)
-_events_filtered_counter = _meter.create_counter(
-    "aggregator.events_filtered",
-    description="Number of LangGraph events filtered out",
-)
-_chunks_batched_counter = _meter.create_counter(
-    "aggregator.chunks_batched",
-    description="Number of token chunks buffered before flush",
-)
-_ingest_duration_histogram = _meter.create_histogram(
-    "aggregator.ingest_duration_seconds",
-    description="Duration of a full graph ingest cycle",
-    unit="s",
-)
 
 
 def _evict_oldest(d: dict, max_entries: int) -> None:
@@ -290,8 +265,12 @@ class EventAggregator:
     Designed as a FastAPI lifespan singleton injected via DI (ADR-007).
     """
 
-    def __init__(self) -> None:
+    def __init__(self, telemetry: TelemetryHook | None = None) -> None:
         """Initialize the aggregator with empty subscriber and sequence tables."""
+        self._telemetry: TelemetryHook | NullTelemetryHook = (
+            telemetry or NullTelemetryHook()
+        )
+
         # Per-thread monotonic sequence counters (start at 0, first event = 1)
         self._sequences: dict[str, int] = defaultdict(int)
 
@@ -493,7 +472,7 @@ class EventAggregator:
         Uses ``event_queue_maxsize`` for backpressure (research §1.5).
         """
         queue: asyncio.Queue[SequencedEvent] = asyncio.Queue(
-            maxsize=settings.event_queue_maxsize
+            maxsize=domain_config.event_queue_maxsize
         )
         self._subscribers[client_id] = queue
         self._subscriptions[client_id] = set()
@@ -584,9 +563,9 @@ class EventAggregator:
         thread_id = getattr(sequenced.event, "thread_id", None)
         event_type = type(sequenced.event).__name__
 
-        with _tracer.start_as_current_span(
+        with self._telemetry.start_span(
             "aggregator.broadcast",
-            attributes={"event.type": str(event_type), "thread_id": thread_id or ""},
+            **{"event.type": str(event_type), "thread_id": thread_id or ""},
         ):
             delivered = 0
             for client_id, queue in list(self._subscribers.items()):
@@ -616,7 +595,9 @@ class EventAggregator:
                         )
                         continue
                     delivered += 1
-            _events_emitted_counter.add(1, {"event.type": str(event_type)})
+            self._telemetry.increment_counter(
+                "aggregator.events_emitted", 1, **{"event.type": str(event_type)}
+            )
             for hook in self._broadcast_hooks:
                 try:
                     await hook(sequenced)
@@ -632,7 +613,7 @@ class EventAggregator:
         key: tuple[str, str],
     ) -> None:
         """Flush a pending debounced tool call update after the interval."""
-        await asyncio.sleep(settings.tool_call_debounce_seconds)
+        await asyncio.sleep(domain_config.tool_call_debounce_seconds)
         async with self._lock:
             event = self._tool_update_pending.pop(key, None)
         if event is not None:
@@ -643,7 +624,7 @@ class EventAggregator:
         thread_id: str,
     ) -> None:
         """Flush a pending debounced plan update after the interval."""
-        await asyncio.sleep(settings.plan_update_debounce_seconds)
+        await asyncio.sleep(domain_config.plan_update_debounce_seconds)
         async with self._lock:
             event = self._plan_update_pending.pop(thread_id, None)
         if event is not None:
@@ -668,9 +649,10 @@ class EventAggregator:
         meta = self._chunk_buffer_meta.pop(thread_id, None)
         self._chunk_flush_tasks.pop(thread_id, None)
         if chunks and meta:
-            with _tracer.start_as_current_span(
+            with self._telemetry.start_span(
                 "aggregator.flush_chunks",
-                attributes={"thread_id": thread_id, "chunk_count": len(chunks)},
+                thread_id=thread_id,
+                chunk_count=len(chunks),
             ):
                 combined = "".join(chunks)
                 seq = self._next_sequence(thread_id)
@@ -685,7 +667,7 @@ class EventAggregator:
 
     async def _scheduled_chunk_flush(self, thread_id: str) -> None:
         """Timer-based flush: waits 50ms then flushes."""
-        await asyncio.sleep(settings.chunk_flush_interval_seconds)
+        await asyncio.sleep(domain_config.chunk_flush_interval_seconds)
         await self._flush_chunk_buffer(thread_id)
 
     async def _buffer_message_chunk(
@@ -717,11 +699,13 @@ class EventAggregator:
             "agent_id": agent_id,
             "message_id": message_id,
         }
-        _chunks_batched_counter.add(1, {"thread_id": thread_id})
+        self._telemetry.increment_counter(
+            "aggregator.chunks_batched", 1, thread_id=thread_id
+        )
 
         buffer_size = sum(len(c) for c in self._chunk_buffers[thread_id])
 
-        if buffer_size >= settings.chunk_buffer_max_bytes:
+        if buffer_size >= domain_config.chunk_buffer_max_bytes:
             # 4KB threshold reached: flush immediately
             existing_task = self._chunk_flush_tasks.pop(thread_id, None)
             if existing_task is not None:
@@ -850,8 +834,8 @@ class EventAggregator:
                 args_str = json.dumps(input_args, default=str, ensure_ascii=False)
             except (TypeError, ValueError):
                 args_str = str(input_args)
-            if len(args_str) > settings.tool_arg_truncate_len:
-                args_str = args_str[: settings.tool_arg_truncate_len] + "..."
+            if len(args_str) > domain_config.tool_arg_truncate_len:
+                args_str = args_str[: domain_config.tool_arg_truncate_len] + "..."
             content.append({"content_type": "text", "text": args_str})
         # F-38: track tool call state for REST snapshot enrichment.
         self._tool_call_states[(thread_id, tool_call_id)] = {
@@ -924,14 +908,13 @@ class EventAggregator:
         sequenced = SequencedEvent(event=event, sequence=seq)
 
         last_emit = self._tool_update_last_emit.get(key, 0.0)
-        if now - last_emit >= settings.tool_call_debounce_seconds:
+        if now - last_emit >= domain_config.tool_call_debounce_seconds:
             # Enough time has passed, emit immediately
             self._tool_update_last_emit[key] = now
             # AGG-03: cap map size to prevent unbounded growth across threads.
-            if len(self._tool_update_last_emit) > settings.debounce_map_max_entries:
-                _evict_oldest(
-                    self._tool_update_last_emit, settings.debounce_map_max_entries
-                )
+            max_entries = domain_config.debounce_map_max_entries
+            if len(self._tool_update_last_emit) > max_entries:
+                _evict_oldest(self._tool_update_last_emit, max_entries)
             await self._broadcast(sequenced)
         else:
             # Debounce: store pending and schedule flush
@@ -1233,7 +1216,7 @@ class EventAggregator:
         sequenced = SequencedEvent(event=event, sequence=seq)
         now = time.monotonic()
         last = self._plan_update_last_emit.get(thread_id, 0.0)
-        if now - last >= settings.plan_update_debounce_seconds:
+        if now - last >= domain_config.plan_update_debounce_seconds:
             self._plan_update_last_emit[thread_id] = now
             await self._broadcast(sequenced)
         else:
@@ -1466,10 +1449,9 @@ class EventAggregator:
                     else:
                         output_str = str(output)
                     if output_str:
-                        if len(output_str) > settings.tool_arg_truncate_len:
-                            output_str = (
-                                output_str[: settings.tool_arg_truncate_len] + "..."
-                            )
+                        max_len = domain_config.tool_arg_truncate_len
+                        if len(output_str) > max_len:
+                            output_str = output_str[:max_len] + "..."
                         output_content = [{"content_type": "text", "text": output_str}]
                 await self.emit_tool_call_update(
                     thread_id=thread_id,
@@ -1622,7 +1604,9 @@ class EventAggregator:
 
         # --- Everything else is filtered out (research §1.2) ---
         if event_kind not in _PASSTHROUGH_EVENTS | _NODE_BOUNDARY_EVENTS:
-            _events_filtered_counter.add(1, {"event.kind": event_kind})
+            self._telemetry.increment_counter(
+                "aggregator.events_filtered", 1, **{"event.kind": event_kind}
+            )
             logger.debug(
                 "Filtered LangGraph event: %s (run_id=%s)",
                 event_kind,
@@ -1654,13 +1638,12 @@ class EventAggregator:
             graph:     Compiled LangGraph graph; must expose ``aget_state``.
             config:    LangGraph config dict with ``configurable.thread_id``.
         """
-        # M3: aget_state timeout is configurable via settings.aget_state_timeout_seconds
+        # M3: aget_state timeout is configurable via domain_config.
         interrupt_detected = False
+        timeout = domain_config.aget_state_timeout_seconds
 
         try:
-            state = await asyncio.wait_for(
-                graph.aget_state(config), timeout=settings.aget_state_timeout_seconds
-            )
+            state = await asyncio.wait_for(graph.aget_state(config), timeout=timeout)
         except TimeoutError:
             logger.warning(
                 "Timed out inspecting state for interrupt detection on thread %s",
@@ -1843,9 +1826,10 @@ class EventAggregator:
         # projection/persistence.
         _is_interrupt = False
         _outcome = "completed"
-        with _tracer.start_as_current_span(
+        with self._telemetry.start_span(
             "aggregator.ingest",
-            attributes={"thread_id": thread_id, "agent_id": agent_id},
+            thread_id=thread_id,
+            agent_id=agent_id,
         ) as span:
             try:
                 async for raw_event in graph.astream_events(
@@ -1953,9 +1937,10 @@ class EventAggregator:
                 if _outcome == "completed" and interrupt_emitted:
                     _outcome = "interrupted"
                     span.set_attribute("interrupted_via_state", True)
-                _ingest_duration_histogram.record(
+                self._telemetry.record_histogram(
+                    "aggregator.ingest_duration_seconds",
                     time.monotonic() - start,
-                    {"thread_id": thread_id},
+                    thread_id=thread_id,
                 )
         return _outcome
 

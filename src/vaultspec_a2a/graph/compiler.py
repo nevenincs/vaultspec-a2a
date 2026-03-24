@@ -106,22 +106,16 @@ def _worker_retry_on(exc: Exception) -> bool:
 _NODE_RETRY_POLICY = RetryPolicy(retry_on=_worker_retry_on)
 
 
-def _get_provider_factory() -> ProviderFactoryProtocol:
-    """Lazy-import the concrete ProviderFactory as a transition fallback."""
-    from vaultspec_a2a.providers.factory import ProviderFactory
-
-    return ProviderFactory  # type: ignore[return-value]
-
-
 def _resolve_model_for_worker(
     worker_ref: Any,
     agent_config: Any,
     team_config: Any,
     workspace_root: Path | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
 ) -> BaseChatModel:
     """Resolve provider + capability following ADR-013 S2.3 precedence."""
-    factory = provider_factory or _get_provider_factory()
+    factory = provider_factory
     primary_provider, capability, fallback_chain = _resolve_worker_model_preferences(
         worker_ref,
         agent_config,
@@ -198,10 +192,11 @@ def _resolve_worker_model_preferences(
 def _resolve_supervisor_model(
     team_config: Any,
     workspace_root: Path | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
 ) -> BaseChatModel:
     """Resolve the supervisor model from team config."""
-    factory = provider_factory or _get_provider_factory()
+    factory = provider_factory
     provider: Provider = (
         team_config.supervisor.provider
         or team_config.defaults.provider
@@ -266,13 +261,14 @@ def _build_supervisor_prompt(
 def compile_team_graph(
     team_config: Any,
     agent_configs: dict[str, Any],
+    *,
+    provider_factory: ProviderFactoryProtocol,
     checkpointer: BaseCheckpointSaver | None = None,
     supervisor_agent_config: Any | None = None,
     workspace_root: Path | None = None,
     autonomous: bool = False,
     step_timeout: float | None = None,
     feature_tag: str | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -300,9 +296,7 @@ def compile_team_graph(
                                  used as fallback (TOML-05).
         feature_tag:             Optional feature tag for task-queue scoping
                                  (ADR-021).
-        provider_factory:        Optional provider factory for model creation.
-                                 When None, falls back to the concrete
-                                 ProviderFactory (transition period).
+        provider_factory:        Provider factory for model creation.
 
     Returns:
         The compiled StateGraph runnable.
@@ -334,20 +328,20 @@ def compile_team_graph(
             team_config,
             agent_configs,
             supervisor_agent_config,
-            workspace_root,
+            provider_factory=provider_factory,
+            workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
-            provider_factory=provider_factory,
         )
     elif topology.type == TopologyType.PIPELINE:
         _compile_pipeline(
             builder,
             team_config,
             agent_configs,
-            workspace_root,
+            provider_factory=provider_factory,
+            workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
-            provider_factory=provider_factory,
         )
     elif topology.type == TopologyType.PIPELINE_LOOP:
         _compile_pipeline_loop(
@@ -355,10 +349,10 @@ def compile_team_graph(
             team_config,
             agent_configs,
             supervisor_agent_config,
-            workspace_root,
+            provider_factory=provider_factory,
+            workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
-            provider_factory=provider_factory,
         )
     else:
         raise ValueError(
@@ -396,10 +390,11 @@ def _compile_star(
     team_config: Any,
     agent_configs: dict[str, Any],
     supervisor_agent_config: Any | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -409,7 +404,7 @@ def _compile_star(
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
     supervisor_model = _resolve_supervisor_model(
-        team_config, workspace_root, provider_factory
+        team_config, workspace_root, provider_factory=provider_factory
     )
 
     if supervisor_agent_config is not None:
@@ -480,7 +475,7 @@ def _compile_star(
             agent_cfg,
             team_config,
             workspace_root,
-            provider_factory,
+            provider_factory=provider_factory,
         )
         worker_node = create_worker_node(
             model,
@@ -529,10 +524,11 @@ def _compile_pipeline(
     builder: StateGraph,
     team_config: Any,
     agent_configs: dict[str, Any],
+    *,
+    provider_factory: ProviderFactoryProtocol,
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -586,7 +582,7 @@ def _compile_pipeline(
             agent_cfg,
             team_config,
             workspace_root,
-            provider_factory,
+            provider_factory=provider_factory,
         )
         worker_node = create_worker_node(
             model,
@@ -699,10 +695,11 @@ def _compile_pipeline_loop(
     team_config: Any,
     agent_configs: dict[str, Any],
     _supervisor_agent_config: Any | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
-    provider_factory: ProviderFactoryProtocol | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -736,7 +733,7 @@ def _compile_pipeline_loop(
             agent_cfg,
             team_config,
             workspace_root,
-            provider_factory,
+            provider_factory=provider_factory,
         )
         worker_node = create_worker_node(
             model,

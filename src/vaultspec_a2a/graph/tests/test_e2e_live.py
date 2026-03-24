@@ -15,6 +15,9 @@ if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig
     from langgraph.graph.state import CompiledStateGraph
 
+    from ..protocols import ProviderFactoryProtocol
+
+from vaultspec_a2a.providers.factory import ProviderFactory
 from vaultspec_a2a.team.team_config import (
     AgentConfig,
     AgentModelConfig,
@@ -34,6 +37,12 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
         await saver.setup()
         yield saver
+
+
+@pytest.fixture
+def pf() -> ProviderFactoryProtocol:
+    """Concrete ProviderFactory for graph compilation tests."""
+    return ProviderFactory  # type: ignore[return-value]
 
 
 def _team_and_agents_with_provider(
@@ -68,7 +77,9 @@ async def _run_and_collect_nodes(
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
+async def test_solo_coder_openai(
+    checkpointer: AsyncSqliteSaver, pf: ProviderFactoryProtocol
+) -> None:
     """Single-agent graph completes a code task via OpenAI."""
     team, agent_configs = _team_and_agents_with_provider(
         "vaultspec-solo-coder", Provider.OPENAI
@@ -78,6 +89,7 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-solo-openai"
@@ -110,6 +122,7 @@ async def test_solo_coder_openai(checkpointer: AsyncSqliteSaver) -> None:
 @pytest.mark.asyncio
 async def test_pipeline_team_openai_collaboration(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """Three-agent pipeline with OpenAI."""
     team, agent_configs = _team_and_agents_with_provider(
@@ -120,6 +133,7 @@ async def test_pipeline_team_openai_collaboration(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-pipeline-openai"
@@ -150,7 +164,9 @@ async def test_pipeline_team_openai_collaboration(
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
+async def test_checkpoint_resume_openai(
+    checkpointer: AsyncSqliteSaver, pf: ProviderFactoryProtocol
+) -> None:
     """Checkpoint survives and the thread can be resumed."""
     team, agent_configs = _team_and_agents_with_provider(
         "vaultspec-solo-coder", Provider.OPENAI
@@ -160,6 +176,7 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-resume-openai"
@@ -197,6 +214,7 @@ async def test_checkpoint_resume_openai(checkpointer: AsyncSqliteSaver) -> None:
 @pytest.mark.asyncio
 async def test_star_topology_supervisor_routing_openai(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """Star topology: supervisor routes to at least one worker via OpenAI."""
     team, agent_configs = _team_and_agents_with_provider(
@@ -214,6 +232,7 @@ async def test_star_topology_supervisor_routing_openai(
         checkpointer=checkpointer,
         supervisor_agent_config=supervisor_cfg,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-star-openai"
@@ -242,7 +261,9 @@ async def test_star_topology_supervisor_routing_openai(
 
 @pytest.mark.live
 @pytest.mark.asyncio
-async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
+async def test_solo_coder_gemini(
+    checkpointer: AsyncSqliteSaver, pf: ProviderFactoryProtocol
+) -> None:
     """Single-agent graph completes a task via Gemini ACP subprocess."""
     team, agent_configs = _team_and_agents_with_provider(
         "vaultspec-solo-coder", Provider.GEMINI
@@ -252,6 +273,7 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-solo-gemini"
@@ -281,6 +303,7 @@ async def test_solo_coder_gemini(checkpointer: AsyncSqliteSaver) -> None:
 @pytest.mark.asyncio
 async def test_pipeline_team_gemini_collaboration(
     checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
 ) -> None:
     """Three-agent pipeline with Gemini ACP."""
     team, agent_configs = _team_and_agents_with_provider(
@@ -291,6 +314,7 @@ async def test_pipeline_team_gemini_collaboration(
         agent_configs=agent_configs,
         checkpointer=checkpointer,
         autonomous=True,
+        provider_factory=pf,
     )
 
     thread_id = "e2e-pipeline-gemini"

@@ -57,12 +57,22 @@ class TelemetryHook(Protocol):
     def record_histogram(self, name: str, value: float, **attrs: Any) -> None: ...
 
 
+class _NullSpan:
+    """No-op span that silently absorbs attribute calls."""
+
+    def set_attribute(self, _key: str, _value: Any) -> None:
+        pass
+
+
+_NULL_SPAN = _NullSpan()
+
+
 class NullTelemetryHook:
     """No-op telemetry hook — used when no instrumentation is configured."""
 
     @contextmanager
-    def start_span(self, _name: str, **_attrs: Any) -> Iterator[None]:
-        yield
+    def start_span(self, _name: str, **_attrs: Any) -> Iterator[_NullSpan]:
+        yield _NULL_SPAN
 
     def increment_counter(self, _name: str, _value: int = 1, **_attrs: Any) -> None:
         pass

@@ -42,7 +42,7 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
     """Concrete ProviderFactory for graph compilation tests."""
-    return ProviderFactory  # type: ignore[return-value]
+    return ProviderFactory()
 
 
 def _team_and_agents_with_provider(

@@ -397,7 +397,7 @@ class TestTeamStatus:
         from ...graph.events import PermissionRequest
 
         agg = EventAggregator()
-        # Directly inject a pending permission into the aggregator
+        # Inject a pending permission via the emitters sub-component
         event = PermissionRequest(
             thread_id="thread-abc",
             agent_id="vaultspec-coder",
@@ -406,7 +406,10 @@ class TestTeamStatus:
             description="Allow file write?",
             options=[],
         )
-        agg._pending_permissions["thread-abc:perm-001"] = (event, 0.0)
+        agg._emitters._pending_permissions["thread-abc:perm-001"] = (
+            event,
+            0.0,
+        )
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg
@@ -428,11 +431,15 @@ class TestTeamStatus:
     ) -> None:
         """Agents registered via aggregator node metadata appear in response."""
         agg = EventAggregator()
-        agg._node_metadata["vaultspec-coder"] = {
-            "role": "coder",
-            "display_name": "Coder Agent",
-            "description": "Writes code",
-        }
+        agg._subscribers_mgr.set_node_metadata(
+            {
+                "vaultspec-coder": {
+                    "role": "coder",
+                    "display_name": "Coder Agent",
+                    "description": "Writes code",
+                },
+            }
+        )
 
         app, _agg, _worker, _cp = make_app(
             session_factory, checkpointer, aggregator=agg

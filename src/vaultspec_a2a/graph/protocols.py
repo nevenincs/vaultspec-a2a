@@ -8,11 +8,10 @@ implementations at construction time.
 
 from __future__ import annotations
 
-from contextlib import AbstractContextManager, contextmanager
+from contextlib import AbstractContextManager
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
     from pathlib import Path
 
 __all__ = [
@@ -67,12 +66,24 @@ class _NullSpan:
 _NULL_SPAN = _NullSpan()
 
 
+class _NullSpanContext(AbstractContextManager[Any]):
+    """Context manager that yields a no-op span."""
+
+    def __enter__(self) -> _NullSpan:
+        return _NULL_SPAN
+
+    def __exit__(self, *_exc: object) -> None:
+        pass
+
+
+_NULL_SPAN_CTX = _NullSpanContext()
+
+
 class NullTelemetryHook:
     """No-op telemetry hook — used when no instrumentation is configured."""
 
-    @contextmanager
-    def start_span(self, _name: str, **_attrs: Any) -> Iterator[_NullSpan]:
-        yield _NULL_SPAN
+    def start_span(self, _name: str, **_attrs: Any) -> AbstractContextManager[Any]:
+        return _NULL_SPAN_CTX
 
     def increment_counter(self, _name: str, _value: int = 1, **_attrs: Any) -> None:
         pass

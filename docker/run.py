@@ -127,7 +127,7 @@ async def execute_mock_team(
             graph = compile_team_graph(
                 team_config=team_config,
                 agent_configs=agent_configs,
-                provider_factory=ProviderFactory,  # type: ignore[arg-type]
+                provider_factory=ProviderFactory(),
                 supervisor_agent_config=supervisor_config,
                 autonomous=True,
                 checkpointer=checkpointer,

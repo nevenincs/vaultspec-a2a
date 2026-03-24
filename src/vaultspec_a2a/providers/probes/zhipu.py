@@ -46,7 +46,7 @@ async def main() -> ProbeResult:
     model_name = MODEL_MAP[Provider.ZHIPU][PROVIDER_DEFAULT_MODELS[Provider.ZHIPU]]
     logger.info("Starting Zhipu GLM probe (model=%s)...", model_name)
 
-    model = ProviderFactory.create(Provider.ZHIPU)
+    model = ProviderFactory().create(Provider.ZHIPU)
     result = await run_http_probe(model, model_name, prompt=_PROMPT)
 
     if result.success:

@@ -61,7 +61,7 @@ async def setup_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
-            provider_factory=ProviderFactory,  # type: ignore[arg-type]
+            provider_factory=ProviderFactory(),
         )
         yield graph
 

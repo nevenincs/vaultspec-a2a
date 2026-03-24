@@ -46,7 +46,7 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
     """Concrete ProviderFactory for graph compilation tests."""
-    return ProviderFactory  # type: ignore[return-value]
+    return ProviderFactory()
 
 
 # ---------------------------------------------------------------------------
@@ -426,7 +426,7 @@ async def test_compile_team_graph_step_timeout_set() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=42.0,
-            provider_factory=ProviderFactory,  # type: ignore[arg-type]
+            provider_factory=ProviderFactory(),
         )
     assert graph.step_timeout == 42.0
 
@@ -444,7 +444,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml() -> None:
             agent_configs=agent_configs,
             checkpointer=cp,
             step_timeout=None,
-            provider_factory=ProviderFactory,  # type: ignore[arg-type]
+            provider_factory=ProviderFactory(),
         )
     assert graph.step_timeout == 300.0
 
@@ -484,7 +484,7 @@ async def test_compile_team_graph_recursion_limit_from_toml() -> None:
             team_config=team,
             agent_configs=agent_configs,
             checkpointer=cp,
-            provider_factory=ProviderFactory,  # type: ignore[arg-type]
+            provider_factory=ProviderFactory(),
         )
     assert graph.recursion_limit == 10  # type: ignore[attr-defined]
 

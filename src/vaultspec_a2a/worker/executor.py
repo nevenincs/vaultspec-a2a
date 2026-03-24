@@ -88,7 +88,7 @@ class Executor:
 
         self._checkpointer = checkpointer
         self._bridge = bridge
-        self._provider_factory = ProviderFactory
+        self._provider_factory = ProviderFactory()
         self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
         # Maps thread_id -> cache key so _handle_resume can find the graph
         # and recompile if evicted.
@@ -969,7 +969,7 @@ class Executor:
             step_timeout=None,
             # MED-05: thread feature_tag so vault indexing works in worker
             feature_tag=req.active_feature,
-            provider_factory=self._provider_factory,  # type: ignore[arg-type]
+            provider_factory=self._provider_factory,
         )
 
     # ------------------------------------------------------------------

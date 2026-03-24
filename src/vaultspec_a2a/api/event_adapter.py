@@ -48,6 +48,8 @@ from .schemas.events import (
     TeamStatusEvent,
     ThoughtChunkEvent,
     ToolCallContent,
+    ToolCallContentDiff,
+    ToolCallContentTerminal,
     ToolCallContentText,
     ToolCallLocation,
     ToolCallStartEvent,
@@ -60,6 +62,27 @@ __all__ = ["domain_to_wire", "sequenced_to_wire"]
 def _ts(epoch: float) -> datetime:
     """Convert a Unix epoch timestamp to a timezone-aware datetime."""
     return datetime.fromtimestamp(epoch, tz=UTC)
+
+
+def _content_to_wire(c: dict[str, str | None]) -> ToolCallContent | None:
+    """Convert a domain content dict to the appropriate wire ToolCallContent variant.
+
+    Returns ``None`` for unrecognised ``content_type`` values so callers can
+    filter silently — the aggregator currently only emits ``text``, but the ACP
+    protocol also defines ``diff`` and ``terminal`` content blocks.
+    """
+    ct = c.get("content_type")
+    if ct == "text":
+        return ToolCallContentText(text=c.get("text") or "")
+    if ct == "diff":
+        return ToolCallContentDiff(
+            path=str(c.get("path") or ""),
+            old_text=c.get("old_text"),
+            new_text=str(c.get("new_text") or ""),
+        )
+    if ct == "terminal":
+        return ToolCallContentTerminal(terminal_id=str(c.get("terminal_id") or ""))
+    return None
 
 
 def _loc_to_wire(loc: dict[str, str | int | None]) -> ToolCallLocation:
@@ -99,9 +122,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
 
         case ToolCallStart():
             content: list[ToolCallContent] = [
-                ToolCallContentText(text=c.get("text") or "")
-                for c in event.content
-                if c.get("content_type") == "text"
+                w for c in event.content if (w := _content_to_wire(c)) is not None
             ]
             locations = [_loc_to_wire(loc) for loc in event.locations]
             return ToolCallStartEvent(
@@ -121,9 +142,7 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
             upd_content: list[ToolCallContent] | None = None
             if event.content is not None:
                 upd_content = [
-                    ToolCallContentText(text=c.get("text") or "")
-                    for c in event.content
-                    if c.get("content_type") == "text"
+                    w for c in event.content if (w := _content_to_wire(c)) is not None
                 ]
             upd_locations = None
             if event.locations is not None:

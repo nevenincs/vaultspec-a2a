@@ -45,7 +45,7 @@ async def main() -> ProbeResult:
     model_name = MODEL_MAP[Provider.OPENAI][PROVIDER_DEFAULT_MODELS[Provider.OPENAI]]
     logger.info("Starting OpenAI probe (model=%s)...", model_name)
 
-    model = ProviderFactory.create(Provider.OPENAI)
+    model = ProviderFactory().create(Provider.OPENAI)
     result = await run_http_probe(model, model_name, prompt=_PROMPT)
 
     if result.success:

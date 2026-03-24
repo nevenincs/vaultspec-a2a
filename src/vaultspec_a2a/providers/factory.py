@@ -235,9 +235,8 @@ def _build_acp_command(backend: str) -> list[str]:
 class ProviderFactory:
     """Factory for instantiating LangChain chat models for different providers."""
 
-    @classmethod
     def create(
-        cls,
+        self,
         provider: Provider,
         model: "Model | str | None" = None,
         agent_config: AgentConfig | None = None,

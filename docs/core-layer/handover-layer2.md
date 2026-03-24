@@ -188,8 +188,8 @@ pytest src/vaultspec_a2a/ -q --tb=no \
   -m "not live and not requires_vidaimock and not requires_jaeger"
 ```
 
-Expected: ~977 pass. The `test_factory.py` and `test_compiler.py`
-failures are pre-existing (missing ACP npm dependency).
+Record the pass count as your baseline. Any regressions from that
+number during your work are your responsibility to fix.
 
 ## Scope boundary
 

@@ -680,7 +680,7 @@ class TestAggregatorGCOnTerminal:
         """_handle_terminal_event removes the terminated thread from
         aggregator _sequences.
         """
-        from ..internal import _handle_terminal_event
+        from ...control.event_handlers import _handle_terminal_event
 
         aggregator = EventAggregator()
         aggregator._emitters._sequences["t-pruned"] = 5
@@ -706,8 +706,8 @@ class TestAggregatorGCOnTerminal:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Terminal update logs should carry thread/status/event metadata."""
+        from ...control.event_handlers import _handle_terminal_event
         from ...database.crud import ThreadStatus, update_thread_status
-        from ..internal import _handle_terminal_event
 
         aggregator = EventAggregator()
         async with session_factory() as session:
@@ -738,7 +738,7 @@ class TestAggregatorGCOnTerminal:
         caplog: pytest.LogCaptureFixture,
     ) -> None:
         """Repeated terminal updates should log a structured skip record."""
-        from ..internal import _handle_terminal_event
+        from ...control.event_handlers import _handle_terminal_event
 
         aggregator = EventAggregator()
         async with session_factory() as session:

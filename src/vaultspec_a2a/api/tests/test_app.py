@@ -13,15 +13,18 @@ import pytest
 from httpx import ASGITransport
 from langgraph.checkpoint.base import empty_checkpoint
 
-from ..app import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.worker_management import (
     LazyWorkerSpawner,
-    WorkerCircuitBreaker,
+    WorkerState,
     WorkerWatchdog,
-    _build_sqlite_fallback_diagnostics,
     _build_worker_restart_detail,
+    _worker_stderr_log_path,
+)
+from ..app import (
+    _build_sqlite_fallback_diagnostics,
     _classify_missing_ws_thread,
     _create_dispatch_message_handler,
-    _worker_stderr_log_path,
 )
 from ..websocket import WebSocketCommandRejectedError
 from .conftest import make_app
@@ -78,6 +81,7 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
         auto_spawn=False,
     )
     app_state = SimpleNamespace()
+    worker_state = WorkerState()
 
     WorkerWatchdog(
         spawner=spawner,
@@ -85,10 +89,11 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
             failure_threshold=1,
             recovery_timeout=1.0,
         ),
+        worker_state=worker_state,
         app_state=app_state,
     )
 
-    assert app_state.worker_stderr_log_path is None
+    assert worker_state.worker_stderr_log_path is None
 
 
 @pytest.mark.asyncio
@@ -98,11 +103,14 @@ async def test_api_health_reports_worker_stderr_log_path(
 ) -> None:
     """GET /api/health should expose the diagnostic stderr log location."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
-    app.state.worker_status = "up"
-    app.state.worker_last_restart_detail = "returncode=9; stderr_log=example.log"
-    app.state.worker_restart_count = 1
-    app.state.worker_last_restart_reason = "process_exited"
-    app.state.worker_stderr_log_path = str(_worker_stderr_log_path(8001))
+    ws = WorkerState(
+        worker_status="up",
+        worker_last_restart_detail="returncode=9; stderr_log=example.log",
+        worker_restart_count=1,
+        worker_last_restart_reason="process_exited",
+        worker_stderr_log_path=str(_worker_stderr_log_path(8001)),
+    )
+    app.state.worker_state = ws
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app),

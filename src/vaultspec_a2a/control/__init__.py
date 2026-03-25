@@ -1,6 +1,16 @@
-"""control — dev-tooling modules invoked via ``python -m``.
+"""control — infrastructure services and dev-tooling.
 
-Each sub-module is self-contained and callable directly:
+Production runtime modules:
+
+    config              — application settings (pydantic-settings)
+    circuit_breaker     — WorkerCircuitBreaker
+    worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
+    event_handlers      — relay_event, terminal/permission/progress/execution
+                          state event handlers
+    projection          — checkpoint and execution-state projection helpers
+    snapshot            — snapshot enrichment from LangGraph state
+
+Dev-tooling modules invoked via ``python -m``:
 
     python -m vaultspec_a2a.control.db      migrate [--fix]
     python -m vaultspec_a2a.control.db      snapshot [list]
@@ -10,11 +20,18 @@ Each sub-module is self-contained and callable directly:
     python -m vaultspec_a2a.control.verify  prodlike_docker
     python -m vaultspec_a2a.control.verify  provider <name>
     python -m vaultspec_a2a.control.doctor  [all|ports|config|services]
-
-These modules are NOT registered as CLI commands.  They are invoked by the
-Justfile and other dev-tooling scripts only.
 """
 
 from __future__ import annotations
 
-__all__ = ["db", "doctor", "verify"]
+__all__ = [
+    "circuit_breaker",
+    "config",
+    "db",
+    "doctor",
+    "event_handlers",
+    "projection",
+    "snapshot",
+    "verify",
+    "worker_management",
+]

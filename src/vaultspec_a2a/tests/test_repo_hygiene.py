@@ -15,7 +15,7 @@ _FILES = [
     _ROOT / "docker-compose.prod.postgres.yml",
 ]
 _RUNTIME_PATH_FILES = [
-    _ROOT / "src" / "vaultspec_a2a" / "api" / "app.py",
+    _ROOT / "src" / "vaultspec_a2a" / "control" / "worker_management.py",
     _ROOT / "src" / "vaultspec_a2a" / "control" / "verify.py",
 ]
 _SECRET_PATTERNS = [

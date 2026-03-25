@@ -6,8 +6,8 @@ from contextlib import asynccontextmanager
 
 from fastapi.testclient import TestClient
 
-from ...api.schemas.internal import DispatchRequest
 from ...control.config import settings
+from ...ipc.schemas import DispatchRequest
 from ...utils.enums import Environment
 from ..app import create_worker_app
 

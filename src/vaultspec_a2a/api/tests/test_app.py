@@ -14,6 +14,8 @@ from httpx import ASGITransport
 from langgraph.checkpoint.base import empty_checkpoint
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.diagnostics import classify_missing_ws_thread
+from ...control.health import build_sqlite_fallback_diagnostics
 from ...control.worker_management import (
     LazyWorkerSpawner,
     WorkerState,
@@ -21,12 +23,8 @@ from ...control.worker_management import (
     _build_worker_restart_detail,
     _worker_stderr_log_path,
 )
-from ..app import (
-    _build_sqlite_fallback_diagnostics,
-    _classify_missing_ws_thread,
-    _create_dispatch_message_handler,
-)
 from ..websocket import WebSocketCommandRejectedError
+from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 
 
@@ -144,7 +142,7 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state() -> None:
         finally:
             conn.close()
 
-    diagnostics = _build_sqlite_fallback_diagnostics(
+    diagnostics = build_sqlite_fallback_diagnostics(
         database_backend="sqlite",
         checkpoint_backend="sqlite",
         database_path=db_path,
@@ -197,14 +195,14 @@ async def test_classify_missing_ws_thread_reports_not_found(
     checkpointer,
 ) -> None:
     """Missing thread with no backend residue should return THREAD_NOT_FOUND."""
-    rejection = await _classify_missing_ws_thread(
+    result = await classify_missing_ws_thread(
         thread_id="missing-thread",
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
 
-    assert rejection.code == "THREAD_NOT_FOUND"
-    assert rejection.metadata == {
+    assert result.code == "THREAD_NOT_FOUND"
+    assert result.metadata == {
         "execution_state_present": False,
         "checkpoint_present": False,
         "checkpoint_unverified": False,
@@ -227,16 +225,16 @@ async def test_classify_missing_ws_thread_reports_state_drift(
         {},
     )
 
-    rejection = await _classify_missing_ws_thread(
+    result = await classify_missing_ws_thread(
         thread_id="drift-thread",
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
 
-    assert rejection.code == "THREAD_STATE_DRIFT"
-    assert rejection.metadata is not None
-    assert rejection.metadata["execution_state_present"] is False
-    assert rejection.metadata["checkpoint_present"] is True
+    assert result.code == "THREAD_STATE_DRIFT"
+    assert result.metadata is not None
+    assert result.metadata["execution_state_present"] is False
+    assert result.metadata["checkpoint_present"] is True
 
 
 @pytest.mark.asyncio
@@ -246,7 +244,7 @@ async def test_dispatch_message_handler_rejects_missing_thread(
 ) -> None:
     """WS dispatch handler should reject missing threads before worker dispatch."""
     app, _aggregator, worker, _checkpointer = make_app(session_factory, checkpointer)
-    handler = _create_dispatch_message_handler(
+    handler = create_dispatch_message_handler(
         worker.client,
         session_factory,
         checkpointer,

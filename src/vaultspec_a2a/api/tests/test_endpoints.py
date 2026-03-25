@@ -499,7 +499,10 @@ class TestPermissionRespond:
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)
 
         with (
-            caplog.at_level(logging.INFO, logger="vaultspec_a2a.api.endpoints"),
+            caplog.at_level(
+                logging.INFO,
+                logger="vaultspec_a2a.api.routes.permissions",
+            ),
             TestClient(app, raise_server_exceptions=True) as client,
         ):
             # Create a thread first so the permission endpoint can find it.

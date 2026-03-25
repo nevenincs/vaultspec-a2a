@@ -22,8 +22,8 @@ if TYPE_CHECKING:
         ThreadModel,
     )
 
-from .schemas.enums import PermissionOptionKind, PermissionType
-from .schemas.snapshots import (
+from ..api.schemas.enums import PermissionOptionKind, PermissionType
+from ..api.schemas.snapshots import (
     ExecutionTaskSnapshot,
     ThreadStateSnapshot,
     _PermissionOptionSnapshot,

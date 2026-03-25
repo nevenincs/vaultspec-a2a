@@ -31,9 +31,9 @@ import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from ..api.schemas.internal import DispatchRequest, DispatchResponse
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
+from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.enums import Environment

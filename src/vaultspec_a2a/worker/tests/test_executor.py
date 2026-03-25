@@ -1,8 +1,9 @@
-"""Tests for src/vaultspec_a2a/worker/executor.py -- Executor graph engine (ADR-019).
+"""Tests for Executor, GraphLifecycleManager, and StateProjector (ADR-019, D-09).
 
 Validates the Executor's ingest gating logic, dispatch routing, and
-shutdown behaviour using a real ``AsyncSqliteSaver`` and a real
-``WorkerBridge`` backed by a real FastAPI ASGI app via ASGITransport.
+shutdown behaviour; GraphLifecycleManager's input construction; using a real
+``AsyncSqliteSaver`` and a real ``WorkerBridge`` backed by a real FastAPI
+ASGI app via ASGITransport.
 
 No mock libraries.  No tautological tests.
 """
@@ -19,8 +20,9 @@ from httpx import ASGITransport
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
-from ...api.schemas.internal import DispatchRequest
+from ...ipc.schemas import DispatchRequest
 from ..executor import Executor
+from ..graph_lifecycle import GraphLifecycleManager
 from ..ipc import WorkerBridge
 
 # ---------------------------------------------------------------------------
@@ -348,7 +350,7 @@ class TestGraphInputBuilding:
             content="Hello",
             team_preset="vaultspec-adaptive-coder",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
         required_fields = {
             "messages",
@@ -375,7 +377,7 @@ class TestGraphInputBuilding:
             thread_id="t-followup",
             content="Follow-up question",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
         # These keys must NOT be present -- their absence lets LangGraph
         # preserve checkpoint values rather than triggering reducers.
@@ -394,7 +396,7 @@ class TestGraphInputBuilding:
             thread_id="thread-xyz",
             content="test",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
         assert inp["thread_id"] == "thread-xyz"
 
     def test_sdd_fields_included_on_first_ingest_when_provided(self) -> None:
@@ -409,7 +411,7 @@ class TestGraphInputBuilding:
             vault_index={"specs": ["auth.md"]},
             validation_errors=["missing tests"],
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
         assert inp["active_feature"] == "auth-flow"
         assert inp["pipeline_phase"] == "implement"
@@ -425,7 +427,7 @@ class TestGraphInputBuilding:
             team_preset="vaultspec-adaptive-coder",
             # SDD fields left at defaults (None/empty)
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=True)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp
@@ -442,7 +444,7 @@ class TestGraphInputBuilding:
             content="User question",
             context_preamble="You are a helpful assistant.",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
         msgs = inp["messages"]
         assert len(msgs) == 2
@@ -457,7 +459,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-empty",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
         assert inp["messages"] == []
 
     def test_sdd_fields_not_included_on_followup_even_if_provided(self) -> None:
@@ -471,7 +473,7 @@ class TestGraphInputBuilding:
             active_feature="auth-flow",
             pipeline_phase="implement",
         )
-        inp = Executor._build_graph_input(req, is_first_ingest=False)
+        inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
         assert "active_feature" not in inp
         assert "pipeline_phase" not in inp

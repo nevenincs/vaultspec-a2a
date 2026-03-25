@@ -1,4 +1,8 @@
-"""Internal IPC message types between gateway and worker (ADR-019)."""
+"""Shared IPC message types between gateway and worker (ADR-019, D-01).
+
+These types define the gateway-worker contract.  Neither ``api/`` nor
+``worker/`` owns them; both are equal consumers.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +11,13 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
-from ...control.config import settings
+from ..control.config import settings
 
 __all__ = [
     "DispatchRequest",
     "DispatchResponse",
     "ExecutionStateProjectionPayload",
     "ExecutionTaskProjectionPayload",
-    "HeartbeatMessage",
-    "WorkerEventEnvelope",
 ]
 
 
@@ -54,15 +56,6 @@ class DispatchResponse(BaseModel):
     thread_id: str
 
 
-class HeartbeatMessage(BaseModel):
-    """Worker heartbeat sent via internal WebSocket."""
-
-    type: str = "heartbeat"
-    worker_id: str
-    active_threads: list[str] = Field(default_factory=list)
-    timestamp: str
-
-
 class ExecutionTaskProjectionPayload(BaseModel):
     """Normalized task summary emitted internally by the worker."""
 
@@ -90,11 +83,3 @@ class ExecutionStateProjectionPayload(BaseModel):
     task_count: int = 0
     tasks: list[ExecutionTaskProjectionPayload] = Field(default_factory=list)
     degraded_reasons: list[str] = Field(default_factory=list)
-
-
-class WorkerEventEnvelope(BaseModel):
-    """Wrapper for events sent from worker to gateway via internal WS."""
-
-    type: str = "event"
-    thread_id: str
-    payload: dict

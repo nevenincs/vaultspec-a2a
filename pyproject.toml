@@ -121,7 +121,8 @@ unfixable = ["B"]
 "**/test_*.py" = ["ARG"]
 "**/tests/**/*.py" = ["ARG"]
 # FastAPI endpoints use Depends() in function defaults
-"src/vaultspec_a2a/api/endpoints.py" = ["B008"]
+"src/vaultspec_a2a/api/dependencies.py" = ["B008"]
+"src/vaultspec_a2a/api/routes/*.py" = ["B008"]
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
 "src/vaultspec_a2a/worker/app.py" = ["B008"]
 

@@ -4,6 +4,9 @@ Production runtime modules:
 
     config              — application settings (pydantic-settings)
     circuit_breaker     — WorkerCircuitBreaker
+    diagnostics         — missing-thread classification, mark_thread_failed
+    dispatch            — dispatch_to_worker consolidated dispatch function
+    health              — assemble_health_status, SQLite fallback diagnostics
     worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
     event_handlers      — relay_event, terminal/permission/progress/execution
                           state event handlers
@@ -28,8 +31,11 @@ __all__ = [
     "circuit_breaker",
     "config",
     "db",
+    "diagnostics",
+    "dispatch",
     "doctor",
     "event_handlers",
+    "health",
     "projection",
     "snapshot",
     "verify",

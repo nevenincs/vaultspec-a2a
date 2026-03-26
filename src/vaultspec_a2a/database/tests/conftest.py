@@ -20,7 +20,26 @@ import pytest
 
 __all__: list[str] = []
 
+_PACKAGE_DIR = str(Path(__file__).resolve().parent)
+_INFRA_MARKERS = frozenset(
+    {
+        "live",
+        "requires_postgres",
+        "requires_jaeger",
+        "requires_vidaimock",
+    }
+)
 _DEFAULT_DSN = "postgresql://postgres:postgres@127.0.0.1:5432/vaultspec"
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark pure database tests as ``layer2``, excluding infra-marked tests."""
+    for item in items:
+        if not str(item.path).startswith(_PACKAGE_DIR):
+            continue
+        if any(item.get_closest_marker(m) for m in _INFRA_MARKERS):
+            continue
+        item.add_marker(pytest.mark.layer2)
 
 
 def resolve_postgres_dsn() -> str:

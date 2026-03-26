@@ -335,10 +335,48 @@ src/vaultspec_a2a/
 3. **Layer 2 entry points** import from Layer 1, 1.5, and infra services. Never import from each other (api/ does not import cli/, worker/ does not import api/).
 4. **Layer 2 infra services** import from Layer 1. Entry points import from infra services. Infra services never import from entry points.
 5. **IPC package** (`ipc/`) is a neutral contract consumed equally by api/ and worker/. Neither owns it.
-6. **control/** contains both production runtime (dispatch, health, projection, event handlers) and dev-tooling (db, doctor, hooks, verify). Both categories are Layer 2 infra services.
+6. **control/** contains production runtime (dispatch, health, circuit breaker, worker management), dev-tooling (db, doctor, hooks, verify), and **misplaced domain logic** (projection, snapshot, event_handlers — business rules that depend on database/schemas and need dependency inversion to move to Layer 1).
 7. **Layer 3** defines topology. No code execution logic. No business rules.
 
-## Validation
+## Test Isolation
+
+Each layer is independently testable via pytest markers. No layer's tests
+depend on a higher layer's infrastructure.
+
+```bash
+# Layer 1 — pure domain, zero infrastructure
+pytest -m core          # 425 tests, zero deps, bare REPL importable
+
+# Layer 2 — middleware (protocol adapters + infra services)
+pytest -m middleware    # 616 tests, no Docker/orchestration
+
+# All non-infrastructure tests combined
+pytest                  # 1,041 tests (core + middleware)
+
+# Infrastructure-gated (require external services)
+pytest -m live                   # full-stack integration (Docker)
+pytest -m requires_acp           # ACP node module (npm install)
+pytest -m requires_postgres      # live Postgres instance
+pytest -m requires_jaeger        # local Jaeger instance
+pytest -m requires_vidaimock      # VidaiMock tape server
+```
+
+Marker hierarchy:
+
+| Marker | Layer | Count | What it needs |
+|--------|-------|-------|---------------|
+| `core` + `unit` | 1 | 425 | Nothing — bare Python |
+| `middleware` | 2 | 616 | Nothing — no orchestration |
+| `live` | 3 | ~34 | Docker, running services |
+| `requires_acp` | infra | 9 | `npm install` |
+| `requires_postgres` | infra | 4 | Postgres instance |
+| `requires_jaeger` | infra | 1 | Jaeger instance |
+| `requires_vidaimock` | infra | 3 | VidaiMock server |
+
+All infrastructure-gated tests hard-fail (not skip) when their dependency
+is unreachable.
+
+## Import Validation
 
 ```bash
 # Layer 1 import test — must pass with zero services running
@@ -353,15 +391,60 @@ from vaultspec_a2a.graph.protocols import ProviderFactoryProtocol
 print('Layer 1: PASS')
 "
 
-# Layer 1 + 1.5 test isolation — no Docker, no database, no services.
-# The 'core' marker is registered in pyproject.toml and selects all tests
-# under team/, thread/, context/, graph/, streaming/, and lifecycle/.
-pytest -m core
-
 # IPC import test — neutral contract, no entry point dependencies
 python -c "
 from vaultspec_a2a.ipc import DispatchRequest, DispatchResponse
 from vaultspec_a2a.ipc.serializers import sequenced_to_dict
 print('IPC: PASS')
 "
+
+# Boundary violation check — Layer 1 must not import Layer 2
+# This must return zero matches:
+grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from.*control\.' \
+  src/vaultspec_a2a/thread/ src/vaultspec_a2a/context/ src/vaultspec_a2a/team/ \
+  src/vaultspec_a2a/graph/ src/vaultspec_a2a/streaming/ src/vaultspec_a2a/lifecycle/ \
+  --include='*.py' | grep -v '/tests/' | grep -v __pycache__
 ```
+
+## Boundary Audit Status (2026-03-26)
+
+### Layer 1 + Layer 2a — PASS (PR #3 + entry-point-layer PR)
+
+| Check | Status |
+|-------|--------|
+| Layer 1 imports nothing from Layer 2+ | PASS |
+| Entry points don't cross-import | PASS |
+| Handlers are thin protocol adapters | PASS |
+| Configuration centralized (Settings) | PASS |
+| Docker files contain no business logic | PASS |
+| Test markers correctly isolate layers | PASS |
+| Infrastructure failures hard-fail | PASS |
+
+### Layer 2b Infrastructure Services — AUDITED, issues found
+
+| Package | Status | Finding |
+|---------|--------|---------|
+| `providers/` | CLEAN | Correct dependency inversion via ProviderFactoryProtocol |
+| `telemetry/` | CLEAN | Correct TelemetryHook protocol implementation |
+| `workspace/` | CLEAN | Thin subprocess wrapper |
+| `ipc/` | CLEAN | Neutral contract |
+| `database/` | MODERATE | Status enums (ThreadStatus, RepairStatus, etc.) are domain logic defined in crud.py (Layer 2b) — belong in Layer 1. crud.py (976L) covers 6 unrelated domains. |
+| `control/` | MODERATE | Three concerns mashed together: production runtime, misplaced domain logic (projection, snapshot, event_handlers), dev-tooling. Domain logic needs dependency inversion to move to Layer 1. |
+| `utils/` | MINOR | timestamp.py is pure Layer 1. enums.py mixes domain + infra. Dead code (vowel_counter.py). |
+
+### Known Test Marker Mismatches
+
+| Test file | Current | Should be | Reason |
+|-----------|---------|-----------|--------|
+| `utils/tests/test_enums.py` | `middleware` | `core` | Pure enum tests, no infra deps |
+| `utils/tests/test_timestamp.py` | `middleware` | `core` | Pure stdlib utility |
+| `graph/tests/test_e2e_live.py` | none | `live` | Uses real AsyncSqliteSaver |
+
+### Next PR: Domain Logic Extraction
+
+Move domain concepts from Layer 2b back to Layer 1:
+- Status enums from `database/crud.py` → `thread/` or `lifecycle/`
+- Business logic from `control/projection.py`, `control/snapshot.py`,
+  `control/event_handlers.py` → Layer 1 (requires dependency inversion)
+- Split `crud.py` by domain (thread, control, permission, execution, artifact, cost)
+- Fix test markers to match actual layers

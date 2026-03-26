@@ -24,11 +24,16 @@ venv/
 .env.*
 !.env.example
 
-# antigravity
+# Agent/tooling configs (per-user, not tracked)
 .profile
 .claude/
 .gemini/
 .agent/
+.agents/
+.codex/
+AGENTS.md
+CLAUDE.md
+GEMINI.md
 
 # Node.js
 node_modules/

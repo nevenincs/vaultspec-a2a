@@ -70,7 +70,7 @@ data/
 
 # Runtime artifacts
 .vault/runtime/
-.vaultspec/runtime/
+.vaultspec/
 .tmp-*/
 
 # Scratch workspaces (test/audit throwaway)

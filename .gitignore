@@ -31,6 +31,7 @@ venv/
 .agent/
 .agents/
 .codex/
+.mcp.json
 AGENTS.md
 CLAUDE.md
 GEMINI.md

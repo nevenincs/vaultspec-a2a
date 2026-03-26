@@ -695,7 +695,7 @@ class ConnectionManager:
                 except asyncio.QueueEmpty:
                     pass
             try:
-                queue.put_nowait(payload)  # type: ignore[arg-type]
+                queue.put_nowait(cast("SequencedEvent", payload))
             except asyncio.QueueFull:
                 logger.warning(
                     "Relay event dropped for client %s — queue still full",

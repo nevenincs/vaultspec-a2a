@@ -11,6 +11,7 @@ No mock libraries.  No tautological tests.
 from __future__ import annotations
 
 import logging
+from typing import Any, cast
 
 import httpx
 import pytest
@@ -176,7 +177,7 @@ class TestHandleDispatch:
         """Invalid dispatch actions are rejected before they reach the worker."""
         with pytest.raises(ValidationError):
             DispatchRequest(
-                action="delete_everything",  # type: ignore[arg-type]
+                action=cast("Any", "delete_everything"),
                 thread_id="t-1",
             )
 

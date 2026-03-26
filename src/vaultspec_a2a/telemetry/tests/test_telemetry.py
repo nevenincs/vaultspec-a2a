@@ -13,7 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 import pytest
@@ -69,7 +69,7 @@ def _make_test_app(*, excluded: frozenset[str] | None = None) -> Starlette:
     ]
     app = Starlette(routes=routes)
     kwargs: dict = {} if excluded is None else {"excluded_paths": excluded}
-    app.add_middleware(TelemetryMiddleware, **kwargs)  # type: ignore[arg-type]
+    app.add_middleware(cast("Any", TelemetryMiddleware), **kwargs)
     return app
 
 
@@ -370,7 +370,7 @@ async def test_middleware_custom_excluded_paths() -> None:
 
     app = Starlette(routes=[Route("/ping", ping)])
     app.add_middleware(
-        TelemetryMiddleware,  # type: ignore[arg-type]
+        cast("Any", TelemetryMiddleware),
         excluded_paths=frozenset({"/ping"}),
     )
     async with AsyncClient(
@@ -493,7 +493,7 @@ async def test_worker_middleware_extracts_incoming_traceparent(
             return JSONResponse({"status": "dispatched"})
 
         app = Starlette(routes=[Route("/dispatch", dispatch_handler, methods=["POST"])])
-        app.add_middleware(TelemetryMiddleware)  # type: ignore[arg-type]
+        app.add_middleware(cast("Any", TelemetryMiddleware))
 
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://worker"

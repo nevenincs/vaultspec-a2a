@@ -4,16 +4,24 @@ from __future__ import annotations
 
 __all__ = ["team"]
 
+from typing import TYPE_CHECKING
+
 import click
 
+if TYPE_CHECKING:
+    import httpx
 
-def _fetch_thread_metadata(client: object, thread_id: str) -> dict[str, str | None]:
+
+def _fetch_thread_metadata(
+    client: httpx.Client,
+    thread_id: str,
+) -> dict[str, str | None]:
     """Fetch nickname, team_preset, created_at from the thread list endpoint.
 
     ThreadStateSnapshot does not include these identity fields.
     """
     try:
-        resp = client.get("/threads")  # type: ignore[union-attr]
+        resp = client.get("/threads")
         if not resp.is_success:
             return {"nickname": None, "team_preset": None, "created_at": None}
         data = resp.json()

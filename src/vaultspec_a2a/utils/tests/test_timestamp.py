@@ -27,7 +27,9 @@ class TestNowUtc:
         result = now_utc()
         dt = datetime.fromisoformat(result)
         assert dt.tzinfo is not None
-        assert dt.utcoffset().total_seconds() == 0  # type: ignore[union-attr]
+        offset = dt.utcoffset()
+        assert offset is not None
+        assert offset.total_seconds() == 0
 
     def test_approximately_current_time(self) -> None:
         before = datetime.now(UTC)

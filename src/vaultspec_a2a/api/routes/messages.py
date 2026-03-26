@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...control.dispatch import (
     WorkerAtCapacityError,
     WorkerCircuitOpenError,
+    WorkerDispatchRejectedError,
     WorkerUnreachableError,
     dispatch_to_worker,
 )
@@ -182,6 +183,13 @@ async def send_message_endpoint(
         raise HTTPException(
             status_code=502,
             detail="Worker unreachable — thread marked as failed",
+        ) from None
+    except WorkerDispatchRejectedError as exc:
+        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        await db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Worker rejected dispatch (HTTP {exc.status_code})",
         ) from None
 
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)

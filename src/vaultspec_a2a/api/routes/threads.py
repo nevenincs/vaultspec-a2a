@@ -16,6 +16,7 @@ from ...control.config import settings
 from ...control.dispatch import (
     WorkerAtCapacityError,
     WorkerCircuitOpenError,
+    WorkerDispatchRejectedError,
     WorkerUnreachableError,
     dispatch_to_worker,
 )
@@ -265,6 +266,13 @@ async def create_thread_endpoint(
                 raise HTTPException(
                     status_code=502,
                     detail="Worker unreachable — thread marked as failed",
+                ) from None
+            except WorkerDispatchRejectedError as exc:
+                await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+                await db.commit()
+                raise HTTPException(
+                    status_code=502,
+                    detail=f"Worker rejected dispatch (HTTP {exc.status_code})",
                 ) from None
             await update_thread_status(db, thread.id, ThreadStatus.RUNNING)
             await set_thread_repair_state(

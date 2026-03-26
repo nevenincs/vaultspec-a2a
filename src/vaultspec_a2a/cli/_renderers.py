@@ -203,7 +203,7 @@ async def handle_permission_prompt(
     request_id = evt.get("request_id", "")
     description = evt.get("description", "")
     tool_call = evt.get("tool_call", "")
-    options: list[dict[str, str]] = evt.get("options", [])  # type: ignore[assignment]
+    options: list[dict[str, str]] = cast("list[dict[str, str]]", evt.get("options", []))
 
     click.echo(f"{elapsed} PERMISSION REQUIRED: {description}")
     if tool_call:

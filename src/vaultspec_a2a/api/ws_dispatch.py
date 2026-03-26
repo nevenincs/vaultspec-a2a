@@ -17,6 +17,7 @@ from ..control.diagnostics import classify_missing_ws_thread, mark_thread_failed
 from ..control.dispatch import (
     WorkerAtCapacityError,
     WorkerCircuitOpenError,
+    WorkerDispatchRejectedError,
     WorkerUnreachableError,
     dispatch_to_worker,
 )
@@ -211,6 +212,13 @@ def create_dispatch_message_handler(
                 connection_manager,
                 "Worker unreachable — message not delivered",
             )
+        except WorkerDispatchRejectedError as exc:
+            await _ws_mark_failed_and_broadcast(
+                thread_id,
+                session_factory,
+                connection_manager,
+                f"Worker rejected dispatch (HTTP {exc.status_code})",
+            )
 
     return _dispatch_message
 
@@ -272,7 +280,11 @@ def create_dispatch_control_handler(
                 trace_headers=trace_headers(),
             )
             app_state.worker_last_heartbeat_ts = time.monotonic()
-        except (WorkerAtCapacityError, WorkerUnreachableError):
+        except (
+            WorkerAtCapacityError,
+            WorkerDispatchRejectedError,
+            WorkerUnreachableError,
+        ):
             logger.warning(
                 "Failed to dispatch control to worker for thread %s",
                 thread_id,

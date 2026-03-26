@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.dispatch import (
     WorkerAtCapacityError,
+    WorkerDispatchRejectedError,
     WorkerUnreachableError,
     dispatch_to_worker,
 )
@@ -122,7 +123,7 @@ async def cancel_thread_endpoint(
         )
         dispatched = True
         mark_worker_connected(request)
-    except (WorkerAtCapacityError, WorkerUnreachableError):
+    except (WorkerAtCapacityError, WorkerDispatchRejectedError, WorkerUnreachableError):
         pass
 
     if not dispatched:

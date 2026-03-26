@@ -27,6 +27,7 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 import anyio
+import anyio.abc
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -180,7 +181,7 @@ def create_worker_app() -> FastAPI:
         the lifespan task group so that this endpoint returns immediately.
         """
         executor: Executor = app.state.executor
-        tg: anyio.abc.TaskGroup = app.state.task_group  # type: ignore[assignment]
+        tg = app.state.task_group
 
         # WPA-001: Reject dispatch when concurrent thread cap is reached.
         if executor.at_capacity():

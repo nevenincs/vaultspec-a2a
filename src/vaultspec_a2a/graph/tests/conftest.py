@@ -66,7 +66,8 @@ class _StubProviderFactory:
         workspace_root: Any | None = None,
         **kwargs: Any,
     ) -> FakeChatModel:
-        return FakeChatModel(responses=["stub response"])  # type: ignore[call-arg]
+        _kwargs: dict[str, Any] = {"responses": ["stub response"]}
+        return FakeChatModel(**_kwargs)
 
 
 @pytest.fixture

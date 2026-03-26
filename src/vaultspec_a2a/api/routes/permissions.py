@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...control.dispatch import (
     WorkerAtCapacityError,
     WorkerCircuitOpenError,
+    WorkerDispatchRejectedError,
     WorkerUnreachableError,
     dispatch_to_worker,
 )
@@ -266,7 +267,7 @@ async def respond_to_permission_endpoint(
         mark_worker_connected(request)
     except WorkerCircuitOpenError as exc:
         raise HTTPException(status_code=503, detail=exc.detail) from exc
-    except (WorkerAtCapacityError, WorkerUnreachableError):
+    except (WorkerAtCapacityError, WorkerDispatchRejectedError, WorkerUnreachableError):
         pass
 
     if dispatched:

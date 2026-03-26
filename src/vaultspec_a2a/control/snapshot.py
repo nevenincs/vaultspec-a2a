@@ -37,7 +37,7 @@ if TYPE_CHECKING:
 
 def enrich_snapshot_from_state(
     snapshot: ThreadStateSnapshot,
-    state: StateSnapshot,
+    state: StateSnapshot | MinimalState,
     aggregator: EventAggregator | None = None,
 ) -> ThreadStateSnapshot:
     """Populate snapshot fields from LangGraph checkpointer state.

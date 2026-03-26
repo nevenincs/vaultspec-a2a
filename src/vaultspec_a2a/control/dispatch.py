@@ -29,6 +29,7 @@ __all__ = [
     "DispatchError",
     "WorkerAtCapacityError",
     "WorkerCircuitOpenError",
+    "WorkerDispatchRejectedError",
     "WorkerUnreachableError",
     "dispatch_to_worker",
     "redispatch_reconciling_threads",
@@ -57,6 +58,26 @@ class WorkerAtCapacityError(DispatchError):
         self.dispatch_id = dispatch_id
         super().__init__(
             f"Worker at capacity (429) for dispatch_id={dispatch_id} thread {thread_id}"
+        )
+
+
+class WorkerDispatchRejectedError(DispatchError):
+    """Raised when the worker returns a non-2xx response (e.g. 500, 503)."""
+
+    def __init__(
+        self,
+        thread_id: str,
+        dispatch_id: str,
+        status_code: int,
+        body: str,
+    ) -> None:
+        self.thread_id = thread_id
+        self.dispatch_id = dispatch_id
+        self.status_code = status_code
+        self.body = body
+        super().__init__(
+            f"Worker rejected dispatch_id={dispatch_id} thread {thread_id}"
+            f" with status {status_code}"
         )
 
 
@@ -142,6 +163,21 @@ async def dispatch_to_worker(
             dispatch_id=dispatch.dispatch_id,
         )
 
+    if not resp.is_success:
+        circuit_breaker.record_failure()
+        logger.warning(
+            "Worker rejected dispatch_id=%s thread %s with status %d",
+            dispatch.dispatch_id,
+            dispatch.thread_id,
+            resp.status_code,
+        )
+        raise WorkerDispatchRejectedError(
+            thread_id=dispatch.thread_id,
+            dispatch_id=dispatch.dispatch_id,
+            status_code=resp.status_code,
+            body=resp.text,
+        )
+
     circuit_breaker.record_success()
 
     return DispatchResponse(
@@ -211,7 +247,11 @@ async def redispatch_reconciling_threads(
                         thread.id,
                     )
                     continue
-                except (WorkerAtCapacityError, WorkerUnreachableError) as exc:
+                except (
+                    WorkerAtCapacityError,
+                    WorkerDispatchRejectedError,
+                    WorkerUnreachableError,
+                ) as exc:
                     logger.warning(
                         "Re-dispatch error for thread %s: %s",
                         thread.id,

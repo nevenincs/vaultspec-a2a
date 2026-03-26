@@ -100,7 +100,7 @@ async def get_thread_state_endpoint(
             )
             snapshot = enrich_snapshot_from_state(
                 snapshot,
-                minimal_state,  # type: ignore[arg-type]
+                minimal_state,
                 aggregator=aggregator,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)

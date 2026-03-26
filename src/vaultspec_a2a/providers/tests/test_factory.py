@@ -1,6 +1,7 @@
 """Tests for the provider factory."""
 
 from pathlib import Path
+from typing import cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
@@ -305,7 +306,7 @@ def test_provider_factory_claude_oauth_only() -> None:
 def test_provider_factory_unsupported_provider() -> None:
     """Verify that nonsense providers raise ValueError with useful message."""
     with pytest.raises(ValueError, match="Unsupported provider: unknown"):
-        ProviderFactory().create("unknown")  # type: ignore[arg-type]
+        ProviderFactory().create(cast("Provider", "unknown"))
 
 
 @pytest.mark.live

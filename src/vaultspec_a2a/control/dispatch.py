@@ -122,6 +122,7 @@ async def dispatch_to_worker(
     Raises:
         WorkerCircuitOpenError: Circuit breaker is open (caller should 503).
         WorkerAtCapacityError: Worker returned 429 (caller decides policy).
+        WorkerDispatchRejectedError: Worker returned non-2xx (e.g. 500/503).
         WorkerUnreachableError: httpx transport error (caller decides policy).
     """
     await spawner.ensure_worker()
@@ -153,6 +154,7 @@ async def dispatch_to_worker(
         ) from exc
 
     if resp.status_code == httpx.codes.TOO_MANY_REQUESTS:
+        circuit_breaker.record_failure()
         logger.warning(
             "Worker at capacity (429) for dispatch_id=%s thread %s",
             dispatch.dispatch_id,

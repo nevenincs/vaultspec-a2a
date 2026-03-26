@@ -267,7 +267,14 @@ async def respond_to_permission_endpoint(
         mark_worker_connected(request)
     except WorkerCircuitOpenError as exc:
         raise HTTPException(status_code=503, detail=exc.detail) from exc
-    except (WorkerAtCapacityError, WorkerDispatchRejectedError, WorkerUnreachableError):
+    except WorkerDispatchRejectedError as exc:
+        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        await db.commit()
+        raise HTTPException(
+            status_code=502,
+            detail=f"Worker rejected dispatch (HTTP {exc.status_code})",
+        ) from None
+    except (WorkerAtCapacityError, WorkerUnreachableError):
         pass
 
     if dispatched:

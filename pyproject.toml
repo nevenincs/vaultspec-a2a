@@ -90,7 +90,8 @@ asyncio_default_fixture_loop_scope = "function"
 timeout = "300"
 markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
-  "layer2: marks Layer 2 entry point + infra service tests — no live external processes (run with '-m layer2')",
+  "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
+  "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
   "live: marks tests requiring live ACP backend processes (deselect with '-m not live')",
   "requires_jaeger: marks tests that verify real OTel span export to the persistent local Jaeger instance (health at localhost:13133/status, OTLP at localhost:4317, UI/query at localhost:16686)",
   "requires_postgres: marks tests that require a live Postgres instance (fails if Postgres unreachable)",

@@ -1,4 +1,4 @@
-"""Layer 2 test configuration + shared fixtures for api/tests/.
+"""Middleware test configuration + shared fixtures for api/tests/.
 
 Centralises engine, session_factory, session, checkpointer, and make_app so
 that all test modules use the same isolated file-backed SQLite setup and
@@ -42,10 +42,10 @@ _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark tests collected from THIS directory as ``layer2``."""
+    """Mark tests collected from THIS directory as ``middleware``."""
     for item in items:
         if str(item.path).startswith(_PACKAGE_DIR):
-            item.add_marker(pytest.mark.layer2)
+            item.add_marker(pytest.mark.middleware)
 
 
 __all__: list[str] = []

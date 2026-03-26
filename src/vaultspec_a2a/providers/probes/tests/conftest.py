@@ -1,4 +1,4 @@
-"""Layer 2 test configuration — auto-applies ``layer2`` marker to pure tests.
+"""Middleware test configuration — auto-applies ``middleware`` marker to pure tests.
 
 Tests marked ``live`` or other infra markers are excluded so they remain
 gated by their infrastructure requirements.
@@ -20,10 +20,10 @@ _INFRA_MARKERS = frozenset(
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark pure probe tests as ``layer2``, excluding infra-marked tests."""
+    """Mark pure probe tests as ``middleware``, excluding infra-marked tests."""
     for item in items:
         if not str(item.path).startswith(_PACKAGE_DIR):
             continue
         if any(item.get_closest_marker(m) for m in _INFRA_MARKERS):
             continue
-        item.add_marker(pytest.mark.layer2)
+        item.add_marker(pytest.mark.middleware)

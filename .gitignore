@@ -26,9 +26,17 @@ venv/
 
 # antigravity
 .profile
+
+# Agent configs (per-developer, not shared)
 .claude/
 .gemini/
+.codex/
 .agent/
+.agents/
+CLAUDE.md
+GEMINI.md
+AGENTS.md
+.mcp.json
 
 # Node.js
 node_modules/

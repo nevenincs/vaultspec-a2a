@@ -27,13 +27,14 @@ if TYPE_CHECKING:
 from uuid import uuid4
 
 import anyio
+import anyio.abc
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
 
-from ..api.schemas.internal import DispatchRequest, DispatchResponse
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
+from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.enums import Environment
@@ -180,7 +181,7 @@ def create_worker_app() -> FastAPI:
         the lifespan task group so that this endpoint returns immediately.
         """
         executor: Executor = app.state.executor
-        tg: anyio.abc.TaskGroup = app.state.task_group  # type: ignore[assignment]
+        tg = app.state.task_group
 
         # WPA-001: Reject dispatch when concurrent thread cap is reached.
         if executor.at_capacity():

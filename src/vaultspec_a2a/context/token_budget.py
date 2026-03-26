@@ -6,6 +6,7 @@ preparation as mandated by ADR-002 (context management) and ADR-008
 """
 
 from collections.abc import Sequence
+from typing import cast
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
@@ -66,11 +67,11 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     """
     messages: list[BaseMessage] = list(state.get("messages", []))
     if not messages:
-        return dict(state)  # type: ignore[return-value]
+        return cast("TeamState", dict(state))
 
     current_tokens = estimate_tokens(messages)
     if current_tokens <= max_tokens:
-        return dict(state)  # type: ignore[return-value]
+        return cast("TeamState", dict(state))
 
     # Separate system prefix from conversation body, then pin the first
     # HumanMessage (the original task) so it is never subject to budget
@@ -130,7 +131,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     pinned_list = [pinned_human] if pinned_human else []
     compacted_messages = [*system_msgs, *pinned_list, summary, *kept]
 
-    new_state: TeamState = dict(state)  # type: ignore[assignment]
+    new_state: TeamState = cast("TeamState", dict(state))
     new_state["messages"] = compacted_messages
     return new_state
 

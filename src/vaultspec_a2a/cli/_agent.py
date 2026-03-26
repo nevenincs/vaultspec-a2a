@@ -8,8 +8,6 @@ from __future__ import annotations
 
 __all__ = ["agent"]
 
-from pathlib import Path
-
 import click
 
 
@@ -24,22 +22,19 @@ def list_cmd(emit_json: bool) -> None:
     """List available agent presets."""
     import json as json_mod
 
-    presets_dir = Path(__file__).resolve().parent.parent / "core" / "presets" / "agents"
-    if not presets_dir.exists():
-        click.echo("No agent presets directory found.", err=True)
-        return
+    from vaultspec_a2a.team.team_config import discover_agent_preset_ids
 
-    tomls = sorted(presets_dir.glob("*.toml"))
-    if not tomls:
+    preset_ids = sorted(discover_agent_preset_ids())
+    if not preset_ids:
         click.echo("No agent presets found.")
         return
 
     if emit_json:
-        click.echo(json_mod.dumps([t.stem for t in tomls], indent=2))
+        click.echo(json_mod.dumps(preset_ids, indent=2))
         return
 
-    for t in tomls:
-        click.echo(f"  {t.stem}")
+    for name in preset_ids:
+        click.echo(f"  {name}")
 
     click.echo('\n  Use: vaultspec team start --preset <name> --message "..."')
 
@@ -51,29 +46,29 @@ def show(name: str, emit_json: bool) -> None:
     """Show the configuration of an agent preset."""
     import json as json_mod
 
-    presets_dir = Path(__file__).resolve().parent.parent / "core" / "presets" / "agents"
-    preset_path = presets_dir / f"{name}.toml"
+    from vaultspec_a2a.team.team_config import (
+        AgentConfigNotFoundError,
+        load_agent_config,
+    )
 
-    if not preset_path.exists():
-        # Also check team presets
-        team_presets_dir = presets_dir.parent / "teams"
-        preset_path = team_presets_dir / f"{name}.toml"
-        if not preset_path.exists():
-            click.echo(f"Preset not found: {name}", err=True)
-            click.echo("  Available: vaultspec agent list", err=True)
-            raise SystemExit(1)
-
-    content = preset_path.read_text(encoding="utf-8")
+    try:
+        config = load_agent_config(name)
+    except AgentConfigNotFoundError:
+        click.echo(f"Preset not found: {name}", err=True)
+        click.echo("  Available: vaultspec agent list", err=True)
+        raise SystemExit(1) from None
 
     if emit_json:
-        try:
-            import tomllib
-
-            data = tomllib.loads(content)
-            click.echo(json_mod.dumps(data, indent=2, default=str))
-        except Exception:
-            click.echo(content)
+        data = config.model_dump(mode="json")
+        click.echo(json_mod.dumps(data, indent=2, default=str))
         return
 
-    click.echo(f"# {preset_path.name}\n")
-    click.echo(content)
+    click.echo(f"# {name}\n")
+    click.echo(f"  id:           {config.id}")
+    click.echo(f"  display_name: {config.display_name}")
+    click.echo(f"  role:         {config.role}")
+    click.echo(f"  description:  {config.description}")
+    if config.model.provider:
+        click.echo(f"  provider:     {config.model.provider}")
+    if config.model.capability:
+        click.echo(f"  capability:   {config.model.capability}")

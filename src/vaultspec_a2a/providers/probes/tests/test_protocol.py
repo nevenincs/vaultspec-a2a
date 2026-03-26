@@ -19,6 +19,7 @@ Policy note on _WriteBuffer usage (PROV-L1):
 import asyncio
 import contextlib
 import json
+from typing import cast
 
 import pytest
 
@@ -192,7 +193,7 @@ class TestProbeSessionHandleResponse:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
         session.step = "initialize"
 
         msg = {
@@ -220,7 +221,7 @@ class TestProbeSessionHandleResponse:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
         session.step = "session/new"
         session.auth_methods = ["oauth-personal", "gemini-api-key"]
 
@@ -246,7 +247,7 @@ class TestProbeSessionHandleResponse:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
         session.step = "authenticate"
         session.auth_methods = ["oauth-personal"]
 
@@ -267,7 +268,7 @@ class TestProbeSessionHandleResponse:
             prompt="Test prompt",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
         session.step = "session/new"
 
         msg = {"result": {"sessionId": "sess-abc-123"}}
@@ -333,7 +334,7 @@ class TestProbeSessionServerRPC:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
 
         await session.handle_server_rpc(42, "permission/request")
         resp = json.loads(wb.decode().strip())
@@ -360,7 +361,7 @@ class TestProbeSessionSend:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
 
         id1 = await session.send("initialize", {"version": 1})
         id2 = await session.send("session/new", {"cwd": "."})
@@ -378,7 +379,7 @@ class TestProbeSessionSend:
             prompt="Hello",
         )
         wb = _WriteBuffer()
-        session.stdin = wb  # type: ignore[assignment]
+        session.stdin = cast("asyncio.StreamWriter", wb)
 
         rid = await session.send("initialize", {"protocolVersion": 1})
         msg = json.loads(wb.decode().strip())

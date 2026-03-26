@@ -14,7 +14,10 @@ import functools
 import glob as _glob
 import logging
 from pathlib import Path
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
+
+if TYPE_CHECKING:
+    from collections.abc import Hashable
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -380,7 +383,7 @@ def compile_team_graph(
         graph.step_timeout = effective_timeout
 
     # recursion_limit: LangGraph runtime attribute not in stubs.
-    graph.recursion_limit = team_config.graph.recursion_limit  # type: ignore[assignment]
+    cast("Any", graph).recursion_limit = team_config.graph.recursion_limit
 
     return graph
 
@@ -516,7 +519,7 @@ def _compile_star(
     builder.add_conditional_edges(
         "supervisor",
         lambda state: state["next"],
-        route_map,  # type: ignore[arg-type]
+        cast("dict[Hashable, str]", route_map),
     )
 
 

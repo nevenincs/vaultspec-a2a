@@ -9,9 +9,7 @@ from langgraph.checkpoint.base import CheckpointTuple
 from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from ...database.crud import create_thread, record_thread_execution_state
-from ...database.models import Base, ThreadExecutionStateModel
-from ..projection import (
+from ...control.projection import (
     CheckpointProjection,
     ProjectedInterrupt,
     apply_checkpoint_projection,
@@ -20,6 +18,8 @@ from ..projection import (
     project_checkpoint_tuple,
     project_execution_state_model,
 )
+from ...database.crud import create_thread, record_thread_execution_state
+from ...database.models import Base, ThreadExecutionStateModel
 from ..schemas.snapshots import ExecutionTaskSnapshot, ThreadStateSnapshot
 
 
@@ -227,7 +227,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
-    from ..projection import ExecutionStateProjection
+    from ...control.projection import ExecutionStateProjection
 
     snapshot = ThreadStateSnapshot(
         thread_id="thread-1",

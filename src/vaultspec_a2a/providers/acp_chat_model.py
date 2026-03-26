@@ -1011,9 +1011,9 @@ class AcpChatModel(BaseChatModel):
                     terminal_env.update(extra_env)
             # M12: on Windows, use CREATE_NEW_PROCESS_GROUP so child
             # processes don't become orphans when the terminal is killed.
-            extra_kwargs: dict[str, object] = {}
-            if sys.platform == "win32":
-                extra_kwargs["creationflags"] = subprocess.CREATE_NEW_PROCESS_GROUP
+            creation_flags = (
+                subprocess.CREATE_NEW_PROCESS_GROUP if sys.platform == "win32" else 0
+            )
             process = await asyncio.create_subprocess_exec(
                 command,
                 *args,
@@ -1022,7 +1022,7 @@ class AcpChatModel(BaseChatModel):
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(resolved_cwd),
                 env=terminal_env,
-                **extra_kwargs,  # type: ignore[arg-type]
+                creationflags=creation_flags,
             )
             terminal_id = uuid4().hex[:8]
             ctx.terminals[terminal_id] = process

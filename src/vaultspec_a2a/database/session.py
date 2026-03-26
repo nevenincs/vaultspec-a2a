@@ -10,6 +10,7 @@ References:
 """
 
 import logging
+import sqlite3
 from collections.abc import AsyncGenerator
 from pathlib import Path
 
@@ -43,14 +44,14 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 
 
-def _set_wal_mode(dbapi_conn: object, _connection_record: object) -> None:
+def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) -> None:
     """Enable WAL journal mode on every new SQLite connection.
 
     WAL allows concurrent readers while a write is in progress,
     which is critical for the Event Aggregator's high-frequency writes
     (ADR-007 section 5).
     """
-    cursor = dbapi_conn.cursor()  # type: ignore[union-attr]
+    cursor = dbapi_conn.cursor()
     # H18: check the return value — PRAGMA journal_mode returns the mode that
     # was actually set (or the current mode on read-only filesystems).
     cursor.execute("PRAGMA journal_mode=WAL")

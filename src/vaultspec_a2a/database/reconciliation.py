@@ -8,7 +8,7 @@ CRUD calls, and control-action journaling.
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -136,7 +136,7 @@ async def reconcile_threads_on_startup(
     session: AsyncSession,
     checkpointer: Checkpointer,
     *,
-    strategy: str = "conservative",
+    strategy: Literal["conservative", "mark_repair_needed"] = "conservative",
 ) -> dict[str, int]:
     """Full reconciliation pipeline: probe + decide + execute.
 
@@ -174,7 +174,7 @@ async def reconcile_threads_on_startup(
         checkpoint_results,
         checkpoint_errors,
         pending_map,
-        strategy=strategy,  # type: ignore[arg-type]
+        strategy=strategy,
     )
 
     await execute_reconciliation(session, actions, thread_epochs)

@@ -29,7 +29,7 @@ from ...graph.events import (
 )
 from .. import EventAggregator as CoreAggregator
 from .. import aggregator as agg_module
-from ..aggregator import EventAggregator, SequencedEvent
+from ..aggregator import EventAggregator, SequencedEvent, StreamableGraph
 
 # ---------------------------------------------------------------------------
 # Fixtures
@@ -323,7 +323,7 @@ class TestEventEmission:
         class _MinimalGraph:
             nodes: ClassVar[dict[str, _MinimalNode]] = {"worker": _MinimalNode()}
 
-        aggregator.register_graph(_MinimalGraph())  # type: ignore[arg-type]
+        aggregator.register_graph(cast("StreamableGraph", _MinimalGraph()))
 
         await aggregator.emit_team_status(
             thread_id="thread-1",
@@ -425,8 +425,8 @@ class TestSequenceOnEvents:
             message_id="msg-2",
         )
 
-        s1 = cast("SequencedEvent", queue.get_nowait())
-        s2 = cast("SequencedEvent", queue.get_nowait())
+        s1 = queue.get_nowait()
+        s2 = queue.get_nowait()
         first_seq = 1
         second_seq = 2
         assert s1.sequence == first_seq
@@ -459,7 +459,7 @@ class TestSequenceOnEvents:
             message_id="msg-3",
         )
 
-        sequenced_all = [cast("SequencedEvent", queue.get_nowait()) for _ in range(3)]
+        sequenced_all = [queue.get_nowait() for _ in range(3)]
         a_events = [s for s in sequenced_all if s.event.thread_id == "thread-a"]
         b_events = [s for s in sequenced_all if s.event.thread_id == "thread-b"]
 

@@ -251,7 +251,7 @@ class TestPureFunction:
             execution_readiness="checkpoint_unavailable",
         )
         try:
-            action.thread_id = "t2"  # type: ignore[misc]
+            object.__setattr__(action, "thread_id", "t2")
             raised = False
         except AttributeError:
             raised = True

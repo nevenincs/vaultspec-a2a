@@ -32,6 +32,7 @@ def _assert_binary_backend_unavailable(action) -> None:
         action()
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_creates_acp() -> None:
     """Verify Claude provider creates AcpChatModel with the correct ACP command."""
     model = ProviderFactory().create(Provider.CLAUDE)
@@ -50,6 +51,7 @@ def test_provider_factory_claude_creates_acp() -> None:
 # ---------------------------------------------------------------------------
 
 
+@pytest.mark.requires_acp
 def test_build_acp_command_node_returns_node_command() -> None:
     """node backend returns ['node', '<path>/index.js']."""
     cmd = _build_acp_command("node")
@@ -77,6 +79,7 @@ def test_build_acp_command_binary_path_matches_bin_path() -> None:
     assert Path(cmd[0]) == _BIN_PATH
 
 
+@pytest.mark.requires_acp
 def test_classify_acp_command_node_returns_runtime_metadata() -> None:
     """Claude node backend exposes bounded runtime-authority metadata."""
     command, meta = _classify_acp_command("node")
@@ -105,6 +108,7 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert model.auth_mode in {"oauth_token", "none_detected"}
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_node_backend_no_bun_flag() -> None:
     """node backend does not inject CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN."""
     model = ProviderFactory().create(Provider.CLAUDE, backend="node")
@@ -148,6 +152,7 @@ def test_provider_factory_claude_binary_sets_use_exec() -> None:
     assert model.use_exec is True
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_node_use_exec_false() -> None:
     """node backend leaves use_exec=False (shell mode for .cmd shim)."""
     model = ProviderFactory().create(Provider.CLAUDE, backend="node")
@@ -249,6 +254,7 @@ def test_provider_factory_zhipu_mapping() -> None:
     assert "bigmodel.cn" in str(model.openai_api_base)
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_with_workspace_root() -> None:
     """Verify that workspace_root kwarg is forwarded to AcpChatModel."""
     ws = Path("Y:/code/test")
@@ -265,6 +271,7 @@ def test_provider_factory_gemini_with_workspace_root() -> None:
     assert model.workspace_root == str(ws)
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_workspace_root_none_default() -> None:
     """Verify that workspace_root defaults to None when not provided."""
     model = ProviderFactory().create(Provider.CLAUDE)
@@ -272,6 +279,7 @@ def test_provider_factory_workspace_root_none_default() -> None:
     assert model.workspace_root is None
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_never_injects_anthropic_api_key() -> None:
     """ADR-002 §2: Factory must NOT inject ANTHROPIC_API_KEY for Claude.
 
@@ -284,6 +292,7 @@ def test_provider_factory_claude_never_injects_anthropic_api_key() -> None:
     assert "ANTHROPIC_API_KEY" not in model.env_vars
 
 
+@pytest.mark.requires_acp
 def test_provider_factory_claude_oauth_only() -> None:
     """When OAuth token is set, only CLAUDE_CODE_OAUTH_TOKEN is in env_vars."""
     model = ProviderFactory().create(Provider.CLAUDE)

@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.middleware
+
 _ROOT = Path(__file__).resolve().parents[3]
 _FILES = [
     _ROOT / ".env.example",

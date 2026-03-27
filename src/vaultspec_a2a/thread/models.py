@@ -10,9 +10,24 @@ from dataclasses import asdict, dataclass
 
 __all__ = [
     "ArtifactRef",
+    "PlanEntry",
     "PlanStep",
     "TokenUsageEntry",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class PlanEntry:
+    """A single entry in the agent's execution plan.
+
+    Fields use plain ``str`` so the domain layer stays free of wire-protocol
+    enum imports.  Values correspond to ``PlanEntryStatus`` / ``PlanEntryPriority``
+    members defined in ``api.schemas.enums``.
+    """
+
+    content: str
+    status: str = "pending"
+    priority: str = "medium"
 
 
 @dataclass(frozen=True, slots=True)

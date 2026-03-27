@@ -22,13 +22,13 @@ if TYPE_CHECKING:
         ThreadModel,
     )
 
-from ..api.schemas.enums import PermissionOptionKind, PermissionType
 from ..api.schemas.snapshots import (
     ExecutionTaskSnapshot,
     ThreadStateSnapshot,
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
+from ..graph.enums import PermissionOptionKind, PermissionType
 
 _PLAN_APPROVAL_PAUSE_CAUSES = {
     PermissionType.PLAN_APPROVAL.value,

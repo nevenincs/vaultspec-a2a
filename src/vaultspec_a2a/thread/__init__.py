@@ -83,6 +83,9 @@ from .models import (
     ArtifactRef as ArtifactRef,
 )
 from .models import (
+    PlanEntry as PlanEntry,
+)
+from .models import (
     PlanStep as PlanStep,
 )
 from .models import (
@@ -107,6 +110,7 @@ __all__ = [
     "NicknameConflictError",
     "PermissionDeniedError",
     "PermissionRequestStatus",
+    "PlanEntry",
     "PlanStep",
     "ProtocolError",
     "ProviderSessionError",

@@ -9,13 +9,6 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
-from ..api.schemas.enums import (
-    AgentLifecycleState,
-    PermissionOptionKind,
-    ToolCallStatus,
-    ToolKind,
-)
-from ..api.schemas.events import PlanEntry
 from ..api.schemas.snapshots import (
     ArtifactSnapshot,
     MessageSnapshot,
@@ -25,8 +18,15 @@ from ..api.schemas.snapshots import (
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
+from ..graph.enums import (
+    AgentLifecycleState,
+    PermissionOptionKind,
+    ToolCallStatus,
+    ToolKind,
+)
 from ..streaming.aggregator import EventAggregator, classify_tool_kind
 from ..thread.enums import ThreadStatus
+from ..thread.models import PlanEntry
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig

@@ -1,14 +1,14 @@
 """FastAPI layer for the A2A Orchestrator.
 
-Note: ``create_app``, ``router``, ``get_aggregator``, and
-``ConnectionManager`` are intentionally NOT re-exported from this facade.
-They depend on ``vaultspec_a2a.core.aggregator``, which in turn imports from
+Note: ``create_app`` and ``ConnectionManager`` are intentionally NOT
+re-exported from this facade.  They depend on
+``vaultspec_a2a.core.aggregator``, which in turn imports from
 ``vaultspec_a2a.api.schemas``, creating a circular import if exposed here.
 
 Import them directly instead::
 
     from vaultspec_a2a.api.app import create_app
-    from vaultspec_a2a.api.endpoints import router, get_aggregator
+    from vaultspec_a2a.api.dependencies import get_aggregator
     from vaultspec_a2a.api.websocket import ConnectionManager
 """
 

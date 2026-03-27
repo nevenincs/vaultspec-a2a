@@ -1,4 +1,4 @@
-"""Shared fixtures for src/vaultspec_a2a/api/tests/.
+"""Middleware test configuration + shared fixtures for api/tests/.
 
 Centralises engine, session_factory, session, checkpointer, and make_app so
 that all test modules use the same isolated file-backed SQLite setup and
@@ -19,6 +19,7 @@ from pathlib import Path
 from uuid import uuid4
 
 import httpx
+import pytest
 import pytest_asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
@@ -30,10 +31,22 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
+from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.config import settings
+from ...control.worker_management import LazyWorkerSpawner
 from ...database.models import Base
 from ...streaming.aggregator import EventAggregator
-from ..app import LazyWorkerSpawner, WorkerCircuitBreaker, create_app
+from ..app import create_app
+
+_PACKAGE_DIR = str(Path(__file__).resolve().parent)
+
+
+def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
+    """Mark tests collected from THIS directory as ``middleware``."""
+    for item in items:
+        if str(item.path).startswith(_PACKAGE_DIR):
+            item.add_marker(pytest.mark.middleware)
+
 
 __all__: list[str] = []
 

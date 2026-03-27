@@ -5,6 +5,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+import pytest
+
+pytestmark = pytest.mark.middleware
+
 _ROOT = Path(__file__).resolve().parents[3]
 _FILES = [
     _ROOT / ".env.example",
@@ -15,7 +19,7 @@ _FILES = [
     _ROOT / "docker-compose.prod.postgres.yml",
 ]
 _RUNTIME_PATH_FILES = [
-    _ROOT / "src" / "vaultspec_a2a" / "api" / "app.py",
+    _ROOT / "src" / "vaultspec_a2a" / "control" / "worker_management.py",
     _ROOT / "src" / "vaultspec_a2a" / "control" / "verify.py",
 ]
 _SECRET_PATTERNS = [

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, cast
 
 import pytest
 import pytest_asyncio
@@ -483,7 +483,7 @@ async def test_compile_team_graph_recursion_limit_from_toml(
             checkpointer=cp,
             provider_factory=pf,
         )
-    assert graph.recursion_limit == 10  # type: ignore[attr-defined]
+    assert cast("Any", graph).recursion_limit == 10
 
 
 # ---------------------------------------------------------------------------

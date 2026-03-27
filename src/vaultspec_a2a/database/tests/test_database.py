@@ -9,6 +9,7 @@ cross-session durability, and cascade-delete behaviour.
 import json
 from collections.abc import AsyncGenerator
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -756,8 +757,8 @@ class TestWALMode:
         # WAL mode is set via the connect event listener in session.py;
         # replicate it here for a standalone engine.
         @event.listens_for(eng.sync_engine, "connect")
-        def _set_wal(dbapi_conn: object, _rec: object) -> None:
-            dbapi_conn.execute("PRAGMA journal_mode=WAL")  # type: ignore[union-attr]
+        def _set_wal(dbapi_conn: Any, _rec: object) -> None:
+            dbapi_conn.execute("PRAGMA journal_mode=WAL")
 
         async with eng.begin() as conn:
             await conn.run_sync(Base.metadata.create_all)

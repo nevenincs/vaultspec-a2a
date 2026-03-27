@@ -46,6 +46,7 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if any(item.get_closest_marker(m) for m in _INFRA_MARKERS):
             continue
         item.add_marker(pytest.mark.core)
+        item.add_marker(pytest.mark.unit)
 
 
 # ---------------------------------------------------------------------------
@@ -65,7 +66,8 @@ class _StubProviderFactory:
         workspace_root: Any | None = None,
         **kwargs: Any,
     ) -> FakeChatModel:
-        return FakeChatModel(responses=["stub response"])  # type: ignore[call-arg]
+        _kwargs: dict[str, Any] = {"responses": ["stub response"]}
+        return FakeChatModel(**_kwargs)
 
 
 @pytest.fixture

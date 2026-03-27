@@ -77,7 +77,7 @@ packages = ["src/vaultspec_a2a"]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live and not requires_postgres and not requires_jaeger and not requires_vidaimock"]
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not live and not requires_acp and not requires_postgres and not requires_jaeger and not requires_vidaimock"]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
@@ -90,9 +90,12 @@ asyncio_default_fixture_loop_scope = "function"
 timeout = "300"
 markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
+  "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
+  "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
   "live: marks tests requiring live ACP backend processes (deselect with '-m not live')",
   "requires_jaeger: marks tests that verify real OTel span export to the persistent local Jaeger instance (health at localhost:13133/status, OTLP at localhost:4317, UI/query at localhost:16686)",
   "requires_postgres: marks tests that require a live Postgres instance (fails if Postgres unreachable)",
+  "requires_acp: marks tests that require the ACP node module (@zed-industries/claude-agent-acp via npm install)",
   "requires_vidaimock: marks tests that require a running VidaiMock tape server (fails if unreachable at MOCK_API_BASE or localhost:8100)",
 ]
 
@@ -121,7 +124,8 @@ unfixable = ["B"]
 "**/test_*.py" = ["ARG"]
 "**/tests/**/*.py" = ["ARG"]
 # FastAPI endpoints use Depends() in function defaults
-"src/vaultspec_a2a/api/endpoints.py" = ["B008"]
+"src/vaultspec_a2a/api/dependencies.py" = ["B008"]
+"src/vaultspec_a2a/api/routes/*.py" = ["B008"]
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
 "src/vaultspec_a2a/worker/app.py" = ["B008"]
 

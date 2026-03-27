@@ -13,17 +13,18 @@ import pytest
 from httpx import ASGITransport
 from langgraph.checkpoint.base import empty_checkpoint
 
-from ..app import (
+from ...control.circuit_breaker import WorkerCircuitBreaker
+from ...control.diagnostics import classify_missing_ws_thread
+from ...control.health import build_sqlite_fallback_diagnostics
+from ...control.worker_management import (
     LazyWorkerSpawner,
-    WorkerCircuitBreaker,
+    WorkerState,
     WorkerWatchdog,
-    _build_sqlite_fallback_diagnostics,
     _build_worker_restart_detail,
-    _classify_missing_ws_thread,
-    _create_dispatch_message_handler,
     _worker_stderr_log_path,
 )
 from ..websocket import WebSocketCommandRejectedError
+from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 
 
@@ -78,6 +79,7 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
         auto_spawn=False,
     )
     app_state = SimpleNamespace()
+    worker_state = WorkerState()
 
     WorkerWatchdog(
         spawner=spawner,
@@ -85,10 +87,11 @@ def test_worker_watchdog_keeps_stderr_log_path_null_when_auto_spawn_disabled() -
             failure_threshold=1,
             recovery_timeout=1.0,
         ),
+        worker_state=worker_state,
         app_state=app_state,
     )
 
-    assert app_state.worker_stderr_log_path is None
+    assert worker_state.worker_stderr_log_path is None
 
 
 @pytest.mark.asyncio
@@ -98,11 +101,14 @@ async def test_api_health_reports_worker_stderr_log_path(
 ) -> None:
     """GET /api/health should expose the diagnostic stderr log location."""
     app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
-    app.state.worker_status = "up"
-    app.state.worker_last_restart_detail = "returncode=9; stderr_log=example.log"
-    app.state.worker_restart_count = 1
-    app.state.worker_last_restart_reason = "process_exited"
-    app.state.worker_stderr_log_path = str(_worker_stderr_log_path(8001))
+    ws = WorkerState(
+        worker_status="up",
+        worker_last_restart_detail="returncode=9; stderr_log=example.log",
+        worker_restart_count=1,
+        worker_last_restart_reason="process_exited",
+        worker_stderr_log_path=str(_worker_stderr_log_path(8001)),
+    )
+    app.state.worker_state = ws
 
     async with httpx.AsyncClient(
         transport=ASGITransport(app=app),
@@ -136,7 +142,7 @@ def test_build_sqlite_fallback_diagnostics_reports_wal_state() -> None:
         finally:
             conn.close()
 
-    diagnostics = _build_sqlite_fallback_diagnostics(
+    diagnostics = build_sqlite_fallback_diagnostics(
         database_backend="sqlite",
         checkpoint_backend="sqlite",
         database_path=db_path,
@@ -189,14 +195,14 @@ async def test_classify_missing_ws_thread_reports_not_found(
     checkpointer,
 ) -> None:
     """Missing thread with no backend residue should return THREAD_NOT_FOUND."""
-    rejection = await _classify_missing_ws_thread(
+    result = await classify_missing_ws_thread(
         thread_id="missing-thread",
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
 
-    assert rejection.code == "THREAD_NOT_FOUND"
-    assert rejection.metadata == {
+    assert result.code == "THREAD_NOT_FOUND"
+    assert result.metadata == {
         "execution_state_present": False,
         "checkpoint_present": False,
         "checkpoint_unverified": False,
@@ -219,16 +225,16 @@ async def test_classify_missing_ws_thread_reports_state_drift(
         {},
     )
 
-    rejection = await _classify_missing_ws_thread(
+    result = await classify_missing_ws_thread(
         thread_id="drift-thread",
         session_factory=session_factory,
         checkpointer=checkpointer,
     )
 
-    assert rejection.code == "THREAD_STATE_DRIFT"
-    assert rejection.metadata is not None
-    assert rejection.metadata["execution_state_present"] is False
-    assert rejection.metadata["checkpoint_present"] is True
+    assert result.code == "THREAD_STATE_DRIFT"
+    assert result.metadata is not None
+    assert result.metadata["execution_state_present"] is False
+    assert result.metadata["checkpoint_present"] is True
 
 
 @pytest.mark.asyncio
@@ -238,7 +244,7 @@ async def test_dispatch_message_handler_rejects_missing_thread(
 ) -> None:
     """WS dispatch handler should reject missing threads before worker dispatch."""
     app, _aggregator, worker, _checkpointer = make_app(session_factory, checkpointer)
-    handler = _create_dispatch_message_handler(
+    handler = create_dispatch_message_handler(
         worker.client,
         session_factory,
         checkpointer,

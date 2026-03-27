@@ -13,7 +13,7 @@ See ADR D-01, Phase 6 of the core-layer-boundary plan.
 
 import asyncio
 from collections.abc import Awaitable, Callable
-from typing import Any
+from typing import Any, cast
 
 from langgraph.types import Command
 
@@ -47,7 +47,7 @@ class EventAggregator:
         self._subscribers_mgr = SubscriberManager(self._telemetry)
         self._emitters = EventEmitters(
             self._subscribers_mgr,
-            None,  # type: ignore[arg-type]  # set below after buffering init
+            cast("BufferingManager", None),  # set below after buffering init
             self._telemetry,
         )
         self._buffering = BufferingManager(

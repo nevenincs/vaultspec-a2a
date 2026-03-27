@@ -72,7 +72,10 @@ def _reset_client() -> None:
     if _shared_client is not None and not _shared_client.is_closed:
         # LG-030: use close() instead of __del__() for proper cleanup.
         with contextlib.suppress(Exception):
-            _shared_client._transport.close()  # type: ignore[union-attr]
+            transport = _shared_client._transport
+            _close = getattr(transport, "close", None)
+            if _close is not None:
+                _close()
     _shared_client = None
 
 

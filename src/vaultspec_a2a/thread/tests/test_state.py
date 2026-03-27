@@ -106,7 +106,7 @@ class TestReplacePlan:
     def test_none_new_keeps_existing(self) -> None:
         """None leaves the existing plan in place (reducer called with no update)."""
         old = [{"step": "research", "status": "done", "agent": "planner"}]
-        result = _replace_plan(old, None)  # type: ignore[arg-type]
+        result = _replace_plan(old, None)
         assert result == old
 
 

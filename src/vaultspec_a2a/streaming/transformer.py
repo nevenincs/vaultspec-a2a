@@ -33,14 +33,18 @@ from .types import (
 
 # M6: import GraphInterrupt for isinstance check vs string comparison.
 try:
-    from langgraph.errors import GraphInterrupt as _GraphInterrupt
+    from langgraph.errors import GraphInterrupt as _GraphInterrupt_cls
+
+    _GraphInterrupt: type[Exception] | None = _GraphInterrupt_cls
 except ImportError:
-    _GraphInterrupt = None  # type: ignore[assignment,misc]
+    _GraphInterrupt = None
 
 try:
-    from langgraph.errors import GraphRecursionError as _GraphRecursionError
+    from langgraph.errors import GraphRecursionError as _GraphRecursionError_cls
+
+    _GraphRecursionError: type[Exception] | None = _GraphRecursionError_cls
 except ImportError:
-    _GraphRecursionError = None  # type: ignore[assignment,misc]
+    _GraphRecursionError = None
 
 logger = logging.getLogger(__name__)
 

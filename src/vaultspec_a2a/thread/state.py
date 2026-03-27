@@ -54,7 +54,7 @@ def _merge_token_usage(
 
 def _replace_plan(
     existing: list[dict[str, str]],
-    new: list[dict[str, str]],
+    new: list[dict[str, str]] | None,
 ) -> list[dict[str, str]]:
     """Full-replacement reducer for the execution plan.
 

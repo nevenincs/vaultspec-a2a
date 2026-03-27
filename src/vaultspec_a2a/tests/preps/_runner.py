@@ -5,7 +5,7 @@ from __future__ import annotations
 import os
 import tempfile
 from contextlib import asynccontextmanager, suppress
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
@@ -81,7 +81,12 @@ async def run_scenario(
     input_state = {"messages": [HumanMessage(content=user_message)]}
     mode = stream_mode or ["updates"]
 
-    async for chunk in graph.astream(input_state, config, stream_mode=mode):  # type: ignore[call-overload]
+    stream = graph.astream(
+        input_state,
+        config,
+        stream_mode=cast("Any", mode),
+    )
+    async for chunk in stream:
         if isinstance(chunk, tuple):
             mode_name, data = chunk
             print(f"\n{'=' * 60}")

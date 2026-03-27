@@ -4,39 +4,24 @@ from __future__ import annotations
 
 __all__ = ["team"]
 
-from typing import Any, cast
+from typing import TYPE_CHECKING
 
 import click
 
-
-def _format_elapsed(created_at_str: str | None) -> str:
-    """Compute human-readable elapsed time from an ISO datetime string."""
-    if not created_at_str:
-        return ""
-    try:
-        from datetime import UTC, datetime
-
-        created = datetime.fromisoformat(created_at_str.replace("Z", "+00:00"))
-        delta = datetime.now(UTC) - created
-        total_seconds = int(delta.total_seconds())
-        if total_seconds < 60:
-            return f"{total_seconds}s"
-        if total_seconds < 3600:
-            return f"{total_seconds // 60}m"
-        hours = total_seconds // 3600
-        minutes = (total_seconds % 3600) // 60
-        return f"{hours}h {minutes}m"
-    except Exception:
-        return ""
+if TYPE_CHECKING:
+    import httpx
 
 
-def _fetch_thread_metadata(client: object, thread_id: str) -> dict[str, str | None]:
+def _fetch_thread_metadata(
+    client: httpx.Client,
+    thread_id: str,
+) -> dict[str, str | None]:
     """Fetch nickname, team_preset, created_at from the thread list endpoint.
 
     ThreadStateSnapshot does not include these identity fields.
     """
     try:
-        resp = client.get("/threads")  # type: ignore[union-attr]
+        resp = client.get("/threads")
         if not resp.is_success:
             return {"nickname": None, "team_preset": None, "created_at": None}
         data = resp.json()
@@ -245,6 +230,7 @@ def status(thread_id: str, emit_json: bool) -> None:
     """Show detailed status for a single thread."""
     import json
 
+    from ._renderers import render_status_display
     from ._util import _api_client, _handle_response
 
     with _api_client() as client:
@@ -260,89 +246,8 @@ def status(thread_id: str, emit_json: bool) -> None:
             click.echo(json.dumps(data, indent=2))
             return
 
-        # Fetch identity fields not on ThreadStateSnapshot
         meta = _fetch_thread_metadata(client, thread_id)
-
-        # Thread header
-        nick = meta["nickname"] or thread_id[:8]
-        click.echo(f"  Thread:     {thread_id} ({nick})")
-        if meta["team_preset"]:
-            click.echo(f"  Preset:     {meta['team_preset']}")
-        click.echo(f"  Status:     {data.get('status', 'unknown')}")
-        elapsed = _format_elapsed(meta["created_at"])
-        if elapsed:
-            click.echo(f"  Elapsed:    {elapsed}")
-        if data.get("pause_cause"):
-            click.echo(f"  Paused:     {data['pause_cause']}")
-
-        # Next nodes (what the graph will execute next)
-        next_nodes = data.get("next_nodes", [])
-        if next_nodes:
-            click.echo(f"  Next:       {', '.join(next_nodes)}")
-
-        # Agents
-        agents = data.get("agents", [])
-        if agents:
-            click.echo("  Agents:")
-            for a in agents:
-                agent_id = a.get("agent_id", "?")
-                state = a.get("state", "unknown")
-                display = a.get("display_name", "")
-                label = f"{agent_id:20s}  {state:16s}"
-                if display:
-                    label += f"  {display}"
-                click.echo(f"    {label}")
-
-        # Plan progress — API field is "plan", entries have "content" and "status"
-        plan = data.get("plan", [])
-        if plan:
-            click.echo("  Plan:")
-            for entry in plan:
-                entry_status = entry.get("status", "pending")
-                if entry_status == "completed":
-                    icon = "[x]"
-                elif entry_status == "in_progress":
-                    icon = "[>]"
-                else:
-                    icon = "[ ]"
-                content = entry.get("content", "")
-                click.echo(f"    {icon} {content}")
-
-        # Pending permissions
-        perms = data.get("pending_permissions", [])
-        if perms:
-            click.echo(f"  Pending permissions: {len(perms)}")
-            for p in perms:
-                description = p.get("description", "")
-                click.echo(f"    {p.get('request_id', '?')}  {description}")
-                if p.get("tool_call"):
-                    click.echo(f"    Tool: {p['tool_call']}")
-                opts = p.get("options", [])
-                if opts:
-                    opt_names = " | ".join(o.get("option_id", "?") for o in opts)
-                    click.echo(f"    Options: {opt_names}")
-                    click.echo(
-                        f"    Respond: vaultspec team respond {thread_id} "
-                        f"--request-id {p.get('request_id', '?')} --option <OPTION>"
-                    )
-
-        # Pending interrupts count
-        interrupt_count = data.get("pending_interrupt_count", 0)
-        if interrupt_count and not perms:
-            click.echo(f"  Pending interrupts: {interrupt_count}")
-
-        # Tool calls — API field is "title" for tool name
-        tool_calls = data.get("tool_calls", [])
-        active_tools = [
-            t for t in tool_calls if t.get("status") in ("pending", "in_progress")
-        ]
-        if active_tools:
-            click.echo(f"  Active tool calls: {len(active_tools)}")
-            for t in active_tools:
-                name = t.get("title") or "(unknown)"
-                kind = t.get("kind", "")
-                kind_str = f" [{kind}]" if kind else ""
-                click.echo(f"    {name}{kind_str}: {t.get('status', 'unknown')}")
+        render_status_display(thread_id, data, meta)
 
 
 @team.command("list")
@@ -374,6 +279,7 @@ def list_cmd(status_filter: str | None, emit_json: bool) -> None:
     """
     import json
 
+    from ._renderers import render_thread_list
     from ._util import _api_client, _handle_response
 
     with _api_client() as client:
@@ -390,50 +296,19 @@ def list_cmd(status_filter: str | None, emit_json: bool) -> None:
 
         threads = data.get("threads", [])
 
-        if not threads:
-            click.echo("No threads found.")
-            return
-
-        # Summary counts
-        counts: dict[str, int] = {}
-        for t in threads:
-            s = t.get("status", "unknown")
-            counts[s] = counts.get(s, 0) + 1
-
-        _active_states = ("submitted", "running", "input_required", "cancelling")
-        active = sum(counts.get(s, 0) for s in _active_states)
-        total = len(threads)
-        click.echo(f"  {total} threads ({active} active)\n")
-
-        # Thread table — created_at IS on ThreadSummary
-        click.echo(
-            f"  {'THREAD_ID':34s}  {'STATUS':16s}  {'ELAPSED':8s}  "
-            f"{'PRESET / NICKNAME'}"
-        )
-        click.echo(f"  {'-' * 34}  {'-' * 16}  {'-' * 8}  {'-' * 30}")
-        for t in threads:
-            tid = t["thread_id"]
-            tst = t.get("status", "unknown")
-            elapsed = _format_elapsed(t.get("created_at"))
-            nick = t.get("nickname") or t.get("team_preset", "")
-            click.echo(f"  {tid:34s}  {tst:16s}  {elapsed:8s}  {nick}")
-
-        # Pending permissions summary from /team/status
+        # Fetch pending permissions for the dashboard summary.
+        pending_permissions = None
         try:
             perm_resp = client.get("/team/status")
             if perm_resp.is_success:
                 perm_data = perm_resp.json()
                 perms = perm_data.get("pending_permissions", [])
                 if perms:
-                    click.echo(f"\n  Pending permissions: {len(perms)}")
-                    for p in perms:
-                        tid = p.get("thread_id", "?")[:8]
-                        description = p.get("description", "")
-                        click.echo(
-                            f"    [{tid}] {p.get('request_id', '?')}  {description}"
-                        )
+                    pending_permissions = perms
         except Exception:
             pass
+
+        render_thread_list(threads, pending_permissions)
 
 
 @team.command()
@@ -456,7 +331,6 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
     4. Read events, render each one, handle permission prompts inline
     5. On terminal thread events or Ctrl+C, disconnect cleanly
     """
-    import asyncio
     import json
     import time
 
@@ -476,6 +350,7 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
     import httpx
 
     from ..control.config import settings
+    from ._renderers import handle_permission_prompt, render_event
 
     base_url = f"http://127.0.0.1:{settings.port}"
     api_url = f"{base_url}/api"
@@ -512,203 +387,6 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
 
     # Terminal agent states that signal the thread is done.
     terminal_states = frozenset({"completed", "failed", "cancelled"})
-
-    # --- Event rendering helpers ---
-
-    def _render_agent_status(evt: dict[str, object]) -> str | None:
-        agent = evt.get("agent_id") or "agent"
-        state = evt.get("state", "")
-        detail = evt.get("detail", "")
-        parts = [f"{_elapsed()} {agent}: {state}"]
-        if detail:
-            parts[0] += f" -- {detail}"
-        return parts[0]
-
-    def _render_message_chunk(evt: dict[str, object]) -> str | None:
-        content = evt.get("content", "")
-        if not content:
-            return None
-        agent = evt.get("agent_id") or "agent"
-        finish = evt.get("finish_reason")
-        if finish:
-            return f"{_elapsed()} {agent}: {content} [{finish}]"
-        return f"{_elapsed()} {agent}: {content}"
-
-    def _render_thought_chunk(evt: dict[str, object]) -> str | None:
-        content = evt.get("content", "")
-        if not content:
-            return None
-        agent = evt.get("agent_id") or "agent"
-        return f"{_elapsed()} {agent} (thinking): {content}"
-
-    def _render_tool_call_start(evt: dict[str, object]) -> str | None:
-        title = evt.get("title") or "(unknown tool)"
-        kind = evt.get("kind", "")
-        agent = evt.get("agent_id") or "agent"
-        kind_str = f" [{kind}]" if kind else ""
-        return f"{_elapsed()} {agent}: tool_call_start {title}{kind_str}"
-
-    def _render_tool_call_update(evt: dict[str, object]) -> str | None:
-        title = evt.get("title") or ""
-        status = evt.get("status") or ""
-        agent = evt.get("agent_id") or "agent"
-        label = title or evt.get("tool_call_id", "")
-        return f"{_elapsed()} {agent}: tool_call_update {label} ({status})"
-
-    def _render_plan_update(evt: dict[str, object]) -> str | None:
-        entries = cast("list[dict[str, Any]]", evt.get("entries", []))
-        if not entries:
-            return f"{_elapsed()} plan: (empty)"
-        lines = [f"{_elapsed()} plan:"]
-        for entry in entries:
-            entry_status = entry.get("status", "pending")
-            if entry_status == "completed":
-                icon = "[x]"
-            elif entry_status == "in_progress":
-                icon = "[>]"
-            else:
-                icon = "[ ]"
-            content = entry.get("content", "")
-            lines.append(f"        {icon} {content}")
-        return "\n".join(lines)
-
-    def _render_artifact_update(evt: dict[str, object]) -> str | None:
-        filename = evt.get("filename", "")
-        last_chunk = evt.get("last_chunk", False)
-        suffix = " (complete)" if last_chunk else ""
-        return f"{_elapsed()} artifact: {filename}{suffix}"
-
-    def _render_error(evt: dict[str, object]) -> str | None:
-        code = evt.get("code", "")
-        message = evt.get("message", "")
-        return f"{_elapsed()} ERROR [{code}]: {message}"
-
-    def _render_team_status(evt: dict[str, object]) -> str | None:
-        agents = cast("list[dict[str, Any]]", evt.get("agents", []))
-        if not agents:
-            return None
-        lines = [f"{_elapsed()} team_status:"]
-        for a in agents:
-            agent_id = a.get("agent_id", "?")
-            state = a.get("state", "unknown")
-            lines.append(f"        {agent_id}: {state}")
-        return "\n".join(lines)
-
-    def _render_event(evt: dict[str, object]) -> str | None:
-        """Dispatch to the appropriate renderer based on event type."""
-        event_type = evt.get("type", "")
-        match event_type:
-            case "agent_status":
-                return _render_agent_status(evt)
-            case "message_chunk":
-                return _render_message_chunk(evt)
-            case "thought_chunk":
-                return _render_thought_chunk(evt)
-            case "tool_call_start":
-                return _render_tool_call_start(evt)
-            case "tool_call_update":
-                return _render_tool_call_update(evt)
-            case "plan_update":
-                return _render_plan_update(evt)
-            case "artifact_update":
-                return _render_artifact_update(evt)
-            case "error":
-                return _render_error(evt)
-            case "team_status":
-                return _render_team_status(evt)
-            case "heartbeat":
-                return None  # Suppress heartbeats in output.
-            case "connected":
-                return None  # Handled separately during handshake.
-            case _:
-                return f"{_elapsed()} {event_type}: {evt}"
-
-    # --- Permission prompt ---
-
-    async def _handle_permission(
-        evt: dict[str, object],
-    ) -> None:
-        """Prompt the user inline for a permission decision and POST it."""
-        request_id = evt.get("request_id", "")
-        description = evt.get("description", "")
-        tool_call = evt.get("tool_call", "")
-        options: list[dict[str, str]] = evt.get("options", [])  # type: ignore[assignment]
-
-        click.echo(f"{_elapsed()} PERMISSION REQUIRED: {description}")
-        if tool_call:
-            click.echo(f"        Tool: {tool_call}")
-
-        # Build shortcut map from options.
-        shortcut_map: dict[str, str] = {}
-        labels: list[str] = []
-        for opt in options:
-            oid = opt.get("option_id", "")
-            name = opt.get("name", oid)
-            kind = opt.get("kind", "")
-            if kind == "allow_once":
-                shortcut_map["a"] = oid
-                labels.append("[a]llow")
-            elif kind == "allow_always":
-                shortcut_map["A"] = oid
-                labels.append("[A]llow always")
-            elif kind == "reject_once":
-                shortcut_map["r"] = oid
-                labels.append("[r]eject")
-            elif kind == "reject_always":
-                shortcut_map["R"] = oid
-                labels.append("[R]eject always")
-            else:
-                # Fallback: use first char of option_id.
-                key = oid[0] if oid else name[0] if name else "?"
-                shortcut_map[key] = oid
-                labels.append(f"[{key}]{name[1:] if len(name) > 1 else ''}")
-
-        prompt_line = "  ".join(labels)
-        click.echo(f"        {prompt_line}")
-
-        # Run the blocking input() in a thread so the event loop stays alive.
-        loop = asyncio.get_running_loop()
-        chosen_option_id: str | None = None
-        while chosen_option_id is None:
-            try:
-                answer = await loop.run_in_executor(
-                    None, lambda: click.prompt("        >", prompt_suffix=" ")
-                )
-            except (EOFError, KeyboardInterrupt):
-                click.echo("\n        Skipped (no response sent).")
-                return
-            answer = answer.strip()
-            if answer in shortcut_map:
-                chosen_option_id = shortcut_map[answer]
-            else:
-                # Try matching as a raw option_id.
-                valid_ids = {o.get("option_id") for o in options}
-                if answer in valid_ids:
-                    chosen_option_id = answer
-                else:
-                    click.echo(
-                        f"        Invalid choice '{answer}'. "
-                        f"Options: {', '.join(shortcut_map.keys())}"
-                    )
-
-        # POST the permission response via REST.
-        try:
-            async with httpx.AsyncClient(base_url=api_url, timeout=10.0) as http:
-                resp = await http.post(
-                    f"/permissions/{request_id}/respond",
-                    json={"option_id": chosen_option_id},
-                )
-                if resp.is_success:
-                    data = resp.json()
-                    status = data.get("action_status", "unknown")
-                    click.echo(f"        Permission {request_id}: {status}")
-                else:
-                    click.echo(
-                        f"        Permission response failed: {resp.status_code}",
-                        err=True,
-                    )
-        except Exception as exc:
-            click.echo(f"        Permission response error: {exc}", err=True)
 
     # --- Main WebSocket loop ---
 
@@ -752,22 +430,20 @@ async def _watch_async(thread_id: str, *, emit_json: bool = False) -> None:
                 else:
                     # Handle permission requests interactively.
                     if event_type == "permission_request":
-                        await _handle_permission(evt)
+                        await handle_permission_prompt(evt, _elapsed(), api_url)
                     else:
-                        rendered = _render_event(evt)
+                        rendered = render_event(_elapsed(), evt)
                         if rendered is not None:
                             click.echo(rendered)
 
-                # Thread-level terminal signal — works for all topologies
-                # (pipeline, star, etc.) regardless of whether a supervisor exists.
+                # Thread-level terminal signal
                 if event_type == "thread_terminal":
-                    status = evt.get("status", "unknown")
-                    click.echo(f"\nThread {thread_id} {status}.")
+                    thread_status = evt.get("status", "unknown")
+                    click.echo(f"\nThread {thread_id} {thread_status}.")
                     disconnected_cleanly = True
                     break
 
                 # Fallback: supervisor agent_status for star topologies.
-                # node_name is always "supervisor"; agent_id is "vaultspec-supervisor".
                 if event_type == "agent_status":
                     state = evt.get("state", "")
                     if state in terminal_states:

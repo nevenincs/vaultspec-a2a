@@ -8,7 +8,6 @@ wrappers; this adapter unpacks them.
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -261,10 +260,3 @@ def domain_to_wire(event: DomainEvent, sequence: int) -> ServerEvent:
 def sequenced_to_wire(sequenced: SequencedEvent) -> ServerEvent:
     """Convenience wrapper: unpack a ``SequencedEvent`` and convert."""
     return domain_to_wire(sequenced.event, sequenced.sequence)
-
-
-def sequenced_to_dict(sequenced: SequencedEvent) -> dict:
-    """Serialise a ``SequencedEvent`` to a plain dict (for bridge relay)."""
-    d = asdict(sequenced.event)
-    d["sequence"] = sequenced.sequence
-    return d

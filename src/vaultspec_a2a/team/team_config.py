@@ -56,6 +56,7 @@ __all__ = [
     "TopologyType",
     "WorkerOverrideConfig",
     "WorkerRef",
+    "discover_agent_preset_ids",
     "discover_team_preset_ids",
     "load_agent_config",
     "load_team_config",
@@ -76,6 +77,18 @@ class TopologyType(StrEnum):
 # Bundled preset directories, relative to this file.
 _PRESET_AGENTS_DIR = Path(__file__).parent / "presets" / "agents"
 _PRESET_TEAMS_DIR = Path(__file__).parent / "presets" / "teams"
+
+
+def discover_agent_preset_ids() -> frozenset[str]:
+    """Discover available agent preset IDs by globbing the bundled TOML directory.
+
+    Returns a frozenset of TOML file stems from
+    ``src/vaultspec_a2a/team/presets/agents/*.toml``.
+    If the directory does not exist or is empty, returns an empty frozenset.
+    """
+    if _PRESET_AGENTS_DIR.is_dir():
+        return frozenset(p.stem for p in _PRESET_AGENTS_DIR.glob("*.toml"))
+    return frozenset()
 
 
 def discover_team_preset_ids() -> frozenset[str]:

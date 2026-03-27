@@ -20,11 +20,13 @@ from ..lifecycle.reconciliation import (
     ThreadSnapshot,
     compute_reconciliation_actions,
 )
-from .crud import (
+from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
     RepairStatus,
     ThreadStatus,
+)
+from .crud import (
     create_control_action,
     get_pending_permission_requests,
     list_non_terminal_threads,

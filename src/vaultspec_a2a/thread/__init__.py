@@ -4,6 +4,27 @@ This is a Layer 1 leaf module with zero internal dependencies beyond
 standard-library and LangGraph/LangChain framework types.
 """
 
+from .enums import (
+    ApprovalStatus as ApprovalStatus,
+)
+from .enums import (
+    ControlActionResultStatus as ControlActionResultStatus,
+)
+from .enums import (
+    ControlActionType as ControlActionType,
+)
+from .enums import (
+    InvalidTransitionError as InvalidTransitionError,
+)
+from .enums import (
+    PermissionRequestStatus as PermissionRequestStatus,
+)
+from .enums import (
+    RepairStatus as RepairStatus,
+)
+from .enums import (
+    ThreadStatus as ThreadStatus,
+)
 from .errors import (
     AgentConfigNotFoundError as AgentConfigNotFoundError,
 )
@@ -72,21 +93,28 @@ from .state import TeamState as TeamState
 __all__ = [
     "AgentConfigNotFoundError",
     "AgentProcessError",
+    "ApprovalStatus",
     "ArtifactRef",
     "ConfigError",
     "ContextOverflowError",
+    "ControlActionResultStatus",
+    "ControlActionType",
     "DatabaseError",
     "ErrorSeverity",
     "EventAggregatorError",
+    "InvalidTransitionError",
     "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
+    "PermissionRequestStatus",
     "PlanStep",
     "ProtocolError",
     "ProviderSessionError",
     "RecoveryAction",
+    "RepairStatus",
     "TeamConfigNotFoundError",
     "TeamState",
+    "ThreadStatus",
     "TokenBudgetExceededError",
     "TokenUsageEntry",
     "VaultspecError",

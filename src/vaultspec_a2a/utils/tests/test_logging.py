@@ -34,7 +34,7 @@ def test_setup_logging_json_format_in_production() -> None:
         environment=Environment.PRODUCTION, log_level=LogLevel.DEBUG
     )
 
-    setup_logging(settings_override=settings_override)
+    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
 
     root_logger = logging.getLogger()
     assert root_logger.level == logging.DEBUG
@@ -53,7 +53,7 @@ def test_setup_logging_respects_settings_override() -> None:
         environment=Environment.DEVELOPMENT, log_level=LogLevel.ERROR
     )
 
-    setup_logging(settings_override=settings_override)
+    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
 
     root_logger = logging.getLogger()
     assert root_logger.level == logging.ERROR
@@ -167,7 +167,7 @@ def test_setup_logging_attaches_correlation_filter_json_path() -> None:
         environment=Environment.PRODUCTION, log_level=LogLevel.DEBUG
     )
 
-    setup_logging(settings_override=settings_override)
+    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
 
     handler = logging.getLogger().handlers[0]
     assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)
@@ -184,7 +184,7 @@ def test_setup_logging_attaches_correlation_filter_rich_path(
         log_level=LogLevel.DEBUG,
     )
 
-    setup_logging(settings_override=settings_override)
+    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
 
     handler = logging.getLogger().handlers[0]
     assert handler.__class__.__name__ == "RichHandler"

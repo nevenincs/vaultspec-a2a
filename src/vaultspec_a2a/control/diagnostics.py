@@ -16,10 +16,10 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from ..database.crud import (
-    ThreadStatus,
     get_thread_execution_state,
     update_thread_status,
 )
+from ..thread.enums import ThreadStatus
 
 __all__ = [
     "MissingThreadClassification",

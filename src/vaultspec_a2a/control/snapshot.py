@@ -25,8 +25,8 @@ from ..api.schemas.snapshots import (
     _PermissionOptionSnapshot,
     _PermissionSnapshot,
 )
-from ..database.crud import ThreadStatus
 from ..streaming.aggregator import EventAggregator, classify_tool_kind
+from ..thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from langchain_core.runnables import RunnableConfig

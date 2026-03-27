@@ -13,6 +13,7 @@ __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",
     "AgentLifecycleState",
+    "AgentState",
     "Model",
     "PermissionOptionKind",
     "PermissionType",
@@ -22,11 +23,21 @@ __all__ = [
 ]
 
 
+class AgentState(StrEnum):
+    """Lifecycle states for LangGraph agents/nodes."""
+
+    INIT = "init"
+    READY = "ready"
+    RUNNING = "running"
+    ERROR = "error"
+    DONE = "done"
+
+
 class AgentLifecycleState(StrEnum):
     """Observable agent states exposed to the frontend.
 
-    Maps to ADR-003 MCP states. Distinct from ``vaultspec_a2a.utils.enums.AgentState``
-    which tracks internal process lifecycle (init/ready/running/error/done).
+    Maps to ADR-003 MCP states. Distinct from ``AgentState`` which tracks
+    internal process lifecycle (init/ready/running/error/done).
     """
 
     SUBMITTED = "submitted"

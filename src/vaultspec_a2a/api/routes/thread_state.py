@@ -23,9 +23,10 @@ from ...control.snapshot import (
     load_checkpoint_history_depth,
 )
 from ...database.checkpoints import Checkpointer
-from ...database.crud import RepairStatus, get_thread
+from ...database.crud import get_thread
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
+from ...thread.enums import RepairStatus
 from ..dependencies import get_aggregator, get_checkpointer
 from ..schemas.snapshots import ThreadStateSnapshot
 

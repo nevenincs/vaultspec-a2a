@@ -7,32 +7,9 @@ non-terminal threads into a consistent state after a gateway restart.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Literal
 
-
-class _ThreadStatus(StrEnum):
-    """Subset of ThreadStatus values relevant to reconciliation decisions."""
-
-    INPUT_REQUIRED = "input_required"
-    REPAIR_NEEDED = "repair_needed"
-    CANCELLING = "cancelling"
-    RECONCILING = "reconciling"
-
-
-class _RepairStatus(StrEnum):
-    """Subset of RepairStatus values used in reconciliation actions."""
-
-    PAUSED_RESUMABLE = "paused_resumable"
-    CANCEL_PENDING = "cancel_pending"
-    CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
-    NEEDS_RECONCILIATION = "needs_reconciliation"
-
-
-class _ControlActionType(StrEnum):
-    """Subset of ControlActionType values referenced in reconciliation."""
-
-    PERMISSION_REQUEST_CREATED = "permission_request_created"
+from ..thread.enums import ControlActionType, RepairStatus, ThreadStatus
 
 
 @dataclass(frozen=True, slots=True)
@@ -94,33 +71,33 @@ def compute_reconciliation_actions(
         if has_pending:
             new_status: str | None = None
             if thread.status not in (
-                _ThreadStatus.INPUT_REQUIRED.value,
-                _ThreadStatus.REPAIR_NEEDED.value,
+                ThreadStatus.INPUT_REQUIRED.value,
+                ThreadStatus.REPAIR_NEEDED.value,
             ):
-                new_status = _ThreadStatus.INPUT_REQUIRED.value
+                new_status = ThreadStatus.INPUT_REQUIRED.value
 
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,
                     new_thread_status=new_status,
-                    repair_status=_RepairStatus.PAUSED_RESUMABLE.value,
+                    repair_status=RepairStatus.PAUSED_RESUMABLE.value,
                     repair_reason=("Pending permission request survived restart"),
-                    execution_readiness=_RepairStatus.PAUSED_RESUMABLE.value,
+                    execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
                     last_applied_action=(
-                        _ControlActionType.PERMISSION_REQUEST_CREATED.value
+                        ControlActionType.PERMISSION_REQUEST_CREATED.value
                     ),
                 ),
             )
-        elif thread.status == _ThreadStatus.CANCELLING.value:
+        elif thread.status == ThreadStatus.CANCELLING.value:
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,
                     new_thread_status=None,
-                    repair_status=_RepairStatus.CANCEL_PENDING.value,
+                    repair_status=RepairStatus.CANCEL_PENDING.value,
                     repair_reason=(
                         "Cancellation is pending confirmation after restart"
                     ),
-                    execution_readiness=_RepairStatus.CANCEL_PENDING.value,
+                    execution_readiness=RepairStatus.CANCEL_PENDING.value,
                     increment_recovery_epoch=True,
                 ),
             )
@@ -128,10 +105,10 @@ def compute_reconciliation_actions(
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,
-                    new_thread_status=_ThreadStatus.REPAIR_NEEDED.value,
-                    repair_status=_RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+                    new_thread_status=ThreadStatus.REPAIR_NEEDED.value,
+                    repair_status=RepairStatus.CHECKPOINT_UNAVAILABLE.value,
                     repair_reason=(checkpoint_error or "checkpoint_unavailable"),
-                    execution_readiness=(_RepairStatus.CHECKPOINT_UNAVAILABLE.value),
+                    execution_readiness=(RepairStatus.CHECKPOINT_UNAVAILABLE.value),
                     increment_generation=True,
                     increment_recovery_epoch=True,
                 ),
@@ -140,10 +117,10 @@ def compute_reconciliation_actions(
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,
-                    new_thread_status=_ThreadStatus.REPAIR_NEEDED.value,
-                    repair_status=_RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+                    new_thread_status=ThreadStatus.REPAIR_NEEDED.value,
+                    repair_status=RepairStatus.CHECKPOINT_UNAVAILABLE.value,
                     repair_reason=("Marked repair_needed by startup strategy"),
-                    execution_readiness=(_RepairStatus.CHECKPOINT_UNAVAILABLE.value),
+                    execution_readiness=(RepairStatus.CHECKPOINT_UNAVAILABLE.value),
                     increment_generation=True,
                     increment_recovery_epoch=True,
                 ),
@@ -152,10 +129,10 @@ def compute_reconciliation_actions(
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,
-                    new_thread_status=_ThreadStatus.RECONCILING.value,
-                    repair_status=_RepairStatus.NEEDS_RECONCILIATION.value,
+                    new_thread_status=ThreadStatus.RECONCILING.value,
+                    repair_status=RepairStatus.NEEDS_RECONCILIATION.value,
                     repair_reason=("Gateway restarted with an active thread"),
-                    execution_readiness=(_RepairStatus.NEEDS_RECONCILIATION.value),
+                    execution_readiness=(RepairStatus.NEEDS_RECONCILIATION.value),
                     increment_generation=True,
                     increment_recovery_epoch=True,
                 ),

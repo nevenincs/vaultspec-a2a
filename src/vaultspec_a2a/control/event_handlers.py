@@ -71,14 +71,16 @@ async def _handle_terminal_event(
         return
     try:
         from ..database.crud import (
-            ControlActionType,
-            InvalidTransitionError,
-            RepairStatus,
-            ThreadStatus,
             expire_pending_permission_requests,
             get_latest_control_action,
             set_thread_repair_state,
             update_thread_status,
+        )
+        from ..thread.enums import (
+            ControlActionType,
+            InvalidTransitionError,
+            RepairStatus,
+            ThreadStatus,
         )
 
         if session_factory is None:
@@ -181,12 +183,6 @@ async def _handle_permission_event(
         return
 
     from ..database.crud import (
-        ApprovalStatus,
-        ControlActionResultStatus,
-        ControlActionType,
-        PermissionRequestStatus,
-        RepairStatus,
-        ThreadStatus,
         create_control_action,
         get_permission_request,
         mark_permission_request_applied,
@@ -195,6 +191,14 @@ async def _handle_permission_event(
         set_thread_repair_state,
         supersede_permission_requests,
         update_thread_status,
+    )
+    from ..thread.enums import (
+        ApprovalStatus,
+        ControlActionResultStatus,
+        ControlActionType,
+        PermissionRequestStatus,
+        RepairStatus,
+        ThreadStatus,
     )
 
     if session_factory is None:
@@ -321,17 +325,19 @@ async def _handle_progress_event(
         return
 
     from ..database.crud import (
-        ApprovalStatus,
-        ControlActionResultStatus,
-        ControlActionType,
-        RepairStatus,
-        ThreadStatus,
         create_control_action,
         get_pending_permission_requests,
         mark_permission_request_applied,
         set_thread_approval_state,
         set_thread_repair_state,
         update_thread_status,
+    )
+    from ..thread.enums import (
+        ApprovalStatus,
+        ControlActionResultStatus,
+        ControlActionType,
+        RepairStatus,
+        ThreadStatus,
     )
 
     if session_factory is None:

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, datetime
-from enum import StrEnum
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -16,7 +15,17 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
+from ..thread.enums import (
+    ApprovalStatus,
+    ControlActionResultStatus,
+    ControlActionType,
+    InvalidTransitionError,
+    PermissionRequestStatus,
+    RepairStatus,
+    ThreadStatus,
+)
 from ..thread.errors import NicknameConflictError
+from ..thread.transitions import validate_transition
 from .models import (
     ArtifactModel,
     ControlActionModel,
@@ -26,79 +35,6 @@ from .models import (
     ThreadExecutionStateModel,
     ThreadModel,
 )
-
-
-class ThreadStatus(StrEnum):
-    """Durable lifecycle states for orchestration threads."""
-
-    SUBMITTED = "submitted"
-    RUNNING = "running"
-    INPUT_REQUIRED = "input_required"
-    CANCELLING = "cancelling"
-    CANCELLED = "cancelled"
-    COMPLETED = "completed"
-    FAILED = "failed"
-    ARCHIVED = "archived"
-    REPAIR_NEEDED = "repair_needed"
-    RECONCILING = "reconciling"
-
-
-class RepairStatus(StrEnum):
-    """Repair and readiness classification distinct from lifecycle."""
-
-    HEALTHY = "healthy"
-    PAUSED_RESUMABLE = "paused_resumable"
-    CANCEL_PENDING = "cancel_pending"
-    REPLAY_GAP = "replay_gap"
-    CHECKPOINT_UNAVAILABLE = "checkpoint_unavailable"
-    NEEDS_RECONCILIATION = "needs_reconciliation"
-    OPERATOR_INTERVENTION_REQUIRED = "operator_intervention_required"
-
-
-class ControlActionType(StrEnum):
-    """Durable journaled control action types."""
-
-    INGEST = "ingest"
-    RESUME = "resume"
-    CANCEL = "cancel"
-    PERMISSION_REQUEST_CREATED = "permission_request_created"
-    PERMISSION_RESPONSE_SUBMITTED = "permission_response_submitted"
-    PERMISSION_RESPONSE_APPLIED = "permission_response_applied"
-    MESSAGE_FOLLOWUP_REQUESTED = "message_followup_requested"
-    MESSAGE_FOLLOWUP_APPLIED = "message_followup_applied"
-    REPAIR_STARTED = "repair_started"
-    REPAIR_FINISHED = "repair_finished"
-
-
-class ControlActionResultStatus(StrEnum):
-    """Journaled outcome states for control actions."""
-
-    ACCEPTED_NOT_APPLIED = "accepted_not_applied"
-    APPLIED = "applied"
-    REJECTED_INVALID_STATE = "rejected_invalid_state"
-    SUPERSEDED = "superseded"
-    DUPLICATE = "duplicate"
-
-
-class PermissionRequestStatus(StrEnum):
-    """Durable lifecycle for permission requests."""
-
-    PENDING = "pending"
-    ANSWERED_PENDING_APPLY = "answered_pending_apply"
-    APPLIED = "applied"
-    REJECTED = "rejected"
-    SUPERSEDED = "superseded"
-    EXPIRED_BY_TERMINAL_STATE = "expired_by_terminal_state"
-
-
-class ApprovalStatus(StrEnum):
-    """Durable lifecycle for plan approval state on a thread."""
-
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-    SUPERSEDED = "superseded"
-
 
 __all__ = [
     "ApprovalStatus",
@@ -338,81 +274,6 @@ async def delete_thread(session: AsyncSession, thread_id: str) -> bool:
     return True
 
 
-class InvalidTransitionError(ValueError):
-    """Raised when a thread status transition is not allowed."""
-
-
-_VALID_TRANSITIONS: dict[ThreadStatus, frozenset[ThreadStatus]] = {
-    ThreadStatus.SUBMITTED: frozenset(
-        {
-            ThreadStatus.RUNNING,
-            ThreadStatus.INPUT_REQUIRED,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.FAILED,
-            ThreadStatus.RECONCILING,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.RUNNING: frozenset(
-        {
-            ThreadStatus.INPUT_REQUIRED,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.COMPLETED,
-            ThreadStatus.FAILED,
-            ThreadStatus.RECONCILING,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.INPUT_REQUIRED: frozenset(
-        {
-            ThreadStatus.RUNNING,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.COMPLETED,
-            ThreadStatus.FAILED,
-            ThreadStatus.RECONCILING,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.CANCELLING: frozenset(
-        {
-            ThreadStatus.CANCELLED,
-            ThreadStatus.FAILED,
-            ThreadStatus.RECONCILING,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.RECONCILING: frozenset(
-        {
-            ThreadStatus.SUBMITTED,
-            ThreadStatus.RUNNING,
-            ThreadStatus.INPUT_REQUIRED,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.COMPLETED,
-            ThreadStatus.FAILED,
-            ThreadStatus.REPAIR_NEEDED,
-        }
-    ),
-    ThreadStatus.REPAIR_NEEDED: frozenset(
-        {
-            ThreadStatus.RECONCILING,
-            ThreadStatus.RUNNING,
-            ThreadStatus.INPUT_REQUIRED,
-            ThreadStatus.CANCELLING,
-            ThreadStatus.CANCELLED,
-            ThreadStatus.FAILED,
-        }
-    ),
-    ThreadStatus.COMPLETED: frozenset({ThreadStatus.ARCHIVED}),
-    ThreadStatus.FAILED: frozenset({ThreadStatus.ARCHIVED}),
-    ThreadStatus.CANCELLED: frozenset({ThreadStatus.ARCHIVED}),
-    ThreadStatus.ARCHIVED: frozenset(),
-}
-
-
 async def update_thread_status(
     session: AsyncSession,
     thread_id: str,
@@ -430,12 +291,7 @@ async def update_thread_status(
         await session.flush()
         return thread
 
-    allowed = _VALID_TRANSITIONS.get(current, frozenset())
-    if coerced_status not in allowed:
-        raise InvalidTransitionError(
-            f"Cannot transition thread {thread_id} from "
-            f"{current.value!r} to {coerced_status.value!r}"
-        )
+    validate_transition(current, coerced_status, thread_id=thread_id)
 
     thread.status = coerced_status.value
     thread.updated_at = _utcnow()

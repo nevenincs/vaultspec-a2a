@@ -7,8 +7,13 @@ sub-modules directly::
     from vaultspec_a2a.database import init_db, create_thread, ThreadModel
 """
 
-from .crud import InvalidTransitionError as InvalidTransitionError
-from .crud import ThreadStatus as ThreadStatus
+from ..thread.enums import ApprovalStatus as ApprovalStatus
+from ..thread.enums import ControlActionResultStatus as ControlActionResultStatus
+from ..thread.enums import ControlActionType as ControlActionType
+from ..thread.enums import InvalidTransitionError as InvalidTransitionError
+from ..thread.enums import PermissionRequestStatus as PermissionRequestStatus
+from ..thread.enums import RepairStatus as RepairStatus
+from ..thread.enums import ThreadStatus as ThreadStatus
 from .crud import append_cost_record as append_cost_record
 from .crud import append_permission_log as append_permission_log
 from .crud import create_artifact as create_artifact
@@ -39,11 +44,16 @@ from .session import init_db as init_db
 from .session import verify_wal_mode as verify_wal_mode
 
 __all__ = [
+    "ApprovalStatus",
     "ArtifactModel",
     "Base",
+    "ControlActionResultStatus",
+    "ControlActionType",
     "CostTrackingModel",
     "InvalidTransitionError",
     "PermissionLogModel",
+    "PermissionRequestStatus",
+    "RepairStatus",
     "ThreadModel",
     "ThreadStatus",
     "append_cost_record",

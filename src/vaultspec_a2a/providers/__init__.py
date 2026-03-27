@@ -17,8 +17,8 @@ from .acp_exceptions import AcpProtocolError as AcpProtocolError
 from .acp_exceptions import AcpSessionError as AcpSessionError
 
 # Lazy imports to break circular dependency:
-#   providers.acp_chat_model -> core.team_config -> core.__init__
-#   -> core.graph -> providers.factory -> providers.acp_chat_model
+#   providers.acp_chat_model -> team.team_config -> graph.compiler
+#   -> providers.factory -> providers.acp_chat_model
 _LAZY_IMPORTS = {
     "AcpChatModel": ".acp_chat_model",
     "MockChatModel": ".mock_chat_model",

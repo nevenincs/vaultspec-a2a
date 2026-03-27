@@ -21,10 +21,15 @@ src/vaultspec_a2a/
 │   │                                         discover_agent_preset_ids, load_agent_config
 │   └── presets/                              Preset TOML files (incl. mock/tapes/)
 │
-├── thread/                            ~670 lines
-│   ├── __init__.py                     (95)
+├── thread/                            ~1,437 lines
+│   ├── __init__.py                    (171)
+│   ├── enums.py                        (83)  ThreadStatus, RepairStatus, ControlActionType,
+│   │                                         ControlActionResultStatus, PermissionRequestStatus,
+│   │                                         ApprovalStatus
+│   ├── transitions.py                  (95)  _VALID_TRANSITIONS state machine + transition helpers
+│   ├── snapshots.py                   (498)  Snapshot dataclasses + pure enrichment logic
 │   ├── state.py                       (168)  TeamState TypedDict + reducers
-│   ├── models.py                       (89)  TokenUsageEntry, PlanStep, ArtifactRef
+│   ├── models.py                      (104)  TokenUsageEntry, PlanStep, ArtifactRef
 │   └── errors.py                      (318)  Full error taxonomy + ProviderSessionError
 │
 ├── context/                           ~774 lines
@@ -137,15 +142,15 @@ src/vaultspec_a2a/
 │   │                                         ExecutionTaskProjectionPayload
 │   └── serializers.py                 (18)  sequenced_to_dict (event serialization)
 │
-├── control/                           ~4,948 lines │ Runtime + dev-tooling
+├── control/                           ~4,754 lines │ Runtime + dev-tooling
 │   │
 │   │   # ── Production runtime (process supervision, dispatch, health) ──
 │   ├── circuit_breaker.py             (98)  WorkerCircuitBreaker (protocol-agnostic)
 │   ├── worker_management.py          (604)  LazyWorkerSpawner, WorkerWatchdog, WorkerState
-│   ├── dispatch.py                   (221)  dispatch_to_worker(), domain error types
-│   ├── projection.py                 (491)  Checkpoint/state projection (from api/)
-│   ├── snapshot.py                   (286)  Snapshot assembly (from api/endpoints)
-│   ├── event_handlers.py             (473)  Event handlers + relay_event() (from api/internal)
+│   ├── dispatch.py                   (264)  dispatch_to_worker(), domain error types
+│   ├── projection.py                 (337)  Checkpoint/state projection
+│   ├── snapshot.py                   (202)  Snapshot assembly (delegates to thread/snapshots)
+│   ├── event_handlers.py             (467)  Event handlers + relay_event()
 │   ├── health.py                     (170)  assemble_health_status() (consolidated)
 │   ├── diagnostics.py                (150)  classify_missing_ws_thread, mark_thread_failed
 │   │
@@ -156,13 +161,17 @@ src/vaultspec_a2a/
 │   ├── verify.py                     (894)  Schema consistency
 │   └── hooks.py                      (191)  Pre-commit hook management
 │
-├── database/                          ~2,116 lines │ SQLAlchemy + Alembic + aiosqlite
-│   ├── session.py                    (269)  Engine factory (SQLite/Postgres)
+├── database/                          ~2,340 lines │ SQLAlchemy + Alembic + aiosqlite
+│   ├── session.py                    (270)  Engine factory (SQLite/Postgres)
 │   ├── models.py                     (288)  ORM table definitions
-│   ├── crud.py                       (976)  Query/mutation functions
+│   ├── crud.py                       (211)  Cost/execution CRUD (residual)
+│   ├── crud_threads.py               (359)  Thread lifecycle CRUD
+│   ├── crud_permissions.py           (299)  Permission request CRUD
+│   ├── crud_artifacts.py             (126)  Artifact CRUD
+│   ├── _crud_helpers.py              (130)  Shared CRUD utilities (pagination, filtering)
 │   ├── checkpoints.py                (270)  LangGraph checkpointer factory
 │   ├── migrate.py                     (47)  Alembic runner
-│   ├── reconciliation.py             (194)  Reconciliation I/O executor
+│   ├── reconciliation.py             (196)  Reconciliation I/O executor
 │   └── migrations/                           Alembic versions
 │
 ├── providers/                         ~4,031 lines │ Anthropic + OpenAI + Google + Zhipu SDKs
@@ -190,11 +199,11 @@ src/vaultspec_a2a/
 │   ├── environment.py                (135)  .venv/workspace discovery
 │   └── git_manager.py               (485)  Git operations
 │
-├── utils/                             ~496 lines │ stdlib + OTel trace context
-│   ├── enums.py                       (54)  AgentState, LogLevel, Environment, AcpRequestId
-│   ├── logging.py                    (163)  Log setup
+├── utils/                             ~520 lines │ stdlib + OTel trace context
+│   ├── enums.py                       (43)  AgentState, LogLevel, Environment, AcpRequestId
+│   ├── logging.py                    (182)  Log setup
 │   ├── timestamp.py                   (68)  Monotonic clock helpers
-│   ├── trace.py                      (177)  OTel span context utilities
+│   ├── trace.py                      (195)  OTel span context utilities
 │   └── asyncio_compat.py              (15)  Windows Proactor event loop stub
 │
 # ══════════════════════════════════════════════════════════════
@@ -219,17 +228,17 @@ src/vaultspec_a2a/
                     └────────┬────────┘
                              │ (consumed by all Layer 1 modules)
                              │
-    ┌──────────┐    ┌────────▼─┐    ┌──────────┐    ┌──────────┐
-    │  team/   │    │ thread/  │    │ context/ │    │  graph/  │
-    │          │    │          │    │          │    │          │
-    │ team_cfg │    │ state    │    │ metadata │    │ compiler │
-    │ presets  │    │ models   │    │ preamble │    │ nodes/*  │
-    │          │    │ errors   │    │ anchoring│    │ tools/*  │
-    │          │    │          │    │ rules    │    │ events   │
-    │          │    │          │    │ token_   │    │ enums    │
-    │          │    │          │    │  budget  │    │ protocols│
-    └──────────┘    └──────────┘    │ stage    │    └──────────┘
-                                    └──────────┘
+    ┌──────────┐    ┌────────▼─────┐  ┌──────────┐    ┌──────────┐
+    │  team/   │    │   thread/    │  │ context/ │    │  graph/  │
+    │          │    │              │  │          │    │          │
+    │ team_cfg │    │ enums        │  │ metadata │    │ compiler │
+    │ presets  │    │ transitions  │  │ preamble │    │ nodes/*  │
+    │          │    │ snapshots    │  │ anchoring│    │ tools/*  │
+    │          │    │ state        │  │ rules    │    │ events   │
+    │          │    │ models       │  │ token_   │    │ enums    │
+    │          │    │ errors       │  │  budget  │    │ protocols│
+    └──────────┘    └──────────────┘  │ stage    │    └──────────┘
+                                      └──────────┘
     Dependency direction (imports from):
     ─ graph/   imports from ► context/, thread/, team/, domain_config
     ─ context/ imports from ► thread/, domain_config
@@ -265,24 +274,24 @@ src/vaultspec_a2a/
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
          LAYER 2 — Infrastructure Services (shared)
  ┌──────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌───────────┐
- │ ipc/ │ │ control/ │ │ database/ │ │providers/│ │ telemetry/│
- │      │ │          │ │           │ │          │ │           │
- │schema│ │circuit_  │ │ session   │ │ factory  │ │instrument.│
- │serial│ │ breaker  │ │ models    │ │ acp_chat │ │ middleware│
- │      │ │worker_   │ │ crud      │ │ mock_    │ │ agg_hook  │
- │      │ │ mgmt     │ │ checkpts  │ │ gemini   │ │           │
- │      │ │dispatch  │ │ migrate   │ │ probes/* │ │           │
- │      │ │projection│ │ reconcile │ │          │ │           │
- │      │ │snapshot  │ │           │ │          │ │           │
- │      │ │event_    │ │           │ │          │ │           │
- │      │ │ handlers │ │           │ │          │ │           │
- │      │ │health    │ │           │ │          │ │           │
- │      │ │diagnost. │ │           │ │          │ │           │
- │      │ │config    │ │           │ │          │ │           │
- │      │ │db/doctor │ │           │ │          │ │           │
- │      │ │verify    │ │           │ │          │ │           │
- │      │ │hooks     │ │           │ │          │ │           │
- └──────┘ └──────────┘ └───────────┘ └──────────┘ └───────────┘
+ │ ipc/ │ │ control/ │ │ database/  │ │providers/│ │ telemetry/│
+ │      │ │          │ │            │ │          │ │           │
+ │schema│ │circuit_  │ │ session    │ │ factory  │ │instrument.│
+ │serial│ │ breaker  │ │ models     │ │ acp_chat │ │ middleware│
+ │      │ │worker_   │ │ crud       │ │ mock_    │ │ agg_hook  │
+ │      │ │ mgmt     │ │ crud_      │ │ gemini   │ │           │
+ │      │ │dispatch  │ │  threads   │ │ probes/* │ │           │
+ │      │ │projection│ │ crud_      │ │          │ │           │
+ │      │ │snapshot  │ │  permissns │ │          │ │           │
+ │      │ │event_    │ │ crud_      │ │          │ │           │
+ │      │ │ handlers │ │  artifacts │ │          │ │           │
+ │      │ │health    │ │ _crud_     │ │          │ │           │
+ │      │ │diagnost. │ │  helpers   │ │          │ │           │
+ │      │ │config    │ │ checkpts   │ │          │ │           │
+ │      │ │db/doctor │ │ migrate    │ │          │ │           │
+ │      │ │verify    │ │ reconcile  │ │          │ │           │
+ │      │ │hooks     │ │            │ │          │ │           │
+ └──────┘ └──────────┘ └────────────┘ └──────────┘ └───────────┘
  ┌───────────┐ ┌───────┐
  │ workspace/│ │ utils/│
  │ git+path  │ │stdlib │
@@ -303,7 +312,10 @@ src/vaultspec_a2a/
 |---|---|---|
 | **domain_config** | All Layer 1 modules, control/config (composes into Settings) | Pydantic |
 | **team/team_config** | providers/factory, providers/acp_chat_model, worker/executor, cli/_agent | LangChain, subprocess |
-| **thread/errors** | database/crud, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
+| **thread/enums** | database/crud_*, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum |
+| **thread/transitions** | database/crud_threads, control/event_handlers | Pure dict lookup |
+| **thread/snapshots** | control/snapshot, control/projection, api/routes/thread_state | Dataclasses |
+| **thread/errors** | database/crud_*, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
 | **thread/state** | worker/executor, api/routes/* (via graph/) | LangGraph, FastAPI |
 | **context/*** | graph/nodes/* only (via facade) | Internal — not consumed by Layer 2 directly |
 | **graph/compiler** | worker/graph_lifecycle | LangGraph, LangChain |
@@ -335,7 +347,7 @@ src/vaultspec_a2a/
 3. **Layer 2 entry points** import from Layer 1, 1.5, and infra services. Never import from each other (api/ does not import cli/, worker/ does not import api/).
 4. **Layer 2 infra services** import from Layer 1. Entry points import from infra services. Infra services never import from entry points.
 5. **IPC package** (`ipc/`) is a neutral contract consumed equally by api/ and worker/. Neither owns it.
-6. **control/** contains production runtime (dispatch, health, circuit breaker, worker management), dev-tooling (db, doctor, hooks, verify), and **misplaced domain logic** (projection, snapshot, event_handlers — business rules that depend on database/schemas and need dependency inversion to move to Layer 1).
+6. **control/** contains production runtime (dispatch, health, circuit breaker, worker management) and dev-tooling (db, doctor, hooks, verify). Domain logic formerly in projection/snapshot/event_handlers has been extracted to `thread/snapshots` and `thread/transitions`.
 7. **Layer 3** defines topology. No code execution logic. No business rules.
 
 ## Test Isolation
@@ -345,13 +357,13 @@ depend on a higher layer's infrastructure.
 
 ```bash
 # Layer 1 — pure domain, zero infrastructure
-pytest -m core          # 425 tests, zero deps, bare REPL importable
+pytest -m core          # 520 tests, zero deps, bare REPL importable
 
 # Layer 2 — middleware (protocol adapters + infra services)
-pytest -m middleware    # 616 tests, no Docker/orchestration
+pytest -m middleware    # 574 tests, no Docker/orchestration
 
 # All non-infrastructure tests combined
-pytest                  # 1,041 tests (core + middleware)
+pytest                  # 1,094 tests (core + middleware)
 
 # Infrastructure-gated (require external services)
 pytest -m live                   # full-stack integration (Docker)
@@ -365,8 +377,8 @@ Marker hierarchy:
 
 | Marker | Layer | Count | What it needs |
 |--------|-------|-------|---------------|
-| `core` + `unit` | 1 | 425 | Nothing — bare Python |
-| `middleware` | 2 | 616 | Nothing — no orchestration |
+| `core` + `unit` | 1 | 520 | Nothing — bare Python |
+| `middleware` | 2 | 574 | Nothing — no orchestration |
 | `live` | 3 | ~34 | Docker, running services |
 | `requires_acp` | infra | 9 | `npm install` |
 | `requires_postgres` | infra | 4 | Postgres instance |
@@ -406,7 +418,7 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
   --include='*.py' | grep -v '/tests/' | grep -v __pycache__
 ```
 
-## Boundary Audit Status (2026-03-26)
+## Boundary Audit Status (2026-03-27)
 
 ### Layer 1 + Layer 2a — PASS (PR #3 + entry-point-layer PR)
 
@@ -420,7 +432,7 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | Test markers correctly isolate layers | PASS |
 | Infrastructure failures hard-fail | PASS |
 
-### Layer 2b Infrastructure Services — AUDITED, issues found
+### Layer 2b Infrastructure Services — CLEAN (domain-logic extraction PR)
 
 | Package | Status | Finding |
 |---------|--------|---------|
@@ -428,23 +440,20 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | `telemetry/` | CLEAN | Correct TelemetryHook protocol implementation |
 | `workspace/` | CLEAN | Thin subprocess wrapper |
 | `ipc/` | CLEAN | Neutral contract |
-| `database/` | MODERATE | Status enums (ThreadStatus, RepairStatus, etc.) are domain logic defined in crud.py (Layer 2b) — belong in Layer 1. crud.py (976L) covers 6 unrelated domains. |
-| `control/` | MODERATE | Three concerns mashed together: production runtime, misplaced domain logic (projection, snapshot, event_handlers), dev-tooling. Domain logic needs dependency inversion to move to Layer 1. |
-| `utils/` | MINOR | timestamp.py is pure Layer 1. enums.py mixes domain + infra. Dead code (vowel_counter.py). |
+| `database/` | CLEAN | Domain enums extracted to `thread/enums`. `crud.py` split into focused modules (`crud_threads`, `crud_permissions`, `crud_artifacts`, `_crud_helpers`). |
+| `control/` | CLEAN | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain. |
+| `utils/` | CLEAN | Dead code removed. Layer inversions fixed. |
 
 ### Known Test Marker Mismatches
 
 | Test file | Current | Should be | Reason |
 |-----------|---------|-----------|--------|
-| `utils/tests/test_enums.py` | `middleware` | `core` | Pure enum tests, no infra deps |
-| `utils/tests/test_timestamp.py` | `middleware` | `core` | Pure stdlib utility |
 | `graph/tests/test_e2e_live.py` | none | `live` | Uses real AsyncSqliteSaver |
 
-### Next PR: Domain Logic Extraction
+### Next PR: Layer 3 Infrastructure Config
 
-Move domain concepts from Layer 2b back to Layer 1:
-- Status enums from `database/crud.py` → `thread/` or `lifecycle/`
-- Business logic from `control/projection.py`, `control/snapshot.py`,
-  `control/event_handlers.py` → Layer 1 (requires dependency inversion)
-- Split `crud.py` by domain (thread, control, permission, execution, artifact, cost)
-- Fix test markers to match actual layers
+Remaining work:
+
+- Docker Compose consolidation and topology review
+- Justfile recipe audit
+- `.env.example` alignment with Settings fields

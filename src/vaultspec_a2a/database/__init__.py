@@ -14,22 +14,65 @@ from ..thread.enums import InvalidTransitionError as InvalidTransitionError
 from ..thread.enums import PermissionRequestStatus as PermissionRequestStatus
 from ..thread.enums import RepairStatus as RepairStatus
 from ..thread.enums import ThreadStatus as ThreadStatus
-from .crud import append_cost_record as append_cost_record
-from .crud import append_permission_log as append_permission_log
-from .crud import create_artifact as create_artifact
-from .crud import create_thread as create_thread
-from .crud import delete_thread as delete_thread
-from .crud import get_artifact as get_artifact
-from .crud import get_artifacts_by_thread as get_artifacts_by_thread
-from .crud import get_permission_logs_by_thread as get_permission_logs_by_thread
-from .crud import get_thread as get_thread
-from .crud import get_thread_metadata as get_thread_metadata
-from .crud import list_threads as list_threads
 from .crud import save_model as save_model
-from .crud import sum_cost_by_agent as sum_cost_by_agent
-from .crud import sum_cost_by_thread as sum_cost_by_thread
-from .crud import update_thread_metadata as update_thread_metadata
-from .crud import update_thread_status as update_thread_status
+from .crud_artifacts import append_cost_record as append_cost_record
+from .crud_artifacts import append_permission_log as append_permission_log
+from .crud_artifacts import create_artifact as create_artifact
+from .crud_artifacts import get_artifact as get_artifact
+from .crud_artifacts import get_artifacts_by_thread as get_artifacts_by_thread
+from .crud_artifacts import (
+    get_permission_logs_by_thread as get_permission_logs_by_thread,
+)
+from .crud_artifacts import sum_cost_by_agent as sum_cost_by_agent
+from .crud_artifacts import sum_cost_by_thread as sum_cost_by_thread
+from .crud_permissions import create_control_action as create_control_action
+from .crud_permissions import (
+    expire_pending_permission_requests as expire_pending_permission_requests,
+)
+from .crud_permissions import (
+    get_control_action_by_idempotency_key as get_control_action_by_idempotency_key,
+)
+from .crud_permissions import get_latest_control_action as get_latest_control_action
+from .crud_permissions import (
+    get_pending_permission_requests as get_pending_permission_requests,
+)
+from .crud_permissions import get_permission_request as get_permission_request
+from .crud_permissions import (
+    mark_control_action_applied as mark_control_action_applied,
+)
+from .crud_permissions import (
+    mark_control_action_duplicate as mark_control_action_duplicate,
+)
+from .crud_permissions import (
+    mark_control_action_superseded as mark_control_action_superseded,
+)
+from .crud_permissions import (
+    mark_permission_request_applied as mark_permission_request_applied,
+)
+from .crud_permissions import record_permission_request as record_permission_request
+from .crud_permissions import (
+    record_permission_response_submission as record_permission_response_submission,
+)
+from .crud_permissions import (
+    supersede_permission_requests as supersede_permission_requests,
+)
+from .crud_threads import create_thread as create_thread
+from .crud_threads import delete_thread as delete_thread
+from .crud_threads import (
+    delete_thread_execution_state as delete_thread_execution_state,
+)
+from .crud_threads import get_thread as get_thread
+from .crud_threads import get_thread_execution_state as get_thread_execution_state
+from .crud_threads import get_thread_metadata as get_thread_metadata
+from .crud_threads import list_non_terminal_threads as list_non_terminal_threads
+from .crud_threads import list_threads as list_threads
+from .crud_threads import (
+    record_thread_execution_state as record_thread_execution_state,
+)
+from .crud_threads import set_thread_approval_state as set_thread_approval_state
+from .crud_threads import set_thread_repair_state as set_thread_repair_state
+from .crud_threads import update_thread_metadata as update_thread_metadata
+from .crud_threads import update_thread_status as update_thread_status
 from .migrate import run_migrations as run_migrations
 from .models import ArtifactModel as ArtifactModel
 from .models import Base as Base
@@ -60,22 +103,41 @@ __all__ = [
     "append_permission_log",
     "close_db",
     "create_artifact",
+    "create_control_action",
     "create_thread",
     "delete_thread",
+    "delete_thread_execution_state",
+    "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
+    "get_control_action_by_idempotency_key",
     "get_db",
     "get_engine",
+    "get_latest_control_action",
+    "get_pending_permission_requests",
     "get_permission_logs_by_thread",
+    "get_permission_request",
     "get_session_factory",
     "get_thread",
+    "get_thread_execution_state",
     "get_thread_metadata",
     "init_db",
+    "list_non_terminal_threads",
     "list_threads",
+    "mark_control_action_applied",
+    "mark_control_action_duplicate",
+    "mark_control_action_superseded",
+    "mark_permission_request_applied",
+    "record_permission_request",
+    "record_permission_response_submission",
+    "record_thread_execution_state",
     "run_migrations",
     "save_model",
+    "set_thread_approval_state",
+    "set_thread_repair_state",
     "sum_cost_by_agent",
     "sum_cost_by_thread",
+    "supersede_permission_requests",
     "update_thread_metadata",
     "update_thread_status",
     "verify_wal_mode",

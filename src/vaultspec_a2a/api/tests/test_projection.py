@@ -10,17 +10,21 @@ from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from ...control.projection import (
-    CheckpointProjection,
-    ProjectedInterrupt,
     apply_checkpoint_projection,
     apply_execution_state_projection,
     enrich_snapshot_from_execution_state,
-    project_checkpoint_tuple,
     project_execution_state_model,
 )
 from ...database.crud import create_thread, record_thread_execution_state
 from ...database.models import Base, ThreadExecutionStateModel
-from ..schemas.snapshots import ExecutionTaskSnapshot, ThreadStateSnapshot
+from ...thread.snapshots import (
+    CheckpointProjection,
+    ExecutionStateProjection,
+    ExecutionTaskData,
+    ProjectedInterrupt,
+    ThreadStateData,
+    project_checkpoint_tuple,
+)
 
 
 def test_project_checkpoint_tuple_extracts_plan_approval_interrupt() -> None:
@@ -124,7 +128,7 @@ def test_project_checkpoint_tuple_surfaces_metadata_parent_and_pending_writes() 
 
 def test_apply_checkpoint_projection_merges_interrupt_permissions() -> None:
     """Projected interrupts should surface as pending permissions in snapshots."""
-    snapshot = ThreadStateSnapshot(
+    snapshot = ThreadStateData(
         thread_id="thread-1",
         status="input_required",
         last_sequence=0,
@@ -211,7 +215,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
     assert projection.interrupt_count == 1
     assert projection.degraded_reasons == ["execution_state_projection_partial"]
     assert projection.execution_tasks == [
-        ExecutionTaskSnapshot(
+        ExecutionTaskData(
             task_id="task-1",
             name="supervisor",
             path=["supervisor"],
@@ -227,9 +231,7 @@ def test_project_execution_state_model_normalizes_latest_row() -> None:
 
 def test_apply_execution_state_projection_merges_normalized_fields() -> None:
     """Durable execution-state projection should enrich reconnect snapshots."""
-    from ...control.projection import ExecutionStateProjection
-
-    snapshot = ThreadStateSnapshot(
+    snapshot = ThreadStateData(
         thread_id="thread-1",
         status="running",
         last_sequence=0,
@@ -243,7 +245,7 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
         next_nodes=["supervisor"],
         interrupt_types=["permission_request"],
         execution_tasks=[
-            ExecutionTaskSnapshot(
+            ExecutionTaskData(
                 task_id="task-1",
                 name="supervisor",
                 path=["supervisor"],
@@ -301,7 +303,7 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint() -
         )
         await session.commit()
 
-        snapshot = ThreadStateSnapshot(
+        snapshot = ThreadStateData(
             thread_id="thread-1",
             status=thread.status,
             last_sequence=0,

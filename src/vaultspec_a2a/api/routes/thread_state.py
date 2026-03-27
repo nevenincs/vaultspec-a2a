@@ -2,6 +2,7 @@
 
 import asyncio
 import logging
+from dataclasses import asdict
 from typing import TYPE_CHECKING
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,12 +15,10 @@ from ...control.projection import (
     apply_checkpoint_projection,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
-    project_checkpoint_tuple,
 )
 from ...control.snapshot import (
     MinimalState,
     enrich_snapshot_from_state,
-    finalize_snapshot_replay_status,
     load_checkpoint_history_depth,
 )
 from ...database.checkpoints import Checkpointer
@@ -27,11 +26,21 @@ from ...database.crud import get_thread
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import RepairStatus
+from ...thread.snapshots import (
+    ThreadStateData,
+    finalize_snapshot_replay_status,
+    project_checkpoint_tuple,
+)
 from ..dependencies import get_aggregator, get_checkpointer
 from ..schemas.snapshots import ThreadStateSnapshot
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _to_pydantic(data: ThreadStateData) -> ThreadStateSnapshot:
+    """Convert a Layer 1 ``ThreadStateData`` to a Pydantic wire model."""
+    return ThreadStateSnapshot.model_validate(asdict(data))
 
 
 @router.get("/threads/{thread_id}/state", response_model=ThreadStateSnapshot)
@@ -53,7 +62,7 @@ async def get_thread_state_endpoint(
 
     last_seq = aggregator.get_sequence(thread_id)
 
-    snapshot = ThreadStateSnapshot(
+    snapshot = ThreadStateData(
         thread_id=thread.id,
         status=thread.status,
         last_sequence=last_seq,
@@ -137,10 +146,12 @@ async def get_thread_state_endpoint(
         checkpoint_id=snapshot.checkpoint_id,
     )
 
-    return finalize_snapshot_replay_status(
+    snapshot = finalize_snapshot_replay_status(
         snapshot,
         checkpoint_loaded=checkpoint_loaded,
         checkpoint_present=checkpoint_present,
         checkpoint_error=checkpoint_error,
         thread_status=thread.status,
     )
+
+    return _to_pydantic(snapshot)

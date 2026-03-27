@@ -17,6 +17,14 @@ from datetime import datetime
 from typing import Any
 
 from ..ipc.schemas import ExecutionStateProjectionPayload
+from ..thread.snapshots import (
+    PLAN_APPROVAL_PAUSE_CAUSES,
+    TERMINAL_STATUS_MAP,
+    classify_permission_pause_reason,
+    is_permission_event,
+    is_progress_event,
+    is_terminal_event,
+)
 
 __all__ = [
     "_handle_execution_state_event",
@@ -28,17 +36,8 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_PLAN_APPROVAL_PAUSE_CAUSES = {
-    "plan_approval_request",
-    "plan_approval",
-}
-
-# DB-CRIT-01: map aggregator outcome strings to ThreadStatus enum values.
-_TERMINAL_STATUS_MAP: dict[str, str] = {
-    "completed": "completed",
-    "failed": "failed",
-    "cancelled": "cancelled",
-}
+_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
+_TERMINAL_STATUS_MAP = TERMINAL_STATUS_MAP
 
 
 def _time_now_utc() -> Any:
@@ -64,7 +63,7 @@ async def _handle_terminal_event(
     When *aggregator* is provided, prune stale permissions and sequence
     counters for the terminated thread (AGG-01/05).
     """
-    if payload.get("event_type") != "thread_terminal":
+    if not is_terminal_event(payload):
         return
     status_str = _TERMINAL_STATUS_MAP.get(payload.get("status", ""))
     if not status_str:
@@ -178,9 +177,9 @@ async def _handle_permission_event(
     session_factory: Any | None = None,
 ) -> None:
     """Persist worker permission events into the durable journal."""
-    event_type = payload.get("type", "")
-    if event_type not in {"permission_request", "permission_resolved"}:
+    if not is_permission_event(payload):
         return
+    event_type = payload.get("type", "")
 
     from ..database.crud import (
         create_control_action,
@@ -213,11 +212,7 @@ async def _handle_permission_event(
             if not request_id:
                 return
             tool_call = payload.get("tool_call")
-            pause_reason_type = (
-                "plan_approval_request"
-                if tool_call == "plan_approval"
-                else str(tool_call or "permission_request")
-            )
+            pause_reason_type = classify_permission_pause_reason(tool_call)
             if pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
                 await supersede_permission_requests(
                     db,
@@ -313,16 +308,9 @@ async def _handle_progress_event(
     session_factory: Any | None = None,
 ) -> None:
     """Infer permission application from post-resume worker progress."""
-    event_type = payload.get("type", "")
-    if event_type not in {
-        "agent_status",
-        "message_chunk",
-        "tool_call_start",
-        "tool_call_update",
-        "plan_update",
-        "artifact_update",
-    }:
+    if not is_progress_event(payload):
         return
+    event_type = payload.get("type", "")
 
     from ..database.crud import (
         create_control_action,

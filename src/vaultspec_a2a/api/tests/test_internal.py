@@ -16,7 +16,7 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from ...database.crud import create_thread, get_thread_execution_state
+from ...database import create_thread, get_thread_execution_state
 from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 from ..websocket import ConnectionManager
@@ -707,7 +707,7 @@ class TestAggregatorGCOnTerminal:
     ) -> None:
         """Terminal update logs should carry thread/status/event metadata."""
         from ...control.event_handlers import _handle_terminal_event
-        from ...database.crud import update_thread_status
+        from ...database import update_thread_status
         from ...thread.enums import ThreadStatus
 
         aggregator = EventAggregator()

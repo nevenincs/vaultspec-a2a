@@ -5,7 +5,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...database.crud import get_pending_permission_requests
+from ...database import get_pending_permission_requests
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import discover_team_preset_ids, load_team_config

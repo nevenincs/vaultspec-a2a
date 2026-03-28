@@ -1,4 +1,4 @@
-"""Artifact, permission log, and cost tracking CRUD operations."""
+"""Artifact repository — artifacts, permission logs, and cost tracking."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncSession
 
-from ._crud_helpers import save_model
+from ._helpers import save_model
 from .models import ArtifactModel, CostTrackingModel, PermissionLogModel
 
 __all__ = [

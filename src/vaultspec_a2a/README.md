@@ -165,11 +165,10 @@ src/vaultspec_a2a/
 ├── database/                          ~2,340 lines │ SQLAlchemy + Alembic + aiosqlite
 │   ├── session.py                    (270)  Engine factory (SQLite/Postgres)
 │   ├── models.py                     (288)  ORM table definitions
-│   ├── crud.py                       (211)  Cost/execution CRUD (residual)
-│   ├── crud_threads.py               (359)  Thread lifecycle CRUD
-│   ├── crud_permissions.py           (299)  Permission request CRUD
-│   ├── crud_artifacts.py             (126)  Artifact CRUD
-│   ├── _crud_helpers.py              (130)  Shared CRUD utilities (pagination, filtering)
+│   ├── thread_repository.py           (359)  Thread lifecycle persistence
+│   ├── permission_repository.py       (299)  Permission request persistence
+│   ├── artifact_repository.py         (126)  Artifact persistence
+│   ├── _helpers.py                    (130)  Shared persistence utilities
 │   ├── checkpoints.py                (270)  LangGraph checkpointer factory
 │   ├── migrate.py                     (47)  Alembic runner
 │   ├── reconciliation.py             (196)  Reconciliation I/O executor
@@ -279,18 +278,18 @@ src/vaultspec_a2a/
  │      │ │          │ │            │ │          │ │           │
  │schema│ │circuit_  │ │ session    │ │ factory  │ │instrument.│
  │serial│ │ breaker  │ │ models     │ │ acp_chat │ │ middleware│
- │      │ │worker_   │ │ crud       │ │ mock_    │ │ agg_hook  │
- │      │ │ mgmt     │ │ crud_      │ │ gemini   │ │           │
- │      │ │dispatch  │ │  threads   │ │ probes/* │ │           │
- │      │ │projection│ │ crud_      │ │          │ │           │
- │      │ │snapshot  │ │  permissns │ │          │ │           │
- │      │ │event_    │ │ crud_      │ │          │ │           │
- │      │ │ handlers │ │  artifacts │ │          │ │           │
- │      │ │health    │ │ _crud_     │ │          │ │           │
- │      │ │diagnost. │ │  helpers   │ │          │ │           │
- │      │ │config    │ │ checkpts   │ │          │ │           │
- │      │ │db/doctor │ │ migrate    │ │          │ │           │
- │      │ │verify    │ │ reconcile  │ │          │ │           │
+ │      │ │worker_   │ │ thread_    │ │ mock_    │ │ agg_hook  │
+ │      │ │ mgmt     │ │  repository│ │ gemini   │ │           │
+ │      │ │dispatch  │ │ permission_│ │ probes/* │ │           │
+ │      │ │projection│ │  repository│ │          │ │           │
+ │      │ │snapshot  │ │ artifact_  │ │          │ │           │
+ │      │ │event_    │ │  repository│ │          │ │           │
+ │      │ │ handlers │ │ _helpers   │ │          │ │           │
+ │      │ │health    │ │ session    │ │          │ │           │
+ │      │ │diagnost. │ │ models     │ │          │ │           │
+ │      │ │config    │ │ reconcile  │ │          │ │           │
+ │      │ │db/doctor │ │            │ │          │ │           │
+ │      │ │verify    │ │            │ │          │ │           │
  │      │ │hooks     │ │            │ │          │ │           │
  └──────┘ └──────────┘ └────────────┘ └──────────┘ └───────────┘
  ┌───────────┐ ┌───────┐
@@ -313,10 +312,10 @@ src/vaultspec_a2a/
 |---|---|---|
 | **domain_config** | All Layer 1 modules, control/config (composes into Settings) | Pydantic |
 | **team/team_config** | providers/factory, providers/acp_chat_model, worker/executor, cli/_agent | LangChain, subprocess |
-| **thread/enums** | database/crud_*, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum |
-| **thread/transitions** | database/crud_threads, control/event_handlers | Pure dict lookup |
+| **thread/enums** | database/thread_repository, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum |
+| **thread/transitions** | database/thread_repository, control/event_handlers | Pure dict lookup |
 | **thread/snapshots** | control/snapshot, control/projection, api/routes/thread_state | Dataclasses |
-| **thread/errors** | database/crud_*, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
+| **thread/errors** | database/*_repository, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
 | **thread/state** | worker/executor, api/routes/* (via graph/) | LangGraph, FastAPI |
 | **context/*** | graph/nodes/* only (via facade) | Internal — not consumed by Layer 2 directly |
 | **graph/compiler** | worker/graph_lifecycle | LangGraph, LangChain |
@@ -441,7 +440,7 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | `telemetry/` | CLEAN | Correct TelemetryHook protocol implementation |
 | `workspace/` | CLEAN | Thin subprocess wrapper |
 | `ipc/` | CLEAN | Neutral contract |
-| `database/` | CLEAN | Domain enums extracted to `thread/enums`. `crud.py` split into focused modules (`crud_threads`, `crud_permissions`, `crud_artifacts`, `_crud_helpers`). |
+| `database/` | CLEAN | Domain enums extracted to `thread/enums`. Modules renamed to repository convention (`thread_repository`, `permission_repository`, `artifact_repository`, `_helpers`). `crud.py` re-export hub deleted. |
 | `control/` | CLEAN | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain. |
 | `utils/` | CLEAN | Dead code removed. Layer inversions fixed. |
 

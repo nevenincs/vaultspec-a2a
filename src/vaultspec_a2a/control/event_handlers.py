@@ -69,7 +69,7 @@ async def _handle_terminal_event(
     if not status_str:
         return
     try:
-        from ..database.crud import (
+        from ..database import (
             expire_pending_permission_requests,
             get_latest_control_action,
             set_thread_repair_state,
@@ -181,7 +181,7 @@ async def _handle_permission_event(
         return
     event_type = payload.get("type", "")
 
-    from ..database.crud import (
+    from ..database import (
         create_control_action,
         get_permission_request,
         mark_permission_request_applied,
@@ -312,7 +312,7 @@ async def _handle_progress_event(
         return
     event_type = payload.get("type", "")
 
-    from ..database.crud import (
+    from ..database import (
         create_control_action,
         get_pending_permission_requests,
         mark_permission_request_applied,
@@ -390,7 +390,7 @@ async def _handle_execution_state_event(
     if payload.get("type") != "execution_state_projection":
         return
 
-    from ..database.crud import record_thread_execution_state
+    from ..database import record_thread_execution_state
 
     projection = ExecutionStateProjectionPayload.model_validate(payload)
     snapshot_created_at: datetime | None = None

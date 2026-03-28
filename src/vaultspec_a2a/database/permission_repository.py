@@ -1,4 +1,4 @@
-"""Permission request lifecycle and control action journal CRUD operations."""
+"""Permission repository — permission request lifecycle and control action journal."""
 
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from ..thread.enums import (
     ControlActionType,
     PermissionRequestStatus,
 )
-from ._crud_helpers import (
+from ._helpers import (
     _coerce_control_action_type,
     _coerce_control_result,
     _coerce_permission_request_status,

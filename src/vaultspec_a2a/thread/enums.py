@@ -79,5 +79,20 @@ class ApprovalStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(
+    {
+        ThreadStatus.COMPLETED,
+        ThreadStatus.FAILED,
+        ThreadStatus.CANCELLED,
+    }
+)
+
+NON_ACTIVE_STATUSES: frozenset[ThreadStatus] = TERMINAL_STATUSES | frozenset(
+    {
+        ThreadStatus.ARCHIVED,
+    }
+)
+
+
 class InvalidTransitionError(ValueError):
     """Raised when a thread status transition is not allowed."""

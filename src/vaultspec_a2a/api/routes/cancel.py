@@ -1,6 +1,5 @@
 """POST /threads/{thread_id}/cancel -- Cancel a running thread (MCP-R3)."""
 
-import hashlib
 import logging
 from typing import Any
 
@@ -8,27 +7,9 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control.dispatch import (
-    WorkerAtCapacityError,
-    WorkerDispatchRejectedError,
-    WorkerUnreachableError,
-    dispatch_to_worker,
-)
-from ...database.crud import (
-    create_control_action,
-    get_control_action_by_idempotency_key,
-    get_thread,
-    set_thread_repair_state,
-    update_thread_status,
-)
+from ...control.cancel_service import cancel_thread
+from ...control.config import settings
 from ...database.session import get_db
-from ...ipc.schemas import DispatchRequest
-from ...thread.enums import (
-    ControlActionResultStatus,
-    ControlActionType,
-    RepairStatus,
-    ThreadStatus,
-)
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import get_circuit_breaker, get_worker_client, get_worker_spawner
 from ..schemas.rest import CancelThreadResponse
@@ -51,116 +32,32 @@ async def cancel_thread_endpoint(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> CancelThreadResponse:
     """Cancel a running thread by dispatching a cancel action to the worker."""
-    thread = await get_thread(db, thread_id)
-    if thread is None:
+    result = await cancel_thread(
+        db=db,
+        thread_id=thread_id,
+        idempotency_key=idempotency_key,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=settings.graph_recursion_limit,
+        trace_headers=trace_headers(),
+    )
+
+    if result.error_detail == "Thread not found":
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    if thread.status in (
-        ThreadStatus.COMPLETED,
-        ThreadStatus.FAILED,
-        ThreadStatus.CANCELLED,
-        ThreadStatus.ARCHIVED,
-    ):
-        return CancelThreadResponse(
-            thread_id=thread_id,
-            status=thread.status,
-            cancelled=False,
-            accepted=False,
-            applied=thread.status == ThreadStatus.CANCELLED.value,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-        )
-
-    resolved_idempotency_key = (
-        idempotency_key or hashlib.sha256(f"{thread_id}:cancel".encode()).hexdigest()
-    )
-    existing_action = await get_control_action_by_idempotency_key(
-        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
-    )
-    if existing_action is not None:
-        return CancelThreadResponse(
-            thread_id=thread_id,
-            status=ThreadStatus.CANCELLING.value,
-            cancelled=True,
-            accepted=True,
-            applied=existing_action.applied_at is not None,
-            action_status=existing_action.result_status,
-            action_id=existing_action.id,
-            idempotency_key=resolved_idempotency_key,
-        )
-
-    dispatched = False
-    action = await create_control_action(
-        db,
-        thread_id=thread_id,
-        action_type=ControlActionType.CANCEL,
-        idempotency_key=resolved_idempotency_key,
-        payload={"thread_status": thread.status},
-    )
-    await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=RepairStatus.CANCEL_PENDING,
-        execution_readiness=RepairStatus.CANCEL_PENDING.value,
-        last_requested_action=ControlActionType.CANCEL,
-    )
-    dispatch = DispatchRequest(action="cancel", thread_id=thread_id)
-    logger.info(
-        "Dispatching cancel dispatch_id=%s for thread %s",
-        dispatch.dispatch_id,
-        thread_id,
-        extra={
-            "thread_id": thread_id,
-            "dispatch_id": dispatch.dispatch_id,
-            "action": dispatch.action,
-        },
-    )
-    try:
-        await dispatch_to_worker(
-            worker_client,
-            dispatch,
-            circuit_breaker,
-            worker_spawner,
-            bypass_circuit_breaker=True,
-            trace_headers=trace_headers(),
-        )
-        dispatched = True
-        mark_worker_connected(request)
-    except (WorkerAtCapacityError, WorkerDispatchRejectedError, WorkerUnreachableError):
-        pass
-
-    if not dispatched:
-        logger.warning(
-            "Cancel dispatch failed for thread %s — leaving DB status unchanged",
-            thread_id,
-            extra={
-                "thread_id": thread_id,
-                "dispatch_id": dispatch.dispatch_id,
-                "action": dispatch.action,
-            },
-        )
-        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-        await db.commit()
-        return CancelThreadResponse(
-            thread_id=thread_id,
-            status=thread.status,
-            cancelled=False,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
-            idempotency_key=resolved_idempotency_key,
-        )
-
-    await update_thread_status(db, thread_id, ThreadStatus.CANCELLING)
     await db.commit()
 
+    if result.cancelled:
+        mark_worker_connected(request)
+
     return CancelThreadResponse(
-        thread_id=thread_id,
-        status=ThreadStatus.CANCELLING.value,
-        cancelled=True,
-        accepted=True,
-        applied=False,
-        action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
-        action_id=action.id,
-        idempotency_key=resolved_idempotency_key,
+        thread_id=result.thread_id,
+        status=result.thread_status,
+        cancelled=result.cancelled,
+        accepted=result.accepted,
+        applied=result.applied,
+        action_status=result.action_status,
+        action_id=result.action_id,
+        idempotency_key=result.idempotency_key,
     )

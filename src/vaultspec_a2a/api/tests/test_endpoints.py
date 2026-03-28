@@ -19,7 +19,7 @@ import logging
 from fastapi.testclient import TestClient
 
 from ...control.config import settings
-from ...database.crud import record_permission_request
+from ...database import record_permission_request
 from ...streaming.aggregator import EventAggregator
 from .conftest import make_app
 

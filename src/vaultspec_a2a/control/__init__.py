@@ -13,6 +13,7 @@ Production runtime modules:
     diagnostics         — missing-thread classification, mark_thread_failed
     dispatch            — dispatch_to_worker consolidated dispatch function
     health              — assemble_health_status, SQLite fallback diagnostics
+    permission_service  — permission response orchestration (extracted from route)
     worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
     event_handlers      — relay_event, terminal/permission/progress/execution
                           state event handlers
@@ -43,8 +44,11 @@ __all__ = [
     "event_handlers",
     "health",
     "hooks",
+    "permission_service",
     "projection",
+    "repair_transitions",
     "snapshot",
+    "thread_service",
     "verify",
     "worker_management",
 ]

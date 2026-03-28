@@ -5,7 +5,7 @@ performing DB queries and checkpoint lookups to distinguish between
 truly missing threads and state drift scenarios.
 
 This module lives in ``control/`` (Layer 2 IS) because it depends on
-``database.crud`` — it cannot reside in Layer 1 (``thread/``).
+``database`` — it cannot reside in Layer 1 (``thread/``).
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..database.crud import (
+from ..database import (
     get_thread_execution_state,
     update_thread_status,
 )

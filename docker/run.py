@@ -23,10 +23,9 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from vaultspec_a2a.control.config import settings
-from vaultspec_a2a.database import run_migrations
-from vaultspec_a2a.database.crud import (
-    ThreadStatus,
+from vaultspec_a2a.database import (
     create_thread,
+    run_migrations,
     update_thread_status,
 )
 from vaultspec_a2a.database.session import close_db, get_session_factory, init_db
@@ -37,6 +36,7 @@ from vaultspec_a2a.team.team_config import (
     load_agent_config,
     load_team_config,
 )
+from vaultspec_a2a.thread.enums import ThreadStatus
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"

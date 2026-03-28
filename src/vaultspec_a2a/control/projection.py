@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
-from ..database.crud import (
+from ..database import (
     get_pending_permission_requests,
     get_thread_execution_state,
 )

@@ -15,7 +15,7 @@ from ...control.projection import (
     enrich_snapshot_from_execution_state,
     project_execution_state_model,
 )
-from ...database.crud import create_thread, record_thread_execution_state
+from ...database import create_thread, record_thread_execution_state
 from ...database.models import Base, ThreadExecutionStateModel
 from ...thread.snapshots import (
     CheckpointProjection,

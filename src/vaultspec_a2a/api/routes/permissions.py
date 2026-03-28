@@ -37,6 +37,7 @@ from ...thread.enums import (
     RepairStatus,
     ThreadStatus,
 )
+from ...thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -44,16 +45,10 @@ from ..dependencies import (
     get_worker_client,
     get_worker_spawner,
 )
-from ..schemas.enums import PermissionType
 from ..schemas.rest import PermissionResponseRequest, PermissionResponseResult
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
-
-_PLAN_APPROVAL_PAUSE_CAUSES = {
-    PermissionType.PLAN_APPROVAL.value,
-    "plan_approval_request",
-}
 
 
 @router.post(
@@ -201,7 +196,7 @@ async def respond_to_permission_endpoint(
             pass
 
     resume_value: str | dict[str, bool] = body.option_id
-    if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+    if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
         resume_value = {"approved": body.option_id == "approve"}
 
     action = await create_control_action(
@@ -218,7 +213,7 @@ async def respond_to_permission_endpoint(
         option_id=body.option_id,
         idempotency_key=resolved_idempotency_key,
     )
-    if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+    if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
         await set_thread_approval_state(
             db,
             thread_id,
@@ -300,7 +295,7 @@ async def respond_to_permission_endpoint(
             idempotency_key=resolved_idempotency_key,
             approval_status=(
                 ApprovalStatus.PENDING.value
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+                if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
                 else thread_record.approval_status
             ),
         )

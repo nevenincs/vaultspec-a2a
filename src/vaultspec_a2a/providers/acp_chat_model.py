@@ -19,7 +19,7 @@ import json
 import logging
 import shutil
 import sys
-from collections.abc import AsyncIterator, Callable, Mapping
+from collections.abc import AsyncIterator, Mapping
 from contextlib import suppress
 from pathlib import Path
 from typing import Any, override
@@ -47,7 +47,7 @@ from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
-from ._acp_protocol import process_stdout_loop
+from ._acp_protocol import RpcHandlerMap, process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
     on_fs_write_text_file,
@@ -59,6 +59,7 @@ from ._acp_rpc_handlers import (
     on_terminal_wait_for_exit,
 )
 from ._acp_session import (
+    PermissionCallback,
     _AcpModelConfig,
     _AcpSessionContext,
     authenticate_rpc,
@@ -103,7 +104,7 @@ class AcpChatModel(BaseChatModel):
         default=None,
         description="Working directory for the agent session.",
     )
-    permission_callback: Callable[..., Any] | None = Field(
+    permission_callback: PermissionCallback | None = Field(
         default=None,
         description="Optional async callback for custom permission handling.",
         exclude=True,
@@ -276,16 +277,11 @@ class AcpChatModel(BaseChatModel):
         )
 
         stderr_task = asyncio.create_task(self._read_stderr_loop(ctx))
-        cfg = self._config
-        rpc_map: dict[str, Callable[..., Any]] = {
-            "session/request_permission": (
-                lambda rid, p, c: on_request_permission(rid, p, c, cfg)
-            ),
-            "fs/read_text_file": (lambda rid, p, _c: on_fs_read_text_file(rid, p, cfg)),
-            "fs/write_text_file": (
-                lambda rid, p, _c: on_fs_write_text_file(rid, p, cfg)
-            ),
-            "terminal/create": (lambda rid, p, c: on_terminal_create(rid, p, c, cfg)),
+        rpc_map: RpcHandlerMap = {
+            "session/request_permission": on_request_permission,
+            "fs/read_text_file": on_fs_read_text_file,
+            "fs/write_text_file": on_fs_write_text_file,
+            "terminal/create": on_terminal_create,
             "terminal/kill": on_terminal_kill,
             "terminal/output": on_terminal_output,
             "terminal/wait_for_exit": on_terminal_wait_for_exit,

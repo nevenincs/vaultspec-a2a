@@ -9,7 +9,7 @@ free-standing — they receive ``_AcpModelConfig`` and/or
 import asyncio
 import json
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Awaitable, Callable, Mapping
 from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -37,6 +37,9 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 
+PermissionCallback = Callable[[str, dict, list[dict[str, Any]]], Awaitable[str]]
+
+
 @dataclass(frozen=True)
 class _AcpModelConfig:
     """Frozen snapshot of read-only ACP model configuration.
@@ -47,7 +50,7 @@ class _AcpModelConfig:
     """
 
     agent_config: AgentConfig | None
-    permission_callback: Callable[..., Any] | None
+    permission_callback: PermissionCallback | None
     workspace_root: str | None
     cwd: str | None
     command: list[str]
@@ -691,15 +694,3 @@ async def setup_prompt(
         await ctx.stdin.drain()
     ctx.prompt_id_ref.append(rpc_id)
     return ctx.response_futures[rpc_id]
-
-
-async def send_notification(
-    ctx: _AcpSessionContext,
-    method: str,
-    params: dict,
-) -> None:
-    """Send an ACP notification."""
-    req = {"jsonrpc": "2.0", "method": method, "params": params}
-    async with ctx.stdin_lock:
-        ctx.stdin.write(json.dumps(req).encode("utf-8") + b"\n")
-        await ctx.stdin.drain()

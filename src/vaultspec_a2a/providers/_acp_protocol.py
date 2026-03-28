@@ -11,8 +11,7 @@ circular imports — this module does NOT import from ``_acp_rpc_handlers``.
 import asyncio
 import json
 import logging
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Awaitable, Callable
 
 from langchain_core.messages import AIMessageChunk
 from langchain_core.outputs import ChatGenerationChunk
@@ -45,7 +44,13 @@ _CAPABILITY_REQUIREMENTS: dict[str, str] = {
 }
 
 # Type alias for the RPC handler map passed by the caller.
-RpcHandlerMap = dict[str, Callable[..., Any]]
+RpcHandlerMap = dict[
+    str,
+    Callable[
+        [int | str, dict, _AcpSessionContext, _AcpModelConfig],
+        Awaitable[dict[str, object]],
+    ],
+]
 
 
 async def process_stdout_loop(
@@ -185,7 +190,7 @@ async def handle_server_rpc(
 
     handler = rpc_handler_map.get(method)
     if handler is not None:
-        resp = await handler(rpc_id, params, ctx)
+        resp = await handler(rpc_id, params, ctx, config)
     else:
         resp = {
             "jsonrpc": "2.0",

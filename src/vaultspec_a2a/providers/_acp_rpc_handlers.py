@@ -157,6 +157,7 @@ async def on_request_permission(
 async def on_fs_read_text_file(
     rpc_id: int | str,
     params: dict,
+    _ctx: _AcpSessionContext,
     config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle fs/read_text_file RPC.
@@ -197,6 +198,7 @@ async def on_fs_read_text_file(
 async def on_fs_write_text_file(
     rpc_id: int | str,
     params: dict,
+    _ctx: _AcpSessionContext,
     config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle fs/write_text_file RPC.
@@ -334,6 +336,7 @@ async def on_terminal_kill(
     rpc_id: int | str,
     params: dict,
     ctx: _AcpSessionContext,
+    _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/kill RPC."""
     terminal_id = params.get("terminalId", "")
@@ -356,6 +359,7 @@ async def on_terminal_output(
     rpc_id: int | str,
     params: dict,
     ctx: _AcpSessionContext,
+    _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/output RPC."""
     terminal_id = params.get("terminalId", "")
@@ -396,6 +400,7 @@ async def on_terminal_wait_for_exit(
     rpc_id: int | str,
     params: dict,
     ctx: _AcpSessionContext,
+    _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/wait_for_exit RPC."""
     terminal_id = params.get("terminalId", "")
@@ -430,6 +435,7 @@ async def on_terminal_release(
     rpc_id: int | str,
     params: dict,
     ctx: _AcpSessionContext,
+    _config: _AcpModelConfig,
 ) -> dict[str, object]:
     """Handle terminal/release RPC."""
     terminal_id = params.get("terminalId", "")

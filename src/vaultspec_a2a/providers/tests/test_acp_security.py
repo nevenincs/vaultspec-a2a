@@ -5,6 +5,7 @@ requiring a live ACP subprocess (PROV-M6).
 """
 
 import asyncio
+import dataclasses
 from pathlib import Path
 from typing import Any, ClassVar, cast
 
@@ -17,7 +18,7 @@ from .._acp_rpc_handlers import (
     on_terminal_create,
     sandbox_path,
 )
-from .._acp_session import _AcpModelConfig
+from .._acp_session import _AcpModelConfig, _AcpSessionContext
 
 
 def _make_config(workspace_root: str | None = None) -> _AcpModelConfig:
@@ -221,6 +222,11 @@ class TestOnTerminalCreateValidation:
         class _MinimalSessionContext:
             stdin_lock = asyncio.Lock()
             terminals: ClassVar[dict] = {}
+
+        # Structural guard: verify real type has the attrs we shadow
+        _ctx_fields = {f.name for f in dataclasses.fields(_AcpSessionContext)}
+        assert "stdin_lock" in _ctx_fields, "ctx interface drift"
+        assert "terminals" in _ctx_fields, "ctx interface drift"
 
         return _MinimalSessionContext()
 

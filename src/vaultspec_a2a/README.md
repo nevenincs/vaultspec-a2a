@@ -45,7 +45,8 @@ src/vaultspec_a2a/
 │   ├── __init__.py
 │   ├── compiler.py                    (790)  StateGraph assembly from TeamConfig
 │   ├── events.py                      (139)  Domain event dataclasses (DomainEvent base)
-│   ├── enums.py                       (162)  ToolKind, PermissionType, AgentLifecycleState,
+│   ├── enums.py                       (173)  ToolKind, PermissionType, AgentLifecycleState,
+│   │                                         AgentState,
 │   │                                         Model, Provider, MODEL_MAP, PROVIDER_DEFAULT_MODELS
 │   ├── protocols.py                    (92)  ProviderFactoryProtocol, TelemetryHook
 │   ├── nodes/
@@ -200,7 +201,7 @@ src/vaultspec_a2a/
 │   └── git_manager.py               (485)  Git operations
 │
 ├── utils/                             ~520 lines │ stdlib + OTel trace context
-│   ├── enums.py                       (43)  AgentState, LogLevel, Environment, AcpRequestId
+│   ├── enums.py                       (43)  LogLevel, Environment, AcpRequestId
 │   ├── logging.py                    (182)  Log setup
 │   ├── timestamp.py                   (68)  Monotonic clock helpers
 │   ├── trace.py                      (195)  OTel span context utilities
@@ -243,7 +244,7 @@ src/vaultspec_a2a/
     ─ graph/   imports from ► context/, thread/, team/, domain_config
     ─ context/ imports from ► thread/, domain_config
     ─ team/    imports from ► thread/errors, graph/enums
-    ─ thread/  imports from ► (nothing — leaf module)
+    ─ thread/  imports from ► graph/enums (PermissionType for snapshots)
 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
                       LAYER 1.5 (bridges)

@@ -49,7 +49,7 @@ imports from `api/`.
 <!-- IMPORTANT: This document must be updated between execution runs to
      track progress. -->
 
-### Phase 0 — baseline + frozen dataclass fix
+### Phase 0 — baseline + frozen dataclass fix ✅ DONE
 
 - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase0-summary.md`
 
@@ -75,7 +75,7 @@ imports from `api/`.
 
 ### Wave 1 (parallel): Phase 1, Phase 5
 
-- `Phase 1` — D-01, D-02, D-11: domain enums + state machine to Layer 1
+- `Phase 1` — D-01, D-02, D-11: domain enums + state machine to Layer 1 ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase1-summary.md`
 
   1. Create `thread/enums.py`. Move the 6 domain enums (`ThreadStatus`,
@@ -124,7 +124,7 @@ imports from `api/`.
      - Step record: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase1-step5.md`
      - Executing agent: `vaultspec-high-executor`
 
-- `Phase 5` — D-09, D-10: utils cleanup (parallel with Phase 1)
+- `Phase 5` — D-09, D-10: utils cleanup (parallel with Phase 1) ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase5-summary.md`
 
   1. Refactor `utils/logging.py`: remove the runtime
@@ -159,7 +159,7 @@ imports from `api/`.
 
 ### Wave 2 (sequential, after Phase 1): Phase 2, Phase 3, Phase 4
 
-- `Phase 2` — D-03, D-04: fix upward enum imports + move PlanEntry
+- `Phase 2` — D-03, D-04: fix upward enum imports + move PlanEntry ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase2-summary.md`
 
   1. In `control/snapshot.py`, change enum imports from
@@ -190,7 +190,7 @@ imports from `api/`.
      - Step record: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase2-step3.md`
      - Executing agent: `vaultspec-standard-executor`
 
-- `Phase 3` — D-05, D-06, D-07, D-12: domain logic extraction + dependency inversion
+- `Phase 3` — D-05, D-06, D-07, D-12: domain logic extraction + dependency inversion ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase3-summary.md`
 
   1. Create `thread/snapshots.py`. Move from `control/projection.py`: the 3
@@ -278,7 +278,7 @@ imports from `api/`.
      - Step record: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase3-step8.md`
      - Executing agent: `vaultspec-high-executor`
 
-- `Phase 4` — D-08: split crud.py
+- `Phase 4` — D-08: split crud.py ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase4-summary.md`
 
   1. Create `database/crud_threads.py`. Move thread CRUD functions
@@ -334,7 +334,7 @@ imports from `api/`.
 
 ### Wave 3 (after all above): Phase 6
 
-- `Phase 6` — housekeeping + final validation
+- `Phase 6` — housekeeping + final validation ✅ DONE
   - Phase summary: `.vault/exec/2026-03-27-domain-logic/2026-03-27-domain-logic-phase6-summary.md`
 
   1. Update `control/__init__.py`: update docstring and `__all__` to reflect

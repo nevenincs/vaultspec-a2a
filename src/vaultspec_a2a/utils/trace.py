@@ -53,11 +53,12 @@ def print_trace_summary(
         thread_id:    The LangGraph thread_id used as configurable["thread_id"].
         project_name: LangSmith project name. Defaults to settings.langsmith_project,
                       then "default".
-        settings:     Application settings instance. Required.
+        settings:     Application settings instance. When *None*, the summary
+                      is skipped (tracing is best-effort diagnostics).
     """
     if settings is None:
-        msg = "settings is required for print_trace_summary"
-        raise TypeError(msg)
+        _trace_print("[trace] No settings provided — skipping trace query.")
+        return
 
     if not settings.langsmith_api_key:
         _trace_print("[trace] LANGSMITH_API_KEY not set — skipping trace query.")

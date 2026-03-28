@@ -1,7 +1,7 @@
 # Layer 2c — Database Layer Rework + Handler Extraction — Handover
 
 **GitHub repo:** wgergely/vaultspec-a2a
-**GitHub Issue:** TBD (create before starting)
+**GitHub Issue:** wgergely/vaultspec-a2a#10
 **Prerequisite:** PR #9 (Layer 2b domain logic extraction) merged to `main`.
 **Remote name:** `vaultspec-a2a` (NOT `origin`)
 **Merge strategy:** Merge commits only. Squash and rebase are disabled.

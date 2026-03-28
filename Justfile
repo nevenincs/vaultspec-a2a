@@ -487,14 +487,14 @@ prod-agent *ARGS:
     uv run vaultspec agent {{ARGS}}
 
 # ===========================================================================
-# Convenience aliases (backward compat during transition)
+# Convenience aliases
 # ===========================================================================
 
-# Run a preps scenario (backward compat — use: just dev test mock <scenario>)
+# Run a preps integration scenario (autonomous, pipeline_team, plan_approval, solo_coder)
 preps SCENARIO:
     uv run python -m vaultspec_a2a.tests.preps.{{SCENARIO}}
 
-# List available preps scenarios (backward compat — use: just dev test mock --list)
+# List available preps integration scenarios
 preps-list:
     uv run python -m vaultspec_a2a.tests.preps
 

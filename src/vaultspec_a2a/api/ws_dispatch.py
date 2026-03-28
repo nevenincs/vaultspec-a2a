@@ -13,6 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from ..control.config import settings
 from ..control.diagnostics import classify_missing_ws_thread, mark_thread_failed
 from ..control.dispatch import (
     WorkerAtCapacityError,
@@ -21,7 +22,7 @@ from ..control.dispatch import (
     WorkerUnreachableError,
     dispatch_to_worker,
 )
-from ..database.crud import get_thread
+from ..database import get_thread
 from ..ipc.schemas import DispatchRequest
 from ..thread.enums import ThreadStatus
 from ._utils import trace_headers
@@ -181,6 +182,7 @@ def create_dispatch_message_handler(
             content=content,
             team_preset=team_preset,
             workspace_root=workspace_root,
+            recursion_limit=settings.graph_recursion_limit,
         )
 
         try:
@@ -270,6 +272,7 @@ def create_dispatch_control_handler(
             action=dispatch_action,
             thread_id=thread_id,
             agent_id=agent_id,
+            recursion_limit=settings.graph_recursion_limit,
         )
         try:
             await dispatch_to_worker(

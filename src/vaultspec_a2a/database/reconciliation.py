@@ -26,9 +26,11 @@ from ..thread.enums import (
     RepairStatus,
     ThreadStatus,
 )
-from .crud import (
+from .permission_repository import (
     create_control_action,
     get_pending_permission_requests,
+)
+from .thread_repository import (
     list_non_terminal_threads,
     set_thread_repair_state,
     update_thread_status,

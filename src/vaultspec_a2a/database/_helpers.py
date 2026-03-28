@@ -1,4 +1,4 @@
-"""Shared CRUD utilities used by the domain-specific crud_* modules."""
+"""Shared helpers used by the domain-specific repository modules."""
 
 from __future__ import annotations
 

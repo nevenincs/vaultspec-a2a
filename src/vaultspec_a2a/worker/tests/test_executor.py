@@ -179,6 +179,7 @@ class TestHandleDispatch:
             DispatchRequest(
                 action=cast("Any", "delete_everything"),
                 thread_id="t-1",
+                recursion_limit=25,
             )
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -206,6 +207,7 @@ class TestHandleDispatch:
                 req = DispatchRequest(
                     action="cancel",
                     thread_id="t-cancel-me",
+                    recursion_limit=25,
                 )
                 await executor.handle_dispatch(req)
 
@@ -228,7 +230,7 @@ class TestHandleDispatch:
                     action="ingest",
                     thread_id="t-no-graph",
                     content="Hello",
-                    # No team_preset, so no graph will compile
+                    recursion_limit=25,
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -263,6 +265,7 @@ class TestHandleDispatch:
                     action="resume",
                     thread_id="t-no-graph",
                     option_id="opt-1",
+                    recursion_limit=25,
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -307,6 +310,7 @@ class TestHandleDispatch:
                     action="ingest",
                     thread_id="t-1",
                     content="Hello",
+                    recursion_limit=25,
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"
@@ -350,6 +354,7 @@ class TestGraphInputBuilding:
             thread_id="t-init",
             content="Hello",
             team_preset="vaultspec-adaptive-coder",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
@@ -377,6 +382,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-followup",
             content="Follow-up question",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
@@ -396,6 +402,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="thread-xyz",
             content="test",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
         assert inp["thread_id"] == "thread-xyz"
@@ -411,6 +418,7 @@ class TestGraphInputBuilding:
             pipeline_phase="implement",
             vault_index={"specs": ["auth.md"]},
             validation_errors=["missing tests"],
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
@@ -426,7 +434,7 @@ class TestGraphInputBuilding:
             thread_id="t-sdd-empty",
             content="Hello",
             team_preset="vaultspec-adaptive-coder",
-            # SDD fields left at defaults (None/empty)
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
@@ -444,6 +452,7 @@ class TestGraphInputBuilding:
             thread_id="t-preamble",
             content="User question",
             context_preamble="You are a helpful assistant.",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
@@ -459,6 +468,7 @@ class TestGraphInputBuilding:
         req = DispatchRequest(
             action="ingest",
             thread_id="t-empty",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
         assert inp["messages"] == []
@@ -473,6 +483,7 @@ class TestGraphInputBuilding:
             content="Follow up",
             active_feature="auth-flow",
             pipeline_phase="implement",
+            recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=False)
 
@@ -517,7 +528,7 @@ class TestLazyRecompilation:
                     action="resume",
                     thread_id="t-no-graph",
                     option_id="allow_once",
-                    # No team_preset — cannot recompile
+                    recursion_limit=25,
                 )
                 with caplog.at_level(
                     logging.WARNING, logger="vaultspec_a2a.worker.executor"

@@ -1,4 +1,4 @@
-"""Thread CRUD operations — lifecycle, repair, approval, execution state, metadata."""
+"""Thread repository — lifecycle, repair, approval, execution state, metadata."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ from ..thread.enums import (
 )
 from ..thread.errors import NicknameConflictError
 from ..thread.transitions import validate_transition
-from ._crud_helpers import (
+from ._helpers import (
     _UNSET,
     _coerce_approval_status,
     _coerce_control_action_type,

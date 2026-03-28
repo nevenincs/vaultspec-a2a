@@ -1,7 +1,5 @@
 """POST /threads/{thread_id}/messages -- Send message into thread."""
 
-import hashlib
-import json
 import logging
 from typing import Any
 
@@ -9,29 +7,10 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control.dispatch import (
-    WorkerAtCapacityError,
-    WorkerCircuitOpenError,
-    WorkerDispatchRejectedError,
-    WorkerUnreachableError,
-    dispatch_to_worker,
-)
-from ...database.crud import (
-    create_control_action,
-    get_control_action_by_idempotency_key,
-    get_thread,
-    set_thread_repair_state,
-    update_thread_status,
-)
+from ...control.config import settings
+from ...control.message_service import send_followup_message
 from ...database.session import get_db
-from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
-from ...thread.enums import (
-    ControlActionResultStatus,
-    ControlActionType,
-    RepairStatus,
-    ThreadStatus,
-)
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -66,150 +45,48 @@ async def send_message_endpoint(
     Returns 202 Accepted immediately; the message is dispatched to the
     worker process for graph execution (ADR-019).
     """
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
-    if thread.status == ThreadStatus.INPUT_REQUIRED.value:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                "Cannot send a follow-up message while the thread is paused for input"
-            ),
-        )
-
-    terminal_statuses = (
-        ThreadStatus.ARCHIVED,
-        ThreadStatus.COMPLETED,
-        ThreadStatus.FAILED,
-        ThreadStatus.CANCELLED,
-    )
-    if thread.status in terminal_statuses:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot send messages to thread in {thread.status!r} state",
-        )
-
-    logger.info(
-        "Message received for thread %s: %d chars",
-        thread_id,
-        len(body.content),
-    )
-
     agent_id = body.agent_id or "vaultspec-supervisor"
-    resolved_idempotency_key = (
-        idempotency_key
-        or hashlib.sha256(
-            f"{thread_id}:message:{agent_id}:{body.content}".encode()
-        ).hexdigest()
-    )
-    existing_action = await get_control_action_by_idempotency_key(
-        db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
-    )
-    if existing_action is not None:
-        return SendMessageResponse(
-            status="accepted",
-            thread_id=thread_id,
-            accepted=True,
-            applied=existing_action.applied_at is not None,
-            action_status=existing_action.result_status,
-            action_id=existing_action.id,
-            idempotency_key=resolved_idempotency_key,
-        )
 
-    action = await create_control_action(
-        db,
+    result = await send_followup_message(
+        db=db,
         thread_id=thread_id,
-        action_type=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-        idempotency_key=resolved_idempotency_key,
-        payload={"content": body.content, "agent_id": agent_id},
-    )
-    await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
-        last_requested_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-    )
-
-    team_preset: str | None = None
-    workspace_root: str | None = None
-    if thread.team_preset:
-        team_preset = thread.team_preset
-    if thread.thread_metadata:
-        try:
-            meta = json.loads(thread.thread_metadata)
-            workspace_root = meta.get("workspace_root")
-        except (json.JSONDecodeError, AttributeError):
-            pass
-
-    dispatch = DispatchRequest(
-        action="ingest",
-        thread_id=thread_id,
-        agent_id=agent_id,
         content=body.content,
-        team_preset=team_preset,
-        workspace_root=workspace_root,
+        agent_id=agent_id,
+        idempotency_key=idempotency_key,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        worker_client=worker_client,
+        recursion_limit=settings.graph_recursion_limit,
+        trace_headers=trace_headers(),
     )
 
-    logger.info(
-        "Dispatching message dispatch_id=%s for thread %s",
-        dispatch.dispatch_id,
-        thread_id,
-        extra={
-            "thread_id": thread_id,
-            "dispatch_id": dispatch.dispatch_id,
-            "action": dispatch.action,
-            "agent_id": agent_id,
-        },
-    )
-    try:
-        await dispatch_to_worker(
-            worker_client,
-            dispatch,
-            circuit_breaker,
-            worker_spawner,
-            trace_headers=trace_headers(),
-        )
-        mark_worker_connected(request)
-    except WorkerCircuitOpenError as exc:
-        raise HTTPException(status_code=503, detail=exc.detail) from exc
-    except WorkerAtCapacityError:
-        raise HTTPException(
-            status_code=503,
-            detail="Worker at capacity — try again later",
-        ) from None
-    except WorkerUnreachableError:
-        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-        await db.commit()
-        raise HTTPException(
-            status_code=502,
-            detail="Worker unreachable — thread marked as failed",
-        ) from None
-    except WorkerDispatchRejectedError as exc:
-        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-        await db.commit()
-        raise HTTPException(
-            status_code=502,
-            detail=f"Worker rejected dispatch (HTTP {exc.status_code})",
-        ) from None
+    if result.error_detail == "Thread not found":
+        raise HTTPException(status_code=404, detail="Thread not found")
+    if result.error_detail and "paused for input" in result.error_detail:
+        raise HTTPException(status_code=409, detail=result.error_detail)
+    if result.error_detail and "Cannot send messages" in result.error_detail:
+        raise HTTPException(status_code=409, detail=result.error_detail)
 
-    await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
-    await set_thread_repair_state(
-        db,
-        thread_id,
-        repair_status=RepairStatus.HEALTHY,
-        execution_readiness=RepairStatus.HEALTHY.value,
-        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
-    )
     await db.commit()
+
+    if result.dispatched:
+        mark_worker_connected(request)
+
+    if result.circuit_open:
+        raise HTTPException(status_code=503, detail=result.error_detail)
+    if result.error_detail and "at capacity" in result.error_detail.lower():
+        raise HTTPException(status_code=503, detail=result.error_detail)
+    if result.error_detail:
+        raise HTTPException(status_code=502, detail=result.error_detail)
 
     return SendMessageResponse(
         status="accepted",
-        thread_id=thread_id,
+        thread_id=result.thread_id,
         accepted=True,
         applied=False,
-        action_status=ControlActionResultStatus.ACCEPTED_NOT_APPLIED.value,
-        action_id=action.id,
-        idempotency_key=resolved_idempotency_key,
+        action_status=result.thread_status
+        if not result.dispatched
+        else "accepted_not_applied",
+        action_id=result.action_id,
+        idempotency_key=idempotency_key or "",
     )

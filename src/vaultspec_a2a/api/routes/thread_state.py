@@ -21,8 +21,8 @@ from ...control.snapshot import (
     enrich_snapshot_from_state,
     load_checkpoint_history_depth,
 )
+from ...database import get_thread
 from ...database.checkpoints import Checkpointer
-from ...database.crud import get_thread
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import RepairStatus

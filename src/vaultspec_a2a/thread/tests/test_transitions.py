@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from ..enums import InvalidTransitionError, ThreadStatus
+from ..enums import TERMINAL_STATUSES, InvalidTransitionError, ThreadStatus
 from ..transitions import _VALID_TRANSITIONS, validate_transition
 
 
@@ -70,8 +70,7 @@ def test_no_self_loops_in_transition_table() -> None:
 
 
 def test_terminal_states_lead_only_to_archived_or_nothing() -> None:
-    terminal = {ThreadStatus.COMPLETED, ThreadStatus.FAILED, ThreadStatus.CANCELLED}
-    for status in terminal:
+    for status in TERMINAL_STATUSES:
         targets = _VALID_TRANSITIONS[status]
         assert targets <= {ThreadStatus.ARCHIVED}, (
             f"{status} should only transition to ARCHIVED, got {targets}"

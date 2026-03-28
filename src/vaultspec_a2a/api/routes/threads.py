@@ -11,32 +11,23 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
-from ...context.preamble import build_context_preamble
 from ...control.config import settings
-from ...control.dispatch import (
-    WorkerAtCapacityError,
-    WorkerCircuitOpenError,
-    WorkerDispatchRejectedError,
-    WorkerUnreachableError,
-    dispatch_to_worker,
-)
-from ...database.checkpoints import Checkpointer
-from ...database.crud import (
-    create_control_action,
-    create_thread,
+from ...control.thread_service import create_and_dispatch_thread
+from ...database import (
     delete_thread,
     get_thread,
     get_thread_metadata,
     list_threads,
-    set_thread_repair_state,
     update_thread_status,
 )
+from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
-from ...graph.compiler import build_initial_vault_index
-from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
+from ...thread.enums import (
+    TERMINAL_STATUSES,
+    ThreadStatus,
+)
 from ...thread.errors import (
     ConfigError,
     NicknameConflictError,
@@ -136,14 +127,22 @@ async def create_thread_endpoint(
             nickname = body.nickname
 
         try:
-            thread = await create_thread(
+            result = await create_and_dispatch_thread(
                 db,
-                title=body.title,
-                status=ThreadStatus.SUBMITTED,
-                metadata=metadata_json,
-                nickname=nickname,
                 thread_id=thread_id,
+                title=body.title,
+                initial_message=body.initial_message,
                 team_preset=body.team_preset,
+                autonomous=body.autonomous,
+                nickname=nickname,
+                metadata=body.metadata,
+                metadata_json=metadata_json,
+                workspace_root=ws_root,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                worker_client=worker_client,
+                recursion_limit=settings.graph_recursion_limit,
+                trace_headers=trace_headers(),
             )
         except NicknameConflictError as exc:
             raise HTTPException(
@@ -151,142 +150,37 @@ async def create_thread_endpoint(
                 detail=f"Thread nickname already exists: {exc.nickname!r}",
             ) from exc
 
-        logger.info(
-            "Created thread %s (title=%s, preset=%s, nickname=%s)",
-            thread.id,
-            body.title,
-            body.team_preset,
-            nickname,
-            extra={
-                "thread_id": thread.id,
-                "action": "create_thread",
-                "team_preset": body.team_preset,
-                "thread_title": body.title,
-                "thread_nickname": nickname,
-            },
-        )
-        await create_control_action(
-            db,
-            thread_id=thread.id,
-            action_type=ControlActionType.INGEST,
-            idempotency_key=f"thread-create:{thread.id}",
-            payload={
-                "title": body.title,
-                "team_preset": body.team_preset,
-                "autonomous": body.autonomous,
-            },
-        )
-        await set_thread_repair_state(
-            db,
-            thread.id,
-            repair_status=RepairStatus.HEALTHY,
-            execution_readiness=RepairStatus.HEALTHY.value,
-            last_requested_action=ControlActionType.INGEST,
-        )
-
-        if body.team_preset:
-            context_preamble: str | None = None
-            if body.metadata is not None:
-                preamble_msg = build_context_preamble(body.metadata)
-                context_preamble = (
-                    preamble_msg.content
-                    if isinstance(preamble_msg.content, str)
-                    else str(preamble_msg.content)
-                )
-
-            effective_autonomous: bool = False
-            if body.autonomous is not None:
-                effective_autonomous = body.autonomous
-            else:
-                try:
-                    _tc = load_team_config(body.team_preset, workspace_root=ws_root)
-                    effective_autonomous = _tc.permissions.auto_approve
-                except (ConfigError, TeamConfigNotFoundError):
-                    pass
-
-            metadata = body.metadata
-            feature_tag = metadata.feature_tag if metadata else None
-            vault_index = (
-                build_initial_vault_index(ws_root, metadata.feature_tag)
-                if (metadata and metadata.feature_tag)
-                else {}
-            )
-
-            dispatch = DispatchRequest(
-                action="ingest",
-                thread_id=thread.id,
-                team_preset=body.team_preset,
-                workspace_root=str(ws_root) if ws_root else None,
-                autonomous=effective_autonomous,
-                metadata_json=metadata_json,
-                content=body.initial_message,
-                context_preamble=context_preamble,
-                recursion_limit=settings.graph_recursion_limit,
-                active_feature=feature_tag,
-                pipeline_phase=None,
-                vault_index=vault_index,
-                validation_errors=[],
-            )
-
-            logger.info(
-                "Dispatching ingest dispatch_id=%s for thread %s",
-                dispatch.dispatch_id,
-                thread.id,
-                extra={
-                    "thread_id": thread.id,
-                    "dispatch_id": dispatch.dispatch_id,
-                    "action": dispatch.action,
-                    "team_preset": dispatch.team_preset,
-                    "autonomous": dispatch.autonomous,
-                },
-            )
-            try:
-                await dispatch_to_worker(
-                    worker_client,
-                    dispatch,
-                    circuit_breaker,
-                    worker_spawner,
-                    trace_headers=trace_headers(),
-                )
-                mark_worker_connected(request)
-            except WorkerCircuitOpenError as exc:
-                raise HTTPException(status_code=503, detail=exc.detail) from exc
-            except WorkerAtCapacityError:
-                await update_thread_status(db, thread.id, ThreadStatus.FAILED)
-                await db.commit()
-                raise HTTPException(
-                    status_code=503,
-                    detail="Worker at capacity — try again later",
-                ) from None
-            except WorkerUnreachableError:
-                await update_thread_status(db, thread.id, ThreadStatus.FAILED)
-                await db.commit()
-                raise HTTPException(
-                    status_code=502,
-                    detail="Worker unreachable — thread marked as failed",
-                ) from None
-            except WorkerDispatchRejectedError as exc:
-                await update_thread_status(db, thread.id, ThreadStatus.FAILED)
-                await db.commit()
-                raise HTTPException(
-                    status_code=502,
-                    detail=f"Worker rejected dispatch (HTTP {exc.status_code})",
-                ) from None
-            await update_thread_status(db, thread.id, ThreadStatus.RUNNING)
-            await set_thread_repair_state(
-                db,
-                thread.id,
-                repair_status=RepairStatus.HEALTHY,
-                execution_readiness=RepairStatus.HEALTHY.value,
-                last_applied_action=ControlActionType.INGEST,
-            )
-
         await db.commit()
 
+        if result.dispatched:
+            mark_worker_connected(request)
+
+        if result.error_detail:
+            if result.error_detail.startswith("circuit_open:"):
+                raise HTTPException(
+                    status_code=503,
+                    detail=result.error_detail.removeprefix("circuit_open:"),
+                )
+            if result.error_detail.startswith("at_capacity:"):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Worker at capacity \u2014 try again later",
+                )
+            if result.error_detail.startswith("unreachable:"):
+                raise HTTPException(
+                    status_code=502,
+                    detail="Worker unreachable \u2014 thread marked as failed",
+                )
+            if result.error_detail.startswith("rejected:"):
+                raise HTTPException(
+                    status_code=502,
+                    detail=result.error_detail.removeprefix("rejected:"),
+                )
+
         return CreateThreadResponse(
-            thread_id=thread.id,
-            status=thread.status,
-            nickname=nickname,
+            thread_id=result.thread_id,
+            status=result.status,
+            nickname=result.nickname,
         )
     except HTTPException:
         raise
@@ -416,11 +310,7 @@ async def archive_thread_endpoint(
     if thread.status == ThreadStatus.ARCHIVED:
         return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
 
-    if thread.status not in (
-        ThreadStatus.COMPLETED,
-        ThreadStatus.FAILED,
-        ThreadStatus.CANCELLED,
-    ):
+    if thread.status not in TERMINAL_STATUSES:
         raise HTTPException(
             status_code=409,
             detail=f"Cannot archive thread in {thread.status!r} state",

@@ -13,14 +13,16 @@ from __future__ import annotations
 import json
 import logging
 import time
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..database.crud import list_threads
+from ..database import list_threads
 from ..database.session import get_session_factory
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..thread.enums import ThreadStatus
+from .config import settings
 
 if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
@@ -28,15 +30,27 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DispatchError",
+    "DispatchOutcome",
     "WorkerAtCapacityError",
     "WorkerCircuitOpenError",
     "WorkerDispatchRejectedError",
     "WorkerUnreachableError",
     "dispatch_to_worker",
     "redispatch_reconciling_threads",
+    "safe_dispatch",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class DispatchOutcome:
+    """Result of a :func:`safe_dispatch` call."""
+
+    success: bool
+    failure_type: str | None = None
+    exception: Exception | None = None
+    detail: str | None = None
 
 
 class DispatchError(Exception):
@@ -229,6 +243,7 @@ async def redispatch_reconciling_threads(
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
                     workspace_root=meta.get("workspace_root"),
+                    recursion_limit=settings.graph_recursion_limit,
                 )
                 headers = trace_headers_fn() if trace_headers_fn else {}
                 try:
@@ -262,3 +277,80 @@ async def redispatch_reconciling_threads(
                     )
     except Exception as exc:
         logger.error("Reconciling re-dispatch task failed: %s", exc)
+
+
+async def safe_dispatch(
+    worker_client: httpx.AsyncClient,
+    dispatch_request: DispatchRequest,
+    circuit_breaker: WorkerCircuitBreaker,
+    worker_spawner: LazyWorkerSpawner,
+    *,
+    bypass_circuit_breaker: bool = False,
+    trace_headers: dict[str, str] | None = None,
+) -> DispatchOutcome:
+    """Non-raising wrapper around :func:`dispatch_to_worker`.
+
+    Returns a :class:`DispatchOutcome` instead of raising dispatch errors,
+    making it easier for callers to handle failures without try/except
+    boilerplate.
+    """
+    try:
+        await dispatch_to_worker(
+            worker_client,
+            dispatch_request,
+            circuit_breaker,
+            worker_spawner,
+            bypass_circuit_breaker=bypass_circuit_breaker,
+            trace_headers=trace_headers,
+        )
+        return DispatchOutcome(success=True)
+    except WorkerCircuitOpenError as exc:
+        logger.warning(
+            "Circuit breaker open for dispatch_id=%s thread %s: %s",
+            dispatch_request.dispatch_id,
+            dispatch_request.thread_id,
+            exc.detail,
+        )
+        return DispatchOutcome(
+            success=False,
+            failure_type="circuit_open",
+            exception=exc,
+            detail=exc.detail,
+        )
+    except WorkerAtCapacityError as exc:
+        logger.warning(
+            "Worker at capacity for dispatch_id=%s thread %s",
+            dispatch_request.dispatch_id,
+            dispatch_request.thread_id,
+        )
+        return DispatchOutcome(
+            success=False,
+            failure_type="at_capacity",
+            exception=exc,
+            detail=str(exc),
+        )
+    except WorkerUnreachableError as exc:
+        logger.warning(
+            "Worker unreachable for dispatch_id=%s thread %s",
+            dispatch_request.dispatch_id,
+            dispatch_request.thread_id,
+        )
+        return DispatchOutcome(
+            success=False,
+            failure_type="unreachable",
+            exception=exc,
+            detail=str(exc),
+        )
+    except WorkerDispatchRejectedError as exc:
+        logger.warning(
+            "Worker rejected dispatch_id=%s thread %s (status %d)",
+            dispatch_request.dispatch_id,
+            dispatch_request.thread_id,
+            exc.status_code,
+        )
+        return DispatchOutcome(
+            success=False,
+            failure_type="rejected",
+            exception=exc,
+            detail=str(exc),
+        )

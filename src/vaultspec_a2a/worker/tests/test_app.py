@@ -43,7 +43,11 @@ def _make_app_without_lifespan():
 def test_dispatch_rejects_missing_internal_token_outside_development() -> None:
     """Worker /dispatch should fail loudly when token auth is required but missing."""
     app = _make_app_without_lifespan()
-    dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
+    dispatch = DispatchRequest(
+        action="cancel",
+        thread_id="thread-1",
+        recursion_limit=25,
+    )
     with (
         _SettingsOverride(
             environment=Environment.TESTING, internal_token="secret-token"
@@ -59,7 +63,11 @@ def test_dispatch_rejects_missing_internal_token_outside_development() -> None:
 def test_dispatch_rejects_missing_token_configuration_outside_development() -> None:
     """Worker /dispatch should fail loudly when internal auth is not configured."""
     app = _make_app_without_lifespan()
-    dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
+    dispatch = DispatchRequest(
+        action="cancel",
+        thread_id="thread-1",
+        recursion_limit=25,
+    )
     with (
         _SettingsOverride(
             environment=Environment.TESTING,
@@ -76,7 +84,11 @@ def test_dispatch_rejects_missing_token_configuration_outside_development() -> N
 def test_dispatch_rejects_invalid_internal_token() -> None:
     """Worker /dispatch should reject incorrect bearer tokens."""
     app = _make_app_without_lifespan()
-    dispatch = DispatchRequest(action="cancel", thread_id="thread-1")
+    dispatch = DispatchRequest(
+        action="cancel",
+        thread_id="thread-1",
+        recursion_limit=25,
+    )
     with (
         _SettingsOverride(
             environment=Environment.DEVELOPMENT, internal_token="secret-token"

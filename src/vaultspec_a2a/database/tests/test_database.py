@@ -25,8 +25,7 @@ from starlette.datastructures import State
 from starlette.requests import Request
 
 from ...thread.errors import NicknameConflictError
-from .. import session as _session_module
-from ..crud import (
+from .. import (
     ApprovalStatus,
     InvalidTransitionError,
     PermissionRequestStatus,
@@ -52,6 +51,7 @@ from ..crud import (
     update_thread_metadata,
     update_thread_status,
 )
+from .. import session as _session_module
 from ..models import (
     ArtifactModel,
     Base,

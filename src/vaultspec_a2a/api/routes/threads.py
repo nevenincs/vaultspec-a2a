@@ -22,9 +22,6 @@ from ...control.dispatch import (
 )
 from ...database.checkpoints import Checkpointer
 from ...database.crud import (
-    ControlActionType,
-    RepairStatus,
-    ThreadStatus,
     create_control_action,
     create_thread,
     delete_thread,
@@ -39,6 +36,7 @@ from ...graph.compiler import build_initial_vault_index
 from ...ipc.schemas import DispatchRequest
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
+from ...thread.enums import ControlActionType, RepairStatus, ThreadStatus
 from ...thread.errors import (
     ConfigError,
     NicknameConflictError,

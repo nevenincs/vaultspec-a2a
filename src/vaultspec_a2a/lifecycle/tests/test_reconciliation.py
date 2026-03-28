@@ -1,5 +1,7 @@
 """Tests for lifecycle.reconciliation — pure decision logic, zero I/O."""
 
+import pytest
+
 from vaultspec_a2a.lifecycle.reconciliation import (
     ReconciliationAction,
     ThreadSnapshot,
@@ -250,9 +252,5 @@ class TestPureFunction:
             repair_reason="test",
             execution_readiness="checkpoint_unavailable",
         )
-        try:
-            object.__setattr__(action, "thread_id", "t2")
-            raised = False
-        except AttributeError:
-            raised = True
-        assert raised, "ReconciliationAction should be frozen"
+        with pytest.raises(AttributeError):
+            action.thread_id = "t2"  # ty: ignore[invalid-assignment]

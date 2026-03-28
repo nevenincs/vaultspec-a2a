@@ -44,7 +44,7 @@ class TestTokenUsageEntry:
         """Frozen dataclass rejects attribute assignment."""
         entry = TokenUsageEntry(agent_id="a", input_tokens=1, output_tokens=2, total=3)
         with pytest.raises(AttributeError):
-            object.__setattr__(entry, "agent_id", "b")
+            entry.agent_id = "b"  # ty: ignore[invalid-assignment]
 
     def test_default_field_values(self) -> None:
         """Only agent_id is required; counters default to 0."""
@@ -92,7 +92,7 @@ class TestPlanStep:
         """Frozen dataclass rejects attribute assignment."""
         ps = PlanStep(step="x")
         with pytest.raises(AttributeError):
-            object.__setattr__(ps, "step", "y")
+            ps.step = "y"  # ty: ignore[invalid-assignment]
 
 
 # ---------------------------------------------------------------------------
@@ -145,7 +145,7 @@ class TestArtifactRef:
         """Frozen dataclass rejects attribute assignment."""
         ar = ArtifactRef(id="x", path="/y")
         with pytest.raises(AttributeError):
-            object.__setattr__(ar, "id", "z")
+            ar.id = "z"  # ty: ignore[invalid-assignment]
 
     def test_different_type_values(self) -> None:
         """ArtifactRef supports arbitrary type strings (file, diff, doc, etc.)."""

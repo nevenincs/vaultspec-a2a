@@ -4,6 +4,27 @@ This is a Layer 1 leaf module with zero internal dependencies beyond
 standard-library and LangGraph/LangChain framework types.
 """
 
+from .enums import (
+    ApprovalStatus as ApprovalStatus,
+)
+from .enums import (
+    ControlActionResultStatus as ControlActionResultStatus,
+)
+from .enums import (
+    ControlActionType as ControlActionType,
+)
+from .enums import (
+    InvalidTransitionError as InvalidTransitionError,
+)
+from .enums import (
+    PermissionRequestStatus as PermissionRequestStatus,
+)
+from .enums import (
+    RepairStatus as RepairStatus,
+)
+from .enums import (
+    ThreadStatus as ThreadStatus,
+)
 from .errors import (
     AgentConfigNotFoundError as AgentConfigNotFoundError,
 )
@@ -62,34 +83,89 @@ from .models import (
     ArtifactRef as ArtifactRef,
 )
 from .models import (
+    PlanEntry as PlanEntry,
+)
+from .models import (
     PlanStep as PlanStep,
 )
 from .models import (
     TokenUsageEntry as TokenUsageEntry,
 )
+from .snapshots import (
+    PLAN_APPROVAL_PAUSE_CAUSES as PLAN_APPROVAL_PAUSE_CAUSES,
+)
+from .snapshots import (
+    CheckpointProjection as CheckpointProjection,
+)
+from .snapshots import (
+    ExecutionStateProjection as ExecutionStateProjection,
+)
+from .snapshots import (
+    ProjectedInterrupt as ProjectedInterrupt,
+)
+from .snapshots import (
+    classify_message_role as classify_message_role,
+)
+from .snapshots import (
+    derive_message_id as derive_message_id,
+)
+from .snapshots import (
+    extract_message_timestamp as extract_message_timestamp,
+)
+from .snapshots import (
+    finalize_snapshot_replay_status as finalize_snapshot_replay_status,
+)
+from .snapshots import (
+    normalize_artifacts as normalize_artifacts,
+)
+from .snapshots import (
+    normalize_plan_entries as normalize_plan_entries,
+)
+from .snapshots import (
+    project_checkpoint_tuple as project_checkpoint_tuple,
+)
 from .state import TeamState as TeamState
 
 __all__ = [
+    "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentConfigNotFoundError",
     "AgentProcessError",
+    "ApprovalStatus",
     "ArtifactRef",
+    "CheckpointProjection",
     "ConfigError",
     "ContextOverflowError",
+    "ControlActionResultStatus",
+    "ControlActionType",
     "DatabaseError",
     "ErrorSeverity",
     "EventAggregatorError",
+    "ExecutionStateProjection",
+    "InvalidTransitionError",
     "MergeConflictError",
     "NicknameConflictError",
     "PermissionDeniedError",
+    "PermissionRequestStatus",
+    "PlanEntry",
     "PlanStep",
+    "ProjectedInterrupt",
     "ProtocolError",
     "ProviderSessionError",
     "RecoveryAction",
+    "RepairStatus",
     "TeamConfigNotFoundError",
     "TeamState",
+    "ThreadStatus",
     "TokenBudgetExceededError",
     "TokenUsageEntry",
     "VaultspecError",
     "WorkerExecutionError",
     "WorkspaceError",
+    "classify_message_role",
+    "derive_message_id",
+    "extract_message_timestamp",
+    "finalize_snapshot_replay_status",
+    "normalize_artifacts",
+    "normalize_plan_entries",
+    "project_checkpoint_tuple",
 ]

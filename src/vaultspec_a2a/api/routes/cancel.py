@@ -15,10 +15,6 @@ from ...control.dispatch import (
     dispatch_to_worker,
 )
 from ...database.crud import (
-    ControlActionResultStatus,
-    ControlActionType,
-    RepairStatus,
-    ThreadStatus,
     create_control_action,
     get_control_action_by_idempotency_key,
     get_thread,
@@ -27,6 +23,12 @@ from ...database.crud import (
 )
 from ...database.session import get_db
 from ...ipc.schemas import DispatchRequest
+from ...thread.enums import (
+    ControlActionResultStatus,
+    ControlActionType,
+    RepairStatus,
+    ThreadStatus,
+)
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import get_circuit_breaker, get_worker_client, get_worker_spawner
 from ..schemas.rest import CancelThreadResponse

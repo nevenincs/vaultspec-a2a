@@ -707,7 +707,8 @@ class TestAggregatorGCOnTerminal:
     ) -> None:
         """Terminal update logs should carry thread/status/event metadata."""
         from ...control.event_handlers import _handle_terminal_event
-        from ...database.crud import ThreadStatus, update_thread_status
+        from ...database.crud import update_thread_status
+        from ...thread.enums import ThreadStatus
 
         aggregator = EventAggregator()
         async with session_factory() as session:

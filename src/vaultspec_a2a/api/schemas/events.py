@@ -11,12 +11,11 @@ from typing import Annotated, Any, Literal
 from pydantic import BaseModel, Field
 
 from ...graph.enums import Model, Provider
+from ...thread.models import PlanEntry
 from .base import EventEnvelope
 from .enums import (
     AgentLifecycleState,
     PermissionOptionKind,
-    PlanEntryPriority,
-    PlanEntryStatus,
     ServerEventType,
     ToolCallStatus,
     ToolKind,
@@ -89,14 +88,6 @@ ToolCallContent = Annotated[
     ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal,
     Field(discriminator="content_type"),
 ]
-
-
-class PlanEntry(BaseModel):
-    """A single entry in the agent's execution plan."""
-
-    content: str
-    status: PlanEntryStatus = PlanEntryStatus.PENDING
-    priority: PlanEntryPriority = PlanEntryPriority.MEDIUM
 
 
 class PermissionOption(BaseModel):

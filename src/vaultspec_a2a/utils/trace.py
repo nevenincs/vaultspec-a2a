@@ -14,8 +14,18 @@ from __future__ import annotations
 import logging
 import time
 from datetime import UTC, datetime
+from typing import Protocol
 
 _logger = logging.getLogger(__name__)
+
+
+class _TraceSettings(Protocol):
+    """Structural type for the settings attributes used by print_trace_summary."""
+
+    langsmith_api_key: str
+    langsmith_tracing: bool
+    langsmith_project: str
+    langsmith_endpoint: str
 
 
 def _trace_print(msg: str) -> None:
@@ -24,7 +34,12 @@ def _trace_print(msg: str) -> None:
     print(msg)
 
 
-def print_trace_summary(thread_id: str, project_name: str | None = None) -> None:
+def print_trace_summary(
+    thread_id: str,
+    project_name: str | None = None,
+    *,
+    settings: _TraceSettings | None = None,
+) -> None:
     """Query LangSmith for the most recent trace for thread_id and print a summary.
 
     Polls briefly to allow the trace to propagate after the run completes,
@@ -38,8 +53,12 @@ def print_trace_summary(thread_id: str, project_name: str | None = None) -> None
         thread_id:    The LangGraph thread_id used as configurable["thread_id"].
         project_name: LangSmith project name. Defaults to settings.langsmith_project,
                       then "default".
+        settings:     Application settings instance. When *None*, the summary
+                      is skipped (tracing is best-effort diagnostics).
     """
-    from ..control.config import settings
+    if settings is None:
+        _trace_print("[trace] No settings provided — skipping trace query.")
+        return
 
     if not settings.langsmith_api_key:
         _trace_print("[trace] LANGSMITH_API_KEY not set — skipping trace query.")

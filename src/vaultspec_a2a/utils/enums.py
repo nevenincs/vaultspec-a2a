@@ -4,20 +4,9 @@ from enum import IntEnum, StrEnum
 
 __all__ = [
     "AcpRequestId",
-    "AgentState",
     "Environment",
     "LogLevel",
 ]
-
-
-class AgentState(StrEnum):
-    """Lifecycle states for LangGraph agents/nodes."""
-
-    INIT = "init"
-    READY = "ready"
-    RUNNING = "running"
-    ERROR = "error"
-    DONE = "done"
 
 
 class LogLevel(StrEnum):

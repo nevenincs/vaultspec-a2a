@@ -21,8 +21,9 @@ from ..control.dispatch import (
     WorkerUnreachableError,
     dispatch_to_worker,
 )
-from ..database.crud import ThreadStatus, get_thread
+from ..database.crud import get_thread
 from ..ipc.schemas import DispatchRequest
+from ..thread.enums import ThreadStatus
 from ._utils import trace_headers
 from .schemas.enums import AgentControlAction
 from .websocket import WebSocketCommandRejectedError

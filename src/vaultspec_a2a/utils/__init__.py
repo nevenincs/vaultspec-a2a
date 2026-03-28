@@ -1,5 +1,4 @@
 from .enums import AcpRequestId as AcpRequestId
-from .enums import AgentState as AgentState
 from .enums import Environment as Environment
 from .enums import LogLevel as LogLevel
 from .logging import setup_logging as setup_logging
@@ -9,7 +8,6 @@ from .timestamp import parse_iso as parse_iso
 
 __all__ = [
     "AcpRequestId",
-    "AgentState",
     "Environment",
     "LogLevel",
     "human_delta",

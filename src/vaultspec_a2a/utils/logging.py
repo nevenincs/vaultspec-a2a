@@ -1,20 +1,33 @@
 """Logging utilities for the VaultSpec A2A project."""
 
+from __future__ import annotations
+
 import json
 import logging
 import sys
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Protocol
 
 from opentelemetry import trace
 from opentelemetry.trace.span import format_span_id, format_trace_id
 
-from .enums import LogLevel
+if TYPE_CHECKING:
+    from .enums import LogLevel
 
 __all__ = ["JSONFormatter", "OTelCorrelationFilter", "setup_logging"]
 
 
-if TYPE_CHECKING:
-    from ..control.config import Settings
+class _LoggingSettings(Protocol):
+    """Structural type for the settings attributes used by setup_logging.
+
+    Note: ty does not yet have a Pydantic plugin (astral-sh/ty#2403), so
+    Pydantic models passed as ``_LoggingSettings`` require
+    ``# ty: ignore[invalid-argument-type]`` at call sites.
+    """
+
+    log_level: str
+    no_color: bool
+    ci: bool
+    is_dev: bool
 
 
 # Standard LogRecord attributes that should not be included as extra fields.
@@ -105,15 +118,21 @@ class JSONFormatter(logging.Formatter):
 
 def setup_logging(
     level: LogLevel | str | None = None,
-    settings_override: "Settings | None" = None,
+    settings_override: _LoggingSettings | None = None,
 ) -> None:
-    """Configure structured JSON logging or rich terminal logging."""
-    from ..control.config import settings as core_settings
+    """Configure structured JSON logging or rich terminal logging.
 
-    active_settings = settings_override or core_settings
-
+    Args:
+        level: Explicit log level. When *None*, ``settings_override.log_level``
+            is used (``settings_override`` must be provided in that case).
+        settings_override: Application settings instance. Required when *level*
+            is *None* or when interactive/color/CI decisions are needed.
+    """
     if level is None:
-        level = active_settings.log_level
+        if settings_override is None:
+            msg = "settings_override is required when level is not provided"
+            raise TypeError(msg)
+        level = settings_override.log_level
 
     # M35: `level` is guaranteed non-None here; `if level else "INFO"` was dead code
     level_str = level.upper() if isinstance(level, str) else level.value.upper()
@@ -129,9 +148,9 @@ def setup_logging(
         root_logger.removeHandler(handler)
 
     is_interactive = sys.stdout.isatty() and sys.stderr.isatty()
-    disable_color = active_settings.no_color
-    ci_mode = active_settings.ci
-    force_json = not active_settings.is_dev
+    disable_color = settings_override.no_color if settings_override else False
+    ci_mode = settings_override.ci if settings_override else False
+    force_json = not settings_override.is_dev if settings_override else True
 
     log_handler: logging.Handler
     if is_interactive and not disable_color and not ci_mode and not force_json:

@@ -17,9 +17,10 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from ..database.crud import ThreadStatus, list_threads
+from ..database.crud import list_threads
 from ..database.session import get_session_factory
 from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..thread.enums import ThreadStatus
 
 if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker

@@ -1,5 +1,11 @@
 """control — infrastructure services and dev-tooling.
 
+Pure domain logic (enums, state machine, snapshot dataclasses) has been
+extracted to ``thread/enums``, ``thread/transitions``, and
+``thread/snapshots`` respectively.  This package retains only
+infrastructure concerns: process supervision, health, dispatch, and
+dev-tooling.
+
 Production runtime modules:
 
     config              — application settings (pydantic-settings)
@@ -36,6 +42,7 @@ __all__ = [
     "doctor",
     "event_handlers",
     "health",
+    "hooks",
     "projection",
     "snapshot",
     "verify",

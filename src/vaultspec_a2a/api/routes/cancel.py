@@ -8,8 +8,8 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
-from ...control.config import settings
 from ...database.session import get_db
+from ...domain_config import domain_config
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import get_circuit_breaker, get_worker_client, get_worker_spawner
 from ..schemas.rest import CancelThreadResponse
@@ -39,7 +39,7 @@ async def cancel_thread_endpoint(
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
         worker_client=worker_client,
-        recursion_limit=settings.graph_recursion_limit,
+        recursion_limit=domain_config.graph_recursion_limit,
         trace_headers=trace_headers(),
     )
 

@@ -11,7 +11,6 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
-from ...control.config import settings
 from ...control.thread_service import create_and_dispatch_thread
 from ...database import (
     delete_thread,
@@ -22,6 +21,7 @@ from ...database import (
 )
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...thread.enums import (
@@ -141,7 +141,7 @@ async def create_thread_endpoint(
                 circuit_breaker=circuit_breaker,
                 worker_spawner=worker_spawner,
                 worker_client=worker_client,
-                recursion_limit=settings.graph_recursion_limit,
+                recursion_limit=domain_config.graph_recursion_limit,
                 trace_headers=trace_headers(),
             )
         except NicknameConflictError as exc:

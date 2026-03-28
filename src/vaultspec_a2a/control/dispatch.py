@@ -20,9 +20,9 @@ import httpx
 
 from ..database import list_threads
 from ..database.session import get_session_factory
+from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..thread.enums import ThreadStatus
-from .config import settings
 
 if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
@@ -243,7 +243,7 @@ async def redispatch_reconciling_threads(
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
                     workspace_root=meta.get("workspace_root"),
-                    recursion_limit=settings.graph_recursion_limit,
+                    recursion_limit=domain_config.graph_recursion_limit,
                 )
                 headers = trace_headers_fn() if trace_headers_fn else {}
                 try:

@@ -13,7 +13,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DomainConfig(BaseSettings):
     """Behavioural knobs consumed by Layer 1 (domain) modules."""
 
-    model_config = SettingsConfigDict(env_prefix="VAULTSPEC_", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="VAULTSPEC_",
+        extra="ignore",
+    )
 
     # -- Event aggregator debounce / buffer (D-20) ---------------------------
 

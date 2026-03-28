@@ -7,9 +7,9 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control.config import settings
 from ...control.message_service import send_followup_message
 from ...database.session import get_db
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -56,7 +56,7 @@ async def send_message_endpoint(
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
         worker_client=worker_client,
-        recursion_limit=settings.graph_recursion_limit,
+        recursion_limit=domain_config.graph_recursion_limit,
         trace_headers=trace_headers(),
     )
 

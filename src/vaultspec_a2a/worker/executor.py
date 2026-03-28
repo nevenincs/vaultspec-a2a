@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any, cast
 from langgraph.types import Command
 
 from ..control.config import settings
+from ..domain_config import domain_config
 from ..ipc.serializers import sequenced_to_dict
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import load_team_config
@@ -324,7 +325,7 @@ class Executor:
             config = {
                 "configurable": {"thread_id": req.thread_id},
                 "recursion_limit": (
-                    req.recursion_limit or settings.graph_recursion_limit
+                    req.recursion_limit or domain_config.graph_recursion_limit
                 ),
             }
 
@@ -443,7 +444,7 @@ class Executor:
             effective_recursion_limit = (
                 req.recursion_limit
                 or team_recursion_limit
-                or settings.graph_recursion_limit
+                or domain_config.graph_recursion_limit
             )
             config = {
                 "configurable": {"thread_id": req.thread_id},

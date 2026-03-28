@@ -26,6 +26,7 @@ files reference these Dockerfiles directly for clarity and consistency.
 ### `docker/dev.Dockerfile`
 
 **Targets:**
+
 - `python-base`  
   Base Python image for dev. Used by dev backends and tooling.
 
@@ -43,6 +44,7 @@ files reference these Dockerfiles directly for clarity and consistency.
 ### `docker/prod.Dockerfile`
 
 **Targets:**
+
 - `gateway`  
   Builds the production gateway. Includes the compiled frontend assets.
 
@@ -57,6 +59,7 @@ files reference these Dockerfiles directly for clarity and consistency.
 ### `docker/vidaimock.Dockerfile`
 
 **Purpose:**
+
 - Runs `vidaimock` with recorded tapes for deterministic mocking.
 
 **Used by:** `docker-compose.integration.yml`
@@ -107,7 +110,7 @@ files reference these Dockerfiles directly for clarity and consistency.
   `docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml up --build`
 - Required production env:
   - `VAULTSPEC_INTERNAL_TOKEN` for gateway <-> worker internal auth
-  - `POSTGRES_PASSWORD` when using `docker-compose.postgres.yml`
+  - `POSTGRES_PASSWORD` when using `docker-compose.prod.postgres.yml`
 - `just verify-prodlike-docker` is the current staged verification target for the
   Postgres production-like stack.
 - The repo-owned Docker verifier scripts explicitly disable Docker Compose's

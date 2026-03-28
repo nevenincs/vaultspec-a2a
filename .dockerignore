@@ -8,6 +8,12 @@ __pycache__/
 *.db-shm
 *.db-wal
 .env
+.vault/
+.vaultspec/
+CLAUDE.md
+Justfile
+docker-compose*.yml
+.pre-commit-config.yaml
 data/
 logs/
 temp/

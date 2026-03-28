@@ -39,7 +39,7 @@ services:
         '200',
       ]
     volumes:
-      - ./src/vaultspec_a2a/core/presets/mock/tapes:/app/tapes
+      - ./src/vaultspec_a2a/team/presets/mock/tapes:/app/tapes
     healthcheck:
       test: ['CMD', 'curl', '-f', 'http://localhost:8100/v1/models']
       interval: 5s

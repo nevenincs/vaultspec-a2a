@@ -128,6 +128,8 @@ unfixable = ["B"]
 "src/vaultspec_a2a/api/routes/*.py" = ["B008"]
 "src/vaultspec_a2a/api/internal.py" = ["B008"]
 "src/vaultspec_a2a/worker/app.py" = ["B008"]
+# MCP server defines mcp=FastMCP() then imports tool modules for side-effect registration
+"src/vaultspec_a2a/protocols/mcp/server.py" = ["E402", "F401"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["vaultspec_a2a"]

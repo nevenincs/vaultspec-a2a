@@ -20,7 +20,17 @@ from langchain_core.messages import HumanMessage
 from ...control.config import settings
 from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.enums import AcpRequestId
-from ..acp_chat_model import AcpChatModel, _AcpSessionContext
+from .._acp_session import (
+    _AcpSessionContext,
+    auth_hint,
+    auth_url_hint,
+    authenticate_rpc,
+    is_auth_required_error,
+    runtime_log_extra,
+    select_auth_method_id,
+    wait_for_authenticate_response,
+)
+from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpAuthError
 from ..factory import _CLAUDE_ACP_JS
 
@@ -144,30 +154,28 @@ async def test_acp_gemini_ainvoke() -> None:
 
 
 class TestAuthHint:
-    """Tests for AcpChatModel._auth_hint() provider detection."""
+    """Tests for auth_hint() provider detection."""
 
     def test_claude_hint_for_node_command(self) -> None:
         model = AcpChatModel(command=["node", "/path/to/cli.js"])
-        hint = model._auth_hint()
+        hint = auth_hint(model._config)
         assert "claude login" in hint
         assert "CLAUDE_CODE_OAUTH_TOKEN" in hint
 
     def test_gemini_hint_for_gemini_command(self) -> None:
         model = AcpChatModel(command=["gemini", "--experimental-acp"])
-        hint = model._auth_hint()
+        hint = auth_hint(model._config)
         assert "gemini" in hint
         assert "GEMINI_API_KEY" in hint
 
     def test_claude_hint_is_default_for_unknown_command(self) -> None:
         model = AcpChatModel(command=["unknown-cli", "--acp"])
-        hint = model._auth_hint()
+        hint = auth_hint(model._config)
         assert "claude login" in hint
 
     def test_empty_command_returns_claude_hint(self) -> None:
-        model = AcpChatModel(command=["node", "cli.js"])
-        # Override command to empty to exercise fallback
-        model.__dict__["command"] = []
-        hint = model._auth_hint()
+        model = AcpChatModel(command=[])
+        hint = auth_hint(model._config)
         assert "claude login" in hint
 
 
@@ -189,30 +197,29 @@ class TestAuthenticateMethodSelection:
     """Tests for ACP auth method selection against advertised authMethods."""
 
     def test_selects_gemini_oauth_personal_for_cli_home(self) -> None:
-        model = AcpChatModel(
-            command=["gemini", "--experimental-acp"],
-            auth_mode="local_oauth_mount",
-        )
-        model._auth_methods = [{"id": "oauth-personal"}, {"id": "gemini-api-key"}]
+        methods = [{"id": "oauth-personal"}, {"id": "gemini-api-key"}]
 
-        method_id = model._select_auth_method_id(
-            {"GEMINI_CLI_HOME": "/gemini-cli-home", "GOOGLE_GENAI_USE_GCA": "true"}
+        method_id = select_auth_method_id(
+            methods,
+            {"GEMINI_CLI_HOME": "/gemini-cli-home", "GOOGLE_GENAI_USE_GCA": "true"},
+            "local_oauth_mount",
         )
 
         assert method_id == "oauth-personal"
 
     def test_selects_gemini_api_key_when_present(self) -> None:
-        model = AcpChatModel(command=["gemini", "--experimental-acp"])
-        model._auth_methods = [{"id": "oauth-personal"}, {"id": "gemini-api-key"}]
+        methods = [{"id": "oauth-personal"}, {"id": "gemini-api-key"}]
 
-        method_id = model._select_auth_method_id({"GEMINI_API_KEY": "test-key"})
+        method_id = select_auth_method_id(
+            methods,
+            {"GEMINI_API_KEY": "test-key"},
+            None,
+        )
 
         assert method_id == "gemini-api-key"
 
     def test_detects_auth_required_error_message(self) -> None:
-        model = AcpChatModel(command=["gemini", "--experimental-acp"])
-
-        assert model._is_auth_required_error(
+        assert is_auth_required_error(
             {"code": -32000, "message": "Authentication required"}
         )
 
@@ -233,7 +240,8 @@ def test_runtime_log_extra_includes_handshake_context() -> None:
         use_exec=False,
     )
 
-    extra = model._runtime_log_extra(
+    extra = runtime_log_extra(
+        model._config,
         handshake_step="initialize",
         timeout_seconds=15.0,
         session_id="session-123",
@@ -255,7 +263,6 @@ async def test_wait_for_authenticate_response_returns_future_result_before_exit(
     None
 ):
     """Auth wait should complete on the RPC response without waiting for exit."""
-    model = AcpChatModel(command=["gemini", "--experimental-acp"])
     response_future = asyncio.get_running_loop().create_future()
     process = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -264,7 +271,7 @@ async def test_wait_for_authenticate_response_returns_future_result_before_exit(
     )
     try:
         response_future.set_result({"result": {"ok": True}})
-        response = await model._wait_for_authenticate_response(
+        response = await wait_for_authenticate_response(
             response_future=response_future,
             process=process,
             timeout_seconds=0.5,
@@ -279,7 +286,6 @@ async def test_wait_for_authenticate_response_returns_future_result_before_exit(
 @pytest.mark.asyncio
 async def test_wait_for_authenticate_response_raises_on_subprocess_exit() -> None:
     """Auth wait should fail promptly when the subprocess exits first."""
-    model = AcpChatModel(command=["gemini", "--experimental-acp"])
     response_future = asyncio.get_running_loop().create_future()
     process = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -287,7 +293,7 @@ async def test_wait_for_authenticate_response_raises_on_subprocess_exit() -> Non
         "import sys; sys.exit(7)",
     )
     with pytest.raises(RuntimeError, match="ACP subprocess exited with code 7"):
-        await model._wait_for_authenticate_response(
+        await wait_for_authenticate_response(
             response_future=response_future,
             process=process,
             timeout_seconds=1.0,
@@ -297,7 +303,6 @@ async def test_wait_for_authenticate_response_raises_on_subprocess_exit() -> Non
 @pytest.mark.asyncio
 async def test_wait_for_authenticate_response_raises_on_watchdog_timeout() -> None:
     """Auth wait should raise TimeoutError when no terminal outcome arrives."""
-    model = AcpChatModel(command=["gemini", "--experimental-acp"])
     response_future = asyncio.get_running_loop().create_future()
     process = await asyncio.create_subprocess_exec(
         sys.executable,
@@ -306,7 +311,7 @@ async def test_wait_for_authenticate_response_raises_on_watchdog_timeout() -> No
     )
     try:
         with pytest.raises(TimeoutError):
-            await model._wait_for_authenticate_response(
+            await wait_for_authenticate_response(
                 response_future=response_future,
                 process=process,
                 timeout_seconds=0.05,
@@ -352,7 +357,7 @@ async def test_capture_auth_progress_records_browser_url() -> None:
         await process.wait()
 
     assert ctx.auth_url == "https://accounts.google.com/o/oauth2/auth"
-    assert model._auth_url_hint() == (
+    assert auth_url_hint(None, ctx.last_auth_url) == (
         " Browser auth URL: https://accounts.google.com/o/oauth2/auth"
     )
 
@@ -373,11 +378,14 @@ async def test_authenticate_rpc_exit_error_surfaces_browser_url() -> None:
     try:
         assert process.stdin is not None
         with pytest.raises(AcpAuthError, match=r"Browser auth URL: https://auth\.test"):
-            await model._authenticate_rpc(
+            await authenticate_rpc(
+                ctx=None,
+                config=model._config,
+                env={},
+                auth_methods=model._auth_methods,
                 stdin=process.stdin,
                 stdin_lock=asyncio.Lock(),
                 response_futures=response_futures,
-                env={},
                 process=process,
                 auth_url="https://auth.test",
             )
@@ -412,11 +420,14 @@ async def test_authenticate_rpc_cancelled_outcome_sets_operator_cancelled_data()
     try:
         assert process.stdin is not None
         with pytest.raises(AcpAuthError) as exc_info:
-            await model._authenticate_rpc(
+            await authenticate_rpc(
+                ctx=None,
+                config=model._config,
+                env={},
+                auth_methods=model._auth_methods,
                 stdin=process.stdin,
                 stdin_lock=asyncio.Lock(),
                 response_futures=response_futures,
-                env={},
                 process=process,
             )
     finally:
@@ -453,11 +464,14 @@ async def test_authenticate_rpc_rejected_error_sets_auth_rejected_data() -> None
     try:
         assert process.stdin is not None
         with pytest.raises(AcpAuthError) as exc_info:
-            await model._authenticate_rpc(
+            await authenticate_rpc(
+                ctx=None,
+                config=model._config,
+                env={},
+                auth_methods=model._auth_methods,
                 stdin=process.stdin,
                 stdin_lock=asyncio.Lock(),
                 response_futures=response_futures,
-                env={},
                 process=process,
             )
     finally:
@@ -494,11 +508,14 @@ async def test_authenticate_rpc_cancelled_error_sets_operator_cancelled_data() -
     try:
         assert process.stdin is not None
         with pytest.raises(AcpAuthError) as exc_info:
-            await model._authenticate_rpc(
+            await authenticate_rpc(
+                ctx=None,
+                config=model._config,
+                env={},
+                auth_methods=model._auth_methods,
                 stdin=process.stdin,
                 stdin_lock=asyncio.Lock(),
                 response_futures=response_futures,
-                env={},
                 process=process,
             )
     finally:
@@ -526,11 +543,14 @@ async def test_authenticate_rpc_propagates_external_task_cancellation() -> None:
 
     async def _run_authenticate() -> dict[str, object]:
         assert process.stdin is not None
-        return await model._authenticate_rpc(
+        return await authenticate_rpc(
+            ctx=None,
+            config=model._config,
+            env={},
+            auth_methods=model._auth_methods,
             stdin=process.stdin,
             stdin_lock=asyncio.Lock(),
             response_futures=response_futures,
-            env={},
             process=process,
         )
 

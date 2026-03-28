@@ -222,6 +222,7 @@ src/vaultspec_a2a/
 ├── docker-compose.dev.yml                    Gateway + Worker + Vite (SQLite)
 ├── docker-compose.prod.yml                   Gateway + Worker + Jaeger (SQLite)
 ├── docker-compose.prod.postgres.yml          Postgres override
+├── docker-compose.prod.providers.yml         Provider auth overlay
 ├── docker-compose.integration.yml            VidaiMock + test fixtures
 ├── Justfile                           (515)  Service lifecycle, migrations, linting
 └── .env.example                              Full config template
@@ -470,10 +471,20 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | Zero self._runtime_log_extra | PASS | Replaced by `runtime_log_extra(config, ...)` free function |
 | MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
 
-### Next PR: Layer 3 Infrastructure Config
+### Layer 3 Infrastructure Config — DONE (PR #TBD)
 
-Remaining work:
+| Check | Status | Finding |
+|-------|--------|---------|
+| Settings god-object reduction | DONE | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 29 prod files. |
+| `DomainConfig` env_file parity | DONE | Added `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence |
+| Stale tapes volume mount | FIXED | `docker-compose.integration.yml` path corrected: `core/` → `team/` |
+| Orphan `docker-compose.postgres.yml` | DELETED | Legacy duplicate with missing `CHECKPOINT_DATABASE_URL` bug |
+| `.dockerignore` gaps | FIXED | Added `.vault/`, `.vaultspec/`, `Justfile`, compose files, `CLAUDE.md` |
+| `.env.example` alignment | FIXED | Added `VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS` |
+| Justfile preps comments | FIXED | Removed misleading backward-compat labels |
 
-- Docker Compose consolidation and topology review
-- Justfile recipe audit
-- `.env.example` alignment with Settings fields
+### Next PR: Service Layer
+
+The end goal. Once all layers (1–3) have clean boundaries, the service
+lifecycle layer can be formalized: start/stop/health, registry,
+cross-service communication.

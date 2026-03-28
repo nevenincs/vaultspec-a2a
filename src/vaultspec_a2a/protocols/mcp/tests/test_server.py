@@ -42,21 +42,24 @@ from ....control.worker_management import LazyWorkerSpawner
 from ....database import record_permission_request
 from ....database.models import Base
 from ....streaming.aggregator import EventAggregator
-from ..server import (
-    _reset_client,
-    _reset_known_presets,
-    _ws_url_from_api_base,
+from .._http import _reset_client, _reset_known_presets
+from ..tools.discovery import (
+    get_pending_permissions,
+    get_team_status,
+    list_team_presets,
+    respond_to_permission,
+)
+from ..tools.messaging import send_message
+from ..tools.thread_lifecycle import (
     archive_thread,
     cancel_thread,
     delete_thread,
-    get_pending_permissions,
-    get_team_status,
-    get_thread_status,
-    list_team_presets,
-    list_threads,
-    respond_to_permission,
-    send_message,
     start_thread,
+)
+from ..tools.thread_query import (
+    _ws_url_from_api_base,
+    get_thread_status,
+    list_threads,
 )
 
 # ---------------------------------------------------------------------------
@@ -821,11 +824,11 @@ class TestKnownPresetsCache:
         """
         import sys
 
-        from ..server import _get_known_presets
+        from .._http import _get_known_presets
 
-        # Locate the already-imported server module via sys.modules
+        # Locate the already-imported _http module via sys.modules
         srv_mod = next(
-            m for k, m in sys.modules.items() if k.endswith("protocols.mcp.server")
+            m for k, m in sys.modules.items() if k.endswith("protocols.mcp._http")
         )
 
         # After autouse fixture, cache is already None

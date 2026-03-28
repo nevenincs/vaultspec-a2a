@@ -1,4 +1,4 @@
-"""Unit tests for security-critical AcpChatModel paths.
+"""Unit tests for security-critical ACP RPC handler paths.
 
 Tests sandbox path validation and terminal creation security without
 requiring a live ACP subprocess (PROV-M6).
@@ -10,77 +10,90 @@ from typing import Any, ClassVar, cast
 
 import pytest
 
-from ..acp_chat_model import (
+from .._acp_rpc_handlers import (
     _ENV_NAME_RE,
     _SHELL_METACHAR_RE,
     _TERMINAL_COMMAND_ALLOWLIST,
-    AcpChatModel,
+    on_terminal_create,
+    sandbox_path,
 )
-
-# ---------------------------------------------------------------------------
-# Helpers: construct a minimal AcpChatModel for security tests
-# ---------------------------------------------------------------------------
+from .._acp_session import _AcpModelConfig
 
 
-def _make_model(workspace_root: str | None = None) -> AcpChatModel:
-    """Create an AcpChatModel instance without spawning a subprocess."""
-    return AcpChatModel(
-        command=["echo"],
+def _make_config(workspace_root: str | None = None) -> _AcpModelConfig:
+    """Create a minimal _AcpModelConfig for security tests."""
+    return _AcpModelConfig(
+        agent_config=None,
+        permission_callback=None,
         workspace_root=workspace_root,
+        cwd=None,
+        command=["echo"],
+        env_vars={},
+        session_id=None,
+        mcp_servers=[],
+        use_exec=False,
+        provider=None,
+        runtime_authority=None,
+        acp_backend=None,
+        command_origin=None,
+        command_kind=None,
+        command_executable=None,
+        command_target=None,
+        auth_mode=None,
     )
 
 
 # ---------------------------------------------------------------------------
-# _sandbox_path — path traversal prevention (PROV-M6)
+# sandbox_path — path traversal prevention (PROV-M6)
 # ---------------------------------------------------------------------------
 
 
 class TestSandboxPath:
-    """Tests for _sandbox_path() path traversal prevention."""
+    """Tests for sandbox_path() path traversal prevention."""
 
     def test_allows_relative_path_within_root(self, tmp_path: Path) -> None:
         """A path within the workspace root resolves correctly."""
-        model = _make_model(workspace_root=str(tmp_path))
-        result = model._sandbox_path("subdir/file.txt")
+        config = _make_config(workspace_root=str(tmp_path))
+        result = sandbox_path("subdir/file.txt", config)
         assert result == (tmp_path / "subdir" / "file.txt").resolve()
 
     def test_allows_nested_path(self, tmp_path: Path) -> None:
         """Deeply nested paths within the workspace root are allowed."""
-        model = _make_model(workspace_root=str(tmp_path))
-        result = model._sandbox_path("a/b/c/d.txt")
+        config = _make_config(workspace_root=str(tmp_path))
+        result = sandbox_path("a/b/c/d.txt", config)
         assert result.is_relative_to(tmp_path.resolve())
 
     def test_blocks_dotdot_traversal(self, tmp_path: Path) -> None:
         """Path traversal via '../' is rejected."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         with pytest.raises(ValueError, match="escapes sandbox"):
-            model._sandbox_path("../escape.txt")
+            sandbox_path("../escape.txt", config)
 
     def test_blocks_deeply_nested_traversal(self, tmp_path: Path) -> None:
         """Multi-level '../../../' traversal is rejected."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         with pytest.raises(ValueError, match="escapes sandbox"):
-            model._sandbox_path("subdir/../../../../../../etc/passwd")
+            sandbox_path("subdir/../../../../../../etc/passwd", config)
 
     def test_allows_absolute_path_within_root(self, tmp_path: Path) -> None:
         """Absolute paths within the sandbox root are allowed."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         inner = str(tmp_path / "a.txt")
-        result = model._sandbox_path(inner)
+        result = sandbox_path(inner, config)
         assert result == Path(inner).resolve()
 
     def test_blocks_absolute_path_outside_root(self, tmp_path: Path) -> None:
         """Absolute paths outside the sandbox root are rejected."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         with pytest.raises(ValueError, match="escapes sandbox"):
-            model._sandbox_path("/etc/passwd")
+            sandbox_path("/etc/passwd", config)
 
     def test_blocks_windows_drive_escape(self, tmp_path: Path) -> None:
         """Windows drive-relative path that escapes sandbox is rejected."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         # On any platform, a path that resolves outside tmp_path must be rejected
         with pytest.raises(ValueError, match="escapes sandbox"):
-            model._sandbox_path("/windows/system32/cmd.exe")
+            sandbox_path("/windows/system32/cmd.exe", config)
 
 
 # ---------------------------------------------------------------------------
@@ -182,23 +195,23 @@ class TestEnvNamePattern:
 
 
 # ---------------------------------------------------------------------------
-# _on_terminal_create — allowlist and metachar rejection (unit-level)
+# on_terminal_create — allowlist and metachar rejection (unit-level)
 # ---------------------------------------------------------------------------
 
 
 class TestOnTerminalCreateValidation:
-    """Tests for the security validation in _on_terminal_create().
+    """Tests for the security validation in on_terminal_create().
 
-    These tests call _on_terminal_create directly with a minimal session
+    These tests call on_terminal_create directly with a minimal session
     context to test the input validation paths without spawning a real
     subprocess.
     """
 
     def _make_ctx(self) -> object:
-        """Create a minimal session context for _on_terminal_create calls.
+        """Create a minimal session context for on_terminal_create calls.
 
         Policy exception: _MinimalSessionContext satisfies the structural
-        subset of _AcpSessionContext used by _on_terminal_create's validation
+        subset of _AcpSessionContext used by on_terminal_create's validation
         paths (allowlist check, metachar check, sandbox check). This is pure
         logic that runs before any subprocess is spawned. The project's
         no-mocks mandate targets mocking out network/LLM/subprocess calls;
@@ -214,12 +227,13 @@ class TestOnTerminalCreateValidation:
     @pytest.mark.asyncio
     async def test_rejects_command_not_in_allowlist(self, tmp_path: Path) -> None:
         """Commands not in the allowlist return an error response."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(
+        resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "curl", "args": ["http://example.com"]},
             ctx=cast("Any", ctx),
+            config=config,
         )
         resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
@@ -230,12 +244,13 @@ class TestOnTerminalCreateValidation:
     @pytest.mark.asyncio
     async def test_rejects_metachar_in_command(self, tmp_path: Path) -> None:
         """Commands with shell metacharacters return an error response."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(
+        resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": ["script.py; rm -rf /"]},
             ctx=cast("Any", ctx),
+            config=config,
         )
         resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
@@ -246,12 +261,13 @@ class TestOnTerminalCreateValidation:
     @pytest.mark.asyncio
     async def test_rejects_cwd_outside_sandbox(self, tmp_path: Path) -> None:
         """A cwd outside the workspace root returns an error response."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(
+        resp = await on_terminal_create(
             rpc_id=1,
             params={"command": "python", "args": [], "cwd": "/etc"},
             ctx=cast("Any", ctx),
+            config=config,
         )
         resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict
@@ -262,9 +278,9 @@ class TestOnTerminalCreateValidation:
     @pytest.mark.asyncio
     async def test_rejects_invalid_env_var_name(self, tmp_path: Path) -> None:
         """Invalid env variable names return an error response."""
-        model = _make_model(workspace_root=str(tmp_path))
+        config = _make_config(workspace_root=str(tmp_path))
         ctx = self._make_ctx()
-        resp = await model._on_terminal_create(
+        resp = await on_terminal_create(
             rpc_id=1,
             params={
                 "command": "python",
@@ -272,6 +288,7 @@ class TestOnTerminalCreateValidation:
                 "env": [{"name": "1INVALID", "value": "x"}],
             },
             ctx=cast("Any", ctx),
+            config=config,
         )
         resp_dict = cast("dict[str, Any]", resp)
         assert "error" in resp_dict

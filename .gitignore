@@ -76,3 +76,7 @@ workspaces/
 
 # Stray Python installations
 Python/
+
+# >>> vaultspec-managed (do not edit this block) >>>
+.vaultspec/_snapshots/
+# <<< vaultspec-managed <<<

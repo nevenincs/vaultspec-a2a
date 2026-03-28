@@ -125,10 +125,16 @@ src/vaultspec_a2a/
 │   ├── state_projection.py           (297)  StateProjector: checkpoint, normalize, emit
 │   └── ipc.py                        (356)  WorkerBridge: event relay to gateway
 │
-├── protocols/                         ~1,131 lines │ MCP SDK + httpx
+├── protocols/                         ~1,053 lines │ MCP SDK + httpx
 │   ├── mcp/                                  IDE tool server (Cursor, Windsurf, Claude)
-│   │   ├── server.py                (1042)
-│   │   └── __main__.py                (55)
+│   │   ├── server.py                  (55)  FastMCP instance + tool registration
+│   │   ├── _http.py                  (197)  Shared httpx helper, preset cache, credentials
+│   │   ├── tools/                            Per-domain MCP tool handlers
+│   │   │   ├── thread_lifecycle.py   (264)  start, cancel, delete, archive
+│   │   │   ├── thread_query.py       (196)  get_thread_status, list_threads
+│   │   │   ├── discovery.py          (217)  team status, permissions, presets
+│   │   │   └── messaging.py           (69)  send_message
+│   │   └── __main__.py                (55)  Standalone entry point (stdio/HTTP)
 │   └── adapter/                              Protocol adapters
 │
 # ══════════════════════════════════════════════════════════════
@@ -174,9 +180,12 @@ src/vaultspec_a2a/
 │   ├── reconciliation.py             (196)  Reconciliation I/O executor
 │   └── migrations/                           Alembic versions
 │
-├── providers/                         ~4,031 lines │ Anthropic + OpenAI + Google + Zhipu SDKs
+├── providers/                         ~4,694 lines │ Anthropic + OpenAI + Google + Zhipu SDKs
 │   ├── factory.py                    (459)  ProviderFactory (implements ProviderFactoryProtocol)
-│   ├── acp_chat_model.py           (1,821)  Claude ACP subprocess wrapper
+│   ├── acp_chat_model.py             (663)  LangChain BaseChatModel interface + public API
+│   ├── _acp_session.py               (714)  AcpModelConfig, AcpSessionContext, session lifecycle
+│   ├── _acp_protocol.py              (325)  JSON-RPC dispatch, stdout loop, packet handling
+│   ├── _acp_rpc_handlers.py          (445)  Permission, filesystem, terminal RPC handlers
 │   ├── mock_chat_model.py            (210)  VidaiMock tape-replay model
 │   ├── gemini_auth.py                (223)  Google auth flow
 │   ├── _subprocess.py                (182)  Subprocess management utilities
@@ -418,7 +427,7 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
   --include='*.py' | grep -v '/tests/' | grep -v __pycache__
 ```
 
-## Boundary Audit Status (2026-03-27)
+## Boundary Audit Status (2026-03-28)
 
 ### Layer 1 + Layer 2a — PASS (PR #3 + entry-point-layer PR)
 
@@ -449,6 +458,17 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | Test file | Current | Should be | Reason |
 |-----------|---------|-----------|--------|
 | `graph/tests/test_e2e_live.py` | none | `live` | Uses real AsyncSqliteSaver |
+
+### Layer 2d File Size Violations — RESOLVED (PR #12)
+
+| Check | Status | Finding |
+|-------|--------|---------|
+| `protocols/mcp/server.py` | RESOLVED | Split from 1,045 → 55 lines. Handlers in `tools/` sub-package. Shared HTTP helper in `_http.py`. |
+| `providers/acp_chat_model.py` | RESOLVED | Split from 1,821 → 663 lines. Session lifecycle in `_acp_session.py`. Protocol dispatch in `_acp_protocol.py`. RPC handlers in `_acp_rpc_handlers.py`. |
+| No file over 1,000 lines | PASS | Max is `_acp_session.py` at 714 lines |
+| Zero httpx in MCP tools/ | PASS | All HTTP via `_http.py` |
+| Zero self._runtime_log_extra | PASS | Replaced by `runtime_log_extra(config, ...)` free function |
+| MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
 
 ### Next PR: Layer 3 Infrastructure Config
 

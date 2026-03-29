@@ -20,8 +20,7 @@ from langchain_core.messages import HumanMessage
 from ...control.config import settings
 from ...graph.enums import MODEL_MAP, Model, Provider
 from ...utils.enums import AcpRequestId
-from .._acp_session import (
-    _AcpSessionContext,
+from .._acp_auth import (
     auth_hint,
     auth_url_hint,
     authenticate_rpc,
@@ -30,6 +29,7 @@ from .._acp_session import (
     select_auth_method_id,
     wait_for_authenticate_response,
 )
+from .._acp_types import _AcpSessionContext
 from ..acp_chat_model import AcpChatModel
 from ..acp_exceptions import AcpAuthError
 from ..factory import _CLAUDE_ACP_JS

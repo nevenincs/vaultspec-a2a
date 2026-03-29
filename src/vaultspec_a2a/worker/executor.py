@@ -14,7 +14,6 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.types import Command
 
-from ..control.config import settings
 from ..domain_config import domain_config
 from ..ipc.serializers import sequenced_to_dict
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
@@ -98,7 +97,7 @@ class Executor:
 
     def at_capacity(self) -> bool:
         """Return True if the concurrent thread cap has been reached."""
-        cap = settings.max_concurrent_threads
+        cap = domain_config.max_concurrent_threads
         return len(self._active_ingests) >= cap
 
     # Internal state access (used by tests for graph injection).

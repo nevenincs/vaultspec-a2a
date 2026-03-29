@@ -232,11 +232,6 @@ class InfraConfig(BaseSettings):
             "Bearer token for worker<->control IPC. None disables auth (dev mode)."
         ),
     )
-    max_concurrent_threads: int = Field(
-        default=5,
-        description="Max concurrent graph executions per worker (WPA-001).",
-        alias="VAULTSPEC_MAX_CONCURRENT_THREADS",
-    )
     auto_spawn_worker: bool = Field(
         default=True,
         description=(

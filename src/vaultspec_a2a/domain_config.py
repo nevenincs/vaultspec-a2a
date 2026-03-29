@@ -138,6 +138,11 @@ class DomainConfig(BaseSettings):
             "Maximum compiled LangGraph objects held in the executor LRU cache."
         ),
     )
+    max_concurrent_threads: int = Field(
+        default=5,
+        alias="VAULTSPEC_MAX_CONCURRENT_THREADS",
+        description="Max concurrent graph executions per worker (WPA-001).",
+    )
 
 
 domain_config = DomainConfig()

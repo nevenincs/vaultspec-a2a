@@ -78,6 +78,7 @@ class PermissionResult:
 
 async def respond_to_permission(
     db: AsyncSession,
+    *,
     request_id: str,
     option_id: str,
     idempotency_key: str | None,

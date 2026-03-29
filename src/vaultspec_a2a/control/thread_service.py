@@ -33,11 +33,27 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
+    "ThreadCreationRequest",
     "ThreadCreationResult",
     "create_and_dispatch_thread",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadCreationRequest:
+    """Bundled request fields for :func:`create_and_dispatch_thread`."""
+
+    thread_id: str
+    title: str | None
+    initial_message: str | None
+    team_preset: str | None
+    autonomous: bool | None
+    nickname: str | None
+    metadata: ThreadMetadata | None
+    metadata_json: str | None
+    workspace_root: Path | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,16 +69,8 @@ class ThreadCreationResult:
 
 async def create_and_dispatch_thread(
     db: AsyncSession,
+    req: ThreadCreationRequest,
     *,
-    thread_id: str,
-    title: str | None,
-    initial_message: str | None,
-    team_preset: str | None,
-    autonomous: bool | None,
-    nickname: str | None,
-    metadata: ThreadMetadata | None,
-    metadata_json: str | None,
-    workspace_root: Path | None,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
     worker_client: httpx.AsyncClient,
@@ -80,26 +88,26 @@ async def create_and_dispatch_thread(
     """
     thread = await create_thread(
         db,
-        title=title,
+        title=req.title,
         status=ThreadStatus.SUBMITTED,
-        metadata=metadata_json,
-        nickname=nickname,
-        thread_id=thread_id,
-        team_preset=team_preset,
+        metadata=req.metadata_json,
+        nickname=req.nickname,
+        thread_id=req.thread_id,
+        team_preset=req.team_preset,
     )
 
     logger.info(
         "Created thread %s (title=%s, preset=%s, nickname=%s)",
         thread.id,
-        title,
-        team_preset,
-        nickname,
+        req.title,
+        req.team_preset,
+        req.nickname,
         extra={
             "thread_id": thread.id,
             "action": "create_thread",
-            "team_preset": team_preset,
-            "thread_title": title,
-            "thread_nickname": nickname,
+            "team_preset": req.team_preset,
+            "thread_title": req.title,
+            "thread_nickname": req.nickname,
         },
     )
 
@@ -109,26 +117,26 @@ async def create_and_dispatch_thread(
         action_type=ControlActionType.INGEST,
         idempotency_key=f"thread-create:{thread.id}",
         payload={
-            "title": title,
-            "team_preset": team_preset,
-            "autonomous": autonomous,
+            "title": req.title,
+            "team_preset": req.team_preset,
+            "autonomous": req.autonomous,
         },
     )
     await mark_ingest_requested(db, thread.id)
 
-    if not team_preset:
+    if not req.team_preset:
         return ThreadCreationResult(
             thread_id=thread.id,
             status=thread.status,
-            nickname=nickname,
+            nickname=req.nickname,
             dispatched=False,
             error_detail=None,
         )
 
     # -- Build context preamble ------------------------------------------------
     context_preamble: str | None = None
-    if metadata is not None:
-        preamble_msg = build_context_preamble(metadata)
+    if req.metadata is not None:
+        preamble_msg = build_context_preamble(req.metadata)
         context_preamble = (
             preamble_msg.content
             if isinstance(preamble_msg.content, str)
@@ -137,20 +145,20 @@ async def create_and_dispatch_thread(
 
     # -- Resolve autonomous flag -----------------------------------------------
     effective_autonomous: bool = False
-    if autonomous is not None:
-        effective_autonomous = autonomous
+    if req.autonomous is not None:
+        effective_autonomous = req.autonomous
     else:
         try:
-            _tc = load_team_config(team_preset, workspace_root=workspace_root)
+            _tc = load_team_config(req.team_preset, workspace_root=req.workspace_root)
             effective_autonomous = _tc.permissions.auto_approve
         except (ConfigError, TeamConfigNotFoundError):
             pass
 
     # -- Build vault index -----------------------------------------------------
-    feature_tag = metadata.feature_tag if metadata else None
+    feature_tag = req.metadata.feature_tag if req.metadata else None
     vault_index = (
-        build_initial_vault_index(workspace_root, metadata.feature_tag)
-        if (metadata and metadata.feature_tag)
+        build_initial_vault_index(req.workspace_root, req.metadata.feature_tag)
+        if (req.metadata and req.metadata.feature_tag)
         else {}
     )
 
@@ -158,11 +166,11 @@ async def create_and_dispatch_thread(
     dispatch = DispatchRequest(
         action="ingest",
         thread_id=thread.id,
-        team_preset=team_preset,
-        workspace_root=str(workspace_root) if workspace_root else None,
+        team_preset=req.team_preset,
+        workspace_root=str(req.workspace_root) if req.workspace_root else None,
         autonomous=effective_autonomous,
-        metadata_json=metadata_json,
-        content=initial_message,
+        metadata_json=req.metadata_json,
+        content=req.initial_message,
         context_preamble=context_preamble,
         recursion_limit=recursion_limit,
         active_feature=feature_tag,
@@ -199,7 +207,7 @@ async def create_and_dispatch_thread(
             return ThreadCreationResult(
                 thread_id=thread.id,
                 status=thread.status,
-                nickname=nickname,
+                nickname=req.nickname,
                 dispatched=False,
                 error_detail=f"circuit_open:{outcome.detail}",
             )
@@ -209,7 +217,7 @@ async def create_and_dispatch_thread(
         return ThreadCreationResult(
             thread_id=thread.id,
             status=ThreadStatus.FAILED.value,
-            nickname=nickname,
+            nickname=req.nickname,
             dispatched=False,
             error_detail=f"{outcome.failure_type}:{outcome.detail}",
         )
@@ -221,7 +229,7 @@ async def create_and_dispatch_thread(
     return ThreadCreationResult(
         thread_id=thread.id,
         status=ThreadStatus.RUNNING.value,
-        nickname=nickname,
+        nickname=req.nickname,
         dispatched=True,
         error_detail=None,
     )

@@ -57,6 +57,7 @@ class CancelResult:
 
 async def cancel_thread(
     db: AsyncSession,
+    *,
     thread_id: str,
     idempotency_key: str | None,
     circuit_breaker: WorkerCircuitBreaker,

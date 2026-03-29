@@ -60,6 +60,7 @@ class MessageResult:
 
 async def send_followup_message(
     db: AsyncSession,
+    *,
     thread_id: str,
     content: str,
     agent_id: str,

@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
-from ...control.thread_service import create_and_dispatch_thread
+from ...control.thread_service import ThreadCreationRequest, create_and_dispatch_thread
 from ...database import (
     delete_thread,
     get_thread,
@@ -127,8 +127,7 @@ async def create_thread_endpoint(
             nickname = body.nickname
 
         try:
-            result = await create_and_dispatch_thread(
-                db,
+            creation_req = ThreadCreationRequest(
                 thread_id=thread_id,
                 title=body.title,
                 initial_message=body.initial_message,
@@ -138,6 +137,10 @@ async def create_thread_endpoint(
                 metadata=body.metadata,
                 metadata_json=metadata_json,
                 workspace_root=ws_root,
+            )
+            result = await create_and_dispatch_thread(
+                db,
+                creation_req,
                 circuit_breaker=circuit_breaker,
                 worker_spawner=worker_spawner,
                 worker_client=worker_client,

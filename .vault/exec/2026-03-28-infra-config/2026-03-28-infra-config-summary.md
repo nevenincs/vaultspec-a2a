@@ -35,7 +35,7 @@ fixes, and hygiene. All 3 phases executed successfully with 4 commits.
 **Phase 1 — Settings decoupling:** Switched 8 production files from
 `settings` to `domain_config` for domain-only field access. Added
 `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence.
-Settings import footprint reduced from 37 → 29 production files (22%).
+Settings import footprint reduced from 37 → 30 production files (19%).
 
 **Phase 2 — Docker/Compose fixes:** Fixed stale VidaiMock tapes volume
 mount (`core/` → `team/`). Deleted orphan `docker-compose.postgres.yml`.

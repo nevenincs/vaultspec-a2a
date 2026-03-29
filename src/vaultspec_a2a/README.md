@@ -471,11 +471,11 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | Zero self._runtime_log_extra | PASS | Replaced by `runtime_log_extra(config, ...)` free function |
 | MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
 
-### Layer 3 Infrastructure Config — DONE (PR #TBD)
+### Layer 3 Infrastructure Config — DONE (PR #16)
 
 | Check | Status | Finding |
 |-------|--------|---------|
-| Settings god-object reduction | DONE | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 29 prod files. |
+| Settings god-object reduction | DONE | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 30 prod files (19%). |
 | `DomainConfig` env_file parity | DONE | Added `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence |
 | Stale tapes volume mount | FIXED | `docker-compose.integration.yml` path corrected: `core/` → `team/` |
 | Orphan `docker-compose.postgres.yml` | DELETED | Legacy duplicate with missing `CHECKPOINT_DATABASE_URL` bug |

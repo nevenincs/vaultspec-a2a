@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.permission_service import PermissionResult, respond_to_permission
 from ...database.session import get_db
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -51,7 +52,6 @@ async def respond_to_permission_endpoint(
     idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
 ) -> PermissionResponseResult:
     """Submit a permission response via REST for guaranteed delivery."""
-    from ...domain_config import domain_config
 
     result = await respond_to_permission(
         db=db,

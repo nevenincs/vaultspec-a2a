@@ -95,11 +95,12 @@ to `from ..domain_config import domain_config`:
 - `control/dispatch.py` — same field
 - `worker/graph_lifecycle.py` — replace `settings.max_cached_graphs` with
   `domain_config.max_cached_graphs`
+- `worker/executor.py` — replace `settings.graph_recursion_limit` with
+  `domain_config.graph_recursion_limit` (mixed file: retains `settings`
+  for `max_concurrent_threads`)
 
 This is a mechanical import swap — no logic changes, no new abstractions.
-Each file touches exactly one import line and one or more field access
-sites. The `permissions.py` inline import requires swapping the deferred
-import inside the function body.
+Each file touches the import line and one or more field access sites.
 
 ### Phase 2: Docker/Compose fixes (Track B)
 
@@ -147,10 +148,10 @@ import inside the function body.
 
 ## Consequences
 
-- **Import paths change for 7 files.** Any code that previously relied on
+- **Import paths change for 8 files.** Any code that previously relied on
   `settings.graph_recursion_limit` being the canonical access pattern in
   API routes now uses `domain_config.graph_recursion_limit`. The value is
-  identical at runtime (both read from the same env vars).
+  identical at runtime (both read from the same env vars and `.env` file).
 
 - **`docker-compose.postgres.yml` is deleted.** Anyone who had custom
   scripts referencing this file must switch to

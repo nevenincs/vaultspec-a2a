@@ -53,6 +53,11 @@ class _WriteBuffer:
         return self.buffer.decode()
 
 
+assert hasattr(_WriteBuffer(), "write") and hasattr(  # protocol drift guard
+    _WriteBuffer(), "drain"
+)
+
+
 # ---------------------------------------------------------------------------
 # ProbeResult dataclass
 # ---------------------------------------------------------------------------

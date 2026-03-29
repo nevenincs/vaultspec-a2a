@@ -10,14 +10,13 @@ The base URL is read from ``MOCK_API_BASE`` (same env var used by
 from __future__ import annotations
 
 import os
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 import httpx
 import pytest
 from langchain_core.language_models.fake_chat_models import FakeChatModel
 
-if TYPE_CHECKING:
-    from ..protocols import ProviderFactoryProtocol
+from ..protocols import ProviderFactoryProtocol
 
 __all__: list[str] = []
 
@@ -73,7 +72,9 @@ class _StubProviderFactory:
 @pytest.fixture
 def pf() -> ProviderFactoryProtocol:
     """Stub provider factory for graph compilation tests (Layer 1 only)."""
-    return _StubProviderFactory()
+    factory = _StubProviderFactory()
+    assert isinstance(factory, ProviderFactoryProtocol)
+    return factory
 
 
 _DEFAULT_VIDAIMOCK_URL = "http://localhost:8100"

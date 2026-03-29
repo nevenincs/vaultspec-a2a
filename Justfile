@@ -170,25 +170,17 @@ _dev-service-stop-vidaimock:
 
 # --- kill recipes (force) ---
 
-# Force-kill the gateway process
+# Force-kill the gateway process (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-gateway:
-    #!/usr/bin/env pwsh
-    $port = if ($env:VAULTSPEC_PORT) { $env:VAULTSPEC_PORT } else { "8000" }
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway killed." } else { Write-Host "Gateway not running." }
+    just _dev-service-stop-gateway
 
-# Force-kill the worker process
+# Force-kill the worker process (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-worker:
-    #!/usr/bin/env pwsh
-    $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker killed." } else { Write-Host "Worker not running." }
+    just _dev-service-stop-worker
 
-# Force-kill the UI dev server
+# Force-kill the UI dev server (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-ui:
-    #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "node" -and $_.CommandLine -match "vite" }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "UI killed." } else { Write-Host "UI not running." }
+    just _dev-service-stop-ui
 
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:

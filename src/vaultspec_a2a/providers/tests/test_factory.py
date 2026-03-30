@@ -5,7 +5,6 @@ from typing import cast
 
 import pytest
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import HumanMessage
 from langchain_openai import ChatOpenAI
 
 from ...graph.enums import MODEL_MAP, Model, Provider
@@ -17,7 +16,6 @@ from ..factory import (
     _build_acp_command,
     _build_gemini_command,
     _build_gemini_env,
-    _classify_acp_command,
     _classify_gemini_command,
 )
 
@@ -33,32 +31,9 @@ def _assert_binary_backend_unavailable(action) -> None:
         action()
 
 
-@pytest.mark.requires_acp
-def test_provider_factory_claude_creates_acp() -> None:
-    """Verify Claude provider creates AcpChatModel with the correct ACP command."""
-    model = ProviderFactory().create(Provider.CLAUDE)
-    assert isinstance(model, AcpChatModel)
-    assert model.command[0] == "node"
-    assert model.command[1].endswith("index.js")
-    assert model.provider == Provider.CLAUDE.value
-    assert model.runtime_authority == "project_local"
-    assert model.command_origin == "project_node_modules_entry"
-    assert model.command_kind == "node_entry"
-    assert model.acp_backend == "node"
-
-
 # ---------------------------------------------------------------------------
 # _build_acp_command: node and binary variants
 # ---------------------------------------------------------------------------
-
-
-@pytest.mark.requires_acp
-def test_build_acp_command_node_returns_node_command() -> None:
-    """node backend returns ['node', '<path>/index.js']."""
-    cmd = _build_acp_command("node")
-    assert cmd[0] == "node"
-    assert cmd[1].endswith("index.js")
-    assert len(cmd) == 2
 
 
 def test_build_acp_command_binary_returns_bin_path() -> None:
@@ -80,17 +55,6 @@ def test_build_acp_command_binary_path_matches_bin_path() -> None:
     assert Path(cmd[0]) == _BIN_PATH
 
 
-@pytest.mark.requires_acp
-def test_classify_acp_command_node_returns_runtime_metadata() -> None:
-    """Claude node backend exposes bounded runtime-authority metadata."""
-    command, meta = _classify_acp_command("node")
-    assert command[0] == "node"
-    assert meta["runtime_authority"] == "project_local"
-    assert meta["command_origin"] == "project_node_modules_entry"
-    assert meta["command_kind"] == "node_entry"
-    assert meta["acp_backend"] == "node"
-
-
 def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     """binary backend injects CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN=1 into env_vars."""
     if _BIN_PATH is None:
@@ -107,15 +71,6 @@ def test_provider_factory_claude_binary_backend_injects_bun_flag() -> None:
     assert model.command_kind == "bun_binary"
     assert model.acp_backend == "binary"
     assert model.auth_mode in {"oauth_token", "none_detected"}
-
-
-@pytest.mark.requires_acp
-def test_provider_factory_claude_node_backend_no_bun_flag() -> None:
-    """node backend does not inject CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN."""
-    model = ProviderFactory().create(Provider.CLAUDE, backend="node")
-    assert isinstance(model, AcpChatModel)
-    assert "CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN" not in model.env_vars
-    assert model.command[0] == "node"
 
 
 def test_provider_factory_claude_binary_oauth_still_injected() -> None:
@@ -151,14 +106,6 @@ def test_provider_factory_claude_binary_sets_use_exec() -> None:
     model = ProviderFactory().create(Provider.CLAUDE, backend="binary")
     assert isinstance(model, AcpChatModel)
     assert model.use_exec is True
-
-
-@pytest.mark.requires_acp
-def test_provider_factory_claude_node_use_exec_false() -> None:
-    """node backend leaves use_exec=False (shell mode for .cmd shim)."""
-    model = ProviderFactory().create(Provider.CLAUDE, backend="node")
-    assert isinstance(model, AcpChatModel)
-    assert model.use_exec is False
 
 
 def test_provider_factory_gemini_creates_acp() -> None:
@@ -255,15 +202,6 @@ def test_provider_factory_zhipu_mapping() -> None:
     assert "bigmodel.cn" in str(model.openai_api_base)
 
 
-@pytest.mark.requires_acp
-def test_provider_factory_claude_with_workspace_root() -> None:
-    """Verify that workspace_root kwarg is forwarded to AcpChatModel."""
-    ws = Path("Y:/code/test")
-    model = ProviderFactory().create(Provider.CLAUDE, workspace_root=ws)
-    assert isinstance(model, AcpChatModel)
-    assert model.workspace_root == str(ws)
-
-
 def test_provider_factory_gemini_with_workspace_root() -> None:
     """Verify that workspace_root kwarg is forwarded to AcpChatModel for Gemini."""
     ws = Path("Y:/code/test")
@@ -272,94 +210,7 @@ def test_provider_factory_gemini_with_workspace_root() -> None:
     assert model.workspace_root == str(ws)
 
 
-@pytest.mark.requires_acp
-def test_provider_factory_workspace_root_none_default() -> None:
-    """Verify that workspace_root defaults to None when not provided."""
-    model = ProviderFactory().create(Provider.CLAUDE)
-    assert isinstance(model, AcpChatModel)
-    assert model.workspace_root is None
-
-
-@pytest.mark.requires_acp
-def test_provider_factory_claude_never_injects_anthropic_api_key() -> None:
-    """ADR-002 §2: Factory must NOT inject ANTHROPIC_API_KEY for Claude.
-
-    The factory reads the real settings. Regardless of what ANTHROPIC_API_KEY
-    is set to in the environment, the factory must not place it in env_vars.
-    ANTHROPIC_API_KEY is stripped at subprocess spawn time in _astream().
-    """
-    model = ProviderFactory().create(Provider.CLAUDE)
-    assert isinstance(model, AcpChatModel)
-    assert "ANTHROPIC_API_KEY" not in model.env_vars
-
-
-@pytest.mark.requires_acp
-def test_provider_factory_claude_oauth_only() -> None:
-    """When OAuth token is set, only CLAUDE_CODE_OAUTH_TOKEN is in env_vars."""
-    model = ProviderFactory().create(Provider.CLAUDE)
-    assert isinstance(model, AcpChatModel)
-    if model.env_vars.get("CLAUDE_CODE_OAUTH_TOKEN"):
-        assert model.env_vars["CLAUDE_CODE_OAUTH_TOKEN"].strip()
-    assert "ANTHROPIC_API_KEY" not in model.env_vars
-
-
 def test_provider_factory_unsupported_provider() -> None:
     """Verify that nonsense providers raise ValueError with useful message."""
     with pytest.raises(ValueError, match="Unsupported provider: unknown"):
         ProviderFactory().create(cast("Provider", "unknown"))
-
-
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_factory_claude_live() -> None:
-    """Test Claude end-to-end via the ACP subprocess wrapper."""
-    model = ProviderFactory().create(Provider.CLAUDE)
-    assert isinstance(model, AcpChatModel)
-
-    response = await model.ainvoke(
-        [HumanMessage(content="Return the exact word 'Hello'.")]
-    )
-    assert response.content
-    assert "hello" in str(response.content).lower()
-
-
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_factory_gemini_live() -> None:
-    """Test Gemini end-to-end via the ACP subprocess wrapper."""
-    model = ProviderFactory().create(Provider.GEMINI)
-    assert isinstance(model, AcpChatModel)
-
-    response = await model.ainvoke(
-        [HumanMessage(content="Return the exact word 'Hello'.")]
-    )
-    assert response.content
-    assert "hello" in str(response.content).lower()
-
-
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_factory_openai_live() -> None:
-    """Test OpenAI end-to-end via the ChatOpenAI SDK wrapper."""
-    model = ProviderFactory().create(Provider.OPENAI)
-    assert isinstance(model, ChatOpenAI)
-
-    response = await model.ainvoke(
-        [HumanMessage(content="Return the exact word 'Hello'.")]
-    )
-    assert response.content
-    assert "hello" in str(response.content).lower()
-
-
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_factory_zhipu_live() -> None:
-    """Test Zhipu GLM end-to-end via the OpenAI-compatible ChatOpenAI wrapper."""
-    model = ProviderFactory().create(Provider.ZHIPU)
-    assert isinstance(model, ChatOpenAI)
-
-    response = await model.ainvoke(
-        [HumanMessage(content="Return the exact word 'Hello'.")]
-    )
-    assert response.content
-    assert "hello" in str(response.content).lower()

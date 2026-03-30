@@ -30,11 +30,3 @@ COPY src/ui/package*.json ./
 RUN npm ci
 
 EXPOSE 5173
-
-# ── Mock Seeder base: continuous DB population daemon ──────────────────────────
-FROM python-base AS mock-seeder
-
-# This container's sole purpose is to loop through mock team presets
-# and stream trace data directly using the local AsyncSqliteSaver.
-
-CMD ["uv", "run", "python", "docker/run.py"]

@@ -27,9 +27,6 @@ Dev-tooling modules invoked via ``python -m``:
     python -m vaultspec_a2a.control.db      restore --name FILE
     python -m vaultspec_a2a.control.db      clear --yes
     python -m vaultspec_a2a.control.hooks   install
-    python -m vaultspec_a2a.control.verify  prodlike_docker
-    python -m vaultspec_a2a.control.verify  provider <name>
-    python -m vaultspec_a2a.control.doctor  [all|ports|config|services]
 """
 
 from __future__ import annotations
@@ -40,7 +37,6 @@ __all__ = [
     "db",
     "diagnostics",
     "dispatch",
-    "doctor",
     "event_handlers",
     "health",
     "hooks",
@@ -49,6 +45,5 @@ __all__ = [
     "repair_transitions",
     "snapshot",
     "thread_service",
-    "verify",
     "worker_management",
 ]

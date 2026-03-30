@@ -30,14 +30,11 @@ class _SettingsOverride:
 
 
 def _make_app_without_lifespan():
-    app = create_worker_app()
-
     @asynccontextmanager
     async def _noop_lifespan(_app):
         yield
 
-    app.router.lifespan_context = _noop_lifespan
-    return app
+    return create_worker_app(lifespan=_noop_lifespan)
 
 
 def test_dispatch_rejects_missing_internal_token_outside_development() -> None:

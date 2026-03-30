@@ -11,6 +11,8 @@ from typing import Literal
 
 from ..thread.enums import ControlActionType, RepairStatus, ThreadStatus
 
+STARTUP_REPAIR_REASON: str = "Gateway restarted with an active thread"
+
 
 @dataclass(frozen=True, slots=True)
 class ThreadSnapshot:
@@ -131,7 +133,7 @@ def compute_reconciliation_actions(
                     thread_id=tid,
                     new_thread_status=ThreadStatus.RECONCILING.value,
                     repair_status=RepairStatus.NEEDS_RECONCILIATION.value,
-                    repair_reason=("Gateway restarted with an active thread"),
+                    repair_reason=STARTUP_REPAIR_REASON,
                     execution_readiness=(RepairStatus.NEEDS_RECONCILIATION.value),
                     increment_generation=True,
                     increment_recovery_epoch=True,

@@ -121,7 +121,7 @@ async def cancel_thread(
     await mark_cancel_requested(db, thread_id)
 
     dispatch = DispatchRequest(
-        action="cancel",
+        action=ControlActionType.CANCEL,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         recursion_limit=recursion_limit,
     )

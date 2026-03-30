@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
@@ -465,10 +465,14 @@ def test_build_supervisor_prompt_no_directive() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_recursion_limit_from_toml(
+async def test_compile_team_graph_does_not_set_recursion_limit(
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """compile_team_graph sets recursion_limit from team TOML."""
+    """compile_team_graph leaves recursion_limit at LangGraph default.
+
+    The recursion_limit is passed at runtime via the executor config dict,
+    not baked into the compiled graph object.
+    """
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.recursion_limit == 10
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -480,7 +484,8 @@ async def test_compile_team_graph_recursion_limit_from_toml(
             checkpointer=cp,
             provider_factory=pf,
         )
-    assert cast("Any", graph).recursion_limit == 10
+    # recursion_limit is passed at runtime via config, not set on graph.
+    assert not hasattr(graph, "recursion_limit")
 
 
 # ---------------------------------------------------------------------------

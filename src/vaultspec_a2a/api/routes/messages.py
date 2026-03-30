@@ -11,6 +11,7 @@ from ...control.message_service import send_followup_message
 from ...database.session import get_db
 from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -45,7 +46,7 @@ async def send_message_endpoint(
     Returns 202 Accepted immediately; the message is dispatched to the
     worker process for graph execution (ADR-019).
     """
-    agent_id = body.agent_id or "vaultspec-supervisor"
+    agent_id = body.agent_id or DEFAULT_SUPERVISOR_ID
 
     result = await send_followup_message(
         db=db,

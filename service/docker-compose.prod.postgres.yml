@@ -1,6 +1,6 @@
 # Production-like Postgres overlay for the gateway + worker stack.
 # Usage:
-#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml up --build
+#   docker compose -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up --build
 
 services:
   postgres:

@@ -282,7 +282,7 @@ async def respond_to_permission(
     # 6. Dispatch resume to worker
     # ------------------------------------------------------------------
     dispatch = DispatchRequest(
-        action="resume",
+        action=ControlActionType.RESUME,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         option_id=resume_value,
         team_preset=team_preset,

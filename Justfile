@@ -120,7 +120,7 @@ _dev-service-start-ui:
 
 # Start PostgreSQL via docker compose
 _dev-service-start-postgres:
-    docker compose -f docker-compose.prod.postgres.yml up -d postgres
+    docker compose -f service/docker-compose.prod.postgres.yml up -d postgres
 
 
 # --- stop recipes (graceful) ---
@@ -147,7 +147,7 @@ _dev-service-stop-ui:
 
 # Stop PostgreSQL container
 _dev-service-stop-postgres:
-    -docker compose -f docker-compose.prod.postgres.yml stop postgres
+    -docker compose -f service/docker-compose.prod.postgres.yml stop postgres
 
 
 # --- kill recipes (force) ---
@@ -166,7 +166,7 @@ _dev-service-kill-ui:
 
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:
-    -docker compose -f docker-compose.prod.postgres.yml kill postgres
+    -docker compose -f service/docker-compose.prod.postgres.yml kill postgres
 
 
 # --- restart recipes ---
@@ -211,7 +211,7 @@ _dev-service-rebuild-ui:
 
 # Rebuild PostgreSQL: destroy volume and recreate
 _dev-service-rebuild-postgres:
-    docker compose -f docker-compose.prod.postgres.yml down -v
+    docker compose -f service/docker-compose.prod.postgres.yml down -v
     just _dev-service-start-postgres
 
 
@@ -232,7 +232,7 @@ _dev-service-logs-ui:
 
 # Tail PostgreSQL container logs
 _dev-service-logs-postgres:
-    docker compose -f docker-compose.prod.postgres.yml logs -f postgres
+    docker compose -f service/docker-compose.prod.postgres.yml logs -f postgres
 
 
 # --- db subgroup ---
@@ -320,12 +320,12 @@ _dev-build-package:
 
 # Build local dev Docker images (gateway + worker)
 _dev-build-docker:
-    docker compose -f docker-compose.dev.yml build
+    docker compose -f service/docker-compose.dev.yml build
 
 # Build production multi-stage Docker images
 _dev-build-docker-prod:
-    docker build -t vaultspec-a2a-gateway -f docker/prod.Dockerfile --target gateway .
-    docker build -t vaultspec-a2a-worker -f docker/prod.Dockerfile --target worker .
+    docker build -t vaultspec-a2a-gateway -f service/docker/prod.Dockerfile --target gateway .
+    docker build -t vaultspec-a2a-worker -f service/docker/prod.Dockerfile --target worker .
 
 # Remove dist/, egg-info, and __pycache__ directories
 _dev-build-clean:

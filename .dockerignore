@@ -3,6 +3,7 @@
 node_modules/
 knowledge/repositories/*/
 __pycache__/
+**/tests/
 *.pyc
 *.db
 *.db-shm

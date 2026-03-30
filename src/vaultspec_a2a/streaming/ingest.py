@@ -14,6 +14,7 @@ from langgraph.types import Command
 
 from ..graph.enums import AgentLifecycleState
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
+from ..thread.enums import ThreadStatus
 from .buffering import BufferingManager
 from .emitters import EventEmitters
 from .transformer import (
@@ -92,7 +93,7 @@ class IngestManager:
         start = time.monotonic()
         cancel_event = self._get_cancel_event(thread_id)
         _is_interrupt = False
-        _outcome = "completed"
+        _outcome = ThreadStatus.COMPLETED
         with self._telemetry.start_span(
             "aggregator.ingest",
             thread_id=thread_id,
@@ -106,7 +107,7 @@ class IngestManager:
                 ):
                     if cancel_event.is_set():
                         logger.info("Ingest cancelled for thread %s", thread_id)
-                        _outcome = "cancelled"
+                        _outcome = ThreadStatus.CANCELLED
                         span.set_attribute("cancelled", True)
                         await self._emitters.emit_agent_status(
                             thread_id=thread_id,
@@ -141,7 +142,7 @@ class IngestManager:
                     )
                     span.set_attribute("interrupted", True)
                 elif _is_recursion_limit:
-                    _outcome = "failed"
+                    _outcome = ThreadStatus.FAILED
                     logger.warning(
                         "Graph recursion limit reached for thread %s", thread_id
                     )
@@ -157,7 +158,7 @@ class IngestManager:
                         recoverable=False,
                     )
                 elif _is_step_timeout:
-                    _outcome = "failed"
+                    _outcome = ThreadStatus.FAILED
                     logger.warning("Graph step_timeout fired for thread %s", thread_id)
                     span.set_attribute("error.type", "step_timeout")
                     await self._emitters.emit_error(
@@ -171,7 +172,7 @@ class IngestManager:
                         recoverable=True,
                     )
                 else:
-                    _outcome = "failed"
+                    _outcome = ThreadStatus.FAILED
                     logger.exception(
                         "Error during graph ingest for thread %s", thread_id
                     )
@@ -190,7 +191,7 @@ class IngestManager:
                 interrupt_emitted = await emit_interrupt_events(
                     thread_id, agent_id, graph, config, self._emitters
                 )
-                if _outcome == "completed" and interrupt_emitted:
+                if _outcome == ThreadStatus.COMPLETED and interrupt_emitted:
                     _outcome = "interrupted"
                     span.set_attribute("interrupted_via_state", True)
                 self._telemetry.record_histogram(

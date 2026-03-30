@@ -18,6 +18,7 @@ from ..domain_config import domain_config
 from ..graph.compiler import compile_team_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 
 if TYPE_CHECKING:
@@ -228,13 +229,13 @@ class GraphLifecycleManager:
         if team_config.topology.type in ("star", "pipeline_loop"):
             try:
                 supervisor_config = load_agent_config(
-                    "vaultspec-supervisor", workspace_root=ws_root
+                    DEFAULT_SUPERVISOR_ID, workspace_root=ws_root
                 )
             except AgentConfigNotFoundError:
                 logger.debug(
                     "No supervisor config; using defaults",
                     extra={
-                        "agent_id": "vaultspec-supervisor",
+                        "agent_id": DEFAULT_SUPERVISOR_ID,
                         "team_preset": req.team_preset,
                         "workspace_root": str(ws_root) if ws_root else None,
                         "action": "supervisor_config_defaulted",

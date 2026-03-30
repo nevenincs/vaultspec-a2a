@@ -2,10 +2,10 @@
 # Suitable for local testing of production container images and
 # single-node deployments where an external Postgres is not available.
 #
-# Usage: docker compose -f docker-compose.prod.yml up --build
+# Usage: docker compose -f service/docker-compose.prod.yml up --build
 #
 # Postgres (recommended for production):
-#   docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml up --build
+#   docker compose -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up --build
 #
 # Gateway: http://localhost:8000 (FastAPI serves React SPA)
 # Jaeger UI: http://localhost:16686
@@ -13,8 +13,8 @@
 services:
   gateway:
     build:
-      context: .
-      dockerfile: docker/prod.Dockerfile
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
       target: gateway
     restart: unless-stopped
     ports:
@@ -51,8 +51,8 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: docker/prod.Dockerfile
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
       target: worker
     restart: unless-stopped
     volumes:

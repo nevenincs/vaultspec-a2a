@@ -26,11 +26,12 @@ if TYPE_CHECKING:
 
 from uuid import uuid4
 
-import anyio
+import anyio  # anyio: structured task groups for heartbeat + dispatch.
 import anyio.abc
 import httpx
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException
+from opentelemetry import metrics, trace
 
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
@@ -152,9 +153,20 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await executor.shutdown()
         await bridge.close()
 
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "shutdown"):
+            await anyio.to_thread.run_sync(provider.shutdown)  # ty: ignore[unresolved-attribute]
+        meter_provider = metrics.get_meter_provider()
+        if hasattr(provider, "shutdown"):
+            await anyio.to_thread.run_sync(meter_provider.shutdown)  # ty: ignore[unresolved-attribute]
 
-def create_worker_app() -> FastAPI:
+
+def create_worker_app(lifespan: Any | None = None) -> FastAPI:
     """Create and return the worker FastAPI application.
+
+    Args:
+        lifespan: Optional lifespan override for testing. When ``None``
+            the production ``_lifespan`` is used.
 
     Called as a factory by ``uvicorn`` (``--factory`` flag) or directly
     in tests.
@@ -162,7 +174,7 @@ def create_worker_app() -> FastAPI:
     app = FastAPI(
         title="Vaultspec Worker",
         version="0.1.0",
-        lifespan=_lifespan,
+        lifespan=lifespan or _lifespan,
     )
 
     # TEL-01: Instrument incoming requests so the worker's spans participate

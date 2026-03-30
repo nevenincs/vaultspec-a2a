@@ -58,9 +58,9 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
 
 # DB-CRIT-01: map aggregator outcome strings to ThreadStatus enum values.
 TERMINAL_STATUS_MAP: dict[str, str] = {
-    "completed": "completed",
-    "failed": "failed",
-    "cancelled": "cancelled",
+    ThreadStatus.COMPLETED: ThreadStatus.COMPLETED,
+    ThreadStatus.FAILED: ThreadStatus.FAILED,
+    ThreadStatus.CANCELLED: ThreadStatus.CANCELLED,
 }
 
 _PROGRESS_EVENT_TYPES: frozenset[str] = frozenset(

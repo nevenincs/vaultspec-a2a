@@ -24,7 +24,8 @@ from ..control.dispatch import (
 from ..database import get_thread
 from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest
-from ..thread.enums import ThreadStatus
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..thread.enums import ControlActionType, ThreadStatus
 from ._utils import trace_headers
 from .schemas.enums import AgentControlAction
 from .websocket import WebSocketCommandRejectedError
@@ -85,7 +86,7 @@ async def _ws_mark_failed_and_broadcast(
     terminal_payload = {
         "event_type": "thread_terminal",
         "thread_id": thread_id,
-        "status": "failed",
+        "status": ThreadStatus.FAILED,
         "error_detail": error_detail,
     }
     try:
@@ -176,9 +177,9 @@ def create_dispatch_message_handler(
             )
 
         dispatch = DispatchRequest(
-            action="ingest",
+            action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
             thread_id=thread_id,
-            agent_id=agent_id or "vaultspec-supervisor",
+            agent_id=agent_id or DEFAULT_SUPERVISOR_ID,
             content=content,
             team_preset=team_preset,
             workspace_root=workspace_root,
@@ -246,7 +247,7 @@ def create_dispatch_control_handler(
     ) -> None:
         match action:
             case AgentControlAction.TERMINATE:
-                dispatch_action = "cancel"
+                dispatch_action = ControlActionType.CANCEL
             case AgentControlAction.RESUME:
                 logger.warning(
                     "WS RESUME without option_id is a no-op;"
@@ -269,7 +270,7 @@ def create_dispatch_control_handler(
                 )
 
         dispatch = DispatchRequest(
-            action=dispatch_action,
+            action=dispatch_action,  # ty: ignore[invalid-argument-type]
             thread_id=thread_id,
             agent_id=agent_id,
             recursion_limit=domain_config.graph_recursion_limit,

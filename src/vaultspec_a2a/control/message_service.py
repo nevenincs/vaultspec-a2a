@@ -156,7 +156,7 @@ async def send_followup_message(
 
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(
-        action="ingest",
+        action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         agent_id=agent_id,
         content=content,

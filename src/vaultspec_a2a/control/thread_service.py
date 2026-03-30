@@ -164,7 +164,7 @@ async def create_and_dispatch_thread(
 
     # -- Construct dispatch request --------------------------------------------
     dispatch = DispatchRequest(
-        action="ingest",
+        action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
         thread_id=thread.id,
         team_preset=req.team_preset,
         workspace_root=str(req.workspace_root) if req.workspace_root else None,

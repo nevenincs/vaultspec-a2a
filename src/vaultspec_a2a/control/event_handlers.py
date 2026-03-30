@@ -16,6 +16,7 @@ import logging
 from datetime import datetime
 from typing import Any
 
+from ..graph.enums import REJECT_OPTION_IDS
 from ..ipc.schemas import ExecutionStateProjectionPayload
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -263,7 +264,7 @@ async def _handle_permission_event(
                 target_status = PermissionRequestStatus.APPLIED
                 if (
                     permission.response_option_id
-                    and permission.response_option_id.startswith("reject")
+                    and permission.response_option_id in REJECT_OPTION_IDS
                 ):
                     target_status = PermissionRequestStatus.REJECTED
                 await mark_permission_request_applied(

@@ -4,6 +4,9 @@ This is a Layer 1 leaf module with zero internal dependencies beyond
 standard-library and LangGraph/LangChain framework types.
 """
 
+from .constants import (
+    DEFAULT_SUPERVISOR_ID as DEFAULT_SUPERVISOR_ID,
+)
 from .enums import (
     ApprovalStatus as ApprovalStatus,
 )
@@ -127,6 +130,7 @@ from .snapshots import (
 from .state import TeamState as TeamState
 
 __all__ = [
+    "DEFAULT_SUPERVISOR_ID",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "AgentConfigNotFoundError",
     "AgentProcessError",

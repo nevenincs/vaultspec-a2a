@@ -1,13 +1,13 @@
 # Frontend-ready development environment: backend + worker + Vite.
-# Usage: docker compose -f docker-compose.dev.yml up --build
+# Usage: docker compose -f service/docker-compose.dev.yml up --build
 # Gateway: http://localhost:8000
 # Frontend: http://localhost:5173 (HMR, proxied to the gateway)
 
 services:
   gateway:
     build:
-      context: .
-      dockerfile: docker/prod.Dockerfile
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
       target: gateway
     ports:
       - '${VAULTSPEC_PORT:-8000}:8000'
@@ -37,8 +37,8 @@ services:
 
   worker:
     build:
-      context: .
-      dockerfile: docker/prod.Dockerfile
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
       target: worker
     volumes:
       - db-data:/app/data
@@ -62,14 +62,14 @@ services:
 
   frontend:
     build:
-      context: .
-      dockerfile: docker/dev.Dockerfile
+      context: ..
+      dockerfile: service/docker/dev.Dockerfile
       target: node-base
     command: npm run dev -- --host 0.0.0.0
     ports:
       - '${VAULTSPEC_UI_PORT:-5173}:5173'
     volumes:
-      - ./src/ui:/app/src/ui
+      - ../src/ui:/app/src/ui
       - /app/src/ui/node_modules # exclude host node_modules from mount
     working_dir: /app/src/ui
     environment:

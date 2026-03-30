@@ -67,13 +67,15 @@ packages = ["src/vaultspec_a2a"]
 # --capture=sys: avoids pytest's fd-level dup2 which crashes silently under
 # Git Bash / MinTTY (the _windowsconsoleio_workaround path). sys-level capture
 # replaces sys.stdout/stderr in memory only — no CloseHandle, no silent death.
-addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys"]
+addopts = ["--durations=10", "--showlocals", "-ra", "--capture=sys", "-m", "not service"]
 log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 log_cli_date_format = "%H:%M:%S"
 norecursedirs = [".venv", "knowledge", "node_modules", "ui"]
 strict_xfail = true
+# CI should set OTEL_SDK_DISABLED=true to avoid OTLP exporter connection errors.
+# Not set here because _SDK_DISABLED is import-time and telemetry tests need it enabled.
 testpaths = ["src/vaultspec_a2a"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"
@@ -82,6 +84,7 @@ markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
   "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
+  "service: marks Layer 3 tests — require Docker compose services. Run with pytest -m service.",
 ]
 
 [tool.ruff]

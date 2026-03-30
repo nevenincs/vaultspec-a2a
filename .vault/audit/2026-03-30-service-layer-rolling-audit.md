@@ -203,11 +203,119 @@ exclusively in `event_handlers.py` (covered above) and `ws_dispatch.py`
 | V20 | `thread/tests/conftest.py` missing `unit` marker | **MEDIUM** | Test marker audit |
 | V21 | Terminal-state guard in WS uses hand-rolled tuple vs `NON_ACTIVE_STATUSES` frozenset | **MEDIUM** | Duplication audit |
 
+## Cycle 3 — Deep-dive audits (2026-03-30)
+
+Five parallel agents: hand-rolled literals, config redefinition, free-standing
+domain logic in Layer 2, test marker correctness, and Layer 1 constant gaps.
+
+### Hand-Rolled Literals vs Centralized Enums
+
+Widespread use of bare string literals where Layer 1 enums exist:
+
+| Category | Violation count | Root issue |
+|----------|----------------|------------|
+| `ThreadStatus` bare strings (`"running"`, `"failed"`, etc.) | 20+ sites | Enum exists, not used |
+| `ControlActionType` bare strings (`"ingest"`, `"cancel"`, `"resume"`) | 12 sites | Enum exists, not used |
+| `ApprovalStatus` bare strings (`"approved"`, `"rejected"`, `"pending"`) | 4 sites | Enum exists, not used |
+| `"vaultspec-supervisor"` default agent ID | 8 prod sites | No constant exists |
+| `TERMINAL_STATUSES` inline re-definitions | 2 sites | Frozenset exists, hand-rolled |
+
+**Key files:** `worker/executor.py` (15+ bare strings), `streaming/ingest.py`
+(5), `worker/state_projection.py` (3), `api/ws_dispatch.py` (3),
+`control/cancel_service.py` (1), `graph/nodes/supervisor.py` (3).
+
+### Config Value Redefinition Across Layers
+
+Port defaults (`8000`, `8001`, `8200`) defined in 5+ files each:
+
+| Value | Authoritative | Also in |
+|-------|---------------|---------|
+| `8000` | `config.py:170` | 2 compose files (fallback), `doctor.py`, `verify.py`, Justfile |
+| `8001` | `config.py:211` | 2 compose files, `doctor.py`, Justfile (2 recipes) |
+| `8200` | `config.py:192` | `doctor.py` |
+| `"sqlite"` | `config.py:39,47` | 2 compose files (explicit default assignments) |
+| `"127.0.0.1"` | `config.py:216` | `cli/_team.py:355`, `cli/_util.py:115` (hardcoded) |
+
+`doctor.py` hardcodes all three ports in `_DEFAULT_PORTS` instead of
+reading from `settings`. `verify.py` embeds `:8000` in module-level URL
+constants.
+
+### Free-Standing Domain Logic in Layer 2/3
+
+**48 domain decisions** found in Layer 2 with no Layer 1 pure-function
+counterpart:
+
+| Category | Count | Proposed Layer 1 module |
+|----------|-------|------------------------|
+| Dispatch failure policy | 6 | `thread/dispatch_policy.py` |
+| Permission response FSM | 8 | `thread/permission_policy.py` |
+| Permission event FSM | 7 | `thread/permission_fsm.py` |
+| Thread creation rules | 5 | `thread/creation.py` |
+| Cancel eligibility | 3 | `thread/cancel_policy.py` |
+| Message eligibility | 2 | `thread/message_policy.py` |
+| Terminal effects | 3 | `thread/terminal_effects.py` |
+| Repair state mapping | 7 | `thread/repair_policy.py` |
+| Deletion/archive guards | 2 | `thread/lifecycle_guards.py` |
+| Idempotency key derivation | 2 | `thread/idempotency.py` |
+| Default agent ID | 1 | `thread/constants.py` |
+| Checkpoint error → repair | 2 | extend `snapshots.py` |
+
+**Critical inconsistency found:** Dispatch failure policy differs
+between services — `thread_service` marks FAILED for `at_capacity`;
+`permission_service` does NOT. This invisible because each service
+hard-codes its own policy inline.
+
+### Test Marker Audit
+
+| Violation | Severity |
+|-----------|----------|
+| `graph/tests/nodes/test_worker_integration.py` marked `core` but imports `providers.acp_chat_model` and spawns subprocess | **HIGH** |
+| `utils/tests/test_logging.py` marked `core` but imports `control.config.Settings` | **HIGH** |
+| `thread/tests/conftest.py` missing `unit` marker (inconsistent with all other `core` conftest files) | **MEDIUM** |
+| `tests/evals/` has no marker and no fail-fast hook | **MEDIUM** |
+| `graph/tests/nodes/` has no conftest — inherits parent markers wholesale | **LOW** |
+
+**`service` marker proposal:** Single Layer 3 marker replacing the
+fragmented `live`/`requires_*` family. Added to `addopts` as
+`not service`. Bridge via `pytest_collection_modifyitems` auto-applying
+`service` to legacy-marked tests. New Layer 3 tests use `service` only.
+
+### Layer 1 Constant Gaps
+
+| Missing constant | Inline usage count | Proposed location |
+|------------------|--------------------|-------------------|
+| `DEFAULT_SUPERVISOR_ID` (`"vaultspec-supervisor"`) | 8 prod sites | `thread/constants.py` |
+| `DispatchRequest.action` typed as `ControlActionType` | 3 match arms + 7 assignments | `ipc/schemas.py` type change |
+| `REJECT_OPTION_IDS` frozenset | 2 `startswith("reject")` checks | `graph/enums.py` |
+| `STARTUP_REPAIR_REASON` constant | 2 coupled magic strings | `lifecycle/reconciliation.py` |
+| `AgentControlAction` vs `ControlActionType` divergence | structural | evaluate merge or document distinction |
+
+### Cycle 3 — New Findings
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V22 | 20+ bare `ThreadStatus` string literals instead of enum usage | **CRITICAL** |
+| V23 | 12 bare `ControlActionType` string literals instead of enum | **CRITICAL** |
+| V24 | 48 domain decisions in Layer 2 with no Layer 1 counterpart | **CRITICAL** |
+| V25 | Dispatch failure policy inconsistent across services (FAILED vs lenient for same error) | **CRITICAL** |
+| V26 | `DEFAULT_SUPERVISOR_ID` scattered across 8 files with no constant | **HIGH** |
+| V27 | Port defaults hardcoded in 5+ files per value | **HIGH** |
+| V28 | `DispatchRequest.action` typed as `Literal[...]` not `ControlActionType` | **HIGH** |
+| V29 | `test_worker_integration.py` imports Layer 2 under `core` marker | **HIGH** |
+| V30 | `test_logging.py` imports Layer 2 under `core` marker | **HIGH** |
+| V31 | `ApprovalStatus` bare strings in `supervisor.py` and `projection.py` | **HIGH** |
+| V32 | `thread/tests/conftest.py` missing `unit` marker | **MEDIUM** |
+| V33 | `tests/evals/` has no marker or fail-fast hook | **MEDIUM** |
+| V34 | Rejection determined by `startswith("reject")` not enum check | **MEDIUM** |
+| V35 | `TERMINAL_STATUS_MAP` uses string keys instead of enum | **LOW** |
+| V36 | `graph/tests/nodes/` has no local conftest | **LOW** |
+
 ## Cumulative Violation Summary
 
-| Severity | Cycle 1 | Cycle 2 | Total |
-|----------|---------|---------|-------|
-| CRITICAL | 8 | 6 | **14** |
-| HIGH | 9 | 6 | **15** |
-| MEDIUM | 0 | 1 | **1** |
-| Total | **17** | **13** | **30** |
+| Severity | Cycle 1 | Cycle 2 | Cycle 3 | Total |
+|----------|---------|---------|---------|-------|
+| CRITICAL | 8 | 6 | 4 | **18** |
+| HIGH | 9 | 6 | 6 | **21** |
+| MEDIUM | 0 | 1 | 3 | **4** |
+| LOW | 0 | 0 | 2 | **2** |
+| Total | **17** | **13** | **15** | **45** |

@@ -319,3 +319,133 @@ fragmented `live`/`requires_*` family. Added to `addopts` as
 | MEDIUM | 0 | 1 | 3 | **4** |
 | LOW | 0 | 0 | 2 | **2** |
 | Total | **17** | **13** | **15** | **45** |
+
+## Cycle 4 — Library documentation verification (2026-03-30)
+
+Five parallel agents verified the codebase against official documentation
+for LangGraph, Pydantic/pydantic-settings, FastAPI, SQLAlchemy async,
+and OpenTelemetry using Context7 MCP and web research.
+
+### LangGraph — 22 MATCH, 0 MISMATCH, 2 CONCERN
+
+The LangGraph integration is **correct and well-implemented**. All core
+patterns verified:
+
+- StateGraph construction, node addition, edge wiring — correct
+- `astream_events(version="v2")` with event classification — correct
+- `Command(resume=...)` for interrupt resumption — correct
+- `AsyncSqliteSaver`/`AsyncPostgresSaver` via `from_conn_string()` + `setup()` — correct
+- TeamState TypedDict with `add_messages` reducer — correct
+- `aget_state` for checkpoint inspection — correct
+- `GraphInterrupt` caught as `BaseException` — correct
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V37 | `graph.recursion_limit` set as compile-time attribute (compiler.py:386). Docs say pass via `config={"recursion_limit": N}` at runtime. The project also passes it correctly at runtime in executor.py — the compile-time set is redundant and undocumented. | **MEDIUM** |
+| V38 | `graph.step_timeout` attribute (compiler.py:382). Exists in LangGraph's `Pregel` base but is not in user-facing docs. Internal attribute — upgrade risk. | **LOW** |
+
+### Pydantic / pydantic-settings — 13 MATCH, 0 MISMATCH, 2 CONCERN
+
+All pydantic-settings patterns are **functionally correct**:
+
+- `BaseSettings` with `env_file` + `env_prefix` — correct
+- `Settings(DomainConfig, InfraConfig)` MRO — works because `Settings`
+  declares its own `model_config` (critical — removal would silently
+  change behavior)
+- `validation_alias` for third-party env vars — correct
+- `AliasChoices` — correct
+- `field_validator(mode="before")`, `model_validator(mode="after")` — correct
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V39 | All 18 DomainConfig fields have redundant `alias="VAULTSPEC_<NAME>"` that duplicates what `env_prefix="VAULTSPEC_"` already produces. Not wrong, but unnecessary boilerplate. | **LOW** |
+| V40 | Two singletons (`domain_config` + `settings`) each parse `.env` independently at import time. Minor performance concern (one extra file read). | **LOW** |
+
+### FastAPI — 19 MATCH, 0 MISMATCH, 2 CONCERN
+
+FastAPI usage is **correct throughout**:
+
+- Lifespan context manager, factory pattern — correct
+- `Depends()` with return and yield patterns — correct
+- WebSocket accept/receive/send lifecycle — correct
+- CORS middleware, static file serving — correct
+- ASGITransport for testing — correct
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V41 | Mixed `asyncio`/`anyio` concurrency primitives: gateway uses raw `asyncio`, worker uses `anyio.create_task_group()`. Both work but inconsistent. | **LOW** |
+| V42 | `app.router.lifespan_context` override in tests is an undocumented Starlette internal. Fragile across upgrades. | **MEDIUM** |
+
+### SQLAlchemy async — 17 MATCH, 0 MISMATCH, 2 CONCERN
+
+SQLAlchemy usage is **correct per 2.0 async docs**:
+
+- `create_async_engine` for both aiosqlite and asyncpg — correct
+- `async_sessionmaker` with `expire_on_commit=False` — correct
+- `get_db()` yield pattern for FastAPI — correct
+- WAL mode / busy_timeout pragmas — correct
+- ORM models with `DeclarativeBase`, `mapped_column`, `Mapped[T]` — correct
+- Repository pattern: `select()` + `scalars()`, flush-not-commit — correct
+- Alembic async runner — correct
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V43 | **No `lazy="raise"` on any relationship.** Default `lazy="select"` will raise `MissingGreenlet` if relationship attributes are ever accessed in async context. Currently safe only because repositories never traverse relationships. Adding `lazy="raise"` would make this a compile-time safety net. | **HIGH** |
+| V44 | `migrate.py` uses `asyncio.to_thread(command.upgrade, cfg, "head")` — Alembic's `command.upgrade` internally calls `asyncio.run()`, creating a nested event loop in a worker thread. Works today but architecturally fragile. | **MEDIUM** |
+
+### OpenTelemetry — 15 MATCH, 0 MISMATCH, 3 CONCERN
+
+OTel implementation is **mostly correct**:
+
+- TracerProvider + BatchSpanProcessor + OTLP gRPC exporter — correct
+- MeterProvider + PeriodicExportingMetricReader — correct
+- W3C traceparent extract/inject via `propagate` — correct
+- Span attributes using modern semantic conventions — correct
+- Resource with `service.name` — correct
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V45 | **Missing `TracerProvider.shutdown()` at process exit.** Neither gateway nor worker lifespan calls shutdown. Buffered spans may be silently dropped on exit. OTel docs explicitly recommend calling `provider.shutdown()` during teardown. | **HIGH** |
+| V46 | Dead error-handling code in middleware.py (lines 151-155): `span.set_status()` and `span.record_exception()` called on an already-ended span. The context manager `__exit__` handles this automatically — the explicit except block is misleading dead code. | **MEDIUM** |
+| V47 | OTLP exporter fires during non-Jaeger tests. `OTEL_SDK_DISABLED` not set in test env, causing `BatchSpanProcessor` to attempt gRPC connections to `localhost:4317` during every test run. Produces background noise. | **HIGH** |
+
+### Cycle 4 — New Findings
+
+| ID | Finding | Severity | Library |
+|----|---------|----------|---------|
+| V37 | Redundant `graph.recursion_limit` compile-time attribute | **MEDIUM** | LangGraph |
+| V38 | `graph.step_timeout` relies on undocumented internal attribute | **LOW** | LangGraph |
+| V39 | 18 redundant alias declarations in DomainConfig | **LOW** | pydantic-settings |
+| V40 | Double `.env` parse (two singletons) | **LOW** | pydantic-settings |
+| V41 | Mixed asyncio/anyio concurrency primitives | **LOW** | FastAPI |
+| V42 | Undocumented `app.router.lifespan_context` in tests | **MEDIUM** | FastAPI/Starlette |
+| V43 | No `lazy="raise"` on ORM relationships — MissingGreenlet risk | **HIGH** | SQLAlchemy |
+| V44 | Nested `asyncio.run()` in migration thread | **MEDIUM** | SQLAlchemy/Alembic |
+| V45 | Missing `TracerProvider.shutdown()` at exit — spans may be lost | **HIGH** | OpenTelemetry |
+| V46 | Dead span error-handling code in middleware | **MEDIUM** | OpenTelemetry |
+| V47 | OTLP exporter noise during tests — `OTEL_SDK_DISABLED` not set | **HIGH** | OpenTelemetry |
+
+## Cumulative Violation Summary
+
+| Severity | C1 | C2 | C3 | C4 | Total |
+|----------|----|----|----|----|-------|
+| CRITICAL | 8 | 6 | 4 | 0 | **18** |
+| HIGH | 9 | 6 | 6 | 3 | **24** |
+| MEDIUM | 0 | 1 | 3 | 4 | **8** |
+| LOW | 0 | 0 | 2 | 5 | **7** |
+| Total | **17** | **13** | **15** | **12** | **57** |
+
+## Cycle 4 — Key Takeaway
+
+**The core library integrations are implemented correctly.** LangGraph
+(22/24 match), pydantic-settings (13/15 match), FastAPI (19/21 match),
+SQLAlchemy (17/19 match), and OpenTelemetry (15/18 match) all follow
+official documentation closely. Zero outright misimplementations found.
+
+The findings are:
+- **Defensive gaps** (V43 `lazy="raise"`, V45 `TracerProvider.shutdown()`)
+  that don't cause bugs today but will when the code evolves
+- **Redundancy** (V37 compile-time recursion_limit, V39 alias duplication,
+  V40 double env parse) that adds noise but doesn't break correctness
+- **Test hygiene** (V47 OTLP noise, V42 internal Starlette API) that
+  affects developer experience

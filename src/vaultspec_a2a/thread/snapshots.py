@@ -17,10 +17,11 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from ..graph.enums import PermissionType
-from .enums import ThreadStatus
+from .enums import RepairStatus, ThreadStatus
 from .models import PlanEntry
 
 __all__ = [
+    "CHECKPOINT_ERROR_REPAIR_MAP",
     "PLAN_APPROVAL_PAUSE_CAUSES",
     "TERMINAL_STATUS_MAP",
     "AgentData",
@@ -61,6 +62,16 @@ TERMINAL_STATUS_MAP: dict[str, str] = {
     ThreadStatus.COMPLETED: ThreadStatus.COMPLETED,
     ThreadStatus.FAILED: ThreadStatus.FAILED,
     ThreadStatus.CANCELLED: ThreadStatus.CANCELLED,
+}
+
+# Checkpoint error → repair status mapping.  Used by snapshot replay
+# logic to decide which RepairStatus to assign when a checkpoint probe
+# fails or returns degraded data.
+CHECKPOINT_ERROR_REPAIR_MAP: dict[str, RepairStatus] = {
+    "checkpoint_unavailable": RepairStatus.CHECKPOINT_UNAVAILABLE,
+    "checkpoint_missing": RepairStatus.CHECKPOINT_UNAVAILABLE,
+    "checkpoint_corrupt": RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+    "checkpoint_timeout": RepairStatus.NEEDS_RECONCILIATION,
 }
 
 _PROGRESS_EVENT_TYPES: frozenset[str] = frozenset(

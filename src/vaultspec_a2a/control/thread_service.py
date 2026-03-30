@@ -8,6 +8,7 @@ response formatting.
 
 from __future__ import annotations
 
+import contextlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -19,6 +20,8 @@ from ..database import create_control_action, create_thread, update_thread_statu
 from ..graph.compiler import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
+from ..thread.creation import requires_dispatch, resolve_autonomous
+from ..thread.dispatch_policy import classify_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 
@@ -124,7 +127,7 @@ async def create_and_dispatch_thread(
     )
     await mark_ingest_requested(db, thread.id)
 
-    if not req.team_preset:
+    if not requires_dispatch(req.team_preset):
         return ThreadCreationResult(
             thread_id=thread.id,
             status=thread.status,
@@ -144,15 +147,13 @@ async def create_and_dispatch_thread(
         )
 
     # -- Resolve autonomous flag -----------------------------------------------
-    effective_autonomous: bool = False
-    if req.autonomous is not None:
-        effective_autonomous = req.autonomous
-    else:
-        try:
-            _tc = load_team_config(req.team_preset, workspace_root=req.workspace_root)
-            effective_autonomous = _tc.permissions.auto_approve
-        except (ConfigError, TeamConfigNotFoundError):
-            pass
+    team_config = None
+    if req.team_preset:
+        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
+            team_config = load_team_config(
+                req.team_preset, workspace_root=req.workspace_root
+            )
+    effective_autonomous = resolve_autonomous(req.autonomous, team_config)
 
     # -- Build vault index -----------------------------------------------------
     feature_tag = req.metadata.feature_tag if req.metadata else None
@@ -202,21 +203,16 @@ async def create_and_dispatch_thread(
     )
 
     if not outcome.success:
-        if outcome.failure_type == "circuit_open":
-            # Caller should raise 503; do NOT mark thread FAILED.
-            return ThreadCreationResult(
-                thread_id=thread.id,
-                status=thread.status,
-                nickname=req.nickname,
-                dispatched=False,
-                error_detail=f"circuit_open:{outcome.detail}",
-            )
-
-        # at_capacity, unreachable, rejected -- mark FAILED
-        await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+        policy = classify_dispatch_failure(outcome.failure_type)
+        if policy.should_mark_failed:
+            await update_thread_status(db, thread.id, ThreadStatus.FAILED)
         return ThreadCreationResult(
             thread_id=thread.id,
-            status=ThreadStatus.FAILED.value,
+            status=(
+                ThreadStatus.FAILED.value
+                if policy.should_mark_failed
+                else thread.status
+            ),
             nickname=req.nickname,
             dispatched=False,
             error_detail=f"{outcome.failure_type}:{outcome.detail}",

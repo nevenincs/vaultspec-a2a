@@ -7,7 +7,6 @@ Does NOT commit, raise HTTPException, or touch FastAPI request state.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -21,12 +20,13 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
+from ..thread.cancel_policy import can_cancel
 from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
     ControlActionResultStatus,
     ControlActionType,
     ThreadStatus,
 )
+from ..thread.idempotency import default_cancel_key
 
 if TYPE_CHECKING:
     import httpx
@@ -82,20 +82,19 @@ async def cancel_thread(
             error_detail="Thread not found",
         )
 
-    if thread.status in NON_ACTIVE_STATUSES:
+    eligibility = can_cancel(thread.status)
+    if not eligibility.allowed:
         return CancelResult(
             action_id=None,
             thread_id=thread_id,
             cancelled=False,
             thread_status=thread.status,
             accepted=False,
-            applied=thread.status == ThreadStatus.CANCELLED.value,
+            applied=eligibility.already_cancelled,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
         )
 
-    resolved_idempotency_key = (
-        idempotency_key or hashlib.sha256(f"{thread_id}:cancel".encode()).hexdigest()
-    )
+    resolved_idempotency_key = idempotency_key or default_cancel_key(thread_id)
     existing_action = await get_control_action_by_idempotency_key(
         db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
     )

@@ -24,15 +24,13 @@ from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
-from ...thread.enums import (
-    TERMINAL_STATUSES,
-    ThreadStatus,
-)
+from ...thread.enums import ThreadStatus
 from ...thread.errors import (
     ConfigError,
     NicknameConflictError,
     TeamConfigNotFoundError,
 )
+from ...thread.lifecycle_guards import can_archive, can_delete
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_circuit_breaker,
@@ -284,11 +282,9 @@ async def delete_thread_endpoint(
     thread = await get_thread(db, thread_id)
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if thread.status == ThreadStatus.RUNNING.value:
-        raise HTTPException(
-            status_code=409,
-            detail="Cannot delete a RUNNING thread — cancel it first",
-        )
+    eligibility = can_delete(thread.status)
+    if not eligibility.allowed:
+        raise HTTPException(status_code=409, detail=eligibility.reason)
     deleted = await delete_thread(db, thread_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Thread not found")
@@ -310,14 +306,11 @@ async def archive_thread_endpoint(
     if thread is None:
         raise HTTPException(status_code=404, detail="Thread not found")
 
-    if thread.status == ThreadStatus.ARCHIVED:
+    eligibility = can_archive(thread.status)
+    if eligibility.already_archived:
         return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
-
-    if thread.status not in TERMINAL_STATUSES:
-        raise HTTPException(
-            status_code=409,
-            detail=f"Cannot archive thread in {thread.status!r} state",
-        )
+    if not eligibility.allowed:
+        raise HTTPException(status_code=409, detail=eligibility.reason)
 
     await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
     await db.commit()

@@ -16,16 +16,21 @@ import logging
 from datetime import datetime
 from typing import Any
 
-from ..graph.enums import REJECT_OPTION_IDS
 from ..ipc.schemas import ExecutionStateProjectionPayload
+from ..thread.permission_fsm import (
+    PROGRESS_BATCH_EFFECTS,
+    compute_permission_request_effects,
+    compute_permission_resolution_effects,
+    compute_progress_applied_effects,
+)
 from ..thread.snapshots import (
-    PLAN_APPROVAL_PAUSE_CAUSES,
     TERMINAL_STATUS_MAP,
     classify_permission_pause_reason,
     is_permission_event,
     is_progress_event,
     is_terminal_event,
 )
+from ..thread.terminal_effects import compute_terminal_effects
 
 __all__ = [
     "_handle_execution_state_event",
@@ -37,7 +42,6 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 _TERMINAL_STATUS_MAP = TERMINAL_STATUS_MAP
 
 
@@ -79,7 +83,6 @@ async def _handle_terminal_event(
         from ..thread.enums import (
             ControlActionType,
             InvalidTransitionError,
-            RepairStatus,
             ThreadStatus,
         )
 
@@ -95,20 +98,20 @@ async def _handle_terminal_event(
             latest_cancel = await get_latest_control_action(
                 db, thread_id=thread_id, action_type=ControlActionType.CANCEL
             )
-            if latest_cancel is not None and status_str == ThreadStatus.CANCELLED.value:
+            effects = compute_terminal_effects(
+                ThreadStatus(status_str),
+                has_cancel_action=latest_cancel is not None,
+            )
+            if effects.should_finalize_cancel and latest_cancel is not None:
                 latest_cancel.result_status = "applied"
                 latest_cancel.applied_at = latest_cancel.applied_at or _time_now_utc()
             await set_thread_repair_state(
                 db,
                 thread_id,
-                repair_status=RepairStatus.HEALTHY,
-                repair_reason=None,
-                execution_readiness=RepairStatus.HEALTHY.value,
-                last_applied_action=(
-                    ControlActionType.CANCEL
-                    if status_str == ThreadStatus.CANCELLED.value
-                    else None
-                ),
+                repair_status=effects.repair_status,
+                repair_reason=effects.repair_reason,
+                execution_readiness=effects.repair_status.value,
+                last_applied_action=effects.last_applied_action,
             )
             await db.commit()
         logger.info(
@@ -196,9 +199,6 @@ async def _handle_permission_event(
         ApprovalStatus,
         ControlActionResultStatus,
         ControlActionType,
-        PermissionRequestStatus,
-        RepairStatus,
-        ThreadStatus,
     )
 
     if session_factory is None:
@@ -214,7 +214,8 @@ async def _handle_permission_event(
                 return
             tool_call = payload.get("tool_call")
             pause_reason_type = classify_permission_pause_reason(tool_call)
-            if pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+            fx = compute_permission_request_effects(pause_reason_type)
+            if fx.is_plan_approval:
                 await supersede_permission_requests(
                     db,
                     thread_id=thread_id,
@@ -239,16 +240,16 @@ async def _handle_permission_event(
                 payload={"description": payload.get("description", "")},
                 result_status=ControlActionResultStatus.APPLIED,
             )
-            await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
+            await update_thread_status(db, thread_id, fx.thread_status)
             await set_thread_repair_state(
                 db,
                 thread_id,
-                repair_status=RepairStatus.PAUSED_RESUMABLE,
-                repair_reason="Worker reported a pending permission request",
-                execution_readiness=RepairStatus.PAUSED_RESUMABLE.value,
-                last_applied_action=ControlActionType.PERMISSION_REQUEST_CREATED,
+                repair_status=fx.repair_status,
+                repair_reason=fx.repair_reason,
+                execution_readiness=fx.repair_status.value,
+                last_applied_action=fx.last_applied_action,
             )
-            if pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+            if fx.is_plan_approval:
                 await set_thread_approval_state(
                     db,
                     thread_id,
@@ -261,19 +262,17 @@ async def _handle_permission_event(
             request_id = str(payload.get("request_id", ""))
             permission = await get_permission_request(db, request_id)
             if permission is not None:
-                target_status = PermissionRequestStatus.APPLIED
-                if (
-                    permission.response_option_id
-                    and permission.response_option_id in REJECT_OPTION_IDS
-                ):
-                    target_status = PermissionRequestStatus.REJECTED
+                fx_res = compute_permission_resolution_effects(
+                    permission.response_option_id,
+                    permission.pause_reason_type,
+                )
                 await mark_permission_request_applied(
-                    db, request_id=request_id, status=target_status
+                    db, request_id=request_id, status=fx_res.target_status
                 )
                 await create_control_action(
                     db,
                     thread_id=thread_id,
-                    action_type=ControlActionType.PERMISSION_RESPONSE_APPLIED,
+                    action_type=fx_res.last_applied_action,
                     request_id=request_id,
                     idempotency_key=f"permission-response-applied:{request_id}",
                     payload={"request_id": request_id},
@@ -282,20 +281,16 @@ async def _handle_permission_event(
                 await set_thread_repair_state(
                     db,
                     thread_id,
-                    repair_status=RepairStatus.HEALTHY,
-                    repair_reason=None,
-                    execution_readiness=RepairStatus.HEALTHY.value,
-                    last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
+                    repair_status=fx_res.repair_status,
+                    repair_reason=fx_res.repair_reason,
+                    execution_readiness=fx_res.repair_status.value,
+                    last_applied_action=fx_res.last_applied_action,
                 )
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                if fx_res.is_plan_approval:
                     await set_thread_approval_state(
                         db,
                         thread_id,
-                        approval_status=(
-                            ApprovalStatus.REJECTED
-                            if target_status == PermissionRequestStatus.REJECTED
-                            else ApprovalStatus.APPROVED
-                        ),
+                        approval_status=fx_res.approval_status,
                         approval_request_id=request_id,
                         approval_reason=permission.description,
                     )
@@ -322,11 +317,7 @@ async def _handle_progress_event(
         update_thread_status,
     )
     from ..thread.enums import (
-        ApprovalStatus,
         ControlActionResultStatus,
-        ControlActionType,
-        RepairStatus,
-        ThreadStatus,
     )
 
     if session_factory is None:
@@ -343,11 +334,15 @@ async def _handle_progress_event(
             if permission.request_status == "answered_pending_apply"
         ]
         for permission in answered:
+            fx = compute_progress_applied_effects(
+                permission.response_option_id,
+                permission.pause_reason_type,
+            )
             await mark_permission_request_applied(db, request_id=permission.request_id)
             await create_control_action(
                 db,
                 thread_id=thread_id,
-                action_type=ControlActionType.PERMISSION_RESPONSE_APPLIED,
+                action_type=fx.last_applied_action,
                 request_id=permission.request_id,
                 idempotency_key=(
                     f"permission-response-progress-applied:{permission.request_id}"
@@ -355,28 +350,25 @@ async def _handle_progress_event(
                 payload={"event_type": event_type},
                 result_status=ControlActionResultStatus.APPLIED,
             )
-            if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+            if fx.is_plan_approval:
                 await set_thread_approval_state(
                     db,
                     thread_id,
-                    approval_status=(
-                        ApprovalStatus.REJECTED
-                        if permission.response_option_id == "reject"
-                        else ApprovalStatus.APPROVED
-                    ),
+                    approval_status=fx.approval_status,
                     approval_request_id=permission.request_id,
                     approval_reason=permission.description,
                 )
         if answered:
+            batch = PROGRESS_BATCH_EFFECTS
             with contextlib.suppress(Exception):
-                await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
+                await update_thread_status(db, thread_id, batch.thread_status)
             await set_thread_repair_state(
                 db,
                 thread_id,
-                repair_status=RepairStatus.HEALTHY,
-                repair_reason=None,
-                execution_readiness=RepairStatus.HEALTHY.value,
-                last_applied_action=ControlActionType.PERMISSION_RESPONSE_APPLIED,
+                repair_status=batch.repair_status,
+                repair_reason=batch.repair_reason,
+                execution_readiness=batch.repair_status.value,
+                last_applied_action=batch.last_applied_action,
             )
             await db.commit()
 

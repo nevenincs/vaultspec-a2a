@@ -169,7 +169,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         msg_handler = create_dispatch_message_handler(
             worker_client,
             get_session_factory(),
-            checkpointer,
             circuit_breaker,
             worker_spawner,
             connection_manager,

@@ -247,7 +247,6 @@ async def test_dispatch_message_handler_rejects_missing_thread(
     handler = create_dispatch_message_handler(
         worker.client,
         session_factory,
-        checkpointer,
         app.state.circuit_breaker,
         app.state.worker_spawner,
         None,

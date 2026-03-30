@@ -9,7 +9,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable
     from pathlib import Path
 
-from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.control.config import domain_config
 
 __all__ = ["create_mark_task_complete_tool"]
 

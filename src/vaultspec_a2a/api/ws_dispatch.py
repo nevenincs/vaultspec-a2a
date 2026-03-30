@@ -13,6 +13,7 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
+from ..control.config import domain_config
 from ..control.diagnostics import classify_missing_ws_thread, mark_thread_failed
 from ..control.dispatch import (
     WorkerAtCapacityError,
@@ -22,7 +23,6 @@ from ..control.dispatch import (
     dispatch_to_worker,
 )
 from ..database import get_thread
-from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType, ThreadStatus

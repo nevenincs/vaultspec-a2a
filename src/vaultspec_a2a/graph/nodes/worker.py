@@ -13,7 +13,7 @@ from langgraph.types import interrupt
 from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
-from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.control.config import domain_config
 from vaultspec_a2a.thread.errors import WorkerExecutionError
 from vaultspec_a2a.thread.state import TeamState
 

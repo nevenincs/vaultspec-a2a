@@ -6,9 +6,9 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from ...control.config import domain_config
 from ...control.permission_service import PermissionResult, respond_to_permission
 from ...database.session import get_db
-from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (

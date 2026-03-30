@@ -26,7 +26,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.pregel._retry import RetryPolicy
 
-from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.control.config import domain_config
 from vaultspec_a2a.thread.errors import (
     ConfigError,
     ProviderSessionError,

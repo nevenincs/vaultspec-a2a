@@ -489,7 +489,18 @@ class InfraConfig(BaseSettings):
         return value
 
 
-class Settings(DomainConfig, InfraConfig):
+class DomainSettingsConfig(BaseSettings, DomainConfig):
+    """Env-reading subclass of DomainConfig. Lives in Layer 2."""
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="VAULTSPEC_",
+        extra="ignore",
+    )
+
+
+class Settings(DomainSettingsConfig, InfraConfig):
     """Backwards-compatible composed settings.
 
     Inherits all ~18 domain fields from ``DomainConfig`` and all ~75
@@ -625,3 +636,7 @@ class Settings(DomainConfig, InfraConfig):
 
 # Global settings instance
 settings = Settings()
+
+# Domain-only singleton for Layer 1 consumers that need env-populated config
+# without pulling in the full infrastructure Settings object.
+domain_config = DomainSettingsConfig()

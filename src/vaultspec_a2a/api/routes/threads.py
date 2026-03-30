@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
+from ...control.config import domain_config
 from ...control.thread_service import ThreadCreationRequest, create_and_dispatch_thread
 from ...database import (
     delete_thread,
@@ -21,7 +22,6 @@ from ...database import (
 )
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
-from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import load_team_config
 from ...thread.enums import (

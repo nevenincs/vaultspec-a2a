@@ -10,7 +10,7 @@ from langgraph.errors import GraphInterrupt
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ...domain_config import domain_config
+from ...control.config import domain_config
 from ...graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,

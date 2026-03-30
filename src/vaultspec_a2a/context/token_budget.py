@@ -10,7 +10,7 @@ from typing import cast
 
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 
-from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.control.config import domain_config
 from vaultspec_a2a.thread.state import TeamState
 
 __all__ = [

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.types import Command
 
-from ..domain_config import domain_config
+from ..control.config import domain_config
 from ..ipc.serializers import sequenced_to_dict
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import load_team_config

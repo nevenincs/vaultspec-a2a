@@ -10,7 +10,7 @@ from vaultspec_a2a.context.metadata import (
     discover_context_refs,
     generate_nickname,
 )
-from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.control.config import domain_config
 
 # ---------------------------------------------------------------------------
 # ContextRef validation

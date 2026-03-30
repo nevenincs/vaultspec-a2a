@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..domain_config import domain_config
+from ..control.config import domain_config
 from ..graph.compiler import compile_team_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span

@@ -12,7 +12,7 @@ src/vaultspec_a2a/
 #           Accepted frameworks: Pydantic, langchain_core, langgraph
 # ══════════════════════════════════════════════════════════════
 
-├── domain_config.py                   (141)  Cross-cutting domain settings (18 fields)
+├── domain_config.py                          DomainConfig(BaseModel) — pure schema, no env reading
 │
 ├── team/                              ~515 lines Python (+ presets TOML/YAML)
 │   ├── __init__.py                     (77)
@@ -219,13 +219,15 @@ src/vaultspec_a2a/
 # LAYER 3 — Infrastructure config. Topology, not behaviour.
 # ══════════════════════════════════════════════════════════════
 │
+service/
 ├── docker-compose.dev.yml                    Gateway + Worker + Vite (SQLite)
 ├── docker-compose.prod.yml                   Gateway + Worker + Jaeger (SQLite)
 ├── docker-compose.prod.postgres.yml          Postgres override
-├── docker-compose.prod.providers.yml         Provider auth overlay
-├── docker-compose.integration.yml            VidaiMock + test fixtures
-├── Justfile                           (515)  Service lifecycle, migrations, linting
-└── .env.example                              Full config template
+├── .env.example                              Full config template
+├── docker/
+│   ├── prod.Dockerfile                       Multi-stage: gateway + worker
+│   └── dev.Dockerfile                        Dev images: python-base, node-base
+└── README.md                                 Compose topology guide
 ```
 
 ## Dependency Graph

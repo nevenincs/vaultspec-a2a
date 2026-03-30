@@ -111,7 +111,8 @@ class EventEmitters:
         completed_keys = [
             k
             for k, v in self._tool_call_states.items()
-            if k[0] == thread_id and v.get("status") in ("completed", "failed")
+            if k[0] == thread_id
+            and v.get("status") in (ToolCallStatus.COMPLETED, ToolCallStatus.FAILED)
         ]
         if len(completed_keys) > cap:
             for key in completed_keys[:-cap]:

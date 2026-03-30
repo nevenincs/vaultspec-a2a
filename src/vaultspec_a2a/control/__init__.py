@@ -45,5 +45,6 @@ __all__ = [
     "repair_transitions",
     "snapshot",
     "thread_service",
+    "thread_state_service",
     "worker_management",
 ]

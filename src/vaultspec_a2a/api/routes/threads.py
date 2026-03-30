@@ -2,7 +2,6 @@
 
 import json
 import logging
-from pathlib import Path
 from typing import Any
 from uuid import uuid4
 
@@ -10,9 +9,13 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
+from ...context.metadata import ThreadMetadata
 from ...control.config import domain_config
-from ...control.thread_service import ThreadCreationRequest, create_and_dispatch_thread
+from ...control.thread_service import (
+    ThreadCreationRequest,
+    create_and_dispatch_thread,
+    process_metadata,
+)
 from ...database import (
     delete_thread,
     get_thread,
@@ -23,13 +26,9 @@ from ...database import (
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
-from ...team.team_config import load_team_config
+from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
-from ...thread.errors import (
-    ConfigError,
-    NicknameConflictError,
-    TeamConfigNotFoundError,
-)
+from ...thread.errors import NicknameConflictError
 from ...thread.lifecycle_guards import can_archive, can_delete
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
@@ -48,52 +47,24 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+def _parse_thread_summary_metadata(
+    raw_json: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Extract display fields from thread_metadata JSON.
 
-
-def _process_metadata(
-    body: CreateThreadRequest,
-    thread_id: str,
-) -> tuple[Path | None, str | None, str | None]:
-    """Validate and enrich thread metadata (ADR-014).
-
-    Returns (workspace_root, nickname, metadata_json).
-
-    Raises:
-        HTTPException: If ``workspace_root`` is not an existing directory (422).
+    Returns ``(feature_tag, source_branch, callee)``.
     """
-    metadata = body.metadata
-    if metadata is None:
+    if not raw_json:
         return None, None, None
-
-    ws_root = Path(metadata.workspace_root).resolve()
-    if not ws_root.is_dir():
-        raise HTTPException(
-            status_code=422,
-            detail=(
-                "workspace_root is not an existing directory: "
-                f"{metadata.workspace_root!r}"
-            ),
+    try:
+        meta = json.loads(raw_json)
+        return (
+            meta.get("feature_tag") or None,
+            meta.get("source_branch") or None,
+            meta.get("callee") or None,
         )
-
-    if metadata.feature_tag and not metadata.context_refs:
-        metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
-
-    topology = "default"
-    if body.team_preset:
-        try:
-            tc = load_team_config(body.team_preset, workspace_root=ws_root)
-            topology = tc.topology.type
-        except (ConfigError, TeamConfigNotFoundError):
-            pass
-    nickname = metadata.nickname or generate_nickname(
-        metadata.feature_tag, topology, thread_id
-    )
-    metadata.nickname = nickname
-
-    return ws_root, nickname, metadata.model_dump_json()
+    except (json.JSONDecodeError, TypeError):
+        return None, None, None
 
 
 # ---------------------------------------------------------------------------
@@ -119,7 +90,12 @@ async def create_thread_endpoint(
         db, _aggregator, _checkpointer, worker_client = services
         thread_id = uuid4().hex
 
-        ws_root, nickname, metadata_json = _process_metadata(body, thread_id)
+        try:
+            ws_root, nickname, metadata_json = process_metadata(
+                body.metadata, thread_id, body.team_preset
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
         if nickname is None and body.nickname is not None:
             nickname = body.nickname
@@ -151,31 +127,29 @@ async def create_thread_endpoint(
                 detail=f"Thread nickname already exists: {exc.nickname!r}",
             ) from exc
 
-        await db.commit()
-
         if result.dispatched:
             mark_worker_connected(request)
 
-        if result.error_detail:
-            if result.error_detail.startswith("circuit_open:"):
+        if result.failure_type is not None:
+            if result.failure_type == FailureType.CIRCUIT_OPEN:
                 raise HTTPException(
                     status_code=503,
-                    detail=result.error_detail.removeprefix("circuit_open:"),
+                    detail=result.error_detail or "Circuit breaker open",
                 )
-            if result.error_detail.startswith("at_capacity:"):
+            if result.failure_type == FailureType.AT_CAPACITY:
                 raise HTTPException(
                     status_code=503,
                     detail="Worker at capacity \u2014 try again later",
                 )
-            if result.error_detail.startswith("unreachable:"):
+            if result.failure_type == FailureType.UNREACHABLE:
                 raise HTTPException(
                     status_code=502,
                     detail="Worker unreachable \u2014 thread marked as failed",
                 )
-            if result.error_detail.startswith("rejected:"):
+            if result.failure_type == FailureType.REJECTED:
                 raise HTTPException(
                     status_code=502,
-                    detail=result.error_detail.removeprefix("rejected:"),
+                    detail=result.error_detail or "Worker dispatch rejected",
                 )
 
         return CreateThreadResponse(
@@ -217,19 +191,9 @@ async def list_threads_endpoint(
     )
     summaries: list[ThreadSummary] = []
     for t in threads:
-        nickname: str | None = t.nickname
-        feature_tag: str | None = None
-        source_branch: str | None = None
-        callee: str | None = None
-        if t.thread_metadata:
-            try:
-                meta_dict = json.loads(t.thread_metadata)
-                feature_tag = meta_dict.get("feature_tag") or None
-                source_branch = meta_dict.get("source_branch") or None
-                callee = meta_dict.get("callee") or None
-            except (json.JSONDecodeError, TypeError):
-                pass
-
+        feature_tag, source_branch, callee = _parse_thread_summary_metadata(
+            t.thread_metadata
+        )
         summaries.append(
             ThreadSummary(
                 thread_id=t.id,
@@ -242,7 +206,7 @@ async def list_threads_endpoint(
                 team_preset=t.team_preset,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
-                nickname=nickname,
+                nickname=t.nickname,
                 feature_tag=feature_tag,
                 source_branch=source_branch,
                 callee=callee,

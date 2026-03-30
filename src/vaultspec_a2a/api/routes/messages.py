@@ -12,6 +12,7 @@ from ...control.message_service import send_followup_message
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...thread.constants import DEFAULT_SUPERVISOR_ID
+from ...thread.dispatch_policy import FailureType
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -68,16 +69,14 @@ async def send_message_endpoint(
     if result.error_detail and "Cannot send messages" in result.error_detail:
         raise HTTPException(status_code=409, detail=result.error_detail)
 
-    await db.commit()
-
     if result.dispatched:
         mark_worker_connected(request)
 
-    if result.circuit_open:
-        raise HTTPException(status_code=503, detail=result.error_detail)
-    if result.error_detail and "at capacity" in result.error_detail.lower():
-        raise HTTPException(status_code=503, detail=result.error_detail)
-    if result.error_detail:
+    if result.failure_type is not None:
+        if result.failure_type == FailureType.CIRCUIT_OPEN:
+            raise HTTPException(status_code=503, detail=result.error_detail)
+        if result.failure_type == FailureType.AT_CAPACITY:
+            raise HTTPException(status_code=503, detail=result.error_detail)
         raise HTTPException(status_code=502, detail=result.error_detail)
 
     return SendMessageResponse(

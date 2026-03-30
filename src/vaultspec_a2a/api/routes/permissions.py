@@ -66,8 +66,6 @@ async def respond_to_permission_endpoint(
         trace_headers=trace_headers(),
     )
 
-    await db.commit()
-
     if result.dispatched:
         mark_worker_connected(request)
 

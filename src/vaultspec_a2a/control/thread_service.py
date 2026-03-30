@@ -13,6 +13,7 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import mark_ingest_applied, mark_ingest_requested
@@ -21,7 +22,7 @@ from ..graph.compiler import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
-from ..thread.dispatch_policy import classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 
@@ -31,7 +32,6 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
-    from ..context.metadata import ThreadMetadata
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -39,6 +39,7 @@ __all__ = [
     "ThreadCreationRequest",
     "ThreadCreationResult",
     "create_and_dispatch_thread",
+    "process_metadata",
 ]
 
 logger = logging.getLogger(__name__)
@@ -68,6 +69,47 @@ class ThreadCreationResult:
     nickname: str | None
     dispatched: bool
     error_detail: str | None
+    failure_type: FailureType | None = None
+
+
+def process_metadata(
+    metadata: ThreadMetadata | None,
+    thread_id: str,
+    team_preset: str | None,
+) -> tuple[Path | None, str | None, str | None]:
+    """Validate and enrich thread metadata (ADR-014).
+
+    Returns ``(workspace_root, nickname, metadata_json)``.
+
+    Raises:
+        ValueError: If ``workspace_root`` is not an existing directory.
+    """
+    if metadata is None:
+        return None, None, None
+
+    import pathlib
+
+    ws_root = pathlib.Path(metadata.workspace_root).resolve()
+    if not ws_root.is_dir():
+        msg = (
+            f"workspace_root is not an existing directory: {metadata.workspace_root!r}"
+        )
+        raise ValueError(msg)
+
+    if metadata.feature_tag and not metadata.context_refs:
+        metadata.context_refs = discover_context_refs(ws_root, metadata.feature_tag)
+
+    topology = "default"
+    if team_preset:
+        with contextlib.suppress(ConfigError, TeamConfigNotFoundError):
+            tc = load_team_config(team_preset, workspace_root=ws_root)
+            topology = tc.topology.type
+    nickname = metadata.nickname or generate_nickname(
+        metadata.feature_tag, topology, thread_id
+    )
+    metadata.nickname = nickname
+
+    return ws_root, nickname, metadata.model_dump_json()
 
 
 async def create_and_dispatch_thread(
@@ -82,9 +124,9 @@ async def create_and_dispatch_thread(
 ) -> ThreadCreationResult:
     """Create a thread row, build dispatch payload, and dispatch to worker.
 
-    Does **not** call ``db.commit()`` -- the caller owns the transaction
-    boundary.  Does **not** raise ``HTTPException`` -- returns a result
-    that the caller translates into HTTP status codes.
+    Commits the session before returning — the service owns its
+    transaction boundary.  Does **not** raise ``HTTPException`` — returns
+    a result that the caller translates into HTTP status codes.
 
     Raises:
         NicknameConflictError: If the requested nickname is already taken.
@@ -128,6 +170,7 @@ async def create_and_dispatch_thread(
     await mark_ingest_requested(db, thread.id)
 
     if not requires_dispatch(req.team_preset):
+        await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,
             status=thread.status,
@@ -204,8 +247,12 @@ async def create_and_dispatch_thread(
 
     if not outcome.success:
         policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
+        )
         if policy.should_mark_failed:
             await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+        await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,
             status=(
@@ -215,12 +262,14 @@ async def create_and_dispatch_thread(
             ),
             nickname=req.nickname,
             dispatched=False,
-            error_detail=f"{outcome.failure_type}:{outcome.detail}",
+            error_detail=outcome.detail,
+            failure_type=typed_failure,
         )
 
     # -- Success ---------------------------------------------------------------
     await update_thread_status(db, thread.id, ThreadStatus.RUNNING)
     await mark_ingest_applied(db, thread.id)
+    await db.commit()
 
     return ThreadCreationResult(
         thread_id=thread.id,

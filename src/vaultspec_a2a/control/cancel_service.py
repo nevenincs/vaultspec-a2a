@@ -21,6 +21,7 @@ from ..database import (
 )
 from ..ipc.schemas import DispatchRequest
 from ..thread.cancel_policy import can_cancel
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
     ControlActionResultStatus,
     ControlActionType,
@@ -53,6 +54,7 @@ class CancelResult:
     applied: bool = False
     action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
     idempotency_key: str | None = None
+    failure_type: FailureType | None = None
 
 
 async def cancel_thread(
@@ -68,9 +70,8 @@ async def cancel_thread(
 ) -> CancelResult:
     """Execute the cancel-thread workflow.
 
-    Returns a :class:`CancelResult` describing what happened.  The caller
-    is responsible for committing the session and translating the result
-    into an HTTP response.
+    Returns a :class:`CancelResult` describing what happened.  Commits the
+    session before returning — the service owns its transaction boundary.
     """
     thread = await get_thread(db, thread_id)
     if thread is None:
@@ -145,6 +146,10 @@ async def cancel_thread(
     )
 
     if not outcome.success:
+        policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
+        )
         logger.warning(
             "Cancel dispatch failed for thread %s — leaving DB status unchanged",
             thread_id,
@@ -154,7 +159,11 @@ async def cancel_thread(
                 "action": dispatch.action,
             },
         )
-        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        if policy.should_mark_failed:
+            action.result_status = (
+                ControlActionResultStatus.REJECTED_INVALID_STATE.value
+            )
+        await db.commit()
         return CancelResult(
             action_id=action.id,
             thread_id=thread_id,
@@ -164,9 +173,11 @@ async def cancel_thread(
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             idempotency_key=resolved_idempotency_key,
+            failure_type=typed_failure,
         )
 
     await update_thread_status(db, thread_id, ThreadStatus.CANCELLING)
+    await db.commit()
     return CancelResult(
         action_id=action.id,
         thread_id=thread_id,

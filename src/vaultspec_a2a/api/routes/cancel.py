@@ -45,8 +45,11 @@ async def cancel_thread_endpoint(
 
     if result.error_detail == "Thread not found":
         raise HTTPException(status_code=404, detail="Thread not found")
-
-    await db.commit()
+    if result.failure_type is not None:
+        raise HTTPException(
+            status_code=502,
+            detail=result.error_detail or "Cancel dispatch failed",
+        )
 
     if result.cancelled:
         mark_worker_connected(request)

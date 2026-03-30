@@ -26,7 +26,7 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
-from ..thread.dispatch_policy import classify_dispatch_failure
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.idempotency import default_message_key
 from ..thread.message_policy import can_send_followup
@@ -53,7 +53,7 @@ class MessageResult:
     dispatched: bool
     error_detail: str | None = None
     circuit_open: bool = False
-    failure_type: str | None = None
+    failure_type: FailureType | None = None
 
 
 async def send_followup_message(
@@ -73,7 +73,7 @@ async def send_followup_message(
 
     Returns a :class:`MessageResult` describing the outcome.  Never raises
     HTTP exceptions — the caller is responsible for translating the result
-    into an appropriate HTTP response and committing the session.
+    into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
     thread = await get_thread(db, thread_id)
@@ -172,8 +172,12 @@ async def send_followup_message(
 
     if not outcome.success:
         policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
+        )
         if policy.should_mark_failed:
             await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        await db.commit()
         return MessageResult(
             action_id=action.id,
             thread_id=thread_id,
@@ -185,11 +189,13 @@ async def send_followup_message(
             dispatched=False,
             circuit_open=policy.is_circuit_open,
             error_detail=outcome.detail or "Worker dispatch failed",
+            failure_type=typed_failure,
         )
 
     # -- Success: transition to RUNNING ----------------------------------
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await mark_message_followup_applied(db, thread_id)
+    await db.commit()
 
     return MessageResult(
         action_id=action.id,

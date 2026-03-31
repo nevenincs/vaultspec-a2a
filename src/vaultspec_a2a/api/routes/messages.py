@@ -62,20 +62,18 @@ async def send_message_endpoint(
         trace_headers=trace_headers(),
     )
 
-    if result.error_detail == "Thread not found":
+    if result.failure_type == FailureType.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if result.error_detail and "paused for input" in result.error_detail:
+    if result.failure_type == FailureType.INPUT_REQUIRED:
         raise HTTPException(status_code=409, detail=result.error_detail)
-    if result.error_detail and "Cannot send messages" in result.error_detail:
+    if result.failure_type == FailureType.TERMINAL:
         raise HTTPException(status_code=409, detail=result.error_detail)
 
     if result.dispatched:
         mark_worker_connected(request)
 
     if result.failure_type is not None:
-        if result.failure_type == FailureType.CIRCUIT_OPEN:
-            raise HTTPException(status_code=503, detail=result.error_detail)
-        if result.failure_type == FailureType.AT_CAPACITY:
+        if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
             raise HTTPException(status_code=503, detail=result.error_detail)
         raise HTTPException(status_code=502, detail=result.error_detail)
 

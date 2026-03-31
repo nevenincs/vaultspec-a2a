@@ -22,7 +22,7 @@ from ..database import list_threads
 from ..database.session import get_session_factory
 from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest, DispatchResponse
-from ..thread.enums import ThreadStatus
+from ..thread.enums import ControlActionType, ThreadStatus
 
 if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker
@@ -239,7 +239,7 @@ async def redispatch_reconciling_threads(
                             exc_info=True,
                         )
                 dispatch = DispatchRequest(
-                    action="ingest",
+                    action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
                     workspace_root=meta.get("workspace_root"),

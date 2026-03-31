@@ -128,29 +128,28 @@ def _raise_message_failure(
             recoverable=False,
         )
 
-    # Domain-level rejections detected via error_detail
-    if error_detail:
-        if "not found" in error_detail.lower():
-            return WebSocketCommandRejectedError(
-                thread_id=thread_id,
-                code="THREAD_NOT_FOUND",
-                message=detail,
-                recoverable=False,
-            )
-        if "paused for input" in error_detail.lower():
-            return WebSocketCommandRejectedError(
-                thread_id=thread_id,
-                code="THREAD_INPUT_REQUIRED",
-                message=detail,
-                recoverable=True,
-            )
-        if "cannot send messages" in error_detail.lower():
-            return WebSocketCommandRejectedError(
-                thread_id=thread_id,
-                code="THREAD_TERMINAL",
-                message=detail,
-                recoverable=False,
-            )
+    # Domain-level rejections via typed failure_type
+    if failure_type == FailureType.NOT_FOUND:
+        return WebSocketCommandRejectedError(
+            thread_id=thread_id,
+            code="THREAD_NOT_FOUND",
+            message=detail,
+            recoverable=False,
+        )
+    if failure_type == FailureType.INPUT_REQUIRED:
+        return WebSocketCommandRejectedError(
+            thread_id=thread_id,
+            code="THREAD_INPUT_REQUIRED",
+            message=detail,
+            recoverable=True,
+        )
+    if failure_type == FailureType.TERMINAL:
+        return WebSocketCommandRejectedError(
+            thread_id=thread_id,
+            code="THREAD_TERMINAL",
+            message=detail,
+            recoverable=False,
+        )
 
     return WebSocketCommandRejectedError(
         thread_id=thread_id,
@@ -274,7 +273,7 @@ def create_dispatch_control_handler(
             app_state.worker_last_heartbeat_ts = time.monotonic()
             return
 
-        if result.error_detail == "Thread not found":
+        if result.failure_type == FailureType.NOT_FOUND:
             raise await _raise_missing_thread(
                 thread_id=thread_id,
                 session_factory=session_factory,

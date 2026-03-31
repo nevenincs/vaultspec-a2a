@@ -81,6 +81,7 @@ async def cancel_thread(
             cancelled=False,
             thread_status="",
             error_detail="Thread not found",
+            failure_type=FailureType.NOT_FOUND,
         )
 
     eligibility = can_cancel(thread.status)
@@ -93,6 +94,7 @@ async def cancel_thread(
             accepted=False,
             applied=eligibility.already_cancelled,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            failure_type=FailureType.TERMINAL,
         )
 
     resolved_idempotency_key = idempotency_key or default_cancel_key(thread_id)

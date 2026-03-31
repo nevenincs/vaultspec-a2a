@@ -24,6 +24,11 @@ class FailureType(StrEnum):
     UNREACHABLE = "unreachable"
     REJECTED = "rejected"
 
+    # Domain rejections (thread-level, not dispatch-level)
+    NOT_FOUND = "not_found"
+    TERMINAL = "terminal"
+    INPUT_REQUIRED = "input_required"
+
 
 @dataclass(frozen=True, slots=True)
 class FailureAction:

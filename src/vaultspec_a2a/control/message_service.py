@@ -84,16 +84,24 @@ async def send_followup_message(
             thread_status="",
             dispatched=False,
             error_detail="Thread not found",
+            failure_type=FailureType.NOT_FOUND,
         )
 
     eligibility = can_send_followup(thread.status)
     if not eligibility.allowed:
+        # Distinguish INPUT_REQUIRED from generic terminal-state rejection
+        domain_failure = (
+            FailureType.INPUT_REQUIRED
+            if thread.status == ThreadStatus.INPUT_REQUIRED.value
+            else FailureType.TERMINAL
+        )
         return MessageResult(
             action_id="",
             thread_id=thread_id,
             thread_status=thread.status,
             dispatched=False,
             error_detail=eligibility.reason,
+            failure_type=domain_failure,
         )
 
     logger.info(

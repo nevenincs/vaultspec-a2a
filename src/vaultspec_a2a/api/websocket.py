@@ -25,6 +25,7 @@ from ..control.config import settings
 from ..streaming.aggregator import EventAggregator, SequencedEvent
 from ..telemetry.instrumentation import get_meter, get_tracer
 from ..telemetry.middleware import inject_trace_context, ws_span
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from .event_adapter import sequenced_to_wire
 from .schemas.commands import (
     AgentControlCommand,
@@ -349,7 +350,7 @@ class ConnectionManager:
             # received even if no graph is wired yet.
             await self._aggregator.emit_agent_status(
                 thread_id=cmd.thread_id,
-                agent_id=cmd.agent_id or "vaultspec-supervisor",
+                agent_id=cmd.agent_id or DEFAULT_SUPERVISOR_ID,
                 node_name="supervisor",
                 state=AgentLifecycleState.SUBMITTED,
                 detail="Message received, awaiting graph integration",

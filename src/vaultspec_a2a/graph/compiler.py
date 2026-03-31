@@ -380,10 +380,9 @@ def compile_team_graph(
         )
     )
     if effective_timeout is not None:
+        # step_timeout is an internal Pregel attribute, not in public docs.
+        # Pin to LangGraph >=0.2.60 if relying on this.
         graph.step_timeout = effective_timeout
-
-    # recursion_limit: LangGraph runtime attribute not in stubs.
-    cast("Any", graph).recursion_limit = team_config.graph.recursion_limit
 
     return graph
 

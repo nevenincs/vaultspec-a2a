@@ -1018,6 +1018,9 @@ class _InterruptValue:
         self.value = value
 
 
+assert hasattr(_InterruptValue(None), "value")  # protocol drift guard
+
+
 class _GraphTask:
     """Minimal LangGraph task stub for _emit_interrupt_events testing.
 
@@ -1032,6 +1035,11 @@ class _GraphTask:
         self.interrupts = interrupts
 
 
+assert hasattr(_GraphTask("", []), "name") and hasattr(  # protocol drift guard
+    _GraphTask("", []), "interrupts"
+)
+
+
 class _GraphStateSnapshot:
     """Minimal LangGraph state snapshot for _emit_interrupt_events testing.
 
@@ -1043,6 +1051,9 @@ class _GraphStateSnapshot:
 
     def __init__(self, tasks: list[_GraphTask]) -> None:
         self.tasks = tasks
+
+
+assert hasattr(_GraphStateSnapshot([]), "tasks")  # protocol drift guard
 
 
 class _SilentGraph:
@@ -1068,6 +1079,9 @@ class _SilentGraph:
         return self._state
 
 
+assert issubclass(_SilentGraph, StreamableGraph)  # protocol drift guard
+
+
 class _InterruptingGraph:
     """Graph stub that raises a real GraphInterrupt from astream_events.
 
@@ -1091,6 +1105,9 @@ class _InterruptingGraph:
 
     async def aget_state(self, config: object) -> object:
         return self._state
+
+
+assert issubclass(_InterruptingGraph, StreamableGraph)  # protocol drift guard
 
 
 class TestEmitInterruptEvents:
@@ -1316,6 +1333,9 @@ class _RecursingGraph:
         return type(
             "_State", (), {"tasks": [], "values": {}, "next": [], "config": {}}
         )()
+
+
+assert issubclass(_RecursingGraph, StreamableGraph)  # protocol drift guard
 
 
 class TestRecursionLimitDetection:

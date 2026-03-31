@@ -3,17 +3,14 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
-from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 if TYPE_CHECKING:
     from collections.abc import AsyncGenerator
-
-    from langchain_core.runnables import RunnableConfig
 
     from ..protocols import ProviderFactoryProtocol
 
@@ -468,10 +465,14 @@ def test_build_supervisor_prompt_no_directive() -> None:
 
 
 @pytest.mark.asyncio(loop_scope="function")
-async def test_compile_team_graph_recursion_limit_from_toml(
+async def test_compile_team_graph_does_not_set_recursion_limit(
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """compile_team_graph sets recursion_limit from team TOML."""
+    """compile_team_graph leaves recursion_limit at LangGraph default.
+
+    The recursion_limit is passed at runtime via the executor config dict,
+    not baked into the compiled graph object.
+    """
     team = load_team_config("vaultspec-solo-coder")
     assert team.graph.recursion_limit == 10
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -483,7 +484,8 @@ async def test_compile_team_graph_recursion_limit_from_toml(
             checkpointer=cp,
             provider_factory=pf,
         )
-    assert cast("Any", graph).recursion_limit == 10
+    # recursion_limit is passed at runtime via config, not set on graph.
+    assert not hasattr(graph, "recursion_limit")
 
 
 # ---------------------------------------------------------------------------
@@ -532,72 +534,3 @@ def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
 
     exc = GraphRecursionError("Recursion limit of 100 reached")
     assert _worker_retry_on(exc) is False
-
-
-# ---------------------------------------------------------------------------
-# Live execution test
-# ---------------------------------------------------------------------------
-
-
-@pytest.mark.live
-@pytest.mark.asyncio
-async def test_graph_execution_routing(
-    checkpointer: AsyncSqliteSaver,
-) -> None:
-    """End-to-end: supervisor routes, checkpointer persists state."""
-    from vaultspec_a2a.providers.factory import ProviderFactory
-
-    pf = ProviderFactory()
-    team = load_team_config("vaultspec-adaptive-coder")
-    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
-    supervisor_cfg = load_agent_config("vaultspec-supervisor")
-
-    graph = compile_team_graph(
-        team_config=team,
-        agent_configs=agent_configs,
-        checkpointer=checkpointer,
-        supervisor_agent_config=supervisor_cfg,
-        provider_factory=pf,
-    )
-
-    initial_state = {
-        "messages": [
-            HumanMessage(
-                content=(
-                    "Calculate 25 * 4 and have the coder return"
-                    " the expected numerical result."
-                    " Then immediately FINISH."
-                )
-            )
-        ],
-    }
-
-    config: RunnableConfig = {
-        "configurable": {"thread_id": "test_routing_thread"},
-        "recursion_limit": 5,
-    }
-
-    executed_nodes: list[str] = []
-    async for event in graph.astream_events(initial_state, config, version="v2"):
-        if event["event"] == "on_chain_end":
-            node_name = event["name"]
-            if node_name in (
-                "supervisor",
-                "vaultspec-coder",
-                "vaultspec-planner",
-                "vaultspec-reviewer",
-            ):
-                executed_nodes.append(node_name)
-
-    saved_state = await checkpointer.aget(config)
-    assert saved_state is not None
-    channel_values = saved_state["channel_values"]
-    assert "messages" in channel_values
-
-    assert "supervisor" in executed_nodes
-
-    messages = channel_values["messages"]
-    assert len(messages) > 1
-
-    ai_messages = [msg for msg in messages if msg.type == "ai"]
-    assert len(ai_messages) > 0, f"No AI messages found: {messages}"

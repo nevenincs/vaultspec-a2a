@@ -14,10 +14,11 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langchain_core.messages import HumanMessage, SystemMessage
 
-from ..control.config import settings
+from ..domain_config import domain_config
 from ..graph.compiler import compile_team_graph
 from ..team.team_config import AgentConfig, load_agent_config, load_team_config
 from ..telemetry import ws_span
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 
 if TYPE_CHECKING:
@@ -152,7 +153,7 @@ class GraphLifecycleManager:
                 raise GraphCompilationError(str(exc)) from exc
 
         # Evict LRU if at capacity.
-        while len(self._graph_cache) >= settings.max_cached_graphs:
+        while len(self._graph_cache) >= domain_config.max_cached_graphs:
             self._graph_cache.popitem(last=False)
 
         self._graph_cache[new_key] = graph
@@ -228,13 +229,13 @@ class GraphLifecycleManager:
         if team_config.topology.type in ("star", "pipeline_loop"):
             try:
                 supervisor_config = load_agent_config(
-                    "vaultspec-supervisor", workspace_root=ws_root
+                    DEFAULT_SUPERVISOR_ID, workspace_root=ws_root
                 )
             except AgentConfigNotFoundError:
                 logger.debug(
                     "No supervisor config; using defaults",
                     extra={
-                        "agent_id": "vaultspec-supervisor",
+                        "agent_id": DEFAULT_SUPERVISOR_ID,
                         "team_preset": req.team_preset,
                         "workspace_root": str(ws_root) if ws_root else None,
                         "action": "supervisor_config_defaulted",

@@ -14,7 +14,7 @@ from typing import Literal, Self
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ..domain_config import DomainConfig
+from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment, LogLevel
 
 # Defaults for path-override fields.  Computed once at module import relative to
@@ -231,11 +231,6 @@ class InfraConfig(BaseSettings):
         description=(
             "Bearer token for worker<->control IPC. None disables auth (dev mode)."
         ),
-    )
-    max_concurrent_threads: int = Field(
-        default=5,
-        description="Max concurrent graph executions per worker (WPA-001).",
-        alias="VAULTSPEC_MAX_CONCURRENT_THREADS",
     )
     auto_spawn_worker: bool = Field(
         default=True,
@@ -494,7 +489,7 @@ class InfraConfig(BaseSettings):
         return value
 
 
-class Settings(DomainConfig, InfraConfig):
+class Settings(DomainSettingsConfig, InfraConfig):
     """Backwards-compatible composed settings.
 
     Inherits all ~18 domain fields from ``DomainConfig`` and all ~75

@@ -157,7 +157,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         if hasattr(provider, "shutdown"):
             await anyio.to_thread.run_sync(provider.shutdown)  # ty: ignore[unresolved-attribute]
         meter_provider = metrics.get_meter_provider()
-        if hasattr(provider, "shutdown"):
+        if hasattr(meter_provider, "shutdown"):
             await anyio.to_thread.run_sync(meter_provider.shutdown)  # ty: ignore[unresolved-attribute]
 
 

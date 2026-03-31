@@ -435,6 +435,52 @@ OTel implementation is **mostly correct**:
 | LOW | 0 | 0 | 2 | 5 | **7** |
 | Total | **17** | **13** | **15** | **12** | **57** |
 
+## Cycle 5 — 15-agent sonar audit (2026-03-31)
+
+Post-fix verification audit with 15 parallel agents covering all
+checklist domains. 3 regression fixes applied before the audit
+(Layer 1 coupling, handler commits, OTel noise).
+
+### CLEAN domains (10/15 agents)
+
+Layer 1 import independence, Layer 1 test isolation (509 core, zero
+L2 imports), entry point cross-imports, infrastructure containment,
+db.commit ownership (zero in handlers), ORM lazy="raise" (12/12),
+test markers (18 conftest files correct), deleted module remnants,
+config/secrets, full test suite (1035 pass).
+
+### Bug found and fixed
+
+| ID | Finding | Severity |
+|----|---------|----------|
+| V48 | `worker/app.py:160` — MeterProvider shutdown guard checks `provider` (TracerProvider) instead of `meter_provider`. Metric shutdown silently gated on wrong object. | **CRITICAL** (bug) — FIXED |
+
+### Remaining moderate findings (not regressions — pre-existing)
+
+These are handler-level violations that existed before PR #16 and
+were partially improved but not fully resolved. They are tracked
+for the integration testing PR (#17) or a dedicated handler-cleanup
+pass.
+
+| ID | Finding | Severity | File |
+|----|---------|----------|------|
+| R1 | `health.py` — full probe orchestration in route (DB probe, HTTP call to worker, readiness logic) | Moderate | `api/routes/health.py` |
+| R2 | `teams.py` — direct `get_pending_permission_requests(db)` + permission dedup logic in route | Moderate | `api/routes/teams.py` |
+| R3 | `threads.py` — `uuid4()` ID gen, `json.loads()` metadata parsing, direct `list_threads(db)` in route | Moderate | `api/routes/threads.py` |
+| R4 | `messages.py` — `"paused for input" in error_detail` string-sniffing for HTTP 409 | Moderate | `api/routes/messages.py` |
+| R5 | `ws_dispatch.py:133-153` — string parsing on `error_detail` to classify WS error codes (FailureType covers dispatch errors but not domain rejections like NOT_FOUND, INPUT_REQUIRED) | Moderate | `api/ws_dispatch.py` |
+| R6 | `thread_state.py` — direct `get_thread(db)` bypasses service | Minor | `api/routes/thread_state.py` |
+| R7 | 13 bare string literals remaining: column defaults, plan entry statuses, one dispatch action, log extras | Moderate | scattered |
+| R8 | `dispatch.py:242` — `action="ingest"` bare string in DispatchRequest | Moderate | `control/dispatch.py` |
+
+### Cycle 5 Summary
+
+- **1 critical bug found and fixed** (V48)
+- **8 moderate pre-existing findings tracked** (R1-R8)
+- **10 domains fully clean**
+- **Layer 1 independence: VERIFIED** — bare REPL import succeeds
+- **Test suite: 1035 pass, zero failures**
+
 ## Cycle 4 — Key Takeaway
 
 **The core library integrations are implemented correctly.** LangGraph

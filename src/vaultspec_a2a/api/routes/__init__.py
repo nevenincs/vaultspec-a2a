@@ -13,6 +13,7 @@ from .messages import router as messages_router
 from .permissions import router as permissions_router
 from .teams import router as teams_router
 from .thread_state import router as thread_state_router
+from .thread_stream import router as thread_stream_router
 from .threads import router as threads_router
 
 __all__ = ["register_routes"]
@@ -23,6 +24,7 @@ def register_routes(app: FastAPI) -> None:
     for sub_router in (
         health_router,
         threads_router,
+        thread_stream_router,
         thread_state_router,
         messages_router,
         cancel_router,

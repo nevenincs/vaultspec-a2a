@@ -1,12 +1,13 @@
 """Worker node for LangGraph agent task execution."""
 
+import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, Protocol
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
@@ -108,6 +109,64 @@ def _drain_worker_state_updates(
     return drain_fn() if drain_fn is not None else {}
 
 
+async def _apply_mock_permission_gate(
+    *,
+    messages: list[BaseMessage],
+    response: BaseMessage,
+    model: BaseChatModel,
+    autonomous: bool,
+) -> BaseMessage:
+    """Gate mock-provider permission tool calls inside the graph node context.
+
+    VidaiMock can deterministically replay permission tool calls, but the
+    LangGraph interrupt must still be raised from a runnable context the graph
+    owns. The mock provider therefore surfaces the tool call normally and the
+    worker node performs the actual interrupt/resume gate here.
+    """
+    if autonomous or getattr(model, "_llm_type", "") != "mock-chat-model":
+        return response
+    if not isinstance(response, AIMessage):
+        return response
+
+    for tool_call in response.tool_calls:
+        if tool_call.get("name") != "session_request_permission":
+            continue
+        tool_input = tool_call.get("args", {})
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        options = tool_input.get("options", [])
+        if not isinstance(options, list):
+            options = []
+        selected_option = await _interrupt_permission_callback(
+            "session_request_permission",
+            tool_input,
+            options,
+        )
+        tool_call_id = tool_call.get("id")
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            raise RuntimeError(
+                "Mock permission gate requires a stable tool call id to resume"
+            )
+
+        follow_up_messages = [
+            *messages,
+            SystemMessage(
+                content=(
+                    "Human approval has been resolved. Continue the task using "
+                    "the tool result below."
+                )
+            ),
+            response,
+            ToolMessage(
+                content=json.dumps({"approved_option_id": selected_option}),
+                tool_call_id=tool_call_id,
+            ),
+        ]
+        return await model.ainvoke(follow_up_messages)
+
+    return response
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
@@ -168,7 +227,10 @@ async def _interrupt_permission_callback(
     if isinstance(resume_value, dict):
         candidate = resume_value.get("option_id", _first_option_id(options))
         return _validate_option_id(candidate, options)
-    return _first_option_id(options)
+    raise RuntimeError(
+        "LangGraph interrupt returned an unsupported resume payload for "
+        f"{tool_name!r}: {type(resume_value).__name__}"
+    )
 
 
 def create_worker_node(
@@ -221,6 +283,12 @@ def create_worker_node(
         )
         try:
             response = await effective_model.ainvoke(messages)
+            response = await _apply_mock_permission_gate(
+                messages=messages,
+                response=response,
+                model=effective_model,
+                autonomous=autonomous,
+            )
         except GraphBubbleUp:
             if drain_fn is not None:
                 drain_fn()

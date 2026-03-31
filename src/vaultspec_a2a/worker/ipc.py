@@ -20,6 +20,7 @@ import httpx
 from fastapi.encoders import jsonable_encoder
 
 from ..control.config import settings
+from ..telemetry import inject_trace_context
 
 __all__ = ["WorkerBridge"]
 
@@ -103,6 +104,13 @@ class WorkerBridge:
     # Event relay (batched, CRIT-02)
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _trace_headers() -> dict[str, str] | None:
+        """Inject the current trace context into outbound IPC requests."""
+        headers: dict[str, str] = {}
+        inject_trace_context(headers)
+        return headers or None
+
     async def send_event(self, thread_id: str, payload: dict[str, Any]) -> None:
         """Buffer an event for batched relay to the gateway.
 
@@ -162,6 +170,7 @@ class WorkerBridge:
                 resp = await self._client.post(
                     "/internal/events/batch",
                     json={"events": batch},
+                    headers=self._trace_headers(),
                 )
                 if resp.status_code == 200:
                     return  # success
@@ -259,6 +268,7 @@ class WorkerBridge:
                     "active_threads": sorted(self._active_threads),
                     "uptime_seconds": round(time.monotonic() - self._start_time),
                 },
+                headers=self._trace_headers(),
             )
             if resp.status_code == 200:
                 return True

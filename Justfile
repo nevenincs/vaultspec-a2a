@@ -122,6 +122,10 @@ _dev-service-start-ui:
 _dev-service-start-postgres:
     docker compose -f service/docker-compose.prod.postgres.yml up -d postgres
 
+# Start the deterministic certification stack (gateway + worker + VidaiMock + Jaeger)
+_dev-service-start-integration:
+    docker compose -f service/docker-compose.integration.yml up -d --build --wait
+
 
 # --- stop recipes (graceful) ---
 
@@ -149,6 +153,10 @@ _dev-service-stop-ui:
 _dev-service-stop-postgres:
     -docker compose -f service/docker-compose.prod.postgres.yml stop postgres
 
+# Stop the deterministic certification stack
+_dev-service-stop-integration:
+    docker compose -f service/docker-compose.integration.yml down --remove-orphans
+
 
 # --- kill recipes (force) ---
 
@@ -167,6 +175,10 @@ _dev-service-kill-ui:
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:
     -docker compose -f service/docker-compose.prod.postgres.yml kill postgres
+
+# Force-kill the deterministic certification stack
+_dev-service-kill-integration:
+    -docker compose -f service/docker-compose.integration.yml kill
 
 
 # --- restart recipes ---
@@ -191,6 +203,11 @@ _dev-service-restart-postgres:
     just _dev-service-stop-postgres
     just _dev-service-start-postgres
 
+# Restart the deterministic certification stack
+_dev-service-restart-integration:
+    just _dev-service-stop-integration
+    just _dev-service-start-integration
+
 
 # --- rebuild recipes ---
 
@@ -214,6 +231,11 @@ _dev-service-rebuild-postgres:
     docker compose -f service/docker-compose.prod.postgres.yml down -v
     just _dev-service-start-postgres
 
+# Rebuild the deterministic certification stack
+_dev-service-rebuild-integration:
+    docker compose -f service/docker-compose.integration.yml build
+    just _dev-service-restart-integration
+
 
 
 # --- logs recipes ---
@@ -233,6 +255,10 @@ _dev-service-logs-ui:
 # Tail PostgreSQL container logs
 _dev-service-logs-postgres:
     docker compose -f service/docker-compose.prod.postgres.yml logs -f postgres
+
+# Tail the deterministic certification stack logs
+_dev-service-logs-integration:
+    docker compose -f service/docker-compose.integration.yml logs -f --tail=100
 
 
 # --- db subgroup ---
@@ -297,6 +323,9 @@ dev-test TARGET *ARGS:
 _dev-test-unit *ARGS:
     uv run pytest {{ARGS}}
 
+# Run deterministic service certification tests against the real local stack
+_dev-test-service *ARGS:
+    uv run pytest --override-ini "addopts=--durations=10 --showlocals -ra --capture=sys" -m service {{ARGS}}
 
 # Run the complete test suite
 _dev-test-all *ARGS:

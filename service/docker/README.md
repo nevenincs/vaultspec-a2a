@@ -6,8 +6,7 @@ files reference these Dockerfiles directly for clarity and consistency.
 ## Files
 
 - `dev.Dockerfile`
-  Development-only images and targets. Used by `docker-compose.dev.yml` and the
-  integration overlay.
+  Development-only images and targets. Used by `docker-compose.dev.yml`.
 
 - `prod.Dockerfile`
   Production build targets for gateway and worker services. Used by
@@ -36,8 +35,8 @@ files reference these Dockerfiles directly for clarity and consistency.
 - `mock-seeder`  
   Runs a loop to populate the mock database for demo/test flows. Used by the **mock-seeder** service.
 
-**Used by:** `docker-compose.dev.yml`, `docker-compose.integration.yml`
-**Typical usage:** local development with HMR, plus optional integration mocks.
+**Used by:** `docker-compose.dev.yml`
+**Typical usage:** local development with HMR.
 
 ---
 
@@ -60,7 +59,8 @@ files reference these Dockerfiles directly for clarity and consistency.
 
 **Purpose:**
 
-- Runs `vidaimock` with recorded tapes for deterministic mocking.
+- Runs a pinned `vidaimock` release with recorded tapes for deterministic
+  mocking.
 
 **Used by:** `docker-compose.integration.yml`
 
@@ -75,9 +75,10 @@ files reference these Dockerfiles directly for clarity and consistency.
   - `frontend` → `docker/dev.Dockerfile` `node-base`
 
 - `docker-compose.integration.yml`
-  Optional overlay:
+  Deterministic certification stack:
+  - `gateway` → `docker/prod.Dockerfile` `gateway`
+  - `worker` → `docker/prod.Dockerfile` `worker`
   - `vidaimock` → `docker/vidaimock.Dockerfile`
-  - `mock-seeder` → `docker/dev.Dockerfile` `mock-seeder`
   - `jaeger` → upstream image
 
 - `docker-compose.prod.yml`  
@@ -105,7 +106,9 @@ files reference these Dockerfiles directly for clarity and consistency.
 
 - All Docker definitions live under `docker/` for consistency.
 - `docker-compose.dev.yml` is the default frontend-ready stack.
-- `docker-compose.integration.yml` is the richer overlay for mocks and tracing.
+- `docker-compose.integration.yml` is the deterministic certification stack
+  used by the pytest service harness and the repo-owned `just dev service`
+  commands.
 - The production-authoritative Docker path is:
   `docker compose -f docker-compose.prod.yml -f docker-compose.prod.postgres.yml up --build`
 - Required production env:

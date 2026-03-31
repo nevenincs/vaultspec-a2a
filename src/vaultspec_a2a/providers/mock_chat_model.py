@@ -30,6 +30,75 @@ logger = logging.getLogger(__name__)
 __all__ = ["MockChatModel"]
 
 
+def _extract_text_content(content: Any) -> str:
+    """Return concatenated display text from string or structured blocks."""
+    if isinstance(content, str):
+        return content
+    if not isinstance(content, list):
+        return ""
+
+    parts: list[str] = []
+    for block in content:
+        if not isinstance(block, dict):
+            continue
+        block_type = block.get("type")
+        if block_type in {"text", "output_text"} and isinstance(block.get("text"), str):
+            parts.append(block["text"])
+    return "".join(parts)
+
+
+def _extract_choice_payload(chunk: dict[str, Any]) -> dict[str, Any]:
+    """Return the delta/message payload from an OpenAI-style chunk."""
+    choices = chunk.get("choices", [])
+    if not choices:
+        return {}
+    choice = choices[0]
+    if not isinstance(choice, dict):
+        return {}
+    payload = choice.get("delta")
+    if isinstance(payload, dict):
+        return payload
+    payload = choice.get("message")
+    return payload if isinstance(payload, dict) else {}
+
+
+def _extract_tool_calls(chunk: Any) -> list[dict[str, Any]]:
+    """Return tool call entries from either OpenAI or VidaiMock raw chunks."""
+    if isinstance(chunk, list):
+        tool_calls = []
+        for item in chunk:
+            if not isinstance(item, dict):
+                continue
+            function = item.get("function")
+            if not isinstance(function, dict):
+                continue
+            tool_calls.append(
+                {
+                    "id": item.get("id"),
+                    "type": item.get("type", "function"),
+                    "function": function,
+                    "index": item.get("index"),
+                }
+            )
+        return tool_calls
+
+    if not isinstance(chunk, dict):
+        return []
+    payload = _extract_choice_payload(chunk)
+    tool_calls = payload.get("tool_calls", [])
+    return tool_calls if isinstance(tool_calls, list) else []
+
+
+def _extract_chunk_text(chunk: Any) -> str:
+    """Return text content from either OpenAI or VidaiMock raw chunks."""
+    if isinstance(chunk, list):
+        return _extract_text_content(chunk)
+    if not isinstance(chunk, dict):
+        return ""
+    payload = _extract_choice_payload(chunk)
+    return _extract_text_content(payload.get("content", ""))
+
+
 class MockChatModel(BaseChatModel):
     """A mock chat model that proxies requests to a local VidaiMock instance.
 
@@ -41,6 +110,7 @@ class MockChatModel(BaseChatModel):
 
     model_name: str = "mock-success-single"
     base_url: str = "http://localhost:8100/mock-success-single/v1"
+    disable_streaming: bool = True
     permission_callback: Any | None = Field(default=None, exclude=True)
 
     _agent_config: AgentConfig | None = PrivateAttr(default=None)
@@ -174,34 +244,32 @@ class MockChatModel(BaseChatModel):
                         )
                         continue
 
-                    choices = chunk.get("choices", [])
-                    if not choices:
-                        continue
-                    delta = choices[0].get("delta", {})
-
-                    text = delta.get("content")
+                    text = _extract_chunk_text(chunk)
                     if text:
                         yield ChatGenerationChunk(message=AIMessageChunk(content=text))
 
-                    tool_calls = delta.get("tool_calls", [])
+                    tool_calls = _extract_tool_calls(chunk)
                     if tool_calls:
                         tc_chunks = []
                         for t_idx, tc in enumerate(tool_calls):
                             func = tc.get("function", {})
+                            tool_name = func.get("name")
+                            raw_args = func.get("arguments", "")
                             tc_chunks.append(
                                 {
                                     "index": tc.get("index", t_idx),
                                     "id": tc.get("id"),
-                                    "name": func.get("name"),
-                                    "args": func.get("arguments", ""),
+                                    "name": tool_name,
+                                    "args": raw_args,
                                 }
                             )
-                        yield ChatGenerationChunk(
-                            message=AIMessageChunk(
-                                content="",
-                                tool_call_chunks=tc_chunks,
+                        if tc_chunks:
+                            yield ChatGenerationChunk(
+                                message=AIMessageChunk(
+                                    content="",
+                                    tool_call_chunks=tc_chunks,
+                                )
                             )
-                        )
 
             logger.debug("SSE stream from VidaiMock completed")
 

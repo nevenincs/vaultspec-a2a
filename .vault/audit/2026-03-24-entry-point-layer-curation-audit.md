@@ -5,10 +5,10 @@ tags:
 date: '2026-03-25'
 related:
   - '[[2026-03-24-entry-point-decomposition-adr]]'
-  - '[[2026-03-24-api-module-audit]]'
-  - '[[2026-03-24-worker-cli-audit]]'
-  - '[[2026-03-24-cross-import-dependency-map]]'
-  - '[[2026-03-24-entry-point-adr-review]]'
+  - '[[2026-03-24-api-module-research]]'
+  - '[[2026-03-24-worker-cli-research]]'
+  - '[[2026-03-24-cross-import-dependency-map-research]]'
+  - '[[2026-03-24-entry-point-audit]]'
   - '[[2026-03-24-entry-point-layer-plan]]'
 ---
 
@@ -16,8 +16,8 @@ related:
      outside the YAML frontmatter above -->
 
 <!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
+     - quoted wiki-links are ONLY for .vault/ documents in the related: field above.
+     - NEVER use wiki-link syntax or markdown path links in the document body.
      - NEVER reference file paths in the body. If you must name a source file,
        class, or function, use inline backtick code: `src/module.py`. -->
 
@@ -32,11 +32,11 @@ cross-reference bidirectionality, and directory placement.
 
 Files audited:
 
-- `.vault/research/2026-03-24-api-module-audit.md`
-- `.vault/research/2026-03-24-worker-cli-audit.md`
-- `.vault/research/2026-03-24-cross-import-dependency-map.md`
+- `.vault/research/2026-03-24-api-module-research.md`
+- `.vault/research/2026-03-24-worker-cli-research.md`
+- `.vault/research/2026-03-24-cross-import-dependency-map-research.md`
 - `.vault/adr/2026-03-24-entry-point-decomposition-adr.md`
-- `.vault/audit/2026-03-24-entry-point-adr-review.md`
+- `.vault/audit/2026-03-24-entry-point-audit.md`
 - `.vault/plan/2026-03-24-entry-point-layer-plan.md`
 
 ## Findings
@@ -49,11 +49,11 @@ them.
 
 | File | Missing comments |
 |------|-----------------|
-| `2026-03-24-api-module-audit.md` | Both `DO NOT add` and `LINK RULES` |
-| `2026-03-24-worker-cli-audit.md` | Both `DO NOT add` and `LINK RULES` |
-| `2026-03-24-cross-import-dependency-map.md` | Both `DO NOT add` and `LINK RULES` |
+| `2026-03-24-api-module-research.md` | Both `DO NOT add` and `LINK RULES` |
+| `2026-03-24-worker-cli-research.md` | Both `DO NOT add` and `LINK RULES` |
+| `2026-03-24-cross-import-dependency-map-research.md` | Both `DO NOT add` and `LINK RULES` |
 | `2026-03-24-entry-point-decomposition-adr.md` | Both `DO NOT add` and `LINK RULES` |
-| `2026-03-24-entry-point-adr-review.md` | Both `DO NOT add` and `LINK RULES` |
+| `2026-03-24-entry-point-audit.md` | Both `DO NOT add` and `LINK RULES` |
 
 **Fix applied**: Inserted both HTML comment blocks between the frontmatter
 closing `---` and the H1 title in all 5 files, matching the exact text
@@ -68,7 +68,7 @@ All 6 documents pass frontmatter validation:
   `#audit`, `#plan`)
 - Feature tag is consistently `#entry-point-layer` across all 6 documents
 - `date:` is ISO format, quoted
-- `related:` is a YAML list of quoted `"[[wiki-links]]"`
+- `related:` is a YAML list of quoted wiki-link strings
 - No `feature:` key present in any document
 - No unsupported frontmatter properties
 
@@ -76,13 +76,13 @@ All 6 documents pass frontmatter validation:
 
 All wiki-links in `related:` fields point to files that exist in `.vault/`:
 
-- `[[2026-03-24-entry-point-decomposition-adr]]` -- exists at `.vault/adr/`
-- `[[2026-03-24-api-module-audit]]` -- exists at `.vault/research/`
-- `[[2026-03-24-worker-cli-audit]]` -- exists at `.vault/research/`
-- `[[2026-03-24-cross-import-dependency-map]]` -- exists at `.vault/research/`
-- `[[2026-03-24-entry-point-adr-review]]` -- exists at `.vault/audit/`
-- `[[2026-03-24-entry-point-layer-plan]]` -- exists at `.vault/plan/`
-- `[[2026-03-23-core-layer-boundary-adr]]` -- exists at `.vault/adr/`
+- `2026-03-24-entry-point-decomposition-adr` -- exists at `.vault/adr/`
+- `2026-03-24-api-module-research` -- exists at `.vault/research/`
+- `2026-03-24-worker-cli-research` -- exists at `.vault/research/`
+- `2026-03-24-cross-import-dependency-map-research` -- exists at `.vault/research/`
+- `2026-03-24-entry-point-audit` -- exists at `.vault/audit/`
+- `2026-03-24-entry-point-layer-plan` -- exists at `.vault/plan/`
+- `2026-03-23-core-layer-boundary-adr` -- exists at `.vault/adr/`
 
 No broken links. No relative paths. All wiki-links are quoted strings.
 
@@ -114,11 +114,11 @@ ADR does not reference the audit review).
 
 All filenames follow `yyyy-mm-dd-{feature}-{type}.md` (kebab-case):
 
-- `2026-03-24-api-module-audit.md` -- research type
-- `2026-03-24-worker-cli-audit.md` -- research type
-- `2026-03-24-cross-import-dependency-map.md` -- research type
+- `2026-03-24-api-module-research.md` -- research type
+- `2026-03-24-worker-cli-research.md` -- research type
+- `2026-03-24-cross-import-dependency-map-research.md` -- research type
 - `2026-03-24-entry-point-decomposition-adr.md` -- adr type
-- `2026-03-24-entry-point-adr-review.md` -- audit type
+- `2026-03-24-entry-point-audit.md` -- audit type
 - `2026-03-24-entry-point-layer-plan.md` -- plan type
 
 All lowercase, kebab-case, correct directory placement. No unreplaced
@@ -142,7 +142,7 @@ All lowercase, kebab-case, correct directory placement. No unreplaced
 
 ### PASS -- Body link rules
 
-No wiki-links (`[[...]]`) or markdown links (`[text](url)`) found in
+No wiki-link syntax or markdown links found in
 document bodies. All source file references use inline backtick code
 (e.g., `api/endpoints.py`, `worker/executor.py`).
 

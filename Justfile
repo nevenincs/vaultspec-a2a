@@ -18,10 +18,6 @@ default:
 dev *ARGS:
     just dev-{{ARGS}}
 
-# Production CLI passthrough — dispatch to prod-<subcommand>
-prod *ARGS:
-    just prod-{{ARGS}}
-
 # Full CI pipeline: lint + typecheck + unit tests
 ci:
     just dev code check all
@@ -85,7 +81,7 @@ _dev-service-dispatch ACTION *TARGETS:
 
     # Expand group targets
     $prodTargets = @("gateway", "worker", "ui", "postgres")
-    $devTargets = @("jaeger", "vidaimock")
+    $devTargets = @()
     $allTargets = $prodTargets + $devTargets
 
     $resolvedTargets = @()
@@ -124,15 +120,8 @@ _dev-service-start-ui:
 
 # Start PostgreSQL via docker compose
 _dev-service-start-postgres:
-    docker compose -f docker-compose.prod.postgres.yml up -d postgres
+    docker compose -f service/docker-compose.prod.postgres.yml up -d postgres
 
-# Start Jaeger tracing collector (OTLP gRPC :4317, UI :16686, health :13133)
-_dev-service-start-jaeger:
-    docker run -d --name jaeger-local -p 4317:4317 -p 4318:4318 -p 16686:16686 -p 13133:13133 -e COLLECTOR_OTLP_ENABLED=true cr.jaegertracing.io/jaegertracing/jaeger:2.16.0; echo "Jaeger UI: http://localhost:16686  Health: http://localhost:13133/status"
-
-# Start VidaiMock LLM provider via integration compose
-_dev-service-start-vidaimock:
-    docker compose -f docker-compose.integration.yml up -d --build vidaimock; echo "VidaiMock running at http://localhost:8100/v1/models"
 
 # --- stop recipes (graceful) ---
 
@@ -158,49 +147,27 @@ _dev-service-stop-ui:
 
 # Stop PostgreSQL container
 _dev-service-stop-postgres:
-    -docker compose -f docker-compose.prod.postgres.yml stop postgres
+    -docker compose -f service/docker-compose.prod.postgres.yml stop postgres
 
-# Stop Jaeger container
-_dev-service-stop-jaeger:
-    -docker stop jaeger-local
-
-# Stop VidaiMock container
-_dev-service-stop-vidaimock:
-    docker compose -f docker-compose.integration.yml stop vidaimock
 
 # --- kill recipes (force) ---
 
-# Force-kill the gateway process
+# Force-kill the gateway process (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-gateway:
-    #!/usr/bin/env pwsh
-    $port = if ($env:VAULTSPEC_PORT) { $env:VAULTSPEC_PORT } else { "8000" }
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "Gateway killed." } else { Write-Host "Gateway not running." }
+    just _dev-service-stop-gateway
 
-# Force-kill the worker process
+# Force-kill the worker process (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-worker:
-    #!/usr/bin/env pwsh
-    $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker killed." } else { Write-Host "Worker not running." }
+    just _dev-service-stop-worker
 
-# Force-kill the UI dev server
+# Force-kill the UI dev server (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-ui:
-    #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "node" -and $_.CommandLine -match "vite" }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "UI killed." } else { Write-Host "UI not running." }
+    just _dev-service-stop-ui
 
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:
-    -docker compose -f docker-compose.prod.postgres.yml kill postgres
+    -docker compose -f service/docker-compose.prod.postgres.yml kill postgres
 
-# Force-kill Jaeger container
-_dev-service-kill-jaeger:
-    -docker kill jaeger-local
-
-# Force-kill VidaiMock container
-_dev-service-kill-vidaimock:
-    docker compose -f docker-compose.integration.yml kill vidaimock
 
 # --- restart recipes ---
 
@@ -224,16 +191,6 @@ _dev-service-restart-postgres:
     just _dev-service-stop-postgres
     just _dev-service-start-postgres
 
-# Restart Jaeger (remove old container then start)
-_dev-service-restart-jaeger:
-    just _dev-service-stop-jaeger
-    -docker rm jaeger-local
-    just _dev-service-start-jaeger
-
-# Restart VidaiMock (stop then start)
-_dev-service-restart-vidaimock:
-    just _dev-service-stop-vidaimock
-    just _dev-service-start-vidaimock
 
 # --- rebuild recipes ---
 
@@ -254,44 +211,10 @@ _dev-service-rebuild-ui:
 
 # Rebuild PostgreSQL: destroy volume and recreate
 _dev-service-rebuild-postgres:
-    docker compose -f docker-compose.prod.postgres.yml down -v
+    docker compose -f service/docker-compose.prod.postgres.yml down -v
     just _dev-service-start-postgres
 
-# Rebuild Jaeger: remove container and restart
-_dev-service-rebuild-jaeger:
-    just _dev-service-stop-jaeger
-    -docker rm jaeger-local
-    just _dev-service-start-jaeger
 
-# Rebuild VidaiMock: rebuild docker image and restart
-_dev-service-rebuild-vidaimock:
-    docker compose -f docker-compose.integration.yml up -d --build --force-recreate vidaimock
-
-# --- health recipes ---
-
-# Check gateway health via doctor.py
-_dev-service-health-gateway:
-    uv run python -m vaultspec_a2a.control.doctor services gateway
-
-# Check worker health via doctor.py
-_dev-service-health-worker:
-    uv run python -m vaultspec_a2a.control.doctor services worker
-
-# Check UI dev server health via doctor.py
-_dev-service-health-ui:
-    uv run python -m vaultspec_a2a.control.doctor services ui
-
-# Check PostgreSQL health via doctor.py
-_dev-service-health-postgres:
-    uv run python -m vaultspec_a2a.control.doctor services postgres
-
-# Check Jaeger health via doctor.py
-_dev-service-health-jaeger:
-    uv run python -m vaultspec_a2a.control.doctor services jaeger
-
-# Check VidaiMock health via doctor.py
-_dev-service-health-vidaimock:
-    uv run python -m vaultspec_a2a.control.doctor services vidaimock
 
 # --- logs recipes ---
 
@@ -309,21 +232,8 @@ _dev-service-logs-ui:
 
 # Tail PostgreSQL container logs
 _dev-service-logs-postgres:
-    docker compose -f docker-compose.prod.postgres.yml logs -f postgres
+    docker compose -f service/docker-compose.prod.postgres.yml logs -f postgres
 
-# Tail Jaeger container logs
-_dev-service-logs-jaeger:
-    docker logs -f jaeger-local
-
-# Tail VidaiMock container logs
-_dev-service-logs-vidaimock:
-    docker compose -f docker-compose.integration.yml logs -f vidaimock
-
-# --- probe recipe ---
-
-# Run a provider connectivity probe (claude | gemini | openai | zhipu | --list)
-dev-service-probe PROVIDER:
-    uv run python -m vaultspec_a2a.providers.probes.{{PROVIDER}}
 
 # --- db subgroup ---
 
@@ -383,34 +293,10 @@ _dev-code-fix-all:
 dev-test TARGET *ARGS:
     just _dev-test-{{TARGET}} {{ARGS}}
 
-# Run unit tests (excludes live, requires_jaeger, requires_vidaimock)
+# Run unit tests
 _dev-test-unit *ARGS:
-    uv run pytest -m "not live and not requires_jaeger and not requires_vidaimock" {{ARGS}}
+    uv run pytest {{ARGS}}
 
-# Run live tests (requires running backend + live ACP provider)
-_dev-test-live *ARGS:
-    uv run pytest -m live {{ARGS}}
-
-# Run smoke tests against local gateway + worker stack
-_dev-test-smoke *ARGS:
-    uv run pytest src/vaultspec_a2a/tests/test_smoke.py -m live {{ARGS}}
-
-# Run tracing tests (requires local Jaeger: just dev service start jaeger)
-_dev-test-tracing *ARGS:
-    uv run pytest -m requires_jaeger {{ARGS}}
-
-# Run mock tests (requires VidaiMock: just dev service start vidaimock)
-_dev-test-mock *ARGS:
-    uv run pytest -m requires_vidaimock {{ARGS}}
-
-# Run verification suites: docker, provider, endpoints, core
-_dev-test-verify *ARGS:
-    uv run python -m vaultspec_a2a.control.verify {{ARGS}}
-
-# CI gate: unit tests + tracing (matches CI pipeline)
-_dev-test-ci *ARGS:
-    just _dev-test-unit {{ARGS}}
-    just _dev-test-tracing {{ARGS}}
 
 # Run the complete test suite
 _dev-test-all *ARGS:
@@ -434,12 +320,12 @@ _dev-build-package:
 
 # Build local dev Docker images (gateway + worker)
 _dev-build-docker:
-    docker compose -f docker-compose.dev.yml build
+    docker compose -f service/docker-compose.dev.yml build
 
 # Build production multi-stage Docker images
 _dev-build-docker-prod:
-    docker build -t vaultspec-a2a-gateway -f docker/prod.Dockerfile --target gateway .
-    docker build -t vaultspec-a2a-worker -f docker/prod.Dockerfile --target worker .
+    docker build -t vaultspec-a2a-gateway -f service/docker/prod.Dockerfile --target gateway .
+    docker build -t vaultspec-a2a-worker -f service/docker/prod.Dockerfile --target worker .
 
 # Remove dist/, egg-info, and __pycache__ directories
 _dev-build-clean:
@@ -475,28 +361,8 @@ _dev-deps-lock:
     uv lock
 
 # ===========================================================================
-# prod — Production CLI passthrough
+# Convenience aliases
 # ===========================================================================
-
-# Passthrough to Python CLI: vaultspec team <args>
-prod-team *ARGS:
-    uv run vaultspec team {{ARGS}}
-
-# Passthrough to Python CLI: vaultspec agent <args>
-prod-agent *ARGS:
-    uv run vaultspec agent {{ARGS}}
-
-# ===========================================================================
-# Convenience aliases (backward compat during transition)
-# ===========================================================================
-
-# Run a preps scenario (backward compat — use: just dev test mock <scenario>)
-preps SCENARIO:
-    uv run python -m vaultspec_a2a.tests.preps.{{SCENARIO}}
-
-# List available preps scenarios (backward compat — use: just dev test mock --list)
-preps-list:
-    uv run python -m vaultspec_a2a.tests.preps
 
 # Start standalone MCP server (stdio by default, use TRANSPORT=streamable-http for HTTP)
 mcp TRANSPORT="stdio" *ARGS:

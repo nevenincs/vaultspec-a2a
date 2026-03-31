@@ -23,6 +23,7 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
     TERMINAL_STATUSES,
     ApprovalStatus,
@@ -74,10 +75,12 @@ class PermissionResult:
     error_detail: str | None = None
     error_status_code: int | None = None
     circuit_open: bool = False
+    failure_type: FailureType | None = None
 
 
 async def respond_to_permission(
     db: AsyncSession,
+    *,
     request_id: str,
     option_id: str,
     idempotency_key: str | None,
@@ -90,9 +93,9 @@ async def respond_to_permission(
 ) -> PermissionResult:
     """Execute the permission-response state machine.
 
-    Returns a :class:`PermissionResult` describing the outcome.  The caller
-    is responsible for committing the session and translating errors into
-    protocol-specific responses (HTTP, WebSocket, etc.).
+    Returns a :class:`PermissionResult` describing the outcome.  Commits the
+    session before returning — the service owns its transaction boundary.
+    The caller translates errors into protocol-specific responses.
     """
     logger.info(
         "Permission response: request_id=%s, option_id=%s",
@@ -179,6 +182,7 @@ async def respond_to_permission(
             payload={"option_id": option_id},
             result_status=ControlActionResultStatus.DUPLICATE,
         )
+        await db.commit()
         return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
@@ -200,6 +204,7 @@ async def respond_to_permission(
             payload={"option_id": option_id},
             result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
         )
+        await db.commit()
         return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
@@ -281,7 +286,7 @@ async def respond_to_permission(
     # 6. Dispatch resume to worker
     # ------------------------------------------------------------------
     dispatch = DispatchRequest(
-        action="resume",
+        action=ControlActionType.RESUME,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         option_id=resume_value,
         team_preset=team_preset,
@@ -311,27 +316,31 @@ async def respond_to_permission(
         trace_headers=trace_headers,
     )
 
-    # Circuit open → 503 (caller raises)
-    if outcome.failure_type == "circuit_open":
-        return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=thread_record.approval_status,
-            circuit_open=True,
-            error_detail=outcome.detail or "Circuit breaker open",
-            error_status_code=503,
+    if not outcome.success:
+        policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
         )
+        if policy.should_mark_failed:
+            await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        else:
+            action.result_status = (
+                ControlActionResultStatus.REJECTED_INVALID_STATE.value
+            )
 
-    # Hard rejection → mark FAILED
-    if outcome.failure_type == "rejected":
-        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-        exc = outcome.exception
-        status_code = getattr(exc, "status_code", 0)
+        error_detail: str | None = outcome.detail or "Worker dispatch failed"
+        error_status_code: int | None = None
+        if policy.is_circuit_open:
+            error_detail = outcome.detail or "Circuit breaker open"
+            error_status_code = 503
+        elif policy.should_mark_failed:
+            exc = outcome.exception
+            http_code = getattr(exc, "status_code", 0)
+            if http_code:
+                error_detail = f"Worker dispatch failed (HTTP {http_code})"
+            error_status_code = 502
+
+        await db.commit()
         return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
@@ -341,22 +350,10 @@ async def respond_to_permission(
             action_id=action.id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
-            error_detail=f"Worker rejected dispatch (HTTP {status_code})",
-            error_status_code=502,
-        )
-
-    # Capacity / unreachable → LENIENT: do NOT mark FAILED
-    if outcome.failure_type in ("at_capacity", "unreachable"):
-        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
-        return PermissionResult(
-            request_id=request_id,
-            thread_id=thread_id,
-            accepted=False,
-            applied=False,
-            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
-            action_id=action.id,
-            idempotency_key=resolved_idempotency_key,
-            approval_status=thread_record.approval_status,
+            circuit_open=policy.is_circuit_open,
+            error_detail=error_detail,
+            error_status_code=error_status_code,
+            failure_type=typed_failure,
         )
 
     # ------------------------------------------------------------------
@@ -365,6 +362,7 @@ async def respond_to_permission(
     aggregator.resolve_permission(request_id)
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await mark_permission_response_applied(db, thread_id)
+    await db.commit()
 
     return PermissionResult(
         request_id=request_id,

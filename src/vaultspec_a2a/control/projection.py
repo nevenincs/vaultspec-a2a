@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
+from ..thread.enums import ApprovalStatus
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -286,7 +287,7 @@ async def enrich_snapshot_from_durable_state(
         if snapshot.approval_status is None:
             for permission in durable_permissions:
                 if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                    snapshot.approval_status = "pending"
+                    snapshot.approval_status = ApprovalStatus.PENDING
                     snapshot.approval_request_id = permission.request_id
                     break
 

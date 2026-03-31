@@ -18,7 +18,7 @@ from .._acp_rpc_handlers import (
     on_terminal_create,
     sandbox_path,
 )
-from .._acp_session import _AcpModelConfig, _AcpSessionContext
+from .._acp_types import _AcpModelConfig, _AcpSessionContext
 
 
 def _make_config(workspace_root: str | None = None) -> _AcpModelConfig:

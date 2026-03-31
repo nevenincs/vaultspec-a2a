@@ -11,6 +11,8 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
+
 __all__ = [
     "DispatchRequest",
     "DispatchResponse",
@@ -27,7 +29,7 @@ class DispatchRequest(BaseModel):
         description="'ingest' | 'resume' | 'cancel'"
     )
     thread_id: str
-    agent_id: str = "vaultspec-supervisor"
+    agent_id: str = DEFAULT_SUPERVISOR_ID
     # For ingest: user message content
     content: str | None = None
     # For resume: permission response option

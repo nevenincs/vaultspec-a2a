@@ -18,7 +18,7 @@ from langgraph.errors import GraphBubbleUp
 
 from ..control.config import settings
 from ..workspace.environment import resolve_env_vars
-from ._acp_session import _AcpModelConfig, _AcpSessionContext
+from ._acp_types import _AcpModelConfig, _AcpSessionContext
 from ._subprocess import kill_process_tree as _kill_process_tree
 
 __all__: list[str] = []

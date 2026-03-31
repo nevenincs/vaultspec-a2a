@@ -24,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from ..thread.enums import PermissionRequestStatus, ThreadStatus
+
 __all__ = [
     "ArtifactModel",
     "Base",
@@ -90,7 +92,7 @@ class ThreadModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
-    status: Mapped[str] = mapped_column(default="submitted")
+    status: Mapped[str] = mapped_column(default=ThreadStatus.SUBMITTED)
     repair_status: Mapped[str] = mapped_column(default="healthy")
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
@@ -110,24 +112,25 @@ class ThreadModel(Base):
     team_preset: Mapped[str | None] = mapped_column(default=None)
 
     artifacts: Mapped[list["ArtifactModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan"
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
     permission_logs: Mapped[list["PermissionLogModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan"
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
     permission_requests: Mapped[list["PermissionRequestModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan"
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
     control_actions: Mapped[list["ControlActionModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan"
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
     execution_state: Mapped["ThreadExecutionStateModel | None"] = relationship(
         back_populates="thread",
         cascade="all, delete-orphan",
         uselist=False,
+        lazy="raise",
     )
     cost_records: Mapped[list["CostTrackingModel"]] = relationship(
-        back_populates="thread", cascade="all, delete-orphan"
+        back_populates="thread", cascade="all, delete-orphan", lazy="raise"
     )
 
     def __repr__(self) -> str:
@@ -151,7 +154,9 @@ class ArtifactModel(Base):
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
     agent_id: Mapped[str | None] = mapped_column(default=None)
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="artifacts")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="artifacts", lazy="raise"
+    )
 
     __table_args__ = (Index("ix_artifacts_thread_id", "thread_id"),)
 
@@ -176,7 +181,9 @@ class PermissionLogModel(Base):
     option_id: Mapped[str | None] = mapped_column(default=None)
     responded_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="permission_logs")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="permission_logs", lazy="raise"
+    )
 
     __table_args__ = (Index("ix_permission_logs_thread_id", "thread_id"),)
 
@@ -192,7 +199,7 @@ class PermissionRequestModel(Base):
     tool_call: Mapped[str | None] = mapped_column(default=None)
     description: Mapped[str] = mapped_column(Text)
     allowed_options_json: Mapped[str] = mapped_column(Text)
-    request_status: Mapped[str] = mapped_column(default="pending")
+    request_status: Mapped[str] = mapped_column(default=PermissionRequestStatus.PENDING)
     response_option_id: Mapped[str | None] = mapped_column(default=None)
     idempotency_key: Mapped[str | None] = mapped_column(default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)
@@ -200,7 +207,9 @@ class PermissionRequestModel(Base):
     responded_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
     applied_at: Mapped[datetime | None] = mapped_column(UTCDateTime(), default=None)
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="permission_requests")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="permission_requests", lazy="raise"
+    )
 
     __table_args__ = (
         Index("ix_permission_requests_thread_id", "thread_id"),
@@ -235,7 +244,9 @@ class ControlActionModel(Base):
     payload_json: Mapped[str | None] = mapped_column(Text, default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="control_actions")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="control_actions", lazy="raise"
+    )
 
 
 class ThreadExecutionStateModel(Base):
@@ -262,7 +273,9 @@ class ThreadExecutionStateModel(Base):
     tasks_json: Mapped[str] = mapped_column(Text, default="[]")
     degraded_reasons_json: Mapped[str] = mapped_column(Text, default="[]")
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="execution_state")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="execution_state", lazy="raise"
+    )
 
 
 class CostTrackingModel(Base):
@@ -280,7 +293,9 @@ class CostTrackingModel(Base):
     estimated_cost: Mapped[float] = mapped_column(default=0.0)
     created_at: Mapped[datetime] = mapped_column(UTCDateTime(), default=_utcnow)
 
-    thread: Mapped["ThreadModel"] = relationship(back_populates="cost_records")
+    thread: Mapped["ThreadModel"] = relationship(
+        back_populates="cost_records", lazy="raise"
+    )
 
     __table_args__ = (
         Index("ix_cost_tracking_thread_id", "thread_id"),

@@ -15,6 +15,7 @@ from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.stage import infer_phase_from_vault_index
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
 from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.thread.enums import ApprovalStatus
 from vaultspec_a2a.thread.state import TeamState
 
 _logger = logging.getLogger(__name__)
@@ -185,7 +186,7 @@ def _evaluate_supervisor_response(
                     routing_error=gate_result.message,
                 )
 
-    approval_granted = state.get("approval_status") == "approved" or bool(
+    approval_granted = state.get("approval_status") == ApprovalStatus.APPROVED or bool(
         state.get("plan_approved")
     )
     if (
@@ -347,7 +348,7 @@ def create_supervisor_node(
                 return {
                     "next": decision.next_route,
                     "pipeline_phase": decision.inferred_phase,
-                    "approval_status": "approved",
+                    "approval_status": ApprovalStatus.APPROVED,
                 }
             _logger.info(
                 "plan rejected by user — rerouting to first worker for revision"
@@ -355,7 +356,7 @@ def create_supervisor_node(
             return {
                 "next": workers[0] if workers else "FINISH",
                 "pipeline_phase": decision.inferred_phase,
-                "approval_status": "rejected",
+                "approval_status": ApprovalStatus.REJECTED,
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."
                 ),

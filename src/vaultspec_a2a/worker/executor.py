@@ -14,11 +14,13 @@ from typing import TYPE_CHECKING, Any, cast
 
 from langgraph.types import Command
 
-from ..control.config import settings
+from ..domain_config import domain_config
 from ..ipc.serializers import sequenced_to_dict
 from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGraph
 from ..team.team_config import load_team_config
 from ..telemetry import ws_span
+from ..thread.constants import DEFAULT_SUPERVISOR_ID
+from ..thread.enums import ControlActionType, ThreadStatus
 from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
 from .state_projection import StateProjector
 
@@ -97,7 +99,7 @@ class Executor:
 
     def at_capacity(self) -> bool:
         """Return True if the concurrent thread cap has been reached."""
-        cap = settings.max_concurrent_threads
+        cap = domain_config.max_concurrent_threads
         return len(self._active_ingests) >= cap
 
     # Internal state access (used by tests for graph injection).
@@ -162,11 +164,11 @@ class Executor:
                 agent_id=req.agent_id or "supervisor",
             ) as span:
                 match req.action:
-                    case "ingest":
+                    case ControlActionType.INGEST:
                         await self._handle_ingest(req)
-                    case "resume":
+                    case ControlActionType.RESUME:
                         await self._handle_resume(req)
-                    case "cancel":
+                    case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
                         self._aggregator.cancel_thread(req.thread_id)
                         # Emit terminal if no active ingest (TOCTOU safe:
@@ -175,7 +177,7 @@ class Executor:
                             is_active = req.thread_id in self._active_ingests
                         if not is_active:
                             await self._state_projector.emit_terminal_status(
-                                req.thread_id, "cancelled"
+                                req.thread_id, ThreadStatus.CANCELLED
                             )
                     case _:
                         logger.warning(
@@ -217,7 +219,7 @@ class Executor:
                     req.thread_id in self._graph_lifecycle.thread_to_cache_key
                 ),
             )
-            if pre_flight_outcome == "completed":
+            if pre_flight_outcome == ThreadStatus.COMPLETED:
                 logger.info(
                     "Thread %s checkpoint shows completion before crash"
                     " — emitting completed without re-running",
@@ -225,15 +227,15 @@ class Executor:
                     extra=self._dispatch_log_extra(
                         req,
                         action="checkpoint_preflight_terminal",
-                        outcome="completed",
+                        outcome=ThreadStatus.COMPLETED,
                     ),
                 )
                 span.set_attribute("pre_flight", "completed")
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "completed"
+                    req.thread_id, ThreadStatus.COMPLETED
                 )
                 return
-            if pre_flight_outcome == "failed":
+            if pre_flight_outcome == ThreadStatus.FAILED:
                 logger.warning(
                     "Thread %s checkpoint shows error before crash"
                     " — emitting failed without re-running",
@@ -241,12 +243,12 @@ class Executor:
                     extra=self._dispatch_log_extra(
                         req,
                         action="checkpoint_preflight_terminal",
-                        outcome="failed",
+                        outcome=ThreadStatus.FAILED,
                     ),
                 )
                 span.set_attribute("pre_flight", "failed")
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "failed"
+                    req.thread_id, ThreadStatus.FAILED
                 )
                 return
             if pre_flight_outcome == "interrupted":
@@ -281,7 +283,7 @@ class Executor:
                 span.set_attribute("error", True)
                 span.set_attribute("error.message", str(exc))
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "failed", error_detail=str(exc)
+                    req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
                 )
                 return
 
@@ -298,7 +300,7 @@ class Executor:
                 span.set_attribute("error", True)
                 span.set_attribute("error.message", "No team preset")
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "failed"
+                    req.thread_id, ThreadStatus.FAILED
                 )
                 return
 
@@ -324,11 +326,11 @@ class Executor:
             config = {
                 "configurable": {"thread_id": req.thread_id},
                 "recursion_limit": (
-                    req.recursion_limit or settings.graph_recursion_limit
+                    req.recursion_limit or domain_config.graph_recursion_limit
                 ),
             }
 
-            agent_id = req.agent_id or "vaultspec-supervisor"
+            agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             try:
                 span.add_event("starting_graph_execution")
@@ -341,7 +343,7 @@ class Executor:
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
-                outcome = "failed"
+                outcome = ThreadStatus.FAILED
                 logger.exception(
                     "Ingest failed for thread %s",
                     req.thread_id,
@@ -384,7 +386,7 @@ class Executor:
                 span.set_attribute("error", True)
                 span.set_attribute("error.message", str(exc))
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "failed", error_detail=str(exc)
+                    req.thread_id, ThreadStatus.FAILED, error_detail=str(exc)
                 )
                 return
 
@@ -399,7 +401,7 @@ class Executor:
                     ),
                 )
                 await self._state_projector.emit_terminal_status(
-                    req.thread_id, "failed"
+                    req.thread_id, ThreadStatus.FAILED
                 )
                 return
 
@@ -443,13 +445,13 @@ class Executor:
             effective_recursion_limit = (
                 req.recursion_limit
                 or team_recursion_limit
-                or settings.graph_recursion_limit
+                or domain_config.graph_recursion_limit
             )
             config = {
                 "configurable": {"thread_id": req.thread_id},
                 "recursion_limit": effective_recursion_limit,
             }
-            agent_id = req.agent_id or "vaultspec-supervisor"
+            agent_id = req.agent_id or DEFAULT_SUPERVISOR_ID
 
             try:
                 span.add_event("resuming_graph_execution")
@@ -464,7 +466,7 @@ class Executor:
                 )
                 span.set_attribute("outcome", outcome)
             except Exception:
-                outcome = "failed"
+                outcome = ThreadStatus.FAILED
                 logger.exception(
                     "Resume failed for thread %s",
                     req.thread_id,

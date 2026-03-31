@@ -1,9 +1,11 @@
 ---
 tags:
-  - "#plan"
-  - "#vowel-counter"
+- '#plan'
+- '#vowel-counter'
 date: 2026-03-26
-related: []
+related:
+- '[[2026-03-31-docs-vault-authority-retention-adr]]'
+- '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
 # vowel-counter-implementation-plan

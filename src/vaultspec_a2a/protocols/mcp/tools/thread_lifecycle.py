@@ -11,6 +11,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
+from ....thread.enums import ThreadStatus
 from .._http import (
     _HTTP_CONFLICT,
     HTTPStatusError,
@@ -260,5 +261,5 @@ async def archive_thread(
                 f"{detail or 'thread is not in a terminal state'}."
             ) from exc
         raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
-    status = data.get("status", "archived")
+    status = data.get("status", ThreadStatus.ARCHIVED)
     return f"Thread {thread_id} archived (status: {status})."

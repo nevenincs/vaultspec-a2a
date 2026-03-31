@@ -1,6 +1,10 @@
 # vaultspec_a2a — Package Architecture
 
-**Binding ADR:** `docs/adrs/040-layer-boundary-enforcement.md`
+**Binding ADR chain:** `.vault/adr/2026-03-23-core-layer-boundary-adr.md`,
+`.vault/adr/2026-03-24-entry-point-decomposition-adr.md`,
+`.vault/adr/2026-03-27-domain-logic-extraction-adr.md`,
+`.vault/adr/2026-03-28-database-layer-adr.md`,
+`.vault/adr/2026-03-28-infra-config-adr.md`
 
 ## Full Tree
 
@@ -12,7 +16,8 @@ src/vaultspec_a2a/
 #           Accepted frameworks: Pydantic, langchain_core, langgraph
 # ══════════════════════════════════════════════════════════════
 
-├── domain_config.py                   (141)  Cross-cutting domain settings (18 fields)
+├── domain_config.py                          DomainConfig(BaseModel) — pure schema, no env reading
+│                                             19 fields
 │
 ├── team/                              ~515 lines Python (+ presets TOML/YAML)
 │   ├── __init__.py                     (77)
@@ -21,41 +26,51 @@ src/vaultspec_a2a/
 │   │                                         discover_agent_preset_ids, load_agent_config
 │   └── presets/                              Preset TOML files (incl. mock/tapes/)
 │
-├── thread/                            ~1,437 lines
-│   ├── __init__.py                    (171)
-│   ├── enums.py                        (83)  ThreadStatus, RepairStatus, ControlActionType,
+├── thread/                            ~1,989 lines
+│   ├── __init__.py                    (175)
+│   ├── constants.py                     (8)  Shared constants
+│   ├── enums.py                        (98)  ThreadStatus, RepairStatus, ControlActionType,
 │   │                                         ControlActionResultStatus, PermissionRequestStatus,
 │   │                                         ApprovalStatus
 │   ├── transitions.py                  (95)  _VALID_TRANSITIONS state machine + transition helpers
-│   ├── snapshots.py                   (498)  Snapshot dataclasses + pure enrichment logic
+│   ├── snapshots.py                   (509)  Snapshot dataclasses + pure enrichment logic
 │   ├── state.py                       (168)  TeamState TypedDict + reducers
 │   ├── models.py                      (104)  TokenUsageEntry, PlanStep, ArtifactRef
-│   └── errors.py                      (318)  Full error taxonomy + ProviderSessionError
+│   ├── errors.py                      (318)  Full error taxonomy + ProviderSessionError
+│   ├── terminal_effects.py             (43)  Terminal state side-effect definitions
+│   ├── permission_fsm.py             (140)  Permission request finite state machine
+│   ├── dispatch_policy.py              (68)  Dispatch eligibility rules
+│   ├── lifecycle_guards.py             (59)  Pre-condition guards for lifecycle transitions
+│   ├── message_policy.py               (36)  Message validation policy
+│   ├── cancel_policy.py                (31)  Cancellation eligibility rules
+│   ├── creation.py                     (39)  Thread creation domain logic
+│   ├── repair_policy.py                (76)  Repair eligibility + transition rules
+│   └── idempotency.py                  (22)  Idempotency key helpers
 │
-├── context/                           ~774 lines
+├── context/                           ~775 lines
 │   ├── __init__.py                     (35)
 │   ├── metadata.py                    (171)  Thread metadata + context ref discovery
 │   ├── preamble.py                     (55)  System message builder
 │   ├── anchoring.py                    (63)  Workspace/feature state anchoring
 │   ├── stage.py                        (21)  Pipeline phase inference
 │   ├── rules.py                       (270)  RuleManager — .vaultspec/rules/ discovery
-│   └── token_budget.py               (159)  Token estimation + context compaction
+│   └── token_budget.py               (160)  Token estimation + context compaction
 │
-├── graph/                             ~2,093 lines
-│   ├── __init__.py
-│   ├── compiler.py                    (790)  StateGraph assembly from TeamConfig
+├── graph/                             ~2,113 lines
+│   ├── __init__.py                      (6)
+│   ├── compiler.py                    (792)  StateGraph assembly from TeamConfig
 │   ├── events.py                      (139)  Domain event dataclasses (DomainEvent base)
-│   ├── enums.py                       (173)  ToolKind, PermissionType, AgentLifecycleState,
+│   ├── enums.py                       (179)  ToolKind, PermissionType, AgentLifecycleState,
 │   │                                         AgentState,
 │   │                                         Model, Provider, MODEL_MAP, PROVIDER_DEFAULT_MODELS
 │   ├── protocols.py                    (92)  ProviderFactoryProtocol, TelemetryHook
 │   ├── nodes/
-│   │   ├── __init__.py                       Re-exports create_*_node factories
-│   │   ├── supervisor.py              (378)  Routing + phase gates
+│   │   ├── __init__.py                  (6)  Re-exports create_*_node factories
+│   │   ├── supervisor.py              (379)  Routing + phase gates
 │   │   ├── worker.py                  (247)  Task execution + permissions
 │   │   └── vault_reader.py            (116)  Vault document mounting
 │   └── tools/
-│       ├── __init__.py
+│       ├── __init__.py                  (1)
 │       └── task_queue.py              (156)  Persistent task queue (filesystem I/O)
 │
 # ══════════════════════════════════════════════════════════════
@@ -63,19 +78,19 @@ src/vaultspec_a2a/
 #             Layer 1 only. May use LangGraph runtime types.
 # ══════════════════════════════════════════════════════════════
 │
-├── streaming/                         ~2,286 lines
+├── streaming/                         ~2,293 lines
 │   ├── __init__.py                     (11)  Public API: EventAggregator
 │   ├── aggregator.py                  (326)  EventAggregator facade (compose buffer+emit+ingest)
-│   ├── types.py                       (203)  StreamableGraph protocol, classify_tool_kind
+│   ├── types.py                       (204)  StreamableGraph protocol, classify_tool_kind
 │   ├── subscribers.py                 (199)  Client queue mgmt, subscribe/unsubscribe
 │   ├── buffering.py                   (235)  Chunk batching, debounce, flush scheduling
-│   ├── emitters.py                    (629)  emit_* methods, sequence numbering, permissions
-│   ├── transformer.py                 (469)  LangGraph callback → domain event translation
-│   └── ingest.py                      (214)  Graph consumption loop, cancel, shutdown
+│   ├── emitters.py                    (630)  emit_* methods, sequence numbering, permissions
+│   ├── transformer.py                 (473)  LangGraph callback → domain event translation
+│   └── ingest.py                      (215)  Graph consumption loop, cancel, shutdown
 │
-├── lifecycle/                         ~169 lines
+├── lifecycle/                         ~148 lines
 │   ├── __init__.py                      (5)
-│   └── reconciliation.py             (164)  Pure decision logic (zero external imports)
+│   └── reconciliation.py             (143)  Pure decision logic (zero external imports)
 │
 # ══════════════════════════════════════════════════════════════
 # LAYER 2 — Entry points. Thin protocol adapters. Zero
@@ -83,52 +98,47 @@ src/vaultspec_a2a/
 #           Layer 1 + control/ calls.
 # ══════════════════════════════════════════════════════════════
 │
-├── api/                               ~4,615 lines │ FastAPI + WebSocket + Pydantic
-│   ├── app.py                         (312)  Application factory, lifespan, main()
+├── api/                               ~3,819 lines │ FastAPI + WebSocket + Pydantic
+│   ├── app.py                         (325)  Application factory, lifespan, main()
 │   ├── middleware.py                   (40)  CacheControlMiddleware (cache headers)
 │   ├── dependencies.py                (79)  FastAPI Depends() providers
 │   ├── _utils.py                      (42)  trace_headers(), mark_worker_connected()
-│   ├── ws_dispatch.py                (282)  WS dispatch handler factories
-│   ├── websocket.py                  (719)  WS ConnectionManager + event streaming
+│   ├── ws_dispatch.py                (291)  WS dispatch handler factories
+│   ├── websocket.py                  (720)  WS ConnectionManager + event streaming
 │   ├── auth.py                        (40)  Bearer token validation
-│   ├── internal.py                   (369)  Worker-facing internal routes + event relay
-│   ├── event_adapter.py              (264)  Domain event → wire protocol translation
+│   ├── internal.py                   (366)  Worker-facing internal routes + event relay
+│   ├── event_adapter.py              (262)  Domain event → wire protocol translation
 │   ├── routes/                               Per-resource REST route modules
 │   │   ├── __init__.py                (33)  register_routes(app) helper
-│   │   ├── health.py                  (82)  GET /health
-│   │   ├── threads.py                (425)  POST/GET/DELETE threads, archive, metadata
-│   │   ├── thread_state.py           (145)  GET /threads/{id}/state
-│   │   ├── messages.py               (205)  POST /threads/{id}/messages
-│   │   ├── cancel.py                 (163)  POST /threads/{id}/cancel
-│   │   ├── teams.py                  (102)  GET /teams, /team/status, /team/presets
-│   │   ├── permissions.py            (309)  POST /permissions/{id}/respond
+│   │   ├── health.py                  (31)  GET /health
+│   │   ├── threads.py                (234)  POST/GET/DELETE threads, archive, metadata
+│   │   ├── thread_state.py            (47)  GET /threads/{id}/state
+│   │   ├── messages.py                (92)  POST /threads/{id}/messages
+│   │   ├── cancel.py                  (66)  POST /threads/{id}/cancel
+│   │   ├── teams.py                   (76)  GET /teams, /team/status, /team/presets
+│   │   ├── permissions.py             (81)  POST /permissions/{id}/respond
 │   │   └── admin.py                   (15)  POST /admin/shutdown
 │   └── schemas/                              Pydantic request/response models
+│       ├── __init__.py               (132)
 │       ├── base.py                    (43)
 │       ├── commands.py                (90)
 │       ├── enums.py                   (86)  Re-exports from graph/enums
-│       ├── events.py                 (271)
+│       ├── events.py                 (262)
 │       ├── rest.py                   (200)
 │       └── snapshots.py              (140)
 │
-├── cli/                               ~1,269 lines │ Click + httpx + Rich
-│   ├── _agent.py                      (74)  Agent preset commands (via team.team_config)
-│   ├── _team.py                      (493)  Team commands (Click definitions only)
-│   ├── _renderers.py                 (442)  Domain event rendering, status display,
-│   │                                         permission prompts, thread list
-│   └── _util.py                      (173)  API client helpers
-│
-├── worker/                            ~1,740 lines │ FastAPI + LangGraph + anyio
-│   ├── app.py                        (243)  Worker HTTP service
-│   ├── executor.py                   (490)  Dispatch orchestration, concurrency gating
-│   ├── graph_lifecycle.py            (317)  GraphLifecycleManager: cache, compile, input
-│   ├── state_projection.py           (297)  StateProjector: checkpoint, normalize, emit
+├── worker/                            ~1,757 lines │ FastAPI + LangGraph + anyio
+│   ├── __main__.py                      (6)  Entry point
+│   ├── app.py                        (256)  Worker HTTP service
+│   ├── executor.py                   (492)  Dispatch orchestration, concurrency gating
+│   ├── graph_lifecycle.py            (318)  GraphLifecycleManager: cache, compile, input
+│   ├── state_projection.py           (298)  StateProjector: checkpoint, normalize, emit
 │   └── ipc.py                        (356)  WorkerBridge: event relay to gateway
 │
-├── protocols/                         ~1,053 lines │ MCP SDK + httpx
+├── protocols/                         ~1,068 lines │ MCP SDK + httpx
 │   ├── mcp/                                  IDE tool server (Cursor, Windsurf, Claude)
 │   │   ├── server.py                  (55)  FastMCP instance + tool registration
-│   │   ├── _http.py                  (197)  Shared httpx helper, preset cache, credentials
+│   │   ├── _http.py                  (195)  Shared httpx helper, preset cache, credentials
 │   │   ├── tools/                            Per-domain MCP tool handlers
 │   │   │   ├── thread_lifecycle.py   (264)  start, cancel, delete, archive
 │   │   │   ├── thread_query.py       (196)  get_thread_status, list_threads
@@ -149,23 +159,30 @@ src/vaultspec_a2a/
 │   │                                         ExecutionTaskProjectionPayload
 │   └── serializers.py                 (18)  sequenced_to_dict (event serialization)
 │
-├── control/                           ~4,754 lines │ Runtime + dev-tooling
+├── control/                           ~5,241 lines │ Runtime + service orchestration
 │   │
 │   │   # ── Production runtime (process supervision, dispatch, health) ──
 │   ├── circuit_breaker.py             (98)  WorkerCircuitBreaker (protocol-agnostic)
 │   ├── worker_management.py          (604)  LazyWorkerSpawner, WorkerWatchdog, WorkerState
-│   ├── dispatch.py                   (264)  dispatch_to_worker(), domain error types
-│   ├── projection.py                 (337)  Checkpoint/state projection
+│   ├── dispatch.py                   (356)  dispatch_to_worker(), domain error types
+│   ├── projection.py                 (338)  Checkpoint/state projection
 │   ├── snapshot.py                   (202)  Snapshot assembly (delegates to thread/snapshots)
-│   ├── event_handlers.py             (467)  Event handlers + relay_event()
-│   ├── health.py                     (170)  assemble_health_status() (consolidated)
+│   ├── event_handlers.py             (460)  Event handlers + relay_event()
+│   ├── health.py                     (254)  assemble_health_status() + build_full_health()
 │   ├── diagnostics.py                (150)  classify_missing_ws_thread, mark_thread_failed
 │   │
-│   │   # ── Dev-tooling + infrastructure config ──
-│   ├── config.py                     (632)  InfraConfig (75 infra fields) + Settings facade
+│   │   # ── Service layer (domain-backed orchestration) ──
+│   ├── thread_service.py             (461)  Thread lifecycle + list + delete + archive
+│   ├── cancel_service.py             (190)  Cancellation orchestration
+│   ├── message_service.py            (205)  Message send orchestration
+│   ├── permission_service.py         (381)  Permission response orchestration
+│   ├── thread_state_service.py       (152)  Thread state query orchestration
+│   ├── team_service.py               (107)  Team status assembly orchestration
+│   ├── repair_transitions.py          (91)  Repair state transition orchestration
+│   │
+│   │   # ── Infrastructure config ──
+│   ├── config.py                     (642)  InfraConfig (75 infra fields) + Settings facade
 │   ├── db.py                         (312)  DB lifecycle (migrate, snapshot, restore)
-│   ├── doctor.py                     (383)  System health checks
-│   ├── verify.py                     (894)  Schema consistency
 │   └── hooks.py                      (191)  Pre-commit hook management
 │
 ├── database/                          ~2,340 lines │ SQLAlchemy + Alembic + aiosqlite
@@ -180,51 +197,48 @@ src/vaultspec_a2a/
 │   ├── reconciliation.py             (196)  Reconciliation I/O executor
 │   └── migrations/                           Alembic versions
 │
-├── providers/                         ~4,694 lines │ Anthropic + OpenAI + Google + Zhipu SDKs
+├── providers/                         ~3,368 lines │ Anthropic + OpenAI + Google + Zhipu SDKs
 │   ├── factory.py                    (459)  ProviderFactory (implements ProviderFactoryProtocol)
-│   ├── acp_chat_model.py             (663)  LangChain BaseChatModel interface + public API
-│   ├── _acp_session.py               (714)  AcpModelConfig, AcpSessionContext, session lifecycle
-│   ├── _acp_protocol.py              (325)  JSON-RPC dispatch, stdout loop, packet handling
+│   ├── acp_chat_model.py             (658)  LangChain BaseChatModel interface + public API
+│   ├── _acp_session.py               (259)  AcpSessionContext, session lifecycle
+│   ├── _acp_types.py                  (89)  AcpModelConfig frozen dataclass
+│   ├── _acp_auth.py                  (381)  ACP authentication helpers
+│   ├── _acp_protocol.py              (322)  JSON-RPC dispatch, stdout loop, packet handling
 │   ├── _acp_rpc_handlers.py          (445)  Permission, filesystem, terminal RPC handlers
 │   ├── mock_chat_model.py            (210)  VidaiMock tape-replay model
 │   ├── gemini_auth.py                (223)  Google auth flow
 │   ├── _subprocess.py                (182)  Subprocess management utilities
-│   ├── acp_exceptions.py              (91)  ACP-specific error types
-│   └── probes/                               Per-provider health checks
-│       ├── _protocol.py              (463)  Base probe protocol
-│       ├── _http.py                   (69)  HTTP probe utilities
-│       ├── certifying.py              (82)  Production certification probe
-│       ├── claude.py                 (143)  Claude probe
-│       ├── openai.py                  (66)  OpenAI probe
-│       ├── gemini.py                  (78)  Gemini probe
-│       └── zhipu.py                   (67)  Zhipu probe
+│   └── acp_exceptions.py              (91)  ACP-specific error types
 │
-├── telemetry/                         ~684 lines │ OpenTelemetry SDK + LangSmith
+├── telemetry/                         ~681 lines │ OpenTelemetry SDK + LangSmith
 │   ├── instrumentation.py            (343)  Tracer/meter factory (implements TelemetryHook)
-│   ├── middleware.py                 (238)  FastAPI auto-instrumentation
+│   ├── middleware.py                 (235)  FastAPI auto-instrumentation
 │   └── aggregator_hook.py             (49)  Aggregator telemetry bridge
 │
 ├── workspace/                         ~641 lines │ pathlib + subprocess (git)
 │   ├── environment.py                (135)  .venv/workspace discovery
 │   └── git_manager.py               (485)  Git operations
 │
-├── utils/                             ~520 lines │ stdlib + OTel trace context
+├── utils/                             ~521 lines │ stdlib + OTel trace context
 │   ├── enums.py                       (43)  LogLevel, Environment, AcpRequestId
 │   ├── logging.py                    (182)  Log setup
 │   ├── timestamp.py                   (68)  Monotonic clock helpers
-│   ├── trace.py                      (195)  OTel span context utilities
+│   ├── trace.py                      (196)  OTel span context utilities
 │   └── asyncio_compat.py              (15)  Windows Proactor event loop stub
 │
 # ══════════════════════════════════════════════════════════════
 # LAYER 3 — Infrastructure config. Topology, not behaviour.
 # ══════════════════════════════════════════════════════════════
 │
+service/
 ├── docker-compose.dev.yml                    Gateway + Worker + Vite (SQLite)
 ├── docker-compose.prod.yml                   Gateway + Worker + Jaeger (SQLite)
 ├── docker-compose.prod.postgres.yml          Postgres override
-├── docker-compose.integration.yml            VidaiMock + test fixtures
-├── Justfile                           (515)  Service lifecycle, migrations, linting
-└── .env.example                              Full config template
+├── .env.example                              Full config template
+├── docker/
+│   ├── prod.Dockerfile                       Multi-stage: gateway + worker
+│   └── dev.Dockerfile                        Dev images: python-base, node-base
+└── README.md                                 Compose topology guide
 ```
 
 ## Dependency Graph
@@ -233,7 +247,7 @@ src/vaultspec_a2a/
                          LAYER 1 (pure domain)
 
                     ┌─────────────────┐
-                    │ domain_config.py │  Cross-cutting domain knobs (18 fields)
+                    │ domain_config.py │  Cross-cutting domain knobs (19 fields)
                     └────────┬────────┘
                              │ (consumed by all Layer 1 modules)
                              │
@@ -246,8 +260,18 @@ src/vaultspec_a2a/
     │          │    │ state        │  │ rules    │    │ events   │
     │          │    │ models       │  │ token_   │    │ enums    │
     │          │    │ errors       │  │  budget  │    │ protocols│
-    └──────────┘    └──────────────┘  │ stage    │    └──────────┘
-                                      └──────────┘
+    │          │    │ permission_  │  │ stage    │    │          │
+    │          │    │  fsm         │  │          │    │          │
+    │          │    │ dispatch_    │  └──────────┘    └──────────┘
+    │          │    │  policy      │
+    │          │    │ lifecycle_   │
+    │          │    │  guards      │
+    │          │    │ cancel/msg/  │
+    │          │    │  repair_pol. │
+    │          │    │ creation     │
+    │          │    │ idempotency  │
+    └──────────┘    └──────────────┘
+
     Dependency direction (imports from):
     ─ graph/   imports from ► context/, thread/, team/, domain_config
     ─ context/ imports from ► thread/, domain_config
@@ -270,16 +294,16 @@ src/vaultspec_a2a/
 
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
               LAYER 2 — Entry Points (thin protocol adapters)
- ┌──────────────┐ ┌────────┐ ┌────────────┐ ┌──────────┐
- │     api/     │ │  cli/  │ │  worker/   │ │protocols/│
- │ FastAPI      │ │ Click  │ │ FastAPI    │ │ MCP SDK  │
- │ routes/*     │ │ httpx  │ │ executor   │ │ httpx    │
- │ ws_dispatch  │ │ Rich   │ │ graph_life │ │          │
- │ dependencies │ │ render │ │ state_proj │ │          │
- │ middleware   │ │        │ │ ipc        │ │          │
- └──────┬───────┘ └───┬────┘ └─────┬──────┘ └────┬─────┘
-        │             │            │              │
-        ▼             ▼            ▼              ▼
+ ┌──────────────┐ ┌────────────┐ ┌──────────┐
+ │     api/     │ │  worker/   │ │protocols/│
+ │ FastAPI      │ │ FastAPI    │ │ MCP SDK  │
+ │ routes/*     │ │ executor   │ │ httpx    │
+ │ ws_dispatch  │ │ graph_life │ │          │
+ │ dependencies │ │ state_proj │ │          │
+ │ middleware   │ │ ipc        │ │          │
+ └──────┬───────┘ └─────┬──────┘ └────┬─────┘
+        │               │              │
+        ▼               ▼              ▼
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
          LAYER 2 — Infrastructure Services (shared)
  ┌──────┐ ┌──────────┐ ┌───────────┐ ┌──────────┐ ┌───────────┐
@@ -287,19 +311,32 @@ src/vaultspec_a2a/
  │      │ │          │ │            │ │          │ │           │
  │schema│ │circuit_  │ │ session    │ │ factory  │ │instrument.│
  │serial│ │ breaker  │ │ models     │ │ acp_chat │ │ middleware│
- │      │ │worker_   │ │ thread_    │ │ mock_    │ │ agg_hook  │
- │      │ │ mgmt     │ │  repository│ │ gemini   │ │           │
- │      │ │dispatch  │ │ permission_│ │ probes/* │ │           │
- │      │ │projection│ │  repository│ │          │ │           │
- │      │ │snapshot  │ │ artifact_  │ │          │ │           │
- │      │ │event_    │ │  repository│ │          │ │           │
- │      │ │ handlers │ │ _helpers   │ │          │ │           │
- │      │ │health    │ │ session    │ │          │ │           │
- │      │ │diagnost. │ │ models     │ │          │ │           │
- │      │ │config    │ │ reconcile  │ │          │ │           │
- │      │ │db/doctor │ │            │ │          │ │           │
- │      │ │verify    │ │            │ │          │ │           │
+ │      │ │worker_   │ │ thread_    │ │ _acp_    │ │ agg_hook  │
+ │      │ │ mgmt     │ │  repository│ │  types   │ │           │
+ │      │ │dispatch  │ │ permission_│ │ _acp_    │ │           │
+ │      │ │projection│ │  repository│ │  auth    │ │           │
+ │      │ │snapshot  │ │ artifact_  │ │ _acp_    │ │           │
+ │      │ │event_    │ │  repository│ │  session │ │           │
+ │      │ │ handlers │ │ _helpers   │ │ _acp_    │ │           │
+ │      │ │health    │ │ checkpoints│ │  protocol│ │           │
+ │      │ │diagnost. │ │ reconcile  │ │ _acp_rpc │ │           │
+ │      │ │config    │ │            │ │ mock_    │ │           │
+ │      │ │db        │ │            │ │ gemini   │ │           │
  │      │ │hooks     │ │            │ │          │ │           │
+ │      │ │          │ │            │ │          │ │           │
+ │      │ │# services│ │            │ │          │ │           │
+ │      │ │thread_   │ │            │ │          │ │           │
+ │      │ │ service  │ │            │ │          │ │           │
+ │      │ │cancel_   │ │            │ │          │ │           │
+ │      │ │ service  │ │            │ │          │ │           │
+ │      │ │message_  │ │            │ │          │ │           │
+ │      │ │ service  │ │            │ │          │ │           │
+ │      │ │permissn_ │ │            │ │          │ │           │
+ │      │ │ service  │ │            │ │          │ │           │
+ │      │ │thread_st │ │            │ │          │ │           │
+ │      │ │ _service │ │            │ │          │ │           │
+ │      │ │repair_   │ │            │ │          │ │           │
+ │      │ │ trans.   │ │            │ │          │ │           │
  └──────┘ └──────────┘ └────────────┘ └──────────┘ └───────────┘
  ┌───────────┐ ┌───────┐
  │ workspace/│ │ utils/│
@@ -309,9 +346,10 @@ src/vaultspec_a2a/
 ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─ ─
                        LAYER 3 (infrastructure config)
  ┌─────────────────┐ ┌──────────────┐ ┌─────────────┐
- │docker-compose.* │ │  Justfile    │ │.env.example  │
- │dev/prod/integ.  │ │ 515 lines    │ │              │
- │Jaeger,Postgres  │ │ pwsh recipes │ │              │
+ │  service/       │ │  Justfile    │ │.env.example  │
+ │ docker-compose.*│ │ 381 lines    │ │              │
+ │ Dockerfiles     │ │ pwsh recipes │ │              │
+ │ .env.example    │ │              │ │              │
  └─────────────────┘ └──────────────┘ └──────────────┘
 ```
 
@@ -320,12 +358,20 @@ src/vaultspec_a2a/
 | Layer 1 module | Consumed by | Stack |
 |---|---|---|
 | **domain_config** | All Layer 1 modules, control/config (composes into Settings) | Pydantic |
-| **team/team_config** | providers/factory, providers/acp_chat_model, worker/executor, cli/_agent | LangChain, subprocess |
+| **team/team_config** | providers/factory, providers/acp_chat_model, worker/executor | LangChain, subprocess |
 | **thread/enums** | database/thread_repository, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum |
 | **thread/transitions** | database/thread_repository, control/event_handlers | Pure dict lookup |
 | **thread/snapshots** | control/snapshot, control/projection, api/routes/thread_state | Dataclasses |
 | **thread/errors** | database/*_repository, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
 | **thread/state** | worker/executor, api/routes/* (via graph/) | LangGraph, FastAPI |
+| **thread/permission_fsm** | control/permission_service | Pure state machine |
+| **thread/dispatch_policy** | control/dispatch, control/thread_service | Pure predicate |
+| **thread/lifecycle_guards** | control/thread_service | Pure predicate |
+| **thread/cancel_policy** | control/cancel_service | Pure predicate |
+| **thread/message_policy** | control/message_service | Pure predicate |
+| **thread/repair_policy** | control/repair_transitions | Pure predicate |
+| **thread/creation** | control/thread_service | Pure factory |
+| **thread/idempotency** | control/thread_service | Pure helper |
 | **context/*** | graph/nodes/* only (via facade) | Internal — not consumed by Layer 2 directly |
 | **graph/compiler** | worker/graph_lifecycle | LangGraph, LangChain |
 | **graph/events** | api/event_adapter | Pydantic (wire translation) |
@@ -353,10 +399,10 @@ src/vaultspec_a2a/
 
 1. **Layer 1** imports NOTHING from Layer 1.5, 2, or 3. Importable in a bare Python REPL.
 2. **Layer 1.5** imports from Layer 1 only. May use LangGraph runtime types. No database, no HTTP, no telemetry.
-3. **Layer 2 entry points** import from Layer 1, 1.5, and infra services. Never import from each other (api/ does not import cli/, worker/ does not import api/).
+3. **Layer 2 entry points** import from Layer 1, 1.5, and infra services. Never import from each other (api/ does not import worker/, worker/ does not import api/).
 4. **Layer 2 infra services** import from Layer 1. Entry points import from infra services. Infra services never import from entry points.
 5. **IPC package** (`ipc/`) is a neutral contract consumed equally by api/ and worker/. Neither owns it.
-6. **control/** contains production runtime (dispatch, health, circuit breaker, worker management) and dev-tooling (db, doctor, hooks, verify). Domain logic formerly in projection/snapshot/event_handlers has been extracted to `thread/snapshots` and `thread/transitions`.
+6. **control/** contains production runtime (dispatch, health, circuit breaker, worker management) and service-layer orchestration (thread_service, cancel_service, message_service, permission_service, thread_state_service, repair_transitions). Domain logic lives in `thread/` policy modules; control/ services compose policy + persistence.
 7. **Layer 3** defines topology. No code execution logic. No business rules.
 
 ## Test Isolation
@@ -366,33 +412,25 @@ depend on a higher layer's infrastructure.
 
 ```bash
 # Layer 1 — pure domain, zero infrastructure
-pytest -m core          # 520 tests, zero deps, bare REPL importable
+pytest -m core          # 509 tests, zero deps, bare REPL importable
 
 # Layer 2 — middleware (protocol adapters + infra services)
-pytest -m middleware    # 574 tests, no Docker/orchestration
+pytest -m middleware    # 526 tests, no Docker/orchestration
 
 # All non-infrastructure tests combined
-pytest                  # 1,094 tests (core + middleware)
+pytest                  # 1,035 tests (core + middleware)
 
-# Infrastructure-gated (require external services)
-pytest -m live                   # full-stack integration (Docker)
-pytest -m requires_acp           # ACP node module (npm install)
-pytest -m requires_postgres      # live Postgres instance
-pytest -m requires_jaeger        # local Jaeger instance
-pytest -m requires_vidaimock      # VidaiMock tape server
+# Service layer (future)
+pytest -m service       # 0 tests — placeholder for service-layer integration
 ```
 
 Marker hierarchy:
 
 | Marker | Layer | Count | What it needs |
 |--------|-------|-------|---------------|
-| `core` + `unit` | 1 | 520 | Nothing — bare Python |
-| `middleware` | 2 | 574 | Nothing — no orchestration |
-| `live` | 3 | ~34 | Docker, running services |
-| `requires_acp` | infra | 9 | `npm install` |
-| `requires_postgres` | infra | 4 | Postgres instance |
-| `requires_jaeger` | infra | 1 | Jaeger instance |
-| `requires_vidaimock` | infra | 3 | VidaiMock server |
+| `core` | 1 | 509 | Nothing — bare Python |
+| `middleware` | 2 | 526 | Nothing — no orchestration |
+| `service` | future | 0 | Service-layer integration (planned) |
 
 All infrastructure-gated tests hard-fail (not skip) when their dependency
 is unreachable.
@@ -421,15 +459,15 @@ print('IPC: PASS')
 
 # Boundary violation check — Layer 1 must not import Layer 2
 # This must return zero matches:
-grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from.*control\.' \
+grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from.*control\.' \
   src/vaultspec_a2a/thread/ src/vaultspec_a2a/context/ src/vaultspec_a2a/team/ \
   src/vaultspec_a2a/graph/ src/vaultspec_a2a/streaming/ src/vaultspec_a2a/lifecycle/ \
   --include='*.py' | grep -v '/tests/' | grep -v __pycache__
 ```
 
-## Boundary Audit Status (2026-03-28)
+## Boundary Audit Status (2026-03-29)
 
-### Layer 1 + Layer 2a — PASS (PR #3 + entry-point-layer PR)
+### Layer 1 + Layer 2a — PASS (PR #3 + PR #4)
 
 | Check | Status |
 |-------|--------|
@@ -441,7 +479,7 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | Test markers correctly isolate layers | PASS |
 | Infrastructure failures hard-fail | PASS |
 
-### Layer 2b Infrastructure Services — CLEAN (domain-logic extraction PR)
+### Layer 2b Infrastructure Services — CLEAN (PR #9)
 
 | Package | Status | Finding |
 |---------|--------|---------|
@@ -453,27 +491,35 @@ grep -rn 'from.*api\.\|from.*cli\.\|from.*worker\.\|from.*database\.\|from.*prov
 | `control/` | CLEAN | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain. |
 | `utils/` | CLEAN | Dead code removed. Layer inversions fixed. |
 
-### Known Test Marker Mismatches
+### Layer 2c Database + Handlers — CLEAN (PR #11)
 
-| Test file | Current | Should be | Reason |
-|-----------|---------|-----------|--------|
-| `graph/tests/test_e2e_live.py` | none | `live` | Uses real AsyncSqliteSaver |
+| Check | Status | Finding |
+|-------|--------|---------|
+| Handler extraction | DONE | Route handlers thinned: threads 425→281, messages 205→92, cancel 163→66, permissions 309→81, thread_state 145→50 |
+| Service modules | DONE | 6 new control/ services: thread_service, cancel_service, message_service, permission_service, thread_state_service, repair_transitions |
 
-### Layer 2d File Size Violations — RESOLVED (PR #12)
+### Layer 2d File Size Violations — RESOLVED (PR #15)
 
 | Check | Status | Finding |
 |-------|--------|---------|
 | `protocols/mcp/server.py` | RESOLVED | Split from 1,045 → 55 lines. Handlers in `tools/` sub-package. Shared HTTP helper in `_http.py`. |
-| `providers/acp_chat_model.py` | RESOLVED | Split from 1,821 → 663 lines. Session lifecycle in `_acp_session.py`. Protocol dispatch in `_acp_protocol.py`. RPC handlers in `_acp_rpc_handlers.py`. |
-| No file over 1,000 lines | PASS | Max is `_acp_session.py` at 714 lines |
+| `providers/acp_chat_model.py` | RESOLVED | Split from 1,821 → 658 lines. Session lifecycle in `_acp_session.py` (259 lines). Auth in `_acp_auth.py` (381 lines). Types in `_acp_types.py` (89 lines). Protocol dispatch in `_acp_protocol.py`. RPC handlers in `_acp_rpc_handlers.py`. |
+| No file over 1,000 lines | PASS | Max is `graph/compiler.py` at 792 lines |
 | Zero httpx in MCP tools/ | PASS | All HTTP via `_http.py` |
-| Zero self._runtime_log_extra | PASS | Replaced by `runtime_log_extra(config, ...)` free function |
 | MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
 
-### Next PR: Layer 3 Infrastructure Config
+### Layer 3 Infrastructure Config — DONE (PR #16)
 
-Remaining work:
+| Check | Status | Finding |
+|-------|--------|---------|
+| Settings god-object reduction | DONE | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 30 prod files (19%). |
+| `DomainConfig` env_file parity | DONE | Added `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence |
+| Stale tapes volume mount | FIXED | `docker-compose.integration.yml` path corrected: `core/` → `team/` |
+| Orphan `docker-compose.postgres.yml` | DELETED | Legacy duplicate with missing `CHECKPOINT_DATABASE_URL` bug |
+| `.dockerignore` gaps | FIXED | Added `.vault/`, `.vaultspec/`, `Justfile`, compose files, `CLAUDE.md` |
+| `.env.example` alignment | FIXED | Added `VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS` |
+| Justfile preps comments | FIXED | Removed misleading backward-compat labels |
 
-- Docker Compose consolidation and topology review
-- Justfile recipe audit
-- `.env.example` alignment with Settings fields
+### Service Layer — In Progress
+
+Domain policy modules extracted to `thread/` (10 new modules). Service orchestration in `control/` (6 new service files). Route handlers thinned to protocol-only adapters. All layers (1-3) have clean boundaries; service lifecycle formalization is the active work stream.

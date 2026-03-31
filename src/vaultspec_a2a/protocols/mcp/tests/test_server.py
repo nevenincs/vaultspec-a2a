@@ -170,13 +170,12 @@ def _make_test_client(
     required app state is set directly on ``app.state`` before the client
     context manager is entered.
     """
-    app = create_app()
 
     @asynccontextmanager
     async def _test_lifespan(_app):
         yield
 
-    app.router.lifespan_context = _test_lifespan
+    app = create_app(lifespan=_test_lifespan)
 
     if aggregator is None:
         aggregator = EventAggregator()

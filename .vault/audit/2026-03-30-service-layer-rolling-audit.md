@@ -435,6 +435,26 @@ OTel implementation is **mostly correct**:
 | LOW | 0 | 0 | 2 | 5 | **7** |
 | Total | **17** | **13** | **15** | **12** | **57** |
 
+## Cycle 4.5 — Pre-merge self-review (2026-03-31)
+
+Five issues identified during pre-merge status review. Three were
+regressions requiring immediate fixes; two were observations.
+
+### Findings
+
+| ID | Finding | Severity | Status |
+|----|---------|----------|--------|
+| F1 | Two `db.commit()` calls in `api/routes/threads.py` delete/archive endpoints — handlers owned transaction boundaries instead of services | **CRITICAL** | **FIXED** — extracted `delete_thread_service()` and `archive_thread()` to `control/thread_service.py` |
+| F2 | OTel exporter noise during tests — `BatchSpanProcessor` and `PeriodicExportingMetricReader` attempt gRPC to `localhost:4317` during every test run | **HIGH** | **FIXED** — root `conftest.py` sets `OTEL_METRICS_EXPORTER=none` and redirects trace exporter to non-routable `198.51.100.1:4317` |
+| F3 | Layer 1 → `control.config` coupling — Phase 3 moved `domain_config` singleton to `control/config.py`, making 12 Layer 1 modules import from Layer 2. Layer 1 was no longer independently importable. | **CRITICAL** | **FIXED** — moved `DomainSettingsConfig` and `domain_config` singleton back to `domain_config.py`. All 23 consumers import from Layer 1 path. Bare REPL import verified. |
+| F4 | 25+ commits — large PR with substantial diff. Commit history is logical (phase per commit) but review burden is high. | **LOW** | Acknowledged — structural reality of 10-phase plan |
+| F5 | README fully rewritten — line counts verified with `wc -l` but architecture descriptions, dependency graph, and consumer tables are synthesis. | **LOW** | Acknowledged — human review recommended |
+
+### Resolution commit
+
+All three code fixes (F1, F2, F3) landed in commit `a28e208`:
+`fix: resolve 3 regressions — Layer 1 independence, handler commits, OTel noise`
+
 ## Cycle 5 — 15-agent sonar audit (2026-03-31)
 
 Post-fix verification audit with 15 parallel agents covering all

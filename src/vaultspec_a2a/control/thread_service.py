@@ -17,7 +17,13 @@ from ..context.metadata import ThreadMetadata, discover_context_refs, generate_n
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import mark_ingest_applied, mark_ingest_requested
-from ..database import create_control_action, create_thread, update_thread_status
+from ..database import (
+    create_control_action,
+    create_thread,
+    delete_thread,
+    get_thread,
+    update_thread_status,
+)
 from ..graph.compiler import build_initial_vault_index
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
@@ -25,6 +31,7 @@ from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import ControlActionType, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
+from ..thread.lifecycle_guards import can_archive, can_delete
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -36,9 +43,13 @@ if TYPE_CHECKING:
     from .worker_management import LazyWorkerSpawner
 
 __all__ = [
+    "ArchiveResult",
+    "DeleteResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
+    "archive_thread",
     "create_and_dispatch_thread",
+    "delete_thread_service",
     "process_metadata",
 ]
 
@@ -278,3 +289,75 @@ async def create_and_dispatch_thread(
         dispatched=True,
         error_detail=None,
     )
+
+
+# ---------------------------------------------------------------------------
+# Delete thread service
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class DeleteResult:
+    """Outcome of :func:`delete_thread_service`."""
+
+    deleted: bool
+    not_found: bool = False
+    error_detail: str | None = None
+
+
+async def delete_thread_service(db: AsyncSession, thread_id: str) -> DeleteResult:
+    """Hard-delete a thread after lifecycle-guard validation.
+
+    Commits the session before returning — the service owns its
+    transaction boundary.
+    """
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return DeleteResult(deleted=False, not_found=True)
+
+    eligibility = can_delete(thread.status)
+    if not eligibility.allowed:
+        return DeleteResult(deleted=False, error_detail=eligibility.reason)
+
+    deleted = await delete_thread(db, thread_id)
+    if not deleted:
+        return DeleteResult(deleted=False, not_found=True)
+
+    await db.commit()
+    return DeleteResult(deleted=True)
+
+
+# ---------------------------------------------------------------------------
+# Archive thread service
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class ArchiveResult:
+    """Outcome of :func:`archive_thread`."""
+
+    archived: bool
+    already_archived: bool = False
+    not_found: bool = False
+    error_detail: str | None = None
+
+
+async def archive_thread(db: AsyncSession, thread_id: str) -> ArchiveResult:
+    """Transition a thread to ARCHIVED status after lifecycle-guard validation.
+
+    Commits the session before returning — the service owns its
+    transaction boundary.
+    """
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return ArchiveResult(archived=False, not_found=True)
+
+    eligibility = can_archive(thread.status)
+    if eligibility.already_archived:
+        return ArchiveResult(archived=True, already_archived=True)
+    if not eligibility.allowed:
+        return ArchiveResult(archived=False, error_detail=eligibility.reason)
+
+    await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
+    await db.commit()
+    return ArchiveResult(archived=True)

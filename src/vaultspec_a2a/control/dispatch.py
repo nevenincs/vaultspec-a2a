@@ -20,9 +20,9 @@ import httpx
 
 from ..database import list_threads
 from ..database.session import get_session_factory
+from ..domain_config import domain_config
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..thread.enums import ThreadStatus
-from .config import domain_config
 
 if TYPE_CHECKING:
     from .circuit_breaker import WorkerCircuitBreaker

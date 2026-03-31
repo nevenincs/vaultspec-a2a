@@ -7,6 +7,7 @@ Layer 1 modules (thread/, context/, graph/, streaming/).
 """
 
 from pydantic import BaseModel, Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class DomainConfig(BaseModel):
@@ -118,4 +119,23 @@ class DomainConfig(BaseModel):
     )
 
 
-__all__ = ["DomainConfig"]
+class DomainSettingsConfig(BaseSettings, DomainConfig):
+    """Env-reading subclass of DomainConfig.
+
+    Reads ``VAULTSPEC_``-prefixed environment variables and ``.env`` files so
+    that Layer 1 consumers get production values without importing the full
+    infrastructure ``Settings`` object from ``control.config``.
+    """
+
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        env_file_encoding="utf-8",
+        env_prefix="VAULTSPEC_",
+        extra="ignore",
+    )
+
+
+# Module-level singleton — Layer 1 modules import this directly.
+domain_config = DomainSettingsConfig()
+
+__all__ = ["DomainConfig", "DomainSettingsConfig", "domain_config"]

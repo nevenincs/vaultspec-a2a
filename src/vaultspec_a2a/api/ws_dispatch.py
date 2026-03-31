@@ -13,9 +13,9 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..control.cancel_service import cancel_thread
-from ..control.config import domain_config
 from ..control.diagnostics import classify_missing_ws_thread, mark_thread_failed
 from ..control.message_service import send_followup_message
+from ..domain_config import domain_config
 from ..thread.dispatch_policy import FailureType
 from ..thread.enums import ThreadStatus
 from ._utils import trace_headers

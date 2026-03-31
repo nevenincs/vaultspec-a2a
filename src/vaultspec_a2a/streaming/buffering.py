@@ -12,7 +12,7 @@ from collections.abc import Coroutine
 from datetime import UTC, datetime
 from typing import Any
 
-from ..control.config import domain_config
+from ..domain_config import domain_config
 from ..graph.events import MessageChunk
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .subscribers import SubscriberManager

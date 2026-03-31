@@ -74,8 +74,8 @@ log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 log_cli_date_format = "%H:%M:%S"
 norecursedirs = [".venv", "knowledge", "node_modules", "ui"]
 strict_xfail = true
-# CI should set OTEL_SDK_DISABLED=true to avoid OTLP exporter connection errors.
-# Not set here because _SDK_DISABLED is import-time and telemetry tests need it enabled.
+# OTEL_SDK_DISABLED=true is set in the root conftest.py (collection-time)
+# to silence gRPC exporter noise.  Service tests override this via CI env.
 testpaths = ["src/vaultspec_a2a"]
 asyncio_mode = "strict"
 asyncio_default_fixture_loop_scope = "function"

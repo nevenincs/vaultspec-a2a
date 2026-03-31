@@ -12,7 +12,7 @@ from collections.abc import Awaitable, Callable
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
-from ..control.config import domain_config
+from ..domain_config import domain_config
 from ..graph.protocols import NullTelemetryHook, TelemetryHook
 from .types import SequencedEvent, StreamableGraph
 

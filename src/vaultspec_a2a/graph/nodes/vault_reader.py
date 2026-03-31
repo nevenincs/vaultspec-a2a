@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
 
-from vaultspec_a2a.control.config import domain_config
+from vaultspec_a2a.domain_config import domain_config
 
 if TYPE_CHECKING:
     from collections.abc import Callable

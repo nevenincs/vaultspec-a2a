@@ -1,7 +1,7 @@
 """Tests for build_anchoring_context (ADR-022)."""
 
 from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.control.config import domain_config
+from vaultspec_a2a.domain_config import domain_config
 
 
 def _make_state(**overrides):

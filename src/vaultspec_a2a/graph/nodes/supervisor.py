@@ -14,7 +14,7 @@ from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.stage import infer_phase_from_vault_index
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
-from vaultspec_a2a.control.config import domain_config
+from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.enums import ApprovalStatus
 from vaultspec_a2a.thread.state import TeamState
 

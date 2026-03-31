@@ -13,7 +13,7 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import uuid4
 
-from ..control.config import domain_config
+from ..domain_config import domain_config
 from ..graph.enums import (
     AgentLifecycleState,
     PermissionOptionKind,

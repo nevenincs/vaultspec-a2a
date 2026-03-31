@@ -10,26 +10,24 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...context.metadata import ThreadMetadata
-from ...control.config import domain_config
 from ...control.thread_service import (
     ThreadCreationRequest,
+    archive_thread,
     create_and_dispatch_thread,
+    delete_thread_service,
     process_metadata,
 )
 from ...database import (
-    delete_thread,
-    get_thread,
     get_thread_metadata,
     list_threads,
-    update_thread_status,
 )
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
 from ...thread.dispatch_policy import FailureType
 from ...thread.enums import ThreadStatus
 from ...thread.errors import NicknameConflictError
-from ...thread.lifecycle_guards import can_archive, can_delete
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_circuit_breaker,
@@ -243,16 +241,11 @@ async def delete_thread_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     """Hard-delete a thread and all cascading artifacts."""
-    thread = await get_thread(db, thread_id)
-    if thread is None:
+    result = await delete_thread_service(db, thread_id)
+    if result.not_found:
         raise HTTPException(status_code=404, detail="Thread not found")
-    eligibility = can_delete(thread.status)
-    if not eligibility.allowed:
-        raise HTTPException(status_code=409, detail=eligibility.reason)
-    deleted = await delete_thread(db, thread_id)
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Thread not found")
-    await db.commit()
+    if not result.deleted:
+        raise HTTPException(status_code=409, detail=result.error_detail)
 
 
 # ---------------------------------------------------------------------------
@@ -266,16 +259,9 @@ async def archive_thread_endpoint(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     """Transition a thread to ARCHIVED status."""
-    thread = await get_thread(db, thread_id)
-    if thread is None:
+    result = await archive_thread(db, thread_id)
+    if result.not_found:
         raise HTTPException(status_code=404, detail="Thread not found")
-
-    eligibility = can_archive(thread.status)
-    if eligibility.already_archived:
-        return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
-    if not eligibility.allowed:
-        raise HTTPException(status_code=409, detail=eligibility.reason)
-
-    await update_thread_status(db, thread_id, ThreadStatus.ARCHIVED)
-    await db.commit()
+    if not result.archived:
+        raise HTTPException(status_code=409, detail=result.error_detail)
     return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}

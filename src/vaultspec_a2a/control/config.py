@@ -14,7 +14,7 @@ from typing import Literal, Self
 from pydantic import AliasChoices, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-from ..domain_config import DomainConfig
+from ..domain_config import DomainSettingsConfig
 from ..utils.enums import Environment, LogLevel
 
 # Defaults for path-override fields.  Computed once at module import relative to
@@ -489,17 +489,6 @@ class InfraConfig(BaseSettings):
         return value
 
 
-class DomainSettingsConfig(BaseSettings, DomainConfig):
-    """Env-reading subclass of DomainConfig. Lives in Layer 2."""
-
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        env_prefix="VAULTSPEC_",
-        extra="ignore",
-    )
-
-
 class Settings(DomainSettingsConfig, InfraConfig):
     """Backwards-compatible composed settings.
 
@@ -636,7 +625,3 @@ class Settings(DomainSettingsConfig, InfraConfig):
 
 # Global settings instance
 settings = Settings()
-
-# Domain-only singleton for Layer 1 consumers that need env-populated config
-# without pulling in the full infrastructure Settings object.
-domain_config = DomainSettingsConfig()

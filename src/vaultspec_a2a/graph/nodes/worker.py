@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
@@ -178,19 +178,53 @@ def _finalize_worker_response(
     return {"messages": [response], "mounted_context": None, **state_updates}
 
 
-def _first_option_id(options: list[dict[str, Any]]) -> str:
-    """Extract the first optionId from ACP permission options list."""
-    return options[0]["optionId"] if options else "allow_once"
+def _valid_option_ids(options: list[dict[str, Any]]) -> set[str]:
+    """Return the valid ACP permission option ids for resume validation."""
+    return {
+        option_id
+        for option in options
+        if isinstance(option, dict)
+        and isinstance((option_id := option.get("optionId")), str)
+        and option_id
+    }
 
 
-def _validate_option_id(candidate: str, options: list[dict[str, Any]]) -> str:
-    """Return *candidate* if it is a valid optionId, else the first option.
+def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
+    """Validate a resumed option id and fail closed on malformed input."""
+    valid_ids = _valid_option_ids(options)
+    if not valid_ids:
+        raise RuntimeError("Permission resume received no valid option ids")
+    if not isinstance(candidate, str) or not candidate:
+        raise RuntimeError(
+            "Permission resume payload must include a non-empty option_id string"
+        )
+    if candidate not in valid_ids:
+        raise RuntimeError(
+            f"Permission resume payload specified unknown option_id {candidate!r}"
+        )
+    return candidate
 
-    Prevents a client sending an arbitrary string via ``Command(resume=...)``
-    from bypassing permission options with an unrecognised id.
-    """
-    valid_ids = {opt["optionId"] for opt in options if "optionId" in opt}
-    return candidate if candidate in valid_ids else _first_option_id(options)
+
+def _resolve_resume_option_id(
+    resume_value: object,
+    options: list[dict[str, Any]],
+) -> str:
+    """Resolve the resumed option id from a LangGraph interrupt payload."""
+    if isinstance(resume_value, str):
+        return _require_valid_option_id(resume_value, options)
+    if isinstance(resume_value, dict):
+        payload = cast("dict[str, object]", resume_value)
+        candidate = payload.get("option_id")
+        if candidate is None:
+            candidate = payload.get("optionId")
+        return _require_valid_option_id(
+            candidate,
+            options,
+        )
+    raise RuntimeError(
+        "LangGraph interrupt returned an unsupported resume payload type: "
+        f"{type(resume_value).__name__}"
+    )
 
 
 async def _interrupt_permission_callback(
@@ -222,15 +256,13 @@ async def _interrupt_permission_callback(
             "options": options,
         }
     )
-    if isinstance(resume_value, str):
-        return _validate_option_id(resume_value, options)
-    if isinstance(resume_value, dict):
-        candidate = resume_value.get("option_id", _first_option_id(options))
-        return _validate_option_id(candidate, options)
-    raise RuntimeError(
-        "LangGraph interrupt returned an unsupported resume payload for "
-        f"{tool_name!r}: {type(resume_value).__name__}"
-    )
+    try:
+        return _resolve_resume_option_id(resume_value, options)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "LangGraph interrupt returned an invalid resume payload for "
+            f"{tool_name!r}: {exc}"
+        ) from exc
 
 
 def create_worker_node(

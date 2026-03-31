@@ -5,13 +5,13 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...database import get_pending_permission_requests
+from ...control.team_service import build_team_status
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
 from ...team.team_config import discover_team_preset_ids, load_team_config
+from ...thread.enums import PermissionRequestStatus
 from ...thread.errors import TeamConfigNotFoundError
 from ..dependencies import get_aggregator
-from ..schemas.enums import AgentLifecycleState
 from ..schemas.rest import (
     AgentStatusEntry,
     PendingPermission,
@@ -32,49 +32,23 @@ async def get_team_status_endpoint(
 ) -> TeamStatusResponse:
     """Return current team status: agents, active threads, pending permissions."""
     heartbeat_threads = getattr(request.app.state, "worker_active_threads", [])
-    active_threads = sorted(
-        set(heartbeat_threads) | set(aggregator.get_active_thread_ids())
+    status = await build_team_status(
+        db=db, aggregator=aggregator, heartbeat_threads=heartbeat_threads
     )
-    node_summaries = aggregator.get_node_summaries()
-    agent_states = aggregator.get_agent_states()
-
-    agents = [
-        AgentStatusEntry(
-            agent_id=s["agent_id"],
-            node_name=s["node_name"],
-            state=agent_states.get(s["agent_id"], AgentLifecycleState.IDLE),
-            role=s.get("role", ""),
-            display_name=s.get("display_name", ""),
-            description=s.get("description", ""),
-        )
-        for s in node_summaries
-    ]
-
-    durable_pending = await get_pending_permission_requests(db)
-    pending = [
-        PendingPermission(
-            request_id=permission.request_id,
-            thread_id=permission.thread_id,
-            description=permission.description,
-            request_status=permission.request_status,
-        )
-        for permission in durable_pending
-    ]
-    known_request_ids = {permission.request_id for permission in pending}
-    pending.extend(
-        PendingPermission(
-            request_id=event.request_id,
-            thread_id=event.thread_id,
-            description=event.description,
-        )
-        for event in aggregator.get_pending_permissions()
-        if event.request_id not in known_request_ids
-    )
+    from dataclasses import asdict
 
     return TeamStatusResponse(
-        agents=agents,
-        active_threads=active_threads,
-        pending_permissions=pending,
+        agents=[AgentStatusEntry(**asdict(a)) for a in status.agents],
+        active_threads=status.active_threads,
+        pending_permissions=[
+            PendingPermission(
+                request_id=p.request_id,
+                thread_id=p.thread_id,
+                description=p.description,
+                request_status=p.request_status or PermissionRequestStatus.PENDING,
+            )
+            for p in status.pending_permissions
+        ],
     )
 
 

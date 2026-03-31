@@ -21,6 +21,7 @@ from ..control.snapshot import (
     enrich_snapshot_from_state,
     load_checkpoint_history_depth,
 )
+from ..database import get_thread
 from ..thread.enums import RepairStatus
 from ..thread.snapshots import (
     ThreadStateData,
@@ -33,7 +34,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from ..database.checkpoints import Checkpointer
-    from ..database.models import ThreadModel as Thread
     from ..streaming.aggregator import EventAggregator
 
 __all__ = ["build_thread_state"]
@@ -44,16 +44,19 @@ logger = logging.getLogger(__name__)
 async def build_thread_state(
     db: AsyncSession,
     *,
-    thread: Thread,
+    thread_id: str,
     aggregator: EventAggregator,
     checkpointer: Checkpointer,
-) -> ThreadStateData:
+) -> ThreadStateData | None:
     """Assemble a complete thread state snapshot for client reconnection.
 
-    Returns a ``ThreadStateData`` (Layer 1 dataclass).  Does **not** raise
-    ``HTTPException`` — the route handler owns HTTP response mapping.
+    Returns a ``ThreadStateData`` (Layer 1 dataclass), or ``None`` if the
+    thread does not exist.  Does **not** raise ``HTTPException`` — the route
+    handler owns HTTP response mapping.
     """
-    thread_id = thread.id
+    thread = await get_thread(db, thread_id)
+    if thread is None:
+        return None
     last_seq = aggregator.get_sequence(thread_id)
 
     snapshot = ThreadStateData(

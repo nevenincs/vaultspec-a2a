@@ -1,9 +1,7 @@
 """Thread CRUD routes: POST /threads, GET /threads, DELETE, archive, metadata."""
 
-import json
 import logging
 from typing import Any
-from uuid import uuid4
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,12 +13,11 @@ from ...control.thread_service import (
     archive_thread,
     create_and_dispatch_thread,
     delete_thread_service,
+    generate_thread_id,
+    list_threads_service,
     process_metadata,
 )
-from ...database import (
-    get_thread_metadata,
-    list_threads,
-)
+from ...database import get_thread_metadata
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
 from ...domain_config import domain_config
@@ -45,26 +42,6 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-def _parse_thread_summary_metadata(
-    raw_json: str | None,
-) -> tuple[str | None, str | None, str | None]:
-    """Extract display fields from thread_metadata JSON.
-
-    Returns ``(feature_tag, source_branch, callee)``.
-    """
-    if not raw_json:
-        return None, None, None
-    try:
-        meta = json.loads(raw_json)
-        return (
-            meta.get("feature_tag") or None,
-            meta.get("source_branch") or None,
-            meta.get("callee") or None,
-        )
-    except (json.JSONDecodeError, TypeError):
-        return None, None, None
-
-
 # ---------------------------------------------------------------------------
 # POST /threads
 # ---------------------------------------------------------------------------
@@ -84,82 +61,76 @@ async def create_thread_endpoint(
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> CreateThreadResponse:
     """Create a new orchestration thread and dispatch to the worker."""
+    db, _aggregator, _checkpointer, worker_client = services
+    thread_id = generate_thread_id()
+
     try:
-        db, _aggregator, _checkpointer, worker_client = services
-        thread_id = uuid4().hex
-
-        try:
-            ws_root, nickname, metadata_json = process_metadata(
-                body.metadata, thread_id, body.team_preset
-            )
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-        if nickname is None and body.nickname is not None:
-            nickname = body.nickname
-
-        try:
-            creation_req = ThreadCreationRequest(
-                thread_id=thread_id,
-                title=body.title,
-                initial_message=body.initial_message,
-                team_preset=body.team_preset,
-                autonomous=body.autonomous,
-                nickname=nickname,
-                metadata=body.metadata,
-                metadata_json=metadata_json,
-                workspace_root=ws_root,
-            )
-            result = await create_and_dispatch_thread(
-                db,
-                creation_req,
-                circuit_breaker=circuit_breaker,
-                worker_spawner=worker_spawner,
-                worker_client=worker_client,
-                recursion_limit=domain_config.graph_recursion_limit,
-                trace_headers=trace_headers(),
-            )
-        except NicknameConflictError as exc:
-            raise HTTPException(
-                status_code=409,
-                detail=f"Thread nickname already exists: {exc.nickname!r}",
-            ) from exc
-
-        if result.dispatched:
-            mark_worker_connected(request)
-
-        if result.failure_type is not None:
-            if result.failure_type == FailureType.CIRCUIT_OPEN:
-                raise HTTPException(
-                    status_code=503,
-                    detail=result.error_detail or "Circuit breaker open",
-                )
-            if result.failure_type == FailureType.AT_CAPACITY:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Worker at capacity \u2014 try again later",
-                )
-            if result.failure_type == FailureType.UNREACHABLE:
-                raise HTTPException(
-                    status_code=502,
-                    detail="Worker unreachable \u2014 thread marked as failed",
-                )
-            if result.failure_type == FailureType.REJECTED:
-                raise HTTPException(
-                    status_code=502,
-                    detail=result.error_detail or "Worker dispatch rejected",
-                )
-
-        return CreateThreadResponse(
-            thread_id=result.thread_id,
-            status=result.status,
-            nickname=result.nickname,
+        ws_root, nickname, metadata_json = process_metadata(
+            body.metadata, thread_id, body.team_preset
         )
-    except HTTPException:
-        raise
-    except Exception:
-        logger.exception("Unhandled exception while creating thread")
-        raise
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    if nickname is None and body.nickname is not None:
+        nickname = body.nickname
+
+    try:
+        creation_req = ThreadCreationRequest(
+            thread_id=thread_id,
+            title=body.title,
+            initial_message=body.initial_message,
+            team_preset=body.team_preset,
+            autonomous=body.autonomous,
+            nickname=nickname,
+            metadata=body.metadata,
+            metadata_json=metadata_json,
+            workspace_root=ws_root,
+        )
+        result = await create_and_dispatch_thread(
+            db,
+            creation_req,
+            circuit_breaker=circuit_breaker,
+            worker_spawner=worker_spawner,
+            worker_client=worker_client,
+            recursion_limit=domain_config.graph_recursion_limit,
+            trace_headers=trace_headers(),
+        )
+    except NicknameConflictError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=f"Thread nickname already exists: {exc.nickname!r}",
+        ) from exc
+
+    if result.dispatched:
+        mark_worker_connected(request)
+
+    if result.failure_type is not None:
+        if result.failure_type == FailureType.CIRCUIT_OPEN:
+            raise HTTPException(
+                status_code=503,
+                detail=result.error_detail or "Circuit breaker open",
+            )
+        if result.failure_type == FailureType.AT_CAPACITY:
+            raise HTTPException(
+                status_code=503,
+                detail="Worker at capacity \u2014 try again later",
+            )
+        if result.failure_type == FailureType.UNREACHABLE:
+            raise HTTPException(
+                status_code=502,
+                detail="Worker unreachable \u2014 thread marked as failed",
+            )
+        if result.failure_type == FailureType.REJECTED:
+            raise HTTPException(
+                status_code=502,
+                detail=result.error_detail or "Worker dispatch rejected",
+            )
+
+    return CreateThreadResponse(
+        thread_id=result.thread_id,
+        status=result.status,
+        nickname=result.nickname,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -184,33 +155,29 @@ async def list_threads_endpoint(
                 status_code=422,
                 detail=f"Invalid status filter: {status!r}",
             ) from None
-    threads, total = await list_threads(
-        db, offset=offset, limit=limit, status=status_filter
+    result = await list_threads_service(
+        db, status_filter=status_filter, limit=limit, offset=offset
     )
-    summaries: list[ThreadSummary] = []
-    for t in threads:
-        feature_tag, source_branch, callee = _parse_thread_summary_metadata(
-            t.thread_metadata
+    summaries = [
+        ThreadSummary(
+            thread_id=t.thread_id,
+            title=t.title,
+            status=t.status,
+            repair_status=t.repair_status,
+            execution_readiness=t.execution_readiness,
+            approval_status=t.approval_status,
+            approval_request_id=t.approval_request_id,
+            team_preset=t.team_preset,
+            created_at=t.created_at,
+            updated_at=t.updated_at,
+            nickname=t.nickname,
+            feature_tag=t.feature_tag,
+            source_branch=t.source_branch,
+            callee=t.callee,
         )
-        summaries.append(
-            ThreadSummary(
-                thread_id=t.id,
-                title=t.title,
-                status=t.status,
-                repair_status=t.repair_status,
-                execution_readiness=t.execution_readiness,
-                approval_status=t.approval_status,
-                approval_request_id=t.approval_request_id,
-                team_preset=t.team_preset,
-                created_at=t.created_at,
-                updated_at=t.updated_at,
-                nickname=t.nickname,
-                feature_tag=feature_tag,
-                source_branch=source_branch,
-                callee=callee,
-            )
-        )
-    return ThreadListResponse(threads=summaries, total=total)
+        for t in result.threads
+    ]
+    return ThreadListResponse(threads=summaries, total=result.total)
 
 
 # ---------------------------------------------------------------------------

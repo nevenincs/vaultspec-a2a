@@ -227,7 +227,7 @@ class Executor:
                     extra=self._dispatch_log_extra(
                         req,
                         action="checkpoint_preflight_terminal",
-                        outcome="completed",
+                        outcome=ThreadStatus.COMPLETED,
                     ),
                 )
                 span.set_attribute("pre_flight", "completed")
@@ -243,7 +243,7 @@ class Executor:
                     extra=self._dispatch_log_extra(
                         req,
                         action="checkpoint_preflight_terminal",
-                        outcome="failed",
+                        outcome=ThreadStatus.FAILED,
                     ),
                 )
                 span.set_attribute("pre_flight", "failed")

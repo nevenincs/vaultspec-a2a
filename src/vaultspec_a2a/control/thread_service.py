@@ -9,9 +9,11 @@ response formatting.
 from __future__ import annotations
 
 import contextlib
+import json
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
+from uuid import uuid4
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
@@ -22,6 +24,7 @@ from ..database import (
     create_thread,
     delete_thread,
     get_thread,
+    list_threads,
     update_thread_status,
 )
 from ..graph.compiler import build_initial_vault_index
@@ -34,6 +37,7 @@ from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
 
 if TYPE_CHECKING:
+    from datetime import datetime
     from pathlib import Path
 
     import httpx
@@ -45,15 +49,109 @@ if TYPE_CHECKING:
 __all__ = [
     "ArchiveResult",
     "DeleteResult",
+    "ListThreadsResult",
     "ThreadCreationRequest",
     "ThreadCreationResult",
+    "ThreadSummaryData",
     "archive_thread",
     "create_and_dispatch_thread",
     "delete_thread_service",
+    "generate_thread_id",
+    "list_threads_service",
     "process_metadata",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def generate_thread_id() -> str:
+    """Generate a unique hex thread identifier."""
+    return uuid4().hex
+
+
+def _parse_thread_summary_metadata(
+    raw_json: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    """Extract display fields from thread_metadata JSON.
+
+    Returns ``(feature_tag, source_branch, callee)``.
+    """
+    if not raw_json:
+        return None, None, None
+    try:
+        meta = json.loads(raw_json)
+        return (
+            meta.get("feature_tag") or None,
+            meta.get("source_branch") or None,
+            meta.get("callee") or None,
+        )
+    except (json.JSONDecodeError, TypeError):
+        return None, None, None
+
+
+@dataclass(frozen=True, slots=True)
+class ThreadSummaryData:
+    """Lightweight thread descriptor produced by :func:`list_threads_service`."""
+
+    thread_id: str
+    title: str | None
+    status: str
+    repair_status: str | None
+    execution_readiness: str | None
+    approval_status: str | None
+    approval_request_id: str | None
+    team_preset: str | None
+    created_at: datetime
+    updated_at: datetime
+    nickname: str | None
+    feature_tag: str | None
+    source_branch: str | None
+    callee: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class ListThreadsResult:
+    """Outcome of :func:`list_threads_service`."""
+
+    threads: list[ThreadSummaryData]
+    total: int
+
+
+async def list_threads_service(
+    db: AsyncSession,
+    *,
+    status_filter: ThreadStatus | None = None,
+    limit: int = 50,
+    offset: int = 0,
+) -> ListThreadsResult:
+    """Query threads and assemble summary data with parsed metadata."""
+    threads, total = await list_threads(
+        db, offset=offset, limit=limit, status=status_filter
+    )
+    summaries: list[ThreadSummaryData] = []
+    for t in threads:
+        feature_tag, source_branch, callee = _parse_thread_summary_metadata(
+            t.thread_metadata
+        )
+        summaries.append(
+            ThreadSummaryData(
+                thread_id=t.id,
+                title=t.title,
+                status=t.status,
+                repair_status=t.repair_status,
+                execution_readiness=t.execution_readiness,
+                approval_status=t.approval_status,
+                approval_request_id=t.approval_request_id,
+                team_preset=t.team_preset,
+                created_at=t.created_at,
+                updated_at=t.updated_at,
+                nickname=t.nickname,
+                feature_tag=feature_tag,
+                source_branch=source_branch,
+                callee=callee,
+            )
+        )
+    return ListThreadsResult(threads=summaries, total=total)
 
 
 @dataclass(frozen=True, slots=True)

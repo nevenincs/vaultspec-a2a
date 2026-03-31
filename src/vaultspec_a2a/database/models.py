@@ -24,6 +24,8 @@ from sqlalchemy import (
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
+from ..thread.enums import PermissionRequestStatus, ThreadStatus
+
 __all__ = [
     "ArtifactModel",
     "Base",
@@ -90,7 +92,7 @@ class ThreadModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         UTCDateTime(), default=_utcnow, onupdate=_utcnow
     )
-    status: Mapped[str] = mapped_column(default="submitted")
+    status: Mapped[str] = mapped_column(default=ThreadStatus.SUBMITTED)
     repair_status: Mapped[str] = mapped_column(default="healthy")
     repair_reason: Mapped[str | None] = mapped_column(Text, default=None)
     execution_readiness: Mapped[str] = mapped_column(default="healthy")
@@ -197,7 +199,7 @@ class PermissionRequestModel(Base):
     tool_call: Mapped[str | None] = mapped_column(default=None)
     description: Mapped[str] = mapped_column(Text)
     allowed_options_json: Mapped[str] = mapped_column(Text)
-    request_status: Mapped[str] = mapped_column(default="pending")
+    request_status: Mapped[str] = mapped_column(default=PermissionRequestStatus.PENDING)
     response_option_id: Mapped[str | None] = mapped_column(default=None)
     idempotency_key: Mapped[str | None] = mapped_column(default=None)
     worker_generation: Mapped[int] = mapped_column(default=0)

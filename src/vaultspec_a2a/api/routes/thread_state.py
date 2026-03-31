@@ -7,7 +7,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.thread_state_service import build_thread_state
-from ...database import get_thread
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
 from ...streaming.aggregator import EventAggregator
@@ -37,14 +36,12 @@ async def get_thread_state_endpoint(
     any subsequent WebSocket events with ``sequence <= last_sequence``
     (ADR-011 section 2.3).
     """
-    thread = await get_thread(db, thread_id)
-    if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
-
     snapshot = await build_thread_state(
         db,
-        thread=thread,
+        thread_id=thread_id,
         aggregator=aggregator,
         checkpointer=checkpointer,
     )
+    if snapshot is None:
+        raise HTTPException(status_code=404, detail="Thread not found")
     return _to_pydantic(snapshot)

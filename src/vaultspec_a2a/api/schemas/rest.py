@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...graph.enums import Model, Provider
+from ...thread.enums import PermissionRequestStatus
 from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [
@@ -149,7 +150,7 @@ class PendingPermission(BaseModel):
     request_id: str
     thread_id: str
     description: str
-    request_status: str = "pending"
+    request_status: str = PermissionRequestStatus.PENDING
 
 
 class TeamStatusResponse(BaseModel):

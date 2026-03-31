@@ -14,6 +14,7 @@ Production runtime modules:
     dispatch            — dispatch_to_worker consolidated dispatch function
     health              — assemble_health_status, SQLite fallback diagnostics
     permission_service  — permission response orchestration (extracted from route)
+    team_service        — team status assembly (extracted from route)
     worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
     event_handlers      — relay_event, terminal/permission/progress/execution
                           state event handlers
@@ -44,6 +45,7 @@ __all__ = [
     "projection",
     "repair_transitions",
     "snapshot",
+    "team_service",
     "thread_service",
     "thread_state_service",
     "worker_management",

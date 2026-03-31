@@ -22,6 +22,22 @@ produce meaningful observable work that developers can trust. This plan keeps
 the deterministic service gate separate from any live-provider compatibility
 smoke.
 
+## Mission Statement
+
+This work is aimed at deterministic, stable, repeatable, controllable,
+and predictable output from the real pipeline and its full stack, with
+VidaiMock as the certification provider surface. The intent is not to
+prove only that the code executes, but that the live system can be
+driven through exact file contents, interactive workflows, cancellation,
+resumption, steering, re-briefing, and hostile permission conditions
+while continuing to behave in a meaningful and observable way.
+
+The certification gate should prefer exact, repo-owned file inputs and
+explicit operator actions over implicit behavior or magic fixtures. Its
+success condition is that the stack remains runnable, observable,
+interactable, and controllable throughout the scenario, and produces the
+same expected outcomes when the tested conditions are held constant.
+
 ## Proposed Changes
 
 Build a real-stack certification tier around the existing `service` marker.
@@ -133,3 +149,37 @@ The first pass should fail the PR if it still depends on in-process worker
 fixtures, fake provider execution, or unverified trace behavior. Live Claude,
 Gemini, OpenAI/Codex, or Zhipu compatibility can be added as a separate opt-in
 smoke lane once the deterministic certification gate is stable.
+
+## Follow-On Audit Roadmap
+
+The remaining work should be divided into separate audits rather than
+treated as one broad hardening effort. Each audit should have its own
+acceptance criteria and its own deterministic service-level checks so
+regressions can be isolated quickly and the certification signal remains
+stable across future changes.
+
+- Audit 1: interrupt, permission, and resume correctness.
+  Cover stale approvals, wrong-thread resume, denied approvals,
+  malformed approval payloads, and repeated resume idempotency.
+- Audit 2: persistence, corruption, and restart resumability.
+  Cover checkpoint replay, restart after interruption, degraded
+  snapshots, and corruption surfacing instead of silent repair.
+- Audit 3: streaming continuity and replay behavior.
+  Cover SSE reconnect, ordered event replay, terminal replay, and
+  tool-call chunk continuity across reconnect and completion.
+- Audit 4: multi-agent steering and re-briefing.
+  Cover supervisor routing, stale-context prevention, re-brief on state
+  change, and no-double-route guarantees during collaborative work.
+- Audit 5: cancellation and cleanup behavior.
+  Cover cancel vs interrupt semantics, in-flight cancellation, terminal
+  cancellation visibility, and absence of zombie execution.
+- Audit 6: hostile-environment and sandbox-boundary behavior.
+  Cover non-permitted actions, approval refusal paths, bounded file
+  access, and destructive-action gating inside supported sandboxes.
+- Audit 7: VidaiMock tape brittleness and deterministic replay quality.
+  Cover tape selection stability, prompt-shape sensitivity, exact output
+  determinism, and operator-visible failure modes when the mock backend
+  is unavailable.
+- Audit 8: artifact persistence and file-removal safety.
+  Cover artifact attribution, cross-thread isolation, persistence across
+  turns, explicit removal flow, and approval-gated deletion behavior.

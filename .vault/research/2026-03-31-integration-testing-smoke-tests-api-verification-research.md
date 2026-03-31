@@ -16,6 +16,25 @@ repository needs a real integration pipeline that exercises the public
 API, worker execution, durable checkpoints, interrupt/resume flows, and
 telemetry against the local stack with deterministic outcomes.
 
+## Mission Statement
+
+Issue `#17` exists to restore a small, trustworthy service-certification
+gate for the refactored architecture. The gate must prove that the real
+gateway, worker, persistence, streaming, and observability layers work
+together against the local development stack with deterministic
+VidaiMock-backed provider replay. Success means a developer can run the
+stack, observe it, interact with it, cancel or resume it, steer it
+through approval flows, and see meaningful output without errors, hangs,
+or hidden in-process shortcuts.
+
+The main mission is deterministic, stable, repeatable, controllable, and
+predictable output from the real pipeline and its full stack. That
+requires repo-owned inputs and explicit conditions: exact file contents,
+explicit operator actions, interactive workflow steps, and known control
+events such as interrupting, resuming, steering, re-briefing, and
+cancelling. The certifying gate should prove controllable execution and
+meaningful outcomes, not broad live-provider compatibility.
+
 ## Findings
 
 ### Constraints inherited from PR `#16`
@@ -137,6 +156,50 @@ telemetry against the local stack with deterministic outcomes.
   `#17` is public API + worker + replayable provider + interrupt/streaming,
   not breadth for its own sake.
 
+### Audit roadmap for follow-on hardening
+
+- Interrupt/resume correctness for human approval callbacks.
+  Map to LangGraph `interrupt()` semantics, `Command(resume=...)`, and
+  checkpoint-backed resumption on the same `thread_id`. The audit should
+  prove the worker pauses at approval boundaries, persists state, and
+  resumes only with a validated approval payload.
+- Streaming and tool-call continuity.
+  Map to LangGraph `astream_events(..., version="v2")`, stream event
+  propagation, and SSE continuity across disconnect/reconnect. The audit
+  should prove stable tool-call chunks and coherent public streaming
+  through interrupts and resume.
+- Deterministic provider replay with VidaiMock.
+  Map to the async `BaseChatModel` wrapper, SSE-backed model chunks, and
+  stable tape selection by agent/model ID. The audit should prove that
+  the certification gate stays deterministic and does not depend on sync
+  generation paths or live provider availability.
+- Cancellation and terminal-state cleanup.
+  Map to LangGraph cancellation semantics distinct from
+  interrupt/resume. The audit should prove cancellation terminates work
+  cleanly, emits the expected terminal state, and does not leave zombie
+  execution or misleading success traces.
+- Multi-agent steering, re-briefing, and supervisor routing.
+  Map to LangGraph multi-agent orchestration, supervisor routing,
+  handoffs, and state refresh before re-routing. The audit should prove
+  the orchestrator can steer a task, re-brief on updated state, and
+  avoid stale or duplicated routing decisions.
+- Persistence, corruption, and resumability.
+  Map to checkpointer-backed replay, state snapshots, and recovery from
+  partial or inconsistent thread state. The audit should prove restart
+  and replay behavior is visible, durable, and not silently repaired in
+  a way that hides corruption.
+- Permission hardening and hostile approvals.
+  Map to approval-option validation, scope enforcement, and payload
+  sanitization for interactive control flows. The audit should prove
+  approvals cannot be forged, reused across threads, or escalated by
+  malformed resume data.
+- Artifact persistence and file-removal safety.
+  Map to persistent artifact handling, file-write/file-delete
+  operations, and bounded destructive behavior in sandboxed execution.
+  The audit should prove artifacts remain attributable to the correct
+  thread/agent and that destructive file operations are explicit,
+  bounded, and observable.
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:
@@ -147,3 +210,20 @@ telemetry against the local stack with deterministic outcomes.
   preset that already triggers `interrupt()` behavior?
 - Is MCP flow required in the first merge for issue `#17`, or acceptable
   as a follow-up once the HTTP/SSE/permission/cancel path is stable?
+
+### Assumptions to state explicitly
+
+- The certification gate uses exact local stack inputs owned by this
+  repository, not ad hoc shell overrides or hidden fixtures.
+- VidaiMock is the deterministic provider backend for the main gate, and
+  the chosen tape must remain stable across runs.
+- The worker must remain controllable throughout execution: start,
+  observe, interrupt, resume, cancel, and stop cleanly.
+- The service gate validates real sockets, real persistence, and real
+  SSE rather than `ASGITransport`-collapsed behavior.
+- The main success criterion is stable, demonstrable work output under
+  interruption and approval control, not merely process liveness.
+- Tests may make broad but explicit assumptions about exact file-input
+  text elements, interactive workflow steps, and deterministic operator
+  choices so long as those assumptions are visible, repo-owned, and
+  repeatable.

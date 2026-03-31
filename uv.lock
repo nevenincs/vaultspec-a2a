@@ -2317,7 +2317,7 @@ dev = [
 
 [[package]]
 name = "vaultspec-core"
-version = "0.1.4"
+version = "0.1.5"
 source = { editable = "Y:/code/vaultspec-core-worktrees/main" }
 dependencies = [
     { name = "httpx" },

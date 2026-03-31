@@ -94,7 +94,7 @@ src/vaultspec_a2a/
 #           Layer 1 + control/ calls.
 # ══════════════════════════════════════════════════════════════
 │
-├── api/                               ~3,947 lines │ FastAPI + WebSocket + Pydantic
+├── api/                               ~3,819 lines │ FastAPI + WebSocket + Pydantic
 │   ├── app.py                         (325)  Application factory, lifespan, main()
 │   ├── middleware.py                   (40)  CacheControlMiddleware (cache headers)
 │   ├── dependencies.py                (79)  FastAPI Depends() providers
@@ -106,12 +106,12 @@ src/vaultspec_a2a/
 │   ├── event_adapter.py              (262)  Domain event → wire protocol translation
 │   ├── routes/                               Per-resource REST route modules
 │   │   ├── __init__.py                (33)  register_routes(app) helper
-│   │   ├── health.py                  (82)  GET /health
-│   │   ├── threads.py                (281)  POST/GET/DELETE threads, archive, metadata
-│   │   ├── thread_state.py            (50)  GET /threads/{id}/state
+│   │   ├── health.py                  (31)  GET /health
+│   │   ├── threads.py                (234)  POST/GET/DELETE threads, archive, metadata
+│   │   ├── thread_state.py            (47)  GET /threads/{id}/state
 │   │   ├── messages.py                (92)  POST /threads/{id}/messages
 │   │   ├── cancel.py                  (66)  POST /threads/{id}/cancel
-│   │   ├── teams.py                  (102)  GET /teams, /team/status, /team/presets
+│   │   ├── teams.py                   (76)  GET /teams, /team/status, /team/presets
 │   │   ├── permissions.py             (81)  POST /permissions/{id}/respond
 │   │   └── admin.py                   (15)  POST /admin/shutdown
 │   └── schemas/                              Pydantic request/response models
@@ -155,7 +155,7 @@ src/vaultspec_a2a/
 │   │                                         ExecutionTaskProjectionPayload
 │   └── serializers.py                 (18)  sequenced_to_dict (event serialization)
 │
-├── control/                           ~4,869 lines │ Runtime + service orchestration
+├── control/                           ~5,241 lines │ Runtime + service orchestration
 │   │
 │   │   # ── Production runtime (process supervision, dispatch, health) ──
 │   ├── circuit_breaker.py             (98)  WorkerCircuitBreaker (protocol-agnostic)
@@ -164,15 +164,16 @@ src/vaultspec_a2a/
 │   ├── projection.py                 (338)  Checkpoint/state projection
 │   ├── snapshot.py                   (202)  Snapshot assembly (delegates to thread/snapshots)
 │   ├── event_handlers.py             (460)  Event handlers + relay_event()
-│   ├── health.py                     (170)  assemble_health_status() (consolidated)
+│   ├── health.py                     (254)  assemble_health_status() + build_full_health()
 │   ├── diagnostics.py                (150)  classify_missing_ws_thread, mark_thread_failed
 │   │
 │   │   # ── Service layer (domain-backed orchestration) ──
-│   ├── thread_service.py             (280)  Thread lifecycle orchestration
+│   ├── thread_service.py             (461)  Thread lifecycle + list + delete + archive
 │   ├── cancel_service.py             (190)  Cancellation orchestration
 │   ├── message_service.py            (205)  Message send orchestration
 │   ├── permission_service.py         (381)  Permission response orchestration
-│   ├── thread_state_service.py       (149)  Thread state query orchestration
+│   ├── thread_state_service.py       (152)  Thread state query orchestration
+│   ├── team_service.py               (107)  Team status assembly orchestration
 │   ├── repair_transitions.py          (91)  Repair state transition orchestration
 │   │
 │   │   # ── Infrastructure config ──

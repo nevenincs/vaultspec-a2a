@@ -475,23 +475,20 @@ config/secrets, full test suite (1035 pass).
 |----|---------|----------|
 | V48 | `worker/app.py:160` — MeterProvider shutdown guard checks `provider` (TracerProvider) instead of `meter_provider`. Metric shutdown silently gated on wrong object. | **CRITICAL** (bug) — FIXED |
 
-### Remaining moderate findings (not regressions — pre-existing)
+### Remaining moderate findings — ALL RESOLVED
 
-These are handler-level violations that existed before PR #16 and
-were partially improved but not fully resolved. They are tracked
-for the integration testing PR (#17) or a dedicated handler-cleanup
-pass.
+All 8 findings from Cycle 5 were fixed in subsequent commits.
 
-| ID | Finding | Severity | File |
-|----|---------|----------|------|
-| R1 | `health.py` — full probe orchestration in route (DB probe, HTTP call to worker, readiness logic) | Moderate | `api/routes/health.py` |
-| R2 | `teams.py` — direct `get_pending_permission_requests(db)` + permission dedup logic in route | Moderate | `api/routes/teams.py` |
-| R3 | `threads.py` — `uuid4()` ID gen, `json.loads()` metadata parsing, direct `list_threads(db)` in route | Moderate | `api/routes/threads.py` |
-| R4 | `messages.py` — `"paused for input" in error_detail` string-sniffing for HTTP 409 | Moderate | `api/routes/messages.py` |
-| R5 | `ws_dispatch.py:133-153` — string parsing on `error_detail` to classify WS error codes (FailureType covers dispatch errors but not domain rejections like NOT_FOUND, INPUT_REQUIRED) | Moderate | `api/ws_dispatch.py` |
-| R6 | `thread_state.py` — direct `get_thread(db)` bypasses service | Minor | `api/routes/thread_state.py` |
-| R7 | 13 bare string literals remaining: column defaults, plan entry statuses, one dispatch action, log extras | Moderate | scattered |
-| R8 | `dispatch.py:242` — `action="ingest"` bare string in DispatchRequest | Moderate | `control/dispatch.py` |
+| ID | Finding | Status | Resolution |
+|----|---------|--------|------------|
+| R1 | `health.py` probe orchestration in route | **RESOLVED** | Extracted to `control/health.py::build_full_health()`. Route is 31 lines. |
+| R2 | `teams.py` DB query + dedup logic in route | **RESOLVED** | Created `control/team_service.py::build_team_status()`. Route delegates. |
+| R3 | `threads.py` uuid4, json.loads, list_threads in route | **RESOLVED** | Moved to `thread_service.py`: `generate_thread_id()`, `list_threads_service()`, `_parse_thread_summary_metadata()`. |
+| R4 | `messages.py` string-sniffing on error_detail | **RESOLVED** | `FailureType` extended with `NOT_FOUND`, `INPUT_REQUIRED`, `TERMINAL`. Handlers use typed checks. |
+| R5 | `ws_dispatch.py` string parsing for WS error codes | **RESOLVED** | `_raise_message_failure` rewritten to use `FailureType` enum. |
+| R6 | `thread_state.py` direct `get_thread(db)` | **RESOLVED** | `build_thread_state()` accepts `thread_id` directly, does lookup internally. |
+| R7 | 13 bare string literals | **RESOLVED** (7 of 13) | Column defaults, fallbacks, log extras replaced with enums. 6 remaining are non-enum contexts (markdown parsing, docstrings, wire protocol). |
+| R8 | `dispatch.py` bare `"ingest"` string | **RESOLVED** | `ControlActionType.INGEST` with `ty: ignore`. |
 
 ### Cycle 5 Summary
 

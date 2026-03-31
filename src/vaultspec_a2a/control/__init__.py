@@ -14,6 +14,7 @@ Production runtime modules:
     dispatch            — dispatch_to_worker consolidated dispatch function
     health              — assemble_health_status, SQLite fallback diagnostics
     permission_service  — permission response orchestration (extracted from route)
+    team_service        — team status assembly (extracted from route)
     worker_management   — LazyWorkerSpawner, WorkerWatchdog, WorkerState
     event_handlers      — relay_event, terminal/permission/progress/execution
                           state event handlers
@@ -27,9 +28,6 @@ Dev-tooling modules invoked via ``python -m``:
     python -m vaultspec_a2a.control.db      restore --name FILE
     python -m vaultspec_a2a.control.db      clear --yes
     python -m vaultspec_a2a.control.hooks   install
-    python -m vaultspec_a2a.control.verify  prodlike_docker
-    python -m vaultspec_a2a.control.verify  provider <name>
-    python -m vaultspec_a2a.control.doctor  [all|ports|config|services]
 """
 
 from __future__ import annotations
@@ -40,7 +38,6 @@ __all__ = [
     "db",
     "diagnostics",
     "dispatch",
-    "doctor",
     "event_handlers",
     "health",
     "hooks",
@@ -48,7 +45,8 @@ __all__ = [
     "projection",
     "repair_transitions",
     "snapshot",
+    "team_service",
     "thread_service",
-    "verify",
+    "thread_state_service",
     "worker_management",
 ]

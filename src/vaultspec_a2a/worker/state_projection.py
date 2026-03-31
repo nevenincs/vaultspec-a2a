@@ -16,6 +16,7 @@ from ..ipc.schemas import (
     ExecutionStateProjectionPayload,
     ExecutionTaskProjectionPayload,
 )
+from ..thread.enums import TERMINAL_STATUSES, ThreadStatus
 
 if TYPE_CHECKING:
     from langgraph.types import StateSnapshot
@@ -130,12 +131,12 @@ class StateProjector:
         pending_writes = checkpoint_tuple.pending_writes or []
         if not pending_writes:
             # Empty pending_writes: graph ran to END cleanly before crash.
-            return "completed", False
+            return ThreadStatus.COMPLETED, False
 
         channels = {w[1] for w in pending_writes}
         if error_ch in channels:
             # Unhandled task error flushed to checkpoint before crash.
-            return "failed", False
+            return ThreadStatus.FAILED, False
         if interrupt_ch in channels:
             # Graph paused at interrupt() -- needs a resume, not a new ingest.
             return "interrupted", False
@@ -276,7 +277,7 @@ class StateProjector:
         the gateway to surface compilation/execution error messages to clients
         (WRK-K03).
         """
-        if outcome not in ("completed", "failed", "cancelled"):
+        if outcome not in TERMINAL_STATUSES:
             return
         payload: dict[str, str] = {
             "event_type": "thread_terminal",

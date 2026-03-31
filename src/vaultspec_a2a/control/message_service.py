@@ -9,7 +9,6 @@ an HTTP response.
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 from dataclasses import dataclass
@@ -27,11 +26,10 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
-from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
-    ControlActionType,
-    ThreadStatus,
-)
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
+from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.idempotency import default_message_key
+from ..thread.message_policy import can_send_followup
 
 if TYPE_CHECKING:
     import httpx
@@ -55,11 +53,12 @@ class MessageResult:
     dispatched: bool
     error_detail: str | None = None
     circuit_open: bool = False
-    failure_type: str | None = None
+    failure_type: FailureType | None = None
 
 
 async def send_followup_message(
     db: AsyncSession,
+    *,
     thread_id: str,
     content: str,
     agent_id: str,
@@ -74,7 +73,7 @@ async def send_followup_message(
 
     Returns a :class:`MessageResult` describing the outcome.  Never raises
     HTTP exceptions — the caller is responsible for translating the result
-    into an appropriate HTTP response and committing the session.
+    into an appropriate HTTP response.  Commits the session before returning.
     """
     # -- Thread lookup & guard -------------------------------------------
     thread = await get_thread(db, thread_id)
@@ -85,26 +84,24 @@ async def send_followup_message(
             thread_status="",
             dispatched=False,
             error_detail="Thread not found",
+            failure_type=FailureType.NOT_FOUND,
         )
 
-    if thread.status == ThreadStatus.INPUT_REQUIRED.value:
+    eligibility = can_send_followup(thread.status)
+    if not eligibility.allowed:
+        # Distinguish INPUT_REQUIRED from generic terminal-state rejection
+        domain_failure = (
+            FailureType.INPUT_REQUIRED
+            if thread.status == ThreadStatus.INPUT_REQUIRED.value
+            else FailureType.TERMINAL
+        )
         return MessageResult(
             action_id="",
             thread_id=thread_id,
             thread_status=thread.status,
             dispatched=False,
-            error_detail=(
-                "Cannot send a follow-up message while the thread is paused for input"
-            ),
-        )
-
-    if thread.status in NON_ACTIVE_STATUSES:
-        return MessageResult(
-            action_id="",
-            thread_id=thread_id,
-            thread_status=thread.status,
-            dispatched=False,
-            error_detail=f"Cannot send messages to thread in {thread.status!r} state",
+            error_detail=eligibility.reason,
+            failure_type=domain_failure,
         )
 
     logger.info(
@@ -114,11 +111,8 @@ async def send_followup_message(
     )
 
     # -- Idempotency deduplication ---------------------------------------
-    resolved_idempotency_key = (
-        idempotency_key
-        or hashlib.sha256(
-            f"{thread_id}:message:{agent_id}:{content}".encode()
-        ).hexdigest()
+    resolved_idempotency_key = idempotency_key or default_message_key(
+        thread_id, agent_id, content
     )
     existing_action = await get_control_action_by_idempotency_key(
         db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
@@ -155,7 +149,7 @@ async def send_followup_message(
 
     # -- Dispatch construction & send ------------------------------------
     dispatch = DispatchRequest(
-        action="ingest",
+        action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         agent_id=agent_id,
         content=content,
@@ -185,39 +179,31 @@ async def send_followup_message(
     )
 
     if not outcome.success:
-        if outcome.failure_type == "circuit_open":
-            return MessageResult(
-                action_id=action.id,
-                thread_id=thread_id,
-                thread_status=thread.status,
-                dispatched=False,
-                circuit_open=True,
-                error_detail=outcome.detail,
-            )
-
-        if outcome.failure_type == "at_capacity":
+        policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
+        )
+        if policy.should_mark_failed:
             await update_thread_status(db, thread_id, ThreadStatus.FAILED)
-            return MessageResult(
-                action_id=action.id,
-                thread_id=thread_id,
-                thread_status=ThreadStatus.FAILED.value,
-                dispatched=False,
-                error_detail="Worker at capacity — try again later",
-            )
-
-        # unreachable or rejected
-        await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+        await db.commit()
         return MessageResult(
             action_id=action.id,
             thread_id=thread_id,
-            thread_status=ThreadStatus.FAILED.value,
+            thread_status=(
+                ThreadStatus.FAILED.value
+                if policy.should_mark_failed
+                else thread.status
+            ),
             dispatched=False,
+            circuit_open=policy.is_circuit_open,
             error_detail=outcome.detail or "Worker dispatch failed",
+            failure_type=typed_failure,
         )
 
     # -- Success: transition to RUNNING ----------------------------------
     await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
     await mark_message_followup_applied(db, thread_id)
+    await db.commit()
 
     return MessageResult(
         action_id=action.id,

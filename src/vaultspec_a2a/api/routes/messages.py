@@ -7,10 +7,12 @@ import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...control.config import settings
 from ...control.message_service import send_followup_message
 from ...database.session import get_db
+from ...domain_config import domain_config
 from ...streaming.aggregator import EventAggregator
+from ...thread.constants import DEFAULT_SUPERVISOR_ID
+from ...thread.dispatch_policy import FailureType
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
     get_aggregator,
@@ -45,7 +47,7 @@ async def send_message_endpoint(
     Returns 202 Accepted immediately; the message is dispatched to the
     worker process for graph execution (ADR-019).
     """
-    agent_id = body.agent_id or "vaultspec-supervisor"
+    agent_id = body.agent_id or DEFAULT_SUPERVISOR_ID
 
     result = await send_followup_message(
         db=db,
@@ -56,27 +58,23 @@ async def send_message_endpoint(
         circuit_breaker=circuit_breaker,
         worker_spawner=worker_spawner,
         worker_client=worker_client,
-        recursion_limit=settings.graph_recursion_limit,
+        recursion_limit=domain_config.graph_recursion_limit,
         trace_headers=trace_headers(),
     )
 
-    if result.error_detail == "Thread not found":
+    if result.failure_type == FailureType.NOT_FOUND:
         raise HTTPException(status_code=404, detail="Thread not found")
-    if result.error_detail and "paused for input" in result.error_detail:
+    if result.failure_type == FailureType.INPUT_REQUIRED:
         raise HTTPException(status_code=409, detail=result.error_detail)
-    if result.error_detail and "Cannot send messages" in result.error_detail:
+    if result.failure_type == FailureType.TERMINAL:
         raise HTTPException(status_code=409, detail=result.error_detail)
-
-    await db.commit()
 
     if result.dispatched:
         mark_worker_connected(request)
 
-    if result.circuit_open:
-        raise HTTPException(status_code=503, detail=result.error_detail)
-    if result.error_detail and "at capacity" in result.error_detail.lower():
-        raise HTTPException(status_code=503, detail=result.error_detail)
-    if result.error_detail:
+    if result.failure_type is not None:
+        if result.failure_type in (FailureType.CIRCUIT_OPEN, FailureType.AT_CAPACITY):
+            raise HTTPException(status_code=503, detail=result.error_detail)
         raise HTTPException(status_code=502, detail=result.error_detail)
 
     return SendMessageResponse(

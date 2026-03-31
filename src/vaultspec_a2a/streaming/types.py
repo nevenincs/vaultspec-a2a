@@ -7,7 +7,7 @@ and lookup tables only.
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, runtime_checkable
 
 from langgraph.types import Command
 
@@ -35,6 +35,7 @@ class SequencedEvent:
     sequence: int
 
 
+@runtime_checkable
 class StreamableGraph(Protocol):
     """Structural protocol for a compiled LangGraph graph with astream_events."""
 

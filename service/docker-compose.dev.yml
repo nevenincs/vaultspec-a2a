@@ -1,0 +1,83 @@
+# Frontend-ready development environment: backend + worker + Vite.
+# Usage: docker compose -f service/docker-compose.dev.yml up --build
+# Gateway: http://localhost:8000
+# Frontend: http://localhost:5173 (HMR, proxied to the gateway)
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
+      target: gateway
+    ports:
+      - '${VAULTSPEC_PORT:-8000}:8000'
+    volumes:
+      - db-data:/app/data
+    environment:
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
+    depends_on:
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8000/internal/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
+      target: worker
+    volumes:
+      - db-data:/app/data
+    environment:
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_GATEWAY_URL: 'http://gateway:8000'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: service/docker/dev.Dockerfile
+      target: node-base
+    command: npm run dev -- --host 0.0.0.0
+    ports:
+      - '${VAULTSPEC_UI_PORT:-5173}:5173'
+    volumes:
+      - ../src/ui:/app/src/ui
+      - /app/src/ui/node_modules # exclude host node_modules from mount
+    working_dir: /app/src/ui
+    environment:
+      # Vite proxy target inside Docker network
+      VITE_API_URL: http://gateway:8000
+    depends_on:
+      gateway:
+        condition: service_healthy
+
+volumes:
+  db-data:

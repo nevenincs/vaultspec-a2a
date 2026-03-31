@@ -12,6 +12,7 @@ from enum import StrEnum
 __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",
+    "REJECT_OPTION_IDS",
     "AgentLifecycleState",
     "AgentState",
     "Model",
@@ -88,6 +89,11 @@ class PermissionOptionKind(StrEnum):
     ALLOW_ALWAYS = "allow_always"
     REJECT_ONCE = "reject_once"
     REJECT_ALWAYS = "reject_always"
+
+
+REJECT_OPTION_IDS: frozenset[str] = frozenset(
+    member.value for member in PermissionOptionKind if member.value.startswith("reject")
+)
 
 
 class PermissionType(StrEnum):

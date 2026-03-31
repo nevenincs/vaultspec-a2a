@@ -47,6 +47,7 @@ from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..utils.enums import AcpRequestId
 from ..workspace.environment import resolve_env_vars
+from ._acp_auth import authenticate_rpc, runtime_log_extra
 from ._acp_protocol import RpcHandlerMap, process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -58,16 +59,8 @@ from ._acp_rpc_handlers import (
     on_terminal_release,
     on_terminal_wait_for_exit,
 )
-from ._acp_session import (
-    PermissionCallback,
-    _AcpModelConfig,
-    _AcpSessionContext,
-    authenticate_rpc,
-    initialize_session,
-    runtime_log_extra,
-    setup_prompt,
-    setup_session,
-)
+from ._acp_session import initialize_session, setup_prompt, setup_session
+from ._acp_types import PermissionCallback, _AcpModelConfig, _AcpSessionContext
 from ._subprocess import kill_process_tree as _kill_process_tree
 from ._subprocess import spawn_acp_process as _spawn_acp_process
 from .acp_exceptions import (
@@ -174,7 +167,6 @@ class AcpChatModel(BaseChatModel):
     _active_session_id: str | None = PrivateAttr(default=None)
     _response_futures: dict[int, asyncio.Future] | None = PrivateAttr(default=None)
     _auth_methods: list[dict[str, Any]] = PrivateAttr(default_factory=list)
-    _last_auth_url: str | None = PrivateAttr(default=None)
 
     def model_post_init(self, __context: object) -> None:
         """Initialize mutable instance attributes after Pydantic validation."""
@@ -198,7 +190,6 @@ class AcpChatModel(BaseChatModel):
             auth_mode=self.auth_mode,
         )
         self._auth_methods = []
-        self._last_auth_url = None
 
     @property
     def _llm_type(self) -> str:
@@ -524,7 +515,6 @@ class AcpChatModel(BaseChatModel):
             ctx.auth_url = text
             ctx.auth_prompt_active = False
             ctx.last_auth_url = text
-            self._last_auth_url = text
             logger.info(
                 "ACP browser authentication URL captured",
                 extra=runtime_log_extra(
@@ -664,5 +654,5 @@ class AcpChatModel(BaseChatModel):
             stdin_lock=self._stdin_lock,
             response_futures=self._require_response_futures(),
             process=self._process,
-            auth_url=self._last_auth_url,
+            auth_url=None,
         )

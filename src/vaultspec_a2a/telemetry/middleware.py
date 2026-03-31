@@ -148,10 +148,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                     span.set_status(StatusCode.OK)
 
                 return response
-        except Exception as exc:
-            # M33: use `span` directly — get_current_span() is redundant here
-            span.set_status(StatusCode.ERROR, str(exc))
-            span.record_exception(exc)
+        except Exception:
             raise
         finally:
             otel_context.detach(token)

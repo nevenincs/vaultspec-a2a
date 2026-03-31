@@ -188,13 +188,12 @@ def make_app(
     Returns:
         Tuple of (app, aggregator, worker, checkpointer).
     """
-    app = create_app()
 
     @asynccontextmanager
     async def _test_lifespan(_app):
         yield
 
-    app.router.lifespan_context = _test_lifespan
+    app = create_app(lifespan=_test_lifespan)
 
     if aggregator is None:
         aggregator = EventAggregator()

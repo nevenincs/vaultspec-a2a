@@ -86,6 +86,51 @@ internal_router = APIRouter(
 )
 
 
+async def _relay_single_event(
+    thread_id: str,
+    payload: dict[str, Any],
+    *,
+    cm: Any,
+    agg: Any,
+    session_factory: Any,
+    transport: str = "http",
+) -> None:
+    """Broadcast, aggregate, and relay a single worker event.
+
+    Shared by all three ingest paths (WS, HTTP POST, HTTP batch) to
+    avoid copy-pasting the broadcast → aggregator sync → relay_event
+    sequence.
+    """
+    if payload.get("type") == "execution_state_projection":
+        await _handle_execution_state_event(
+            thread_id, payload, session_factory=session_factory
+        )
+        return
+
+    if cm is not None:
+        await cm.broadcast_to_thread(thread_id, payload)
+    else:
+        logger.warning(
+            "ConnectionManager not available -- dropping event for %s",
+            thread_id,
+            extra={
+                "thread_id": thread_id,
+                "event_type": str(payload.get("event_type", payload.get("type", ""))),
+                "transport": transport,
+                "action": "relay_drop_event",
+            },
+        )
+
+    if agg is not None:
+        agg.sync_worker_event(thread_id, payload)
+    await relay_event(
+        thread_id,
+        payload,
+        aggregator=agg,
+        session_factory=session_factory,
+    )
+
+
 async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None:
     """Relay a single worker event to WS clients and update aggregator/DB."""
     thread_id = msg.get("thread_id", "")
@@ -103,38 +148,16 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
             },
         )
         return
-    if payload.get("type") == "execution_state_projection":
-        await _handle_execution_state_event(
-            thread_id,
-            payload,
-            session_factory=getattr(websocket.app.state, "db_session_factory", None),
-        )
-        return
     session_factory = getattr(websocket.app.state, "db_session_factory", None)
-
     cm = getattr(websocket.app.state, "connection_manager", None)
-    if cm is not None:
-        await cm.broadcast_to_thread(thread_id, payload)
-    else:
-        logger.warning(
-            "ConnectionManager not available -- dropping event for %s",
-            thread_id,
-            extra={
-                "thread_id": thread_id,
-                "event_type": str(payload.get("event_type", payload.get("type", ""))),
-                "transport": "ws",
-                "action": "relay_drop_event",
-            },
-        )
-    # P8-01: sync into API aggregator state.
     agg = getattr(websocket.app.state, "aggregator", None)
-    if agg is not None:
-        agg.sync_worker_event(thread_id, payload)
-    await relay_event(
+    await _relay_single_event(
         thread_id,
         payload,
-        aggregator=agg,
+        cm=cm,
+        agg=agg,
         session_factory=session_factory,
+        transport="ws",
     )
 
 
@@ -240,14 +263,6 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     thread_id: str = body.get("thread_id", "")
     payload: dict[str, Any] = body.get("payload", {})
     _validate_event_envelope(thread_id, payload, context="worker event POST")
-    session_factory = getattr(request.app.state, "db_session_factory", None)
-    if payload.get("type") == "execution_state_projection":
-        await _handle_execution_state_event(
-            thread_id,
-            payload,
-            session_factory=session_factory,
-        )
-        return {"status": "ok"}
 
     cm = getattr(request.app.state, "connection_manager", None)
     if cm is None:
@@ -256,18 +271,13 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
             detail="ConnectionManager not available -- gateway not ready",
         )
 
-    await cm.broadcast_to_thread(thread_id, payload)
-    # P8-01: sync into API aggregator state.
-    agg = getattr(request.app.state, "aggregator", None)
-    if agg is not None:
-        agg.sync_worker_event(thread_id, payload)
-    await relay_event(
+    await _relay_single_event(
         thread_id,
         payload,
-        aggregator=agg,
-        session_factory=session_factory,
+        cm=cm,
+        agg=getattr(request.app.state, "aggregator", None),
+        session_factory=getattr(request.app.state, "db_session_factory", None),
     )
-
     return {"status": "ok"}
 
 
@@ -327,21 +337,8 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     for evt in events:
         thread_id = evt.get("thread_id", "")
         payload = evt.get("payload", {})
-        if payload.get("type") == "execution_state_projection":
-            await _handle_execution_state_event(
-                thread_id,
-                payload,
-                session_factory=session_factory,
-            )
-            continue
-        await cm.broadcast_to_thread(thread_id, payload)
-        if agg is not None:
-            agg.sync_worker_event(thread_id, payload)
-        await relay_event(
-            thread_id,
-            payload,
-            aggregator=agg,
-            session_factory=session_factory,
+        await _relay_single_event(
+            thread_id, payload, cm=cm, agg=agg, session_factory=session_factory
         )
 
     return {"status": "ok"}

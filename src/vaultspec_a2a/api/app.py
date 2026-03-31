@@ -17,7 +17,7 @@ See: ADR-007 (FastAPI serving, SPA)
      ADR-019 (Service Separation)
 """
 
-import asyncio
+import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
@@ -28,6 +28,7 @@ import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from opentelemetry import metrics, trace
 from starlette.websockets import WebSocket
 
 from ..control.circuit_breaker import WorkerCircuitBreaker
@@ -168,7 +169,6 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         msg_handler = create_dispatch_message_handler(
             worker_client,
             get_session_factory(),
-            checkpointer,
             circuit_breaker,
             worker_spawner,
             connection_manager,
@@ -214,6 +214,13 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         await aggregator.shutdown()
         await close_db()
 
+        provider = trace.get_tracer_provider()
+        if hasattr(provider, "shutdown"):
+            await asyncio.to_thread(provider.shutdown)  # ty: ignore[invalid-argument-type]
+        meter_provider = metrics.get_meter_provider()
+        if hasattr(meter_provider, "shutdown"):
+            await asyncio.to_thread(meter_provider.shutdown)  # ty: ignore[invalid-argument-type]
+
         logger.info("Gateway shutdown complete")
 
 
@@ -234,8 +241,14 @@ def main() -> None:
     )
 
 
-def create_app() -> FastAPI:
+def create_app(
+    lifespan: Any | None = None,
+) -> FastAPI:
     """Create and configure the FastAPI application.
+
+    Args:
+        lifespan: Optional lifespan override for testing. When ``None``
+            the production ``_lifespan`` is used.
 
     Returns:
         A fully configured ``FastAPI`` instance ready for ``uvicorn.run()``.
@@ -243,7 +256,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="Vaultspec A2A Orchestrator",
         version="0.1.0",
-        lifespan=_lifespan,
+        lifespan=lifespan or _lifespan,
     )
 
     cors_origins: list[str] = list(settings.cors_allowed_origins)

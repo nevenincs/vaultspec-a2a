@@ -7,7 +7,6 @@ Does NOT commit, raise HTTPException, or touch FastAPI request state.
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
@@ -21,12 +20,14 @@ from ..database import (
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
+from ..thread.cancel_policy import can_cancel
+from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
-    NON_ACTIVE_STATUSES,
     ControlActionResultStatus,
     ControlActionType,
     ThreadStatus,
 )
+from ..thread.idempotency import default_cancel_key
 
 if TYPE_CHECKING:
     import httpx
@@ -53,10 +54,12 @@ class CancelResult:
     applied: bool = False
     action_status: str = ControlActionResultStatus.REJECTED_INVALID_STATE.value
     idempotency_key: str | None = None
+    failure_type: FailureType | None = None
 
 
 async def cancel_thread(
     db: AsyncSession,
+    *,
     thread_id: str,
     idempotency_key: str | None,
     circuit_breaker: WorkerCircuitBreaker,
@@ -67,9 +70,8 @@ async def cancel_thread(
 ) -> CancelResult:
     """Execute the cancel-thread workflow.
 
-    Returns a :class:`CancelResult` describing what happened.  The caller
-    is responsible for committing the session and translating the result
-    into an HTTP response.
+    Returns a :class:`CancelResult` describing what happened.  Commits the
+    session before returning — the service owns its transaction boundary.
     """
     thread = await get_thread(db, thread_id)
     if thread is None:
@@ -79,22 +81,23 @@ async def cancel_thread(
             cancelled=False,
             thread_status="",
             error_detail="Thread not found",
+            failure_type=FailureType.NOT_FOUND,
         )
 
-    if thread.status in NON_ACTIVE_STATUSES:
+    eligibility = can_cancel(thread.status)
+    if not eligibility.allowed:
         return CancelResult(
             action_id=None,
             thread_id=thread_id,
             cancelled=False,
             thread_status=thread.status,
             accepted=False,
-            applied=thread.status == ThreadStatus.CANCELLED.value,
+            applied=eligibility.already_cancelled,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            failure_type=FailureType.TERMINAL,
         )
 
-    resolved_idempotency_key = (
-        idempotency_key or hashlib.sha256(f"{thread_id}:cancel".encode()).hexdigest()
-    )
+    resolved_idempotency_key = idempotency_key or default_cancel_key(thread_id)
     existing_action = await get_control_action_by_idempotency_key(
         db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
     )
@@ -120,7 +123,7 @@ async def cancel_thread(
     await mark_cancel_requested(db, thread_id)
 
     dispatch = DispatchRequest(
-        action="cancel",
+        action=ControlActionType.CANCEL,  # ty: ignore[invalid-argument-type]
         thread_id=thread_id,
         recursion_limit=recursion_limit,
     )
@@ -145,6 +148,10 @@ async def cancel_thread(
     )
 
     if not outcome.success:
+        policy = classify_dispatch_failure(outcome.failure_type)
+        typed_failure = (
+            FailureType(outcome.failure_type) if outcome.failure_type else None
+        )
         logger.warning(
             "Cancel dispatch failed for thread %s — leaving DB status unchanged",
             thread_id,
@@ -154,7 +161,11 @@ async def cancel_thread(
                 "action": dispatch.action,
             },
         )
-        action.result_status = ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        if policy.should_mark_failed:
+            action.result_status = (
+                ControlActionResultStatus.REJECTED_INVALID_STATE.value
+            )
+        await db.commit()
         return CancelResult(
             action_id=action.id,
             thread_id=thread_id,
@@ -164,9 +175,11 @@ async def cancel_thread(
             applied=False,
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             idempotency_key=resolved_idempotency_key,
+            failure_type=typed_failure,
         )
 
     await update_thread_status(db, thread_id, ThreadStatus.CANCELLING)
+    await db.commit()
     return CancelResult(
         action_id=action.id,
         thread_id=thread_id,

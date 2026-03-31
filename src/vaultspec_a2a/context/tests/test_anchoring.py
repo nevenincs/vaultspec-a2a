@@ -57,20 +57,22 @@ class TestBuildAnchoringContext:
         state = _make_state(
             active_feature="auth-flow",
             vault_index={
-                "research": ["docs/research/auth.md"],
-                "adr": ["docs/adrs/001.md", "docs/adrs/002.md"],
+                "research": [".vault/research/auth.md"],
+                "adr": [".vault/adr/001.md", ".vault/adr/002.md"],
             },
         )
         result = build_anchoring_context(state)
         assert result is not None
         assert "### Available Vault Documents" in result
         assert "**RESEARCH**" in result
-        assert "`docs/research/auth.md`" in result
+        assert "`.vault/research/auth.md`" in result
         assert "**ADR**" in result
-        assert "`docs/adrs/001.md`" in result
+        assert "`.vault/adr/001.md`" in result
 
     def test_vault_paths_capped_at_anchor_path_cap(self) -> None:
-        paths = [f"docs/spec/{i}.md" for i in range(domain_config.anchor_path_cap + 5)]
+        paths = [
+            f".vault/spec/{i}.md" for i in range(domain_config.anchor_path_cap + 5)
+        ]
         state = _make_state(
             active_feature="auth-flow",
             vault_index={"spec": paths},
@@ -79,12 +81,12 @@ class TestBuildAnchoringContext:
         assert result is not None
         assert "(+ 5 more)" in result
         # The last visible path should be index settings.anchor_path_cap - 1
-        assert f"`docs/spec/{domain_config.anchor_path_cap - 1}.md`" in result
+        assert f"`.vault/spec/{domain_config.anchor_path_cap - 1}.md`" in result
         # The first over-cap path should NOT appear
-        assert f"`docs/spec/{domain_config.anchor_path_cap}.md`" not in result
+        assert f"`.vault/spec/{domain_config.anchor_path_cap}.md`" not in result
 
     def test_no_more_label_when_paths_within_cap(self) -> None:
-        paths = [f"docs/spec/{i}.md" for i in range(3)]
+        paths = [f".vault/spec/{i}.md" for i in range(3)]
         state = _make_state(
             active_feature="auth-flow",
             vault_index={"spec": paths},

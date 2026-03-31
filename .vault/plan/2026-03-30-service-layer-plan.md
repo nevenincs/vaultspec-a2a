@@ -1,11 +1,13 @@
 ---
 tags:
-  - '#plan'
-  - '#service-layer'
+- '#plan'
+- '#service-layer'
 date: '2026-03-30'
 related:
-  - '[[2026-03-30-service-layer-rolling-audit]]'
-  - '[[2026-03-30-service-layer-research]]'
+- '[[2026-03-30-service-layer-rolling-audit]]'
+- '[[2026-03-30-service-layer-research]]'
+- '[[2026-03-20-service-lifecycle-architecture-adr]]'
+- '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
 # `service-layer` plan

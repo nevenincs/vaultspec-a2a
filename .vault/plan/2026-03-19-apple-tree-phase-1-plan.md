@@ -1,7 +1,11 @@
 ---
 date: 2026-03-19
-tags: ["#plan", "#apple-tree"]
-related: []
+tags:
+- '#plan'
+- '#apple-tree'
+related:
+- '[[2026-03-31-docs-vault-authority-retention-adr]]'
+- '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
 # Plan: Apple Tree Module — Phase 1

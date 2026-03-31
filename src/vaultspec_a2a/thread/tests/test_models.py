@@ -120,7 +120,7 @@ class TestArtifactRef:
         """from_dict -> to_dict produces the original dict."""
         original = {
             "id": "art-2",
-            "path": "/docs/readme.md",
+            "path": "/vault/readme.md",
             "type": "doc",
             "created_by": "writer",
         }

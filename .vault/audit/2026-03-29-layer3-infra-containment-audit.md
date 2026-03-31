@@ -4,7 +4,7 @@ tags:
   - "#audit"
   - "#infra-config"
 related:
-  - "[[2026-03-28-infra-config-phase1-review]]"
+  - "[[2026-03-28-infra-config-phase1-review-audit]]"
   - "[[2026-03-28-infra-config-rolling-audit]]"
 ---
 

@@ -4,9 +4,9 @@ tags:
   - '#entry-point-layer'
 date: '2026-03-24'
 related:
-  - '[[2026-03-24-api-module-audit]]'
-  - '[[2026-03-24-worker-cli-audit]]'
-  - '[[2026-03-24-cross-import-dependency-map]]'
+  - '[[2026-03-24-api-module-research]]'
+  - '[[2026-03-24-worker-cli-research]]'
+  - '[[2026-03-24-cross-import-dependency-map-research]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'
 ---
 

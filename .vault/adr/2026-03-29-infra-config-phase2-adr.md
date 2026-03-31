@@ -1,11 +1,12 @@
 ---
 tags:
-  - '#adr'
-  - '#infra-config'
+- '#adr'
+- '#infra-config'
 date: '2026-03-29'
 related:
-  - '[[2026-03-28-infra-config-adr]]'
-  - '[[2026-03-28-infra-config-rolling-audit]]'
+- '[[2026-03-28-infra-config-adr]]'
+- '[[2026-03-28-infra-config-rolling-audit]]'
+- '[[2026-03-28-infra-config-research]]'
 ---
 
 # `infra-config` adr: deferred-item resolution | (**status:** `accepted`)

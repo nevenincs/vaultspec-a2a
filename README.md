@@ -330,13 +330,12 @@ service is unhealthy.
 - `src/vaultspec_a2a/` — Python package
   - `api/` — FastAPI gateway (HTTP REST, WebSocket relay, worker spawn)
   - `worker/` — LangGraph executor (agent graphs, checkpointing)
-  - `core/` — shared domain: aggregator, config, rules, permissions
+  - `thread/`, `context/`, `team/`, `graph/`, `streaming/` — layered domain and orchestration packages
   - `database/` — SQLAlchemy models, Alembic migrations
   - `providers/` — LLM provider adapters (Claude/ACP, Gemini, OpenAI)
-  - `control/` — dev tooling invoked by Justfile (`doctor.py`, `db.py`, `verify.py`)
-  - `cli/` — production CLI entry point (`vaultspec` command)
+  - `control/` — service orchestration, health, config, and runtime support modules
 - `src/ui/` — React + Vite frontend
-- `docs/adrs/` — Architecture Decision Records (binding)
+- `.vault/adr/` — Architecture Decision Records (binding)
 - `knowledge/` — implementation notes and repository snippets
 
 Key ADRs:
@@ -348,7 +347,7 @@ Key ADRs:
 
 ## References
 
-- Project ADRs: `docs/adrs/`
+- Project ADRs: `.vault/adr/`
 - Knowledge base: `knowledge/`
 - Environment variables: `.env.example`
-- IDE setup (MCP configuration for Cursor/Claude/Windsurf): `docs/IDE_SETUP.md`
+- IDE setup (MCP configuration for Cursor/Claude/Windsurf): `.vault/reference/2026-03-31-ide-mcp-server-setup-reference.md`

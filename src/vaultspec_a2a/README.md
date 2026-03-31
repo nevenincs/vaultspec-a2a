@@ -1,6 +1,10 @@
 # vaultspec_a2a — Package Architecture
 
-**Binding ADR:** `docs/adrs/040-layer-boundary-enforcement.md`
+**Binding ADR chain:** `.vault/adr/2026-03-23-core-layer-boundary-adr.md`,
+`.vault/adr/2026-03-24-entry-point-decomposition-adr.md`,
+`.vault/adr/2026-03-27-domain-logic-extraction-adr.md`,
+`.vault/adr/2026-03-28-database-layer-adr.md`,
+`.vault/adr/2026-03-28-infra-config-adr.md`
 
 ## Full Tree
 

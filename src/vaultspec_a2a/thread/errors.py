@@ -4,7 +4,8 @@ Provides a structured error classification system with severity levels
 and recovery action hints, enabling the orchestrator to make intelligent
 recovery decisions instead of treating every failure as a crash.
 
-See: docs/architecture/2026-25-02-gap-analysis-audit.md (Gap 6)
+See: the legacy architecture gap analysis that originally introduced the
+typed error-taxonomy requirement.
 """
 
 from enum import StrEnum

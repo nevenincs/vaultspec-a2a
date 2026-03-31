@@ -7,7 +7,7 @@ related:
   - '[[2026-03-23-core-layer-boundary-plan]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'
   - '[[2026-03-23-core-layer-boundary-research]]'
-  - '[[2026-03-24-core-layer-review]]'
+  - '[[2026-03-24-core-layer-review-audit]]'
 ---
 
 # `core-layer` `layer-1-isolation` plan

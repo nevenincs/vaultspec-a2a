@@ -7,7 +7,6 @@ related:
   - '[[2026-03-28-infra-config-adr]]'
   - '[[2026-03-29-infra-config-phase2-adr]]'
   - '[[2026-03-28-infra-config-plan]]'
-  - '[[2026-03-28-infra-config-summary]]'
   - '[[2026-03-28-layer2d-rolling-audit]]'
 ---
 

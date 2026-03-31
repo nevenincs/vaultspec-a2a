@@ -55,6 +55,66 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
+def _allowed_option_ids(permission: object) -> set[str]:
+    """Extract valid option ids from a durable permission request row."""
+    raw_options = getattr(permission, "allowed_options_json", "[]")
+    try:
+        parsed = json.loads(raw_options)
+    except (TypeError, json.JSONDecodeError):
+        return set()
+    if not isinstance(parsed, list):
+        return set()
+
+    valid_ids: set[str] = set()
+    for option in parsed:
+        if not isinstance(option, dict):
+            continue
+        for key in ("option_id", "optionId"):
+            value = option.get(key)
+            if isinstance(value, str) and value:
+                valid_ids.add(value)
+    return valid_ids
+
+
+def _rejected_permission_error(
+    *,
+    permission_status: str | None,
+    thread_terminal: bool,
+    option_id: str,
+    valid_option_ids: set[str],
+) -> tuple[str, int]:
+    """Return the protocol-facing error for a rejected permission response."""
+    if thread_terminal:
+        return ("thread is no longer active", 409)
+    if permission_status and permission_status != PermissionRequestStatus.PENDING.value:
+        return ("Permission request is no longer pending", 409)
+    if not valid_option_ids:
+        return ("Permission request has no valid options", 409)
+    if option_id not in valid_option_ids:
+        return ("Unknown permission option for this request", 409)
+    return ("Permission response was previously rejected", 409)
+
+
+def _rejected_payload(option_id: str, error_detail: str) -> dict[str, object]:
+    """Persist the original rejection reason for idempotent replay."""
+    return {"option_id": option_id, "error_detail": error_detail}
+
+
+def _existing_rejection_error(existing_action: object) -> str | None:
+    """Read the original rejection reason from a stored control action."""
+    raw_payload = getattr(existing_action, "payload_json", None)
+    if not isinstance(raw_payload, str) or not raw_payload:
+        return None
+    try:
+        payload = json.loads(raw_payload)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(payload, dict):
+        return None
+    error_detail = payload.get("error_detail")
+    return error_detail if isinstance(error_detail, str) and error_detail else None
+
+
 @dataclass(frozen=True, slots=True)
 class PermissionResult:
     """Outcome of a permission response operation.
@@ -158,6 +218,32 @@ async def respond_to_permission(
         db, thread_id=thread_id, idempotency_key=resolved_idempotency_key
     )
     if existing_action is not None:
+        if (
+            existing_action.result_status
+            == ControlActionResultStatus.REJECTED_INVALID_STATE.value
+        ):
+            stored_error_detail = _existing_rejection_error(existing_action)
+            valid_option_ids = _allowed_option_ids(permission) if permission else set()
+            error_detail, error_status_code = _rejected_permission_error(
+                permission_status=(
+                    permission.request_status if permission is not None else None
+                ),
+                thread_terminal=thread_record.status in TERMINAL_STATUSES,
+                option_id=option_id,
+                valid_option_ids=valid_option_ids,
+            )
+            return PermissionResult(
+                request_id=request_id,
+                thread_id=thread_id,
+                accepted=False,
+                applied=False,
+                action_status=existing_action.result_status,
+                action_id=existing_action.id,
+                idempotency_key=resolved_idempotency_key,
+                approval_status=thread_record.approval_status,
+                error_detail=stored_error_detail or error_detail,
+                error_status_code=error_status_code,
+            )
         return PermissionResult(
             request_id=request_id,
             thread_id=thread_id,
@@ -195,13 +281,19 @@ async def respond_to_permission(
         )
 
     if permission.request_status != PermissionRequestStatus.PENDING.value:
+        error_detail, error_status_code = _rejected_permission_error(
+            permission_status=permission.request_status,
+            thread_terminal=False,
+            option_id=option_id,
+            valid_option_ids=_allowed_option_ids(permission),
+        )
         action = await create_control_action(
             db,
             thread_id=thread_id,
             action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
             request_id=request_id,
             idempotency_key=resolved_idempotency_key,
-            payload={"option_id": option_id},
+            payload=_rejected_payload(option_id, error_detail),
             result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
         )
         await db.commit()
@@ -214,6 +306,8 @@ async def respond_to_permission(
             action_id=action.id,
             idempotency_key=resolved_idempotency_key,
             approval_status=thread_record.approval_status,
+            error_detail=error_detail,
+            error_status_code=error_status_code,
         )
 
     # ------------------------------------------------------------------
@@ -239,6 +333,88 @@ async def respond_to_permission(
             action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
             error_detail="thread is no longer active",
             error_status_code=409,
+        )
+
+    valid_option_ids = _allowed_option_ids(permission)
+    if not valid_option_ids:
+        error_detail, error_status_code = _rejected_permission_error(
+            permission_status=permission.request_status,
+            thread_terminal=False,
+            option_id=option_id,
+            valid_option_ids=set(),
+        )
+        logger.warning(
+            "Permission respond rejected: request %s has no valid durable options",
+            request_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_response",
+            },
+        )
+        action = await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            request_id=request_id,
+            idempotency_key=resolved_idempotency_key,
+            payload=_rejected_payload(option_id, error_detail),
+            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+        )
+        await db.commit()
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=thread_record.approval_status,
+            error_detail=error_detail,
+            error_status_code=error_status_code,
+        )
+
+    if option_id not in valid_option_ids:
+        error_detail, error_status_code = _rejected_permission_error(
+            permission_status=permission.request_status,
+            thread_terminal=False,
+            option_id=option_id,
+            valid_option_ids=valid_option_ids,
+        )
+        logger.warning(
+            "Permission respond rejected: request %s received unknown option_id=%r",
+            request_id,
+            option_id,
+            extra={
+                "thread_id": thread_id,
+                "request_id": request_id,
+                "action": "permission_response",
+                "option_id": option_id,
+                "valid_option_ids": sorted(valid_option_ids),
+            },
+        )
+        action = await create_control_action(
+            db,
+            thread_id=thread_id,
+            action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+            request_id=request_id,
+            idempotency_key=resolved_idempotency_key,
+            payload=_rejected_payload(option_id, error_detail),
+            result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+        )
+        await db.commit()
+        return PermissionResult(
+            request_id=request_id,
+            thread_id=thread_id,
+            accepted=False,
+            applied=False,
+            action_status=ControlActionResultStatus.REJECTED_INVALID_STATE.value,
+            action_id=action.id,
+            idempotency_key=resolved_idempotency_key,
+            approval_status=thread_record.approval_status,
+            error_detail=error_detail,
+            error_status_code=error_status_code,
         )
 
     # ------------------------------------------------------------------

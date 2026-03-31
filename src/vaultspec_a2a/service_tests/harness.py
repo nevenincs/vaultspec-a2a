@@ -168,6 +168,9 @@ class ServiceStack:
     def _jaeger_client(self) -> httpx.Client:
         return httpx.Client(base_url=self.jaeger_url, timeout=10.0)
 
+    def _vidaimock_client(self) -> httpx.Client:
+        return httpx.Client(base_url=self.vidaimock_url, timeout=10.0)
+
     def _gateway_http_ready(self) -> bool:
         with self._client(timeout=5.0) as client:
             resp = client.get("/api/health")
@@ -373,6 +376,7 @@ class ServiceStack:
             self.record("health", health)
             self.worker_health()
             self.jaeger_services()
+            self.vidaimock_health()
             checks = health.get("checks", {})
             return (
                 health.get("status") == "ok"
@@ -408,6 +412,22 @@ class ServiceStack:
             resp.raise_for_status()
             payload = resp.json()
             self.record("jaeger-services", payload)
+            return payload
+
+    def vidaimock_health(self) -> dict[str, Any]:
+        """Exercise the deterministic provider route before certifying ready."""
+        with self._vidaimock_client() as client:
+            resp = client.post(
+                "/mock-coder-human/v1/chat/completions",
+                json={
+                    "model": "mock-coder-human",
+                    "messages": [{"role": "user", "content": "health probe"}],
+                    "stream": False,
+                },
+            )
+            resp.raise_for_status()
+            payload = resp.json()
+            self.record("vidaimock-health", payload)
             return payload
 
     def jaeger_traces(
@@ -508,6 +528,7 @@ class ServiceStack:
         option_id: str,
         kind: str | None = None,
         idempotency_key: str | None = None,
+        expected_status: int = 200,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {"option_id": option_id}
         if kind is not None:
@@ -521,7 +542,12 @@ class ServiceStack:
                 json=body,
                 headers=headers or None,
             )
-            resp.raise_for_status()
+            if resp.status_code != expected_status:
+                raise AssertionError(
+                    "unexpected permission response status: "
+                    f"expected {expected_status}, got {resp.status_code}, "
+                    f"body={resp.text!r}"
+                )
             payload = resp.json()
             self.record(f"permission-response:{request_id}", payload)
             return payload

@@ -602,6 +602,289 @@ class TestPermissionRespond:
         data = resp.json()
         assert data["accepted"] is False
 
+    def test_rejects_unknown_option_id_without_dispatching(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Hostile option ids must be rejected before they reach the worker."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-invalid"
+            self._seed_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+            )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Unknown permission option for this request"
+        assert worker.dispatches == []
+
+        async def _assert_state() -> None:
+            from ...database.models import PermissionRequestModel
+
+            async with session_factory() as session:
+                permission = await session.get(PermissionRequestModel, request_id)
+                assert permission is not None
+                assert permission.request_status == "pending"
+                assert permission.response_option_id is None
+                assert permission.idempotency_key is None
+
+        asyncio.run(_assert_state())
+
+    def test_replays_rejected_invalid_option_as_conflict(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Idempotent retries of rejected responses must preserve the conflict."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-invalid-replay"
+            self._seed_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
+
+            worker.dispatches.clear()
+            headers = {"Idempotency-Key": "same-invalid-response"}
+            first = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+                headers=headers,
+            )
+            second = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+                headers=headers,
+            )
+
+        assert first.status_code == 409
+        assert second.status_code == 409
+        assert second.json()["detail"] == "Unknown permission option for this request"
+        assert worker.dispatches == []
+
+    def test_replays_rejected_invalid_option_after_valid_response(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Rejected idempotent replays must preserve the original conflict reason."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-invalid-then-valid"
+            asyncio.run(_seed_permission())
+
+            worker.dispatches.clear()
+            invalid_headers = {"Idempotency-Key": "same-invalid-response"}
+            invalid = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+                headers=invalid_headers,
+            )
+            valid = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            replayed_invalid = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+                headers=invalid_headers,
+            )
+
+        assert invalid.status_code == 409
+        assert valid.status_code == 200
+        assert replayed_invalid.status_code == 409
+        assert (
+            replayed_invalid.json()["detail"]
+            == "Unknown permission option for this request"
+        )
+        assert len(worker.dispatches) == 1
+
+    def test_rejects_stale_second_response_after_submission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A second non-idempotent response must fail once the request is answered."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        },
+                        {
+                            "option_id": "deny_once",
+                            "name": "Deny once",
+                            "kind": "deny_once",
+                        },
+                    ],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-stale"
+            asyncio.run(_seed_permission())
+
+            worker.dispatches.clear()
+            first = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            second = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "deny_once"},
+                headers={"Idempotency-Key": "different-response"},
+            )
+
+        assert first.status_code == 200
+        assert second.status_code == 409
+        assert second.json()["detail"] == "Permission request is no longer pending"
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == "allow_once"
+
+    def test_rejects_permission_request_without_valid_durable_options(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A malformed durable permission row must fail closed."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-empty"
+            asyncio.run(_seed_permission())
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Permission request has no valid options"
+        assert worker.dispatches == []
+
+    def test_rejects_permission_request_with_malformed_durable_option_json(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Corrupted durable option payloads must also fail closed."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permission() -> None:
+            from ...database.models import PermissionRequestModel
+
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                permission = await session.get(PermissionRequestModel, request_id)
+                assert permission is not None
+                permission.allowed_options_json = '{"broken":'
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-malformed"
+            asyncio.run(_seed_permission())
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Permission request has no valid options"
+        assert worker.dispatches == []
+
 
 # ---------------------------------------------------------------------------
 # POST /threads -- autonomous mode

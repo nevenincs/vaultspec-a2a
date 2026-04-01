@@ -219,6 +219,8 @@ def test_finalize_gap_detected() -> None:
     )
     assert snap.replay_status == "gap_detected"
     assert "checkpoint_missing" in snap.degraded_reasons
+    assert snap.repair_status == "checkpoint_unavailable"
+    assert snap.execution_readiness == "checkpoint_unavailable"
 
 
 # ---------------------------------------------------------------------------

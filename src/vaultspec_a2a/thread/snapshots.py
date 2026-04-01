@@ -505,5 +505,10 @@ def finalize_snapshot_replay_status(
         snapshot.snapshot_complete = False
         if "checkpoint_missing" not in snapshot.degraded_reasons:
             snapshot.degraded_reasons.append("checkpoint_missing")
+        repair = CHECKPOINT_ERROR_REPAIR_MAP["checkpoint_missing"]
+        with contextlib.suppress(AttributeError):
+            snapshot.repair_status = repair.value
+        with contextlib.suppress(AttributeError):
+            snapshot.execution_readiness = repair.value
         snapshot.replay_status = "gap_detected"
     return snapshot

@@ -258,9 +258,10 @@ with checkpoint truth.
   turns, explicit removal flow, and approval-gated deletion behavior.
 
 Verification note:
-Audit `3` has focused fast coverage, but the compose-backed service lane for
-this slice still needs to be rerun from an environment where Docker resolves on
-`PATH`. The current Codex shell is not satisfying that prerequisite.
+Audit `3` has focused fast coverage and the compose-backed permission/resume
+service lane is green again in the current session. Audit `4` should keep using
+that service lane as a guardrail while the broader restart and persistence
+cases are added.
 
 ## Resume Eligibility Clarification
 

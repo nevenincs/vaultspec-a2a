@@ -354,9 +354,8 @@ Evidence anchors:
 Verification note:
 
 - fast API and aggregator coverage for Audit `3` is green
-- compose-backed service verification for this slice remains blocked in this
-  Codex shell because Docker is not resolving on `PATH` here, not because of a
-  known behavioral regression in the code change
+- compose-backed service verification is green again in this session, including
+  `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
 
 ### Open questions that affect scope quality
 

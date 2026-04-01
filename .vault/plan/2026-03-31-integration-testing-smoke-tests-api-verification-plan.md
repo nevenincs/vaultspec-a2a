@@ -249,6 +249,12 @@ unreadable permission, and preserves checkpoint-backed replay semantics when
 checkpoint truth is available.
 
 Progress note:
+Audit `4` also closed a mirrored approval-state leak in that same path.
+Unreadable plan-approval rows no longer seed `approval_status` or
+`approval_request_id` from raw durable state once the permission itself has
+been rejected as unreadable.
+
+Progress note:
 Audit `4` now also fails closed on unreadable durable permission rows during
 reconnect snapshot assembly. Corrupted `permission_requests.allowed_options_json`
 no longer gets to crash `build_thread_state()` or `/api/threads/{id}/state`.
@@ -314,6 +320,9 @@ replay semantics remain intact.
   permission option payloads in the DB must degrade the reconnect snapshot to
   `operator_intervention_required` rather than crashing state assembly or
   leaving the thread looking healthy.
+  It also now covers mirrored approval metadata: unreadable plan-approval
+  rows must not create a pending approval surface when the corresponding
+  permission could not be projected safely.
   The same corruption handling now also applies to unreadable durable
   permission rows used only for public state projection: malformed option JSON
   must degrade and fail closed, not take down the reconnect/state surface.

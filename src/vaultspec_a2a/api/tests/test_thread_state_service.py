@@ -293,3 +293,82 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
     assert snapshot.execution_readiness == "operator_intervention_required"
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_plan_approval_row_does_not_seed_pending_approval() -> None:
+    """Unreadable plan-approval rows must not leak mirrored approval metadata."""
+    case_dir = (
+        Path.home()
+        / ".codex"
+        / "memories"
+        / "tmp"
+        / "thread-state-service-db"
+        / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-corrupt-plan-approval"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-corrupt-plan-approval",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="thread-corrupt-plan-approval",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            await record_permission_request(
+                session,
+                request_id="perm-corrupt-plan",
+                thread_id="thread-corrupt-plan-approval",
+                pause_reason_type="plan_approval_request",
+                description="Approve plan?",
+                allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                tool_call="plan_approval",
+            )
+            permission = await session.get(PermissionRequestModel, "perm-corrupt-plan")
+            assert permission is not None
+            permission.allowed_options_json = '{"broken":'
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-corrupt-plan-approval",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.snapshot_complete is False
+    assert snapshot.pending_permissions == []
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
+    assert "permission_projection_unreadable" in snapshot.degraded_reasons
+
+    await engine.dispose()

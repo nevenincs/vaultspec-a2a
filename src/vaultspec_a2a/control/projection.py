@@ -297,8 +297,11 @@ async def enrich_snapshot_from_durable_state(
                 continue
             snapshot.pending_permissions.append(projected)
         if snapshot.approval_status is None:
-            for permission in durable_permissions:
-                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+            for permission in snapshot.pending_permissions:
+                if (
+                    permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
+                    or permission.tool_call == PermissionType.PLAN_APPROVAL.value
+                ):
                     snapshot.approval_status = ApprovalStatus.PENDING
                     snapshot.approval_request_id = permission.request_id
                     break

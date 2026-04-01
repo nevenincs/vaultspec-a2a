@@ -43,6 +43,7 @@ Resolved on `audit4`:
 - REVIEW-016
 - REVIEW-017
 - REVIEW-018
+- REVIEW-019
 - REVIEW-018
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
@@ -80,6 +81,9 @@ Audit `4` found that `classify_missing_ws_thread()` returned `THREAD_STATE_DRIFT
 
 REVIEW-018 | MEDIUM | Corrupted durable permission rows could crash reconnect/thread-state projection
 Audit `4` found that `_permission_data_from_model()` parsed `permission.allowed_options_json` with a raw `json.loads(...)` during durable snapshot enrichment. That made a malformed `permission_requests` row capable of aborting `build_thread_state()` and the public `/api/threads/{id}/state` surface before any checkpoint-backed replay logic could even run. The fix makes unreadable durable permission rows fail closed instead of raising: snapshot assembly now records `permission_projection_unreadable`, omits the unreadable permission from the projected state, and degrades readiness to `operator_intervention_required`. The new regressions prove both the direct thread-state assembly path and the public state endpoint stay alive under that corruption mode. Evidence anchors: `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-019 | MEDIUM | Unreadable plan-approval rows could still leak pending approval metadata into reconnect snapshots
+Audit `4` found a mirrored-state leak after the corrupt-permission hardening: even when an unreadable durable plan-approval row was omitted from `pending_permissions`, `enrich_snapshot_from_durable_state()` could still derive `approval_status="pending"` and `approval_request_id` from the raw durable row. That left the reconnect snapshot internally inconsistent, with a pending approval surface but no readable permission backing it. The fix now derives approval metadata only from readable projected permissions, and the new thread-state regression proves unreadable plan-approval rows no longer seed a fake pending approval state. Evidence anchors: `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

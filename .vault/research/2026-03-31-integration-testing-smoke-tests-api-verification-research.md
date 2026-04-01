@@ -497,6 +497,25 @@ Verification note:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestThreadState or rejects_permission_request_with_malformed_durable_option_json or rejects_permission_request_without_valid_durable_options"`
 
+### Audit 4 unreadable plan-approval metadata leak note
+
+Audit `4` also exposed a mirrored-state follow-on inside the same durable
+permission projection path. An unreadable plan-approval permission row could be
+omitted from `pending_permissions` and still seed `approval_status="pending"`
+and `approval_request_id` from the raw durable row. The repository now derives
+approval metadata only from readable projected permissions, so unreadable
+plan-approval rows no longer leak inconsistent approval state into reconnect
+snapshots.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "unreadable_plan_approval_row_does_not_seed_pending_approval or unreadable_durable_permission_degrades_snapshot_without_crashing"`
+
 ### Audit 4 unreadable durable permission projection note
 
 Audit `4` also exposed a corruption gap in the durable permission projection

@@ -269,6 +269,46 @@ class TestSendMessage:
         assert dispatch["content"] == "Follow-up message"
         assert dispatch["agent_id"] == "vaultspec-supervisor"
 
+    def test_followup_dispatch_marks_message_followup_as_applied(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Successful follow-up dispatch must stamp the applied action correctly."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "Hello"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            worker.clear()
+
+            resp = client.post(
+                f"/api/threads/{thread_id}/messages",
+                json={"content": "Follow-up message"},
+            )
+
+        assert resp.status_code == 202
+        assert len(worker.dispatches) == 1
+
+        async def _assert_state() -> None:
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                assert thread.repair_status == "healthy"
+                assert thread.execution_readiness == "healthy"
+                assert (
+                    thread.last_requested_action
+                    == ControlActionType.MESSAGE_FOLLOWUP_REQUESTED.value
+                )
+                assert (
+                    thread.last_applied_action
+                    == ControlActionType.MESSAGE_FOLLOWUP_APPLIED.value
+                )
+
+        asyncio.run(_assert_state())
+
     def test_dispatch_includes_team_preset(self, session_factory, checkpointer) -> None:
         """Ingest DispatchRequest includes team_preset from DB for lazy recompile."""
         app, _agg, worker, _cp = make_app(session_factory, checkpointer)

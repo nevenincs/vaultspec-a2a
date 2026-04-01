@@ -77,7 +77,7 @@ async def mark_message_followup_applied(
         thread_id,
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
-        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_APPLIED,
     )
 
 

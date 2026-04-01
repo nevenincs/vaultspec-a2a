@@ -162,6 +162,7 @@ def _raise_message_failure(
 def create_dispatch_message_handler(
     worker_client: httpx.AsyncClient,
     session_factory: Any,
+    checkpointer: Any,
     circuit_breaker: WorkerCircuitBreaker,
     worker_spawner: LazyWorkerSpawner,
     connection_manager: Any,
@@ -211,6 +212,13 @@ def create_dispatch_message_handler(
                     result.error_detail or "Worker dispatch failed",
                 )
                 return
+
+            if result.failure_type == FailureType.NOT_FOUND:
+                raise await _raise_missing_thread(
+                    thread_id=thread_id,
+                    session_factory=session_factory,
+                    checkpointer=checkpointer,
+                )
 
             raise _raise_message_failure(
                 thread_id, result.failure_type, result.error_detail

@@ -518,6 +518,27 @@ Verification note:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "unreadable_plan_approval_row"`
 
+### Audit 4 websocket missing-thread checkpoint precedence note
+
+Audit `4` also exposed a protocol-translation gap on the websocket follow-up
+path. LangGraph checkpoint truth remains the authoritative persistence surface,
+so when checkpoint verification cannot confirm whether backend state exists the
+gateway must surface uncertainty there too, not flatten the error into a plain
+`THREAD_NOT_FOUND`. The websocket send-message handler now reuses the same
+checkpoint-aware missing-thread classifier as the REST diagnostics path, so
+missing-thread follow-up rejections preserve `THREAD_STATE_UNVERIFIED` when
+checkpoint truth cannot be verified.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/api/ws_dispatch.py`
+- `src/vaultspec_a2a/api/app.py`
+- `src/vaultspec_a2a/api/tests/test_app.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "dispatch_message_handler"`
+
 ### Audit 4 unreadable durable permission projection note
 
 Audit `4` also exposed a corruption gap in the durable permission projection

@@ -294,6 +294,7 @@ async def test_dispatch_message_handler_rejects_missing_thread(
     handler = create_dispatch_message_handler(
         worker.client,
         session_factory,
+        checkpointer,
         app.state.circuit_breaker,
         app.state.worker_spawner,
         None,
@@ -306,3 +307,57 @@ async def test_dispatch_message_handler_rejects_missing_thread(
     rejection = excinfo.value
     assert rejection.code == "THREAD_NOT_FOUND"
     assert worker.dispatches == []
+
+
+@pytest.mark.asyncio
+async def test_dispatch_message_handler_prefers_unverified_over_not_found(
+    session_factory,
+) -> None:
+    """Send-message WS rejection must preserve checkpoint-unverified classification."""
+    case_dir = (
+        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    checkpoints_file = case_dir / "closed-checkpoints.db"
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        pass
+
+    async with session_factory() as session:
+        session.add(
+            ThreadExecutionStateModel(
+                thread_id="unverified-thread",
+                checkpoint_id="cp-orphaned",
+                parent_checkpoint_id=None,
+                recovery_epoch=0,
+                task_count=0,
+                interrupt_count=0,
+                next_nodes_json="[]",
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
+            )
+        )
+        await session.commit()
+
+    app, _aggregator, worker, _checkpointer = make_app(session_factory, checkpointer)
+    handler = create_dispatch_message_handler(
+        worker.client,
+        session_factory,
+        checkpointer,
+        app.state.circuit_breaker,
+        app.state.worker_spawner,
+        None,
+        app.state,
+    )
+
+    with pytest.raises(WebSocketCommandRejectedError) as excinfo:
+        await handler("unverified-thread", "hello", None)
+
+    rejection = excinfo.value
+    assert rejection.code == "THREAD_STATE_UNVERIFIED"
+    assert rejection.metadata == {
+        "execution_state_present": True,
+        "checkpoint_present": False,
+        "checkpoint_unverified": True,
+    }

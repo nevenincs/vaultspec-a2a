@@ -44,6 +44,7 @@ Resolved on `audit4`:
 - REVIEW-017
 - REVIEW-018
 - REVIEW-019
+- REVIEW-020
 - REVIEW-018
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
@@ -84,6 +85,9 @@ Audit `4` found that `_permission_data_from_model()` parsed `permission.allowed_
 
 REVIEW-019 | MEDIUM | Unreadable plan-approval rows could still leak pending approval metadata into reconnect snapshots
 Audit `4` found a mirrored-state leak after the corrupt-permission hardening: even when an unreadable durable plan-approval row was omitted from `pending_permissions`, `enrich_snapshot_from_durable_state()` could still derive `approval_status="pending"` and `approval_request_id` from raw durable state. That included stale approval metadata already present on the thread row itself, leaving the reconnect snapshot internally inconsistent with a pending approval surface but no readable permission backing it. The fix now derives approval metadata only from readable projected permissions and clears stale thread-row approval metadata when the unreadable row is a plan-approval pause. The new thread-state regressions prove unreadable plan-approval rows no longer seed or preserve a fake pending approval state. Evidence anchors: `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`.
+
+REVIEW-020 | MEDIUM | WebSocket follow-up rejection flattened missing-thread uncertainty to plain not-found
+Audit `4` found that the websocket `send_message` adapter still mapped `FailureType.NOT_FOUND` straight to `THREAD_NOT_FOUND`, even after the repo had established checkpoint-aware missing-thread diagnostics elsewhere. That meant backend drift or checkpoint uncertainty could be hidden on websocket follow-up messages even though the underlying control path already knew how to distinguish `THREAD_STATE_UNVERIFIED`. The fix routes websocket follow-up `NOT_FOUND` outcomes through the same checkpoint-aware `_raise_missing_thread()` classification used by the REST diagnostics path, and the new app-level regression proves a closed `AsyncSqliteSaver` plus orphaned durable execution-state residue now yields `THREAD_STATE_UNVERIFIED` instead of flattening to `THREAD_NOT_FOUND`. Evidence anchors: `src/vaultspec_a2a/api/ws_dispatch.py`, `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/tests/test_app.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

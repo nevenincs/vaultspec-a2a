@@ -158,12 +158,26 @@ acceptance criteria and its own deterministic service-level checks so
 regressions can be isolated quickly and the certification signal remains
 stable across future changes.
 
+Progress note:
+Audit `2b` is now complete. The human-loop VidaiMock provider no longer
+branches on total message count or a fixed resumed-message index. The
+repo now uses a file-backed VidaiMock response template that has been
+proven against the real compose-backed service lane for approval, denial,
+invalid-outcome handling, and readiness probing. This reduces the tape
+contract to a simpler repo-owned assumption: the resumed tool result is
+serialized as the last message in the provider request.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
   classify whether the leak is fixture teardown, startup-failure
   cleanup, or silent `docker compose down` failure, and make the cleanup
   outcome observable in the audit trail before remediation is chosen.
+- Audit 2b: VidaiMock tape hardening and template-semantics audit.
+  Completed. Keep the certified contract explicit: use VidaiMock-compatible
+  file-backed templates, avoid unproven inline branching tricks, and
+  require direct provider verification before any future tape change is
+  accepted into the deterministic gate.
 - Audit 1: interrupt, permission, and resume correctness.
   Cover stale approvals, wrong-thread resume, denied approvals,
   malformed approval payloads, repeated resume idempotency, and resume
@@ -187,9 +201,10 @@ stable across future changes.
   Cover non-permitted actions, approval refusal paths, bounded file
   access, and destructive-action gating inside supported sandboxes.
 - Audit 7: VidaiMock tape brittleness and deterministic replay quality.
-  Cover tape selection stability, prompt-shape sensitivity, exact output
-  determinism, and operator-visible failure modes when the mock backend
-  is unavailable.
+  Follow-on scope after Audit `2b`: cover tape selection stability beyond
+  the last-message contract, prompt-shape sensitivity across future worker
+  changes, exact output determinism, and operator-visible failure modes
+  when the mock backend is unavailable.
 - Audit 8: artifact persistence and file-removal safety.
   Cover artifact attribution, cross-thread isolation, persistence across
   turns, explicit removal flow, and approval-gated deletion behavior.

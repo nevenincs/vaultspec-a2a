@@ -1,0 +1,12 @@
+{%- set last_message = json.messages | last -%}
+{%- set last_role = last_message | get(key='role') -%}
+{%- set last_content = last_message | get(key='content') -%}
+{%- if last_role == "tool" and last_content is containing('"reject_once"') -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"The permission was denied, so the privileged operation must not run."},{"type":"text","text":"Permission denied. The privileged command was not executed."}]}}]}
+{%- elif last_role == "tool" and last_content is containing('"approve"') -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"The permission was approved and the privileged work finished successfully."},{"type":"text","text":"Permission approved. The privileged command completed successfully and the task is now finished."}]}}]}
+{%- elif last_role == "tool" -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"The permission payload did not match an allowed outcome, so the operation must remain blocked."},{"type":"text","text":"Permission outcome was invalid. The privileged command was not executed."}]}}]}
+{%- else -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"I need to run a privileged operation. I must request human approval before proceeding."},{"type":"text","text":"Requesting permission to execute a privileged command."}],"tool_calls":[{"id":"call_0","type":"function","function":{"name":"session_request_permission","arguments":"{\"description\": \"Run a privileged shell command: sudo apt-get update\", \"options\": [{\"optionId\": \"approve\", \"name\": \"Approve\", \"kind\": \"proceed\"}, {\"optionId\": \"reject_once\", \"name\": \"Deny\", \"kind\": \"reject_once\"}]}"}}]}}]}
+{%- endif -%}

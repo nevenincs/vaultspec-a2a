@@ -158,6 +158,34 @@ meaningful outcomes, not broad live-provider compatibility.
 
 ### Audit roadmap for follow-on hardening
 
+- Audit 2b: VidaiMock tape brittleness and template-semantics audit.
+  This slice is now proven against the compose-backed service lane. The
+  original human-loop tape was brittle because it selected approval,
+  denial, and invalid-outcome branches from total message count and a
+  fixed resumed-message index. Online VidaiMock docs and direct
+  verification against the real VidaiMock process showed two additional
+  constraints that matter for this repository: inline `response_body`
+  parsing is narrower than the broader Jinja-style constructs the first
+  revisions attempted, and complex branching must be proven against the
+  real binary rather than assumed from generic template intuition.
+
+  The current certified contract is narrower and more explicit:
+  - use a file-backed `response_template` rather than complex inline
+    `response_body` branching
+  - keep the provider contract tied to the last serialized message,
+    which is the worker-owned resume payload on resumed turns
+  - branch only on stable tool payload outcomes: approval, denial, and
+    invalid option handling
+  - prove each branch directly against the real VidaiMock process before
+    accepting the tape into the deterministic gate
+
+  This keeps the main mission intact: deterministic, stable, repeatable,
+  controllable output from the real stack using repo-owned inputs. It
+  also narrows the remaining risk: the tape is no longer coupled to total
+  message count or a fixed absolute index, but it still depends on the
+  repo-owned convention that the resumed tool result is serialized as the
+  last message.
+
 - Interrupt/resume correctness for human approval callbacks.
   Map to LangGraph `interrupt()` semantics, `Command(resume=...)`, and
   checkpoint-backed resumption on the same `thread_id`. The audit should

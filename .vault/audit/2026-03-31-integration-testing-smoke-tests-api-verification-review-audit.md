@@ -17,8 +17,12 @@ Resolved on `audit2a`:
 - REVIEW-004
 - REVIEW-005
 
-REVIEW-001 | MEDIUM | The mock human-loop tape still depends on total message count
-`mock-coder-human.yaml` still chooses between the first permission-request turn and the resumed completion turn using serialized message shape. The tape now certifies both approval and denial under the real stack, but it still assumes the resumed tool result stays at `json.messages[4].content`. Later prompt-shape growth inside the mock worker path could therefore break the tape without changing the underlying permission logic.
+Resolved on `audit2b`:
+
+- REVIEW-001
+
+REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
+Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
 
 REVIEW-002 | MEDIUM | The worker-side mock permission gate lacks a focused fast test
 The new worker helper tests prove fail-closed resume payload validation, but the resumed second provider turn in `worker.py` is still covered only through the compose-backed service scenarios. A small fast test for the mock permission gate would make regressions in the resume-message construction or second `ainvoke()` path easier to localize than the current slowest-tier coverage.

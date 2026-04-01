@@ -158,6 +158,12 @@ acceptance criteria and its own deterministic service-level checks so
 regressions can be isolated quickly and the certification signal remains
 stable across future changes.
 
+- Audit 2B1: service-test Docker cleanup hygiene.
+  Identify why stale `vaultspec-service-tests-*` compose projects can
+  remain running after interrupted or otherwise incomplete sessions,
+  classify whether the leak is fixture teardown, startup-failure
+  cleanup, or silent `docker compose down` failure, and make the cleanup
+  outcome observable in the audit trail before remediation is chosen.
 - Audit 1: interrupt, permission, and resume correctness.
   Cover stale approvals, wrong-thread resume, denied approvals,
   malformed approval payloads, and repeated resume idempotency.

@@ -195,6 +195,83 @@ class TestListThreads:
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
 
+    def test_list_threads_clears_stale_missing_plan_approval_pointer(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not expose a missing pending plan approval."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_missing_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-missing-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-missing-plan"
+                await session.commit()
+
+        asyncio.run(_seed_missing_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-missing-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
+    def test_list_threads_prefers_live_plan_approval_over_stale_thread_pointer(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must resolve pending approval from live durable rows."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_live_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-live-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-stale-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-live-plan",
+                    thread_id="thread-list-live-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve live plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_live_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-live-plan"
+        )
+        assert thread["approval_status"] == "pending"
+        assert thread["approval_request_id"] == "perm-list-live-plan"
+
 
 class TestHealth:
     """Tests for GET /health."""

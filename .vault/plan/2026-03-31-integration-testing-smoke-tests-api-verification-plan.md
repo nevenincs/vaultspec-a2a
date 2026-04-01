@@ -258,6 +258,24 @@ cleared under the same corruption condition.
 Progress note:
 Audit `4` now also aligns websocket follow-up rejection with the same
 checkpoint-first missing-thread classification used by REST diagnostics.
+
+Progress note:
+Audit `4` now also covers stale plan-approval pointers on the `/api/threads`
+summary route. The list surface must no longer trust mirrored
+`thread.approval_request_id` / `approval_status="pending"` metadata when the
+live durable plan-approval row is missing, superseded, or no longer projected
+as active. Thread summaries now fail closed and clear stale approval metadata
+unless a live projected plan approval still backs that state.
+
+Grounding note:
+LangGraph checkpoint and persistence truth remain the authoritative source, so
+mirrored repo summary state must not outrank live durable approval state when
+those surfaces diverge.
+
+VidaiMock note:
+Deterministic request-shape matching remains a versioned provider contract;
+this audit slice changes approval-summary projection only, not the certified
+request-shape assumptions used by the deterministic service lane.
 Missing-thread send-message rejections no longer flatten to `THREAD_NOT_FOUND`
 when checkpoint truth is unavailable; they preserve `THREAD_STATE_UNVERIFIED`
 through the websocket adapter too.

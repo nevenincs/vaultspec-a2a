@@ -27,6 +27,7 @@ from ..database import (
     create_control_action,
     create_thread,
     delete_thread,
+    get_pending_permission_requests,
     get_permission_request,
     get_thread,
     list_threads,
@@ -38,7 +39,7 @@ from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import ApprovalStatus, ControlActionType, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
 
@@ -146,7 +147,27 @@ async def list_threads_service(
         )
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
-        if approval_status is not None and approval_request_id is not None:
+        if approval_status == ApprovalStatus.PENDING.value:
+            live_plan_permissions = [
+                permission
+                for permission in await get_pending_permission_requests(
+                    db, thread_id=t.id
+                )
+                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+            ]
+            if live_plan_permissions:
+                live_permission = live_plan_permissions[-1]
+                try:
+                    json.loads(live_permission.allowed_options_json)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    approval_status = None
+                    approval_request_id = None
+                else:
+                    approval_request_id = live_permission.request_id
+            else:
+                approval_status = None
+                approval_request_id = None
+        elif approval_status is not None and approval_request_id is not None:
             permission = await get_permission_request(db, approval_request_id)
             if permission is not None:
                 try:

@@ -258,9 +258,41 @@ Evidence anchors:
 - `src/vaultspec_a2a/service_tests/test_stream_followup.py`
 - `src/vaultspec_a2a/control/permission_service.py`
 - `src/vaultspec_a2a/control/thread_state_service.py`
+
+### Audit 4 thread-list stale plan-approval pointer note
+
+Audit `4` also exposed a final mirrored-state leak on the `/api/threads`
+summary surface. Thread summaries could still trust stale pending
+plan-approval metadata copied from the thread row even when the live durable
+plan-approval row was missing, superseded, or no longer projected as active.
+That left list summaries advertising `approval_status="pending"` and an old
+`approval_request_id` even though the live approval truth had already changed.
+
+The required rule is the same one already established elsewhere in Audit `4`:
+live durable plan-approval state outranks mirrored thread-row state, and the
+summary surface must clear stale approval metadata when no active projected
+plan approval backs it.
+
+Grounding:
+
+- LangGraph checkpoint and persistence truth outrank mirrored repo state, so
+  list summaries must not claim pending approval state that the live durable
+  plan-approval boundary no longer supports:
+  [Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+  and
+  [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts#interrupts).
+
+VidaiMock note:
+
+- Deterministic request-shape matching remains a versioned contract. Audit `4`
+  does not widen that provider contract; it only tightens approval-summary
+  projection so replay-visible API state stays aligned with durable truth.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/thread_service.py`
 - `src/vaultspec_a2a/control/projection.py`
-- `src/vaultspec_a2a/thread/snapshots.py`
-- `src/vaultspec_a2a/api/routes/thread_state.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
 
 Recommended terminology for the follow-on audits:
 

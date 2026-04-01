@@ -46,8 +46,8 @@ Resolved on `audit4`:
 - REVIEW-019
 - REVIEW-020
 - REVIEW-021
-- REVIEW-021
-- REVIEW-018
+- REVIEW-022
+- REVIEW-023
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
@@ -96,6 +96,28 @@ Audit `4` found that the `/api/threads` listing lagged behind the stricter recon
 
 REVIEW-021 | MEDIUM | Plan approval still trusted stale thread-row pointers ahead of live durable permission truth
 Audit `4` found another mirrored-state defect around plan approval. The permission-response guard could still prefer `thread.approval_request_id` when determining the active request for a plan-approval response, so a stale thread-row pointer could reject the live pending approval as superseded. The reconnect snapshot path also allowed stale `approval_status="pending"` / `approval_request_id` values to survive on the thread row even when no projected plan-approval permission actually remained. The fix now prefers live pending plan-approval rows over stale thread-row pointers during response validation, and clears stale pending approval metadata when no projected plan approval backs it. The new endpoint and thread-state regressions prove both the response path and reconnect snapshot now stay aligned with live durable permission truth. Evidence anchors: `src/vaultspec_a2a/control/permission_service.py`, `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`.
+
+REVIEW-022 | MEDIUM | `/api/threads` summaries could still expose corrupt pending plan-approval metadata
+Audit `4` found that the list-thread summary surface lagged behind the stricter reconnect snapshot contract. Even after the snapshot path stopped exposing unreadable or stale plan-approval metadata, `/api/threads` could still echo `approval_status="pending"` and `approval_request_id` directly from the thread row when the backing plan-approval permission row was unreadable. The fix now clears those summary fields when the linked plan-approval permission payload cannot be parsed, and the new list-thread regression proves the summary surface no longer overstates pending approval state that the stricter snapshot path has already rejected. Evidence anchors: `src/vaultspec_a2a/control/thread_service.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-023 | MEDIUM | `/api/threads` summaries still trusted stale pending plan-approval thread-row pointers after live approval truth had moved
+Audit `4` found one more mirrored-state defect on the list-threads summary
+surface. Even after the stricter permission and reconnect-state paths stopped
+trusting stale plan-approval pointers, `/api/threads` summaries could still
+echo `approval_status="pending"` and `approval_request_id` from the thread row
+when the live durable plan-approval row was missing, superseded, or no longer
+projected as active. That let the summary surface overstate resumable approval
+state from stale mirrored metadata instead of the current durable approval
+truth. The fix makes live projected durable plan approval win over the
+thread-row pointer and clears summary approval metadata when no active durable
+plan approval backs it. LangGraph checkpoint/persistence truth remains the
+authoritative source, so mirrored repo state must fail closed when those
+surfaces diverge. VidaiMock note: deterministic request-shape matching remains
+a versioned contract, but that provider contract is adjacent here rather than
+the source of the defect. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

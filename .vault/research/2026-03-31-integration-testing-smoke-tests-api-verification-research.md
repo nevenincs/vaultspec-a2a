@@ -200,6 +200,56 @@ meaningful outcomes, not broad live-provider compatibility.
   thread/agent and that destructive file operations are explicit,
   bounded, and observable.
 
+### LangGraph interrupt/resume clarification for the service lane
+
+The permission/resume boundary has two separate truths that must not be
+collapsed into one signal.
+
+LangGraph provides checkpoint-backed interrupt state. An `interrupt()`
+is persisted through the checkpointer, resumed via `Command(resume=...)`,
+and the node re-runs from the start on resume rather than continuing from
+the same source line. Checkpoints are written at super-step boundaries, so
+durable execution resumes from the last recorded state and requires
+deterministic, idempotent handling around any side effects near the
+interrupt boundary. Official grounding: LangGraph interrupts, durable
+execution, and persistence docs.
+
+This repository adds a second boundary on top of that guarantee: the
+gateway projects pending permissions from checkpoint and execution-state
+data, while the permission response API requires a separate durable
+permission row and freshness classification before a thread is safely
+resumable. A projected pending permission can therefore become visible
+before the thread is durably resumable. That is a repo boundary race
+between projection and durability, not a LangGraph contract violation.
+`pending_permissions` is therefore a projected pending permission signal,
+not proof of resume eligibility on its own.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+- `src/vaultspec_a2a/service_tests/test_stream_followup.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/thread/snapshots.py`
+- `src/vaultspec_a2a/api/routes/thread_state.py`
+
+Recommended terminology for the follow-on audits:
+
+- `checkpoint-backed interrupt state`
+- `projected pending permission`
+- `durably resumable`
+- `resume eligibility`
+
+Documentation and test cautions:
+
+- Do not claim LangGraph resumes from the same source line. It re-runs the
+  node from the start after resumption.
+- Do not treat `pending_permissions` alone as proof that the public API can
+  safely accept a resume.
+- Keep LangGraph guarantees separate from repo-specific projection and
+  durability alignment.
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

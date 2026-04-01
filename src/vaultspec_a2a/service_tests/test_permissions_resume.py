@@ -48,6 +48,32 @@ def _wait_for_state(
     raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
 
 
+def _wait_for_pending_permission(
+    stack: ServiceStack,
+    thread_id: str,
+    *,
+    request_id: str | None = None,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """Wait until a permission pause is durably resumable, not just projected."""
+
+    def _matches(state: dict[str, Any]) -> bool:
+        pending = state.get("pending_permissions", [])
+        if not pending:
+            return False
+        if request_id is not None and not any(
+            permission.get("request_id") == request_id for permission in pending
+        ):
+            return False
+        return (
+            state.get("status") == "input_required"
+            and state.get("execution_readiness") == "paused_resumable"
+            and state.get("snapshot_complete") is True
+        )
+
+    return _wait_for_state(stack, thread_id, _matches, timeout=timeout)
+
+
 def test_permission_request_can_be_resumed_via_public_api(
     service_stack: ServiceStack,
 ) -> None:
@@ -59,11 +85,7 @@ def test_permission_request_can_be_resumed_via_public_api(
     )
     thread_id = created["thread_id"]
 
-    paused = _wait_for_state(
-        service_stack,
-        thread_id,
-        lambda state: state.get("pending_permissions"),
-    )
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"permission-paused:{thread_id}", paused)
 
     request = paused["pending_permissions"][0]
@@ -107,11 +129,7 @@ def test_invalid_permission_option_is_rejected_without_resuming(
     )
     thread_id = created["thread_id"]
 
-    paused = _wait_for_state(
-        service_stack,
-        thread_id,
-        lambda state: state.get("pending_permissions"),
-    )
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     rejected = service_stack.respond_permission(
@@ -121,10 +139,10 @@ def test_invalid_permission_option_is_rejected_without_resuming(
     )
     assert rejected["detail"] == "Unknown permission option for this request"
 
-    still_paused = _wait_for_state(
+    still_paused = _wait_for_pending_permission(
         service_stack,
         thread_id,
-        lambda state: state.get("pending_permissions"),
+        request_id=request["request_id"],
     )
     assert still_paused["status"] == paused["status"]
     assert still_paused["pending_permissions"][0]["request_id"] == request["request_id"]
@@ -141,11 +159,7 @@ def test_stale_second_permission_response_is_rejected_after_resume(
     )
     thread_id = created["thread_id"]
 
-    paused = _wait_for_state(
-        service_stack,
-        thread_id,
-        lambda state: state.get("pending_permissions"),
-    )
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     approved_option_id = _select_option_id(request, label="approve")
@@ -190,11 +204,7 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
     )
     thread_id = created["thread_id"]
 
-    paused = _wait_for_state(
-        service_stack,
-        thread_id,
-        lambda state: state.get("pending_permissions"),
-    )
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     with service_stack.gateway_client(timeout=30.0) as client:
@@ -205,15 +215,11 @@ def test_invalid_permission_option_keeps_thread_paused_and_recoverable(
     assert invalid.status_code == 409
     assert invalid.json()["detail"] == "Unknown permission option for this request"
 
-    still_paused = _wait_for_state(
+    _wait_for_pending_permission(
         service_stack,
         thread_id,
-        lambda state: any(
-            permission.get("request_id") == request["request_id"]
-            for permission in state.get("pending_permissions", [])
-        ),
+        request_id=request["request_id"],
     )
-    assert still_paused["status"] == "input_required"
 
     resumed = service_stack.respond_permission(
         request["request_id"],
@@ -249,11 +255,7 @@ def test_permission_denial_completes_with_denied_outcome(
     )
     thread_id = created["thread_id"]
 
-    paused = _wait_for_state(
-        service_stack,
-        thread_id,
-        lambda state: state.get("pending_permissions"),
-    )
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     request = paused["pending_permissions"][0]
 
     denied = service_stack.respond_permission(

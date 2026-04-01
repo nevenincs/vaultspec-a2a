@@ -166,7 +166,11 @@ stable across future changes.
   outcome observable in the audit trail before remediation is chosen.
 - Audit 1: interrupt, permission, and resume correctness.
   Cover stale approvals, wrong-thread resume, denied approvals,
-  malformed approval payloads, and repeated resume idempotency.
+  malformed approval payloads, repeated resume idempotency, and resume
+  eligibility at the repo boundary. Distinguish projected pending
+  permission from durably resumable state, and require the public state
+  and permission-response path to agree before a thread is treated as
+  safely resumable.
 - Audit 2: persistence, corruption, and restart resumability.
   Cover checkpoint replay, restart after interruption, degraded
   snapshots, and corruption surfacing instead of silent repair.
@@ -189,3 +193,22 @@ stable across future changes.
 - Audit 8: artifact persistence and file-removal safety.
   Cover artifact attribution, cross-thread isolation, persistence across
   turns, explicit removal flow, and approval-gated deletion behavior.
+
+## Resume Eligibility Clarification
+
+LangGraph guarantees checkpoint-backed interrupt state, resumed through
+`Command(resume=...)`, and replays from the start of the interrupted node
+rather than the same source line. This repository adds a second
+requirement at the service boundary: a thread is not durably resumable
+until the durable permission row, freshness classification, and projected
+public state all agree on resume eligibility.
+
+Implementation and verification work for the permission/resume slice
+should therefore:
+
+1. Distinguish projected pending permission from durably resumable state.
+1. Refuse to treat `pending_permissions` alone as proof that resume is
+   safe to submit.
+1. Add deterministic service coverage that exercises the projection versus
+   durability race and proves the thread is only treated as resumable once
+   those boundaries converge.

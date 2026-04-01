@@ -92,6 +92,27 @@ def _wait_for_state(
     raise AssertionError(f"timed out waiting for thread {thread_id}: {last_state}")
 
 
+def _wait_for_pending_permission(
+    stack: ServiceStack,
+    thread_id: str,
+    *,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """Wait until a permission pause is fully resumable and durably projected."""
+
+    return _wait_for_state(
+        stack,
+        thread_id,
+        lambda state: (
+            state.get("pending_permissions")
+            and state.get("status") == "input_required"
+            and state.get("execution_readiness") == "paused_resumable"
+            and state.get("snapshot_complete") is True
+        ),
+        timeout=timeout,
+    )
+
+
 def _trigger_after(delay_seconds: float, callback) -> threading.Thread:
     thread = threading.Thread(
         target=lambda: (time.sleep(delay_seconds), callback()),
@@ -110,15 +131,7 @@ def test_sse_stream_and_followup_message(service_stack: ServiceStack) -> None:
     )
     thread_id = created["thread_id"]
 
-    paused = None
-    deadline = time.monotonic() + 120.0
-    while time.monotonic() < deadline:
-        state = service_stack.get_thread_state(thread_id)
-        if state.get("pending_permissions"):
-            paused = state
-            break
-        time.sleep(1.0)
-    assert paused is not None, "thread never reached a pending permission state"
+    paused = _wait_for_pending_permission(service_stack, thread_id)
     service_stack.record(f"sse-paused:{thread_id}", paused)
 
     request = paused["pending_permissions"][0]

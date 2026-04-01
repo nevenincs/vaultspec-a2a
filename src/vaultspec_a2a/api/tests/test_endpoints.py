@@ -19,8 +19,9 @@ import logging
 from fastapi.testclient import TestClient
 
 from ...control.config import settings
-from ...database import record_permission_request
+from ...database import create_control_action, record_permission_request
 from ...streaming.aggregator import EventAggregator
+from ...thread.enums import ControlActionResultStatus, ControlActionType
 from .conftest import make_app
 
 # ---------------------------------------------------------------------------
@@ -676,6 +677,66 @@ class TestPermissionRespond:
         assert first.status_code == 409
         assert second.status_code == 409
         assert second.json()["detail"] == "Unknown permission option for this request"
+        assert worker.dispatches == []
+
+    def test_replays_rejected_invalid_option_with_malformed_stored_payload(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Malformed stored rejection payloads must fall back to durable state."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_rejected_action() -> None:
+            from ...database.models import ControlActionModel
+
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                action = await create_control_action(
+                    session,
+                    thread_id=thread_id,
+                    action_type=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+                    request_id=request_id,
+                    idempotency_key="same-invalid-response",
+                    payload={"option_id": "hostile-option"},
+                    result_status=ControlActionResultStatus.REJECTED_INVALID_STATE,
+                )
+                stored = await session.get(ControlActionModel, action.id)
+                assert stored is not None
+                stored.payload_json = '{"broken":'
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-invalid-replay-malformed-payload"
+            asyncio.run(_seed_rejected_action())
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "hostile-option"},
+                headers={"Idempotency-Key": "same-invalid-response"},
+            )
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Unknown permission option for this request"
         assert worker.dispatches == []
 
     def test_replays_rejected_invalid_option_after_valid_response(

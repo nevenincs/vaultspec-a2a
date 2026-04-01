@@ -278,6 +278,33 @@ Documentation and test cautions:
 - Keep LangGraph guarantees separate from repo-specific projection and
   durability alignment.
 
+### Audit 2c and Audit 2d closure notes
+
+Audit `2c` is now closed by a fast LangGraph-native worker test in
+`src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`. The new
+coverage proves the resumed second `ainvoke()` path after a valid approval,
+including LangGraph's rerun-from-node-start behavior and the worker-owned
+follow-up provider turn that consumes the approval tool result. That removes
+an important blind spot where deterministic resumed work was previously proven
+only through the compose-backed service lane.
+
+Audit `2d` is now clarified and closed in two separate branches of the same
+permission boundary. The repository already had fail-closed coverage for
+malformed durable `allowed_options_json`. The remaining uncovered branch was
+idempotent replay when a stored rejected control action has malformed
+`payload_json`. That replay path is now covered in
+`src/vaultspec_a2a/api/tests/test_endpoints.py`, proving the API falls back to
+current durable permission state and still returns the same explicit conflict
+instead of drifting into ambiguous or permissive behavior.
+
+Mission alignment:
+
+- exact operator inputs remain repo-owned and deterministic
+- approval, rejection, and replay stay stable under VidaiMock-backed execution
+- corrupt durable replay metadata fails closed instead of weakening control
+- resumed work is now certified both at the service lane and at a fast
+  LangGraph-native worker boundary
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

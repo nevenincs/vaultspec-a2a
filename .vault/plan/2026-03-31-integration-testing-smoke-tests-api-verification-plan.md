@@ -167,6 +167,21 @@ invalid-outcome handling, and readiness probing. This reduces the tape
 contract to a simpler repo-owned assumption: the resumed tool result is
 serialized as the last message in the provider request.
 
+Progress note:
+Audit `2c` is now complete. The worker now has fast LangGraph-native
+coverage for the resumed second `ainvoke()` path in
+`src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`, proving
+that approval leads to the expected second provider turn after LangGraph
+re-enters the node from the start on resume.
+
+Progress note:
+Audit `2d` is now complete. The permission boundary already had fail-closed
+coverage for malformed durable option rows, and it now also has explicit
+replay coverage for malformed stored rejection payloads in
+`src/vaultspec_a2a/api/tests/test_endpoints.py`. Corrupt replay metadata
+therefore falls back to current durable permission state and preserves the
+same deterministic conflict instead of weakening the control surface.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -178,6 +193,14 @@ serialized as the last message in the provider request.
   file-backed templates, avoid unproven inline branching tricks, and
   require direct provider verification before any future tape change is
   accepted into the deterministic gate.
+- Audit 2c: fast worker resumed-second-`ainvoke()` audit.
+  Completed. Keep a narrow LangGraph-native test below the service tier so
+  regressions in resumed follow-up execution are localized before they reach
+  the compose-backed certification lane.
+- Audit 2d: malformed durable rejection replay audit.
+  Completed. Keep malformed durable option-state coverage and malformed stored
+  rejection-payload replay coverage together so the permission API stays
+  fail-closed under both corruption modes.
 - Audit 1: interrupt, permission, and resume correctness.
   Cover stale approvals, wrong-thread resume, denied approvals,
   malformed approval payloads, repeated resume idempotency, and resume
@@ -185,27 +208,33 @@ serialized as the last message in the provider request.
   permission from durably resumable state, and require the public state
   and permission-response path to agree before a thread is treated as
   safely resumable.
-- Audit 2: persistence, corruption, and restart resumability.
+- Audit 3: active-interrupt binding.
+  Cover binding of permission responses to the correct currently active
+  interrupt for the thread, prevention of stale request replay across newer
+  pauses, and proof that the gateway/control boundary applies responses only
+  to the live interrupt contract rather than to a projected or superseded
+  request surface.
+- Audit 4: persistence, corruption, and restart resumability.
   Cover checkpoint replay, restart after interruption, degraded
   snapshots, and corruption surfacing instead of silent repair.
-- Audit 3: streaming continuity and replay behavior.
+- Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.
-- Audit 4: multi-agent steering and re-briefing.
+- Audit 6: multi-agent steering and re-briefing.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.
-- Audit 5: cancellation and cleanup behavior.
+- Audit 7: cancellation and cleanup behavior.
   Cover cancel vs interrupt semantics, in-flight cancellation, terminal
   cancellation visibility, and absence of zombie execution.
-- Audit 6: hostile-environment and sandbox-boundary behavior.
+- Audit 8: hostile-environment and sandbox-boundary behavior.
   Cover non-permitted actions, approval refusal paths, bounded file
   access, and destructive-action gating inside supported sandboxes.
-- Audit 7: VidaiMock tape brittleness and deterministic replay quality.
+- Audit 9: VidaiMock tape brittleness and deterministic replay quality.
   Follow-on scope after Audit `2b`: cover tape selection stability beyond
   the last-message contract, prompt-shape sensitivity across future worker
   changes, exact output determinism, and operator-visible failure modes
   when the mock backend is unavailable.
-- Audit 8: artifact persistence and file-removal safety.
+- Audit 10: artifact persistence and file-removal safety.
   Cover artifact attribution, cross-thread isolation, persistence across
   turns, explicit removal flow, and approval-gated deletion behavior.
 

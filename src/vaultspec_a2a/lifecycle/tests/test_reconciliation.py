@@ -141,6 +141,23 @@ class TestPendingPermissions:
         assert actions[0].repair_status == "paused_resumable"
         assert actions[0].new_thread_status == "input_required"
 
+    def test_pending_permission_does_not_override_missing_checkpoint(self) -> None:
+        """A durable permission row is not resumable without checkpoint truth."""
+        thread = ThreadSnapshot(thread_id="t1", status="running", recovery_epoch=0)
+        actions = compute_reconciliation_actions(
+            threads=[thread],
+            checkpoint_results={"t1": False},
+            checkpoint_errors={"t1": "checkpoint_unavailable"},
+            pending_permissions={"t1": True},
+        )
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.new_thread_status == "repair_needed"
+        assert action.repair_status == "checkpoint_unavailable"
+        assert action.repair_reason == "checkpoint_unavailable"
+        assert action.increment_generation is True
+        assert action.increment_recovery_epoch is True
+
 
 class TestHealthyThreadConservative:
     """Healthy threads with checkpoint available get reconciling action."""

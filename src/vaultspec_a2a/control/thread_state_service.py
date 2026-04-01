@@ -123,6 +123,7 @@ async def build_thread_state(
         snapshot.degraded_reasons.append("checkpoint_timeout")
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
     except Exception:
         logger.warning(
             "Could not load checkpoint for thread %s; returning partial snapshot",
@@ -134,6 +135,7 @@ async def build_thread_state(
         snapshot.degraded_reasons.append("checkpoint_unavailable")
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
 
     snapshot = await enrich_snapshot_from_execution_state(
         db,

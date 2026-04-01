@@ -223,6 +223,16 @@ diagnostics failure paths, and the regression tests prove both service
 dispatch failures and websocket `mark_thread_failed()` now surface the degraded
 state durably.
 
+Progress note:
+Audit `4` now also fails closed when the durable execution-state row is
+unreadable. LangGraph checkpoint truth still owns replay durability, so a
+loaded checkpoint may remain `durable`, but the repo boundary no longer leaves
+the snapshot looking healthy when the `thread_execution_state` row is corrupt.
+Unreadable execution-state projection now degrades `repair_status` and
+`execution_readiness` to `operator_intervention_required`, and both the pure
+projection test and the real `AsyncSqliteSaver` thread-state assembly test are
+green.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -269,6 +279,10 @@ state durably.
   follow-up success path now distinguishes `message_followup_requested`
   from `message_followup_applied`, and the pure repair-policy mapping now
   keys the applied phase off the applied enum.
+  It also now covers unreadable durable execution-state rows: checkpoint
+  replay remains authoritative, but corrupted execution-state projection
+  must still degrade public readiness to `operator_intervention_required`
+  instead of inheriting a healthy durable row.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

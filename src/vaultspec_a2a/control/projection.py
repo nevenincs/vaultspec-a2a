@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
-from ..thread.enums import ApprovalStatus
+from ..thread.enums import ApprovalStatus, RepairStatus
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -317,6 +317,8 @@ async def enrich_snapshot_from_execution_state(
         snapshot.snapshot_complete = False
         if "execution_state_projection_unreadable" not in snapshot.degraded_reasons:
             snapshot.degraded_reasons.append("execution_state_projection_unreadable")
+        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
         return snapshot
 
     snapshot = apply_execution_state_projection(snapshot, projection)

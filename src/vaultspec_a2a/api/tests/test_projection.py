@@ -405,3 +405,64 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness() -> N
     assert "execution_state_projection_unavailable" in snapshot.degraded_reasons
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_execution_state_requires_operator_intervention() -> None:
+    """Corrupted durable execution-state rows must fail closed on readiness."""
+    case_dir = (
+        Path.home()
+        / ".codex"
+        / "memories"
+        / "tmp"
+        / "api-test-projection-db"
+        / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        thread = await create_thread(
+            session,
+            thread_id="thread-corrupt-execution-state",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        session.add(
+            ThreadExecutionStateModel(
+                thread_id="thread-corrupt-execution-state",
+                checkpoint_id="cp-1",
+                parent_checkpoint_id=None,
+                recovery_epoch=0,
+                task_count=0,
+                interrupt_count=0,
+                next_nodes_json="{",
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
+            )
+        )
+        await session.commit()
+
+        snapshot = ThreadStateData(
+            thread_id=thread.id,
+            status=thread.status,
+            last_sequence=0,
+        )
+        snapshot = await enrich_snapshot_from_execution_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+            checkpoint_present=True,
+            checkpoint_id="cp-1",
+        )
+
+    assert snapshot.snapshot_complete is False
+    assert "execution_state_projection_unreadable" in snapshot.degraded_reasons
+    assert snapshot.repair_status == "operator_intervention_required"
+    assert snapshot.execution_readiness == "operator_intervention_required"
+
+    await engine.dispose()

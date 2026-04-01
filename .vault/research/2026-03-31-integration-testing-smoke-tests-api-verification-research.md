@@ -429,6 +429,29 @@ Evidence anchors:
 - `src/vaultspec_a2a/control/diagnostics.py`
 - `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
 
+### Audit 4 unreadable execution-state corruption note
+
+Audit `4` also exposed a state-corruption gap in the reconnect snapshot path.
+LangGraph's checkpoint is still the authoritative replay source, so a loaded
+checkpoint may legitimately keep the replay status `durable`, but an unreadable
+durable `thread_execution_state` row is still corruption at the repo boundary
+and must not leave the public snapshot looking healthy. The repository now
+fails that path closed by degrading both `repair_status` and
+`execution_readiness` to `operator_intervention_required` whenever execution
+state projection cannot be read, while preserving the checkpoint-backed replay
+signal from the real checkpointer.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_projection.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

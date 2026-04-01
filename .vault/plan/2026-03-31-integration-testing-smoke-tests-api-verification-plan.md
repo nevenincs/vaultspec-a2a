@@ -263,6 +263,12 @@ when checkpoint truth is unavailable; they preserve `THREAD_STATE_UNVERIFIED`
 through the websocket adapter too.
 
 Progress note:
+Audit `4` now also aligns the `/api/threads` summary surface with the stricter
+snapshot contract for corrupt plan-approval state. Thread summaries no longer
+echo stale pending approval metadata when the backing plan-approval permission
+row is unreadable.
+
+Progress note:
 Audit `4` now also fails closed on unreadable durable permission rows during
 reconnect snapshot assembly. Corrupted `permission_requests.allowed_options_json`
 no longer gets to crash `build_thread_state()` or `/api/threads/{id}/state`.
@@ -335,6 +341,9 @@ replay semantics remain intact.
   rejection: protocol translation must preserve `THREAD_STATE_UNVERIFIED`
   rather than collapsing missing-thread uncertainty to a generic not-found
   error.
+  The audit also now covers summary-surface consistency: `/api/threads` must
+  not expose pending approval metadata that the reconnect snapshot has already
+  rejected as unreadable or corrupt.
   The same corruption handling now also applies to unreadable durable
   permission rows used only for public state projection: malformed option JSON
   must degrade and fail closed, not take down the reconnect/state surface.

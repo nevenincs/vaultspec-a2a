@@ -46,6 +46,7 @@ Resolved on `audit4`:
 - REVIEW-019
 - REVIEW-020
 - REVIEW-021
+- REVIEW-021
 - REVIEW-018
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
@@ -89,6 +90,9 @@ Audit `4` found a mirrored-state leak after the corrupt-permission hardening: ev
 
 REVIEW-020 | MEDIUM | WebSocket follow-up rejection flattened missing-thread uncertainty to plain not-found
 Audit `4` found that the websocket `send_message` adapter still mapped `FailureType.NOT_FOUND` straight to `THREAD_NOT_FOUND`, even after the repo had established checkpoint-aware missing-thread diagnostics elsewhere. That meant backend drift or checkpoint uncertainty could be hidden on websocket follow-up messages even though the underlying control path already knew how to distinguish `THREAD_STATE_UNVERIFIED`. The fix routes websocket follow-up `NOT_FOUND` outcomes through the same checkpoint-aware `_raise_missing_thread()` classification used by the REST diagnostics path, and the new app-level regression proves a closed `AsyncSqliteSaver` plus orphaned durable execution-state residue now yields `THREAD_STATE_UNVERIFIED` instead of flattening to `THREAD_NOT_FOUND`. Evidence anchors: `src/vaultspec_a2a/api/ws_dispatch.py`, `src/vaultspec_a2a/api/app.py`, `src/vaultspec_a2a/api/tests/test_app.py`.
+
+REVIEW-021 | MEDIUM | Thread summaries could still expose stale pending approval metadata after corrupt plan-approval state was cleared elsewhere
+Audit `4` found that the `/api/threads` listing lagged behind the stricter reconnect snapshot path. Even after corrupt plan-approval rows were prevented from seeding approval metadata in snapshots, `list_threads_service()` still echoed `approval_status` and `approval_request_id` directly from the thread row. That meant a thread summary could still advertise a pending approval that no readable plan-approval permission actually backed. The fix now clears those summary fields when the backing plan-approval permission row is unreadable, and the new endpoint regression proves `/api/threads` no longer exposes that stale approval surface. Evidence anchors: `src/vaultspec_a2a/control/thread_service.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
 REVIEW-021 | MEDIUM | Plan approval still trusted stale thread-row pointers ahead of live durable permission truth
 Audit `4` found another mirrored-state defect around plan approval. The permission-response guard could still prefer `thread.approval_request_id` when determining the active request for a plan-approval response, so a stale thread-row pointer could reject the live pending approval as superseded. The reconnect snapshot path also allowed stale `approval_status="pending"` / `approval_request_id` values to survive on the thread row even when no projected plan-approval permission actually remained. The fix now prefers live pending plan-approval rows over stale thread-row pointers during response validation, and clears stale pending approval metadata when no projected plan approval backs it. The new endpoint and thread-state regressions prove both the response path and reconnect snapshot now stay aligned with live durable permission truth. Evidence anchors: `src/vaultspec_a2a/control/permission_service.py`, `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`.

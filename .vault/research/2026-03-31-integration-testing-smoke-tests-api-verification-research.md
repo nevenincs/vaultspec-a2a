@@ -622,6 +622,34 @@ Verification note:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestPermissionRespond"`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "missing_plan_approval_request_clears_stale_thread_pending_approval"`
 
+### Audit 4 thread summary approval consistency note
+
+Audit `4` also reached the `/api/threads` summary surface. After the stricter
+reconnect snapshot path stopped exposing corrupt plan-approval metadata, the
+summary route could still echo stale `approval_status="pending"` and
+`approval_request_id` from the thread row even when the backing
+plan-approval permission row was unreadable. The repository now applies the
+same fail-closed rule to thread summaries, clearing unreadable plan-approval
+metadata instead of letting the list view overstate confidence.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Grounding:
+
+- LangGraph persistence checkpoints state at every step, so repo-owned summary
+  projections must not claim a pending approval surface that the stricter
+  checkpoint-aligned reconnect snapshot has already rejected:
+  [Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+  and
+  [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts#interrupts).
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestListThreads"`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

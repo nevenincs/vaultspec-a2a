@@ -27,11 +27,13 @@ from ..database import (
     create_control_action,
     create_thread,
     delete_thread,
+    get_permission_request,
     get_thread,
     list_threads,
     update_thread_status,
 )
 from ..graph.compiler import build_initial_vault_index
+from ..graph.enums import PermissionType
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
@@ -66,6 +68,11 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_PLAN_APPROVAL_PAUSE_CAUSES = {
+    PermissionType.PLAN_APPROVAL.value,
+    "plan_approval_request",
+}
 
 
 def generate_thread_id() -> str:
@@ -137,6 +144,17 @@ async def list_threads_service(
         feature_tag, source_branch, callee = _parse_thread_summary_metadata(
             t.thread_metadata
         )
+        approval_status = t.approval_status
+        approval_request_id = t.approval_request_id
+        if approval_status is not None and approval_request_id is not None:
+            permission = await get_permission_request(db, approval_request_id)
+            if permission is not None:
+                try:
+                    json.loads(permission.allowed_options_json)
+                except (json.JSONDecodeError, TypeError, ValueError):
+                    if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                        approval_status = None
+                        approval_request_id = None
         summaries.append(
             ThreadSummaryData(
                 thread_id=t.id,
@@ -144,8 +162,8 @@ async def list_threads_service(
                 status=t.status,
                 repair_status=t.repair_status,
                 execution_readiness=t.execution_readiness,
-                approval_status=t.approval_status,
-                approval_request_id=t.approval_request_id,
+                approval_status=approval_status,
+                approval_request_id=approval_request_id,
                 team_preset=t.team_preset,
                 created_at=t.created_at,
                 updated_at=t.updated_at,

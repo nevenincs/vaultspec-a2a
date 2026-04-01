@@ -502,10 +502,12 @@ Verification note:
 Audit `4` also exposed a mirrored-state follow-on inside the same durable
 permission projection path. An unreadable plan-approval permission row could be
 omitted from `pending_permissions` and still seed `approval_status="pending"`
-and `approval_request_id` from the raw durable row. The repository now derives
-approval metadata only from readable projected permissions, so unreadable
-plan-approval rows no longer leak inconsistent approval state into reconnect
-snapshots.
+and `approval_request_id` from raw durable state, including stale values
+already present on the thread row itself. The repository now derives approval
+metadata only from readable projected permissions and explicitly clears stale
+thread-row approval metadata when the unreadable row is a plan-approval pause,
+so corrupt plan-approval rows no longer leak inconsistent approval state into
+reconnect snapshots.
 
 Evidence anchors:
 
@@ -514,7 +516,7 @@ Evidence anchors:
 
 Verification note:
 
-- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "unreadable_plan_approval_row_does_not_seed_pending_approval or unreadable_durable_permission_degrades_snapshot_without_crashing"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "unreadable_plan_approval_row"`
 
 ### Audit 4 unreadable durable permission projection note
 

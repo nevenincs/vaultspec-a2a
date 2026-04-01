@@ -294,6 +294,9 @@ async def enrich_snapshot_from_durable_state(
                 snapshot.execution_readiness = (
                     RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
                 )
+                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
+                    snapshot.approval_status = None
+                    snapshot.approval_request_id = None
                 continue
             snapshot.pending_permissions.append(projected)
         if snapshot.approval_status is None:

@@ -252,7 +252,8 @@ Progress note:
 Audit `4` also closed a mirrored approval-state leak in that same path.
 Unreadable plan-approval rows no longer seed `approval_status` or
 `approval_request_id` from raw durable state once the permission itself has
-been rejected as unreadable.
+been rejected as unreadable, and stale thread-row approval metadata is now
+cleared under the same corruption condition.
 
 Progress note:
 Audit `4` now also fails closed on unreadable durable permission rows during

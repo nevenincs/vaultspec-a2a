@@ -189,6 +189,14 @@ memory, and the permission-response guard. Stale outward-facing request ids
 therefore fail closed instead of remaining resumable after a newer interrupt
 has taken over the thread.
 
+Progress note:
+Audit `4` is now grounded in a concrete replay/bookkeeping correction. The
+successful permission-response path now verifies that `permission_response_submitted`
+is recorded as both requested and applied after a resume dispatch succeeds,
+and the repair transition helper now stamps the applied action correctly in
+the durable thread row. That keeps restart and reconciliation logic aligned
+with checkpoint truth.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -224,7 +232,10 @@ has taken over the thread.
   aggregator memory, and reconnect projection as an explicit regression risk.
 - Audit 4: persistence, corruption, and restart resumability.
   Cover checkpoint replay, restart after interruption, degraded
-  snapshots, and corruption surfacing instead of silent repair.
+  snapshots, and corruption surfacing instead of silent repair. The
+  applied repair transition for a successful permission response is now
+  recorded correctly, so the restart lineage stays aligned with the
+  durable resume outcome.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

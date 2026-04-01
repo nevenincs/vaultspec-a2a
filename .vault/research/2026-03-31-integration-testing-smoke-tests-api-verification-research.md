@@ -331,6 +331,18 @@ its own audit concern was necessary because drift between those surfaces can
 create false resumability even when the underlying LangGraph interrupt state is
 correct.
 
+### Audit 4 replay and bookkeeping note
+
+LangGraph replay semantics keep Audit `4` focused on checkpoint truth rather
+than gateway memory. Resume re-enters the node from the checkpoint boundary,
+so the durable repair row has to distinguish requested and applied actions
+correctly. The repository now does that on the successful permission-response
+path: `permission_response_submitted` is recorded as both requested and
+applied after the resume dispatch succeeds, and the repair transition helper
+now stamps the applied action in the durable thread row. That keeps restart
+and reconciliation logic aligned with replay truth instead of mirrored guess
+state.
+
 Evidence anchors:
 
 - `src/vaultspec_a2a/control/permission_service.py`

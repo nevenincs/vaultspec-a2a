@@ -357,6 +357,25 @@ Verification note:
 - compose-backed service verification is green again in this session, including
   `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
 
+### Audit 4 execution-state staleness note
+
+Audit `4` also exposed a restart-specific projection hazard below the
+permission layer. The repository keeps the last good execution-state
+projection when a later worker heartbeat is degraded and carries no new
+checkpoint payload. That preservation is correct, but the row must not also
+adopt the thread's newer `recovery_epoch`, because doing so makes an old
+checkpoint snapshot look fresh after restart. The repository now keeps the
+older `recovery_epoch` on degraded-only updates, which means stale execution
+state is still surfaced explicitly through
+`execution_state_projection_stale` when the thread has advanced to a newer
+recovery epoch without a matching fresh projection.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/database/thread_repository.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_projection.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

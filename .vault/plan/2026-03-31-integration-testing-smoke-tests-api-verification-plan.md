@@ -197,6 +197,14 @@ and the repair transition helper now stamps the applied action correctly in
 the durable thread row. That keeps restart and reconciliation logic aligned
 with checkpoint truth.
 
+Progress note:
+Audit `4` also now covers degraded execution-state persistence after restart.
+When the worker only emits a degraded heartbeat and no fresh checkpoint
+payload, the repository keeps the last good execution-state snapshot but no
+longer refreshes its `recovery_epoch`. That preserves the stale-projection
+signal instead of letting an older checkpoint snapshot masquerade as current
+after reconciliation has moved the thread into a newer recovery epoch.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -234,8 +242,9 @@ with checkpoint truth.
   Cover checkpoint replay, restart after interruption, degraded
   snapshots, and corruption surfacing instead of silent repair. The
   applied repair transition for a successful permission response is now
-  recorded correctly, so the restart lineage stays aligned with the
-  durable resume outcome.
+  recorded correctly, and degraded-only execution-state updates now keep
+  stale recovery epochs visible instead of masking them, so the restart
+  lineage stays aligned with the durable resume outcome.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

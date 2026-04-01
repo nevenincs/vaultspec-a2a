@@ -36,6 +36,7 @@ Resolved on `audit3`:
 Resolved on `audit4`:
 
 - REVIEW-011
+- REVIEW-012
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
@@ -51,6 +52,9 @@ The current service surface can expose a projected pending permission before the
 
 REVIEW-011 | LOW | `mark_permission_response_applied` recorded the requested action instead of the applied action
 Audit `4` found that the repair transition helper for a successful permission response was still stamping `last_requested_action` even though the durable resume path had already succeeded and the thread row should have reflected the applied transition. LangGraph replay semantics make this distinction important because the worker can re-enter from the checkpoint boundary, so the durable repair row is part of the restart truth, not just bookkeeping noise. The issue was confirmed by the real `/api/permissions/{request_id}/respond` success path and fixed by switching the applied transition to `last_applied_action`; compose-backed service verification for `src/vaultspec_a2a/service_tests/test_permissions_resume.py` passed after the patch. Evidence anchors: `src/vaultspec_a2a/control/repair_transitions.py`, `src/vaultspec_a2a/control/permission_service.py`, `src/vaultspec_a2a/database/reconciliation.py`, `src/vaultspec_a2a/service_tests/test_permissions_resume.py`.
+
+REVIEW-012 | MEDIUM | Degraded execution-state heartbeats could mask stale checkpoint lineage by overwriting `recovery_epoch`
+Audit `4` found that `record_thread_execution_state()` was preserving the last good checkpoint snapshot on degraded-only updates, but it was still refreshing the row's `recovery_epoch` to match the thread. After restart or reconciliation, that let an older execution-state snapshot look current even though no fresh checkpoint payload had been recorded for the new recovery epoch. The fix keeps the previous `recovery_epoch` when the update is degraded-only, and the projection layer now continues to surface `execution_state_projection_stale` until a real fresh execution-state payload arrives. Evidence anchors: `src/vaultspec_a2a/database/thread_repository.py`, `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_projection.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

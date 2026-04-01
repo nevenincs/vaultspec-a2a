@@ -294,8 +294,8 @@ async def record_thread_execution_state(
             existing.next_nodes_json = next_nodes_json
             existing.interrupt_types_json = interrupt_types_json
             existing.tasks_json = tasks_json
+            existing.recovery_epoch = thread.recovery_epoch
         existing.recorded_at = _utcnow()
-        existing.recovery_epoch = thread.recovery_epoch
         existing.degraded_reasons_json = degraded_reasons_json
         await session.flush()
         return existing

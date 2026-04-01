@@ -53,7 +53,7 @@ async def mark_permission_response_applied(
         thread_id,
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
-        last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        last_applied_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
     )
 
 

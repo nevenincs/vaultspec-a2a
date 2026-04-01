@@ -259,7 +259,10 @@ async def _handle_permission_event(
         else:
             request_id = str(payload.get("request_id", ""))
             permission = await get_permission_request(db, request_id)
-            if permission is not None:
+            if (
+                permission is not None
+                and permission.request_status == "answered_pending_apply"
+            ):
                 fx_res = compute_permission_resolution_effects(
                     permission.response_option_id,
                     permission.pause_reason_type,

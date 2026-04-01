@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 
 from ...control.config import settings
 from ...database import create_control_action, record_permission_request
+from ...database.models import ThreadModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ControlActionType
 from .conftest import make_app
@@ -548,6 +549,50 @@ class TestPermissionRespond:
         assert record.dispatch_id == dispatch["dispatch_id"]
         assert record.action == "resume"
         assert record.option_id == "allow_once"
+
+    def test_respond_success_marks_permission_response_submitted_as_applied(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Successful resume dispatch must stamp the repair row as applied."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-applied-state"
+            self._seed_permission(
+                session_factory, thread_id=thread_id, request_id=request_id
+            )
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+
+        async def _assert_state() -> None:
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                assert thread.repair_status == "healthy"
+                assert thread.execution_readiness == "healthy"
+                assert (
+                    thread.last_requested_action
+                    == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+                )
+                assert (
+                    thread.last_applied_action
+                    == ControlActionType.PERMISSION_RESPONSE_SUBMITTED.value
+                )
+
+        asyncio.run(_assert_state())
 
     def test_resume_dispatch_includes_team_preset(
         self, session_factory, checkpointer

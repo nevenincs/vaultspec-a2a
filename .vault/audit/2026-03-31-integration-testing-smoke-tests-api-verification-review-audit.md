@@ -39,6 +39,7 @@ Resolved on `audit4`:
 - REVIEW-012
 - REVIEW-013
 - REVIEW-014
+- REVIEW-015
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
@@ -63,6 +64,9 @@ Audit `4` found that the pure startup reconciliation policy still classified a t
 
 REVIEW-014 | LOW | Message-followup bookkeeping reused the requested enum for the applied transition
 Audit `4` found a smaller mirrored-state drift in the follow-up message path: `mark_message_followup_applied()` still stamped `MESSAGE_FOLLOWUP_REQUESTED`, and the pure repair-policy map keyed the applied phase off the requested enum as well. That left the durable repair row and policy lookup slightly out of sync with the actual post-dispatch state even though the follow-up request had already been applied successfully. The fix separates the requested and applied enums, and the new API and pure-policy regressions prove the durable row records `message_followup_requested` and `message_followup_applied` distinctly after a successful follow-up dispatch. Evidence anchors: `src/vaultspec_a2a/control/repair_transitions.py`, `src/vaultspec_a2a/thread/repair_policy.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`, `src/vaultspec_a2a/thread/tests/test_repair_policy.py`.
+
+REVIEW-015 | LOW | Dispatch failures left repair/readiness metadata stale after the worker became unreachable
+Audit `4` found that several dispatch-failure branches were already marking the thread row `FAILED`, but the durable repair and readiness fields could still look healthy after a worker-unreachable failure. That projected the wrong operator state at the repo boundary: the thread was terminally failed, but the row still suggested it was healthy enough for normal execution. The fix adds a shared dispatch-failure transition that stamps `operator_intervention_required` across message, permission, thread, and diagnostics failure paths, and the new direct regressions prove both service dispatch failure and websocket `mark_thread_failed()` now degrade the durable row consistently. Evidence anchors: `src/vaultspec_a2a/control/repair_transitions.py`, `src/vaultspec_a2a/control/message_service.py`, `src/vaultspec_a2a/control/permission_service.py`, `src/vaultspec_a2a/control/thread_service.py`, `src/vaultspec_a2a/control/diagnostics.py`, `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

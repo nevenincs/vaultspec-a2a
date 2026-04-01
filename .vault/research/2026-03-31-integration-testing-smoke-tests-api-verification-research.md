@@ -409,6 +409,26 @@ Evidence anchors:
 - `src/vaultspec_a2a/api/tests/test_endpoints.py`
 - `src/vaultspec_a2a/thread/tests/test_repair_policy.py`
 
+### Audit 4 dispatch-failure repair/readiness degradation note
+
+Audit `4` also exposed a failure-path durability gap below the message and
+permission services. Several dispatch-failure branches were already setting the
+thread row to `FAILED`, but the repair and readiness columns could remain stale
+and still look healthy after the worker became unreachable. The shared
+`mark_dispatch_failed()` transition now degrades those rows to
+`operator_intervention_required` across the dispatch failure surfaces so the
+durable thread row reflects the true operator state after an unreachable-worker
+failure.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/repair_transitions.py`
+- `src/vaultspec_a2a/control/message_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/diagnostics.py`
+- `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

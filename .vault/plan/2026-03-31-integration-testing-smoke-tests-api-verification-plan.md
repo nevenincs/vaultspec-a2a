@@ -213,6 +213,16 @@ falls through to `repair_needed` / `checkpoint_unavailable`, and the new pure
 plus database-backed tests prove that checkpoint truth must still win over a
 surviving permission row at startup.
 
+Progress note:
+Audit `4` now also degrades dispatch failures through a shared repair
+transition. When the worker cannot be reached, the control layer no longer
+leaves `repair_status` and `execution_readiness` looking healthy on a failed
+thread row. The new `mark_dispatch_failed()` helper stamps
+`operator_intervention_required` across message, permission, thread, and
+diagnostics failure paths, and the regression tests prove both service
+dispatch failures and websocket `mark_thread_failed()` now surface the degraded
+state durably.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,

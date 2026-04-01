@@ -800,6 +800,73 @@ class TestPermissionRespond:
         )
         assert len(worker.dispatches) == 1
 
+    def test_rejects_stale_permission_request_when_newer_interrupt_exists(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Only the active pending interrupt for a thread may be resumed."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permissions() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=old_request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow old action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                await record_permission_request(
+                    session,
+                    request_id=new_request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow new action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            old_request_id = f"{thread_id}:req-old"
+            new_request_id = f"{thread_id}:req-new"
+            asyncio.run(_seed_permissions())
+
+            worker.dispatches.clear()
+            stale = client.post(
+                f"/api/permissions/{old_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+            active = client.post(
+                f"/api/permissions/{new_request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        assert stale.status_code == 409
+        assert stale.json()["detail"] == "Permission request is no longer pending"
+        assert active.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == "allow_once"
+
     def test_rejects_stale_second_response_after_submission(
         self, session_factory, checkpointer
     ) -> None:

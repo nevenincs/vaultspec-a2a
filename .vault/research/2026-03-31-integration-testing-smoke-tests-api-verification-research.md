@@ -305,6 +305,47 @@ Mission alignment:
 - resumed work is now certified both at the service lane and at a fast
   LangGraph-native worker boundary
 
+### Audit 3 active-interrupt binding notes
+
+Audit `3` closes a LangGraph-specific boundary that the repository, not the
+library, has to own. LangGraph gives thread-scoped checkpoint-backed resume via
+`Command(resume=...)`, but it does not define the repository's outward-facing
+permission request identity or guarantee that multiple visible pending requests
+for one thread are independently resumable. That means the gateway/control
+layer must bind public request ids to the one currently active interrupt for
+that thread.
+
+The implemented rule is now explicit:
+
+- there is one active pending permission request per thread
+- durable permission rows supersede older pending requests when a newer
+  permission interrupt arrives
+- the aggregator replaces stale in-memory pending requests for the same thread
+- the permission-response API rejects stale request ids even if an older row is
+  still present, and only dispatches resume for the active request
+
+This audit also surfaced a mirrored-logic risk. Active pending permission
+identity had effectively been implemented in parallel across durable rows,
+aggregator memory, and reconnect snapshot assembly. Treating that mirroring as
+its own audit concern was necessary because drift between those surfaces can
+create false resumability even when the underlying LangGraph interrupt state is
+correct.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/event_handlers.py`
+- `src/vaultspec_a2a/streaming/emitters.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/streaming/tests/test_aggregator.py`
+
+Verification note:
+
+- fast API and aggregator coverage for Audit `3` is green
+- compose-backed service verification for this slice remains blocked in this
+  Codex shell because Docker is not resolving on `PATH` here, not because of a
+  known behavioral regression in the code change
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

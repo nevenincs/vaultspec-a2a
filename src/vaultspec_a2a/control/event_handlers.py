@@ -215,13 +215,11 @@ async def _handle_permission_event(
             tool_call = payload.get("tool_call")
             pause_reason_type = classify_permission_pause_reason(tool_call)
             fx = compute_permission_request_effects(pause_reason_type)
-            if fx.is_plan_approval:
-                await supersede_permission_requests(
-                    db,
-                    thread_id=thread_id,
-                    pause_reason_type=pause_reason_type,
-                    except_request_id=request_id,
-                )
+            await supersede_permission_requests(
+                db,
+                thread_id=thread_id,
+                except_request_id=request_id,
+            )
             await record_permission_request(
                 db,
                 request_id=request_id,

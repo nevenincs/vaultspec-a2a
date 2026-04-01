@@ -134,6 +134,22 @@ class EventEmitters:
         """Remove a permission request from the pending set."""
         self._pending_permissions.pop(request_id, None)
 
+    def _replace_thread_pending_permission(
+        self,
+        *,
+        thread_id: str,
+        request_id: str,
+        event: PermissionRequest,
+    ) -> None:
+        stale_request_ids = [
+            rid
+            for rid, (pending, _created_at) in self._pending_permissions.items()
+            if pending.thread_id == thread_id and rid != request_id
+        ]
+        for stale_request_id in stale_request_ids:
+            self._pending_permissions.pop(stale_request_id, None)
+        self._pending_permissions[request_id] = (event, time.monotonic())
+
     def prune_stale_permissions(self, max_age_seconds: float = 300.0) -> int:
         """Remove permission requests older than *max_age_seconds*."""
         cutoff = time.monotonic() - max_age_seconds
@@ -369,7 +385,11 @@ class EventEmitters:
             tool_call=tool_call,
             tool_kind=resolved_kind,
         )
-        self._pending_permissions[request_id] = (event, time.monotonic())
+        self._replace_thread_pending_permission(
+            thread_id=thread_id,
+            request_id=request_id,
+            event=event,
+        )
         await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
 
     async def emit_artifact_update(
@@ -530,17 +550,19 @@ class EventEmitters:
                             "kind": str(map_acp_option_kind(opt.get("option_id", ""))),
                         }
                     )
-                self._pending_permissions[request_id] = (
-                    PermissionRequest(
-                        thread_id=thread_id,
-                        agent_id=payload.get("agent_id", ""),
-                        timestamp=datetime.now(UTC).timestamp(),
-                        request_id=request_id,
-                        description=description,
-                        options=perm_options,
-                        tool_call=str(tool_call) if tool_call is not None else None,
-                    ),
-                    time.monotonic(),
+                event = PermissionRequest(
+                    thread_id=thread_id,
+                    agent_id=payload.get("agent_id", ""),
+                    timestamp=datetime.now(UTC).timestamp(),
+                    request_id=request_id,
+                    description=description,
+                    options=perm_options,
+                    tool_call=str(tool_call) if tool_call is not None else None,
+                )
+                self._replace_thread_pending_permission(
+                    thread_id=thread_id,
+                    request_id=request_id,
+                    event=event,
                 )
                 self.next_sequence(thread_id)
 

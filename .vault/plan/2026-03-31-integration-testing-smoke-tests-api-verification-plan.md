@@ -182,6 +182,13 @@ replay coverage for malformed stored rejection payloads in
 therefore falls back to current durable permission state and preserves the
 same deterministic conflict instead of weakening the control surface.
 
+Progress note:
+Audit `3` is now complete. The repository now enforces one active pending
+permission request per thread across durable permission state, aggregator
+memory, and the permission-response guard. Stale outward-facing request ids
+therefore fail closed instead of remaining resumable after a newer interrupt
+has taken over the thread.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -209,11 +216,12 @@ same deterministic conflict instead of weakening the control surface.
   and permission-response path to agree before a thread is treated as
   safely resumable.
 - Audit 3: active-interrupt binding.
-  Cover binding of permission responses to the correct currently active
+  Completed. Keep binding of permission responses to the correct currently active
   interrupt for the thread, prevention of stale request replay across newer
   pauses, and proof that the gateway/control boundary applies responses only
   to the live interrupt contract rather than to a projected or superseded
-  request surface.
+  request surface. Treat mirrored active-request logic across durable state,
+  aggregator memory, and reconnect projection as an explicit regression risk.
 - Audit 4: persistence, corruption, and restart resumability.
   Cover checkpoint replay, restart after interruption, degraded
   snapshots, and corruption surfacing instead of silent repair.
@@ -237,6 +245,11 @@ same deterministic conflict instead of weakening the control surface.
 - Audit 10: artifact persistence and file-removal safety.
   Cover artifact attribution, cross-thread isolation, persistence across
   turns, explicit removal flow, and approval-gated deletion behavior.
+
+Verification note:
+Audit `3` has focused fast coverage, but the compose-backed service lane for
+this slice still needs to be rerun from an environment where Docker resolves on
+`PATH`. The current Codex shell is not satisfying that prerequisite.
 
 ## Resume Eligibility Clarification
 

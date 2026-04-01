@@ -452,6 +452,25 @@ Verification note:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_projection.py -q`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
 
+### Audit 4 missing-thread checkpoint-unverified precedence note
+
+Audit `4` also exposed a websocket diagnostics precedence gap. LangGraph's
+checkpoint remains the authoritative persistence surface, so if checkpoint
+truth cannot be verified the gateway must not overstate confidence just
+because an orphaned durable execution-state row still exists. The repository
+now classifies that condition as `THREAD_STATE_UNVERIFIED` instead of
+`THREAD_STATE_DRIFT`, which keeps the operator signal aligned with missing
+checkpoint truth rather than stale residue.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/diagnostics.py`
+- `src/vaultspec_a2a/api/tests/test_app.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k classify_missing_ws_thread`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

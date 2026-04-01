@@ -233,6 +233,14 @@ Unreadable execution-state projection now degrades `repair_status` and
 projection test and the real `AsyncSqliteSaver` thread-state assembly test are
 green.
 
+Progress note:
+Audit `4` now also treats missing-thread websocket diagnostics as
+checkpoint-first. If checkpoint truth cannot be verified, the gateway no
+longer reports `THREAD_STATE_DRIFT` just because an orphaned execution-state
+row still exists. The missing-thread classifier now returns
+`THREAD_STATE_UNVERIFIED` for that condition so operators see backend
+uncertainty rather than stale durable residue.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -283,6 +291,10 @@ green.
   replay remains authoritative, but corrupted execution-state projection
   must still degrade public readiness to `operator_intervention_required`
   instead of inheriting a healthy durable row.
+  The same checkpoint-first rule now also applies to missing-thread websocket
+  diagnostics: when checkpoint truth cannot be verified, orphaned execution
+  state must not be surfaced as drift with stronger certainty than the
+  backend can actually provide.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

@@ -97,6 +97,17 @@ async def classify_missing_ws_thread(
         "checkpoint_present": checkpoint_present,
         "checkpoint_unverified": checkpoint_unverified,
     }
+    if checkpoint_unverified:
+        return MissingThreadClassification(
+            thread_id=thread_id,
+            code="THREAD_STATE_UNVERIFIED",
+            message=(
+                "Thread is missing from the gateway database and checkpoint truth "
+                "could not be verified. Retry after the backend is healthy."
+            ),
+            recoverable=True,
+            metadata=metadata,
+        )
     if execution_state_present or checkpoint_present:
         return MissingThreadClassification(
             thread_id=thread_id,
@@ -105,17 +116,6 @@ async def classify_missing_ws_thread(
                 "Thread is missing from the gateway database, but durable backend "
                 "state still exists. Refresh thread state or trigger repair before "
                 "sending follow-up commands."
-            ),
-            recoverable=True,
-            metadata=metadata,
-        )
-    if checkpoint_unverified:
-        return MissingThreadClassification(
-            thread_id=thread_id,
-            code="THREAD_STATE_UNVERIFIED",
-            message=(
-                "Thread is missing from the gateway database and checkpoint truth "
-                "could not be verified. Retry after the backend is healthy."
             ),
             recoverable=True,
             metadata=metadata,

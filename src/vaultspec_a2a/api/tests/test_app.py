@@ -12,6 +12,7 @@ import httpx
 import pytest
 from httpx import ASGITransport
 from langgraph.checkpoint.base import empty_checkpoint
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.circuit_breaker import WorkerCircuitBreaker
 from ...control.diagnostics import classify_missing_ws_thread
@@ -23,6 +24,7 @@ from ...control.worker_management import (
     _build_worker_restart_detail,
     _worker_stderr_log_path,
 )
+from ...database.models import ThreadExecutionStateModel
 from ..websocket import WebSocketCommandRejectedError
 from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
@@ -235,6 +237,51 @@ async def test_classify_missing_ws_thread_reports_state_drift(
     assert result.metadata is not None
     assert result.metadata["execution_state_present"] is False
     assert result.metadata["checkpoint_present"] is True
+
+
+@pytest.mark.asyncio
+async def test_classify_missing_ws_thread_prefers_unverified_over_execution_state(
+    session_factory,
+) -> None:
+    """Checkpoint uncertainty must outrank orphaned execution-state residue."""
+    case_dir = (
+        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    checkpoints_file = case_dir / "closed-checkpoints.db"
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        pass
+
+    async with session_factory() as session:
+        session.add(
+            ThreadExecutionStateModel(
+                thread_id="unverified-thread",
+                checkpoint_id="cp-orphaned",
+                parent_checkpoint_id=None,
+                recovery_epoch=0,
+                task_count=0,
+                interrupt_count=0,
+                next_nodes_json="[]",
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
+            )
+        )
+        await session.commit()
+
+    result = await classify_missing_ws_thread(
+        thread_id="unverified-thread",
+        session_factory=session_factory,
+        checkpointer=checkpointer,
+    )
+
+    assert result.code == "THREAD_STATE_UNVERIFIED"
+    assert result.metadata == {
+        "execution_state_present": True,
+        "checkpoint_present": False,
+        "checkpoint_unverified": True,
+    }
 
 
 @pytest.mark.asyncio

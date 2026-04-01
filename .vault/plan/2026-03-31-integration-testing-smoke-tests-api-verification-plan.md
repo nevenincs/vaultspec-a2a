@@ -241,6 +241,21 @@ row still exists. The missing-thread classifier now returns
 `THREAD_STATE_UNVERIFIED` for that condition so operators see backend
 uncertainty rather than stale durable residue.
 
+Progress note:
+Audit `4` now also covers unreadable durable permission rows in the
+reconnect/thread-state path. The state surface no longer crashes or silently
+trusts corrupted permission options; it degrades the snapshot, skips the
+unreadable permission, and preserves checkpoint-backed replay semantics when
+checkpoint truth is available.
+
+Progress note:
+Audit `4` now also fails closed on unreadable durable permission rows during
+reconnect snapshot assembly. Corrupted `permission_requests.allowed_options_json`
+no longer gets to crash `build_thread_state()` or `/api/threads/{id}/state`.
+The unreadable permission is omitted, the snapshot is marked degraded, and
+readiness is set to `operator_intervention_required` while checkpoint-backed
+replay semantics remain intact.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -295,6 +310,13 @@ uncertainty rather than stale durable residue.
   diagnostics: when checkpoint truth cannot be verified, orphaned execution
   state must not be surfaced as drift with stronger certainty than the
   backend can actually provide.
+  The audit also now covers unreadable durable permission rows: malformed
+  permission option payloads in the DB must degrade the reconnect snapshot to
+  `operator_intervention_required` rather than crashing state assembly or
+  leaving the thread looking healthy.
+  The same corruption handling now also applies to unreadable durable
+  permission rows used only for public state projection: malformed option JSON
+  must degrade and fail closed, not take down the reconnect/state surface.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

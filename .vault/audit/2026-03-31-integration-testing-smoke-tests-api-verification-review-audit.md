@@ -42,6 +42,8 @@ Resolved on `audit4`:
 - REVIEW-015
 - REVIEW-016
 - REVIEW-017
+- REVIEW-018
+- REVIEW-018
 
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
@@ -75,6 +77,9 @@ Audit `4` found that `enrich_snapshot_from_execution_state()` already marked the
 
 REVIEW-017 | MEDIUM | Missing-thread websocket diagnostics overstated drift when checkpoint truth was unverified
 Audit `4` found that `classify_missing_ws_thread()` returned `THREAD_STATE_DRIFT` as soon as any durable residue existed, even if checkpoint verification had already timed out or failed. That inverted the checkpoint-first contract already used elsewhere in the repo: a stale execution-state row could make the gateway sound more certain than the backend truth allowed. The fix makes checkpoint uncertainty win over drift for this path, so missing-thread websocket commands now return `THREAD_STATE_UNVERIFIED` whenever checkpoint truth cannot be verified, even if orphaned execution-state residue is still present. The new app-level regression proves that behavior with a real closed `AsyncSqliteSaver` plus a durable execution-state row. Evidence anchors: `src/vaultspec_a2a/control/diagnostics.py`, `src/vaultspec_a2a/api/tests/test_app.py`.
+
+REVIEW-018 | MEDIUM | Corrupted durable permission rows could crash reconnect/thread-state projection
+Audit `4` found that `_permission_data_from_model()` parsed `permission.allowed_options_json` with a raw `json.loads(...)` during durable snapshot enrichment. That made a malformed `permission_requests` row capable of aborting `build_thread_state()` and the public `/api/threads/{id}/state` surface before any checkpoint-backed replay logic could even run. The fix makes unreadable durable permission rows fail closed instead of raising: snapshot assembly now records `permission_projection_unreadable`, omits the unreadable permission from the projected state, and degrades readiness to `operator_intervention_required`. The new regressions prove both the direct thread-state assembly path and the public state endpoint stay alive under that corruption mode. Evidence anchors: `src/vaultspec_a2a/control/projection.py`, `src/vaultspec_a2a/api/tests/test_thread_state_service.py`, `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

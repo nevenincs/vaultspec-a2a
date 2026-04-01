@@ -19,8 +19,8 @@ import logging
 from fastapi.testclient import TestClient
 
 from ...control.config import settings
-from ...database import create_control_action, record_permission_request
-from ...database.models import ThreadModel
+from ...database import create_control_action, create_thread, record_permission_request
+from ...database.models import PermissionRequestModel, ThreadModel
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ControlActionType
 from .conftest import make_app
@@ -217,6 +217,67 @@ class TestThreadState:
         assert data["task_count"] == 0
         assert data["pending_interrupt_count"] == 0
         assert data["execution_tasks"] == []
+
+    def test_state_handles_unreadable_durable_permission_rows(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Corrupted durable permission rows must not crash the state endpoint."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _corrupt_permission() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-corrupt-permission-state"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-corrupt-permission-state",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-corrupt-permission-state",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="perm-corrupt",
+                    thread_id="thread-corrupt-permission-state",
+                    pause_reason_type="permission_request",
+                    description="Allow file write?",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow Once"}],
+                    tool_call="bash",
+                )
+                permission = await session.get(
+                    PermissionRequestModel,
+                    "perm-corrupt",
+                )
+                assert permission is not None
+                permission.allowed_options_json = '{"broken":'
+                await session.commit()
+
+        asyncio.run(_corrupt_permission())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-corrupt-permission-state/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["snapshot_complete"] is False
+        assert "permission_projection_unreadable" in data["degraded_reasons"]
+        assert data["repair_status"] == "operator_intervention_required"
+        assert data["execution_readiness"] == "operator_intervention_required"
 
 
 # ---------------------------------------------------------------------------

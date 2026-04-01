@@ -279,11 +279,23 @@ async def enrich_snapshot_from_durable_state(
         existing = {
             permission.request_id for permission in snapshot.pending_permissions
         }
-        snapshot.pending_permissions.extend(
-            _permission_data_from_model(permission)
-            for permission in durable_permissions
-            if permission.request_id not in existing
-        )
+        for permission in durable_permissions:
+            if permission.request_id in existing:
+                continue
+            try:
+                projected = _permission_data_from_model(permission)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                snapshot.snapshot_complete = False
+                if "permission_projection_unreadable" not in snapshot.degraded_reasons:
+                    snapshot.degraded_reasons.append("permission_projection_unreadable")
+                snapshot.repair_status = (
+                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+                )
+                snapshot.execution_readiness = (
+                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+                )
+                continue
+            snapshot.pending_permissions.append(projected)
         if snapshot.approval_status is None:
             for permission in durable_permissions:
                 if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:

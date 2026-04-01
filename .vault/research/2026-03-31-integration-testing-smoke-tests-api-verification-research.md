@@ -471,6 +471,63 @@ Verification note:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k classify_missing_ws_thread`
 
+### Audit 4 unreadable durable permission corruption note
+
+Audit `4` also exposed another reconnect/state-corruption gap: a malformed
+durable permission row could abort snapshot assembly because
+`_permission_data_from_model()` raw-loaded `allowed_options_json` without a
+fail-closed boundary. The repository now catches decode/value errors in
+`enrich_snapshot_from_durable_state()`, records
+`permission_projection_unreadable`, marks the snapshot incomplete, and
+degrades readiness to `operator_intervention_required` while skipping the
+unreadable permission row.
+
+Checkpoint authority remains intact, so when checkpoint truth is present the
+snapshot can still report `replay_status="durable"` while surfacing the
+permission-row corruption at the repo boundary.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestThreadState or rejects_permission_request_with_malformed_durable_option_json or rejects_permission_request_without_valid_durable_options"`
+
+### Audit 4 unreadable durable permission projection note
+
+Audit `4` also exposed a corruption gap in the durable permission projection
+path for reconnect snapshots. LangGraph checkpoint state remains authoritative
+for replay and interrupt resume, but unreadable auxiliary durable permission
+rows are still repo-boundary corruption and must not crash the public thread
+state surface. The repository now treats malformed `allowed_options_json` as
+degraded durable state: snapshot assembly remains alive, the unreadable
+permission is omitted, and readiness is failed closed to
+`operator_intervention_required`.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Grounding:
+
+- LangGraph interrupts and durable execution remain checkpoint-backed, so
+  corrupted repo-owned auxiliary rows must degrade operator confidence rather
+  than override checkpoint truth:
+  [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts#interrupts)
+  and
+  [Durable execution](https://docs.langchain.com/oss/python/langgraph/durable-execution#durable-execution).
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestThreadState or rejects_permission_request_with_malformed_durable_option_json or rejects_permission_request_without_valid_durable_options"`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

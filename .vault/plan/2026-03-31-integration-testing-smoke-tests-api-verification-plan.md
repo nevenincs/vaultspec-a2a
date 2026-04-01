@@ -255,6 +255,10 @@ surviving permission row at startup.
   reconciliation now remains checkpoint-first when a pending permission
   row survives a restart, so the restart lineage stays aligned with the
   durable resume outcome.
+  The same audit also covers mirrored follow-up bookkeeping drift: the
+  follow-up success path now distinguishes `message_followup_requested`
+  from `message_followup_applied`, and the pure repair-policy mapping now
+  keys the applied phase off the applied enum.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

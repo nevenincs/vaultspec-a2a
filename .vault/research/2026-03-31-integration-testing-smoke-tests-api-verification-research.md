@@ -392,6 +392,23 @@ Evidence anchors:
 - `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
 - `src/vaultspec_a2a/database/tests/test_reconciliation.py`
 
+### Audit 4 message-followup bookkeeping note
+
+Audit `4` also uncovered a mirrored follow-up bookkeeping drift. The
+successful follow-up dispatch path now records `message_followup_requested`
+as the requested action and `message_followup_applied` as the applied action,
+and the pure repair-policy lookup now keys the applied phase off the applied
+enum instead of reusing the requested one. That keeps the durable repair row
+and the policy map aligned with the actual post-dispatch transition instead of
+a mirrored placeholder.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/repair_transitions.py`
+- `src/vaultspec_a2a/thread/repair_policy.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/thread/tests/test_repair_policy.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

@@ -376,6 +376,22 @@ Evidence anchors:
 - `src/vaultspec_a2a/control/projection.py`
 - `src/vaultspec_a2a/api/tests/test_projection.py`
 
+### Audit 4 startup reconciliation precedence note
+
+Audit `4` now also treats startup reconciliation ordering as checkpoint-first
+rather than permission-first. A durable pending permission row is not enough
+to prove a thread is resumable if the checkpoint probe comes back missing.
+The repository now only classifies the thread as `paused_resumable` when both
+the durable permission row and the checkpoint truth agree; otherwise the
+startup reconciler marks the thread `repair_needed` with
+`checkpoint_unavailable`.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/lifecycle/reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
+- `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

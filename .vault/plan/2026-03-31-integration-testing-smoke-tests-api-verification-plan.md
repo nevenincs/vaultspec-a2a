@@ -205,6 +205,14 @@ longer refreshes its `recovery_epoch`. That preserves the stale-projection
 signal instead of letting an older checkpoint snapshot masquerade as current
 after reconciliation has moved the thread into a newer recovery epoch.
 
+Progress note:
+Audit `4` now also treats startup reconciliation as checkpoint-first. If a
+durable pending permission survives a restart but the checkpoint probe is
+missing, the reconciler no longer marks the thread `paused_resumable`. It now
+falls through to `repair_needed` / `checkpoint_unavailable`, and the new pure
+plus database-backed tests prove that checkpoint truth must still win over a
+surviving permission row at startup.
+
 - Audit 2B1: service-test Docker cleanup hygiene.
   Identify why stale `vaultspec-service-tests-*` compose projects can
   remain running after interrupted or otherwise incomplete sessions,
@@ -243,8 +251,10 @@ after reconciliation has moved the thread into a newer recovery epoch.
   snapshots, and corruption surfacing instead of silent repair. The
   applied repair transition for a successful permission response is now
   recorded correctly, and degraded-only execution-state updates now keep
-  stale recovery epochs visible instead of masking them, so the restart
-  lineage stays aligned with the durable resume outcome.
+  stale recovery epochs visible instead of masking them. Startup
+  reconciliation now remains checkpoint-first when a pending permission
+  row survives a restart, so the restart lineage stays aligned with the
+  durable resume outcome.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

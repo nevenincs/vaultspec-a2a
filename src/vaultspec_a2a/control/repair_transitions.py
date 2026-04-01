@@ -89,3 +89,18 @@ async def mark_cancel_requested(db: AsyncSession, thread_id: str) -> ThreadModel
         execution_readiness=RepairStatus.CANCEL_PENDING.value,
         last_requested_action=ControlActionType.CANCEL,
     )
+
+
+async def mark_dispatch_failed(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    reason: str = "Worker dispatch failed",
+) -> ThreadModel | None:
+    return await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_reason=reason,
+        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    )

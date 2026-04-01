@@ -20,6 +20,7 @@ from ..database import (
     update_thread_status,
 )
 from ..thread.enums import ThreadStatus
+from .repair_transitions import mark_dispatch_failed
 
 __all__ = [
     "MissingThreadClassification",
@@ -141,6 +142,11 @@ async def mark_thread_failed(
     try:
         async with session_factory() as db:
             await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(
+                db,
+                thread_id,
+                reason="Worker dispatch failed during websocket command handling",
+            )
             await db.commit()
     except Exception:
         logger.warning(

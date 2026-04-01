@@ -16,6 +16,7 @@ from typing import TYPE_CHECKING
 
 from ..control.dispatch import safe_dispatch
 from ..control.repair_transitions import (
+    mark_dispatch_failed,
     mark_message_followup_applied,
     mark_message_followup_requested,
 )
@@ -185,6 +186,7 @@ async def send_followup_message(
         )
         if policy.should_mark_failed:
             await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(db, thread_id)
         await db.commit()
         return MessageResult(
             action_id=action.id,

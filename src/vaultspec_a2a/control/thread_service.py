@@ -18,7 +18,11 @@ from uuid import uuid4
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
-from ..control.repair_transitions import mark_ingest_applied, mark_ingest_requested
+from ..control.repair_transitions import (
+    mark_dispatch_failed,
+    mark_ingest_applied,
+    mark_ingest_requested,
+)
 from ..database import (
     create_control_action,
     create_thread,
@@ -361,6 +365,7 @@ async def create_and_dispatch_thread(
         )
         if policy.should_mark_failed:
             await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(db, thread.id)
         await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,

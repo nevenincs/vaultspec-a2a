@@ -36,6 +36,7 @@ from ..thread.enums import (
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .dispatch import safe_dispatch
 from .repair_transitions import (
+    mark_dispatch_failed,
     mark_permission_response_applied,
     mark_permission_response_requested,
 )
@@ -550,6 +551,7 @@ async def respond_to_permission(
         )
         if policy.should_mark_failed:
             await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(db, thread_id)
         else:
             action.result_status = (
                 ControlActionResultStatus.REJECTED_INVALID_STATE.value

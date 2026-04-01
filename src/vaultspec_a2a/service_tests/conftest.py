@@ -21,19 +21,19 @@ def service_stack(request: pytest.FixtureRequest) -> ServiceStack:
     """Start the compose-backed deterministic stack once per test session."""
     stack = build_service_stack()
 
-    try:
-        stack.start()
-    except Exception as exc:  # pragma: no cover - startup failure path
-        stack.record("startup-error", {"error": repr(exc)})
-        stack.record("service-failure", [{"startup": repr(exc)}])
-        raise
-
     def _finalize() -> None:
         if FAILED_SERVICE_TESTS:
             stack.record("service-failure", FAILED_SERVICE_TESTS)
         stack.stop()
 
     request.addfinalizer(_finalize)
+
+    try:
+        stack.start()
+    except Exception as exc:  # pragma: no cover - startup failure path
+        stack.record("startup-error", {"error": repr(exc)})
+        stack.record("service-failure", [{"startup": repr(exc)}])
+        raise
     return stack
 
 

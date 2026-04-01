@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import sys
@@ -46,14 +47,25 @@ def _compose_env(ports: dict[str, int], project_name: str) -> dict[str, str]:
 
 
 def _compose_base_command(project_name: str) -> list[str]:
+    docker = _resolve_docker_executable()
     return [
-        "docker",
+        docker,
         "compose",
         "-p",
         project_name,
         "-f",
         str(COMPOSE_FILE),
     ]
+
+
+def _resolve_docker_executable() -> str:
+    """Resolve Docker from PATH only."""
+    for candidate in ("docker", "docker.exe"):
+        resolved = shutil.which(candidate)
+        if resolved is not None:
+            return resolved
+
+    raise FileNotFoundError("Docker CLI executable could not be resolved from PATH")
 
 
 def _run_compose(
@@ -131,6 +143,7 @@ class ServiceStack:
     )
     _gateway_log: Any | None = field(default=None, init=False, repr=False)
     _worker_log: Any | None = field(default=None, init=False, repr=False)
+    _stopped: bool = field(default=False, init=False, repr=False)
 
     def __post_init__(self) -> None:
         self.runtime_dir = RUNTIME_ROOT / self.project_name
@@ -307,6 +320,10 @@ class ServiceStack:
 
     def stop(self) -> None:
         """Capture diagnostics and tear the compose stack down."""
+        if self._stopped:
+            self.record("teardown", {"status": "already_stopped"})
+            return
+        self._stopped = True
         self._stop_process(self._gateway_proc)
         self._stop_process(self._worker_proc)
         if self._gateway_log is not None:
@@ -317,33 +334,86 @@ class ServiceStack:
         self._worker_log = None
         self._gateway_proc = None
         self._worker_proc = None
-        self.write_diagnostics()
-        _run_compose(
-            self.project_name,
-            "down",
-            "-v",
-            "--remove-orphans",
-            ports=self.ports,
-            timeout=300.0,
-            check=False,
-        )
+        diagnostics_error: Exception | None = None
+        try:
+            self.write_diagnostics()
+        except Exception as exc:
+            diagnostics_error = exc
+            self.record("teardown-diagnostics-error", {"error": repr(exc)})
+        finally:
+            try:
+                teardown_result = _run_compose(
+                    self.project_name,
+                    "down",
+                    "-v",
+                    "--remove-orphans",
+                    ports=self.ports,
+                    timeout=300.0,
+                    check=False,
+                )
+            except Exception as exc:
+                self.record(
+                    "teardown",
+                    {
+                        "status": "compose_down_error",
+                        "error": repr(exc),
+                    },
+                )
+            else:
+                self.record(
+                    "teardown",
+                    {
+                        "status": (
+                            "ok"
+                            if teardown_result.returncode == 0
+                            else "compose_down_failed"
+                        ),
+                        "returncode": teardown_result.returncode,
+                        "stdout": teardown_result.stdout,
+                        "stderr": teardown_result.stderr,
+                    },
+                )
+            self._write_session_summary()
+        if diagnostics_error is not None:
+            raise diagnostics_error
 
     def write_diagnostics(self) -> None:
         """Persist a lightweight session summary for debugging failed runs."""
         self.runtime_dir.mkdir(parents=True, exist_ok=True)
-        compose_logs = _run_compose(
-            self.project_name,
-            "logs",
-            "--no-color",
-            "--timestamps",
-            ports=self.ports,
-            timeout=180.0,
-            check=False,
-        )
-        (self.runtime_dir / "compose-logs.txt").write_text(
-            compose_logs.stdout + "\n" + compose_logs.stderr,
-            encoding="utf-8",
-        )
+        try:
+            compose_logs = _run_compose(
+                self.project_name,
+                "logs",
+                "--no-color",
+                "--timestamps",
+                ports=self.ports,
+                timeout=180.0,
+                check=False,
+            )
+        except Exception as exc:
+            self.record("diagnostics-compose-logs-error", {"error": repr(exc)})
+            (self.runtime_dir / "compose-logs.txt").write_text(
+                repr(exc),
+                encoding="utf-8",
+            )
+        else:
+            (self.runtime_dir / "compose-logs.txt").write_text(
+                compose_logs.stdout + "\n" + compose_logs.stderr,
+                encoding="utf-8",
+            )
+        self._write_session_summary()
+        for name, proc_path in (
+            ("gateway", self.runtime_dir / "gateway.log"),
+            ("worker", self.runtime_dir / "worker.log"),
+        ):
+            if proc_path.exists():
+                (self.runtime_dir / f"{name}-tail.txt").write_text(
+                    proc_path.read_text(encoding="utf-8", errors="replace")[-20000:],
+                    encoding="utf-8",
+                )
+
+    def _write_session_summary(self) -> None:
+        """Persist the current session summary using the latest artifacts."""
         summary = {
             "project_name": self.project_name,
             "ports": self.ports,
@@ -358,15 +428,6 @@ class ServiceStack:
             json.dumps(summary, indent=2, sort_keys=True, default=str),
             encoding="utf-8",
         )
-        for name, proc_path in (
-            ("gateway", self.runtime_dir / "gateway.log"),
-            ("worker", self.runtime_dir / "worker.log"),
-        ):
-            if proc_path.exists():
-                (self.runtime_dir / f"{name}-tail.txt").write_text(
-                    proc_path.read_text(encoding="utf-8", errors="replace")[-20000:],
-                    encoding="utf-8",
-                )
 
     def wait_for_ready(self) -> dict[str, Any]:
         """Poll the public readiness surface until the stack is certifying."""

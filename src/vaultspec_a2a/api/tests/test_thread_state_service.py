@@ -454,3 +454,72 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state()
     assert "permission_projection_unreadable" in snapshot.degraded_reasons
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_missing_plan_approval_request_clears_stale_thread_pending_approval() -> (
+    None
+):
+    """Stale thread-row pending approval must not survive without backing state."""
+    case_dir = (
+        Path.home()
+        / ".codex"
+        / "memories"
+        / "tmp"
+        / "thread-state-service-db"
+        / uuid4().hex
+    )
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-no-plan-approval"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-stale-pending-approval",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                thread_id="thread-stale-pending-approval",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread.approval_status = "pending"
+            thread.approval_request_id = "perm-missing-plan"
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-stale-pending-approval",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
+    assert snapshot.replay_status == "durable"
+
+    await engine.dispose()

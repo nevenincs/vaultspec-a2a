@@ -340,7 +340,16 @@ async def respond_to_permission(
     active_request_id: str | None = None
     pending_permissions = await get_pending_permission_requests(db, thread_id=thread_id)
     if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
-        active_request_id = thread_record.approval_request_id or request_id
+        active_plan_permissions = [
+            pending.request_id
+            for pending in pending_permissions
+            if pending.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
+        ]
+        active_request_id = (
+            active_plan_permissions[-1]
+            if active_plan_permissions
+            else thread_record.approval_request_id or request_id
+        )
     elif pending_permissions:
         active_request_id = pending_permissions[-1].request_id
 

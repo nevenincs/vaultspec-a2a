@@ -539,6 +539,26 @@ Verification note:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "dispatch_message_handler"`
 
+### Audit 4 thread-list approval summary consistency note
+
+Audit `4` also exposed a summary-surface lag behind the reconnect snapshot
+path. The `/api/threads` listing still echoed `approval_status` and
+`approval_request_id` directly from the thread row, so a corrupt unreadable
+plan-approval permission could be cleared in reconnect snapshots and still
+appear as a pending approval in thread summaries. The repository now clears
+those summary fields when the backing plan-approval permission row is
+unreadable, keeping the list surface aligned with the stricter snapshot
+contract.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestListThreads"`
+
 ### Audit 4 unreadable durable permission projection note
 
 Audit `4` also exposed a corruption gap in the durable permission projection
@@ -569,6 +589,38 @@ Verification note:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestThreadState or rejects_permission_request_with_malformed_durable_option_json or rejects_permission_request_without_valid_durable_options"`
+
+### Audit 4 stale plan-approval pointer note
+
+Audit `4` also exposed another mirrored-state drift in the plan-approval path.
+The permission-response guard could still trust `thread.approval_request_id`
+even when the live pending plan-approval row had moved on, and reconnect
+snapshots could preserve `approval_status="pending"` on the thread row even
+when no readable projected plan approval remained. The repository now prefers
+live pending plan-approval rows over the stale thread pointer when validating
+responses, and clears stale pending approval metadata when no projected
+plan-approval permission actually backs it.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+
+Grounding:
+
+- LangGraph resume and interrupt semantics are checkpoint-backed, so repo-owned
+  mirrored approval metadata must not outrank live durable permission truth or
+  the absence of projected approval state:
+  [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts#interrupts)
+  and
+  [Persistence](https://docs.langchain.com/oss/python/langgraph/persistence).
+
+Verification note:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestPermissionRespond"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "missing_plan_approval_request_clears_stale_thread_pending_approval"`
 
 ### Open questions that affect scope quality
 

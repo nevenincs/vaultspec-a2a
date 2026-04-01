@@ -146,6 +146,55 @@ class TestListThreads:
         assert data["total"] == 2
         assert len(data["threads"]) == 2
 
+    def test_list_threads_hides_unreadable_plan_approval_metadata(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not expose corrupt plan-approval state."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_corrupt_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-corrupt-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-corrupt-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-corrupt-plan",
+                    thread_id="thread-list-corrupt-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call="plan_approval",
+                )
+                permission = await session.get(
+                    PermissionRequestModel,
+                    "perm-list-corrupt-plan",
+                )
+                assert permission is not None
+                permission.allowed_options_json = '{"broken":'
+                await session.commit()
+
+        asyncio.run(_seed_corrupt_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-corrupt-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
 
 class TestHealth:
     """Tests for GET /health."""
@@ -1012,6 +1061,61 @@ class TestPermissionRespond:
         assert active.status_code == 200
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == "allow_once"
+
+    def test_plan_approval_uses_live_pending_request_over_stale_thread_pointer(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Plan approval should not trust a stale thread approval_request_id."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_plan_approval() -> None:
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                thread.approval_status = "pending"
+                thread.approval_request_id = stale_request_id
+                await record_permission_request(
+                    session,
+                    request_id=live_request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="plan_approval_request",
+                    description="Approve plan?",
+                    allowed_options=[
+                        {
+                            "option_id": "approve",
+                            "name": "Approve",
+                            "kind": "allow_once",
+                        },
+                        {
+                            "option_id": "reject",
+                            "name": "Reject",
+                            "kind": "reject_once",
+                        },
+                    ],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "plan approval test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            stale_request_id = f"{thread_id}:req-stale-plan"
+            live_request_id = f"{thread_id}:req-live-plan"
+            asyncio.run(_seed_plan_approval())
+
+            worker.dispatches.clear()
+            live = client.post(
+                f"/api/permissions/{live_request_id}/respond",
+                json={"option_id": "approve"},
+            )
+
+        assert live.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == {"approved": True}
 
     def test_rejects_stale_second_response_after_submission(
         self, session_factory, checkpointer

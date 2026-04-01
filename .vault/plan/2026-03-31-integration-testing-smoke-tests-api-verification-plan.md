@@ -338,6 +338,10 @@ replay semantics remain intact.
   The same corruption handling now also applies to unreadable durable
   permission rows used only for public state projection: malformed option JSON
   must degrade and fail closed, not take down the reconnect/state surface.
+  The same anti-mirroring rule now also applies to plan approval pointers:
+  live pending plan-approval rows must outrank stale `thread.approval_request_id`,
+  and stale pending approval metadata must clear when no projected plan
+  approval remains.
 - Audit 5: streaming continuity and replay behavior.
   Cover SSE reconnect, ordered event replay, terminal replay, and
   tool-call chunk continuity across reconnect and completion.

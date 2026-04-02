@@ -570,3 +570,26 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
 - `uv run ruff check src/vaultspec_a2a/control/diagnostics.py src/vaultspec_a2a/api/ws_dispatch.py src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+
+## REVIEW-036: failed cancel dispatch durable-state rollback
+
+Keep a bounded Audit `6` slice for cancel-path durable-state rollback. The
+implementation must ensure that a failed worker cancel dispatch does not leave
+the thread row advertising `cancel_pending` when the API returned 502 /
+`accepted=False`. The durable repair row must restore the pre-cancel repair
+state, including `repair_status`, `execution_readiness`, `repair_reason`, and
+`last_requested_action`, so persistence stays consistent with the caller-facing
+cancel outcome.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/cancel_service.py`
+- `src/vaultspec_a2a/control/repair_transitions.py`
+- `src/vaultspec_a2a/api/routes/cancel.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_cancel_dispatch_restores_repair_state"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "cancel_thread_cancels_running_thread or cancel_thread_repeat_request_stays_accepting_until_terminal_event"`
+- `uv run ruff check src/vaultspec_a2a/control/cancel_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

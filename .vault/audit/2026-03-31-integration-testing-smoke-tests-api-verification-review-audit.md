@@ -361,6 +361,22 @@ pending approvals in persistence or aggregator memory. Evidence anchors:
 `src/vaultspec_a2a/database/permission_repository.py`,
 `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`.
 
+REVIEW-036 | HIGH | Failed cancel dispatch could leave a ghost durable `cancel_pending` state
+Audit `6` also closed a cancel-path persistence split. `cancel_thread()` in
+`src/vaultspec_a2a/control/cancel_service.py` was marking durable repair state
+as `cancel_pending` before worker dispatch, but on dispatch failure it returned
+`accepted=False` / `cancelled=False` while leaving the durable repair row in the
+pre-dispatch cancel state. That violated the deterministic durable-execution
+contract: the public API said cancel was not accepted, while persistence still
+advertised an in-flight cancel. The fix now captures the prior durable repair
+state before `mark_cancel_requested()` and restores it on the failure path, so
+repair status, readiness, and `last_requested_action` stay aligned with the 502
+response. Evidence anchors:
+`src/vaultspec_a2a/control/cancel_service.py`,
+`src/vaultspec_a2a/control/repair_transitions.py`,
+`src/vaultspec_a2a/api/routes/cancel.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

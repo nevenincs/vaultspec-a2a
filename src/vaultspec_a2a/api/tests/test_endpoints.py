@@ -1810,3 +1810,57 @@ class TestCreateThreadAutonomous:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["autonomous"] is True
+
+
+# ---------------------------------------------------------------------------
+# POST /threads/{thread_id}/cancel
+# ---------------------------------------------------------------------------
+
+
+class TestCancelThread:
+    """Tests for POST /api/threads/{thread_id}/cancel."""
+
+    def test_failed_cancel_dispatch_restores_repair_state(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A failed cancel dispatch must not leave a ghost cancel_pending state."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+        original_client = app.state.worker_client
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "cancel dispatch failure"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+
+            async def _assert_initial() -> None:
+                async with session_factory() as session:
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert thread is not None
+                    assert thread.last_requested_action == "ingest"
+
+            asyncio.run(_assert_initial())
+
+            app.state.worker_client = failing_client
+            cancel_resp = client.post(f"/api/threads/{thread_id}/cancel")
+
+            async def _assert_reset() -> None:
+                async with session_factory() as session:
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert thread is not None
+                    assert thread.status == "submitted"
+                    assert thread.repair_status == "healthy"
+                    assert thread.execution_readiness == "healthy"
+                    assert thread.repair_reason is None
+                    assert thread.last_requested_action == "ingest"
+
+            asyncio.run(_assert_reset())
+            app.state.worker_client = original_client
+
+        asyncio.run(failing_client.aclose())
+
+        assert cancel_resp.status_code == 502
+        assert cancel_resp.json()["detail"] == "Cancel dispatch failed"

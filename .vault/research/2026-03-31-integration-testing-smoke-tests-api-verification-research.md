@@ -1041,6 +1041,32 @@ Evidence:
 - `src/vaultspec_a2a/database/permission_repository.py`
 - `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
 
+## REVIEW-036: failed cancel dispatch durable-state rollback
+
+This slice closes a cancel-path persistence split exposed by the ongoing Audit
+`6` repo scan. LangGraph's durable-execution guidance is strict about
+pre-interrupt or pre-resume side effects: if a side effect happens before the
+external action is actually accepted, the durable state must remain idempotent
+and consistent with the caller-visible outcome. Here, `cancel_thread()` was
+writing `cancel_pending` via `mark_cancel_requested()` before worker dispatch,
+then returning a 502 / `accepted=False` branch without rolling that durable
+repair mutation back. The fix in `src/vaultspec_a2a/control/cancel_service.py`
+captures the prior repair state and restores it on dispatch failure, so failed
+cancel requests no longer leave a ghost in-flight cancel in persistence.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/cancel_service.py`
+- `src/vaultspec_a2a/control/repair_transitions.py`
+- `src/vaultspec_a2a/api/routes/cancel.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_cancel_dispatch_restores_repair_state"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "cancel_thread_cancels_running_thread or cancel_thread_repeat_request_stays_accepting_until_terminal_event"`
+- `uv run ruff check src/vaultspec_a2a/control/cancel_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

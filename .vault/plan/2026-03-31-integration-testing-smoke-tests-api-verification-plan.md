@@ -435,6 +435,13 @@ replay semantics remain intact.
   because heartbeat and aggregator memory are empty after a restart-like gap.
   Team status now treats durable pending-permission thread ids as active so
   the operator view stays aligned with persisted approval truth.
+  The next retryability slice is now also in place: failed resume dispatch no
+  longer leaves the permission boundary in a contradictory state where the
+  durable row looks pending again but the thread itself stays terminal
+  `failed`. The repository now restores the durable permission row to
+  `pending`, retires the failed control-action idempotency key to a tombstone
+  value, and keeps the thread in retryable `input_required` while repair
+  readiness remains degraded for operators.
 - Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.
@@ -477,3 +484,25 @@ should therefore:
 1. Add deterministic service coverage that exercises the projection versus
    durability race and proves the thread is only treated as resumable once
    those boundaries converge.
+
+## REVIEW-032: failed resume-dispatch rollback drift
+
+Keep a bounded Audit `6` slice for failed resume-dispatch retryability. The
+implementation must leave the durable permission row re-actionable after an
+unreachable worker response, retire the failed control-action idempotency key
+without reusing it, and avoid leaving the thread in a terminal state that
+blocks retry. The intended retry state is `input_required`, while the restored
+durable permission state is `pending`.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_resume_dispatch_restores_permission_to_pending or rejects_permission_request_when_thread_terminal or stale_permission_request_when_newer_interrupt_exists"`
+- `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service`
+- `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/database/__init__.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

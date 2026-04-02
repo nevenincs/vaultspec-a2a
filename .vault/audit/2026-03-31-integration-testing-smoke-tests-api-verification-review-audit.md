@@ -290,6 +290,25 @@ heartbeat and aggregator state are empty. Evidence anchors:
 `src/vaultspec_a2a/control/team_service.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-032 | HIGH | Failed resume dispatch could restore pending permission while leaving the thread terminal
+Audit `6` found a stricter retryability drift on the permission resume path.
+When worker dispatch failed after a permission response was durably submitted,
+the repository could reset the permission row away from
+`answered_pending_apply`, but it still left the thread in terminal
+`failed`. That made the durable permission look pending again while the public
+surface rejected retry as non-actionable. The fix now rolls the durable
+permission row back to `pending`, retires the failed control-action
+idempotency key to a tombstone value instead of nulling or reusing it, and
+keeps the thread in retryable `input_required` while readiness stays degraded.
+That matches the LangGraph boundary: resume restarts from the node boundary,
+and side effects before interrupt must be idempotent, so rollback belongs at
+the durable write boundary rather than in downstream projection repair.
+Evidence anchors: `src/vaultspec_a2a/control/permission_service.py`,
+`src/vaultspec_a2a/database/permission_repository.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/control/repair_transitions.py`,
+`src/vaultspec_a2a/thread/enums.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

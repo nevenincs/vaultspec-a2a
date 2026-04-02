@@ -20,6 +20,7 @@ from ..database import (
     get_permission_request,
     get_thread,
     record_permission_response_submission,
+    reset_permission_response_submission,
     set_thread_approval_state,
     update_thread_status,
 )
@@ -554,12 +555,16 @@ async def respond_to_permission(
     )
 
     if not outcome.success:
+        await reset_permission_response_submission(db, request_id=request_id)
+        action.idempotency_key = (
+            f"{resolved_idempotency_key}:dispatch-failed:{action.id}"
+        )
         policy = classify_dispatch_failure(outcome.failure_type)
         typed_failure = (
             FailureType(outcome.failure_type) if outcome.failure_type else None
         )
         if policy.should_mark_failed:
-            await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await update_thread_status(db, thread_id, ThreadStatus.INPUT_REQUIRED)
             await mark_dispatch_failed(db, thread_id)
         else:
             action.result_status = (

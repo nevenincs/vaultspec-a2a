@@ -14,9 +14,12 @@ helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 """
 
 import asyncio
+import hashlib
 import logging
 
+import httpx
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 
 from ...control.config import settings
 from ...database import create_control_action, create_thread, record_permission_request
@@ -1474,6 +1477,95 @@ class TestPermissionRespond:
         assert first.status_code == 200
         assert second.status_code == 409
         assert second.json()["detail"] == "Permission request is no longer pending"
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == "allow_once"
+
+    def test_failed_resume_dispatch_restores_permission_to_pending(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Failed resume dispatch must leave the durable permission re-actionable."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id=request_id,
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[
+                        {
+                            "option_id": "allow_once",
+                            "name": "Allow once",
+                            "kind": "allow_once",
+                        }
+                    ],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        failing_client = httpx.AsyncClient(base_url="http://127.0.0.1:9")
+        original_client = app.state.worker_client
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission dispatch failure"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-dispatch-fail"
+            expected_idempotency_key = hashlib.sha256(
+                f"{request_id}:allow_once".encode()
+            ).hexdigest()
+            asyncio.run(_seed_permission())
+
+            worker.dispatches.clear()
+            app.state.worker_client = failing_client
+            first = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+            async def _assert_reset() -> None:
+                from ...database.models import (
+                    ControlActionModel,
+                    PermissionRequestModel,
+                    ThreadModel,
+                )
+
+                async with session_factory() as session:
+                    permission = await session.get(PermissionRequestModel, request_id)
+                    thread = await session.get(ThreadModel, thread_id)
+                    assert permission is not None
+                    assert thread is not None
+                    assert thread.status == "input_required"
+                    assert permission.request_status == "pending"
+                    assert permission.response_option_id is None
+                    assert permission.idempotency_key is None
+                    action = (
+                        await session.execute(
+                            select(ControlActionModel).where(
+                                ControlActionModel.request_id == request_id
+                            )
+                        )
+                    ).scalar_one()
+                    assert action.idempotency_key != expected_idempotency_key
+                    assert ":dispatch-failed:" in action.idempotency_key
+
+            asyncio.run(_assert_reset())
+
+            app.state.worker_client = original_client
+            second = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "allow_once"},
+            )
+
+        asyncio.run(failing_client.aclose())
+
+        assert first.status_code == 502
+        assert second.status_code == 200
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == "allow_once"
 

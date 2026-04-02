@@ -64,6 +64,9 @@ from .permission_repository import (
     record_permission_response_submission as record_permission_response_submission,
 )
 from .permission_repository import (
+    reset_permission_response_submission as reset_permission_response_submission,
+)
+from .permission_repository import (
     supersede_permission_requests as supersede_permission_requests,
 )
 from .session import close_db as close_db
@@ -141,6 +144,7 @@ __all__ = [
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
+    "reset_permission_response_submission",
     "run_migrations",
     "save_model",
     "set_thread_approval_state",

@@ -900,6 +900,49 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k durable_pending_permission_thread_as_active`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-032: failed resume-dispatch rollback drift
+
+This slice confirms the durable-vs-retry boundary for permission resumes. When
+worker dispatch is unreachable, the repository now resets the durable
+permission row to `pending`, retires the original control-action idempotency
+key to a tombstone value, and downgrades the thread to `input_required` so the
+permission remains re-actionable on retry. The drift before this fix was
+stricter than the durable row alone suggested: the permission could look
+pending again while the thread itself remained terminal `failed`, which blocked
+retry at the public boundary.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/control/repair_transitions.py`
+- `src/vaultspec_a2a/thread/enums.py`
+
+Terminology:
+
+- `pending` for the restored durable permission row
+- `input_required` for the retryable thread state
+- `paused_resumable` for the healthy pause/readiness projection
+- `answered_pending_apply` only as the transient durable submit state before
+  dispatch succeeds
+
+LangGraph grounding:
+
+- `interrupts` documentation states that resume restarts from the node
+  boundary.
+- `durable-execution` documentation states that side effects before interrupt
+  must be idempotent.
+- That makes rollback at the durable write boundary the correct fix shape,
+  instead of patching downstream projection surfaces after a failed dispatch.
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_resume_dispatch_restores_permission_to_pending or rejects_permission_request_when_thread_terminal or stale_permission_request_when_newer_interrupt_exists"`
+- `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service`
+- `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/database/__init__.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

@@ -11,8 +11,12 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
+from sqlalchemy import select
+
 from ..database import get_pending_permission_requests
+from ..database.models import ThreadModel
 from ..graph.enums import AgentLifecycleState
+from ..thread.enums import TERMINAL_STATUSES
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -81,6 +85,24 @@ async def build_team_status(
 ) -> TeamStatus:
     """Assemble the full team status from DB and in-memory aggregator state."""
     durable_pending = await get_pending_permission_requests(db)
+    thread_ids = sorted({permission.thread_id for permission in durable_pending})
+    terminal_thread_ids: set[str] = set()
+    if thread_ids:
+        terminal_statuses = [status.value for status in TERMINAL_STATUSES]
+        rows = await db.execute(
+            select(ThreadModel.id, ThreadModel.status).where(
+                ThreadModel.id.in_(thread_ids)
+            )
+        )
+        terminal_thread_ids = {
+            thread_id for thread_id, status in rows.all() if status in terminal_statuses
+        }
+
+    nonterminal_durable_pending = [
+        permission
+        for permission in durable_pending
+        if permission.thread_id not in terminal_thread_ids
+    ]
     public_pending: list[PendingPermissionInfo] = [
         PendingPermissionInfo(
             request_id=p.request_id,
@@ -88,13 +110,13 @@ async def build_team_status(
             description=p.description,
             request_status=p.request_status,
         )
-        for p in durable_pending
+        for p in nonterminal_durable_pending
         if _has_valid_permission_options(p.allowed_options_json)
     ]
     active_threads = sorted(
         set(heartbeat_threads)
         | set(aggregator.get_active_thread_ids())
-        | {permission.thread_id for permission in durable_pending}
+        | {permission.thread_id for permission in nonterminal_durable_pending}
     )
 
     node_summaries = aggregator.get_node_summaries()

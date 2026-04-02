@@ -1662,3 +1662,76 @@ Verification:
   text elements, interactive workflow steps, and deterministic operator
   choices so long as those assumptions are visible, repo-owned, and
   repeatable.
+
+## REVIEW-053: `/api/threads` summaries must not advertise approvals without verified checkpoint truth
+
+LangGraph’s interrupt and durable-execution model keeps resumability anchored
+to the persisted checkpoint for the same `thread_id`. The interrupt docs say
+the checkpointer writes the graph state that is later resumed, and the
+durable-execution docs say workflows resume from the last recorded state
+rather than from durable side-channel residue alone. That means a public
+summary surface can degrade readiness when checkpoint probing fails, but it
+cannot continue to expose `approval_status="pending"` and
+`approval_request_id` as if a resumable human pause were still proven.
+
+Audit `6` found that this stricter rule had only been applied to
+`/api/threads/{id}/state`. `list_threads_service()` in
+`src/vaultspec_a2a/control/thread_service.py` already degraded
+`repair_status` and `execution_readiness` to `checkpoint_unavailable` when the
+checkpointer probe timed out or raised, but it still preserved pending
+approval metadata from the thread row or live durable permission rows. That
+made `/api/threads` and the MCP-backed summary path overstate user-actionable
+resumability at the exact boundary where checkpoint authority was unverified.
+
+The fix keeps the summary contract consistent with the stricter thread-state
+surface: once checkpoint probing is unverified, summaries fail closed by
+clearing public approval metadata alongside readiness degradation. This does
+not erase durable permission bookkeeping; it only stops public/operator
+surfaces from presenting those rows as actionable approvals until checkpoint
+truth can be established again.
+
+Evidence:
+
+- LangGraph interrupts docs: same-thread resume depends on checkpointer state
+  for the `thread_id`
+- LangGraph durable-execution docs: resume semantics come from the last
+  recorded checkpointed state
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified or list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified or list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run ruff check src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-054: MCP `send_message` must match repair-state follow-up rejection
+
+`REVIEW-051` tightened the backend follow-up contract so normal message ingest
+fails closed for `repair_needed` and `reconciling` threads. That made the MCP
+messaging surface subject to the same operator-facing requirement as the other
+tool wrappers in Audit `6`: once the backend rejects a control action with
+`409`, the MCP tool should surface a clear `ToolError` rather than leaking a
+raw HTTP conflict.
+
+The defect was in `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`.
+`send_message()` still relied on the generic request helper path, so when the
+backend refused a follow-up to a repair-state thread, MCP callers saw a lower
+level HTTP failure instead of a direct tool-level explanation that the thread
+was not accepting follow-up messages. That weakened the operator contract even
+though the backend behavior was already correct.
+
+The fix now maps backend message-side `409` conflicts into `ToolError`,
+preserves the backend detail when available, and keeps MCP follow-up behavior
+aligned with the stricter repair-state messaging rules.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "send_message_raises_tool_error_for_repair_needed_thread"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/messaging.py`

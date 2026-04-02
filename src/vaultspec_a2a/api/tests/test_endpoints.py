@@ -570,6 +570,59 @@ class TestListThreads:
         assert thread["repair_status"] == "checkpoint_unavailable"
         assert thread["execution_readiness"] == "checkpoint_unavailable"
 
+    def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
+        self, session_factory, tmp_path
+    ) -> None:
+        """Unverified checkpoint probes must not expose resumable approvals."""
+        checkpoints_file = tmp_path / "closed-list-threads-plan-approval.db"
+
+        async def _closed_checkpointer() -> AsyncSqliteSaver:
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
+                await cp.setup()
+                return cp
+
+        closed_checkpointer = asyncio.run(_closed_checkpointer())
+        app, _agg, _worker, _cp = make_app(session_factory, closed_checkpointer)
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-checkpoint-unverified-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-checkpoint-unverified-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-checkpoint-unverified-plan",
+                    thread_id="thread-list-checkpoint-unverified-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-checkpoint-unverified-plan"
+        )
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
 
 class TestHealth:
     """Tests for GET /health."""

@@ -3,12 +3,14 @@
 Handler: ``send_message``.
 """
 
+import contextlib
 from typing import Annotated
 
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
-from .._http import _mcp_request
+from .._http import _HTTP_CONFLICT, HTTPStatusError, _mcp_request
 from ..server import mcp
 
 
@@ -59,11 +61,22 @@ async def send_message(
                    Keep messages under 32,000 characters; very long inputs
                    should be split across multiple sends.
     """
-    await _mcp_request(
-        "POST",
-        f"/api/threads/{thread_id}/messages",
-        json={"content": message},
-        timeout=settings.mcp_query_timeout_seconds,
-        not_found_msg=f"Thread {thread_id!r} not found.",
-    )
+    try:
+        await _mcp_request(
+            "POST",
+            f"/api/threads/{thread_id}/messages",
+            json={"content": message},
+            timeout=settings.mcp_query_timeout_seconds,
+            not_found_msg=f"Thread {thread_id!r} not found.",
+        )
+    except HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_CONFLICT:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Cannot send message to thread {thread_id}: "
+                f"{detail or 'thread is not accepting follow-up messages'}."
+            ) from exc
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     return f"Message delivered to thread {thread_id}."

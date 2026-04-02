@@ -255,6 +255,19 @@ under stale execution-state lineage. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-054 | MEDIUM | MCP `send_message` leaked raw backend conflicts after repair-state follow-up hardening
+Audit `6` exposed another operator-surface lag after follow-up messaging was
+correctly blocked for `repair_needed` and `reconciling` threads. The REST
+backend now rejects those follow-ups with `409`, but
+`src/vaultspec_a2a/protocols/mcp/tools/messaging.py` was still letting that
+conflict escape as a raw HTTP failure instead of a usable `ToolError`. That
+left the MCP control surface behind the stricter backend contract for
+repair-state threads. The fix now maps backend message-side `409` conflicts
+into `ToolError` with the backend detail so MCP operators see an explicit
+follow-up eligibility failure rather than a transport-level error. Evidence
+anchors: `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 REVIEW-030 | HIGH | Durable pending approvals without `tool_call` could disappear during thread-state reconstruction
 Review follow-up exposed a stricter gateway-side reconstruction bug at the
 boundary between durable projection and checkpoint-state enrichment. Durable
@@ -667,4 +680,21 @@ contract it fronts. The fix now maps delete-side `409` conflicts into a clear
 non-terminal rejection rather than implying only active/running work is
 blocked. Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-053 | MEDIUM | `/api/threads` summaries could advertise pending approvals when checkpoint probing was unverified
+Audit `6` still had a checkpoint-authority drift on the thread-summary
+surface. `/api/threads/{id}/state` was already failing closed when checkpoint
+truth was missing or unavailable, but `list_threads_service()` in
+`src/vaultspec_a2a/control/thread_service.py` still preserved
+`approval_status="pending"` and `approval_request_id` from durable rows even
+when the checkpointer probe itself timed out or raised. Under LangGraph
+interrupt and durable-execution semantics, resumability is checkpoint-backed
+for the same `thread_id`; a durable permission row alone is not enough to
+advertise a still-actionable human approval when checkpoint truth is
+unverified. The fix keeps the summary surface aligned with the stricter
+thread-state contract by degrading readiness to `checkpoint_unavailable` and
+clearing public approval metadata on that boundary. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

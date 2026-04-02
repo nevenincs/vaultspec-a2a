@@ -203,6 +203,11 @@ async def list_threads_service(
         if checkpoint_unverified:
             repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
             execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            # Checkpoint state is LangGraph's resumability authority. If the
+            # probe itself is unverified, the summary surface must not expose a
+            # still-actionable approval target.
+            approval_status = None
+            approval_request_id = None
         if execution_state is not None and (
             execution_state.recovery_epoch != t.recovery_epoch
             or (

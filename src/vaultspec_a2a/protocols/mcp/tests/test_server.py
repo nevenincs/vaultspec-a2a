@@ -486,6 +486,47 @@ async def test_send_message_raises_when_server_unavailable() -> None:
     assert any(kw in msg for kw in _expected_keywords)
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_send_message_raises_tool_error_for_repair_needed_thread(
+    session_factory, checkpointer
+) -> None:
+    """send_message must surface backend 409s for repair-state threads."""
+    with _make_test_client(session_factory, checkpointer) as client:
+        create_resp = client.post(
+            "/api/threads",
+            json={"initial_message": "message tool conflict"},
+        )
+        assert create_resp.status_code == 201
+        thread_id = create_resp.json()["thread_id"]
+
+        async with session_factory() as session:
+            thread = await session.get(ThreadModel, thread_id)
+            assert thread is not None
+            thread.status = "repair_needed"
+            thread.repair_status = "checkpoint_unavailable"
+            thread.execution_readiness = "checkpoint_unavailable"
+            await session.commit()
+
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            with pytest.raises(ToolError) as exc_info:
+                await send_message(thread_id=thread_id, message="hello")
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            settings.gateway_url = original_gateway_url
+
+    assert "Cannot send message to thread" in str(exc_info.value)
+    assert "repair_needed" in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # _ws_url_from_api_base unit tests (MCP-MEDIUM-01)
 # ---------------------------------------------------------------------------
@@ -881,6 +922,60 @@ class TestListThreadsViaApp:
         )
         assert thread["repair_status"] == "checkpoint_unavailable"
         assert thread["execution_readiness"] == "checkpoint_unavailable"
+
+    def test_list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified(
+        self, session_factory, tmp_path
+    ) -> None:
+        """Checkpoint-unverified MCP summaries must not expose approvals."""
+        checkpoints_file = tmp_path / "closed-mcp-list-threads-plan-approval.db"
+
+        async def _closed_checkpointer() -> AsyncSqliteSaver:
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
+                await cp.setup()
+                return cp
+
+        closed_checkpointer = asyncio.run(_closed_checkpointer())
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-checkpoint-unverified-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = (
+                    "mcp-thread-list-checkpoint-unverified-plan:perm-1"
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-list-checkpoint-unverified-plan:perm-1",
+                    thread_id="mcp-thread-list-checkpoint-unverified-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve MCP plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with _make_test_client(session_factory, closed_checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-checkpoint-unverified-plan"
+        )
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
 
 # ---------------------------------------------------------------------------

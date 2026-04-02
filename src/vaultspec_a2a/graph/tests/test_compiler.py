@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 import pytest_asyncio
+from langchain_core.language_models.fake_chat_models import FakeChatModel
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 if TYPE_CHECKING:
@@ -462,6 +463,52 @@ def test_build_supervisor_prompt_no_directive() -> None:
     base = "You are a supervisor."
     result = _build_supervisor_prompt([], base, directive=None)
     assert "## Team Directive" not in result
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_compile_team_graph_passes_supervisor_agent_config_to_provider_factory(
+    checkpointer: AsyncSqliteSaver,
+) -> None:
+    """Supervisor model resolution must preserve the supervisor agent identity."""
+
+    class _RecordingProviderFactory:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, object]] = []
+
+        def create(
+            self,
+            provider: object,
+            *,
+            model: object | None = None,
+            agent_config: object | None = None,
+            workspace_root: object | None = None,
+            **kwargs: object,
+        ) -> FakeChatModel:
+            self.calls.append(
+                {
+                    "provider": provider,
+                    "model": model,
+                    "agent_config": agent_config,
+                    "workspace_root": workspace_root,
+                }
+            )
+            return FakeChatModel()
+
+    team = load_team_config("mock-supervisor-human-in-loop")
+    agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
+    supervisor_cfg = load_agent_config("vaultspec-supervisor")
+    factory = _RecordingProviderFactory()
+
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=agent_configs,
+        checkpointer=checkpointer,
+        supervisor_agent_config=supervisor_cfg,
+        provider_factory=factory,
+    )
+
+    assert graph is not None
+    assert factory.calls[0]["agent_config"] is supervisor_cfg
 
 
 @pytest.mark.asyncio(loop_scope="function")

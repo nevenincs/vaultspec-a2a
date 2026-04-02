@@ -12,7 +12,7 @@ import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
@@ -478,16 +478,31 @@ class ServiceStack:
     def vidaimock_health(self) -> dict[str, Any]:
         """Exercise the deterministic provider route before certifying ready."""
         with self._vidaimock_client() as client:
-            resp = client.post(
-                "/mock-coder-human/v1/chat/completions",
-                json={
-                    "model": "mock-coder-human",
-                    "messages": [{"role": "user", "content": "health probe"}],
-                    "stream": False,
+            probes = {
+                "mock_coder_human": {
+                    "path": "/mock-coder-human/v1/chat/completions",
+                    "body": {
+                        "model": "mock-coder-human",
+                        "messages": [{"role": "user", "content": "health probe"}],
+                        "stream": False,
+                    },
                 },
-            )
-            resp.raise_for_status()
-            payload = resp.json()
+                "vaultspec_supervisor": {
+                    "path": "/vaultspec-supervisor/v1/chat/completions",
+                    "body": {
+                        "model": "vaultspec-supervisor",
+                        "messages": [{"role": "user", "content": "health probe"}],
+                        "stream": False,
+                    },
+                },
+            }
+            payload: dict[str, Any] = {}
+            for name, probe in probes.items():
+                path = str(probe["path"])
+                body = cast("dict[str, Any]", probe["body"])
+                resp = client.post(path, json=body)
+                resp.raise_for_status()
+                payload[name] = resp.json()
             self.record("vidaimock-health", payload)
             return payload
 
@@ -522,6 +537,7 @@ class ServiceStack:
         team_preset: str,
         title: str | None = None,
         autonomous: bool | None = None,
+        metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         body: dict[str, Any] = {
             "initial_message": initial_message,
@@ -531,6 +547,8 @@ class ServiceStack:
             body["title"] = title
         if autonomous is not None:
             body["autonomous"] = autonomous
+        if metadata is not None:
+            body["metadata"] = metadata
         with self._client(timeout=30.0) as client:
             resp = client.post("/api/threads", json=body)
             resp.raise_for_status()

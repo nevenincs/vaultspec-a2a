@@ -53,6 +53,16 @@ Resolved on `containment`:
 
 - REVIEW-024
 
+Resolved on `audit5`:
+
+- REVIEW-025
+- REVIEW-026
+
+Resolved on `audit5`:
+
+- REVIEW-025
+- REVIEW-026
+
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
 
@@ -166,7 +176,49 @@ certification target. Evidence anchors:
 `src/vaultspec_a2a/thread/snapshots.py`,
 `src/vaultspec_a2a/control/event_handlers.py`,
 `src/vaultspec_a2a/control/tests/test_event_handlers.py`,
-`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+`src/vaultspec_a2a/api/tests/test_internal.py`.
+
+REVIEW-026 | MEDIUM | Supervisor plan-approval service certification failed before the permission boundary was exercised
+Audit `5` found a second supervisor-path defect in the real stack. The fast
+durability fix from `REVIEW-025` was already in place, but the compose-backed
+supervisor certification still completed early with `routing_error` and never
+reached the first approval pause. LangGraph durability was not the issue: the
+actual failures were repo-owned supervisor model resolution and provider stream
+decoding. First, supervisor model resolution omitted the supervisor
+`agent_config`, so the mock provider could not select the
+`vaultspec-supervisor` VidaiMock tape. Second, the supervisor route returned
+string-wrapped JSON SSE chunks, and `MockChatModel` dropped those chunks
+instead of decoding them into route text. The fix now passes supervisor agent
+identity through compiler model resolution, adds focused compiler coverage for
+that seam, and hardens `MockChatModel` to decode nested JSON string chunks for
+both route text and tool-call extraction. The compose-backed supervisor
+certifier now passes end to end, including the supervisor plan approval pause,
+worker permission pause, and final completion path. Evidence anchors:
+`src/vaultspec_a2a/graph/compiler.py`,
+`src/vaultspec_a2a/graph/tests/test_compiler.py`,
+`src/vaultspec_a2a/providers/mock_chat_model.py`,
+`src/vaultspec_a2a/providers/tests/test_mock_chat_model.py`,
+`src/vaultspec_a2a/service_tests/harness.py`,
+`src/vaultspec_a2a/service_tests/test_permissions_resume.py`,
+`src/vaultspec_a2a/team/presets/mock/tapes/providers/vaultspec-supervisor.yaml`,
+`src/vaultspec_a2a/team/presets/mock/tapes/templates/vaultspec-supervisor-chat.json.j2`,
+`src/vaultspec_a2a/team/presets/teams/mock-supervisor-human-in-loop.toml`.
+
+REVIEW-027 | LOW | Supervisor deterministic routing remains template-sensitive even after the service certifier went green
+Audit `5` now certifies the full supervisor approval path successfully, but it
+also made the residual contract clearer: the deterministic supervisor route is
+still sensitive to VidaiMock template shape and terminal-branch behavior. The
+current hardening narrows that risk substantially by probing both supervisor
+and worker mock routes during readiness, preserving supervisor mock identity at
+provider resolution, and decoding string-wrapped mock stream chunks in the
+provider adapter. Even so, future drift in the supervisor tape's streamed
+response shape or `FINISH` branch would weaken the certification signal before
+core LangGraph logic itself regressed. Evidence anchors:
+`src/vaultspec_a2a/graph/compiler.py`,
+`src/vaultspec_a2a/providers/mock_chat_model.py`,
+`src/vaultspec_a2a/service_tests/harness.py`,
+`src/vaultspec_a2a/team/presets/mock/tapes/providers/vaultspec-supervisor.yaml`,
+`src/vaultspec_a2a/team/presets/mock/tapes/templates/vaultspec-supervisor-chat.json.j2`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

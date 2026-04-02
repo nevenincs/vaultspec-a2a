@@ -62,8 +62,25 @@ def _extract_choice_payload(chunk: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _normalize_chunk(chunk: Any) -> Any:
+    """Decode VidaiMock string-wrapped JSON chunks when possible."""
+    current = chunk
+    for _ in range(2):
+        if not isinstance(current, str):
+            return current
+        text = current.strip()
+        if not text or text[0] not in "[{":
+            return current
+        try:
+            current = json.loads(text)
+        except json.JSONDecodeError:
+            return current
+    return current
+
+
 def _extract_tool_calls(chunk: Any) -> list[dict[str, Any]]:
     """Return tool call entries from either OpenAI or VidaiMock raw chunks."""
+    chunk = _normalize_chunk(chunk)
     if isinstance(chunk, list):
         tool_calls = []
         for item in chunk:
@@ -91,6 +108,9 @@ def _extract_tool_calls(chunk: Any) -> list[dict[str, Any]]:
 
 def _extract_chunk_text(chunk: Any) -> str:
     """Return text content from either OpenAI or VidaiMock raw chunks."""
+    chunk = _normalize_chunk(chunk)
+    if isinstance(chunk, str):
+        return chunk
     if isinstance(chunk, list):
         return _extract_text_content(chunk)
     if not isinstance(chunk, dict):

@@ -74,6 +74,33 @@ def _wait_for_pending_permission(
     return _wait_for_state(stack, thread_id, _matches, timeout=timeout)
 
 
+def _wait_for_pending_permission_matching(
+    stack: ServiceStack,
+    thread_id: str,
+    *,
+    description_contains: str,
+    timeout: float = 120.0,
+) -> dict[str, Any]:
+    """Wait until the named permission request is durably resumable."""
+
+    needle = description_contains.casefold()
+
+    def _matches(state: dict[str, Any]) -> bool:
+        if (
+            state.get("status") != "input_required"
+            or state.get("execution_readiness") != "paused_resumable"
+            or state.get("snapshot_complete") is not True
+        ):
+            return False
+        for permission in state.get("pending_permissions", []):
+            description = permission.get("description")
+            if isinstance(description, str) and needle in description.casefold():
+                return True
+        return False
+
+    return _wait_for_state(stack, thread_id, _matches, timeout=timeout)
+
+
 def test_permission_request_can_be_resumed_via_public_api(
     service_stack: ServiceStack,
 ) -> None:
@@ -277,4 +304,84 @@ def test_permission_denial_completes_with_denied_outcome(
     ]
     assert assistant_messages[-1]["content"] == (
         "Permission denied. The privileged command was not executed."
+    )
+
+
+def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
+    service_stack: ServiceStack,
+) -> None:
+    """Supervisor approval and worker approval must both remain controllable."""
+    workspace_root = service_stack.runtime_dir / "supervisor-plan-workspace"
+    plan_dir = workspace_root / ".vault" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / "audit-five-plan.md").write_text(
+        "# Audit 5 Plan\n\nExecute the approved implementation path.\n",
+        encoding="utf-8",
+    )
+
+    created = service_stack.create_thread(
+        initial_message="Implement the approved feature through the supervisor path.",
+        team_preset="mock-supervisor-human-in-loop",
+        title="service supervisor approval resume",
+        metadata={
+            "workspace_root": str(workspace_root),
+            "feature_tag": "audit-five",
+        },
+    )
+    thread_id = created["thread_id"]
+
+    plan_paused = _wait_for_pending_permission_matching(
+        service_stack,
+        thread_id,
+        description_contains="Approve plan for feature",
+    )
+    service_stack.record(f"supervisor-plan-paused:{thread_id}", plan_paused)
+
+    plan_request = next(
+        permission
+        for permission in plan_paused["pending_permissions"]
+        if "Approve plan for feature" in str(permission.get("description", ""))
+    )
+    plan_response = service_stack.respond_permission(
+        plan_request["request_id"],
+        option_id=_select_option_id(plan_request, label="approve"),
+    )
+    assert plan_response["accepted"] is True
+    assert plan_response["action_status"] == "accepted_not_applied"
+
+    worker_paused = _wait_for_pending_permission_matching(
+        service_stack,
+        thread_id,
+        description_contains="Permission required",
+    )
+    service_stack.record(f"supervisor-worker-paused:{thread_id}", worker_paused)
+
+    worker_request = next(
+        permission
+        for permission in worker_paused["pending_permissions"]
+        if "Permission required" in str(permission.get("description", ""))
+    )
+    worker_response = service_stack.respond_permission(
+        worker_request["request_id"],
+        option_id=_select_option_id(worker_request, label="approve"),
+    )
+    assert worker_response["accepted"] is True
+    assert worker_response["action_status"] == "accepted_not_applied"
+
+    completed = _wait_for_state(
+        service_stack,
+        thread_id,
+        lambda state: state.get("status") == "completed",
+    )
+    service_stack.record(f"supervisor-completed:{thread_id}", completed)
+
+    assert completed["pending_permissions"] == []
+    assistant_messages = [
+        message
+        for message in completed["messages"]
+        if message.get("role") == "assistant"
+    ]
+    assert assistant_messages[-1]["content"] == (
+        "Permission approved. The privileged command completed successfully "
+        "and the task is now finished."
     )

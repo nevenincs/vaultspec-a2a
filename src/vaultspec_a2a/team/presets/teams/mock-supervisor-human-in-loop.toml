@@ -1,0 +1,28 @@
+[team]
+id           = "mock-supervisor-human-in-loop"
+display_name = "Mock Supervisor Human in Loop"
+description  = "Supervisor-driven mock team that requires plan approval before routing to a human-loop worker."
+
+[team.defaults]
+provider   = "mock"
+capability = "mid"
+
+[team.supervisor]
+provider   = "mock"
+capability = "mid"
+
+[team.topology]
+type = "star"
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = "Route to the coder after plan approval, then require human approval for the privileged tool."
+
+[team.graph]
+step_timeout_seconds = 60
+recursion_limit      = 20
+
+[[team.workers]]
+agent_id = "mock-coder-human"

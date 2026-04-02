@@ -384,6 +384,21 @@ replay semantics remain intact.
   durable request-creation event, and HTTP coverage now proves
   `/internal/events` can relay a real supervisor approval request that
   `/api/permissions/{id}/respond` accepts successfully.
+  The compose-backed service certifier is now also in place and green. It
+  exercises the real supervisor plan approval pause, the worker-owned
+  permission pause, and the final completion path against the deterministic
+  VidaiMock-backed stack. The supporting fixes preserve supervisor mock
+  identity during provider resolution, decode VidaiMock string-wrapped stream
+  chunks correctly, probe both supervisor and worker mock routes during stack
+  readiness, and keep the supervisor tape on a terminating `FINISH` branch
+  once the approved worker output indicates completion.
+  The compose-backed certification follow-up is now also in place: supervisor
+  model resolution passes the supervisor `agent_config`, restoring selection of
+  the `vaultspec-supervisor` mock tape, and `MockChatModel` now decodes the
+  string-wrapped JSON stream chunks emitted on the supervisor route instead of
+  dropping them. Verification passed in targeted compiler coverage, targeted
+  mock provider parsing coverage, and `uv run pytest -m service
+  src/vaultspec_a2a/service_tests -q`, which now passes with 10 service tests.
 - Audit 6: persistence and state-corruption audit.
   Cover checkpoint replay, restart after interruption, degraded snapshots,
   corrupt durable rows, and operator-visible degradation instead of silent
@@ -406,11 +421,11 @@ service lane is green again in the current session. Audit `4` should keep using
 that service lane as a guardrail while the broader restart and persistence
 cases are added.
 
-Audit `5` now also has a first fast guardrail: supervisor-originated
-`plan_approval_request` events are durably persisted and respondable through
-the real `/internal/events` -> `/api/permissions/{id}/respond` boundary. The
-remaining `Audit 5` work is the compose-backed supervisor approval scenario,
-not the basic durable relay fix.
+Audit `5` now has both its fast and compose-backed guardrails. Supervisor-
+originated `plan_approval_request` events are durably persisted and respondable
+through the real `/internal/events` -> `/api/permissions/{id}/respond`
+boundary, and the deterministic local stack now certifies the full supervisor
+approval -> worker approval -> completion path.
 
 ## Resume Eligibility Clarification
 

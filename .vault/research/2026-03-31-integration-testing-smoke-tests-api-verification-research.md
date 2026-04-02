@@ -748,6 +748,41 @@ Context7 note:
 - attempted again for `langgraph`, but the MCP in this environment still fails
   with an invalid API key, so primary-source docs remain the grounding source
 
+Audit `5` also exposed a supervisor-specific certification gap in the real
+stack, and that gap is now closed. LangGraph resume semantics were not the
+fault line: `interrupt()` remains checkpoint-backed, resume must reuse the
+same `thread_id`, and the interrupted node restarts from its checkpoint
+boundary. The actual failures were in repo-owned supervisor routing and
+mock-stream decoding. First, supervisor model resolution initially omitted the
+supervisor `agent_config`, so the mock provider could not select the
+`vaultspec-supervisor` tape. Second, supervisor-route VidaiMock stream chunks
+arrived as string-wrapped JSON, and `MockChatModel` dropped those chunks
+instead of decoding them. Third, the supervisor tape needed an explicit
+terminal `FINISH` branch after the approved worker completion message; without
+that, the stack looped back into a fresh worker permission pause instead of
+terminating.
+
+Those repo-boundary fixes are now in place across the compiler, mock provider,
+service harness, service resume test, and supervisor mock preset artifacts.
+The compose-backed certifier now proves the full chain:
+
+- supervisor plan approval pause appears and is durably respondable
+- worker permission pause appears after the plan is approved
+- the approved worker branch produces meaningful completion text
+- the supervisor emits `FINISH` instead of re-routing back into another pause
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/graph/compiler.py`
+- `src/vaultspec_a2a/graph/tests/test_compiler.py`
+- `src/vaultspec_a2a/providers/mock_chat_model.py`
+- `src/vaultspec_a2a/providers/tests/test_mock_chat_model.py`
+- `src/vaultspec_a2a/service_tests/harness.py`
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+- `src/vaultspec_a2a/team/presets/mock/tapes/providers/vaultspec-supervisor.yaml`
+- `src/vaultspec_a2a/team/presets/mock/tapes/templates/vaultspec-supervisor-chat.json.j2`
+- `src/vaultspec_a2a/team/presets/teams/mock-supervisor-human-in-loop.toml`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

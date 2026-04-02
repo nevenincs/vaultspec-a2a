@@ -1580,6 +1580,35 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_rejects_followup_while_thread_requires_repair or test_rejects_followup_while_thread_is_reconciling"`
 - `uv run ruff check src/vaultspec_a2a/thread/message_policy.py src/vaultspec_a2a/thread/tests/test_message_policy.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-052: MCP delete must match the stricter non-terminal delete contract
+
+The delete hardening in Audit `6` created a new surface-alignment requirement:
+once REST delete rejects non-terminal threads, the MCP delete tool must not
+present a weaker or less legible contract. MCP is an operator-facing control
+surface, so backend `409 Conflict` responses need to be translated into clear
+tool-level errors rather than leaking as raw HTTP failures.
+
+The defect was that `delete_thread` in
+`src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py` still relied on
+the generic request helper path and did not map backend conflict responses into
+`ToolError`. That left the tool contract behind the backend lifecycle guard and
+made non-terminal delete rejections look like transport-level failures instead
+of explicit lifecycle protection.
+
+The fix now maps backend `409` responses into `ToolError`, preserves the
+backend detail when available, and updates the MCP delete documentation so
+non-terminal rejection is explicit.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "delete_thread_raises_tool_error_for_nonterminal_thread or archive_thread_raises_tool_error_when_server_unavailable or delete_thread_raises_tool_error_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ## REVIEW-052: MCP delete must surface non-terminal delete conflicts as ToolError
 
 The stricter delete contract introduced a new surface-level requirement:

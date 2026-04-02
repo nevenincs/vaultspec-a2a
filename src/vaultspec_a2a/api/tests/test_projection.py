@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
@@ -274,16 +273,11 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint() -> None:
+async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
+    tmp_path: Path,
+) -> None:
     """Checkpoint mismatch should explicitly mark execution-state projection stale."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-projection-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-projection-db-stale"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -328,16 +322,11 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint() -
 
 
 @pytest.mark.asyncio
-async def test_degraded_projection_does_not_mask_recovery_epoch_staleness() -> None:
+async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
+    tmp_path: Path,
+) -> None:
     """A degraded-only projection must not refresh recovery_epoch on old state."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-projection-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-projection-db-epoch"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -408,16 +397,11 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness() -> N
 
 
 @pytest.mark.asyncio
-async def test_unreadable_execution_state_requires_operator_intervention() -> None:
+async def test_unreadable_execution_state_requires_operator_intervention(
+    tmp_path: Path,
+) -> None:
     """Corrupted durable execution-state rows must fail closed on readiness."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-projection-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-projection-db-corrupt"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")

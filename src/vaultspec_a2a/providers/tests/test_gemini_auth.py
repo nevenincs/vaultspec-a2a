@@ -6,7 +6,6 @@ are marked @pytest.mark.live.
 
 import json
 import time
-import uuid
 from pathlib import Path
 
 import pytest
@@ -18,10 +17,6 @@ from ..gemini_auth import (
     gemini_uses_env_auth,
     refresh_gemini_token,
 )
-
-_TEST_TEMP_ROOT = Path.home() / ".codex" / "memories" / "vaultspec-gemini-auth-tests"
-_TEST_TEMP_ROOT.mkdir(parents=True, exist_ok=True)
-
 
 # ---------------------------------------------------------------------------
 # _is_expired helper
@@ -96,8 +91,8 @@ class TestDefaultCredsPath:
             Path.home() / ".gemini" / "oauth_creds.json"
         )
 
-    def test_honors_gemini_cli_home(self) -> None:
-        cli_home = _TEST_TEMP_ROOT / f"cli-home-{uuid.uuid4().hex}"
+    def test_honors_gemini_cli_home(self, tmp_path: Path) -> None:
+        cli_home = tmp_path / "cli-home"
         cli_home.mkdir(parents=True, exist_ok=False)
         assert _default_creds_path({"GEMINI_CLI_HOME": str(cli_home)}) == (
             cli_home / ".gemini" / "oauth_creds.json"
@@ -113,18 +108,18 @@ class TestRefreshGeminiTokenOffline:
     """Tests for refresh_gemini_token that do not hit the network."""
 
     @pytest.mark.asyncio
-    async def test_file_not_found_raises(self) -> None:
+    async def test_file_not_found_raises(self, tmp_path: Path) -> None:
         """FileNotFoundError is raised when credentials file does not exist."""
-        test_root = _TEST_TEMP_ROOT / f"missing-{uuid.uuid4().hex}"
+        test_root = tmp_path / "missing"
         test_root.mkdir(parents=True, exist_ok=False)
         missing = test_root / "oauth_creds.json"
         with pytest.raises(FileNotFoundError, match="not found"):
             await refresh_gemini_token(creds_path=missing)
 
     @pytest.mark.asyncio
-    async def test_env_auth_skips_missing_file(self) -> None:
+    async def test_env_auth_skips_missing_file(self, tmp_path: Path) -> None:
         """Env-authenticated Gemini runs do not require a local OAuth file."""
-        test_root = _TEST_TEMP_ROOT / f"env-auth-{uuid.uuid4().hex}"
+        test_root = tmp_path / "env-auth"
         test_root.mkdir(parents=True, exist_ok=False)
         missing = test_root / "oauth_creds.json"
         await refresh_gemini_token(
@@ -133,9 +128,9 @@ class TestRefreshGeminiTokenOffline:
         )
 
     @pytest.mark.asyncio
-    async def test_valid_token_is_noop(self) -> None:
+    async def test_valid_token_is_noop(self, tmp_path: Path) -> None:
         """When the token is valid, no network call or file write occurs."""
-        test_root = _TEST_TEMP_ROOT / f"valid-{uuid.uuid4().hex}"
+        test_root = tmp_path / "valid"
         test_root.mkdir(parents=True, exist_ok=False)
         creds_path = test_root / "oauth_creds.json"
         future_ms = int((time.time() + 7200) * 1000)
@@ -155,9 +150,9 @@ class TestRefreshGeminiTokenOffline:
         assert result["expiry_date"] == future_ms
 
     @pytest.mark.asyncio
-    async def test_expired_no_refresh_token_raises(self) -> None:
+    async def test_expired_no_refresh_token_raises(self, tmp_path: Path) -> None:
         """RuntimeError is raised when token is expired but no refresh_token exists."""
-        test_root = _TEST_TEMP_ROOT / f"expired-{uuid.uuid4().hex}"
+        test_root = tmp_path / "expired"
         test_root.mkdir(parents=True, exist_ok=False)
         creds_path = test_root / "oauth_creds.json"
         past_ms = int((time.time() - 3600) * 1000)
@@ -172,9 +167,9 @@ class TestRefreshGeminiTokenOffline:
             await refresh_gemini_token(creds_path=creds_path)
 
     @pytest.mark.asyncio
-    async def test_empty_refresh_token_raises(self) -> None:
+    async def test_empty_refresh_token_raises(self, tmp_path: Path) -> None:
         """RuntimeError is raised when refresh_token is empty string."""
-        test_root = _TEST_TEMP_ROOT / f"empty-refresh-{uuid.uuid4().hex}"
+        test_root = tmp_path / "empty-refresh"
         test_root.mkdir(parents=True, exist_ok=False)
         creds_path = test_root / "oauth_creds.json"
         past_ms = int((time.time() - 3600) * 1000)
@@ -189,9 +184,9 @@ class TestRefreshGeminiTokenOffline:
             await refresh_gemini_token(creds_path=creds_path)
 
     @pytest.mark.asyncio
-    async def test_creds_path_accepts_custom_path(self) -> None:
+    async def test_creds_path_accepts_custom_path(self, tmp_path: Path) -> None:
         """The creds_path parameter routes to the correct file."""
-        test_root = _TEST_TEMP_ROOT / f"custom-{uuid.uuid4().hex}"
+        test_root = tmp_path / "custom"
         custom_path = test_root / "subdir" / "creds.json"
         custom_path.parent.mkdir(parents=True)
         future_ms = int((time.time() + 7200) * 1000)

@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import uuid4
-
 import httpx
 import pytest
 import pytest_asyncio
@@ -19,17 +16,9 @@ from vaultspec_a2a.database.models import Base
 
 
 @pytest_asyncio.fixture
-async def engine():
+async def engine(tmp_path_factory: pytest.TempPathFactory):
     """Create a file-backed engine for dispatch-failure tests."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "dispatch-failure-db"
-        / uuid4().hex
-    )
-    case_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path_factory.mktemp("dispatch-failure-db")
     db_file = case_dir / "test.db"
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     async with eng.begin() as conn:

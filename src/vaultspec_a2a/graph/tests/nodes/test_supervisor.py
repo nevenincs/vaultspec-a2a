@@ -247,8 +247,8 @@ def test_plan_approval_interrupt_skipped_in_autonomous_mode() -> None:
     assert result.plan_approval_request is None
 
 
-def test_build_supervisor_messages_adds_workspace_rules() -> None:
-    workspace_root = Path(".tmp-supervisor-rules")
+def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "supervisor-rules"
     rules_dir = workspace_root / ".vaultspec" / "rules" / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
     rule_file = rules_dir / "project.md"

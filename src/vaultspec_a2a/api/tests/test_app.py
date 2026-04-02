@@ -3,10 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from pathlib import Path
 from types import SimpleNamespace
-from typing import cast
-from uuid import uuid4
+from typing import TYPE_CHECKING, cast
 
 import httpx
 import pytest
@@ -29,12 +27,13 @@ from ..websocket import WebSocketCommandRejectedError
 from ..ws_dispatch import create_dispatch_message_handler
 from .conftest import make_app
 
+if TYPE_CHECKING:
+    from pathlib import Path
 
-def test_build_worker_restart_detail_includes_log_tail() -> None:
+
+def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:
     """Crash detail should include both stderr tail text and the log path."""
-    case_dir = (
-        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-app"
     case_dir.mkdir(parents=True, exist_ok=True)
     stderr_log = case_dir / "worker.stderr.log"
     stderr_log.write_text(
@@ -124,16 +123,9 @@ async def test_api_health_reports_worker_stderr_log_path(
     assert body["worker_last_restart_detail"] == "returncode=9; stderr_log=example.log"
 
 
-def test_build_sqlite_fallback_diagnostics_reports_wal_state() -> None:
+def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> None:
     """SQLite fallback diagnostics should inspect real file-backed journal mode."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-sqlite-health"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-sqlite-health"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_path = case_dir / "health.db"
     checkpoint_path = case_dir / "checkpoints.db"
@@ -242,11 +234,10 @@ async def test_classify_missing_ws_thread_reports_state_drift(
 @pytest.mark.asyncio
 async def test_classify_missing_ws_thread_prefers_unverified_over_execution_state(
     session_factory,
+    tmp_path: Path,
 ) -> None:
     """Checkpoint uncertainty must outrank orphaned execution-state residue."""
-    case_dir = (
-        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-app"
     case_dir.mkdir(parents=True, exist_ok=True)
     checkpoints_file = case_dir / "closed-checkpoints.db"
 
@@ -312,11 +303,10 @@ async def test_dispatch_message_handler_rejects_missing_thread(
 @pytest.mark.asyncio
 async def test_dispatch_message_handler_prefers_unverified_over_not_found(
     session_factory,
+    tmp_path: Path,
 ) -> None:
     """Send-message WS rejection must preserve checkpoint-unverified classification."""
-    case_dir = (
-        Path.home() / ".codex" / "memories" / "tmp" / "api-test-app" / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-app"
     case_dir.mkdir(parents=True, exist_ok=True)
     checkpoints_file = case_dir / "closed-checkpoints.db"
 

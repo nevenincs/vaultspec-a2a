@@ -1,8 +1,5 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
-from pathlib import Path
-from uuid import uuid4
-
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -22,17 +19,9 @@ from vaultspec_a2a.database.models import Base, ControlActionModel
 
 
 @pytest_asyncio.fixture
-async def engine():
+async def engine(tmp_path_factory: pytest.TempPathFactory):
     """Create a file-backed engine for replay-focused control tests."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "control-event-handler-db"
-        / uuid4().hex
-    )
-    case_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path_factory.mktemp("control-event-handler-db")
     db_file = case_dir / "test.db"
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     async with eng.begin() as conn:

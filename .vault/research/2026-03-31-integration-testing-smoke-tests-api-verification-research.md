@@ -682,6 +682,23 @@ Verification note:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestListThreads"`
 
+### Output containment note
+
+The deterministic gate also depends on bounded filesystem behavior. Test
+fixtures and offline provider regressions should not spill SQLite files,
+checkpoint files, or synthetic credential artifacts into developer-home
+scratch roots or ad hoc repo-root directories. Those writes need to stay
+either inside pytest-managed scratch roots or inside explicit repo-owned
+runtime directories such as `.vault/runtime/` when persistence is part of the
+thing being certified.
+
+This is adjacent to the main LangGraph/VidaiMock work rather than a separate
+concern. LangGraph durability relies on real checkpoint files, and VidaiMock
+offline/provider tests rely on real credential and request fixtures, so the
+filesystem boundary is part of the certification contract. If those artifacts
+escape the test-owned boundary, the suite can become stateful and misleading
+even when the orchestration logic itself is correct.
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

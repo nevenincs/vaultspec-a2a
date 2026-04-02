@@ -49,6 +49,10 @@ Resolved on `audit4`:
 - REVIEW-022
 - REVIEW-023
 
+Resolved on `containment`:
+
+- REVIEW-024
+
 REVIEW-009 | LOW | The VidaiMock human-loop tape still depends on the resumed tool result being serialized as the last message
 Audit `2b` removed the brittle message-count and absolute-index contract from `mock-coder-human.yaml` and replaced it with a file-backed VidaiMock template that certifies approval, denial, invalid outcome handling, and readiness against the real compose-backed service lane. The residual contract is narrower but still real: resumed branch selection now assumes the worker-owned tool result remains the last serialized message in the provider request. If future worker prompt assembly appends additional post-tool messages before provider invocation, the tape could need another adjustment even though permission logic itself remains correct. Evidence anchors: `src/vaultspec_a2a/team/presets/mock/tapes/providers/mock-coder-human.yaml`, `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`, `src/vaultspec_a2a/providers/mock_chat_model.py`, `src/vaultspec_a2a/graph/nodes/worker.py`.
 
@@ -118,6 +122,28 @@ the source of the defect. Evidence anchors:
 `src/vaultspec_a2a/control/thread_service.py`,
 `src/vaultspec_a2a/control/projection.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-024 | HIGH | Test fixtures and offline regressions wrote durable scratch artifacts outside pytest-owned or repo-owned boundaries
+The containment audit found multiple test surfaces writing SQLite files,
+checkpoint files, and synthetic credential artifacts under developer-home
+paths or ad hoc repo-root temp directories. That made the suite capable of
+leaking state outside the test runner's owned boundary even when the
+orchestration logic itself was correct. The fix moves those scratch writes
+onto pytest-managed temp roots and removes the remaining ad hoc repo-root
+workspace-rules path from the supervisor test. This keeps the test suite
+disposable and makes runtime output ownership explicit: service certification
+artifacts stay under `.vault/runtime/`, while non-service scratch data stays
+under pytest-managed temp space. Evidence anchors:
+`src/vaultspec_a2a/api/tests/conftest.py`,
+`src/vaultspec_a2a/database/tests/conftest.py`,
+`src/vaultspec_a2a/api/tests/test_app.py`,
+`src/vaultspec_a2a/api/tests/test_projection.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`,
+`src/vaultspec_a2a/control/tests/test_event_handlers.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
+`src/vaultspec_a2a/providers/tests/test_gemini_auth.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

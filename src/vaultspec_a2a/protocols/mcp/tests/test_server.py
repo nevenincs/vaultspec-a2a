@@ -20,7 +20,6 @@ default to exercise the ``httpx.RequestError`` branch.
 import asyncio
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 import pytest
@@ -98,24 +97,21 @@ async def session_factory(engine):
 
 
 @pytest_asyncio.fixture
-async def checkpointer():
+async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
     """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
 
     Replaces MemorySaver so the real checkpointer implementation is exercised.
     """
-    case_dir = Path.cwd() / ".tmp" / "mcp-test-checkpoints" / uuid4().hex
-    case_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path_factory.mktemp("mcp-test-checkpoints")
     db_file = case_dir / "test_checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
         yield cp
 
 
 @pytest.fixture
-def workspace_root() -> Path:
-    """Return a repo-local workspace path instead of pytest's temp root."""
-    root = Path.cwd() / ".tmp" / "mcp-test-workspaces" / uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+def workspace_root(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """Return a pytest-managed workspace path for MCP test operations."""
+    return tmp_path_factory.mktemp("mcp-test-workspaces")
 
 
 class _InProcessWorker:

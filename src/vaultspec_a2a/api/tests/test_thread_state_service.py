@@ -2,8 +2,7 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-from uuid import uuid4
+from typing import TYPE_CHECKING
 
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
@@ -19,20 +18,16 @@ from vaultspec_a2a.database.models import (
 )
 from vaultspec_a2a.streaming.aggregator import EventAggregator
 
+if TYPE_CHECKING:
+    from pathlib import Path
+
 
 @pytest.mark.asyncio
-async def test_checkpoint_failure_updates_execution_readiness_with_repair_status() -> (
-    None
-):
+async def test_checkpoint_failure_updates_execution_readiness_with_repair_status(
+    tmp_path: Path,
+) -> None:
     """Checkpoint read failures must not leave stale readiness on the snapshot."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-closed"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -77,16 +72,9 @@ async def test_checkpoint_failure_updates_execution_readiness_with_repair_status
 
 
 @pytest.mark.asyncio
-async def test_missing_checkpoint_degrades_snapshot_readiness() -> None:
+async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) -> None:
     """A missing checkpoint must not leave the snapshot looking healthy."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-missing"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -130,18 +118,11 @@ async def test_missing_checkpoint_degrades_snapshot_readiness() -> None:
 
 
 @pytest.mark.asyncio
-async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoint() -> (
-    None
-):
+async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoint(
+    tmp_path: Path,
+) -> None:
     """Checkpoint-backed snapshots must still surface durable state corruption."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-corrupt-state"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -214,18 +195,11 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
 
 
 @pytest.mark.asyncio
-async def test_unreadable_durable_permission_degrades_snapshot_without_crashing() -> (
-    None
-):
+async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
+    tmp_path: Path,
+) -> None:
     """Corrupted durable permission rows must degrade the snapshot, not break it."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-corrupt-permission"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -296,16 +270,11 @@ async def test_unreadable_durable_permission_degrades_snapshot_without_crashing(
 
 
 @pytest.mark.asyncio
-async def test_unreadable_plan_approval_row_does_not_seed_pending_approval() -> None:
+async def test_unreadable_plan_approval_row_does_not_seed_pending_approval(
+    tmp_path: Path,
+) -> None:
     """Unreadable plan-approval rows must not leak mirrored approval metadata."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-corrupt-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -375,18 +344,11 @@ async def test_unreadable_plan_approval_row_does_not_seed_pending_approval() -> 
 
 
 @pytest.mark.asyncio
-async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state() -> (
-    None
-):
+async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state(
+    tmp_path: Path,
+) -> None:
     """Corrupt plan-approval rows must override stale thread-row approval state."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-stale-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -457,18 +419,11 @@ async def test_unreadable_plan_approval_row_clears_stale_thread_approval_state()
 
 
 @pytest.mark.asyncio
-async def test_missing_plan_approval_request_clears_stale_thread_pending_approval() -> (
-    None
-):
+async def test_missing_plan_approval_request_clears_stale_thread_pending_approval(
+    tmp_path: Path,
+) -> None:
     """Stale thread-row pending approval must not survive without backing state."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "thread-state-service-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "thread-state-service-db-missing-plan"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")

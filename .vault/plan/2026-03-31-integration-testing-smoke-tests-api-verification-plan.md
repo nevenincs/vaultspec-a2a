@@ -276,6 +276,13 @@ VidaiMock note:
 Deterministic request-shape matching remains a versioned provider contract;
 this audit slice changes approval-summary projection only, not the certified
 request-shape assumptions used by the deterministic service lane.
+
+Progress note:
+The containment follow-up is now active as a bounded hygiene slice. Test
+fixtures and regressions that previously wrote SQLite/checkpoint scratch data
+under developer-home paths or ad hoc repo-root temp directories are being
+moved onto pytest-managed scratch roots so the suite stays disposable,
+uniform, and bounded by the test runner itself.
 Missing-thread send-message rejections no longer flatten to `THREAD_NOT_FOUND`
 when checkpoint truth is unavailable; they preserve `THREAD_STATE_UNVERIFIED`
 through the websocket adapter too.

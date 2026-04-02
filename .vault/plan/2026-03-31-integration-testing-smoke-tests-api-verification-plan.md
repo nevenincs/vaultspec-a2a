@@ -918,3 +918,20 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/thread/tests/test_message_policy.py -q`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_rejects_followup_while_thread_requires_repair or test_rejects_followup_while_thread_is_reconciling"`
 - `uv run ruff check src/vaultspec_a2a/thread/message_policy.py src/vaultspec_a2a/thread/tests/test_message_policy.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic operator tooling: when the backend rejects hard delete for a
+non-terminal thread, the MCP surface must return a clear `ToolError` instead
+of leaking a lower-level HTTP failure.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "delete_thread_raises_tool_error_for_nonterminal_thread or archive_thread_raises_tool_error_when_server_unavailable or delete_thread_raises_tool_error_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

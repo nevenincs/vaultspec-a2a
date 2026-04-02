@@ -642,3 +642,16 @@ contract. Evidence anchors:
 `src/vaultspec_a2a/control/message_service.py`,
 `src/vaultspec_a2a/thread/tests/test_message_policy.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-052 | MEDIUM | MCP `delete_thread` still leaked raw backend conflicts after delete hardening
+Audit `6` exposed a tool-surface drift immediately after the stricter delete
+contract landed. The REST delete path now rejects non-terminal threads with
+`409`, but `src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py` was
+still letting that backend conflict escape as a raw HTTP failure instead of a
+usable `ToolError`. That left the MCP surface lagging behind the backend
+contract it fronts. The fix now maps delete-side `409` conflicts into a clear
+`ToolError` carrying the backend detail, and the MCP tool docs now describe
+non-terminal rejection rather than implying only active/running work is
+blocked. Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

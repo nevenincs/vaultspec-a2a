@@ -1580,6 +1580,32 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_rejects_followup_while_thread_requires_repair or test_rejects_followup_while_thread_is_reconciling"`
 - `uv run ruff check src/vaultspec_a2a/thread/message_policy.py src/vaultspec_a2a/thread/tests/test_message_policy.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-052: MCP delete must surface non-terminal delete conflicts as ToolError
+
+The stricter delete contract introduced a new surface-level requirement:
+anything that fronts the REST delete endpoint must translate non-terminal
+delete rejection into a clear operator-facing error, not a raw transport or
+HTTP failure. After `REVIEW-050`, the REST backend correctly failed closed on
+non-terminal threads, but the MCP `delete_thread` tool still lagged behind
+that contract.
+
+The defect was in MCP error mapping. `delete_thread()` in
+`src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py` did not catch
+backend `409` conflicts, so MCP callers saw a lower-level failure instead of a
+clear tool-level explanation that the thread was still non-terminal. The fix
+now maps delete-side `409` responses into `ToolError` with backend detail and
+updates the tool help text to describe non-terminal rejection explicitly.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "delete_thread_raises_tool_error_for_nonterminal_thread or archive_thread_raises_tool_error_when_server_unavailable or delete_thread_raises_tool_error_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

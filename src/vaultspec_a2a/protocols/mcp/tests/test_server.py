@@ -37,6 +37,7 @@ from sqlalchemy.ext.asyncio import (
 
 from ....api.app import create_app
 from ....control.circuit_breaker import WorkerCircuitBreaker
+from ....control.config import settings
 from ....control.worker_management import LazyWorkerSpawner
 from ....database import (
     create_thread,
@@ -50,6 +51,7 @@ from ....database.models import (
     ThreadModel,
 )
 from ....streaming.aggregator import EventAggregator
+from .. import _http as mcp_http
 from .._http import _reset_client, _reset_known_presets
 from ..tools.discovery import (
     get_pending_permissions,
@@ -1313,6 +1315,55 @@ class TestDeleteArchiveThreadErrorPaths:
         """archive_thread wraps ConnectError into ToolError."""
         with pytest.raises(ToolError):
             await archive_thread("00000000-0000-0000-0000-000000000002")
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_delete_thread_raises_tool_error_for_nonterminal_thread(
+        self, session_factory, checkpointer
+    ) -> None:
+        """delete_thread must surface backend 409s as ToolError."""
+        with _make_test_client(session_factory, checkpointer) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "delete tool conflict"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+
+            async with session_factory() as session:
+                thread = await session.get(ThreadModel, thread_id)
+                assert thread is not None
+                thread.status = "input_required"
+                thread.repair_status = "paused_resumable"
+                thread.execution_readiness = "paused_resumable"
+                await record_permission_request(
+                    session,
+                    request_id=f"{thread_id}:perm-delete-conflict",
+                    thread_id=thread_id,
+                    pause_reason_type="bash",
+                    description="Allow action?",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow Once"}],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+            original_gateway_url = settings.gateway_url
+            original_client = mcp_http._shared_client
+            try:
+                settings.gateway_url = "http://testserver"
+                mcp_http._shared_client = httpx.AsyncClient(
+                    transport=ASGITransport(app=client.app),
+                    base_url="http://testserver",
+                )
+                with pytest.raises(ToolError) as exc_info:
+                    await delete_thread(thread_id)
+            finally:
+                if mcp_http._shared_client is not None:
+                    await mcp_http._shared_client.aclose()
+                mcp_http._shared_client = original_client
+                settings.gateway_url = original_gateway_url
+
+        assert "Cannot delete thread" in str(exc_info.value)
+        assert "input_required" in str(exc_info.value)
 
 
 class TestKnownPresetsCache:

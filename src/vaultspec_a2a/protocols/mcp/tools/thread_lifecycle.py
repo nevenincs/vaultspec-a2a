@@ -200,21 +200,34 @@ async def delete_thread(
 
     Use this tool to remove a thread that is no longer needed.  This is
     irreversible — all messages, artifacts, plan entries, and checkpoints
-    are permanently destroyed.  Do NOT use this on active/running threads;
-    cancel them first with ``cancel_thread``.
+    are permanently destroyed.  Do NOT use this on non-terminal threads;
+    paused, repairing, or otherwise active work must be resolved or cancelled
+    before deletion.
 
-    Returns 404 if the thread_id does not match any known thread.
+    Returns 404 if the thread_id does not match any known thread. Returns 409
+    if the thread is still in a non-terminal state.
 
     Args:
         thread_id: The UUID of the thread to delete, e.g.
                    '550e8400-e29b-41d4-a716-446655440000'.
     """
-    await _mcp_request(
-        "DELETE",
-        f"/api/threads/{thread_id}",
-        timeout=settings.mcp_query_timeout_seconds,
-        not_found_msg=f"Thread {thread_id!r} not found.",
-    )
+    try:
+        await _mcp_request(
+            "DELETE",
+            f"/api/threads/{thread_id}",
+            timeout=settings.mcp_query_timeout_seconds,
+            not_found_msg=f"Thread {thread_id!r} not found.",
+        )
+    except HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_CONFLICT:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Cannot delete thread {thread_id}: "
+                f"{detail or 'thread is not in a terminal state'}."
+            ) from exc
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     return f"Thread {thread_id} deleted."
 
 

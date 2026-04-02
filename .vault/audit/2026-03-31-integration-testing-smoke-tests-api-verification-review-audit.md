@@ -624,3 +624,21 @@ Evidence anchors:
 `src/vaultspec_a2a/api/routes/threads.py`,
 `src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-051 | HIGH | Follow-up messaging still bypassed `repair_needed` and `reconciling` recovery gates
+Audit `6` exposed another operator-action drift at the message boundary.
+`POST /api/threads/{id}/messages` was still allowed for `repair_needed` and
+`reconciling` threads because `can_send_followup()` only blocked
+`input_required` and terminal/archive states. That let new user work race or
+overwrite explicit repair/recovery states whose whole purpose is to prevent
+normal interaction until checkpoint truth and execution state are trustworthy
+again. In this repo, `repair_needed` is the durable fail-closed state for
+checkpoint loss or untrusted recovery, and `reconciling` already has a
+dedicated redispatch path; neither is a safe target for ordinary follow-up
+ingest. The fix now rejects both states at the pure message-policy boundary,
+which keeps the REST message endpoint aligned with the stricter repair
+contract. Evidence anchors:
+`src/vaultspec_a2a/thread/message_policy.py`,
+`src/vaultspec_a2a/control/message_service.py`,
+`src/vaultspec_a2a/thread/tests/test_message_policy.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.

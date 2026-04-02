@@ -1281,6 +1281,68 @@ class TestSendMessage:
             )
         assert resp.status_code == 422
 
+    def test_rejects_followup_while_thread_requires_repair(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Follow-ups must not bypass repair-needed lifecycle state."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-message-repair-needed",
+                    status="repair_needed",
+                    repair_status="checkpoint_unavailable",
+                    execution_readiness="checkpoint_unavailable",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads/thread-message-repair-needed/messages",
+                json={"content": "retry work"},
+            )
+
+        assert resp.status_code == 409
+        assert (
+            resp.json()["detail"]
+            == "Cannot send messages while thread is in 'repair_needed' repair state"
+        )
+
+    def test_rejects_followup_while_thread_is_reconciling(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Follow-ups must not race reconciliation redispatch."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-message-reconciling",
+                    status="reconciling",
+                    repair_status="needs_reconciliation",
+                    execution_readiness="needs_reconciliation",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                "/api/threads/thread-message-reconciling/messages",
+                json={"content": "retry work"},
+            )
+
+        assert resp.status_code == 409
+        assert (
+            resp.json()["detail"]
+            == "Cannot send messages while thread is in 'reconciling' repair state"
+        )
+
 
 # ---------------------------------------------------------------------------
 # GET /api/teams

@@ -898,3 +898,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py -q`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "rejects_input_required_thread_with_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/thread/lifecycle_guards.py src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-051: follow-up messaging must fail closed for repair-state threads
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic operator truth: a thread in `repair_needed` or `reconciling`
+must not accept ordinary follow-up messages until checkpoint truth and
+execution state are trustworthy again.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/thread/message_policy.py`
+- `src/vaultspec_a2a/control/message_service.py`
+- `src/vaultspec_a2a/thread/tests/test_message_policy.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/thread/tests/test_message_policy.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_rejects_followup_while_thread_requires_repair or test_rejects_followup_while_thread_is_reconciling"`
+- `uv run ruff check src/vaultspec_a2a/thread/message_policy.py src/vaultspec_a2a/thread/tests/test_message_policy.py src/vaultspec_a2a/api/tests/test_endpoints.py`

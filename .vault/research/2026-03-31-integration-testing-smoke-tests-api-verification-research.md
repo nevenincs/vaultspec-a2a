@@ -1547,6 +1547,39 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "rejects_input_required_thread_with_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/thread/lifecycle_guards.py src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-051: follow-up messaging must fail closed for repair-state threads
+
+LangGraph durability and restart semantics still support the same pessimistic
+boundary: a thread in `repair_needed` or `reconciling` is not safe for normal
+user follow-up input. Those states exist because checkpoint truth is
+unavailable or reconciliation is still in progress, so accepting a new
+follow-up would bypass the very recovery gate that is supposed to protect the
+workflow from unsafe continuation.
+
+The defect was in follow-up message eligibility. `can_send_followup()` in
+`src/vaultspec_a2a/thread/message_policy.py` only blocked `input_required` and
+terminal/archive states, which let `POST /api/threads/{id}/messages` accept
+new work for `repair_needed` and `reconciling` threads. That overstated
+interactability and let ordinary ingest race explicit repair/recovery logic.
+
+The fix now fails closed for both repair states. Follow-up messaging is
+rejected while a thread is `repair_needed` or `reconciling`, keeping message
+dispatch aligned with the repo’s repair contract instead of papering over
+checkpoint or reconciliation uncertainty.
+
+Evidence:
+
+- `src/vaultspec_a2a/thread/message_policy.py`
+- `src/vaultspec_a2a/control/message_service.py`
+- `src/vaultspec_a2a/thread/tests/test_message_policy.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/thread/tests/test_message_policy.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_rejects_followup_while_thread_requires_repair or test_rejects_followup_while_thread_is_reconciling"`
+- `uv run ruff check src/vaultspec_a2a/thread/message_policy.py src/vaultspec_a2a/thread/tests/test_message_policy.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

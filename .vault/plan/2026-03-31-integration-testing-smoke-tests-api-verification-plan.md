@@ -593,3 +593,24 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_cancel_dispatch_restores_repair_state"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "cancel_thread_cancels_running_thread or cancel_thread_repeat_request_stays_accepting_until_terminal_event"`
 - `uv run ruff check src/vaultspec_a2a/control/cancel_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-037: startup reconciliation must fail closed on missing checkpoint truth
+
+Keep this as a bounded Audit `6` guardrail. Restart reconciliation must not
+preserve `cancel_pending` when checkpoint probing failed. The implementation
+requirement is explicit ordering: `checkpoint_available=False` must beat a
+surviving `status="cancelling"` so restart state degrades to `repair_needed` /
+`checkpoint_unavailable`.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/lifecycle/reconciliation.py`
+- `src/vaultspec_a2a/database/reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
+- `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "cancelling"`
+- `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "cancelling_without_checkpoint"`
+- `uv run ruff check src/vaultspec_a2a/lifecycle/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`

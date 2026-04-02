@@ -90,7 +90,7 @@ def compute_reconciliation_actions(
                     ),
                 ),
             )
-        elif thread.status == ThreadStatus.CANCELLING.value:
+        elif thread.status == ThreadStatus.CANCELLING.value and checkpoint_available:
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,

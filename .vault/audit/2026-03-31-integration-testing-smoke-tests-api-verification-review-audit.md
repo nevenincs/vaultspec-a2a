@@ -377,6 +377,21 @@ response. Evidence anchors:
 `src/vaultspec_a2a/api/routes/cancel.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
+REVIEW-037 | HIGH | Startup reconciliation trusted `cancelling` without checkpoint truth
+Audit `6` also exposed a restart-time persistence drift. The pure startup
+reconciliation logic in `src/vaultspec_a2a/lifecycle/reconciliation.py` was
+previously allowing `status="cancelling"` to produce `repair_status="cancel_pending"`
+even when checkpoint probing had already failed. That overstated durable
+execution truth after restart: a surviving thread status is only metadata, and
+without checkpoint truth the system cannot safely claim cancellation is still
+in flight. The fix now makes `checkpoint_available=False` win over the
+`cancelling` branch, forcing `repair_needed` / `checkpoint_unavailable`
+instead of `cancel_pending`. Evidence anchors:
+`src/vaultspec_a2a/lifecycle/reconciliation.py`,
+`src/vaultspec_a2a/database/reconciliation.py`,
+`src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`,
+`src/vaultspec_a2a/database/tests/test_reconciliation.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

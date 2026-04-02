@@ -84,6 +84,24 @@ class TestCancellingThread:
         assert action.increment_recovery_epoch is True
         assert action.increment_generation is False
 
+    def test_cancelling_without_checkpoint_fails_closed(self) -> None:
+        """Cancelling without checkpoint truth must not remain cancel_pending."""
+        thread = ThreadSnapshot(thread_id="t1", status="cancelling", recovery_epoch=0)
+        actions = compute_reconciliation_actions(
+            threads=[thread],
+            checkpoint_results={"t1": False},
+            checkpoint_errors={"t1": "checkpoint_unavailable"},
+            pending_permissions={},
+        )
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.thread_id == "t1"
+        assert action.new_thread_status == "repair_needed"
+        assert action.repair_status == "checkpoint_unavailable"
+        assert action.execution_readiness == "checkpoint_unavailable"
+        assert action.increment_recovery_epoch is True
+        assert action.increment_generation is True
+
 
 class TestPendingPermissions:
     """Threads with pending permissions get input_required treatment."""

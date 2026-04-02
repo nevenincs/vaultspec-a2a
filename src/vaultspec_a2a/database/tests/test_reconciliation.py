@@ -67,3 +67,49 @@ async def test_pending_permission_without_checkpoint_is_not_marked_resumable(
     assert repaired.repair_generation == 1
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_cancelling_without_checkpoint_is_not_marked_cancel_pending(
+    runtime_dir,
+) -> None:
+    """Missing checkpoint truth must beat a surviving cancelling status."""
+    db_file = runtime_dir / "reconciliation-cancelling.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+    checkpoints_file = runtime_dir / "checkpoints-cancelling.db"
+
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="thread-cancelling-missing-checkpoint",
+                status="cancelling",
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            summary = await reconcile_threads_on_startup(session, checkpointer)
+            await session.commit()
+            repaired = await get_thread(
+                session,
+                "thread-cancelling-missing-checkpoint",
+            )
+
+    assert summary["paused_resumable"] == 0
+    assert summary["checkpoint_unavailable"] == 1
+    assert repaired is not None
+    assert repaired.status == "repair_needed"
+    assert repaired.repair_status == "checkpoint_unavailable"
+    assert repaired.execution_readiness == "checkpoint_unavailable"
+    assert repaired.recovery_epoch == 1
+    assert repaired.repair_generation == 1
+
+    await engine.dispose()

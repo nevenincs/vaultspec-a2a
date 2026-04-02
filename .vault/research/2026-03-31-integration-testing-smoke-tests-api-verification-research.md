@@ -1067,6 +1067,32 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "cancel_thread_cancels_running_thread or cancel_thread_repeat_request_stays_accepting_until_terminal_event"`
 - `uv run ruff check src/vaultspec_a2a/control/cancel_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-037: checkpoint truth over surviving cancelling status
+
+This slice aligns startup reconciliation with LangGraph persistence semantics:
+replay and recovery truth come from checkpoint availability, not from a
+parallel custom status field that survived a restart. The executor in
+`src/vaultspec_a2a/database/reconciliation.py` already probes checkpoint
+availability before building reconciliation actions; the defect was that the
+pure decision logic in `src/vaultspec_a2a/lifecycle/reconciliation.py` still
+trusted `status="cancelling"` ahead of that probe result. The fix now makes
+reconciliation fail closed. If the checkpoint cannot be read, the thread is
+persisted as `status="repair_needed"` with `repair_status="checkpoint_unavailable"`
+and `execution_readiness="checkpoint_unavailable"` instead of `cancel_pending`.
+
+Evidence:
+
+- `src/vaultspec_a2a/lifecycle/reconciliation.py`
+- `src/vaultspec_a2a/database/reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
+- `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "cancelling"`
+- `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "cancelling_without_checkpoint"`
+- `uv run ruff check src/vaultspec_a2a/lifecycle/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

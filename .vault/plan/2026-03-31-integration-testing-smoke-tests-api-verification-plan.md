@@ -528,3 +528,25 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_degrades_stale_execution_state_lineage or list_threads_degrades_stale_execution_state_lineage or list_threads_degrades_checkpoint_mismatched_execution_state"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_stale_execution_state_summary or list_threads_degrades_checkpoint_mismatched_summary"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/routes/threads.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-034: team-status ghost pending-permission drift
+
+Keep a bounded Audit `6` slice for team-status ghost pending-permission drift.
+The implementation must ensure that `/api/team/status` is durable-first for
+pending permissions, with `build_team_status()` sourcing pending entries only
+from DB-backed `get_pending_permission_requests()`. Aggregator state may
+continue to supply `agents` and `active_threads`, but it must not invent
+permission truth. The intended outcome is durable-backed pending permissions
+only, with ghost permissions excluded from the public surface.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/api/routes/teams.py`
+- `src/vaultspec_a2a/api/schemas/rest.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestTeamStatus"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_lists_durable_pending_permission_thread_as_active or team_status_excludes_aggregator_only_pending_permission or get_pending_permissions_empty"`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

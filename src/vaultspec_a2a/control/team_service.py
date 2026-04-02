@@ -81,7 +81,8 @@ async def build_team_status(
         for s in node_summaries
     ]
 
-    # Durable permissions from DB, then deduplicate with in-memory aggregator.
+    # Public pending permissions must be durable-backed; aggregator state is
+    # still used for agents and active-thread liveness, not permission truth.
     pending: list[PendingPermissionInfo] = [
         PendingPermissionInfo(
             request_id=p.request_id,
@@ -91,16 +92,6 @@ async def build_team_status(
         )
         for p in durable_pending
     ]
-    known_ids = {p.request_id for p in pending}
-    pending.extend(
-        PendingPermissionInfo(
-            request_id=e.request_id,
-            thread_id=e.thread_id,
-            description=e.description,
-        )
-        for e in aggregator.get_pending_permissions()
-        if e.request_id not in known_ids
-    )
 
     return TeamStatus(
         agents=agents,

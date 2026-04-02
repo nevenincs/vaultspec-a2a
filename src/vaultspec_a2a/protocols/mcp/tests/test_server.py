@@ -816,6 +816,39 @@ class TestGetPendingPermissionsViaApp:
             == "team-status-durable-pending:perm-1"
         )
 
+    def test_team_status_excludes_aggregator_only_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Aggregator-only permissions must not become public pending truth."""
+        import time
+
+        from vaultspec_a2a.graph.events import PermissionRequest
+
+        agg = EventAggregator()
+        event = PermissionRequest(
+            thread_id="team-status-aggregator-only",
+            agent_id="vaultspec-coder",
+            timestamp=time.time(),
+            request_id="team-status-aggregator-only:perm-1",
+            description="Ghost permission",
+            options=[],
+        )
+        agg._emitters._pending_permissions["team-status-aggregator-only:perm-1"] = (
+            event,
+            0.0,
+        )
+
+        with _make_test_client(
+            session_factory,
+            checkpointer,
+            aggregator=agg,
+        ) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+
 
 # ---------------------------------------------------------------------------
 # list_team_presets tests (MCP-R2)

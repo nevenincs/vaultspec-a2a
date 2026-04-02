@@ -328,6 +328,23 @@ drift. Evidence anchors: `src/vaultspec_a2a/control/projection.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-034 | MEDIUM | Team status could advertise ghost pending permissions from aggregator memory
+Audit `6` also closed a persistence-versus-operator-surface mismatch in
+`/api/team/status`. The route previously started from durable pending
+permissions but then appended aggregator-only permission entries that had no
+durable backing row, allowing operator and MCP surfaces to advertise
+actionable pending work that persistence could not actually satisfy. The fix
+now makes team status durable-first for pending permissions:
+`build_team_status()` keeps pending permissions from
+`get_pending_permission_requests()` only, while aggregator state remains
+limited to `agents` and `active_threads`. That removes ghost permissions from
+the public surface without weakening liveness visibility. Evidence anchors:
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/api/routes/teams.py`,
+`src/vaultspec_a2a/api/schemas/rest.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

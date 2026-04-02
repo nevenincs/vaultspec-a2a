@@ -983,6 +983,45 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_stale_execution_state_summary or list_threads_degrades_checkpoint_mismatched_summary"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/routes/threads.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-034: team-status ghost pending-permission drift
+
+This slice makes `/api/team/status` durable-first for pending permissions.
+`build_team_status()` now sources pending permissions only from the DB-backed
+`get_pending_permission_requests()` result and no longer appends
+aggregator-only permission entries. Aggregator state still contributes
+`agents` and `active_threads`, but not permission truth, so ghost permissions
+are no longer exposed as public pending work.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/api/routes/teams.py`
+- `src/vaultspec_a2a/api/schemas/rest.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Terminology:
+
+- `durable-backed` / `durable-first` for public pending permissions
+- `ghost permissions` for aggregator-only permission entries with no DB row
+- keep aggregator state limited to agent/activity surfaces
+
+Contradiction resolved:
+
+- the old contract could advertise an actionable pending permission without any
+  durable backing row
+
+LangGraph grounding:
+
+- the persistence and durable-execution docs reinforce that thread state must
+  come from checkpoint-backed persistence, not ephemeral in-memory leftovers
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestTeamStatus"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_lists_durable_pending_permission_thread_as_active or team_status_excludes_aggregator_only_pending_permission or get_pending_permissions_empty"`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

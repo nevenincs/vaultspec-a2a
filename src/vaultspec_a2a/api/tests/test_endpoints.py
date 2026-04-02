@@ -855,10 +855,10 @@ class TestTeamStatus:
         assert data["active_threads"] == []
         assert data["pending_permissions"] == []
 
-    def test_pending_permissions_surface_from_aggregator(
+    def test_pending_permissions_do_not_surface_from_aggregator_without_durable_row(
         self, session_factory, checkpointer
     ) -> None:
-        """Pending permissions stored in aggregator appear in team status."""
+        """Aggregator-only pending permissions must not appear in team status."""
         import time
 
         from ...graph.events import PermissionRequest
@@ -887,11 +887,7 @@ class TestTeamStatus:
 
         assert resp.status_code == 200
         data = resp.json()
-        assert len(data["pending_permissions"]) == 1
-        perm = data["pending_permissions"][0]
-        assert perm["request_id"] == "thread-abc:perm-001"
-        assert perm["thread_id"] == "thread-abc"
-        assert perm["description"] == "Allow file write?"
+        assert data["pending_permissions"] == []
 
     def test_node_summaries_surface_as_agents(
         self, session_factory, checkpointer

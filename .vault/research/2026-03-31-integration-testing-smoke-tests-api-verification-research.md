@@ -699,6 +699,55 @@ filesystem boundary is part of the certification contract. If those artifacts
 escape the test-owned boundary, the suite can become stateful and misleading
 even when the orchestration logic itself is correct.
 
+### Audit 5 supervisor plan-approval durability note
+
+Audit `5` begins with a repo-boundary relay defect rather than a LangGraph
+contract defect. LangGraph's human-in-the-loop model is clear in the primary
+docs: `interrupt()` pauses execution, persistence checkpoints that pause under
+the same `thread_id`, and `Command(resume=...)` resumes from the start of the
+interrupted node rather than from the exact source line. That means a
+supervisor-owned approval pause must remain durably discoverable and
+respondable at the repository boundary, not just visible in transient stream
+events.
+
+This repo already translated supervisor interrupts into outward-facing
+`plan_approval_request` events at the streaming layer, but the durable relay
+classifier still only treated `permission_request` as a row-creating request.
+That created a split-brain failure mode:
+
+- the approval pause was visible in streamed/projection surfaces
+- the same request could fail to exist as a durable pending permission row
+- `/api/permissions/{id}/respond` could then reject the request even though the
+  supervisor had already paused for approval
+
+The minimal fix is to treat `plan_approval_request` as a first-class durable
+permission-request event in the same relay path as `permission_request`.
+Initial verification is now in place at two levels:
+
+- fast event-handler coverage that proves a supervisor approval relay creates a
+  durable pending permission and pending thread approval state
+- HTTP coverage that proves `/internal/events` can relay a real
+  `plan_approval_request` and the resulting request is then accepted by
+  `/api/permissions/{id}/respond`
+
+Remaining risk for this audit slice:
+
+- plan-approval payload construction is still mirrored across supervisor,
+  streaming transform, projection, and permission-response logic
+- the compose-backed service lane still needs a dedicated supervisor approval
+  certification scenario, preferably proving reconnect-safe resume and
+  exactly-once post-approval work
+
+Grounding:
+
+- [Interrupts](https://docs.langchain.com/oss/python/langgraph/interrupts)
+- [Persistence](https://docs.langchain.com/oss/python/langgraph/persistence)
+
+Context7 note:
+
+- attempted again for `langgraph`, but the MCP in this environment still fails
+  with an invalid API key, so primary-source docs remain the grounding source
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

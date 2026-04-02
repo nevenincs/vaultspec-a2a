@@ -16,7 +16,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from ...database import create_thread, get_thread_execution_state
+from ...database import (
+    create_thread,
+    get_permission_request,
+    get_thread_execution_state,
+)
 from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 from ..websocket import ConnectionManager
@@ -371,6 +375,70 @@ class TestInternalEvents:
         assert projection.checkpoint_id == "cp-1"
         assert projection.parent_checkpoint_id == "cp-0"
         assert projection.task_count == 1
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(
+        self,
+        session_factory,
+        checkpointer,
+    ) -> None:
+        """A relayed plan approval must become durably respondable."""
+        from .conftest import make_app
+
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async with session_factory() as session:
+            thread = await create_thread(session, title="Relay plan approval")
+            await session.commit()
+
+        request_id = f"{thread.id}:plan-approval"
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            relay = await client.post(
+                "/internal/events",
+                json={
+                    "type": "event",
+                    "thread_id": thread.id,
+                    "payload": {
+                        "type": "plan_approval_request",
+                        "request_id": request_id,
+                        "description": "Approve plan before execution",
+                        "options": [
+                            {
+                                "option_id": "approve",
+                                "name": "Approve Plan",
+                                "kind": "allow_once",
+                            },
+                            {
+                                "option_id": "reject",
+                                "name": "Reject Plan",
+                                "kind": "reject_once",
+                            },
+                        ],
+                    },
+                },
+            )
+
+        assert relay.status_code == 200
+
+        async with session_factory() as session:
+            permission = await get_permission_request(session, request_id)
+
+        assert permission is not None
+        assert permission.pause_reason_type == "plan_approval_request"
+        assert permission.request_status == "pending"
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "approve"},
+            )
+
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == {"approved": True}
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_degraded_execution_state_projection_preserves_last_good_state(

@@ -145,6 +145,29 @@ under pytest-managed temp space. Evidence anchors:
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
 `src/vaultspec_a2a/providers/tests/test_gemini_auth.py`.
 
+REVIEW-025 | MEDIUM | Supervisor plan approvals were stream-visible without a guaranteed durable pending permission row
+Audit `5` found a concrete relay defect at the repository boundary. The
+supervisor path already emitted outward-facing `plan_approval_request` events,
+and the streaming transformer already treated those as permission-like
+interrupts, but the durable event classifier and permission-event handler still
+created durable rows only for `permission_request`. That left a split-brain
+failure mode where a supervisor approval pause could appear pending in streamed
+or projected state while `/api/permissions/{id}/respond` had no durable pending
+permission row to answer. LangGraph itself is not the source of this behavior:
+its checkpoint-backed interrupt contract requires the pause to remain resumable
+under the same `thread_id`, so the defect was in the repo-owned relay layer.
+The minimal fix now treats `plan_approval_request` as a first-class durable
+request-creation event, and the new regressions prove both the direct event
+handler path and the real `/internal/events` -> `/api/permissions/{id}/respond`
+HTTP boundary. Residual risk remains because plan-approval payload semantics
+are still mirrored across supervisor, stream transform, projection, and
+permission-response logic; that is the next explicit `Audit 5` service
+certification target. Evidence anchors:
+`src/vaultspec_a2a/thread/snapshots.py`,
+`src/vaultspec_a2a/control/event_handlers.py`,
+`src/vaultspec_a2a/control/tests/test_event_handlers.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

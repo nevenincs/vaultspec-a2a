@@ -1,5 +1,7 @@
 """Focused replay/idempotency tests for worker->gateway event handlers."""
 
+import json
+
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
@@ -15,7 +17,7 @@ from vaultspec_a2a.database import (
     record_permission_request,
     record_permission_response_submission,
 )
-from vaultspec_a2a.database.models import Base, ControlActionModel
+from vaultspec_a2a.database.models import Base, ControlActionModel, ThreadModel
 
 
 @pytest_asyncio.fixture
@@ -114,3 +116,45 @@ async def test_replayed_permission_resolved_is_ignored_after_progress_apply(
             .all()
         )
         assert len(actions) == 1
+
+
+@pytest.mark.asyncio
+async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
+    session_factory,
+) -> None:
+    """Supervisor plan approval interrupts must become durable pending rows."""
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Plan approval relay")
+        await session.commit()
+        thread_id = thread.id
+
+    request_id = f"{thread_id}:plan-approval-1"
+    payload = {
+        "type": "plan_approval_request",
+        "request_id": request_id,
+        "description": "Approve plan for feature 'audit-5'",
+        "options": [
+            {"option_id": "approve", "name": "Approve", "kind": "allow_once"},
+            {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
+        ],
+        "tool_call": "plan_approval",
+    }
+
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.pause_reason_type == "plan_approval_request"
+        assert permission.request_status == "pending"
+        assert permission.tool_call == "plan_approval"
+        assert json.loads(permission.allowed_options_json) == payload["options"]
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.approval_status == "pending"
+        assert thread.approval_request_id == request_id

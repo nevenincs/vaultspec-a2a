@@ -1194,6 +1194,63 @@ class TestPermissionRespond:
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == {"approved": True}
 
+    def test_plan_approval_response_succeeds_after_real_event_relay(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Supervisor plan approvals must be respondable after internal relay."""
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "plan approval relay test"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            request_id = f"{thread_id}:req-plan-relay"
+
+            relay = client.post(
+                "/internal/events",
+                json={
+                    "thread_id": thread_id,
+                    "payload": {
+                        "type": "plan_approval_request",
+                        "request_id": request_id,
+                        "description": "Approve plan for feature 'audit-5'",
+                        "options": [
+                            {
+                                "option_id": "approve",
+                                "name": "Approve plan",
+                                "kind": "allow_once",
+                            },
+                            {
+                                "option_id": "reject",
+                                "name": "Reject plan",
+                                "kind": "reject_once",
+                            },
+                        ],
+                        "tool_call": "plan_approval",
+                        "feature": "audit-5",
+                        "plan_paths": [".vault/plan/audit-5.md"],
+                        "exec_worker": "vaultspec-coder",
+                    },
+                },
+            )
+            assert relay.status_code == 200
+
+            worker.dispatches.clear()
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "approve"},
+            )
+
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+        dispatch = worker.dispatches[0]
+        assert dispatch["action"] == "resume"
+        assert dispatch["thread_id"] == thread_id
+        assert dispatch["option_id"] == {"approved": True}
+
     def test_rejects_stale_second_response_after_submission(
         self, session_factory, checkpointer
     ) -> None:

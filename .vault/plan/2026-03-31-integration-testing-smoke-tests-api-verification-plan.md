@@ -376,32 +376,41 @@ replay semantics remain intact.
   live pending plan-approval rows must outrank stale `thread.approval_request_id`,
   and stale pending approval metadata must clear when no projected plan
   approval remains.
-- Audit 5: streaming continuity and replay behavior.
-  Cover SSE reconnect, ordered event replay, terminal replay, and
-  tool-call chunk continuity across reconnect and completion.
-- Audit 6: multi-agent steering and re-briefing.
+- Audit 5: supervisor plan-approval service certification.
+  Cover the full supervisor approval path: streamed `plan_approval_request`,
+  durable pending permission creation, reconnect-safe response acceptance, and
+  proof that approved supervisor work resumes exactly once after interruption.
+  The first fast slice is now in place: `plan_approval_request` is treated as a
+  durable request-creation event, and HTTP coverage now proves
+  `/internal/events` can relay a real supervisor approval request that
+  `/api/permissions/{id}/respond` accepts successfully.
+- Audit 6: persistence and state-corruption audit.
+  Cover checkpoint replay, restart after interruption, degraded snapshots,
+  corrupt durable rows, and operator-visible degradation instead of silent
+  repair.
+- Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.
-- Audit 7: cancellation and cleanup behavior.
-  Cover cancel vs interrupt semantics, in-flight cancellation, terminal
-  cancellation visibility, and absence of zombie execution.
-- Audit 8: hostile-environment and sandbox-boundary behavior.
-  Cover non-permitted actions, approval refusal paths, bounded file
-  access, and destructive-action gating inside supported sandboxes.
-- Audit 9: VidaiMock tape brittleness and deterministic replay quality.
-  Follow-on scope after Audit `2b`: cover tape selection stability beyond
-  the last-message contract, prompt-shape sensitivity across future worker
-  changes, exact output determinism, and operator-visible failure modes
-  when the mock backend is unavailable.
-- Audit 10: artifact persistence and file-removal safety.
-  Cover artifact attribution, cross-thread isolation, persistence across
-  turns, explicit removal flow, and approval-gated deletion behavior.
+- Audit 8: sandbox, artifact, and hostile-environment audit.
+  Cover non-permitted actions, approval refusal paths, bounded file access,
+  destructive-action gating, artifact persistence/removal, and sandbox-owned
+  output boundaries.
+- Audit 9: streaming, replay, and trace-lineage audit.
+  Cover SSE reconnect, ordered event replay, terminal replay, tool-call chunk
+  continuity, and gateway-to-worker-to-persistence trace lineage across replay
+  and completion.
 
 Verification note:
 Audit `3` has focused fast coverage and the compose-backed permission/resume
 service lane is green again in the current session. Audit `4` should keep using
 that service lane as a guardrail while the broader restart and persistence
 cases are added.
+
+Audit `5` now also has a first fast guardrail: supervisor-originated
+`plan_approval_request` events are durably persisted and respondable through
+the real `/internal/events` -> `/api/permissions/{id}/respond` boundary. The
+remaining `Audit 5` work is the compose-backed supervisor approval scenario,
+not the basic durable relay fix.
 
 ## Resume Eligibility Clarification
 

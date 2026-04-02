@@ -101,7 +101,11 @@ def is_terminal_event(payload: dict[str, Any]) -> bool:
 
 def is_permission_event(payload: dict[str, Any]) -> bool:
     """Return True if the payload is a permission request or resolution."""
-    return payload.get("type", "") in {"permission_request", "permission_resolved"}
+    return payload.get("type", "") in {
+        "permission_request",
+        "plan_approval_request",
+        "permission_resolved",
+    }
 
 
 def is_progress_event(payload: dict[str, Any]) -> bool:

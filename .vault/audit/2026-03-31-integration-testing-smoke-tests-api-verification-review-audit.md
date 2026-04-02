@@ -452,6 +452,35 @@ Evidence anchors: `src/vaultspec_a2a/control/projection.py`,
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
+REVIEW-042 | MEDIUM | Team-status and MCP discovery could advertise malformed durable permission rows
+Audit `6` exposed a remaining operator-surface drift in team-status discovery.
+`build_team_status()` in `src/vaultspec_a2a/control/team_service.py` was using
+all durable pending permission rows as public pending truth, even when a row's
+`allowed_options_json` was malformed or contained no usable option ids. That
+meant `/api/team/status` and MCP `get_pending_permissions()` could still
+advertise a request id that the respond path would reject as
+`Permission request has no valid options`. The fix now keeps active-thread
+visibility for those paused threads but excludes malformed or optionless
+durable rows from public pending-permission discovery. Evidence anchors:
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-043 | MEDIUM | Team-status discovery could keep advertising pending permissions on terminal threads
+Audit `6` exposed one more operator-surface drift in team-status discovery.
+`build_team_status()` in `src/vaultspec_a2a/control/team_service.py` was still
+trusting non-expired durable permission rows without reconciling them against
+the owning thread lifecycle. That meant `/api/team/status` could continue to
+list a permission as pending, and keep its thread in `active_threads`, even
+after the durable thread status had already reached a terminal state where the
+respond path would reject further action. The fix now excludes terminal-thread
+permission residue from public pending discovery and from active-thread
+promotion while preserving non-terminal paused-thread visibility, including the
+malformed-row case already covered by `REVIEW-042`. Evidence anchors:
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

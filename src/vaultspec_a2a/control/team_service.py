@@ -7,6 +7,7 @@ function.  The route handler converts the result to a Pydantic wire model.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -19,6 +20,26 @@ if TYPE_CHECKING:
     from ..streaming.aggregator import EventAggregator
 
 __all__ = ["TeamStatus", "build_team_status"]
+
+
+def _has_valid_permission_options(raw_options_json: str | None) -> bool:
+    """Return True only when a durable pending row exposes usable option ids."""
+    if not isinstance(raw_options_json, str) or not raw_options_json:
+        return False
+    try:
+        parsed = json.loads(raw_options_json)
+    except (TypeError, json.JSONDecodeError):
+        return False
+    if not isinstance(parsed, list):
+        return False
+    for option in parsed:
+        if not isinstance(option, dict):
+            continue
+        for key in ("option_id", "optionId"):
+            value = option.get(key)
+            if isinstance(value, str) and value:
+                return True
+    return False
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,10 +81,20 @@ async def build_team_status(
 ) -> TeamStatus:
     """Assemble the full team status from DB and in-memory aggregator state."""
     durable_pending = await get_pending_permission_requests(db)
+    public_pending: list[PendingPermissionInfo] = [
+        PendingPermissionInfo(
+            request_id=p.request_id,
+            thread_id=p.thread_id,
+            description=p.description,
+            request_status=p.request_status,
+        )
+        for p in durable_pending
+        if _has_valid_permission_options(p.allowed_options_json)
+    ]
     active_threads = sorted(
         set(heartbeat_threads)
         | set(aggregator.get_active_thread_ids())
-        | {p.thread_id for p in durable_pending}
+        | {permission.thread_id for permission in durable_pending}
     )
 
     node_summaries = aggregator.get_node_summaries()
@@ -83,18 +114,8 @@ async def build_team_status(
 
     # Public pending permissions must be durable-backed; aggregator state is
     # still used for agents and active-thread liveness, not permission truth.
-    pending: list[PendingPermissionInfo] = [
-        PendingPermissionInfo(
-            request_id=p.request_id,
-            thread_id=p.thread_id,
-            description=p.description,
-            request_status=p.request_status,
-        )
-        for p in durable_pending
-    ]
-
     return TeamStatus(
         agents=agents,
         active_threads=active_threads,
-        pending_permissions=pending,
+        pending_permissions=public_pending,
     )

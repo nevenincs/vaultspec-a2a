@@ -1068,6 +1068,48 @@ class TestTeamStatus:
         data = resp.json()
         assert data["pending_permissions"] == []
 
+    def test_pending_permissions_hide_malformed_durable_rows(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Team status must not advertise durable rows the respond path rejects."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_malformed_permission() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="team-status-malformed-durable",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-malformed-durable:perm-1",
+                    thread_id="team-status-malformed-durable",
+                    pause_reason_type="permission_request",
+                    description="Malformed durable permission",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow"}],
+                    tool_call="bash",
+                )
+                permission = await session.get(
+                    PermissionRequestModel,
+                    "team-status-malformed-durable:perm-1",
+                )
+                assert permission is not None
+                permission.allowed_options_json = '{"broken":'
+                await session.commit()
+
+        asyncio.run(_seed_malformed_permission())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "team-status-malformed-durable" in data["active_threads"]
+        assert data["pending_permissions"] == []
+
     def test_node_summaries_surface_as_agents(
         self, session_factory, checkpointer
     ) -> None:

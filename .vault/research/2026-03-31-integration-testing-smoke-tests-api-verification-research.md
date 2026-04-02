@@ -1205,6 +1205,72 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_checkpoint_only_pending_permission or state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-042: operator discovery must not surface malformed durable permissions as actionable
+
+This slice aligns team-status and MCP permission discovery with the repo's
+actual permission-response contract. The relevant LangGraph grounding does not
+change here: checkpoint truth and interrupt durability still come from the
+checkpointer, but application-level actionability is a repo-owned boundary.
+In this repo, `src/vaultspec_a2a/control/permission_service.py` rejects a
+pending request when its durable row has no valid option ids. That means
+operator discovery surfaces must not advertise those rows as actionable even
+though they still exist durably.
+
+The defect was in `src/vaultspec_a2a/control/team_service.py`, which treated
+all durable pending permission rows as equally discoverable pending work for
+`/api/team/status` and MCP `get_pending_permissions()`. The fix now validates
+that a durable row still exposes at least one usable option id before it
+appears in public `pending_permissions`. The owning paused thread remains in
+`active_threads`, so liveness visibility is preserved while false actionability
+is removed.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestTeamStatus"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission or team_status_lists_durable_pending_permission_thread_as_active or get_pending_permissions_empty"`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-043: operator discovery must not keep terminal-thread permission residue actionable
+
+This slice extends the same actionability boundary one step further. LangGraph
+durable execution and interrupts docs ground the graph side of the contract:
+checkpointed interrupts are durable workflow state bound to a thread and
+resume through that same thread lineage. But application-level control APIs
+still own whether a surfaced permission is actionable. In this repo, once a
+thread is terminal, the control layer rejects further permission responses even
+if a stale durable permission row was never expired. That means operator
+discovery surfaces cannot continue to advertise those rows as pending work.
+
+The defect was again in `src/vaultspec_a2a/control/team_service.py`. After
+`REVIEW-042`, team-status discovery correctly filtered malformed or optionless
+durable rows, but it still promoted any remaining durable pending row into
+`pending_permissions` and `active_threads` without checking whether the owning
+thread had already moved to `completed`, `failed`, or `cancelled`. The fix now
+reconciles durable pending rows against terminal thread status first: terminal
+threads are excluded from team-status pending discovery and do not become
+active solely because of stale permission residue. Non-terminal paused threads
+remain visible, including the malformed-row operator case from `REVIEW-042`.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/thread/enums.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "pending_permissions_exclude_terminal_thread_rows or pending_permissions_hide_malformed_durable_rows"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_pending_permissions_excludes_terminal_thread_rows or team_status_excludes_aggregator_only_pending_permission or team_status_hides_malformed_durable_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

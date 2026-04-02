@@ -39,7 +39,12 @@ from ....api.app import create_app
 from ....control.circuit_breaker import WorkerCircuitBreaker
 from ....control.worker_management import LazyWorkerSpawner
 from ....database import create_thread, record_permission_request
-from ....database.models import Base, ThreadExecutionStateModel, ThreadModel
+from ....database.models import (
+    Base,
+    PermissionRequestModel,
+    ThreadExecutionStateModel,
+    ThreadModel,
+)
 from ....streaming.aggregator import EventAggregator
 from .._http import _reset_client, _reset_known_presets
 from ..tools.discovery import (
@@ -886,6 +891,47 @@ class TestGetPendingPermissionsViaApp:
 
         assert resp.status_code == 200
         data = resp.json()
+        assert data["pending_permissions"] == []
+
+    def test_team_status_hides_malformed_durable_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Malformed durable rows must not become MCP-visible pending actions."""
+
+        async def _seed_malformed_permission() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="mcp-team-status-malformed-durable",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-team-status-malformed-durable:perm-1",
+                    thread_id="mcp-team-status-malformed-durable",
+                    pause_reason_type="permission_request",
+                    description="Malformed durable permission",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow"}],
+                    tool_call="bash",
+                )
+                permission = await session.get(
+                    PermissionRequestModel,
+                    "mcp-team-status-malformed-durable:perm-1",
+                )
+                assert permission is not None
+                permission.allowed_options_json = '{"broken":'
+                await session.commit()
+
+        asyncio.run(_seed_malformed_permission())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mcp-team-status-malformed-durable" in data["active_threads"]
         assert data["pending_permissions"] == []
 
 

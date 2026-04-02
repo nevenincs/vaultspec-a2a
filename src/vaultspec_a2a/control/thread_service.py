@@ -30,6 +30,7 @@ from ..database import (
     get_pending_permission_requests,
     get_permission_request,
     get_thread,
+    get_thread_execution_state,
     list_threads,
     update_thread_status,
 )
@@ -39,7 +40,7 @@ from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
-from ..thread.enums import ApprovalStatus, ControlActionType, ThreadStatus
+from ..thread.enums import ApprovalStatus, ControlActionType, RepairStatus, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
 
@@ -74,6 +75,27 @@ _PLAN_APPROVAL_PAUSE_CAUSES = {
     PermissionType.PLAN_APPROVAL.value,
     "plan_approval_request",
 }
+
+
+def _degrade_stale_execution_state_summary(
+    *,
+    repair_status: str | None,
+    execution_readiness: str | None,
+) -> tuple[str | None, str | None]:
+    """Fail closed when summary lineage is stale but still readable."""
+    if repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.NEEDS_RECONCILIATION.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.NEEDS_RECONCILIATION.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+    return repair_status, execution_readiness
 
 
 def generate_thread_id() -> str:
@@ -145,8 +167,19 @@ async def list_threads_service(
         feature_tag, source_branch, callee = _parse_thread_summary_metadata(
             t.thread_metadata
         )
+        repair_status = t.repair_status
+        execution_readiness = t.execution_readiness
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
+        execution_state = await get_thread_execution_state(db, t.id)
+        if (
+            execution_state is not None
+            and execution_state.recovery_epoch != t.recovery_epoch
+        ):
+            repair_status, execution_readiness = _degrade_stale_execution_state_summary(
+                repair_status=repair_status,
+                execution_readiness=execution_readiness,
+            )
         if approval_status == ApprovalStatus.PENDING.value:
             live_plan_permissions = [
                 permission
@@ -181,8 +214,8 @@ async def list_threads_service(
                 thread_id=t.id,
                 title=t.title,
                 status=t.status,
-                repair_status=t.repair_status,
-                execution_readiness=t.execution_readiness,
+                repair_status=repair_status,
+                execution_readiness=execution_readiness,
                 approval_status=approval_status,
                 approval_request_id=approval_request_id,
                 team_preset=t.team_preset,

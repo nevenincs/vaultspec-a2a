@@ -816,6 +816,31 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k stale_execution_state_lineage`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_projection.py -q`
 
+Audit `6` also exposed a summary-surface mirror of the same stale-lineage
+problem. After the reconnect snapshot and `/api/threads/{id}/state` path began
+failing closed on stale durable execution-state lineage, `/api/threads` and
+the MCP-backed list-thread surface could still echo `repair_status` and
+`execution_readiness` straight from the thread row. That split the operator
+story across two public surfaces: reconnect state said stale lineage required
+reconciliation, while thread summaries could still advertise a healthy thread.
+
+The repository now aligns those surfaces. `list_threads_service()` compares
+the thread row `recovery_epoch` against the latest durable execution-state row
+and degrades summary readiness to `needs_reconciliation` when lineage is
+stale. The new endpoint and MCP regressions prove the list surface no longer
+overstates health under stale execution-state lineage.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k list_threads_degrades_stale_execution_state_lineage`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k list_threads_degrades_stale_execution_state_summary`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

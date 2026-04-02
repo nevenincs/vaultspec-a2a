@@ -410,6 +410,12 @@ replay semantics remain intact.
   checkpoint id, the repository now fails closed to `needs_reconciliation`
   and keeps `execution_state_projection_stale` visible instead of preserving
   `healthy` readiness.
+  The next stale-lineage summary slice is now also in place: `/api/threads`
+  and the MCP-backed list-thread surface no longer echo healthy readiness from
+  the thread row when the durable execution-state row carries an older
+  `recovery_epoch`. Summary `repair_status` and `execution_readiness` now stay
+  aligned with the stricter reconnect contract and fail closed to
+  `needs_reconciliation` under stale durable lineage.
 - Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.

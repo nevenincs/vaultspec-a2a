@@ -276,6 +276,53 @@ class TestListThreads:
         assert thread["approval_status"] == "pending"
         assert thread["approval_request_id"] == "perm-list-live-plan"
 
+    def test_list_threads_degrades_stale_execution_state_lineage(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not keep healthy readiness on stale lineage."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_stale_execution_state() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-stale-state",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.recovery_epoch = 5
+                session.add(
+                    ThreadExecutionStateModel(
+                        thread_id="thread-list-stale-state",
+                        checkpoint_id="cp-list-stale-state",
+                        parent_checkpoint_id=None,
+                        recovery_epoch=2,
+                        task_count=1,
+                        interrupt_count=0,
+                        next_nodes_json='["worker"]',
+                        interrupt_types_json="[]",
+                        tasks_json="[]",
+                        degraded_reasons_json="[]",
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(_seed_stale_execution_state())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-stale-state"
+        )
+        assert thread["repair_status"] == "needs_reconciliation"
+        assert thread["execution_readiness"] == "needs_reconciliation"
+
 
 class TestHealth:
     """Tests for GET /health."""

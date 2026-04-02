@@ -239,6 +239,22 @@ lineage. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
+REVIEW-029 | MEDIUM | Thread summary surfaces could still echo healthy readiness under stale execution-state lineage
+Audit `6` found a mirrored stale-lineage leak after `REVIEW-028`. The
+reconnect snapshot and `/api/threads/{id}/state` now fail closed when the
+durable execution-state row lags checkpoint truth, but `/api/threads` and the
+MCP-backed list-thread surface were still echoing `repair_status` and
+`execution_readiness` directly from the thread row. That left the summary
+surfaces sounding healthier than the stricter reconnect path even when the
+durable execution-state `recovery_epoch` was stale. The fix now degrades
+summary readiness to `needs_reconciliation` when the latest durable
+execution-state row carries older lineage than the thread row, and the new API
+and MCP regressions prove the summary surfaces no longer overstate health
+under stale execution-state lineage. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

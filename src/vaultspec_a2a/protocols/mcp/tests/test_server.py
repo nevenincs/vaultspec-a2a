@@ -38,8 +38,8 @@ from sqlalchemy.ext.asyncio import (
 from ....api.app import create_app
 from ....control.circuit_breaker import WorkerCircuitBreaker
 from ....control.worker_management import LazyWorkerSpawner
-from ....database import record_permission_request
-from ....database.models import Base
+from ....database import create_thread, record_permission_request
+from ....database.models import Base, ThreadExecutionStateModel, ThreadModel
 from ....streaming.aggregator import EventAggregator
 from .._http import _reset_client, _reset_known_presets
 from ..tools.discovery import (
@@ -527,6 +527,54 @@ class TestListThreadsViaApp:
         data = resp.json()
         assert len(data["threads"]) == 2
         assert data["total"] == 3
+
+    def test_list_threads_degrades_stale_execution_state_summary(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads must not report healthy readiness on stale lineage."""
+
+        async def _seed_stale_execution_state() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-stale-state",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread = await session.get(ThreadModel, "mcp-thread-list-stale-state")
+                assert thread is not None
+                thread.recovery_epoch = 4
+                session.add(
+                    ThreadExecutionStateModel(
+                        thread_id="mcp-thread-list-stale-state",
+                        checkpoint_id="cp-mcp-stale",
+                        parent_checkpoint_id=None,
+                        recovery_epoch=1,
+                        task_count=1,
+                        interrupt_count=0,
+                        next_nodes_json='["worker"]',
+                        interrupt_types_json="[]",
+                        tasks_json="[]",
+                        degraded_reasons_json="[]",
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(_seed_stale_execution_state())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-stale-state"
+        )
+        assert thread["repair_status"] == "needs_reconciliation"
+        assert thread["execution_readiness"] == "needs_reconciliation"
 
 
 # ---------------------------------------------------------------------------

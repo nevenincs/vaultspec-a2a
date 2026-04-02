@@ -19,6 +19,7 @@ import logging
 
 import httpx
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from sqlalchemy import select
 
 from ...control.config import settings
@@ -387,6 +388,46 @@ class TestListThreads:
         )
         assert thread["repair_status"] == "needs_reconciliation"
         assert thread["execution_readiness"] == "needs_reconciliation"
+
+    def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
+        self, session_factory, tmp_path
+    ) -> None:
+        """Thread summaries must fail closed when checkpoint probing fails."""
+        checkpoints_file = tmp_path / "closed-list-threads-checkpoints.db"
+
+        async def _closed_checkpointer() -> AsyncSqliteSaver:
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
+                await cp.setup()
+                return cp
+
+        closed_checkpointer = asyncio.run(_closed_checkpointer())
+        app, _agg, _worker, _cp = make_app(session_factory, closed_checkpointer)
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-list-checkpoint-unverified",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-checkpoint-unverified"
+        )
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
 
 
 class TestHealth:

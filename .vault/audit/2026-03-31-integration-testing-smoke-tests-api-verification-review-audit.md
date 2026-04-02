@@ -407,22 +407,6 @@ on thread-state snapshots remain durable-backed only. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
-REVIEW-039 | HIGH | Operator-facing checkpoint surfaces overstated durable readiness
-Audit `6` also exposed a broader operator-surface checkpoint drift. `/api/health`
-was previously reporting checkpoint status `ok` on non-null checkpointer
-presence alone in `src/vaultspec_a2a/control/health.py`, while `/api/threads`
-summaries in `src/vaultspec_a2a/control/thread_service.py` could still look
-healthy when checkpoint probing was unverified. Both surfaces were overstating
-durable readiness even when the checkpoint backend was unusable or could not be
-verified. The fix now makes `/api/health` probe real checkpointer usability and
-makes `/api/threads` fail closed to `checkpoint_unavailable` when checkpoint
-probing is unverified. Evidence anchors:
-`src/vaultspec_a2a/control/health.py`,
-`src/vaultspec_a2a/control/thread_service.py`,
-`src/vaultspec_a2a/api/tests/test_app.py`,
-`src/vaultspec_a2a/api/tests/test_endpoints.py`,
-`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
-
 REVIEW-039 | MEDIUM | `/api/health` reported checkpoint readiness from handle presence alone
 Audit `6` also exposed an operator-surface drift in gateway readiness. The
 `/api/health` path in `src/vaultspec_a2a/control/health.py` was previously
@@ -435,6 +419,19 @@ check to `error` when the probe times out or raises. Evidence anchors:
 `src/vaultspec_a2a/control/health.py`,
 `src/vaultspec_a2a/api/routes/health.py`,
 `src/vaultspec_a2a/api/tests/test_app.py`.
+
+REVIEW-040 | MEDIUM | `/api/threads` summaries stayed healthy when checkpoint probing was unverified
+Audit `6` also exposed an operator-surface drift in thread summaries. The
+summary path in `src/vaultspec_a2a/control/thread_service.py` could keep
+`repair_status` and `execution_readiness` healthy when checkpoint probing
+timed out or raised, even though the gateway could no longer verify checkpoint
+truth. That overstated durable readiness at the list-threads boundary. The fix
+now makes `/api/threads` fail closed to `checkpoint_unavailable` when
+checkpoint probing is unverified, and the MCP-backed route coverage proves the
+same behavior through the protocol surface. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable

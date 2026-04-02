@@ -636,30 +636,6 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
 - `uv run ruff check src/vaultspec_a2a/control/snapshot.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
-## REVIEW-039: operator-facing checkpoint readiness must fail closed
-
-Keep this as a bounded Audit `6` guardrail. Operator-facing health and summary
-surfaces must not certify durable readiness unless checkpoint probing actually
-works. The implementation requirement is twofold: `/api/health` must probe
-real checkpointer usability instead of checking handle presence, and
-`/api/threads` summaries must degrade to `checkpoint_unavailable` when
-checkpoint probing is unverified.
-
-Scope and evidence:
-
-- `src/vaultspec_a2a/control/health.py`
-- `src/vaultspec_a2a/control/thread_service.py`
-- `src/vaultspec_a2a/api/tests/test_app.py`
-- `src/vaultspec_a2a/api/tests/test_endpoints.py`
-- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
-
-Verification:
-
-- `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "api_health_degrades_when_checkpointer_backend_is_unusable or api_health_reports_sqlite_fallback_diagnostics"`
-- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
-- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
-- `uv run ruff check src/vaultspec_a2a/control/health.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_app.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
-
 ## REVIEW-039: `/api/health` must probe real checkpoint usability
 
 Keep this as a bounded Audit `6` guardrail. Gateway readiness must not certify
@@ -678,3 +654,23 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "api_health_degrades_when_checkpointer_backend_is_unusable or api_health_reports_sqlite_fallback_diagnostics"`
 - `uv run ruff check src/vaultspec_a2a/control/health.py src/vaultspec_a2a/api/tests/test_app.py`
+
+## REVIEW-040: `/api/threads` summaries must fail closed when checkpoint probing is unverified
+
+Keep this as a bounded Audit `6` guardrail. Thread summaries must not certify
+healthy execution readiness if checkpoint probing timed out or raised. The
+implementation requirement is fail-closed summaries: when checkpoint usability
+is unverified, `/api/threads` must degrade `repair_status` and
+`execution_readiness` to `checkpoint_unavailable`.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run ruff check src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

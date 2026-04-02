@@ -177,8 +177,9 @@ async def list_threads_service(
         execution_state = await get_thread_execution_state(db, t.id)
         checkpoint_id: str | None = None
         checkpoint_present = False
+        checkpoint_unverified = False
         if checkpointer is not None:
-            with contextlib.suppress(TimeoutError, Exception):
+            try:
                 checkpoint_tuple = await asyncio.wait_for(
                     checkpointer.aget_tuple({"configurable": {"thread_id": t.id}}),
                     timeout=2.0,
@@ -189,6 +190,11 @@ async def list_threads_service(
                         checkpoint_tuple,
                         thread_id=t.id,
                     ).checkpoint_id
+            except (TimeoutError, Exception):
+                checkpoint_unverified = True
+        if checkpoint_unverified:
+            repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         if execution_state is not None and (
             execution_state.recovery_epoch != t.recovery_epoch
             or (

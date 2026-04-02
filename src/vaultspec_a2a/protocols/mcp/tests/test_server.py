@@ -637,6 +637,45 @@ class TestListThreadsViaApp:
         assert thread["repair_status"] == "needs_reconciliation"
         assert thread["execution_readiness"] == "needs_reconciliation"
 
+    def test_list_threads_degrades_when_checkpoint_probe_is_unverified(
+        self, session_factory, tmp_path
+    ) -> None:
+        """GET /api/threads must fail closed when checkpoint probing fails."""
+        checkpoints_file = tmp_path / "closed-mcp-list-threads-checkpoints.db"
+
+        async def _closed_checkpointer() -> AsyncSqliteSaver:
+            async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as cp:
+                await cp.setup()
+                return cp
+
+        closed_checkpointer = asyncio.run(_closed_checkpointer())
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-checkpoint-unverified",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with _make_test_client(session_factory, closed_checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-checkpoint-unverified"
+        )
+        assert thread["repair_status"] == "checkpoint_unavailable"
+        assert thread["execution_readiness"] == "checkpoint_unavailable"
+
 
 # ---------------------------------------------------------------------------
 # respond_to_permission tests (MCP-R4)

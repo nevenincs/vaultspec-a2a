@@ -309,6 +309,25 @@ Evidence anchors: `src/vaultspec_a2a/control/permission_service.py`,
 `src/vaultspec_a2a/control/repair_transitions.py`,
 `src/vaultspec_a2a/thread/enums.py`.
 
+REVIEW-033 | MEDIUM | Stale execution-state rows could still overstate public runtime truth
+Audit `6` also closed a split-brain bug between reconnect/state surfaces and
+summary surfaces. `/api/threads/{id}/state` was marking stale durable
+execution-state lineage, but it still copied stale runtime fields such as
+`next_nodes`, `task_count`, `pending_interrupt_count`, and `execution_tasks`
+into the public snapshot before classifying the row as stale. `/api/threads`
+summaries were also weaker than reconnect/state because they only degraded on
+`recovery_epoch` drift and ignored checkpoint-id mismatch entirely. The fix
+now fails closed before applying stale execution-state projection to `/state`,
+keeps `snapshot_complete=false` with
+`execution_state_projection_stale`, and routes the app checkpointer into
+`list_threads_service` so summary readiness also degrades on checkpoint-id
+drift. Evidence anchors: `src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/routes/threads.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

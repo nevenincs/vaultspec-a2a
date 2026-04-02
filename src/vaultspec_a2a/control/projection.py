@@ -372,16 +372,13 @@ async def enrich_snapshot_from_execution_state(
         snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
         return snapshot
 
-    snapshot = apply_execution_state_projection(snapshot, projection)
-
-    if row.recovery_epoch != thread.recovery_epoch:
-        _mark_execution_state_stale(snapshot)
-
-    if (
+    is_stale = row.recovery_epoch != thread.recovery_epoch or (
         checkpoint_present
         and checkpoint_id is not None
         and row.checkpoint_id != checkpoint_id
-    ):
+    )
+    if is_stale:
         _mark_execution_state_stale(snapshot)
+        return snapshot
 
-    return snapshot
+    return apply_execution_state_projection(snapshot, projection)

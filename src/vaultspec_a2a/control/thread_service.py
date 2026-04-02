@@ -8,11 +8,12 @@ response formatting.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
@@ -43,6 +44,7 @@ from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import ApprovalStatus, ControlActionType, RepairStatus, ThreadStatus
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
+from ..thread.snapshots import project_checkpoint_tuple
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -157,6 +159,7 @@ async def list_threads_service(
     status_filter: ThreadStatus | None = None,
     limit: int = 50,
     offset: int = 0,
+    checkpointer: Any | None = None,
 ) -> ListThreadsResult:
     """Query threads and assemble summary data with parsed metadata."""
     threads, total = await list_threads(
@@ -172,9 +175,27 @@ async def list_threads_service(
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
         execution_state = await get_thread_execution_state(db, t.id)
-        if (
-            execution_state is not None
-            and execution_state.recovery_epoch != t.recovery_epoch
+        checkpoint_id: str | None = None
+        checkpoint_present = False
+        if checkpointer is not None:
+            with contextlib.suppress(TimeoutError, Exception):
+                checkpoint_tuple = await asyncio.wait_for(
+                    checkpointer.aget_tuple({"configurable": {"thread_id": t.id}}),
+                    timeout=2.0,
+                )
+                if checkpoint_tuple is not None:
+                    checkpoint_present = True
+                    checkpoint_id = project_checkpoint_tuple(
+                        checkpoint_tuple,
+                        thread_id=t.id,
+                    ).checkpoint_id
+        if execution_state is not None and (
+            execution_state.recovery_epoch != t.recovery_epoch
+            or (
+                checkpoint_present
+                and checkpoint_id is not None
+                and execution_state.checkpoint_id != checkpoint_id
+            )
         ):
             repair_status, execution_readiness = _degrade_stale_execution_state_summary(
                 repair_status=repair_status,

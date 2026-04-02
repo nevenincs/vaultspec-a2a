@@ -271,6 +271,10 @@ async def test_stale_execution_state_degrades_snapshot_readiness(
     assert "execution_state_projection_stale" in snapshot.degraded_reasons
     assert snapshot.repair_status == "needs_reconciliation"
     assert snapshot.execution_readiness == "needs_reconciliation"
+    assert snapshot.next_nodes == []
+    assert snapshot.task_count == 0
+    assert snapshot.pending_interrupt_count == 0
+    assert snapshot.execution_tasks == []
 
     await engine.dispose()
 

@@ -326,6 +326,68 @@ class TestListThreads:
         assert thread["repair_status"] == "needs_reconciliation"
         assert thread["execution_readiness"] == "needs_reconciliation"
 
+    def test_list_threads_degrades_checkpoint_mismatched_execution_state(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not stay healthy when checkpoint ids drift."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_checkpoint_mismatch() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-list-current"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-list-checkpoint-drift",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-list-checkpoint-drift",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                session.add(
+                    ThreadExecutionStateModel(
+                        thread_id="thread-list-checkpoint-drift",
+                        checkpoint_id="cp-list-stale",
+                        parent_checkpoint_id=None,
+                        recovery_epoch=0,
+                        task_count=1,
+                        interrupt_count=0,
+                        next_nodes_json='["worker"]',
+                        interrupt_types_json="[]",
+                        tasks_json="[]",
+                        degraded_reasons_json="[]",
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(_seed_checkpoint_mismatch())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-checkpoint-drift"
+        )
+        assert thread["repair_status"] == "needs_reconciliation"
+        assert thread["execution_readiness"] == "needs_reconciliation"
+
 
 class TestHealth:
     """Tests for GET /health."""
@@ -520,6 +582,10 @@ class TestThreadState:
         assert "execution_state_projection_stale" in data["degraded_reasons"]
         assert data["repair_status"] == "needs_reconciliation"
         assert data["execution_readiness"] == "needs_reconciliation"
+        assert data["next_nodes"] == []
+        assert data["task_count"] == 0
+        assert data["pending_interrupt_count"] == 0
+        assert data["execution_tasks"] == []
 
     def test_state_preserves_plan_approval_without_tool_call(
         self, session_factory, checkpointer

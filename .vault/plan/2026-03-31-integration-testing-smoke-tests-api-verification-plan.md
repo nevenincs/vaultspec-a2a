@@ -506,3 +506,25 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service`
 - `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/database/__init__.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-033: stale execution-state public-surface drift
+
+Keep a bounded Audit `6` slice for stale execution-state public-surface drift.
+The implementation must ensure that `/api/threads/{id}/state` fails closed
+before stale execution-state fields are merged, and that `/api/threads`
+summaries consult checkpoint truth as well as `recovery_epoch`. The intended
+stale-lineage outcome is `needs_reconciliation` with `snapshot_complete=false`
+and `execution_state_projection_stale` visible to operators.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/routes/threads.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k stale_execution_state_degrades_snapshot_readiness`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_degrades_stale_execution_state_lineage or list_threads_degrades_stale_execution_state_lineage or list_threads_degrades_checkpoint_mismatched_execution_state"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_stale_execution_state_summary or list_threads_degrades_checkpoint_mismatched_summary"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/routes/threads.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

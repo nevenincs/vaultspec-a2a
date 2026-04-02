@@ -140,6 +140,7 @@ async def create_thread_endpoint(
 
 @router.get("/threads", response_model=ThreadListResponse)
 async def list_threads_endpoint(
+    request: Request,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     status: str | None = Query(default=None),
@@ -156,7 +157,11 @@ async def list_threads_endpoint(
                 detail=f"Invalid status filter: {status!r}",
             ) from None
     result = await list_threads_service(
-        db, status_filter=status_filter, limit=limit, offset=offset
+        db,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+        checkpointer=request.app.state.checkpointer,
     )
     summaries = [
         ThreadSummary(

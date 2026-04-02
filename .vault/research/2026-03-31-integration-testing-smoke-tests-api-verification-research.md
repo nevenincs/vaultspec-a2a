@@ -943,6 +943,46 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service`
 - `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/database/__init__.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-033: stale execution-state public-surface drift
+
+This slice aligns public summary and state surfaces with checkpoint truth.
+`/api/threads/{id}/state` now fails closed before stale execution-state fields
+are merged. When the durable execution-state row is stale by `recovery_epoch`
+or `checkpoint_id`, the snapshot is marked
+`execution_state_projection_stale`, `snapshot_complete=false`, readiness
+degrades to `needs_reconciliation`, and stale runtime fields are not copied
+into the public surface. `/api/threads` summaries now also consult checkpoint
+truth, not just `recovery_epoch`, and the route passes the app checkpointer
+into `list_threads_service` so summary freshness can compare durable
+execution-state lineage against live checkpoint truth.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/routes/threads.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Terminology:
+
+- `needs_reconciliation` for stale execution-state summaries and snapshots
+- `execution_state_projection_stale` for the stale-lineage marker
+- `snapshot_complete=false` whenever stale lineage is detected
+
+Contradictions resolved:
+
+- summaries could look healthier than reconnect/state
+- `/state` could leak obsolete runtime truth while already marked stale
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k stale_execution_state_degrades_snapshot_readiness`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_degrades_stale_execution_state_lineage or list_threads_degrades_stale_execution_state_lineage or list_threads_degrades_checkpoint_mismatched_execution_state"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_stale_execution_state_summary or list_threads_degrades_checkpoint_mismatched_summary"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/routes/threads.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

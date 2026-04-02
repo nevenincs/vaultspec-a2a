@@ -4,12 +4,14 @@ Handlers: ``get_team_status``, ``get_pending_permissions``,
 ``respond_to_permission``, ``list_team_presets``.
 """
 
+import contextlib
 from typing import Annotated
 
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
-from .._http import _mcp_request
+from .._http import _HTTP_CONFLICT, HTTPStatusError, _mcp_request
 from ..server import mcp
 
 
@@ -158,13 +160,24 @@ async def respond_to_permission(
                                options list, e.g. 'allow', 'deny', 'allow_always'.
                                Use ``get_pending_permissions`` to see available options.
     """
-    data = await _mcp_request(
-        "POST",
-        f"/api/permissions/{permission_request_id}/respond",
-        json={"option_id": option_id},
-        timeout=settings.mcp_query_timeout_seconds,
-        not_found_msg=f"Permission request {permission_request_id!r} not found.",
-    )
+    try:
+        data = await _mcp_request(
+            "POST",
+            f"/api/permissions/{permission_request_id}/respond",
+            json={"option_id": option_id},
+            timeout=settings.mcp_query_timeout_seconds,
+            not_found_msg=f"Permission request {permission_request_id!r} not found.",
+        )
+    except HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_CONFLICT:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Cannot respond to permission {permission_request_id}: "
+                f"{detail or 'permission request is not in an actionable state'}."
+            ) from exc
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     accepted = data.get("accepted", False)
     thread_id = data.get("thread_id", "unknown")
     status = "accepted" if accepted else "rejected"

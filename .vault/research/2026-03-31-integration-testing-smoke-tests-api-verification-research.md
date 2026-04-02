@@ -1735,3 +1735,33 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "send_message_raises_tool_error_for_repair_needed_thread"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
+
+## REVIEW-055: MCP `respond_to_permission` must match stale-request conflict rejection
+
+Audit `6` exposed the same operator-surface lag on the MCP permission-response
+tool that previously existed on MCP delete and follow-up messaging. The
+backend permission-response path already rejects stale requests when a newer
+interrupt has taken ownership of the thread, but
+`respond_to_permission()` in
+`src/vaultspec_a2a/protocols/mcp/tools/discovery.py` still surfaced that
+`409 Conflict` as a lower-level HTTP failure instead of a usable `ToolError`.
+
+This is not a LangGraph defect; it is MCP error-mapping drift relative to the
+repo’s stricter permission-response contract. Once the backend says a
+permission request is no longer pending, the MCP tool must preserve that
+meaning directly so operators do not mistake stale-request protection for
+transport failure.
+
+The fix now maps backend `409` responses into `ToolError`, preserves backend
+detail when available, and adds a focused MCP regression proving that stale
+permission requests surface as a clear tool-level error.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "respond_to_permission_raises_tool_error_for_stale_request or respond_to_permission_dispatches_for_existing_thread or respond_to_permission_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/discovery.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

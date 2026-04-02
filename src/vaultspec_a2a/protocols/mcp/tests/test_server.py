@@ -1058,6 +1058,71 @@ class TestRespondToPermissionViaApp:
         assert data["request_id"] == request_id
         assert data["accepted"] is True
 
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_respond_to_permission_raises_tool_error_for_stale_request(
+        self, session_factory, checkpointer
+    ) -> None:
+        """MCP must surface stale permission conflicts as ToolError."""
+        with _make_test_client(session_factory, checkpointer) as client:
+            create_resp = client.post(
+                "/api/threads",
+                json={"initial_message": "permission tool conflict"},
+            )
+            assert create_resp.status_code == 201
+            thread_id = create_resp.json()["thread_id"]
+            old_request_id = f"{thread_id}:req-old"
+            new_request_id = f"{thread_id}:req-new"
+
+            async def _seed_permissions() -> None:
+                async with session_factory() as session:
+                    await record_permission_request(
+                        session,
+                        request_id=old_request_id,
+                        thread_id=thread_id,
+                        pause_reason_type="bash",
+                        description="Allow old action?",
+                        allowed_options=[
+                            {"option_id": "allow_once", "name": "Allow once"}
+                        ],
+                        tool_call="bash",
+                    )
+                    await record_permission_request(
+                        session,
+                        request_id=new_request_id,
+                        thread_id=thread_id,
+                        pause_reason_type="bash",
+                        description="Allow new action?",
+                        allowed_options=[
+                            {"option_id": "allow_once", "name": "Allow once"}
+                        ],
+                        tool_call="bash",
+                    )
+                    await session.commit()
+
+            await _seed_permissions()
+
+            original_gateway_url = settings.gateway_url
+            original_client = mcp_http._shared_client
+            try:
+                settings.gateway_url = "http://testserver"
+                mcp_http._shared_client = httpx.AsyncClient(
+                    transport=ASGITransport(app=client.app),
+                    base_url="http://testserver",
+                )
+                with pytest.raises(ToolError) as exc_info:
+                    await respond_to_permission(
+                        permission_request_id=old_request_id,
+                        option_id="allow_once",
+                    )
+            finally:
+                if mcp_http._shared_client is not None:
+                    await mcp_http._shared_client.aclose()
+                mcp_http._shared_client = original_client
+                settings.gateway_url = original_gateway_url
+
+        assert "Cannot respond to permission" in str(exc_info.value)
+        assert "no longer pending" in str(exc_info.value)
+
 
 # ---------------------------------------------------------------------------
 # get_team_status tests (MCP-R6)

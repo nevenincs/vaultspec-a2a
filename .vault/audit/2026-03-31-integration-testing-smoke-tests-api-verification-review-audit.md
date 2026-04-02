@@ -712,3 +712,18 @@ with the fail-closed repair contract already enforced by the REST endpoint.
 Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-055 | MEDIUM | MCP `respond_to_permission` leaked stale permission conflicts as raw HTTP failures
+Audit `6` still had a permission-control surface lag at the MCP boundary.
+The backend permission-response path already rejects stale or superseded
+permission requests with `409 Conflict`, but `respond_to_permission()` in
+`src/vaultspec_a2a/protocols/mcp/tools/discovery.py` was still relying on the
+generic request helper and leaking that conflict as a raw HTTP failure. That
+left the MCP permission surface behind the stricter backend contract and hid
+the real operator-facing reason the response was rejected. The fix now maps
+backend `409` responses into `ToolError`, preserves backend detail when
+available, and keeps MCP permission response handling aligned with the
+existing stale-request protection already enforced by the REST endpoint.
+Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/tools/discovery.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

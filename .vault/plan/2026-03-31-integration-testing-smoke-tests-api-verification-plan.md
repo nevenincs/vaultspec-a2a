@@ -972,6 +972,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "send_message_raises_tool_error_for_repair_needed_thread"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
 
+## REVIEW-055: MCP `respond_to_permission` must fail closed on stale-request conflicts
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic operator tooling: once the backend permission-response path
+rejects a stale request, the MCP permission surface must return a clear
+`ToolError` instead of leaking a raw HTTP conflict.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "respond_to_permission_raises_tool_error_for_stale_request or respond_to_permission_dispatches_for_existing_thread or respond_to_permission_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/discovery.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

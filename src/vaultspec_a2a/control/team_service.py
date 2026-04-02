@@ -59,8 +59,11 @@ async def build_team_status(
     heartbeat_threads: list[str],
 ) -> TeamStatus:
     """Assemble the full team status from DB and in-memory aggregator state."""
+    durable_pending = await get_pending_permission_requests(db)
     active_threads = sorted(
-        set(heartbeat_threads) | set(aggregator.get_active_thread_ids())
+        set(heartbeat_threads)
+        | set(aggregator.get_active_thread_ids())
+        | {p.thread_id for p in durable_pending}
     )
 
     node_summaries = aggregator.get_node_summaries()
@@ -79,7 +82,6 @@ async def build_team_status(
     ]
 
     # Durable permissions from DB, then deduplicate with in-memory aggregator.
-    durable_pending = await get_pending_permission_requests(db)
     pending: list[PendingPermissionInfo] = [
         PendingPermissionInfo(
             request_id=p.request_id,

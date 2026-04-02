@@ -713,6 +713,48 @@ class TestGetPendingPermissionsViaApp:
         data = resp.json()
         assert data["pending_permissions"] == []
 
+    def test_team_status_lists_durable_pending_permission_thread_as_active(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Durable paused threads must stay visible in team status.
+
+        This must hold even after restart-like gaps in in-memory worker state.
+        """
+
+        async def _seed_durable_pending_permission() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="team-status-durable-pending",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-durable-pending:perm-1",
+                    thread_id="team-status-durable-pending",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve durable plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_durable_pending_permission())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "team-status-durable-pending" in data["active_threads"]
+        assert len(data["pending_permissions"]) == 1
+        assert (
+            data["pending_permissions"][0]["request_id"]
+            == "team-status-durable-pending:perm-1"
+        )
+
 
 # ---------------------------------------------------------------------------
 # list_team_presets tests (MCP-R2)

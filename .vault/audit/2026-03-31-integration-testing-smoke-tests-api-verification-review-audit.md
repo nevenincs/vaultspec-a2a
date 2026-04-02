@@ -276,6 +276,20 @@ for a durable plan-approval row created without `tool_call`. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
+REVIEW-031 | MEDIUM | Team status could hide durably paused threads after restart-like memory loss
+Audit `6` also exposed an operator-surface drift in team status assembly. The
+team-status view already loads durable pending permissions from the database,
+but `active_threads` was still derived only from heartbeat threads and
+in-memory aggregator state. After a restart-like loss of worker memory, that
+allowed `/api/team/status` and the MCP-backed `get_team_status` /
+`get_pending_permissions` surfaces to report a pending durable approval while
+omitting the owning thread from the active-thread list. The fix now unions
+durable pending-permission thread ids into `active_threads`, and the new
+MCP-backed regression proves a durably paused thread remains visible even when
+heartbeat and aggregator state are empty. Evidence anchors:
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

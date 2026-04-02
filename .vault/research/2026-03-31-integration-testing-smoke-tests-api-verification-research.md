@@ -880,6 +880,26 @@ makes this a deeper durable-versus-checkpoint precedence audit inside the
 broader persistence and state-corruption domain, not just a one-off projection
 cleanup.
 
+Audit `6` also reached the operator dashboard surface. Team status already
+loaded durable pending permissions from the database, but it still derived
+`active_threads` only from heartbeat threads and in-memory aggregator state.
+After a restart-like loss of worker memory, that could produce a contradictory
+operator view: a pending durable approval would still be listed, but the
+owning thread would disappear from the active-thread list. The repository now
+unions durable pending-permission thread ids into team status `active_threads`,
+and the MCP-backed regression proves a durably paused thread remains visible
+even when heartbeat and aggregator state are empty.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k durable_pending_permission_thread_as_active`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

@@ -430,6 +430,11 @@ replay semantics remain intact.
   state. The reconnect/state surface now preserves those pending approvals by
   durable `request_id` until an explicit durable resolution event supersedes
   them.
+  The next operator-surface slice is now also in place: `/api/team/status` and
+  the MCP-backed team-status tools no longer hide a durably paused thread just
+  because heartbeat and aggregator memory are empty after a restart-like gap.
+  Team status now treats durable pending-permission thread ids as active so
+  the operator view stays aligned with persisted approval truth.
 - Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.

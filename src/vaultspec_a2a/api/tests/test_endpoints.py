@@ -890,6 +890,7 @@ class TestThreadState:
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
+        assert data["pause_cause"] is None
 
     def test_state_excludes_terminal_thread_pending_permission_residue(
         self, session_factory, checkpointer
@@ -1013,6 +1014,7 @@ class TestThreadState:
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
+        assert data["pause_cause"] is None
 
     def test_state_excludes_checkpoint_only_pending_permission(
         self, session_factory, checkpointer

@@ -838,3 +838,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "answered_not_applied_does_not_count_as_resumable_pending or pending_permission_transitions_to_input_required"`
 - `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "answered_pending_apply_with_checkpoint_is_not_marked_resumable or pending_permission_without_checkpoint_is_not_marked_resumable"`
 - `uv run ruff check src/vaultspec_a2a/database/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
+## REVIEW-048: thread-state snapshots must clear stale pause_cause after actionability is removed
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic public state after projection: once actionable permission
+metadata has been cleared, reconnect snapshots must not continue to imply a
+paused workflow through stale `pause_cause`.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "answered_pending_apply_permission_does_not_surface_in_thread_state or checkpoint_only_pending_permission_does_not_surface_in_thread_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_answered_pending_apply_permission or state_excludes_checkpoint_only_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

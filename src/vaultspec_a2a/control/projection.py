@@ -72,6 +72,15 @@ def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
         snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
 
 
+def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
+    """Clear pause metadata when no user-actionable permission remains."""
+    if snapshot.pending_permissions:
+        return
+    if snapshot.approval_status is not None or snapshot.approval_request_id is not None:
+        return
+    snapshot.pause_cause = None
+
+
 def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:
@@ -251,6 +260,7 @@ def reconcile_checkpoint_permissions_with_durable_state(
     if snapshot.approval_request_id in dropped_request_ids:
         snapshot.approval_status = None
         snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
 
     return snapshot
 
@@ -409,6 +419,7 @@ async def enrich_snapshot_from_durable_state(
         if not has_projected_plan_approval:
             snapshot.approval_status = None
             snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
 
     return snapshot
 

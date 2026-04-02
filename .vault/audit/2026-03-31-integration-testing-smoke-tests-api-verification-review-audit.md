@@ -569,3 +569,19 @@ remain internal apply-in-flight state. Evidence anchors:
 `src/vaultspec_a2a/lifecycle/reconciliation.py`,
 `src/vaultspec_a2a/database/tests/test_reconciliation.py`,
 `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`.
+
+REVIEW-048 | MEDIUM | `/api/threads/{id}/state` could keep `pause_cause` populated after public permission/actionability is cleared
+Audit `6` exposed a final projection drift in the thread-state surface.
+`enrich_snapshot_from_durable_state()` in
+`src/vaultspec_a2a/control/projection.py` was already clearing
+`pending_permissions`, `approval_status`, and `approval_request_id` for
+answered-not-applied, checkpoint-only, and terminal-thread residue cases, but
+it could still leave `pause_cause` populated. That made
+`/api/threads/{id}/state` look paused even when no user-actionable permission
+remained. The fix now clears stale pause metadata once the snapshot no longer
+contains actionable permission state, so the public state fails closed instead
+of implying a resumable pause that is no longer there. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.

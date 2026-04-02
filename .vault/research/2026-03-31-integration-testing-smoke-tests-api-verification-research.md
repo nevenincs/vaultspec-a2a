@@ -1445,6 +1445,40 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "answered_pending_apply_with_checkpoint_is_not_marked_resumable or pending_permission_without_checkpoint_is_not_marked_resumable"`
 - `uv run ruff check src/vaultspec_a2a/database/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
 
+## REVIEW-048: thread-state snapshots must clear stale pause_cause after actionability is removed
+
+LangGraph durable execution still supports the same boundary rule: persisted
+state can be inspected and resumed, but public/operator state must reflect
+current actionable truth, not stale pause metadata left behind after permission
+actionability has been cleared. In this repo, `pause_cause` is derived from
+permission and checkpoint projection, so it must not survive when the snapshot
+no longer has any user-actionable pending permissions or mirrored approval
+fields.
+
+The defect was in projection cleanup. `enrich_snapshot_from_durable_state()` in
+`src/vaultspec_a2a/control/projection.py` already cleared the actionable
+permission fields in answered-not-applied, checkpoint-only, and similar
+fail-closed cases, but it did not also clear `pause_cause`. That left
+`/api/threads/{id}/state` suggesting the workflow was still paused even though
+the reconnect snapshot no longer contained any actionable permission state.
+
+The fix now clears `pause_cause` whenever the snapshot no longer has remaining
+actionable permission state. That keeps the reconnect view aligned with
+deterministic public truth rather than stale projection residue.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "answered_pending_apply_permission_does_not_surface_in_thread_state or checkpoint_only_pending_permission_does_not_surface_in_thread_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_answered_pending_apply_permission or state_excludes_checkpoint_only_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

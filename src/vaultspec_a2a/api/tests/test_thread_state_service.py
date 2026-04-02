@@ -710,6 +710,7 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
     assert snapshot.pending_permissions == []
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
+    assert snapshot.pause_cause is None
     assert snapshot.snapshot_complete is False
     assert "terminal_thread_pending_permission_residue" in snapshot.degraded_reasons
     assert snapshot.repair_status == "needs_reconciliation"
@@ -791,6 +792,7 @@ async def test_answered_pending_apply_permission_does_not_surface_in_thread_stat
     assert snapshot.pending_permissions == []
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
+    assert snapshot.pause_cause is None
 
     await engine.dispose()
 

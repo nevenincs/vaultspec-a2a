@@ -198,6 +198,45 @@ def apply_checkpoint_projection(
     return snapshot
 
 
+def reconcile_checkpoint_permissions_with_durable_state(
+    snapshot: ThreadStateData,
+    *,
+    durable_request_ids: set[str],
+) -> ThreadStateData:
+    """Fail closed when checkpoint-only interrupts are not durably actionable."""
+    filtered_permissions: list[PermissionData] = []
+    dropped_request_ids: set[str] = set()
+    for permission in snapshot.pending_permissions:
+        if permission.request_id in durable_request_ids:
+            filtered_permissions.append(permission)
+            continue
+        dropped_request_ids.add(permission.request_id)
+
+    if not dropped_request_ids:
+        return snapshot
+
+    snapshot.pending_permissions = filtered_permissions
+    snapshot.snapshot_complete = False
+    if "checkpoint_permission_without_durable_row" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("checkpoint_permission_without_durable_row")
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+    if snapshot.approval_request_id in dropped_request_ids:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+
+    return snapshot
+
+
 def project_execution_state_model(
     model: ThreadExecutionStateModel,
 ) -> ExecutionStateProjection:

@@ -1164,6 +1164,47 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
 - `uv run ruff check src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-041: checkpoint interrupts must not overstate public permission actionability
+
+This slice aligns the reconnect snapshot surface with the repo's actual
+approval contract. LangGraph interrupt and persistence docs confirm that a
+checkpointed interrupt is real durable graph state: `interrupt()` saves the
+graph state through the checkpointer, and resumption later reuses the same
+`thread_id` and checkpoint lineage. But those docs do not claim that every
+checkpoint interrupt is automatically actionable through an application's own
+approval API. In this repo, `src/vaultspec_a2a/control/permission_service.py`
+intentionally requires a durable pending permission row before
+`/api/permissions/{id}/respond` will accept a resume request. That means the
+public thread-state surface must not advertise a checkpoint-only permission as
+actionable when no durable row exists.
+
+The defect was in the merge boundary between durable state and checkpoint
+projection. `src/vaultspec_a2a/control/thread_state_service.py` merged durable
+pending permissions first, but `src/vaultspec_a2a/control/projection.py` later
+appended checkpoint interrupt permissions without reconciling them against the
+durable request ids. The fix keeps checkpoint pause truth visible while
+failing closed on actionability: checkpoint-only permissions are removed from
+`pending_permissions`, stale mirrored approval pointers are cleared when they
+depended on the dropped permission, and the snapshot is degraded with
+`checkpoint_permission_without_durable_row`.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langgraph/interrupts`
+- `https://docs.langchain.com/oss/python/langgraph/persistence`
+- `https://docs.langchain.com/oss/python/langgraph/durable-execution`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "checkpoint_only_pending_permission_does_not_surface_in_thread_state or aggregator_only_pending_permission_does_not_surface_in_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_checkpoint_only_pending_permission or state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

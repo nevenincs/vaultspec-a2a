@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 import pytest
 from langgraph.checkpoint.base import empty_checkpoint
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.control.thread_state_service import build_thread_state
@@ -711,5 +712,92 @@ async def test_aggregator_only_pending_permission_does_not_surface_in_thread_sta
     assert snapshot.pending_permissions == []
     assert snapshot.approval_status is None
     assert snapshot.approval_request_id is None
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_checkpoint_only_pending_permission_does_not_surface_in_thread_state(
+    tmp_path: Path,
+) -> None:
+    """Checkpoint interrupts alone must not advertise actionable permissions."""
+    case_dir = tmp_path / "thread-state-service-db-checkpoint-only-permission"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-checkpoint-only-permission"
+        config = await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-checkpoint-only-permission",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        await checkpointer.aput_writes(
+            config,
+            [
+                (
+                    "__interrupt__",
+                    [
+                        Interrupt(
+                            value={
+                                "type": "permission_request",
+                                "tool_name": "bash",
+                                "options": [
+                                    {
+                                        "optionId": "allow_once",
+                                        "name": "Allow Once",
+                                    }
+                                ],
+                            },
+                            id="perm-checkpoint-only",
+                        )
+                    ],
+                )
+            ],
+            task_id="task-checkpoint-only-permission",
+        )
+
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="thread-checkpoint-only-permission",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-checkpoint-only-permission",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.pending_permissions == []
+    assert snapshot.snapshot_complete is False
+    assert "checkpoint_permission_without_durable_row" in snapshot.degraded_reasons
+    assert snapshot.repair_status == "needs_reconciliation"
+    assert snapshot.execution_readiness == "needs_reconciliation"
 
     await engine.dispose()

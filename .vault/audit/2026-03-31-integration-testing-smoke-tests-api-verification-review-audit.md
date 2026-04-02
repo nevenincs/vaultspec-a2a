@@ -433,6 +433,25 @@ same behavior through the protocol surface. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-041 | MEDIUM | `/api/threads/{id}/state` could advertise checkpoint-only pending permissions
+Audit `6` exposed another durable-versus-public-state split in the reconnect
+snapshot surface. `build_thread_state()` in
+`src/vaultspec_a2a/control/thread_state_service.py` correctly merged durable
+pending permissions first, but it then applied checkpoint projection and
+re-surfaced interrupt-derived permissions that had no durable pending row.
+That meant `/api/threads/{id}/state` could advertise a pending permission from
+checkpoint `__interrupt__` even though the actual respond path in
+`src/vaultspec_a2a/control/permission_service.py` would fail closed with
+`Permission request is not durably pending`. The fix now reconciles checkpoint
+interrupts against the durable pending permission ids after checkpoint merge,
+drops checkpoint-only permission entries, clears stale mirrored approval
+pointers when needed, and degrades the snapshot with
+`checkpoint_permission_without_durable_row` instead of overstating actionability.
+Evidence anchors: `src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

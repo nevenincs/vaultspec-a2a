@@ -674,3 +674,29 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
 - `uv run ruff check src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-041: `/api/threads/{id}/state` must not expose checkpoint-only pending permissions as actionable
+
+Keep this as a bounded Audit `6` guardrail. Thread-state snapshots may surface
+checkpoint pause truth, but they must not advertise pending permissions unless
+the request id is durably pending in the gateway-owned permission table. The
+implementation requirement is a post-checkpoint reconciliation step:
+checkpoint-projected permissions without a matching durable pending row must be
+removed from `pending_permissions`, stale mirrored approval pointers must be
+cleared if they depended on the dropped permission, and the snapshot must
+degrade with `checkpoint_permission_without_durable_row` rather than silently
+overstating actionability.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "checkpoint_only_pending_permission_does_not_surface_in_thread_state or aggregator_only_pending_permission_does_not_surface_in_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_checkpoint_only_pending_permission or state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

@@ -20,6 +20,7 @@ import logging
 import httpx
 from fastapi.testclient import TestClient
 from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
+from langgraph.types import Interrupt
 from sqlalchemy import select
 
 from ...control.config import settings
@@ -749,6 +750,77 @@ class TestThreadState:
         assert data["pending_permissions"] == []
         assert data["approval_status"] is None
         assert data["approval_request_id"] is None
+
+    def test_state_excludes_checkpoint_only_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread state must not expose checkpoint-only actionable permissions."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-thread-state-checkpoint-only"
+            config = await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-state-checkpoint-only",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            await checkpointer.aput_writes(
+                config,
+                [
+                    (
+                        "__interrupt__",
+                        [
+                            Interrupt(
+                                value={
+                                    "type": "permission_request",
+                                    "tool_name": "bash",
+                                    "options": [
+                                        {
+                                            "optionId": "allow_once",
+                                            "name": "Allow Once",
+                                        }
+                                    ],
+                                },
+                                id="perm-thread-state-checkpoint-only",
+                            )
+                        ],
+                    )
+                ],
+                task_id="task-thread-state-checkpoint-only",
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-state-checkpoint-only",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-state-checkpoint-only/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["approval_status"] is None
+        assert data["approval_request_id"] is None
+        assert "checkpoint_permission_without_durable_row" in data["degraded_reasons"]
+        assert data["repair_status"] == "needs_reconciliation"
+        assert data["execution_readiness"] == "needs_reconciliation"
 
 
 # ---------------------------------------------------------------------------

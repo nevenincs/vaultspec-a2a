@@ -15,6 +15,7 @@ from ..control.projection import (
     apply_checkpoint_projection,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
+    reconcile_checkpoint_permissions_with_durable_state,
 )
 from ..control.snapshot import (
     MinimalState,
@@ -71,6 +72,9 @@ async def build_thread_state(
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot
     )
+    durable_permission_ids = {
+        permission.request_id for permission in snapshot.pending_permissions
+    }
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
@@ -111,6 +115,10 @@ async def build_thread_state(
                 aggregator=aggregator,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
+            snapshot = reconcile_checkpoint_permissions_with_durable_state(
+                snapshot,
+                durable_request_ids=durable_permission_ids,
+            )
             checkpoint_loaded = True
     except TimeoutError:
         logger.warning(

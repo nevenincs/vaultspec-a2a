@@ -1706,37 +1706,6 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_pending_approval_when_checkpoint_probe_is_unverified or list_threads_degrades_when_checkpoint_probe_is_unverified"`
 - `uv run ruff check src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
-## REVIEW-054: MCP send_message must match the stricter repair-state messaging contract
-
-Audit `6` exposed another MCP operator-surface lag after the repair-state
-messaging hardening landed. The backend follow-up path already rejects
-`repair_needed` and `reconciling` threads because ordinary follow-up ingest is
-not allowed while checkpoint truth or execution recovery is unresolved.
-However, `send_message()` in
-`src/vaultspec_a2a/protocols/mcp/tools/messaging.py` still surfaced backend
-`409 Conflict` responses as lower-level HTTP failures instead of a usable
-`ToolError`.
-
-This is not a LangGraph defect; it is a surface-alignment bug in the repo’s
-operator tooling. Once the backend contract says a repair-state thread is not
-accepting follow-up messages, the MCP surface must preserve that meaning
-directly so operators do not mistake lifecycle protection for transport
-failure.
-
-The fix now maps backend `409` responses into `ToolError`, preserves the
-backend detail when available, and adds a focused MCP regression proving that
-repair-state thread conflicts surface as a clear tool-level error.
-
-Evidence:
-
-- `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
-- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
-
-Verification:
-
-- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "send_message_raises_tool_error_for_repair_needed_thread"`
-- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
-
 ## REVIEW-054: MCP `send_message` must match repair-state follow-up rejection
 
 `REVIEW-051` tightened the backend follow-up contract so normal message ingest

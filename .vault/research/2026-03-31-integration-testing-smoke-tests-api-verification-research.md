@@ -1119,6 +1119,55 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
 - `uv run ruff check src/vaultspec_a2a/control/snapshot.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-039: operator-facing checkpoint surfaces must probe real durability
+
+This slice aligns operator-facing health and summary surfaces with LangGraph
+persistence semantics. Durable execution depends on a working checkpointer
+backend, not just the presence of a checkpointer object in memory. The defect
+had two outward-facing forms: `src/vaultspec_a2a/control/health.py` marked the
+checkpoint subsystem healthy on handle presence alone, and
+`src/vaultspec_a2a/control/thread_service.py` could keep `/api/threads`
+summaries looking healthy when checkpoint probing was unverified. The fix makes
+`/api/health` run a lightweight checkpoint probe and makes `/api/threads`
+degrade to `checkpoint_unavailable` when checkpoint probing cannot be trusted.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/health.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_app.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "api_health_degrades_when_checkpointer_backend_is_unusable or api_health_reports_sqlite_fallback_diagnostics"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_degrades_when_checkpoint_probe_is_unverified"`
+- `uv run ruff check src/vaultspec_a2a/control/health.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_app.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-039: checkpoint usability must back `/api/health` readiness
+
+This slice aligns the health surface with LangGraph persistence semantics.
+Durable execution requires a working checkpointer backend that can save and
+load checkpoint state; a non-null handle alone is not enough to certify
+resume capability. The defect was in `src/vaultspec_a2a/control/health.py`,
+where `/api/health` previously marked the checkpoint subsystem `ok` based only
+on object presence. The fix now performs a lightweight `aget_tuple(...)`
+probe and degrades the checkpoint check to `error` when the backend is closed,
+timed out, or otherwise unusable.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/health.py`
+- `src/vaultspec_a2a/api/routes/health.py`
+- `src/vaultspec_a2a/api/tests/test_app.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_app.py -q -k "api_health_degrades_when_checkpointer_backend_is_unusable or api_health_reports_sqlite_fallback_diagnostics"`
+- `uv run ruff check src/vaultspec_a2a/control/health.py src/vaultspec_a2a/api/tests/test_app.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

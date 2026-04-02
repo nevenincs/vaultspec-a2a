@@ -407,6 +407,35 @@ on thread-state snapshots remain durable-backed only. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
 
+REVIEW-039 | HIGH | Operator-facing checkpoint surfaces overstated durable readiness
+Audit `6` also exposed a broader operator-surface checkpoint drift. `/api/health`
+was previously reporting checkpoint status `ok` on non-null checkpointer
+presence alone in `src/vaultspec_a2a/control/health.py`, while `/api/threads`
+summaries in `src/vaultspec_a2a/control/thread_service.py` could still look
+healthy when checkpoint probing was unverified. Both surfaces were overstating
+durable readiness even when the checkpoint backend was unusable or could not be
+verified. The fix now makes `/api/health` probe real checkpointer usability and
+makes `/api/threads` fail closed to `checkpoint_unavailable` when checkpoint
+probing is unverified. Evidence anchors:
+`src/vaultspec_a2a/control/health.py`,
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_app.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-039 | MEDIUM | `/api/health` reported checkpoint readiness from handle presence alone
+Audit `6` also exposed an operator-surface drift in gateway readiness. The
+`/api/health` path in `src/vaultspec_a2a/control/health.py` was previously
+treating a non-null checkpointer handle as equivalent to a healthy durable
+checkpoint backend, even when the saver itself was unusable. That overstated
+LangGraph durable readiness: interrupts and resume require a working
+checkpointer backend, not just an attached object. The fix now probes the
+actual checkpointer with `aget_tuple(...)` and degrades the checkpoint health
+check to `error` when the probe times out or raises. Evidence anchors:
+`src/vaultspec_a2a/control/health.py`,
+`src/vaultspec_a2a/api/routes/health.py`,
+`src/vaultspec_a2a/api/tests/test_app.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

@@ -13,6 +13,7 @@ complete readiness payload consumed by ``/api/health``.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 from typing import TYPE_CHECKING, Any
@@ -216,13 +217,38 @@ async def build_full_health(
             "postgres_required": "yes" if settings.postgres_required else "no",
         }
 
-    # --- Checkpointer presence ---
-    checkpointer_present = getattr(app_state, "checkpointer", None) is not None
-    checks["checkpoint"] = {
-        "status": "ok" if checkpointer_present else "error",
+    # --- Checkpointer probe ---
+    checkpointer = getattr(app_state, "checkpointer", None)
+    checkpoint_check: dict[str, str] = {
         "backend": settings.resolved_checkpoint_backend,
         "postgres_required": "yes" if settings.postgres_required else "no",
     }
+    if checkpointer is None:
+        checkpoint_check["status"] = "error"
+        checkpoint_check["detail"] = "checkpointer missing"
+    else:
+        try:
+            await asyncio.wait_for(
+                checkpointer.aget_tuple(
+                    {
+                        "configurable": {
+                            "thread_id": "__health_probe__",
+                            "checkpoint_ns": "",
+                        }
+                    }
+                ),
+                timeout=5.0,
+            )
+            checkpoint_check["status"] = "ok"
+        except TimeoutError:
+            logger.warning("Health check: checkpoint probe timed out")
+            checkpoint_check["status"] = "error"
+            checkpoint_check["detail"] = "checkpoint probe timed out"
+        except Exception:
+            logger.exception("Health check: checkpoint probe failed")
+            checkpoint_check["status"] = "error"
+            checkpoint_check["detail"] = "checkpoint probe failed"
+    checks["checkpoint"] = checkpoint_check
 
     # --- Worker HTTP probe ---
     try:

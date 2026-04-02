@@ -184,6 +184,34 @@ async def test_api_health_reports_sqlite_fallback_diagnostics(
 
 
 @pytest.mark.asyncio
+async def test_api_health_degrades_when_checkpointer_backend_is_unusable(
+    session_factory,
+    tmp_path: Path,
+) -> None:
+    """GET /api/health must fail closed when the checkpointer cannot be probed."""
+    checkpoints_file = tmp_path / "closed-health-checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as saver:
+        closed_checkpointer = saver
+
+    app, _aggregator, _worker, _checkpointer = make_app(
+        session_factory,
+        closed_checkpointer,
+    )
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get("/api/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["checks"]["checkpoint"]["status"] == "error"
+    assert body["checks"]["checkpoint"]["detail"] == "checkpoint probe failed"
+
+
+@pytest.mark.asyncio
 async def test_classify_missing_ws_thread_reports_not_found(
     session_factory,
     checkpointer,

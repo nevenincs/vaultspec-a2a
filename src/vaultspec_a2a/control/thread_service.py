@@ -222,7 +222,9 @@ async def list_threads_service(
             live_plan_permissions = [
                 permission
                 for permission in await get_pending_permission_requests(
-                    db, thread_id=t.id
+                    db,
+                    thread_id=t.id,
+                    include_answered_pending_apply=False,
                 )
                 if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
             ]

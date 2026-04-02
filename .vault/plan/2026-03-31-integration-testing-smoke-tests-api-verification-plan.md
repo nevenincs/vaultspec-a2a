@@ -792,3 +792,28 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_terminal_thread_pending_permission_residue or state_preserves_plan_approval_without_tool_call"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_state_excludes_terminal_pending_permission_residue"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-046: public permission reads must not treat answered-not-applied rows as actionable pending state
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic public state: user-facing pending/actionable views must reflect
+actionable truth, not internal apply-in-flight residue.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "answered_pending_apply_permission_does_not_surface_in_thread_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_answered_pending_apply_plan_approval or state_excludes_answered_pending_apply_permission or team_status_excludes_answered_pending_apply_permission"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_answered_pending_apply_summary or get_pending_permissions_excludes_answered_pending_apply"`
+- `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

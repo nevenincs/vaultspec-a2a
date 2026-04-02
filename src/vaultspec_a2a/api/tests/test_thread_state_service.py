@@ -11,7 +11,11 @@ from langgraph.types import Interrupt
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from vaultspec_a2a.control.thread_state_service import build_thread_state
-from vaultspec_a2a.database import create_thread, record_permission_request
+from vaultspec_a2a.database import (
+    create_thread,
+    record_permission_request,
+    record_permission_response_submission,
+)
 from vaultspec_a2a.database.models import (
     Base,
     PermissionRequestModel,
@@ -710,6 +714,83 @@ async def test_terminal_thread_excludes_durable_pending_permission_from_thread_s
     assert "terminal_thread_pending_permission_residue" in snapshot.degraded_reasons
     assert snapshot.repair_status == "needs_reconciliation"
     assert snapshot.execution_readiness == "needs_reconciliation"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_answered_pending_apply_permission_does_not_surface_in_thread_state(
+    tmp_path: Path,
+) -> None:
+    """Snapshots must not advertise already-answered permissions as pending."""
+    case_dir = tmp_path / "thread-state-service-db-answered-pending-apply"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-answered-pending-apply"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-answered-pending-apply",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                thread_id="thread-answered-pending-apply",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread.approval_status = "pending"
+            thread.approval_request_id = "perm-answered-pending-apply"
+            await record_permission_request(
+                session,
+                request_id="perm-answered-pending-apply",
+                thread_id="thread-answered-pending-apply",
+                pause_reason_type="plan_approval_request",
+                description="Already answered plan approval",
+                allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                tool_call=None,
+            )
+            await record_permission_response_submission(
+                session,
+                request_id="perm-answered-pending-apply",
+                option_id="approve",
+                idempotency_key="idem-answered-pending-apply",
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-answered-pending-apply",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.pending_permissions == []
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
 
     await engine.dispose()
 

@@ -69,7 +69,10 @@ async def build_team_status(
     heartbeat_threads: list[str],
 ) -> TeamStatus:
     """Assemble the full team status from DB and in-memory aggregator state."""
-    durable_pending = await get_pending_permission_requests(db)
+    durable_pending = await get_pending_permission_requests(
+        db,
+        include_answered_pending_apply=False,
+    )
     thread_ids = sorted({permission.thread_id for permission in durable_pending})
     terminal_thread_ids: set[str] = set()
     if thread_ids:

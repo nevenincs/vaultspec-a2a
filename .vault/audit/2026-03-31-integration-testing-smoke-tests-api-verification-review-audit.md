@@ -529,3 +529,24 @@ resumability. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-046 | MEDIUM | Public permission reads could misclassify answered-not-applied rows as pending
+Audit `6` exposed a remaining public-state split in permission handling.
+`get_pending_permission_requests()` in
+`src/vaultspec_a2a/database/permission_repository.py` still surfaced
+`answered_pending_apply` rows to the same read paths that power
+`/api/team/status`, `/api/threads/{id}/state`, `/api/threads`, and the MCP
+mirrors. That is correct for internal apply bookkeeping, but it is too broad
+for public/actionable reads because a permission that has already been answered
+is no longer user-actionable even if apply is still in flight. The fix now
+splits that read boundary: public surfaces consume only true `pending` rows,
+while internal apply flows can continue to see answered-not-applied rows.
+Evidence anchors: `src/vaultspec_a2a/database/permission_repository.py`,
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

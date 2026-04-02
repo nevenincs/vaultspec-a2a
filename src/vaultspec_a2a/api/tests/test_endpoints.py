@@ -24,7 +24,12 @@ from langgraph.types import Interrupt
 from sqlalchemy import select
 
 from ...control.config import settings
-from ...database import create_control_action, create_thread, record_permission_request
+from ...database import (
+    create_control_action,
+    create_thread,
+    record_permission_request,
+    record_permission_response_submission,
+)
 from ...database.models import (
     PermissionRequestModel,
     ThreadExecutionStateModel,
@@ -363,6 +368,55 @@ class TestListThreads:
             item
             for item in data["threads"]
             if item["thread_id"] == "thread-list-terminal-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
+    def test_list_threads_hides_answered_pending_apply_plan_approval(
+        self, session_factory, checkpointer
+    ) -> None:
+        """List summaries must not expose already-answered approvals as pending."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_answered_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-answered-pending-apply",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-answered-pending-apply"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-answered-pending-apply",
+                    thread_id="thread-list-answered-pending-apply",
+                    pause_reason_type="plan_approval_request",
+                    description="Already answered plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await record_permission_response_submission(
+                    session,
+                    request_id="perm-list-answered-pending-apply",
+                    option_id="approve",
+                    idempotency_key="idem-list-answered-pending-apply",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_answered_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-answered-pending-apply"
         )
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
@@ -899,6 +953,67 @@ class TestThreadState:
         assert data["repair_status"] == "needs_reconciliation"
         assert data["execution_readiness"] == "needs_reconciliation"
 
+    def test_state_excludes_answered_pending_apply_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread state must not expose already-answered permissions as pending."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_answered_permission() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-thread-state-answered-pending-apply"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-state-answered-pending-apply",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-state-answered-pending-apply",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-thread-state-answered-pending-apply"
+                await record_permission_request(
+                    session,
+                    request_id="perm-thread-state-answered-pending-apply",
+                    thread_id="thread-state-answered-pending-apply",
+                    pause_reason_type="plan_approval_request",
+                    description="Already answered plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await record_permission_response_submission(
+                    session,
+                    request_id="perm-thread-state-answered-pending-apply",
+                    option_id="approve",
+                    idempotency_key="idem-thread-state-answered-pending-apply",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_answered_permission())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-state-answered-pending-apply/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["approval_status"] is None
+        assert data["approval_request_id"] is None
+
     def test_state_excludes_checkpoint_only_pending_permission(
         self, session_factory, checkpointer
     ) -> None:
@@ -1163,6 +1278,47 @@ class TestTeamStatus:
         assert "agents" in data
         assert "active_threads" in data
         assert "pending_permissions" in data
+
+    def test_team_status_excludes_answered_pending_apply_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Team status must not advertise answered permissions as pending."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_answered_permission() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="team-status-answered-pending-apply",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-answered-pending-apply:perm-1",
+                    thread_id="team-status-answered-pending-apply",
+                    pause_reason_type="plan_approval_request",
+                    description="Already answered plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await record_permission_response_submission(
+                    session,
+                    request_id="team-status-answered-pending-apply:perm-1",
+                    option_id="approve",
+                    idempotency_key="idem-team-status-answered-pending-apply",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_answered_permission())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
         assert isinstance(data["agents"], list)
         assert isinstance(data["active_threads"], list)
         assert isinstance(data["pending_permissions"], list)

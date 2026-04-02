@@ -38,7 +38,11 @@ from sqlalchemy.ext.asyncio import (
 from ....api.app import create_app
 from ....control.circuit_breaker import WorkerCircuitBreaker
 from ....control.worker_management import LazyWorkerSpawner
-from ....database import create_thread, record_permission_request
+from ....database import (
+    create_thread,
+    record_permission_request,
+    record_permission_response_submission,
+)
 from ....database.models import (
     Base,
     PermissionRequestModel,
@@ -726,6 +730,56 @@ class TestListThreadsViaApp:
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
 
+    def test_list_threads_hides_answered_pending_apply_summary(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads must not expose already-answered approvals."""
+
+        async def _seed_answered_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-answered-pending-apply",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = (
+                    "mcp-thread-list-answered-pending-apply:perm-1"
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-list-answered-pending-apply:perm-1",
+                    thread_id="mcp-thread-list-answered-pending-apply",
+                    pause_reason_type="plan_approval_request",
+                    description="Already answered plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await record_permission_response_submission(
+                    session,
+                    request_id="mcp-thread-list-answered-pending-apply:perm-1",
+                    option_id="approve",
+                    idempotency_key="idem-mcp-thread-list-answered-pending-apply",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_answered_plan_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-answered-pending-apply"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
     def test_list_threads_degrades_checkpoint_mismatched_summary(
         self, session_factory, checkpointer
     ) -> None:
@@ -959,6 +1013,46 @@ class TestGetPendingPermissionsViaApp:
         """When no permissions are pending, the endpoint returns an empty list."""
         with _make_test_client(session_factory, checkpointer) as client:
             resp = client.get("/api/team/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+
+    def test_get_pending_permissions_excludes_answered_pending_apply(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Team status must not expose already-answered permissions as pending."""
+
+        async def _seed_answered_permission() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="mcp-team-status-answered-pending-apply",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-team-status-answered-pending-apply:perm-1",
+                    thread_id="mcp-team-status-answered-pending-apply",
+                    pause_reason_type="plan_approval_request",
+                    description="Already answered plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await record_permission_response_submission(
+                    session,
+                    request_id="mcp-team-status-answered-pending-apply:perm-1",
+                    option_id="approve",
+                    idempotency_key="idem-mcp-team-status-answered-pending-apply",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_answered_permission())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/team/status")
+
         assert resp.status_code == 200
         data = resp.json()
         assert data["pending_permissions"] == []

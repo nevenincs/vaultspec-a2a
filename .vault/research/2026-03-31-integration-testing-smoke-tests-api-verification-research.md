@@ -1369,6 +1369,44 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_state_excludes_terminal_pending_permission_residue"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-046: public permission reads must not treat answered-not-applied rows as actionable pending state
+
+LangGraph checkpoint and interrupt semantics still support the same boundary
+rule: durable state can retain an apply-in-flight transition, but public
+resumability and actionability must reflect current user-facing truth, not
+intermediate internal bookkeeping. In this repo, `answered_pending_apply` is an
+internal state used to complete permission application after an accepted
+response; it must not be treated as a second pending request by public summary
+or snapshot code.
+
+The defect was that the repository read primitive did not distinguish internal
+apply bookkeeping from public pending reads. `get_pending_permission_requests()`
+was feeding `answered_pending_apply` rows into `/api/team/status`,
+`/api/threads`, `/api/threads/{id}/state`, and the MCP mirrors, so multiple
+surfaces could still advertise already-answered permissions as actionable
+pending work. The fix now splits the read boundary so internal completion paths
+keep their answered-not-applied visibility while public surfaces only expose
+genuinely actionable `pending` rows.
+
+Evidence:
+
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "answered_pending_apply_permission_does_not_surface_in_thread_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_answered_pending_apply_plan_approval or state_excludes_answered_pending_apply_permission or team_status_excludes_answered_pending_apply_permission"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_answered_pending_apply_summary or get_pending_permissions_excludes_answered_pending_apply"`
+- `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

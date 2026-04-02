@@ -353,7 +353,9 @@ async def enrich_snapshot_from_durable_state(
     is_terminal_thread = thread.status in {status.value for status in TERMINAL_STATUSES}
 
     durable_permissions = await get_pending_permission_requests(
-        session, thread_id=thread.id
+        session,
+        thread_id=thread.id,
+        include_answered_pending_apply=False,
     )
     if is_terminal_thread:
         if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:

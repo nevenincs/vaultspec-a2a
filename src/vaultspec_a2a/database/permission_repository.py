@@ -97,14 +97,13 @@ async def get_pending_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str | None = None,
+    include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
+    statuses = [PermissionRequestStatus.PENDING.value]
+    if include_answered_pending_apply:
+        statuses.append(PermissionRequestStatus.ANSWERED_PENDING_APPLY.value)
     stmt = select(PermissionRequestModel).where(
-        PermissionRequestModel.request_status.in_(
-            [
-                PermissionRequestStatus.PENDING.value,
-                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
-            ]
-        )
+        PermissionRequestModel.request_status.in_(statuses)
     )
     if thread_id is not None:
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)

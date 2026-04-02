@@ -345,6 +345,22 @@ the public surface without weakening liveness visibility. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-035 | HIGH | WebSocket dispatch failure could leave stale pending permissions after terminal failure
+Audit `6` also closed a WebSocket-specific terminal-cleanup drift. The WS
+dispatch-failure path was previously acting like a status-only transition:
+it marked the thread failed and degraded repair state, but it did not reuse
+the canonical terminal cleanup path that expires durable pending permission
+rows and prunes aggregator pending-permission state. The fix now routes WS
+failure through `mark_thread_failed(...)` with the live aggregator, and that
+helper reuses the canonical terminal-event cleanup before re-applying repair
+degradation. As a result, WS-marked terminal threads no longer leave stale
+pending approvals in persistence or aggregator memory. Evidence anchors:
+`src/vaultspec_a2a/api/ws_dispatch.py`,
+`src/vaultspec_a2a/control/diagnostics.py`,
+`src/vaultspec_a2a/control/event_handlers.py`,
+`src/vaultspec_a2a/database/permission_repository.py`,
+`src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

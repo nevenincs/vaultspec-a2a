@@ -1022,6 +1022,43 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_lists_durable_pending_permission_thread_as_active or team_status_excludes_aggregator_only_pending_permission or get_pending_permissions_empty"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-035: websocket failure terminal-cleanup drift
+
+This slice aligns WebSocket failure handling with the canonical terminal
+cleanup path. `api/ws_dispatch.py` now routes WS dispatch failure through
+`mark_thread_failed(...)` with the live aggregator, and
+`control/diagnostics.py` now calls the canonical terminal-event handler first
+before applying repair/readiness degradation. The terminal path expires
+durable pending permissions in the repository and prunes aggregator
+pending-permission state, so WS failure no longer leaves stale pending
+approvals behind after the thread is terminal.
+
+Evidence:
+
+- `src/vaultspec_a2a/api/ws_dispatch.py`
+- `src/vaultspec_a2a/control/diagnostics.py`
+- `src/vaultspec_a2a/control/event_handlers.py`
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+
+Terminology:
+
+- `FAILED` for the terminal thread status
+- `operator_intervention_required` for the degraded repair/readiness outcome
+- canonical `terminal-event` / `terminal cleanup` path
+- distinguish durable pending permissions from aggregator pending-permission
+  state
+
+Contradiction resolved:
+
+- WS failure could previously leave stale pending approvals in persistence and
+  aggregator memory after the thread was already terminal
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
+- `uv run ruff check src/vaultspec_a2a/control/diagnostics.py src/vaultspec_a2a/api/ws_dispatch.py src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

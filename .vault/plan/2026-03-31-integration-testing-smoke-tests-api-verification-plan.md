@@ -550,3 +550,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "TestTeamStatus"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_lists_durable_pending_permission_thread_as_active or team_status_excludes_aggregator_only_pending_permission or get_pending_permissions_empty"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-035: websocket failure terminal-cleanup drift
+
+Keep a bounded Audit `6` slice for WS failure terminal-cleanup drift. The
+implementation must ensure that WebSocket dispatch failure reuses the
+canonical terminal cleanup path, expiring durable pending permissions and
+pruning aggregator pending-permission state before the thread remains terminal
+`FAILED` with `operator_intervention_required` readiness.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/api/ws_dispatch.py`
+- `src/vaultspec_a2a/control/diagnostics.py`
+- `src/vaultspec_a2a/control/event_handlers.py`
+- `src/vaultspec_a2a/database/permission_repository.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
+- `uv run ruff check src/vaultspec_a2a/control/diagnostics.py src/vaultspec_a2a/api/ws_dispatch.py src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`

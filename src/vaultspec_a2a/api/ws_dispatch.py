@@ -68,13 +68,14 @@ async def _ws_mark_failed_and_broadcast(
     session_factory: Any,
     connection_manager: Any,
     error_detail: str,
+    aggregator: Any | None = None,
 ) -> None:
     """Mark a thread FAILED and broadcast a terminal WS event.
 
     DB update is delegated to ``control.diagnostics.mark_thread_failed``;
     the WS broadcast stays in the API layer.
     """
-    await mark_thread_failed(thread_id, session_factory)
+    await mark_thread_failed(thread_id, session_factory, aggregator=aggregator)
     terminal_payload = {
         "event_type": "thread_terminal",
         "thread_id": thread_id,
@@ -210,6 +211,7 @@ def create_dispatch_message_handler(
                     session_factory,
                     connection_manager,
                     result.error_detail or "Worker dispatch failed",
+                    getattr(app_state, "aggregator", None),
                 )
                 return
 

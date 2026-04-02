@@ -11,8 +11,15 @@ from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
 from vaultspec_a2a.control.diagnostics import mark_thread_failed
 from vaultspec_a2a.control.message_service import send_followup_message
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import create_thread, get_thread
+from vaultspec_a2a.database import (
+    create_thread,
+    get_pending_permission_requests,
+    get_thread,
+    record_permission_request,
+)
 from vaultspec_a2a.database.models import Base
+from vaultspec_a2a.graph.events import PermissionRequest
+from vaultspec_a2a.streaming.aggregator import EventAggregator
 
 
 @pytest_asyncio.fixture
@@ -109,3 +116,60 @@ async def test_mark_thread_failed_degrades_repair_state(session_factory) -> None
             updated.repair_reason
             == "Worker dispatch failed during websocket command handling"
         )
+
+
+@pytest.mark.asyncio
+async def test_mark_thread_failed_expires_pending_permissions_and_prunes_aggregator(
+    session_factory,
+) -> None:
+    """WS failure cleanup must mirror the canonical terminal-event path."""
+    async with session_factory() as session:
+        await create_thread(
+            session,
+            thread_id="thread-ws-fail-permissions",
+            status="input_required",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        await record_permission_request(
+            session,
+            request_id="thread-ws-fail-permissions:perm-1",
+            thread_id="thread-ws-fail-permissions",
+            pause_reason_type="permission_request",
+            description="Approve write?",
+            allowed_options=[{"option_id": "allow_once", "name": "Allow once"}],
+            tool_call="bash",
+        )
+        await session.commit()
+
+    aggregator = EventAggregator()
+    aggregator._emitters._pending_permissions["thread-ws-fail-permissions:perm-1"] = (
+        PermissionRequest(
+            thread_id="thread-ws-fail-permissions",
+            agent_id="vaultspec-coder",
+            timestamp=0.0,
+            request_id="thread-ws-fail-permissions:perm-1",
+            description="Approve write?",
+            options=[],
+        ),
+        0.0,
+    )
+
+    await mark_thread_failed(
+        "thread-ws-fail-permissions",
+        session_factory,
+        aggregator=aggregator,
+    )
+
+    async with session_factory() as session:
+        updated = await get_thread(session, "thread-ws-fail-permissions")
+        pending = await get_pending_permission_requests(
+            session,
+            thread_id="thread-ws-fail-permissions",
+        )
+
+    assert updated is not None
+    assert updated.status == "failed"
+    assert updated.repair_status == "operator_intervention_required"
+    assert pending == []
+    assert aggregator.get_pending_permissions() == []

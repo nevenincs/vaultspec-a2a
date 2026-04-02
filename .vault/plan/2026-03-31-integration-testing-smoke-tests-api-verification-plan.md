@@ -614,3 +614,24 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "cancelling"`
 - `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "cancelling_without_checkpoint"`
 - `uv run ruff check src/vaultspec_a2a/lifecycle/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
+## REVIEW-038: thread-state snapshots must not expose aggregator-only pending permissions
+
+Keep this as a bounded Audit `6` guardrail. `/api/threads/{id}/state` must not
+surface pending permissions unless a durable permission row exists. The
+implementation requirement is simple: aggregator state may still inform agents,
+tool calls, and liveness, but pending permission truth for reconnect snapshots
+must remain durable-backed only.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/snapshot.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "aggregator_only_pending_permission_does_not_surface_in_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
+- `uv run ruff check src/vaultspec_a2a/control/snapshot.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

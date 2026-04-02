@@ -392,6 +392,21 @@ instead of `cancel_pending`. Evidence anchors:
 `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`,
 `src/vaultspec_a2a/database/tests/test_reconciliation.py`.
 
+REVIEW-038 | MEDIUM | `/api/threads/{id}/state` leaked aggregator-only pending permissions
+Audit `6` also exposed a durable/public-state drift in the reconnect snapshot
+path. `build_thread_state()` in `src/vaultspec_a2a/control/thread_state_service.py`
+was letting `src/vaultspec_a2a/control/snapshot.py` append pending permissions
+from in-memory aggregator state even when no durable permission row existed.
+That made `/api/threads/{id}/state` advertise actionable pending permissions
+that persistence could not actually satisfy, which is the same class of drift
+already closed on `/api/team/status`. The fix removes aggregator-only
+permission projection from the checkpoint snapshot path so pending permissions
+on thread-state snapshots remain durable-backed only. Evidence anchors:
+`src/vaultspec_a2a/control/snapshot.py`,
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

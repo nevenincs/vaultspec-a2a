@@ -643,6 +643,72 @@ class TestThreadState:
         assert len(data["pending_permissions"]) == 1
         assert data["pending_permissions"][0]["tool_call"] == "plan_approval"
 
+    def test_state_excludes_aggregator_only_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread state must not expose permissions without durable backing."""
+        import time
+
+        from ...graph.events import PermissionRequest
+
+        agg = EventAggregator()
+        event = PermissionRequest(
+            thread_id="thread-state-aggregator-only",
+            agent_id="vaultspec-coder",
+            timestamp=time.time(),
+            request_id="thread-state-aggregator-only:perm-1",
+            description="Allow file write?",
+            options=[],
+        )
+        agg._emitters._pending_permissions["thread-state-aggregator-only:perm-1"] = (
+            event,
+            0.0,
+        )
+
+        app, _agg, _worker, _cp = make_app(
+            session_factory,
+            checkpointer,
+            aggregator=agg,
+        )
+
+        async def _seed_thread() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-thread-state-aggregator-only"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-state-aggregator-only",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-state-aggregator-only",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-state-aggregator-only/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["approval_status"] is None
+        assert data["approval_request_id"] is None
+
 
 # ---------------------------------------------------------------------------
 # POST /threads/{id}/messages

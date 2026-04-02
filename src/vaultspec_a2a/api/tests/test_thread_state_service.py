@@ -17,6 +17,7 @@ from vaultspec_a2a.database.models import (
     ThreadExecutionStateModel,
     ThreadModel,
 )
+from vaultspec_a2a.graph.events import PermissionRequest
 from vaultspec_a2a.streaming.aggregator import EventAggregator
 
 if TYPE_CHECKING:
@@ -633,5 +634,82 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
     assert snapshot.approval_request_id == "perm-plan-no-tool-call"
     assert len(snapshot.pending_permissions) == 1
     assert snapshot.pending_permissions[0].tool_call == "plan_approval"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_aggregator_only_pending_permission_does_not_surface_in_thread_state(
+    tmp_path: Path,
+) -> None:
+    """Reconnect snapshots must not expose permissions without durable rows."""
+    import time
+
+    case_dir = tmp_path / "thread-state-service-db-aggregator-only-permission"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-aggregator-only-permission"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-aggregator-only-permission",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="thread-aggregator-only-permission",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            await session.commit()
+
+        aggregator = EventAggregator()
+        aggregator._emitters._pending_permissions[
+            "thread-aggregator-only-permission:perm-1"
+        ] = (
+            PermissionRequest(
+                thread_id="thread-aggregator-only-permission",
+                agent_id="vaultspec-coder",
+                timestamp=time.time(),
+                request_id="thread-aggregator-only-permission:perm-1",
+                description="Allow file write?",
+                options=[],
+            ),
+            0.0,
+        )
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-aggregator-only-permission",
+                aggregator=aggregator,
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.pending_permissions == []
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
 
     await engine.dispose()

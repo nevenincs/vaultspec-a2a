@@ -1093,6 +1093,32 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "cancelling_without_checkpoint"`
 - `uv run ruff check src/vaultspec_a2a/lifecycle/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
 
+## REVIEW-038: durable permission truth over aggregator-only thread-state projection
+
+This slice aligns reconnect snapshots with LangGraph persistence semantics:
+durable thread state should come from checkpoint-backed and database-backed
+truth, not from ephemeral in-memory permission cache entries that survived only
+in the aggregator. The defect was in `src/vaultspec_a2a/control/snapshot.py`,
+where `enrich_snapshot_from_state()` appended aggregator pending permissions
+before durable reconciliation in
+`src/vaultspec_a2a/control/thread_state_service.py` and
+`src/vaultspec_a2a/control/projection.py`. The fix makes thread-state pending
+permissions durable-first by removing the aggregator-only append path, while
+still preserving aggregator-derived agent and tool-call liveness data.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/snapshot.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "aggregator_only_pending_permission_does_not_surface_in_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_aggregator_only_pending_permission or state_preserves_plan_approval_without_tool_call"`
+- `uv run ruff check src/vaultspec_a2a/control/snapshot.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

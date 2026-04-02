@@ -8,7 +8,6 @@ from langchain_core.messages import AIMessage, ToolMessage
 
 from ..graph.enums import (
     AgentLifecycleState,
-    PermissionOptionKind,
     ToolCallStatus,
     ToolKind,
 )
@@ -17,8 +16,6 @@ from ..thread.snapshots import (
     AgentData,
     ArtifactData,
     MessageData,
-    PermissionData,
-    PermissionOptionData,
     ThreadStateData,
     ToolCallData,
     classify_message_role,
@@ -89,29 +86,6 @@ def enrich_snapshot_from_state(
                 )
             )
 
-    # Populate pending permissions from aggregator
-    perm_data: list[PermissionData] = []
-    if aggregator is not None:
-        thread_id = snapshot.thread_id
-        for perm in aggregator.get_pending_permissions(thread_id):
-            perm_data.append(
-                PermissionData(
-                    request_id=perm.request_id,
-                    description=perm.description,
-                    tool_call=perm.tool_call,
-                    options=[
-                        PermissionOptionData(
-                            option_id=opt.get("option_id", ""),
-                            name=opt.get("name", ""),
-                            kind=str(
-                                PermissionOptionKind(opt.get("kind", "allow_once"))
-                            ),
-                        )
-                        for opt in perm.options
-                    ],
-                )
-            )
-
     # Extract tool calls from AIMessage.tool_calls, cross-reference with
     # ToolMessage to determine completion status.
     answered_tool_ids: set[str] = {
@@ -172,14 +146,6 @@ def enrich_snapshot_from_state(
     snapshot.plan = plan_entries
     snapshot.artifacts = artifact_data
     snapshot.agents = agent_data
-    existing_permission_ids = {
-        permission.request_id for permission in snapshot.pending_permissions
-    }
-    for permission in perm_data:
-        if permission.request_id in existing_permission_ids:
-            continue
-        snapshot.pending_permissions.append(permission)
-        existing_permission_ids.add(permission.request_id)
     snapshot.tool_calls = tool_call_data
     return snapshot
 

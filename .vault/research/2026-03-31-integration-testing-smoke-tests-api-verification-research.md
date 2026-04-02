@@ -1271,6 +1271,45 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_pending_permissions_excludes_terminal_thread_rows or team_status_excludes_aggregator_only_pending_permission or team_status_hides_malformed_durable_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-044: `/api/threads` summaries must not keep stale plan approval metadata actionable
+
+This slice extends the same fail-closed rule to list-thread summaries. The
+LangGraph grounding remains consistent across the official `Interrupts`,
+`Persistence`, and `Durable execution` docs: checkpointed interrupts are
+thread-scoped durable workflow state, and resumability depends on persisted
+checkpoint lineage rather than transient in-memory projection. That does not
+mean every mirrored application summary surface is automatically actionable.
+In this repo, approval submission still goes through the gateway-owned durable
+permission table and the thread lifecycle guard, so `/api/threads` cannot
+advertise a plan approval as pending when the durable row has no usable option
+ids or the owning thread is already terminal.
+
+The defect in `src/vaultspec_a2a/control/thread_service.py` was twofold. First,
+summary reconstruction treated any parseable `allowed_options_json` as good
+enough, which let optionless durable plan approvals keep `approval_status` and
+`approval_request_id` visible. Second, mirrored thread-row approval metadata
+was evaluated before terminal lifecycle was enforced, which let `completed` or
+`failed` threads still appear to have actionable pending approval in
+`/api/threads` and MCP list-thread output. The fix now centralizes durable
+option-id extraction in `src/vaultspec_a2a/control/permission_options.py`,
+reuses that validator across permission discovery surfaces, and clears summary
+approval metadata for terminal threads before pending-plan reconstruction.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/permission_options.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_optionless_plan_approval_metadata or list_threads_clears_terminal_thread_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_optionless_plan_approval_summary or list_threads_clears_terminal_pending_approval_summary"`
+- `uv run ruff check src/vaultspec_a2a/control/permission_options.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 Terminology:
 
 - `FAILED` for the terminal thread status

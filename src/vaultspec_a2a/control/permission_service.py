@@ -36,6 +36,7 @@ from ..thread.enums import (
 )
 from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES
 from .dispatch import safe_dispatch
+from .permission_options import extract_allowed_option_ids
 from .repair_transitions import (
     mark_dispatch_failed,
     mark_permission_response_applied,
@@ -61,22 +62,7 @@ logger = logging.getLogger(__name__)
 def _allowed_option_ids(permission: object) -> set[str]:
     """Extract valid option ids from a durable permission request row."""
     raw_options = getattr(permission, "allowed_options_json", "[]")
-    try:
-        parsed = json.loads(raw_options)
-    except (TypeError, json.JSONDecodeError):
-        return set()
-    if not isinstance(parsed, list):
-        return set()
-
-    valid_ids: set[str] = set()
-    for option in parsed:
-        if not isinstance(option, dict):
-            continue
-        for key in ("option_id", "optionId"):
-            value = option.get(key)
-            if isinstance(value, str) and value:
-                valid_ids.add(value)
-    return valid_ids
+    return extract_allowed_option_ids(raw_options)
 
 
 def _rejected_permission_error(

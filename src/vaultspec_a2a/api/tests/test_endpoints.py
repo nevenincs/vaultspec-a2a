@@ -204,6 +204,49 @@ class TestListThreads:
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
 
+    def test_list_threads_hides_optionless_plan_approval_metadata(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not expose optionless plan-approval state."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_optionless_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-optionless-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-optionless-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-optionless-plan",
+                    thread_id="thread-list-optionless-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve plan?",
+                    allowed_options=[],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_optionless_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-optionless-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
     def test_list_threads_clears_stale_missing_plan_approval_pointer(
         self, session_factory, checkpointer
     ) -> None:
@@ -280,6 +323,49 @@ class TestListThreads:
         )
         assert thread["approval_status"] == "pending"
         assert thread["approval_request_id"] == "perm-list-live-plan"
+
+    def test_list_threads_clears_terminal_thread_pending_approval(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not keep pending approval on terminal threads."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_terminal_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-terminal-plan",
+                    status="completed",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-list-terminal-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-terminal-plan",
+                    thread_id="thread-list-terminal-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve stale terminal plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_terminal_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-terminal-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
     def test_list_threads_degrades_stale_execution_state_lineage(
         self, session_factory, checkpointer

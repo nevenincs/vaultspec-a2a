@@ -488,3 +488,22 @@ mirrored decision logic remains worth auditing explicitly. If any one of those
 surfaces drifts from the others, stale outward-facing request ids can reappear
 even while the underlying LangGraph thread-scoped interrupt semantics remain
 correct.
+
+REVIEW-044 | MEDIUM | `/api/threads` summaries could keep stale plan approval metadata actionable
+Audit `6` exposed another summary-surface drift in list-thread discovery.
+`list_threads_service()` in `src/vaultspec_a2a/control/thread_service.py` was
+still trusting mirrored thread-row approval metadata too broadly. Two cases
+remained unsafe: optionless durable plan-approval rows could still validate as
+pending because the summary path only checked JSON shape, and terminal threads
+could continue to expose `approval_status="pending"` even though the control
+layer would reject further approval responses. The fix now reuses a shared
+durable option-id validator, clears summary approval metadata for terminal
+threads before pending-plan reconstruction, and keeps `/api/threads` and MCP
+list-thread discovery aligned with the actual permission-response contract.
+Evidence anchors:
+`src/vaultspec_a2a/control/permission_options.py`,
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/control/permission_service.py`,
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

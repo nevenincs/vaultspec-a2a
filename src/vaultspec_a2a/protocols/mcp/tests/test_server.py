@@ -581,6 +581,90 @@ class TestListThreadsViaApp:
         assert thread["repair_status"] == "needs_reconciliation"
         assert thread["execution_readiness"] == "needs_reconciliation"
 
+    def test_list_threads_hides_optionless_plan_approval_summary(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads must not expose optionless plan approvals."""
+
+        async def _seed_optionless_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-optionless-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "mcp-thread-list-optionless-plan:perm-1"
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-list-optionless-plan:perm-1",
+                    thread_id="mcp-thread-list-optionless-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve optionless plan?",
+                    allowed_options=[],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_optionless_plan_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-optionless-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
+    def test_list_threads_clears_terminal_pending_approval_summary(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads must not keep pending approval on terminal threads."""
+
+        async def _seed_terminal_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-terminal-plan",
+                    status="failed",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "mcp-thread-list-terminal-plan:perm-1"
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-list-terminal-plan:perm-1",
+                    thread_id="mcp-thread-list-terminal-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve terminal plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call="plan_approval",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_terminal_plan_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-terminal-plan"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
     def test_list_threads_degrades_checkpoint_mismatched_summary(
         self, session_factory, checkpointer
     ) -> None:

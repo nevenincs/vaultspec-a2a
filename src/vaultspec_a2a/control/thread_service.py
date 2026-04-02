@@ -41,10 +41,17 @@ from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
-from ..thread.enums import ApprovalStatus, ControlActionType, RepairStatus, ThreadStatus
+from ..thread.enums import (
+    TERMINAL_STATUSES,
+    ApprovalStatus,
+    ControlActionType,
+    RepairStatus,
+    ThreadStatus,
+)
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
 from ..thread.snapshots import project_checkpoint_tuple
+from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -174,6 +181,7 @@ async def list_threads_service(
         execution_readiness = t.execution_readiness
         approval_status = t.approval_status
         approval_request_id = t.approval_request_id
+        is_terminal_thread = t.status in {status.value for status in TERMINAL_STATUSES}
         execution_state = await get_thread_execution_state(db, t.id)
         checkpoint_id: str | None = None
         checkpoint_present = False
@@ -207,7 +215,10 @@ async def list_threads_service(
                 repair_status=repair_status,
                 execution_readiness=execution_readiness,
             )
-        if approval_status == ApprovalStatus.PENDING.value:
+        if is_terminal_thread:
+            approval_status = None
+            approval_request_id = None
+        elif approval_status == ApprovalStatus.PENDING.value:
             live_plan_permissions = [
                 permission
                 for permission in await get_pending_permission_requests(
@@ -217,9 +228,7 @@ async def list_threads_service(
             ]
             if live_plan_permissions:
                 live_permission = live_plan_permissions[-1]
-                try:
-                    json.loads(live_permission.allowed_options_json)
-                except (json.JSONDecodeError, TypeError, ValueError):
+                if not extract_allowed_option_ids(live_permission.allowed_options_json):
                     approval_status = None
                     approval_request_id = None
                 else:
@@ -229,13 +238,13 @@ async def list_threads_service(
                 approval_request_id = None
         elif approval_status is not None and approval_request_id is not None:
             permission = await get_permission_request(db, approval_request_id)
-            if permission is not None:
-                try:
-                    json.loads(permission.allowed_options_json)
-                except (json.JSONDecodeError, TypeError, ValueError):
-                    if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                        approval_status = None
-                        approval_request_id = None
+            if (
+                permission is not None
+                and not extract_allowed_option_ids(permission.allowed_options_json)
+                and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+            ):
+                approval_status = None
+                approval_request_id = None
         summaries.append(
             ThreadSummaryData(
                 thread_id=t.id,

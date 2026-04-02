@@ -745,3 +745,28 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "pending_permissions_exclude_terminal_thread_rows or pending_permissions_hide_malformed_durable_rows"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_pending_permissions_excludes_terminal_thread_rows or team_status_excludes_aggregator_only_pending_permission or team_status_hides_malformed_durable_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-044: `/api/threads` summaries must fail closed on optionless or terminal plan approvals
+
+Keep this as a separate bounded Audit `6` guardrail. List-thread summaries must
+not expose plan-approval metadata as actionable unless the durable pending row
+still has at least one usable option id and the owning thread is non-terminal.
+The implementation requirement is narrow: centralize durable option-id
+extraction, reuse it in the list-thread summary path, and clear mirrored
+approval metadata before reconstruction when the thread has already reached a
+terminal lifecycle state.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/permission_options.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_optionless_plan_approval_metadata or list_threads_clears_terminal_thread_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_optionless_plan_approval_summary or list_threads_clears_terminal_pending_approval_summary"`
+- `uv run ruff check src/vaultspec_a2a/control/permission_options.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

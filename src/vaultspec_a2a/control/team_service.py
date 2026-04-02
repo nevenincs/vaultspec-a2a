@@ -7,7 +7,6 @@ function.  The route handler converts the result to a Pydantic wire model.
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
@@ -17,6 +16,7 @@ from ..database import get_pending_permission_requests
 from ..database.models import ThreadModel
 from ..graph.enums import AgentLifecycleState
 from ..thread.enums import TERMINAL_STATUSES
+from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -28,22 +28,7 @@ __all__ = ["TeamStatus", "build_team_status"]
 
 def _has_valid_permission_options(raw_options_json: str | None) -> bool:
     """Return True only when a durable pending row exposes usable option ids."""
-    if not isinstance(raw_options_json, str) or not raw_options_json:
-        return False
-    try:
-        parsed = json.loads(raw_options_json)
-    except (TypeError, json.JSONDecodeError):
-        return False
-    if not isinstance(parsed, list):
-        return False
-    for option in parsed:
-        if not isinstance(option, dict):
-            continue
-        for key in ("option_id", "optionId"):
-            value = option.get(key)
-            if isinstance(value, str) and value:
-                return True
-    return False
+    return bool(extract_allowed_option_ids(raw_options_json))
 
 
 @dataclass(frozen=True, slots=True)

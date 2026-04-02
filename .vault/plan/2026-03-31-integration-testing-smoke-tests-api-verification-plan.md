@@ -936,6 +936,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "delete_thread_raises_tool_error_for_nonterminal_thread or archive_thread_raises_tool_error_when_server_unavailable or delete_thread_raises_tool_error_when_server_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_lifecycle.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-054: MCP send_message must fail closed on repair-state follow-up conflicts
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic operator tooling: once the backend follow-up path rejects
+repair-state threads, the MCP messaging surface must return a clear
+`ToolError` instead of leaking a raw HTTP conflict.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "send_message_raises_tool_error_for_repair_needed_thread"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/messaging.py`
+
 ## REVIEW-053: `/api/threads` summaries must hide approvals when checkpoint probing is unverified
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

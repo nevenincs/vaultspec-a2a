@@ -698,3 +698,17 @@ clearing public approval metadata on that boundary. Evidence anchors:
 `src/vaultspec_a2a/control/thread_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-054 | MEDIUM | MCP `send_message` leaked raw backend 409 conflicts for repair-state threads
+Audit `6` still had an operator-surface drift at the MCP messaging boundary.
+The backend follow-up path already rejects `repair_needed` and `reconciling`
+threads with `409 Conflict`, but `send_message()` in
+`src/vaultspec_a2a/protocols/mcp/tools/messaging.py` was still letting that
+conflict escape as a generic HTTP error. That made the MCP surface lag behind
+the stricter repair-state contract and obscured the real reason the follow-up
+was rejected. The fix now maps backend `409` responses into `ToolError`,
+preserves the backend detail when available, and keeps MCP messaging aligned
+with the fail-closed repair contract already enforced by the REST endpoint.
+Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/tools/messaging.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

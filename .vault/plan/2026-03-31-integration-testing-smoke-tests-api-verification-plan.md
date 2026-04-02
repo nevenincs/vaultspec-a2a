@@ -416,6 +416,20 @@ replay semantics remain intact.
   `recovery_epoch`. Summary `repair_status` and `execution_readiness` now stay
   aligned with the stricter reconnect contract and fail closed to
   `needs_reconciliation` under stale durable lineage.
+- Audit 6.1: durable-versus-checkpoint pending-permission overwrite audit.
+  Cover the boundary where durable pending permission rows and checkpoint or
+  aggregator-derived reconnect state are merged. Durable supervisor plan
+  approvals are allowed to persist with `tool_call = NULL`, and the supervisor
+  interrupt path emits exactly that shape, so thread-state reconstruction must
+  not key plan-approval identity on `tool_call` or let checkpoint enrichment
+  erase already-durable pending permissions.
+  Review-driven follow-up is now also in place on the permission boundary:
+  durable supervisor plan approvals created without `tool_call` remain
+  actionable during thread-state reconstruction, and checkpoint enrichment no
+  longer overwrites durable pending permissions with thinner checkpoint-only
+  state. The reconnect/state surface now preserves those pending approvals by
+  durable `request_id` until an explicit durable resolution event supersedes
+  them.
 - Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.

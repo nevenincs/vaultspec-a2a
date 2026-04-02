@@ -841,6 +841,45 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k list_threads_degrades_stale_execution_state_lineage`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k list_threads_degrades_stale_execution_state_summary`
 
+Review follow-up also exposed a correctness gap in approval-state
+reconstruction. Durable supervisor plan approvals are allowed to persist with
+`tool_call = NULL`, and the supervisor interrupt path emits exactly that
+shape. The gateway now normalizes those durable rows back to
+`plan_approval` during projection, but that alone was not enough: checkpoint
+state enrichment was still replacing `snapshot.pending_permissions` with
+checkpoint/aggregator-derived data instead of merging by durable `request_id`.
+That made a pending approval vulnerable to disappearing from thread state even
+though the durable row and thread approval metadata still said it was pending.
+
+The repository now preserves durable pending permissions during checkpoint
+enrichment and keeps nullable plan-approval rows actionable in both pure
+thread-state assembly and the public `/api/threads/{id}/state` endpoint. This
+is a gateway reconstruction issue, not a LangGraph runtime bug: the checkpoint
+exists only as one input to reconnect state, while durable approval truth must
+retain precedence until an explicit durable resolution event supersedes it.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/snapshot.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k plan_approval_without_tool_call`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k preserves_plan_approval_without_tool_call`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/snapshot.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+This follow-up is now promoted to explicit `Audit 6.1` in the roadmap because
+the defect boundary is broader than a single nullable-field bug. The durable
+plan-approval row was being projected correctly, but reconnect assembly later
+let checkpoint or aggregator-derived state overwrite
+`snapshot.pending_permissions` instead of merging by durable identity. That
+makes this a deeper durable-versus-checkpoint precedence audit inside the
+broader persistence and state-corruption domain, not just a one-off projection
+cleanup.
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

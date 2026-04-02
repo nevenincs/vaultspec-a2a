@@ -255,6 +255,27 @@ under stale execution-state lineage. Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-030 | HIGH | Durable pending approvals without `tool_call` could disappear during thread-state reconstruction
+Review follow-up exposed a stricter gateway-side reconstruction bug at the
+boundary between durable projection and checkpoint-state enrichment. Durable
+`plan_approval_request` rows intentionally allow `tool_call = NULL`, and the
+supervisor interrupt path emits exactly that shape. The projection layer now
+normalizes those rows back to `plan_approval`, but thread-state assembly was
+still vulnerable because checkpoint enrichment replaced
+`snapshot.pending_permissions` with thinner checkpoint/aggregator state instead
+of merging by durable `request_id`. That could leave `approval_status` and
+`approval_request_id` set while the actual pending permission vanished from the
+public state surface, making a still-pending approval look non-actionable. The
+fix now preserves durable pending permissions during checkpoint enrichment and
+normalizes nullable plan-approval `tool_call` values during durable
+projection. The new regressions prove thread-state assembly and the public
+`/api/threads/{id}/state` endpoint both preserve the pending approval surface
+for a durable plan-approval row created without `tool_call`. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/snapshot.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

@@ -518,6 +518,62 @@ class TestThreadState:
         assert data["repair_status"] == "needs_reconciliation"
         assert data["execution_readiness"] == "needs_reconciliation"
 
+    def test_state_preserves_plan_approval_without_tool_call(
+        self, session_factory, checkpointer
+    ) -> None:
+        """A durable plan approval remains visible even if tool_call is null."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_plan_without_tool_call() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-plan-no-tool-call-endpoint"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-plan-no-tool-call-endpoint",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-plan-no-tool-call-endpoint",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = "perm-plan-no-tool-call-endpoint"
+                await record_permission_request(
+                    session,
+                    request_id="perm-plan-no-tool-call-endpoint",
+                    thread_id="thread-plan-no-tool-call-endpoint",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_plan_without_tool_call())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-plan-no-tool-call-endpoint/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["approval_status"] == "pending"
+        assert data["approval_request_id"] == "perm-plan-no-tool-call-endpoint"
+        assert len(data["pending_permissions"]) == 1
+        assert data["pending_permissions"][0]["tool_call"] == "plan_approval"
+
 
 # ---------------------------------------------------------------------------
 # POST /threads/{id}/messages

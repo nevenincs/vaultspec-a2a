@@ -58,6 +58,12 @@ def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:
     raw_options = json.loads(permission.allowed_options_json)
+    tool_call = permission.tool_call
+    if (
+        tool_call in (None, "")
+        and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+    ):
+        tool_call = PermissionType.PLAN_APPROVAL.value
     options = [
         PermissionOptionData(
             option_id=str(option.get("option_id", "")),
@@ -71,7 +77,7 @@ def _permission_data_from_model(
         request_id=permission.request_id,
         description=permission.description,
         options=options,
-        tool_call=permission.tool_call,
+        tool_call=tool_call,
     )
 
 

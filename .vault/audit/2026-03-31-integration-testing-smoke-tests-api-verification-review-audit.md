@@ -607,3 +607,20 @@ Evidence anchors:
 `src/vaultspec_a2a/control/projection.py`,
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-050 | HIGH | Hard delete eligibility still allowed destructive deletion of `input_required` paused/resumable threads
+Audit `6` exposed a destructive lifecycle-guard drift. The delete predicate in
+`src/vaultspec_a2a/thread/lifecycle_guards.py` only blocked `running`, so the
+REST delete path could still hard-delete an `input_required` thread even when
+that state represented real durable paused work with checkpoint-backed
+resumability and a live pending permission row. This repo already treats that
+state as operator-actionable durable work in restart reconciliation and the
+service permission lanes, so allowing hard delete there was an outright
+contract breach rather than a documentation mismatch. The fix now fails closed:
+hard delete is restricted to terminal or archived states, and paused/resumable
+work must be resolved, cancelled, or repaired before it can be destroyed.
+Evidence anchors:
+`src/vaultspec_a2a/thread/lifecycle_guards.py`,
+`src/vaultspec_a2a/api/routes/threads.py`,
+`src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.

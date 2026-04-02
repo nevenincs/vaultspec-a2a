@@ -30,10 +30,14 @@ class ArchiveEligibility:
 
 def can_delete(status: str) -> DeleteEligibility:
     """Check whether a thread in the given status may be hard-deleted."""
-    if status == ThreadStatus.RUNNING.value:
+    terminal_or_archived = {
+        *(thread_status.value for thread_status in TERMINAL_STATUSES),
+        ThreadStatus.ARCHIVED.value,
+    }
+    if status not in terminal_or_archived:
         return DeleteEligibility(
             allowed=False,
-            reason="Cannot delete a RUNNING thread — cancel it first",
+            reason=f"Cannot delete thread in {status!r} state",
         )
     return DeleteEligibility(allowed=True, reason=None)
 

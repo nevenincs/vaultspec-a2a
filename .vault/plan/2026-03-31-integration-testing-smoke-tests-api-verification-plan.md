@@ -878,3 +878,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "missing_checkpoint_hides_durable_pending_permission_state"`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_hides_pending_approval_when_checkpoint_is_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-050: hard delete eligibility must fail closed for paused/resumable work
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic, controllable workflow state: hard delete must never erase
+`input_required` paused/resumable work before the operator has resolved,
+cancelled, or repaired it.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/thread/lifecycle_guards.py`
+- `src/vaultspec_a2a/api/routes/threads.py`
+- `src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "rejects_input_required_thread_with_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/thread/lifecycle_guards.py src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py src/vaultspec_a2a/api/tests/test_endpoints.py`

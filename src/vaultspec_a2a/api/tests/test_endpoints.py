@@ -2014,6 +2014,60 @@ class TestPermissionRespond:
         assert len(worker.dispatches) == 1
         assert worker.dispatches[0]["option_id"] == {"approved": True}
 
+
+class TestDeleteThread:
+    """Tests for DELETE /api/threads/{thread_id}."""
+
+    def test_rejects_input_required_thread_with_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Hard delete must not destroy paused, resumable work."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-delete-input-required"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-delete-input-required",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-delete-input-required",
+                    status="input_required",
+                    repair_status="paused_resumable",
+                    execution_readiness="paused_resumable",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="perm-delete-input-required",
+                    thread_id="thread-delete-input-required",
+                    pause_reason_type="bash",
+                    description="Allow resumable action?",
+                    allowed_options=[{"option_id": "allow_once", "name": "Allow Once"}],
+                    tool_call="bash",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.delete("/api/threads/thread-delete-input-required")
+
+        assert resp.status_code == 409
+        assert resp.json()["detail"] == "Cannot delete thread in 'input_required' state"
+
     def test_plan_approval_response_succeeds_after_real_event_relay(
         self, session_factory, checkpointer
     ) -> None:

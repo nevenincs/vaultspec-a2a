@@ -1514,6 +1514,39 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_hides_pending_approval_when_checkpoint_is_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-050: hard delete must not treat paused/resumable threads as disposable
+
+LangGraph interrupt semantics still impose the same pessimistic boundary:
+`input_required` is not disposable transient noise when it is backed by a
+checkpoint and pending permission state. In this repo, paused permission
+threads are explicitly treated as durable operator handoff state in restart
+reconciliation and the service permission tests, so hard delete must not erase
+that state before the operator resolves it.
+
+The defect was in lifecycle delete eligibility. `can_delete()` in
+`src/vaultspec_a2a/thread/lifecycle_guards.py` only blocked `running`, which
+left the REST delete path free to destroy an `input_required` thread even
+though the same repo semantics treated it as resumable, operator-actionable
+work. That was destructive eligibility drift: the system could erase a valid
+checkpoint-backed pause instead of forcing explicit cancel/archive or repair.
+
+The fix now narrows delete eligibility to terminal or archived states only.
+Paused, reconciling, submitted, or otherwise non-terminal work is no longer
+hard-deletable through the public API.
+
+Evidence:
+
+- `src/vaultspec_a2a/thread/lifecycle_guards.py`
+- `src/vaultspec_a2a/api/routes/threads.py`
+- `src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py -q`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "rejects_input_required_thread_with_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/thread/lifecycle_guards.py src/vaultspec_a2a/thread/tests/test_lifecycle_guards.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

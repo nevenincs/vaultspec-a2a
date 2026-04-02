@@ -15,6 +15,7 @@ from vaultspec_a2a.database.models import (
     Base,
     PermissionRequestModel,
     ThreadExecutionStateModel,
+    ThreadModel,
 )
 from vaultspec_a2a.streaming.aggregator import EventAggregator
 
@@ -190,6 +191,86 @@ async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoin
     assert "execution_state_projection_unreadable" in snapshot.degraded_reasons
     assert snapshot.repair_status == "operator_intervention_required"
     assert snapshot.execution_readiness == "operator_intervention_required"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stale_execution_state_degrades_snapshot_readiness(
+    tmp_path: Path,
+) -> None:
+    """Stale durable execution-state lineage must not leave reconnect healthy."""
+    case_dir = tmp_path / "thread-state-service-db-stale-state"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-fresh-state"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-stale-state",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="thread-stale-state",
+                status="running",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread = await session.get(ThreadModel, "thread-stale-state")
+            assert thread is not None
+            thread.recovery_epoch = 3
+            session.add(
+                ThreadExecutionStateModel(
+                    thread_id="thread-stale-state",
+                    checkpoint_id="cp-fresh-state",
+                    parent_checkpoint_id=None,
+                    recovery_epoch=1,
+                    task_count=1,
+                    interrupt_count=0,
+                    next_nodes_json='["worker"]',
+                    interrupt_types_json="[]",
+                    tasks_json="[]",
+                    degraded_reasons_json="[]",
+                )
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-stale-state",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.snapshot_complete is False
+    assert snapshot.replay_status == "durable"
+    assert "execution_state_projection_stale" in snapshot.degraded_reasons
+    assert snapshot.repair_status == "needs_reconciliation"
+    assert snapshot.execution_readiness == "needs_reconciliation"
 
     await engine.dispose()
 

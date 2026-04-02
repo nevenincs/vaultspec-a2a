@@ -220,6 +220,25 @@ core LangGraph logic itself regressed. Evidence anchors:
 `src/vaultspec_a2a/team/presets/mock/tapes/providers/vaultspec-supervisor.yaml`,
 `src/vaultspec_a2a/team/presets/mock/tapes/templates/vaultspec-supervisor-chat.json.j2`.
 
+REVIEW-028 | MEDIUM | Stale durable execution-state lineage could leave reconnect state looking healthier than checkpoint truth
+Audit `6` found that stale durable execution-state lineage was only being
+tagged with `execution_state_projection_stale`, while reconnect snapshots and
+`/api/threads/{id}/state` could still inherit `repair_status="healthy"` and
+`execution_readiness="healthy"` from the thread row. That overstated certainty
+at the repo boundary: LangGraph resume semantics are checkpoint-backed and
+thread-scoped, so a readable-but-stale `thread_execution_state` row must not
+outrank the active checkpoint lineage during reconnect classification. The fix
+now fails closed to `needs_reconciliation` whenever the durable
+execution-state row no longer matches the thread `recovery_epoch` or live
+checkpoint id, while keeping `snapshot_complete=false` and
+`execution_state_projection_stale` visible for operators. The new regressions
+prove both the pure state-service path and the public `/state` endpoint no
+longer advertise a healthy reconnect surface under stale execution-state
+lineage. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 Residual note after `audit3`:
 The active pending permission rule is now enforced consistently across durable
 rows, aggregator memory, and the permission-response guard, but this class of

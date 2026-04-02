@@ -783,6 +783,39 @@ Evidence anchors:
 - `src/vaultspec_a2a/team/presets/mock/tapes/templates/vaultspec-supervisor-chat.json.j2`
 - `src/vaultspec_a2a/team/presets/teams/mock-supervisor-human-in-loop.toml`
 
+### Audit 6 stale execution-state lineage note
+
+Audit `6` now extends the earlier checkpoint-truth and corruption work to the
+stale-lineage case. A durable `thread_execution_state` row can still
+deserialize cleanly while pointing at lineage that no longer matches the live
+checkpoint or reconnect path after replay, restart, or interrupted recovery.
+That condition must not leave reconnect snapshots or
+`/api/threads/{id}/state` looking healthy or durably resumable just because
+the row is readable. LangGraph's persistence model keeps checkpoint truth
+thread-scoped and authoritative, so repo-owned execution-state projections
+must fail closed when the durable row no longer matches the active
+`recovery_epoch` or checkpoint id.
+
+The repository now does that. Stale durable execution-state lineage degrades
+operator-facing readiness to `needs_reconciliation`, keeps
+`snapshot_complete=false`, and surfaces
+`execution_state_projection_stale` instead of preserving a healthy reconnect
+surface. The new regressions prove both the pure state-service path and the
+public `/api/threads/{id}/state` endpoint under a readable-but-stale
+execution-state row.
+
+Evidence anchors:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k stale_execution_state`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k stale_execution_state_lineage`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_projection.py -q`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

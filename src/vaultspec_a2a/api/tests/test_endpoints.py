@@ -20,7 +20,11 @@ from fastapi.testclient import TestClient
 
 from ...control.config import settings
 from ...database import create_control_action, create_thread, record_permission_request
-from ...database.models import PermissionRequestModel, ThreadModel
+from ...database.models import (
+    PermissionRequestModel,
+    ThreadExecutionStateModel,
+    ThreadModel,
+)
 from ...streaming.aggregator import EventAggregator
 from ...thread.enums import ControlActionResultStatus, ControlActionType
 from .conftest import make_app
@@ -404,6 +408,68 @@ class TestThreadState:
         assert "permission_projection_unreadable" in data["degraded_reasons"]
         assert data["repair_status"] == "operator_intervention_required"
         assert data["execution_readiness"] == "operator_intervention_required"
+
+    def test_state_degrades_stale_execution_state_lineage(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Stale durable execution-state rows must not leave `/state` healthy."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_stale_execution_state() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-fresh-state-endpoint"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-stale-state-endpoint",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-stale-state-endpoint",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread = await session.get(ThreadModel, "thread-stale-state-endpoint")
+                assert thread is not None
+                thread.recovery_epoch = 4
+                session.add(
+                    ThreadExecutionStateModel(
+                        thread_id="thread-stale-state-endpoint",
+                        checkpoint_id="cp-fresh-state-endpoint",
+                        parent_checkpoint_id=None,
+                        recovery_epoch=1,
+                        task_count=1,
+                        interrupt_count=0,
+                        next_nodes_json='["worker"]',
+                        interrupt_types_json="[]",
+                        tasks_json="[]",
+                        degraded_reasons_json="[]",
+                    )
+                )
+                await session.commit()
+
+        asyncio.run(_seed_stale_execution_state())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads/thread-stale-state-endpoint/state")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["snapshot_complete"] is False
+        assert "execution_state_projection_stale" in data["degraded_reasons"]
+        assert data["repair_status"] == "needs_reconciliation"
+        assert data["execution_readiness"] == "needs_reconciliation"
 
 
 # ---------------------------------------------------------------------------

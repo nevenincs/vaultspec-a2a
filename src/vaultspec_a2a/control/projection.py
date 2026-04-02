@@ -36,6 +36,24 @@ from ..thread.snapshots import (
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 
 
+def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
+    """Fail closed when durable execution-state lineage no longer matches truth."""
+    snapshot.snapshot_complete = False
+    if "execution_state_projection_stale" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("execution_state_projection_stale")
+
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
 def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:
@@ -351,17 +369,13 @@ async def enrich_snapshot_from_execution_state(
     snapshot = apply_execution_state_projection(snapshot, projection)
 
     if row.recovery_epoch != thread.recovery_epoch:
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_stale" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_stale")
+        _mark_execution_state_stale(snapshot)
 
     if (
         checkpoint_present
         and checkpoint_id is not None
         and row.checkpoint_id != checkpoint_id
     ):
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_stale" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_stale")
+        _mark_execution_state_stale(snapshot)
 
     return snapshot

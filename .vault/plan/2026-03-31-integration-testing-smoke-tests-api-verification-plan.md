@@ -401,8 +401,15 @@ replay semantics remain intact.
   src/vaultspec_a2a/service_tests -q`, which now passes with 10 service tests.
 - Audit 6: persistence and state-corruption audit.
   Cover checkpoint replay, restart after interruption, degraded snapshots,
-  corrupt durable rows, and operator-visible degradation instead of silent
-  repair.
+  corrupt durable rows, stale durable lineage, and operator-visible
+  degradation instead of silent repair.
+  The first stale-lineage slice is now in place: reconnect snapshots and
+  `/api/threads/{id}/state` no longer inherit a healthy surface from a
+  readable-but-stale `thread_execution_state` row. When durable
+  execution-state lineage no longer matches the active `recovery_epoch` or
+  checkpoint id, the repository now fails closed to `needs_reconciliation`
+  and keeps `execution_state_projection_stale` visible instead of preserving
+  `healthy` readiness.
 - Audit 7: multi-agent cooperation and re-briefing audit.
   Cover supervisor routing, stale-context prevention, re-brief on state
   change, and no-double-route guarantees during collaborative work.

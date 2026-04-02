@@ -298,6 +298,67 @@ class TestCreateThreadViaApp:
         data = state_resp.json()
         assert data["thread_id"] == thread_id
 
+    def test_get_thread_state_excludes_terminal_pending_permission_residue(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads/{id}/state must hide stale terminal approvals."""
+
+        async def _seed_terminal_thread() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-mcp-thread-state-terminal-permission-residue"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "mcp-thread-state-terminal-permission-residue",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-state-terminal-permission-residue",
+                    status="failed",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = (
+                    "mcp-thread-state-terminal-permission-residue:perm-1"
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-state-terminal-permission-residue:perm-1",
+                    thread_id="mcp-thread-state-terminal-permission-residue",
+                    pause_reason_type="plan_approval_request",
+                    description="Stale terminal plan approval",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_terminal_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get(
+                "/api/threads/mcp-thread-state-terminal-permission-residue/state"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["approval_status"] is None
+        assert data["approval_request_id"] is None
+        assert "terminal_thread_pending_permission_residue" in data["degraded_reasons"]
+        assert data["repair_status"] == "needs_reconciliation"
+        assert data["execution_readiness"] == "needs_reconciliation"
+
     def test_post_threads_with_workspace_root_returns_201(
         self, session_factory, checkpointer, workspace_root: Path
     ) -> None:

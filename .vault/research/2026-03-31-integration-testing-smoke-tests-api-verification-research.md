@@ -1328,6 +1328,47 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
 - `uv run ruff check src/vaultspec_a2a/control/diagnostics.py src/vaultspec_a2a/api/ws_dispatch.py src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py`
 
+## REVIEW-045: terminal-thread state surfaces must fail closed on stale pending permissions
+
+LangGraph checkpoint and interrupt durability still support the same stricter
+rule used throughout Audit `6`: resumability and actionability are defined at
+the persisted thread boundary, not by stale public projections after terminal
+lifecycle has already won. Once a thread is terminal, repo-owned public state
+must not continue to advertise actionable pending permissions even if durable
+permission residue still exists.
+
+The repo-specific defect was in `src/vaultspec_a2a/control/projection.py`.
+`enrich_snapshot_from_durable_state()` was still loading durable pending
+permissions and mirrored plan-approval metadata without reconciling them
+against terminal thread lifecycle. That let `/api/threads/{id}/state` expose
+`pending_permissions`, `approval_status`, and `approval_request_id` for
+terminal threads. Because MCP `get_thread_status` formats its pending
+permission output directly from that state payload in
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`, the same stale
+actionability leaked into the operator surface there as well.
+
+The fix now fails closed at the durable projection boundary. When a thread is
+already terminal, pending-permission residue is removed from the public
+snapshot, mirrored approval metadata is cleared, and the snapshot degrades with
+`terminal_thread_pending_permission_residue` so the inconsistency remains
+visible without being actionable.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "terminal_thread_excludes_durable_pending_permission_from_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_terminal_thread_pending_permission_residue or state_preserves_plan_approval_without_tool_call"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_state_excludes_terminal_pending_permission_residue"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

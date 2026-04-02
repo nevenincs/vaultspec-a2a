@@ -770,3 +770,25 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_optionless_plan_approval_metadata or list_threads_clears_terminal_thread_pending_approval"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_optionless_plan_approval_summary or list_threads_clears_terminal_pending_approval_summary"`
 - `uv run ruff check src/vaultspec_a2a/control/permission_options.py src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-045: terminal-thread state surfaces must fail closed on stale pending permissions
+
+Keep this as a separate bounded Audit `6` guardrail. Thread-state snapshots and
+their MCP consumer surfaces must not advertise pending permissions as
+actionable once the durable thread lifecycle is already terminal.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "terminal_thread_excludes_durable_pending_permission_from_thread_state or plan_approval_without_tool_call_preserves_pending_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_terminal_thread_pending_permission_residue or state_preserves_plan_approval_without_tool_call"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_state_excludes_terminal_pending_permission_residue"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

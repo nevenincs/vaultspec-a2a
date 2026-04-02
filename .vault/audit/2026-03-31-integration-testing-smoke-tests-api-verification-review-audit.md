@@ -507,3 +507,25 @@ Evidence anchors:
 `src/vaultspec_a2a/control/team_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-045 | MEDIUM | `/api/threads/{id}/state` could keep terminal-thread pending permissions actionable
+Audit `6` exposed the same public-state drift in the reconnect snapshot
+surface. `enrich_snapshot_from_durable_state()` in
+`src/vaultspec_a2a/control/projection.py` was still projecting durable pending
+permission rows and mirrored plan-approval metadata even when the owning thread
+had already reached a terminal lifecycle state. That meant
+`/api/threads/{id}/state` could continue to advertise `pending_permissions` and
+`approval_status="pending"` even though the permission-response path would
+reject further action, and MCP `get_thread_status` would inherit the same stale
+actionability because it formats `pending_permissions` from that payload. The
+fix now fails closed at durable projection time: terminal-thread permission
+residue is dropped from the public snapshot, mirrored approval pointers are
+cleared, and the snapshot is degraded with
+`terminal_thread_pending_permission_residue` instead of silently overstating
+resumability. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

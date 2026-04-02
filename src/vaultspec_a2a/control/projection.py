@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
-from ..thread.enums import ApprovalStatus, RepairStatus
+from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -41,6 +41,24 @@ def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
     snapshot.snapshot_complete = False
     if "execution_state_projection_stale" not in snapshot.degraded_reasons:
         snapshot.degraded_reasons.append("execution_state_projection_stale")
+
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
+def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
+    """Fail closed when terminal threads still carry pending permission residue."""
+    snapshot.snapshot_complete = False
+    if "terminal_thread_pending_permission_residue" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("terminal_thread_pending_permission_residue")
 
     if snapshot.repair_status not in {
         RepairStatus.CHECKPOINT_UNAVAILABLE.value,
@@ -332,10 +350,19 @@ async def enrich_snapshot_from_durable_state(
     snapshot.execution_readiness = thread.execution_readiness
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
+    is_terminal_thread = thread.status in {status.value for status in TERMINAL_STATUSES}
 
     durable_permissions = await get_pending_permission_requests(
         session, thread_id=thread.id
     )
+    if is_terminal_thread:
+        if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:
+            _mark_terminal_permission_residue(snapshot)
+        snapshot.pending_permissions = []
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+        return snapshot
+
     if durable_permissions:
         if snapshot.pause_cause is None:
             snapshot.pause_cause = durable_permissions[0].pause_reason_type

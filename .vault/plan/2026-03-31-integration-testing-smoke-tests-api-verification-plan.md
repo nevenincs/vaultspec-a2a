@@ -817,3 +817,24 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "list_threads_hides_answered_pending_apply_plan_approval or state_excludes_answered_pending_apply_permission or team_status_excludes_answered_pending_apply_permission"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_answered_pending_apply_summary or get_pending_permissions_excludes_answered_pending_apply"`
 - `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-047: startup reconciliation must not treat answered-not-applied permissions as resumable pending state
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic public/operator state after restart: startup reconciliation must
+not relabel internal answered-not-applied apply state as a user-resumable
+pending pause.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/database/reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/reconciliation.py`
+- `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "answered_not_applied_does_not_count_as_resumable_pending or pending_permission_transitions_to_input_required"`
+- `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "answered_pending_apply_with_checkpoint_is_not_marked_resumable or pending_permission_without_checkpoint_is_not_marked_resumable"`
+- `uv run ruff check src/vaultspec_a2a/database/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`

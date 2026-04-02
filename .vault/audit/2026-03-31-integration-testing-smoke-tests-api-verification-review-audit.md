@@ -550,3 +550,22 @@ Evidence anchors: `src/vaultspec_a2a/database/permission_repository.py`,
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-047 | MEDIUM | Startup reconciliation must not treat answered-not-applied permissions as resumable pending state
+Audit `6` still had one restart-surface drift after `REVIEW-046`.
+`reconcile_threads_on_startup()` in
+`src/vaultspec_a2a/database/reconciliation.py` was still building
+`pending_map` from `get_pending_permission_requests(...)` without separating
+user-actionable `pending` rows from `answered_pending_apply` rows. That meant
+a permission that had already been answered, but was still waiting on internal
+apply bookkeeping, could be classified as `paused_resumable` and push the
+thread back to `input_required` on restart even though the public/operator
+surfaces no longer considered it actionable. The fix keeps restart
+reconciliation aligned with deterministic public state: only true pending
+permissions drive resumable startup repair, while answered-not-applied rows
+remain internal apply-in-flight state. Evidence anchors:
+`src/vaultspec_a2a/database/permission_repository.py`,
+`src/vaultspec_a2a/database/reconciliation.py`,
+`src/vaultspec_a2a/lifecycle/reconciliation.py`,
+`src/vaultspec_a2a/database/tests/test_reconciliation.py`,
+`src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`.

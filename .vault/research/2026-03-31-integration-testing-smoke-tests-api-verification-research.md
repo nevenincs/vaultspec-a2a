@@ -1407,6 +1407,44 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_hides_answered_pending_apply_summary or get_pending_permissions_excludes_answered_pending_apply"`
 - `uv run ruff check src/vaultspec_a2a/database/permission_repository.py src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-047: startup reconciliation must not treat answered-not-applied permissions as resumable pending state
+
+LangGraph durable execution still implies the same boundary rule after restart:
+reconciliation may inspect persisted state, but it must not reinterpret
+internal in-flight bookkeeping as user-actionable pending work. In this repo,
+`answered_pending_apply` is a valid intermediate state for internal apply
+completion after a permission response has already been accepted. It is not
+restart truth for resuming a user pause, because the user has already answered
+and the remaining work is internal application rather than a fresh pending
+approval.
+
+The defect was in startup reconciliation. `reconcile_threads_on_startup()` in
+`src/vaultspec_a2a/database/reconciliation.py` built `pending_map` from
+`get_pending_permission_requests(...)`, which still included
+`answered_pending_apply`. That let the restart classifier in
+`src/vaultspec_a2a/lifecycle/reconciliation.py` overstate resumability by
+assigning `paused_resumable` and pushing threads back to `input_required`
+despite there being no user-actionable permission left to answer.
+
+The fix now scopes startup reconciliation to true pending rows only. Internal
+completion flows still retain access to answered-not-applied rows, but restart
+reconciliation no longer uses them to classify a thread as user-paused or
+resumable.
+
+Evidence:
+
+- `src/vaultspec_a2a/database/permission_repository.py`
+- `src/vaultspec_a2a/database/reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/reconciliation.py`
+- `src/vaultspec_a2a/database/tests/test_reconciliation.py`
+- `src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py -q -k "answered_not_applied_does_not_count_as_resumable_pending or pending_permission_transitions_to_input_required"`
+- `uv run pytest src/vaultspec_a2a/database/tests/test_reconciliation.py -q -k "answered_pending_apply_with_checkpoint_is_not_marked_resumable or pending_permission_without_checkpoint_is_not_marked_resumable"`
+- `uv run ruff check src/vaultspec_a2a/database/reconciliation.py src/vaultspec_a2a/lifecycle/tests/test_reconciliation.py src/vaultspec_a2a/database/tests/test_reconciliation.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

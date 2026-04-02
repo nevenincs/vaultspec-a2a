@@ -23,7 +23,7 @@ from ..control.snapshot import (
     load_checkpoint_history_depth,
 )
 from ..database import get_thread
-from ..thread.enums import TERMINAL_STATUSES, RepairStatus
+from ..thread.enums import RepairStatus
 from ..thread.snapshots import (
     ThreadStateData,
     finalize_snapshot_replay_status,
@@ -40,8 +40,6 @@ if TYPE_CHECKING:
 __all__ = ["build_thread_state"]
 
 logger = logging.getLogger(__name__)
-
-_TERMINAL_THREAD_STATUSES = {status.value for status in TERMINAL_STATUSES}
 
 
 async def build_thread_state(
@@ -154,11 +152,6 @@ async def build_thread_state(
         checkpoint_present=checkpoint_present,
         checkpoint_id=snapshot.checkpoint_id,
     )
-    if thread.status in _TERMINAL_THREAD_STATUSES:
-        snapshot.pending_permissions = []
-        snapshot.approval_status = None
-        snapshot.approval_request_id = None
-        snapshot.pause_cause = None
 
     return finalize_snapshot_replay_status(
         snapshot,

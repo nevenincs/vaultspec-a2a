@@ -170,7 +170,11 @@ async def reconcile_threads_on_startup(
 
     pending_map: dict[str, bool] = {}
     for tid in thread_ids:
-        perms = await get_pending_permission_requests(session, thread_id=tid)
+        perms = await get_pending_permission_requests(
+            session,
+            thread_id=tid,
+            include_answered_pending_apply=False,
+        )
         pending_map[tid] = bool(perms)
 
     actions = compute_reconciliation_actions(

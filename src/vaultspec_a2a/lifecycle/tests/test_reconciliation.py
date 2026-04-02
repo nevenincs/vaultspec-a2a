@@ -176,6 +176,20 @@ class TestPendingPermissions:
         assert action.increment_generation is True
         assert action.increment_recovery_epoch is True
 
+    def test_answered_not_applied_does_not_count_as_resumable_pending(self) -> None:
+        """Reconciliation must only pause on user-actionable pending permissions."""
+        thread = ThreadSnapshot(thread_id="t1", status="running", recovery_epoch=0)
+        actions = compute_reconciliation_actions(
+            threads=[thread],
+            checkpoint_results={"t1": True},
+            checkpoint_errors={},
+            pending_permissions={"t1": False},
+        )
+        assert len(actions) == 1
+        action = actions[0]
+        assert action.new_thread_status == "reconciling"
+        assert action.repair_status == "needs_reconciliation"
+
 
 class TestHealthyThreadConservative:
     """Healthy threads with checkpoint available get reconciling action."""

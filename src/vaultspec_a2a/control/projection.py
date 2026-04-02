@@ -81,6 +81,24 @@ def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
     snapshot.pause_cause = None
 
 
+def clear_permissions_without_checkpoint_truth(
+    snapshot: ThreadStateData,
+) -> ThreadStateData:
+    """Fail closed when pending approval state has no checkpoint authority."""
+    had_actionable_permission_state = bool(snapshot.pending_permissions) or bool(
+        snapshot.approval_status or snapshot.approval_request_id or snapshot.pause_cause
+    )
+    snapshot.pending_permissions = []
+    snapshot.approval_status = None
+    snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
+    if had_actionable_permission_state and (
+        "pending_permission_without_checkpoint_truth" not in snapshot.degraded_reasons
+    ):
+        snapshot.degraded_reasons.append("pending_permission_without_checkpoint_truth")
+    return snapshot
+
+
 def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:

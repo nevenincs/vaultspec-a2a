@@ -858,3 +858,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "answered_pending_apply_permission_does_not_surface_in_thread_state or checkpoint_only_pending_permission_does_not_surface_in_thread_state"`
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_answered_pending_apply_permission or state_excludes_checkpoint_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-049: thread-state snapshots must not advertise pending approvals without checkpoint truth
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic public/operator state: reconnect snapshots may show degraded
+recovery, but they must not present a human pause as actionable when the
+LangGraph checkpoint needed for resume is missing or unavailable.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "missing_checkpoint_hides_durable_pending_permission_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_hides_pending_approval_when_checkpoint_is_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 
 from ..control.projection import (
     apply_checkpoint_projection,
+    clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
     reconcile_checkpoint_permissions_with_durable_state,
@@ -132,6 +133,7 @@ async def build_thread_state(
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
     except Exception:
         logger.warning(
             "Could not load checkpoint for thread %s; returning partial snapshot",
@@ -144,6 +146,14 @@ async def build_thread_state(
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
         snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+
+    if (
+        not checkpoint_loaded
+        and not checkpoint_present
+        and thread.status != "submitted"
+    ):
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
     snapshot = await enrich_snapshot_from_execution_state(
         db,

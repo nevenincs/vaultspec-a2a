@@ -585,3 +585,25 @@ of implying a resumable pause that is no longer there. Evidence anchors:
 `src/vaultspec_a2a/control/thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-049 | MEDIUM | `/api/threads/{id}/state` could advertise pending approvals even when checkpoint truth was missing or unavailable
+Audit `6` exposed another checkpoint-boundary drift in reconnect snapshots.
+`build_thread_state()` in
+`src/vaultspec_a2a/control/thread_state_service.py` loaded durable pending
+permission state before probing the LangGraph checkpoint, but its
+checkpoint-missing and checkpoint-unavailable paths only degraded
+`repair_status` and `execution_readiness`. That meant
+`/api/threads/{id}/state` could still return `pending_permissions`,
+`approval_status="pending"`, `approval_request_id`, and `pause_cause` even
+while the snapshot itself declared checkpoint truth unavailable. LangGraph
+interrupt semantics do not support that optimistic contract: resumability is
+anchored in the persisted checkpoint for the same `thread_id`, so durable
+permission residue alone is not enough to advertise a still-actionable human
+pause. The fix now fails closed on that boundary by clearing public
+permission/approval state when checkpoint truth is missing or unavailable,
+using a shared cleanup helper in `src/vaultspec_a2a/control/projection.py`.
+Evidence anchors:
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.

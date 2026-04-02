@@ -1479,6 +1479,41 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_excludes_answered_pending_apply_permission or state_excludes_checkpoint_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
 
+## REVIEW-049: thread-state must fail closed when checkpoint truth is missing or unavailable
+
+LangGraph interrupt semantics still keep the same hard boundary: a human pause
+is resumable only through persisted checkpoint state for the same `thread_id`.
+The checkpointer is the authority that keeps the exact graph state needed to
+resume; durable permission rows are recovery evidence, not sufficient proof
+that the graph can still accept a user response.
+
+The defect was in reconnect snapshot assembly. `build_thread_state()` in
+`src/vaultspec_a2a/control/thread_state_service.py` loaded durable pending
+permissions first, then degraded checkpoint-missing and
+checkpoint-unavailable cases without clearing that user-actionable state. That
+let `/api/threads/{id}/state` overstate actionability by returning
+`pending_permissions`, `approval_status="pending"`, `approval_request_id`, and
+`pause_cause` even while the snapshot declared checkpoint truth unavailable.
+
+The fix now fails closed on that boundary. When checkpoint truth is missing or
+unavailable, reconnect snapshots clear public permission/approval state and
+record `pending_permission_without_checkpoint_truth` as an additional degraded
+reason. This keeps public resumability aligned with LangGraph’s
+checkpoint-backed interrupt model instead of durable residue.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "missing_checkpoint_hides_durable_pending_permission_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_hides_pending_approval_when_checkpoint_is_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ### Open questions that affect scope quality
 
 - What exact output makes a run count as “meaningful work” for this repo:

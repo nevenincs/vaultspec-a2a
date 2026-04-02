@@ -125,6 +125,68 @@ async def test_missing_checkpoint_degrades_snapshot_readiness(tmp_path: Path) ->
 
 
 @pytest.mark.asyncio
+async def test_missing_checkpoint_hides_durable_pending_permission_state(
+    tmp_path: Path,
+) -> None:
+    """Missing checkpoint truth must not leave approvals looking resumable."""
+    case_dir = tmp_path / "thread-state-service-db-missing-pending-permission"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                thread_id="thread-missing-checkpoint-permission",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread.approval_status = "pending"
+            thread.approval_request_id = "perm-missing-checkpoint-permission"
+            await record_permission_request(
+                session,
+                request_id="perm-missing-checkpoint-permission",
+                thread_id="thread-missing-checkpoint-permission",
+                pause_reason_type="plan_approval_request",
+                description="Approve missing-checkpoint plan",
+                allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                tool_call=None,
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-missing-checkpoint-permission",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.pending_permissions == []
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
+    assert snapshot.pause_cause is None
+    assert snapshot.repair_status == "checkpoint_unavailable"
+    assert snapshot.execution_readiness == "checkpoint_unavailable"
+    assert "checkpoint_missing" in snapshot.degraded_reasons
+    assert "pending_permission_without_checkpoint_truth" in snapshot.degraded_reasons
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_unreadable_execution_state_degrades_readiness_even_with_checkpoint(
     tmp_path: Path,
 ) -> None:

@@ -892,6 +892,65 @@ class TestThreadState:
         assert data["approval_request_id"] is None
         assert data["pause_cause"] is None
 
+    def test_state_hides_pending_approval_when_checkpoint_is_unavailable(
+        self, session_factory, tmp_path
+    ) -> None:
+        """Thread state must not expose approvals without checkpoint access."""
+        checkpoints_file = tmp_path / "missing-thread-state-permission-checkpoints.db"
+
+        async def _open_checkpointer() -> AsyncSqliteSaver:
+            return await AsyncSqliteSaver.from_conn_string(
+                str(checkpoints_file)
+            ).__aenter__()
+
+        missing_checkpointer = asyncio.run(_open_checkpointer())
+        app, _agg, _worker, _cp = make_app(
+            session_factory,
+            missing_checkpointer,
+        )
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-state-missing-checkpoint-permission",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "pending"
+                thread.approval_request_id = (
+                    "perm-thread-state-missing-checkpoint-permission"
+                )
+                await record_permission_request(
+                    session,
+                    request_id="perm-thread-state-missing-checkpoint-permission",
+                    thread_id="thread-state-missing-checkpoint-permission",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve missing-checkpoint plan",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get(
+                "/api/threads/thread-state-missing-checkpoint-permission/state"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pending_permissions"] == []
+        assert data["approval_status"] is None
+        assert data["approval_request_id"] is None
+        assert data["pause_cause"] is None
+        assert data["repair_status"] == "checkpoint_unavailable"
+        assert data["execution_readiness"] == "checkpoint_unavailable"
+        assert "checkpoint_unavailable" in data["degraded_reasons"]
+        assert "pending_permission_without_checkpoint_truth" in data["degraded_reasons"]
+
     def test_state_excludes_terminal_thread_pending_permission_residue(
         self, session_factory, checkpointer
     ) -> None:

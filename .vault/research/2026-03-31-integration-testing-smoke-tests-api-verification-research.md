@@ -1866,5 +1866,30 @@ Evidence:
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "submitted_thread_missing_checkpoint_clears_stale_pending_approval or missing_checkpoint_hides_durable_pending_permission_state"`
-- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_is_unavailable"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_probe_is_unverified"`
 - `uv run ruff check src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-059: MCP guidance must match checkpoint-backed actionability
+
+Audit `6` reached the point where the remaining mismatch was operator guidance
+rather than raw state assembly. The server-level MCP instructions and the
+permission-discovery help text still implied that a thread with
+`status == input_required` necessarily had an actionable permission response
+waiting. That was no longer true after the earlier hardening: this codebase now
+distinguishes checkpoint-backed resumable pauses from checkpoint-unavailable
+repair states, and the operator guidance needed to reflect that distinction.
+
+The change does not alter behavior; it aligns the MCP guidance with the
+contract already enforced by the API and tool outputs. Operators are now told
+to inspect repair status and execution readiness before assuming a pause is
+actionable, and `get_pending_permissions()` is described as the source of
+currently actionable approvals rather than all paused threads in general.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/server.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
+
+Verification:
+
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/server.py src/vaultspec_a2a/protocols/mcp/tools/discovery.py`

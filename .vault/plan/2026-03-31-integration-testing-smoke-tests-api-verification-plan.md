@@ -1040,8 +1040,24 @@ Scope and evidence:
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "submitted_thread_missing_checkpoint_clears_stale_pending_approval or missing_checkpoint_hides_durable_pending_permission_state"`
-- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_is_unavailable"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_probe_is_unverified"`
 - `uv run ruff check src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+## REVIEW-059: MCP guidance must reflect checkpoint-backed actionability
+
+Keep this as a separate bounded Audit `6` tail guardrail. The mission is
+deterministic operator guidance: tool instructions must not tell operators that
+every `input_required` thread is immediately actionable when the actual
+contract now depends on checkpoint-backed resumability.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/server.py`
+- `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
+
+Verification:
+
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/server.py src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
 
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 

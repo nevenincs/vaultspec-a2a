@@ -773,3 +773,17 @@ Evidence anchors:
 `src/vaultspec_a2a/control/thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-059 | LOW | MCP guidance still implied `input_required` always meant an actionable approval
+Audit `6` reached the operator-guidance edge after the underlying state
+surfaces were hardened. The MCP server instructions and permission-discovery
+help text still implied that `status == input_required` alone meant a live
+permission response was available, even though this audit now distinguishes
+checkpoint-backed resumable pauses from checkpoint-unavailable repair states.
+The guidance is now aligned with the actual contract: operators are told to
+inspect repair/readiness first and to treat `get_pending_permissions()` as the
+source of currently actionable approvals rather than assuming every
+`input_required` thread can be resumed immediately.
+Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/server.py`,
+`src/vaultspec_a2a/protocols/mcp/tools/discovery.py`.

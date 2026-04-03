@@ -36,8 +36,8 @@ async def get_team_status() -> str:
     - Count and list of active thread IDs
     - Count and list of agents with their current lifecycle state
       (idle, working, blocked, finished)
-    - Count and list of pending permission requests with request IDs and
-      descriptions
+    - Count and list of checkpoint-actionable pending permission requests with
+      request IDs and descriptions
     """
     data = await _mcp_request(
         "GET",
@@ -72,7 +72,7 @@ async def get_team_status() -> str:
 
 @mcp.tool()
 async def get_pending_permissions() -> str:
-    """List all pending permission requests across active threads that need a response.
+    """List all pending permission requests the gateway still considers actionable.
 
     Use this tool to discover which agent actions are blocked waiting for
     human approval.  After reviewing the results, call
@@ -81,8 +81,9 @@ async def get_pending_permissions() -> str:
     permission requests.
 
     This tool queries the team status endpoint and extracts only the
-    permissions data.  If no threads are running in non-autonomous mode, or if
-    all permissions have been resolved, returns 'No pending permission
+    permissions data.  If no threads are running in non-autonomous mode, if
+    all permissions have been resolved, or if a thread has lost
+    checkpoint-backed actionability, it returns 'No pending permission
     requests.'  For a broader system overview that includes agents and threads
     alongside permissions, use ``get_team_status`` instead.
 

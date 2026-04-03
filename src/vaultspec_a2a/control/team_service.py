@@ -15,7 +15,7 @@ from sqlalchemy import select
 from ..database import get_pending_permission_requests
 from ..database.models import ThreadModel
 from ..graph.enums import AgentLifecycleState
-from ..thread.enums import TERMINAL_STATUSES
+from ..thread.enums import TERMINAL_STATUSES, RepairStatus
 from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
@@ -74,22 +74,38 @@ async def build_team_status(
         include_answered_pending_apply=False,
     )
     thread_ids = sorted({permission.thread_id for permission in durable_pending})
+    known_thread_ids: set[str] = set()
     terminal_thread_ids: set[str] = set()
+    checkpoint_unavailable_thread_ids: set[str] = set()
     if thread_ids:
         terminal_statuses = [status.value for status in TERMINAL_STATUSES]
         rows = await db.execute(
-            select(ThreadModel.id, ThreadModel.status).where(
-                ThreadModel.id.in_(thread_ids)
-            )
+            select(
+                ThreadModel.id,
+                ThreadModel.status,
+                ThreadModel.repair_status,
+                ThreadModel.execution_readiness,
+            ).where(ThreadModel.id.in_(thread_ids))
         )
+        known_rows = rows.all()
+        known_thread_ids = {thread_id for thread_id, *_rest in known_rows}
         terminal_thread_ids = {
-            thread_id for thread_id, status in rows.all() if status in terminal_statuses
+            thread_id
+            for thread_id, status, _repair_status, _execution_readiness in known_rows
+            if status in terminal_statuses
+        }
+        checkpoint_unavailable_thread_ids = {
+            thread_id
+            for thread_id, _status, repair_status, execution_readiness in known_rows
+            if repair_status == RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            or execution_readiness == RepairStatus.CHECKPOINT_UNAVAILABLE.value
         }
 
     nonterminal_durable_pending = [
         permission
         for permission in durable_pending
-        if permission.thread_id not in terminal_thread_ids
+        if permission.thread_id in known_thread_ids
+        and permission.thread_id not in terminal_thread_ids
     ]
     public_pending: list[PendingPermissionInfo] = [
         PendingPermissionInfo(
@@ -100,6 +116,7 @@ async def build_team_status(
         )
         for p in nonterminal_durable_pending
         if _has_valid_permission_options(p.allowed_options_json)
+        and p.thread_id not in checkpoint_unavailable_thread_ids
     ]
     active_threads = sorted(
         set(heartbeat_threads)

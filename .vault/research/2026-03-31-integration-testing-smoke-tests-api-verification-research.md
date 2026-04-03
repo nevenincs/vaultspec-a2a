@@ -1765,3 +1765,38 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "respond_to_permission_raises_tool_error_for_stale_request or respond_to_permission_dispatches_for_existing_thread or respond_to_permission_raises_when_server_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/discovery.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-056: team status must ignore non-actionable durable permission residue
+
+Audit `6` exposed a persistence-corruption leak in the team-status assembly
+path. `build_team_status()` in `src/vaultspec_a2a/control/team_service.py`
+already filtered out terminal owner threads, but it still treated all other
+durable permission rows as public pending work. That left two non-actionable
+cases leaking through the public team-status surface: orphaned permission rows
+whose owning `ThreadModel` no longer existed, and permission rows owned by
+threads already degraded to `checkpoint_unavailable`.
+
+This is not a LangGraph checkpoint issue directly; it is a repo persistence
+and public-state integrity issue. Team status is supposed to present
+actionable, operator-facing work. Once the owning thread row is gone, or once
+the owning thread has already lost checkpoint-backed actionability, a durable
+permission row is only residue and must not be treated as live work.
+
+The fix now requires a live non-terminal thread row before a durable
+permission can contribute to `pending_permissions` or `active_threads`, and it
+also hides public pending permissions for threads already degraded to
+`checkpoint_unavailable`. The regressions prove the REST and MCP discovery
+surfaces no longer surface orphaned residue or checkpoint-unverified pending
+approvals as live work.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/team_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_pending_permissions_without_checkpoint_truth or pending_permissions_hide_malformed_durable_rows or pending_permissions_do_not_surface_from_aggregator_without_durable_row"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_checkpoint_unavailable_pending_permission or team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission"`
+- `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

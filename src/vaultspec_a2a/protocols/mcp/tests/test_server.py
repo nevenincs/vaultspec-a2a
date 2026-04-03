@@ -1335,6 +1335,69 @@ class TestGetPendingPermissionsViaApp:
         assert "mcp-team-status-malformed-durable" in data["active_threads"]
         assert data["pending_permissions"] == []
 
+    def test_team_status_excludes_orphaned_durable_permission_rows(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Orphaned durable permissions must not surface as MCP-visible work."""
+
+        async def _seed_orphaned_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id="mcp-team-status-orphaned:perm-1",
+                    thread_id="mcp-team-status-orphaned",
+                    pause_reason_type="plan_approval_request",
+                    description="Orphaned durable permission",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_orphaned_permission())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mcp-team-status-orphaned" not in data["active_threads"]
+        assert data["pending_permissions"] == []
+
+    def test_team_status_hides_checkpoint_unavailable_pending_permission(
+        self, session_factory, checkpointer
+    ) -> None:
+        """MCP team status must not expose approvals without checkpoint truth."""
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="mcp-team-status-checkpoint-unavailable",
+                    status="input_required",
+                    repair_status="checkpoint_unavailable",
+                    execution_readiness="checkpoint_unavailable",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-team-status-checkpoint-unavailable:perm-1",
+                    thread_id="mcp-team-status-checkpoint-unavailable",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve stranded MCP plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "mcp-team-status-checkpoint-unavailable" in data["active_threads"]
+        assert data["pending_permissions"] == []
+
 
 # ---------------------------------------------------------------------------
 # list_team_presets tests (MCP-R2)

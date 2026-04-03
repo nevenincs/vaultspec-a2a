@@ -1590,6 +1590,71 @@ class TestTeamStatus:
         assert "team-status-malformed-durable" in data["active_threads"]
         assert data["pending_permissions"] == []
 
+    def test_team_status_excludes_orphaned_durable_permission_rows(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Orphaned durable permissions must not create ghost active work."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_orphaned_permission() -> None:
+            async with session_factory() as session:
+                await record_permission_request(
+                    session,
+                    request_id="team-status-orphaned:perm-1",
+                    thread_id="team-status-orphaned",
+                    pause_reason_type="plan_approval_request",
+                    description="Orphaned durable permission",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_orphaned_permission())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "team-status-orphaned" not in data["active_threads"]
+        assert data["pending_permissions"] == []
+
+    def test_team_status_hides_pending_permissions_without_checkpoint_truth(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Checkpoint-unavailable threads must not advertise pending approvals."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="team-status-checkpoint-unavailable",
+                    status="input_required",
+                    repair_status="checkpoint_unavailable",
+                    execution_readiness="checkpoint_unavailable",
+                )
+                await record_permission_request(
+                    session,
+                    request_id="team-status-checkpoint-unavailable:perm-1",
+                    thread_id="team-status-checkpoint-unavailable",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve stranded plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/team/status")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "team-status-checkpoint-unavailable" in data["active_threads"]
+        assert data["pending_permissions"] == []
+
     def test_node_summaries_surface_as_agents(
         self, session_factory, checkpointer
     ) -> None:

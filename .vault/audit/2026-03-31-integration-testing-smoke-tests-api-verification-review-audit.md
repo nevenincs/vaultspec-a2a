@@ -727,3 +727,20 @@ existing stale-request protection already enforced by the REST endpoint.
 Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-056 | MEDIUM | `/api/team/status` could surface non-actionable durable permission residue as live work
+Audit `6` still had a persistence-residue leak on the team-status surface.
+`build_team_status()` in `src/vaultspec_a2a/control/team_service.py` already
+filtered terminal threads, but it still treated all other durable permission
+rows as public pending work. That left two non-actionable cases leaking
+through: orphaned rows whose owning `ThreadModel` no longer existed, and rows
+owned by threads already degraded to `checkpoint_unavailable`, where this
+repo already treats pending approvals as non-actionable until checkpoint truth
+is restored. The fix now requires a live non-terminal owner row and hides
+public pending permissions for checkpoint-unavailable threads, keeping
+persistence residue and checkpoint-unverified pauses from masquerading as
+actionable work on the REST and MCP discovery surfaces.
+Evidence anchors:
+`src/vaultspec_a2a/control/team_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

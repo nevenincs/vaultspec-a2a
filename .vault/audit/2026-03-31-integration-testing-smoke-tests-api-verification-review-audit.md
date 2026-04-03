@@ -801,3 +801,29 @@ interact with the thread.
 Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+Audit 6 closeout
+After `REVIEW-060`, no stronger persistence/public-state or operator-surface
+drift is obvious. Audit `6` has been burned down to the point where the
+remaining surfaces are aligned with the checkpoint-first contract: durable
+residue no longer masquerades as actionable work, and MCP discovery now
+exposes checkpoint-authority degradation instead of hiding it behind raw
+status. The next active fronts are Audit `5` supervisor plan-approval
+certification and Audit `7` multi-agent cooperation and re-briefing.
+
+AUDIT-6 CLOSEOUT | Persistence/public-state burn-down is functionally complete
+After `REVIEW-060`, no stronger persistence/public-state or operator-surface
+drift remained obvious in the audited REST, MCP, team-status, thread-state,
+summary, health, and lifecycle surfaces. The remaining work is no longer about
+hidden checkpoint-authority leaks on public state; the next active fronts move
+up a layer to supervisor plan-approval certification and then multi-agent
+cooperation/re-briefing behavior.
+
+AUDIT-6-CLOSEOUT | NOTE | No stronger persistence/public-state defect remained after REVIEW-060
+The final Audit `6` closeout scan did not expose a stronger remaining defect
+across the audited public/operator surfaces: REST thread state, REST thread
+summaries, team status, MCP thread queries, MCP discovery, readiness health,
+and lifecycle public gates. The remaining material risks have shifted to the
+next roadmap domains rather than checkpoint-authority drift: supervisor
+plan-approval certification, multi-agent cooperation and re-briefing, sandbox
+and artifact behavior, and streaming/trace lineage.

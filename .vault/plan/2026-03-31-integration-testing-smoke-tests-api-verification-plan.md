@@ -1078,6 +1078,18 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## Audit 6 closeout
+
+Treat Audit `6` as burned down after `REVIEW-060` unless a new stronger
+persistence/public-state defect appears during later phases. The checkpoint
+authority contract is now explicit across the audited public/operator
+surfaces, and the next primary execution fronts should move forward:
+
+- Audit `5`: supervisor plan-approval service certification
+- Audit `7`: multi-agent cooperation and re-briefing audit
+- Audit `8`: sandbox, artifact, and hostile-environment audit
+- Audit `9`: streaming/replay/trace lineage audit
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

@@ -1894,38 +1894,6 @@ Verification:
 
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/server.py src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
 
-## REVIEW-060: MCP `list_threads` must surface repair/readiness on the discovery surface
-
-Audit `6` still had a smaller operator-state drift after `REVIEW-057`.
-`get_thread_status()` already surfaced `repair_status` and
-`execution_readiness`, but `list_threads()` still rendered only the raw thread
-`status`. That meant a checkpoint-unavailable or needs-reconciliation thread
-could still look like an ordinary `input_required` or `running` thread during
-discovery, even though the underlying REST summary had already classified the
-thread as degraded and potentially non-actionable.
-
-This is the same checkpoint-first contract expressed on a broader discovery
-surface. LangGraph persistence and interrupt semantics make checkpoint-backed
-state the authority for whether a paused thread is truly resumable. A thread
-listing that hides `repair_status` and `execution_readiness` still overstates
-actionability. The fix now surfaces both fields directly in the MCP listing so
-operators can distinguish resumable work from degraded repair states before
-they try to interact with the thread.
-
-Evidence:
-
-- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
-- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
-- LangGraph docs MCP pages:
-  - `oss/python/langgraph/persistence`
-  - `oss/python/langgraph/interrupts`
-  - `oss/python/langchain/human-in-the-loop`
-
-Verification:
-
-- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
-- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
-
 ## REVIEW-060: MCP `list_threads` must surface checkpoint-authority degradation
 
 LangGraph checkpoint truth is still the resumability authority. Audit `6`
@@ -1951,3 +1919,45 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## Audit 6 closeout
+
+LangGraph checkpoint truth remains the authority, and the Audit `6`
+hardening now reflects that contract across the public and MCP surfaces.
+After `REVIEW-060`, no stronger persistence/public-state or operator-surface
+drift is obvious, so the remaining work should move forward into Audit `5`
+supervisor plan-approval certification and Audit `7` multi-agent
+cooperation and re-briefing rather than continuing to slice the same
+boundary.
+
+## Audit 6 closeout
+
+After `REVIEW-060`, no stronger persistence/public-state or operator-surface
+drift remained obvious in the audited public surfaces. The checkpoint-first
+contract now holds consistently across the thread-state snapshot, thread
+summary, team-status, MCP thread query, MCP discovery, and operator guidance
+layers that Audit `6` targeted.
+
+That does not mean the system is simple; it means the remaining risk has
+shifted. The next meaningful fronts are no longer about stale durable residue
+masquerading as resumable public state. They are the higher-level behavior
+audits:
+
+- Audit `5`: supervisor plan-approval service certification
+- Audit `7`: multi-agent cooperation and re-briefing
+
+## Audit 6 closeout
+
+After `REVIEW-060`, the remaining repo scan no longer exposed a stronger
+persistence/public-state or operator-surface defect in the audited surfaces:
+REST thread state, REST summaries, team status, MCP thread queries, MCP
+discovery, health readiness, and lifecycle public gates. The material pattern
+behind Audit `6` has now been made explicit across those surfaces: checkpoint
+truth governs resumability, durable residue alone is not actionable, and
+public/operator tooling must surface degradation rather than flatten it into
+raw thread status.
+
+That does not mean the system is simple or risk-free. It means the strongest
+remaining risks have shifted away from persistence/public-state drift and into
+the next roadmap layers: supervisor plan-approval certification, multi-agent
+cooperation and re-briefing, sandbox/artifact behavior, and trace lineage.

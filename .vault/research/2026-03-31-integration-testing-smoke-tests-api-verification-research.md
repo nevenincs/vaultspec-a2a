@@ -1801,6 +1801,33 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_checkpoint_unavailable_pending_permission or team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-057: submitted thread-state snapshots must fail closed on stale approval residue
+
+LangGraph checkpoint truth remains the authority for whether a paused thread is
+actually resumable. Audit `6` exposed a gap where `submitted` thread rows could
+still carry stale durable approval residue even when no checkpoint was
+available. That let the thread-state assembly path project a false pending
+approval contract before any LangGraph-backed truth existed for the thread.
+
+The service now strips pending permissions, approval metadata, and pause cause
+from `submitted` snapshots when checkpoint truth is absent, while preserving the
+clean `submitted` replay contract for genuinely empty snapshots. The new tests
+cover both the direct thread-state assembly path and the REST thread-state
+endpoint, proving that stale durable approval residue no longer leaks into an
+actionable public snapshot before checkpoint-backed resumability exists.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "submitted_thread_missing_checkpoint_clears_stale_pending_approval or missing_checkpoint_hides_durable_pending_permission_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_is_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
+
 ## REVIEW-057: MCP thread-query output must surface checkpoint-authority degradation
 
 Audit `6` still had an operator-facing drift on the MCP thread-query surface.
@@ -1833,3 +1860,38 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_status_reports_repair_and_readiness or get_thread_status_raises_when_server_unavailable"`
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-058: submitted thread-state snapshots must not expose stale approval residue
+
+Audit `6` exposed another public-state drift at the thread-state surface.
+`build_thread_state()` in
+`src/vaultspec_a2a/control/thread_state_service.py` already failed closed when
+checkpoint truth was missing, but it treated all `submitted` threads as a
+special case and skipped that cleanup unconditionally. That was too broad. A
+corrupted or stale durable approval row on a never-started thread could still
+surface as pending permission state even though no checkpoint-backed pause had
+ever been created.
+
+The checkpoint-first grounding still applies. LangGraph persistence and
+interrupt semantics make a paused, resumable approval meaningful only when it
+belongs to a persisted thread checkpoint. A `submitted` thread with no
+checkpoint truth is fine if it is clean, but once it already carries durable
+approval residue it has crossed into the same non-actionable territory as the
+other checkpoint-unverified cases. The fix now preserves the clean submitted
+startup case while clearing stale approval residue when no checkpoint-backed
+pause exists.
+
+Evidence:
+
+- `src/vaultspec_a2a/control/thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- LangGraph docs MCP pages:
+  - `oss/python/langgraph/persistence`
+  - `oss/python/langgraph/interrupts`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "submitted_thread_missing_checkpoint_clears_stale_pending_approval or missing_checkpoint_hides_durable_pending_permission_state"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_probe_is_unverified"`
+- `uv run ruff check src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`

@@ -745,6 +745,21 @@ Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
+REVIEW-057 | MEDIUM | `submitted` thread snapshots could expose stale approval residue before checkpoint truth existed
+Audit `6` still had a public-state drift surface on thread-state snapshots.
+`build_thread_state()` kept the special-case behavior that allowed a clean
+`submitted` thread to remain snapshot-complete without a checkpoint, but that
+also allowed stale durable plan-approval residue to survive on the snapshot if
+the thread row had already drifted into a false pending state. The fix now
+fails closed only for the actionable residue: when no checkpoint truth exists,
+`submitted` snapshots still stay `submitted`, but pending permissions,
+approval metadata, and pause cause are cleared so the public surface does not
+advertise resumability before LangGraph-backed truth exists.
+Evidence anchors:
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
 REVIEW-057 | MEDIUM | MCP `get_thread_status` hid checkpoint-authority degradation behind raw thread status
 Audit `6` still had a public/operator-state drift on the MCP thread-query
 surface. `get_thread_status()` in
@@ -758,3 +773,18 @@ states without guessing from the absence of pending permissions.
 Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-058 | MEDIUM | Submitted thread-state snapshots could leak stale approval residue before any checkpoint existed
+Audit `6` still had a boundary hole on `/api/threads/{id}/state`. The
+snapshot builder already failed closed when checkpoint truth was missing for
+non-submitted threads, but it exempted `submitted` threads unconditionally.
+That allowed a corrupted or stale durable `approval_status` and permission row
+to surface on a never-started thread even though no checkpoint-backed pause had
+ever been created. The fix now keeps the `submitted` exemption only for clean
+threads; if a submitted thread carries pending-permission or approval residue
+without checkpoint truth, the snapshot clears that state and marks the
+degraded reason instead of advertising a non-existent actionable pause.
+Evidence anchors:
+`src/vaultspec_a2a/control/thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.

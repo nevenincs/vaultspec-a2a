@@ -151,7 +151,13 @@ async def build_thread_state(
     if (
         not checkpoint_loaded
         and not checkpoint_present
-        and thread.status != "submitted"
+        and (
+            thread.status != "submitted"
+            or snapshot.pending_permissions
+            or snapshot.approval_status is not None
+            or snapshot.approval_request_id is not None
+            or snapshot.pause_cause is not None
+        )
     ):
         snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 

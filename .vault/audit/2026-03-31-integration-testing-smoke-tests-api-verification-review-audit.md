@@ -744,3 +744,17 @@ Evidence anchors:
 `src/vaultspec_a2a/control/team_service.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+REVIEW-057 | MEDIUM | MCP `get_thread_status` hid checkpoint-authority degradation behind raw thread status
+Audit `6` still had a public/operator-state drift on the MCP thread-query
+surface. `get_thread_status()` in
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py` rendered only the raw
+thread `status`, so a degraded thread could still look like an ordinary
+`input_required` pause even when the API had already classified it as
+`checkpoint_unavailable` and therefore non-actionable. The fix now renders
+`repair_status` and `execution_readiness` directly in the MCP tool output so
+operators can distinguish resumable pauses from checkpoint-unverified repair
+states without guessing from the absence of pending permissions.
+Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

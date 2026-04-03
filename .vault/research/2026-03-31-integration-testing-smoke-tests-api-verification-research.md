@@ -1800,3 +1800,36 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_pending_permissions_without_checkpoint_truth or pending_permissions_hide_malformed_durable_rows or pending_permissions_do_not_surface_from_aggregator_without_durable_row"`
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_checkpoint_unavailable_pending_permission or team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-057: MCP thread-query output must surface checkpoint-authority degradation
+
+Audit `6` still had an operator-facing drift on the MCP thread-query surface.
+`get_thread_status()` in
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py` only rendered the raw
+thread `status`, even though the underlying `/api/threads/{id}/state` payload
+already carried `repair_status` and `execution_readiness`. That meant a thread
+degraded to `checkpoint_unavailable` could still read like a normal
+`input_required` pause to an MCP operator, despite the checkpoint contract
+already saying the pause was not currently actionable.
+
+LangGraph grounding stayed the same here. The persistence layer and
+human-in-the-loop interrupt docs make checkpoint-backed state the authority for
+resume semantics. A public/operator surface that hides the degraded
+`repair_status` and `execution_readiness` is therefore still overstating
+actionability even if the raw data endpoint is correct. The fix now renders
+those fields directly in the MCP tool output so resumable pauses and
+checkpoint-unverified repair states are visibly distinct.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+- LangGraph docs MCP pages:
+  - `oss/python/langgraph/persistence`
+  - `oss/python/langgraph/interrupts`
+  - `oss/python/langchain/human-in-the-loop`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_status_reports_repair_and_readiness or get_thread_status_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

@@ -57,8 +57,9 @@ async def get_thread_status(
 
     Returns a structured plain-text block containing:
     - Thread ID and status (one of: 'submitted', 'running', 'input_required',
-      'completed', 'failed', 'cancelled' — 'input_required' means a permission
-      response is needed; use ``get_pending_permissions`` to find it)
+      'completed', 'failed', 'cancelled')
+    - Repair status and execution readiness so degraded or non-actionable
+      pauses are visible to operators
     - Message count and a preview of the last message (truncated to 200 chars)
     - Agent list with lifecycle states (idle, working, blocked, finished)
     - Plan entries with completion status
@@ -80,6 +81,8 @@ async def get_thread_status(
     )
 
     status = data.get("status", "unknown")
+    repair_status = data.get("repair_status")
+    execution_readiness = data.get("execution_readiness")
     messages = data.get("messages", [])
     agents = data.get("agents", [])
     plan = data.get("plan", [])
@@ -88,6 +91,8 @@ async def get_thread_status(
     lines: list[str] = [
         f"Thread: {thread_id}",
         f"Status: {status}",
+        f"Repair status: {repair_status or 'unknown'}",
+        f"Execution readiness: {execution_readiness or 'unknown'}",
         f"Messages: {len(messages)}",
     ]
 

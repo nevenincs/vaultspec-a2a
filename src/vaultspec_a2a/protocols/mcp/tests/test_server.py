@@ -465,6 +465,44 @@ async def test_get_thread_status_raises_when_server_unavailable() -> None:
     assert any(kw in msg for kw in _expected_keywords)
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_get_thread_status_reports_repair_and_readiness(
+    session_factory, checkpointer
+) -> None:
+    """MCP thread status must surface degraded checkpoint authority explicitly."""
+    with _make_test_client(session_factory, checkpointer) as client:
+        async with session_factory() as session:
+            await create_thread(
+                session,
+                thread_id="mcp-get-thread-status-checkpoint-unavailable",
+                status="input_required",
+                repair_status="checkpoint_unavailable",
+                execution_readiness="checkpoint_unavailable",
+            )
+            await session.commit()
+
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            output = await get_thread_status(
+                thread_id="mcp-get-thread-status-checkpoint-unavailable"
+            )
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            settings.gateway_url = original_gateway_url
+
+    assert "Status: input_required" in output
+    assert "Repair status: checkpoint_unavailable" in output
+    assert "Execution readiness: checkpoint_unavailable" in output
+
+
 @pytest.mark.asyncio
 async def test_send_message_raises_when_server_unavailable() -> None:
     """send_message raises when the server is not running.

@@ -1008,6 +1008,22 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_checkpoint_unavailable_pending_permission or team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
+## REVIEW-057: MCP thread status must expose repair/readiness, not only raw status
+
+Keep this as a separate bounded Audit `6` guardrail. The mission is
+deterministic operator state: MCP tools must not hide checkpoint-authority
+degradation behind a raw `status` field that still looks resumable.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "get_thread_status_reports_repair_and_readiness or get_thread_status_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

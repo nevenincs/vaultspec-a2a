@@ -1801,33 +1801,6 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "team_status_excludes_orphaned_durable_permission_rows or team_status_hides_checkpoint_unavailable_pending_permission or team_status_hides_malformed_durable_pending_permission or team_status_excludes_aggregator_only_pending_permission"`
 - `uv run ruff check src/vaultspec_a2a/control/team_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
 
-## REVIEW-057: submitted thread-state snapshots must fail closed on stale approval residue
-
-LangGraph checkpoint truth remains the authority for whether a paused thread is
-actually resumable. Audit `6` exposed a gap where `submitted` thread rows could
-still carry stale durable approval residue even when no checkpoint was
-available. That let the thread-state assembly path project a false pending
-approval contract before any LangGraph-backed truth existed for the thread.
-
-The service now strips pending permissions, approval metadata, and pause cause
-from `submitted` snapshots when checkpoint truth is absent, while preserving the
-clean `submitted` replay contract for genuinely empty snapshots. The new tests
-cover both the direct thread-state assembly path and the REST thread-state
-endpoint, proving that stale durable approval residue no longer leaks into an
-actionable public snapshot before checkpoint-backed resumability exists.
-
-Evidence:
-
-- `src/vaultspec_a2a/control/thread_state_service.py`
-- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
-- `src/vaultspec_a2a/api/tests/test_endpoints.py`
-
-Verification:
-
-- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "submitted_thread_missing_checkpoint_clears_stale_pending_approval or missing_checkpoint_hides_durable_pending_permission_state"`
-- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "state_clears_submitted_stale_pending_approval_without_checkpoint or state_hides_pending_approval_when_checkpoint_is_unavailable"`
-- `uv run ruff check src/vaultspec_a2a/control/thread_state_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py`
-
 ## REVIEW-057: MCP thread-query output must surface checkpoint-authority degradation
 
 Audit `6` still had an operator-facing drift on the MCP thread-query surface.

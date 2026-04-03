@@ -745,21 +745,6 @@ Evidence anchors:
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
 
-REVIEW-057 | MEDIUM | `submitted` thread snapshots could expose stale approval residue before checkpoint truth existed
-Audit `6` still had a public-state drift surface on thread-state snapshots.
-`build_thread_state()` kept the special-case behavior that allowed a clean
-`submitted` thread to remain snapshot-complete without a checkpoint, but that
-also allowed stale durable plan-approval residue to survive on the snapshot if
-the thread row had already drifted into a false pending state. The fix now
-fails closed only for the actionable residue: when no checkpoint truth exists,
-`submitted` snapshots still stay `submitted`, but pending permissions,
-approval metadata, and pause cause are cleared so the public surface does not
-advertise resumability before LangGraph-backed truth exists.
-Evidence anchors:
-`src/vaultspec_a2a/control/thread_state_service.py`,
-`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
-`src/vaultspec_a2a/api/tests/test_endpoints.py`.
-
 REVIEW-057 | MEDIUM | MCP `get_thread_status` hid checkpoint-authority degradation behind raw thread status
 Audit `6` still had a public/operator-state drift on the MCP thread-query
 surface. `get_thread_status()` in

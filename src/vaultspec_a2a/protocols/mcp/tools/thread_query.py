@@ -162,8 +162,8 @@ async def list_threads(
 
     Returns a plain-text listing with one block per thread containing:
     thread_id (UUID), status (one of: 'submitted', 'running', 'input_required',
-    'completed', 'failed', 'cancelled'), team preset ID, creation timestamp
-    (ISO 8601), and optional nickname/title.
+    'completed', 'failed', 'cancelled'), repair status, execution readiness,
+    team preset ID, creation timestamp (ISO 8601), and optional nickname/title.
     Returns 'No threads found.' when no threads exist.
 
     Args:
@@ -188,11 +188,17 @@ async def list_threads(
     for t in threads:
         tid = t.get("thread_id", "?")
         status = t.get("status", "unknown")
+        repair_status = t.get("repair_status") or "unknown"
+        execution_readiness = t.get("execution_readiness") or "unknown"
         preset = t.get("team_preset") or "—"
         created = t.get("created_at", "?")
         nickname = t.get("nickname")
         title = t.get("title") or ""
-        entry = f"  [{status}] {tid}\n    preset: {preset}  created: {created}\n"
+        entry = (
+            f"  [{status}] {tid}\n"
+            f"    repair: {repair_status}  readiness: {execution_readiness}\n"
+            f"    preset: {preset}  created: {created}\n"
+        )
         if nickname:
             entry += f"    nickname: {nickname}\n"
         if title:

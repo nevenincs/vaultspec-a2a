@@ -1893,3 +1893,61 @@ Evidence:
 Verification:
 
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/server.py src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
+
+## REVIEW-060: MCP `list_threads` must surface repair/readiness on the discovery surface
+
+Audit `6` still had a smaller operator-state drift after `REVIEW-057`.
+`get_thread_status()` already surfaced `repair_status` and
+`execution_readiness`, but `list_threads()` still rendered only the raw thread
+`status`. That meant a checkpoint-unavailable or needs-reconciliation thread
+could still look like an ordinary `input_required` or `running` thread during
+discovery, even though the underlying REST summary had already classified the
+thread as degraded and potentially non-actionable.
+
+This is the same checkpoint-first contract expressed on a broader discovery
+surface. LangGraph persistence and interrupt semantics make checkpoint-backed
+state the authority for whether a paused thread is truly resumable. A thread
+listing that hides `repair_status` and `execution_readiness` still overstates
+actionability. The fix now surfaces both fields directly in the MCP listing so
+operators can distinguish resumable work from degraded repair states before
+they try to interact with the thread.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+- LangGraph docs MCP pages:
+  - `oss/python/langgraph/persistence`
+  - `oss/python/langgraph/interrupts`
+  - `oss/python/langchain/human-in-the-loop`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## REVIEW-060: MCP `list_threads` must surface checkpoint-authority degradation
+
+LangGraph checkpoint truth is still the resumability authority. Audit `6`
+found one more operator-surface drift on the MCP discovery path:
+`list_threads()` was rendering only raw thread `status`, even though the
+underlying REST summary already carried `repair_status` and
+`execution_readiness`. That meant a degraded thread could still read like an
+ordinary `input_required` pause even when the summary had already classified it
+as `checkpoint_unavailable` or `needs_reconciliation`.
+
+The MCP discovery surface now includes `repair_status` and
+`execution_readiness`, matching the public REST summary and making degraded
+checkpoint authority visible before an operator decides whether the thread is
+actually resumable. This keeps the discovery surface aligned with the same
+checkpoint-first contract already enforced elsewhere in Audit `6`.
+
+Evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`

@@ -787,3 +787,17 @@ source of currently actionable approvals rather than assuming every
 Evidence anchors:
 `src/vaultspec_a2a/protocols/mcp/server.py`,
 `src/vaultspec_a2a/protocols/mcp/tools/discovery.py`.
+
+REVIEW-060 | MEDIUM | MCP `list_threads` still hid checkpoint-authority degradation behind raw status
+Audit `6` still had an operator-state drift on the MCP discovery surface.
+`list_threads()` in `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+was rendering only raw thread `status`, which could make a degraded thread
+look like an ordinary resumable pause even when the underlying REST summary
+had already classified it as `checkpoint_unavailable` or
+`needs_reconciliation`. The fix now surfaces `repair_status` and
+`execution_readiness` in the MCP listing so operators can distinguish
+checkpoint-backed resumability from degraded repair states before they try to
+interact with the thread.
+Evidence anchors:
+`src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.

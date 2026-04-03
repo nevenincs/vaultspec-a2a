@@ -1059,6 +1059,25 @@ Verification:
 
 - `uv run ruff check src/vaultspec_a2a/protocols/mcp/server.py src/vaultspec_a2a/protocols/mcp/tools/discovery.py`
 
+## REVIEW-060: MCP `list_threads` must surface checkpoint-authority degradation
+
+Keep this as a bounded Audit `6` guardrail. The mission is deterministic
+operator discovery: raw thread status is not enough when checkpoint-backed
+authority is degraded. The MCP thread listing must surface `repair_status` and
+`execution_readiness` so operators can distinguish resumable work from
+checkpoint-unavailable or reconciliation-bound threads before they interact
+with them.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/protocols/mcp/tools/thread_query.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k "list_threads_reports_repair_and_readiness or list_threads_raises_when_server_unavailable"`
+- `uv run ruff check src/vaultspec_a2a/protocols/mcp/tools/thread_query.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

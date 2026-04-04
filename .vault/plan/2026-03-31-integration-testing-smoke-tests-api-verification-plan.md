@@ -1278,6 +1278,23 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
 
+## REVIEW-070: consumed supervisor approval requests must clear on resume
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable re-briefing: once a supervisor plan-approval
+interrupt has been answered, the consumed `approval_request_id` must not remain
+in shared graph state and appear live to later handoffs.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

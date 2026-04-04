@@ -445,6 +445,7 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
     state = _make_state_for_plan_approval(
         vault_index={"plan": [".vault/plan/plan.md"]},
     )
+    state["approval_request_id"] = "approval-1"
     state["routing_error"] = "Plan rejected by user — revise before proceeding."
 
     first = await graph.ainvoke(state, config=config)
@@ -453,8 +454,44 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
     resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
     assert resumed["next"] == "vaultspec-coder"
     assert resumed["approval_status"] == "approved"
+    assert "approval_request_id" in resumed
+    assert resumed["approval_request_id"] is None
     assert "routing_error" in resumed
     assert resumed["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
+    """Rejected plan resumes must not leave the consumed approval request active."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["approval_request_id"] = "approval-1"
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    assert resumed["next"] == "vaultspec-planner"
+    assert resumed["approval_status"] == "rejected"
+    assert "approval_request_id" in resumed
+    assert resumed["approval_request_id"] is None
 
 
 @pytest.mark.asyncio

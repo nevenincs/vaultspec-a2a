@@ -2244,3 +2244,28 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
+
+## REVIEW-070: consumed supervisor approval requests must clear on resume
+
+Audit `7` exposed the next adjacent handoff-state problem after `REVIEW-069`.
+The supervisor's resume paths for both approved and rejected plan-approval
+decisions were still omitting `approval_request_id`, which meant shared
+checkpoint state could keep an old request id alive even after that reviewed
+action had already been consumed. LangGraph handoff guidance treats the shared
+owner state as the authority across turns, so a consumed approval handle should
+not remain in checkpoint state once the workflow has resumed. In this codebase
+that residue matters because later graph-state consumers can misread the stale
+request id as still-actionable approval context. The fix now clears
+`approval_request_id` on both approval and rejection resumes so the resumed
+handoff cannot carry a dead approval handle forward.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`

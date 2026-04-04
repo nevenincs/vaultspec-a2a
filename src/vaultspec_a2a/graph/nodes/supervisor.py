@@ -29,6 +29,14 @@ def _active_agent_for_route(route: str) -> str:
     return "" if route == "FINISH" else route
 
 
+def _plan_entry_for_route(route: str) -> dict[str, str]:
+    """Return the route summary that should replace stale supervisor plan state."""
+    return {
+        "content": f"Route to {route}" if route != "FINISH" else "Complete task",
+        "status": "in_progress" if route != "FINISH" else "completed",
+    }
+
+
 def _select_revision_worker(
     workers: list[str],
     worker_phase_map: dict[str, str] | None,
@@ -366,6 +374,7 @@ def create_supervisor_node(
                 "next": decision.next_route,
                 "active_agent": _active_agent_for_route(decision.next_route),
                 "pipeline_phase": decision.inferred_phase,
+                "current_plan": [_plan_entry_for_route(decision.next_route)],
                 "approval_status": None,
                 "approval_request_id": None,
                 "routing_error": decision.routing_error,
@@ -387,6 +396,7 @@ def create_supervisor_node(
                     "next": decision.next_route,
                     "active_agent": _active_agent_for_route(decision.next_route),
                     "pipeline_phase": decision.inferred_phase,
+                    "current_plan": [_plan_entry_for_route(decision.next_route)],
                     "approval_status": ApprovalStatus.APPROVED,
                     "approval_request_id": None,
                     "routing_error": None,
@@ -404,25 +414,18 @@ def create_supervisor_node(
                     fallback_phase=decision.inferred_phase,
                     worker_phase_map=worker_phase_map,
                 ),
+                "current_plan": [_plan_entry_for_route(revision_worker)],
                 "approval_status": ApprovalStatus.REJECTED,
                 "approval_request_id": None,
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."
                 ),
             }
-        plan_entry: dict[str, str] = {
-            "content": f"Route to {decision.next_route}"
-            if decision.next_route != "FINISH"
-            else "Complete task",
-            "status": (
-                "in_progress" if decision.next_route != "FINISH" else "completed"
-            ),
-        }
         return {
             "next": decision.next_route,
             "active_agent": _active_agent_for_route(decision.next_route),
             "pipeline_phase": decision.inferred_phase,
-            "current_plan": [plan_entry],
+            "current_plan": [_plan_entry_for_route(decision.next_route)],
             "approval_status": None,
             "approval_request_id": None,
             "routing_error": None,

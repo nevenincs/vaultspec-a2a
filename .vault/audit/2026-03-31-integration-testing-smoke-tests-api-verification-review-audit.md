@@ -992,3 +992,17 @@ Evidence anchors:
 `src/vaultspec_a2a/thread/state.py`,
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
+REVIEW-070 | MEDIUM | Consumed supervisor approval requests could stay live after resume
+Audit `7` exposed the next adjacent handoff-state leak immediately after
+`REVIEW-069`. When a supervisor plan-approval interrupt resumed, the return
+paths for both approve and reject outcomes still omitted
+`approval_request_id`. LangGraph therefore preserved any previously stamped
+request id in checkpoint state even though the reviewed action had already been
+consumed. That left later multi-agent turns with an obsolete approval request
+handle that no longer represented actionable state. The fix now clears
+`approval_request_id` on both approval and rejection resumes so checkpointed
+handoff state cannot keep a consumed plan-approval request alive.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.

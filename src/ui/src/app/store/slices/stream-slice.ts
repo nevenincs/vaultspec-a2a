@@ -1,7 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { StreamEvent } from '../../data/types';
-import type { components } from '../../data/wire-types';
-type ServerEvent = components['schemas']['ServerEvent'];
+import type { ServerEvent, WsToolCallContent, components } from '../../data/wire-types';
+type WirePlanEntry = components['schemas']['PlanEntry'];
 import { mapToolKind, mapToolCallStatus } from '../../api/mappers';
 import { wsClient } from '../../api/websocket-client';
 import type { AppStore } from '../app-store';
@@ -133,8 +133,9 @@ export const createStreamSlice: StateCreator<
 
       case 'tool_call_start': {
         const loc = event.locations?.[0];
-        const textC = event.content?.find((c) => c.content_type === 'text');
-        const diffC = event.content?.find((c) => c.content_type === 'diff');
+        const textC = event.content?.find((c: WsToolCallContent) => c.content_type === 'text');
+        const diffC = event.content?.find((c: WsToolCallContent) => c.content_type === 'diff');
+        const termC = event.content?.find((c: WsToolCallContent) => c.content_type === 'terminal');
         set(
           (draft) => {
             if (!draft.streamEvents[threadId]) {
@@ -162,6 +163,8 @@ export const createStreamSlice: StateCreator<
                 diffC?.content_type === 'diff'
                   ? { old_content: diffC.old_text ?? '', new_content: diffC.new_text }
                   : undefined,
+              diff_path: diffC?.content_type === 'diff' ? diffC.path : undefined,
+              terminal_id: termC?.content_type === 'terminal' ? termC.terminal_id : undefined,
             });
           },
           false,
@@ -182,16 +185,23 @@ export const createStreamSlice: StateCreator<
                 if (event.status) entry.status = mapToolCallStatus(event.status);
                 if (event.title) entry.tool_name = event.title;
                 if (event.kind) entry.tool_kind = mapToolKind(event.kind);
+                if (event.locations?.[0]) {
+                  const loc = event.locations[0];
+                  entry.location = { file: loc.path, line: loc.line ?? undefined };
+                }
                 if (event.content) {
-                  const t = event.content.find((c) => c.content_type === 'text');
-                  const d = event.content.find((c) => c.content_type === 'diff');
+                  const t = event.content.find((c: WsToolCallContent) => c.content_type === 'text');
+                  const d = event.content.find((c: WsToolCallContent) => c.content_type === 'diff');
+                  const term = event.content.find((c: WsToolCallContent) => c.content_type === 'terminal');
                   if (t?.content_type === 'text') entry.output = t.text;
                   if (d?.content_type === 'diff') {
                     entry.diff = {
                       old_content: d.old_text ?? '',
                       new_content: d.new_text,
                     };
+                    entry.diff_path = d.path;
                   }
+                  if (term?.content_type === 'terminal') entry.terminal_id = term.terminal_id;
                 }
               }
             },
@@ -252,7 +262,7 @@ export const createStreamSlice: StateCreator<
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
               agent_name: resolveAgentName(event.agent_id),
-              entries: event.entries.map((e, i) => ({
+              entries: event.entries.map((e: WirePlanEntry, i: number) => ({
                 id: `plan-entry-${i}`,
                 content: e.content,
                 status: e.status,
@@ -302,6 +312,7 @@ export const createStreamSlice: StateCreator<
               message: event.message,
               code: event.code,
               agent_id: event.agent_id ?? undefined,
+              recoverable: event.recoverable,
             });
           },
           false,

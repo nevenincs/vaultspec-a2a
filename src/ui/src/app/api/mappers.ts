@@ -6,12 +6,15 @@
  */
 
 import type { components } from '../data/wire-types';
+import type {
+  WsAgentSummary,
+  PermissionRequestEvent,
+  WsPermissionOption,
+} from '../data/wire-types';
 
 type WireThreadSummary = components['schemas']['ThreadSummary'];
-type WireAgentSummary = components['schemas']['AgentSummary'];
 type AgentStatusEntry = components['schemas']['AgentStatusEntry'];
 type TeamPresetSummary = components['schemas']['TeamPresetSummary'];
-type PermissionRequestEvent = components['schemas']['PermissionRequestEvent'];
 type WireToolCallStatus = components['schemas']['ToolCallStatus'];
 type WireToolKind = components['schemas']['ToolKind'];
 
@@ -30,18 +33,22 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
     title: wire.title ?? 'Untitled',
     status: wire.status,
     agent_state: wire.agent_state ?? 'submitted',
-    team_preset: wire.team_preset ?? undefined,
+    team_preset: wire.team_preset ?? null,
     created_at: wire.created_at,
     updated_at: wire.updated_at,
-    nickname: wire.nickname ?? undefined,
-    feature_tag: wire.feature_tag ?? undefined,
-    source_branch: wire.source_branch ?? undefined,
-    callee: wire.callee ?? undefined,
+    nickname: wire.nickname ?? null,
+    feature_tag: wire.feature_tag ?? null,
+    source_branch: wire.source_branch ?? null,
+    callee: wire.callee ?? null,
+    repair_status: wire.repair_status ?? null,
+    execution_readiness: wire.execution_readiness ?? null,
+    approval_status: wire.approval_status ?? null,
+    approval_request_id: wire.approval_request_id ?? null,
   };
 }
 
 export function mapAgentSummary(
-  wire: WireAgentSummary | AgentStatusEntry,
+  wire: WsAgentSummary | AgentStatusEntry,
 ): AgentSummary {
   return {
     agent_id: wire.agent_id,
@@ -74,7 +81,7 @@ export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRe
     tool_name: wire.tool_call ?? '',
     tool_kind: wire.tool_kind ? mapToolKind(wire.tool_kind) : 'other',
     message: wire.description,
-    options: wire.options.map((o) => ({
+    options: wire.options.map((o: WsPermissionOption) => ({
       id: o.option_id,
       kind: o.kind,
       label: o.name,

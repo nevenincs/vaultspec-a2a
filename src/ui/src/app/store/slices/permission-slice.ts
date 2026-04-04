@@ -1,7 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { PermissionRequest } from '../../data/types';
-import type { components } from '../../data/wire-types';
-type PermissionRequestEvent = components['schemas']['PermissionRequestEvent'];
+import type { PermissionRequestEvent } from '../../data/wire-types';
 import { mapPermissionRequest } from '../../api/mappers';
 import type { AppStore } from '../app-store';
 

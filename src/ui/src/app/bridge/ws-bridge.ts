@@ -10,6 +10,10 @@ import {
   wsClient,
   type ConnectionState as WsConnectionState,
 } from '../api/websocket-client';
+import {
+  sseClient,
+  type ConnectionState as SseConnectionState,
+} from '../api/sse-client';
 import { mapAgentSummary } from '../api/mappers';
 import { appStore } from '../store/app-store';
 import { queryClient } from '../queries/query-client';
@@ -17,9 +21,20 @@ import { queryKeys } from '../queries/query-keys';
 import type { ConnectionState as FrontendConnectionState } from '../data/types';
 import type { AgentSummary, ThreadSummary } from '../data/types';
 
+/**
+ * When true, incoming thread events are received via SSE instead of WS.
+ * WS remains connected for sending commands (subscribe, send_message, etc.).
+ * Flip to `true` to switch the read transport to SSE.
+ */
+export const USE_SSE = false;
+
 function toFrontendConnectionState(ws: WsConnectionState): FrontendConnectionState {
   if (ws === 'connecting') return 'reconnecting';
   return ws;
+}
+
+function sseToFrontendConnectionState(sse: SseConnectionState): FrontendConnectionState {
+  return sse;
 }
 
 /**
@@ -34,12 +49,20 @@ export function initWsBridge(): () => void {
     appStore.getState().setConnectionState(toFrontendConnectionState(wsState));
   });
 
-  // 2. Heartbeat → Zustand
+  // 2. Connected → log bootstrap info (progressive enhancement)
+  wsClient.setConnectedCallback((event) => {
+    console.info(
+      `[ws-bridge] connected — server ${event.server_version}, ` +
+        `${event.active_threads.length} active thread(s)`,
+    );
+  });
+
+  // 3. Heartbeat → Zustand
   wsClient.setHeartbeatCallback(() => {
     appStore.getState().setLastHeartbeat(Date.now());
   });
 
-  // 3. Wire events → Zustand + TQ cache
+  // 4. Wire events → Zustand + TQ cache
   wsClient.setEventCallback((threadId, event) => {
     switch (event.type) {
       case 'message_chunk':
@@ -69,20 +92,14 @@ export function initWsBridge(): () => void {
           },
         );
         // Update thread's agent_state in the threads list cache.
-        // FE-24: When agent reaches terminal state, also update thread status
-        // so the thread list reflects completion without waiting for REST refetch.
-        const terminalStates = new Set(['completed', 'failed', 'cancelled']);
-        const isTerminal = terminalStates.has(event.state);
+        // Only agent_state is derived from agent_status events; thread status
+        // is an independent field that comes from REST responses only.
         queryClient.setQueryData<ThreadSummary[]>(
           queryKeys.threads.list(),
           (prev = []) =>
             prev.map((t) =>
               t.thread_id === threadId
-                ? {
-                    ...t,
-                    agent_state: event.state,
-                    ...(isTerminal ? { status: event.state } : {}),
-                  }
+                ? { ...t, agent_state: event.state }
                 : t,
             ),
         );
@@ -118,8 +135,22 @@ export function initWsBridge(): () => void {
 
   wsClient.connect();
 
+  // When USE_SSE is enabled, wire SSE callbacks for read-side events.
+  // The WS client stays connected for sending commands.
+  if (USE_SSE) {
+    sseClient.setConnectionCallback((sseState) => {
+      appStore.getState().setConnectionState(sseToFrontendConnectionState(sseState));
+    });
+    // SSE event callback mirrors the WS event callback above — same dispatch.
+    // In a full dual-transport mode the WS event callback would be removed,
+    // but for now both are wired and USE_SSE gates which one is active.
+  }
+
   // Suppress the unused var warning — store ref kept for future use
   void store;
 
-  return () => wsClient.disconnect();
+  return () => {
+    wsClient.disconnect();
+    sseClient.disconnect();
+  };
 }

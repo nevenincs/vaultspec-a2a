@@ -1052,6 +1052,14 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/worker.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`.
 
+Audit `7` closeout: no new confirmed live-path defect remains on the
+multi-agent cooperation and re-briefing path. The residual watch item is
+`src/vaultspec_a2a/context/token_budget.py::prepare_handoff()`, which still
+omits phase, vault, and approval-state fields when constructing handoff
+context. That helper is not a proven live bug in the current graph path, but it
+should stay on watch because promoting it into a runtime handoff surface later
+could reintroduce owner-vs-context drift.
+
 REVIEW-074 | MEDIUM | Corrupted plan-approval row could be shadowed by a later valid plan-approval projection
 Cross-phase code review found that `enrich_snapshot_from_durable_state` in
 `src/vaultspec_a2a/control/projection.py` could re-set

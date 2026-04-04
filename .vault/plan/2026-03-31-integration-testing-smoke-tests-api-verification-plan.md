@@ -1342,6 +1342,15 @@ Scope and evidence:
 
 Verification:
 
+## Audit 7 closeout
+
+Audit `7` is closed on the live path. No new confirmed multi-agent
+cooperation/re-briefing defect remains after the worker exec-gate consumption
+fix. Keep `src/vaultspec_a2a/context/token_budget.py::prepare_handoff()` as a
+watch item because it still omits phase, vault, and approval-state fields from
+handoff context; it is not a proven bug in the current runtime path, but it
+could reintroduce drift if promoted into a live handoff surface later.
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

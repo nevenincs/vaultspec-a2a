@@ -2350,3 +2350,14 @@ Evidence:
 - `https://docs.langchain.com/oss/python/langchain/human-in-the-loop`
 - `src/vaultspec_a2a/graph/nodes/worker.py`
 - `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`
+
+## Audit 7 closeout
+
+No new confirmed live-path defect remains on the multi-agent cooperation and
+re-briefing path. The residual watch item is
+`src/vaultspec_a2a/context/token_budget.py::prepare_handoff()`, which still
+omits phase, vault, and approval-state fields when constructing handoff
+context. It is not a proven live bug in the current graph path because the
+active runtime handoff path remains grounded in persisted/checkpoint-backed
+state, but it should stay on watch because promoting the helper into a live
+handoff surface later could reintroduce owner-vs-context drift.

@@ -964,15 +964,18 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
 `src/vaultspec_a2a/thread/state.py`.
 
-REVIEW-068 | MEDIUM | Clean supervisor routes preserved stale approval residue
-Audit `7` exposed the adjacent handoff-state leak after `REVIEW-067`. The
-supervisor's clean-route return path still omitted `approval_status` and
-`approval_request_id`, so LangGraph preserved previously rejected or already
-consumed plan-approval residue in checkpoint state. That left later worker
-handoffs and re-briefing context reading obsolete approval state even after the
-supervisor had cleanly rerouted ownership. The fix now clears stale approval
-residue on clean supervisor routes so recovered multi-agent handoffs do not
-carry old plan-approval state into subsequent worker turns.
+REVIEW-068 | MEDIUM | Recovered supervisor handoffs preserved stale approval residue
+Audit `7` exposed the adjacent ownership-versus-approval split after
+`REVIEW-067`. Clean supervisor reroutes were still leaving
+`approval_status` and `approval_request_id` in shared graph state even after
+the workflow had recovered from the original plan-approval exchange. That left
+later worker handoffs and re-brief context able to read obsolete approval
+state as if it were still authoritative, even though the routed owner had
+already moved on. LangChain human-in-the-loop and multi-agent handoff guidance
+treat approval decisions as action-scoped and handoff state as owner-scoped, so
+recovered routes must not keep stale approval residue alive. The fix now
+clears stale approval state on recovered supervisor routes so later handoffs
+reflect the current routed owner rather than an obsolete approval exchange.
 Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
@@ -993,7 +996,22 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
 
-REVIEW-070 | MEDIUM | Consumed supervisor approval requests could stay live after resume
+REVIEW-070 | MEDIUM | Supervisor reroutes preserved stale current_plan summaries
+Audit `7` then exposed the plan mirror of the same handoff problem. The
+supervisor only replaced `current_plan` on its normal clean-route branch, but
+rejection reroutes, approval resumes, and routing-error reroutes all changed
+the owning worker without replacing the shared route summary. Because
+`current_plan` uses a full-replacement reducer, omitting it leaves the old
+route summary sticky in checkpoint state. That means later handoffs and
+re-briefing can describe the wrong owner even after the supervisor has already
+rerouted the workflow. The fix now stamps `current_plan` for every supervisor
+route outcome so the plan summary matches the actual routed worker.
+Evidence anchors:
+`src/vaultspec_a2a/thread/state.py`,
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
+REVIEW-071 | MEDIUM | Consumed supervisor approval requests could stay live after resume
 Audit `7` exposed the next adjacent handoff-state leak immediately after
 `REVIEW-069`. When a supervisor plan-approval interrupt resumed, the return
 paths for both approve and reject outcomes still omitted

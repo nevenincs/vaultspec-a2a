@@ -385,6 +385,9 @@ async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> No
     assert result["next"] == "vaultspec-coder"
     assert result["active_agent"] == "vaultspec-coder"
     assert result["pipeline_phase"] == "exec"
+    assert result["current_plan"] == [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
     assert "approval_status" in result
     assert result["approval_status"] is None
     assert "approval_request_id" in result
@@ -414,6 +417,9 @@ async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
     result = await node(state)
 
     assert result["next"] == "FINISH"
+    assert result["current_plan"] == [
+        {"content": "Complete task", "status": "completed"}
+    ]
     assert "approval_status" in result
     assert result["approval_status"] is None
     assert "approval_request_id" in result
@@ -453,6 +459,9 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
 
     resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
     assert resumed["next"] == "vaultspec-coder"
+    assert resumed["current_plan"] == [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
     assert resumed["approval_status"] == "approved"
     assert "approval_request_id" in resumed
     assert resumed["approval_request_id"] is None
@@ -515,3 +524,41 @@ async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
 
     assert result["next"] == "FINISH"
     assert result["active_agent"] == ""
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
+    """Rejected reroutes must replace stale plan summaries with the new owner."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["current_plan"] = [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    assert resumed["next"] == "vaultspec-planner"
+    assert resumed["active_agent"] == "vaultspec-planner"
+    assert resumed["current_plan"] == [
+        {"content": "Route to vaultspec-planner", "status": "in_progress"}
+    ]
+    assert resumed["approval_status"] == "rejected"

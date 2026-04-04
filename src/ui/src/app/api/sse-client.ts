@@ -33,6 +33,7 @@ export class SSEClient {
   private baseUrl: string;
   private activeThreadId: string | null = null;
   private connectionState: ConnectionState = 'disconnected';
+  private lastSequence = 0;
 
   private onEvent: EventCallback | null = null;
   private onConnectionChange: ConnectionCallback | null = null;
@@ -63,6 +64,11 @@ export class SSEClient {
     return this.activeThreadId;
   }
 
+  /** Set the last seen sequence number (e.g. from a REST snapshot). */
+  updateLastSequence(seq: number): void {
+    this.lastSequence = seq;
+  }
+
   /**
    * Open an SSE connection for a single thread. Closes any existing
    * connection first — only one thread can be streamed at a time.
@@ -72,6 +78,7 @@ export class SSEClient {
       this.disconnect();
     }
 
+    this.lastSequence = 0;
     this.activeThreadId = threadId;
     const url = `${this.baseUrl}/api/threads/${encodeURIComponent(threadId)}/stream`;
     const es = new EventSource(url);
@@ -141,6 +148,7 @@ export class SSEClient {
       this.source = null;
     }
     this.activeThreadId = null;
+    this.lastSequence = 0;
     this.setConnectionState('disconnected');
   }
 
@@ -149,6 +157,11 @@ export class SSEClient {
   private dispatchEvent(threadId: string, e: MessageEvent): void {
     try {
       const data = JSON.parse(e.data as string) as ServerEvent;
+      // Sequence dedup — drop events already seen (EventSource may replay on reconnect)
+      if ('sequence' in data && typeof data.sequence === 'number') {
+        if (data.sequence <= this.lastSequence) return;
+        this.lastSequence = data.sequence;
+      }
       this.onEvent?.(threadId, data);
     } catch {
       // Malformed payload — skip silently

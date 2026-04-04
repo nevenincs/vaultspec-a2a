@@ -1,0 +1,103 @@
+---
+tags:
+  - '#audit'
+  - '#ui-integration-wire-regen'
+date: 2026-04-04
+related:
+  - "[[2026-04-04-ui-integration-wire-regen-plan]]"
+  - "[[2026-04-04-ui-integration-wire-regen-review-audit]]"
+---
+
+# `ui-integration-wire-regen` Rolling Audit
+
+Continuous discovery of drifts, wiring gaps, and regression risks across the
+frontend codebase. Findings appended by parallel sub-agents.
+
+<!-- Findings below are appended as discovered. Format:
+     {DOMAIN}-{NNN} | {LEVEL} | {Summary}
+     {Description with file:line references} -->
+
+## Round 1 — 4 parallel agents (2026-04-04)
+
+### Actionable — PR #28 scope
+
+BRIDGE-001 | HIGH | WS event callback always wired — double dispatch when USE_SSE=true
+`ws-bridge.ts:66`: wsClient.setEventCallback is set unconditionally. When
+USE_SSE=true, both WS and SSE dispatch the same events, doubling every store
+update. The WS event callback should be gated behind `!USE_SSE`.
+
+QUERY-004 | HIGH | SSE bridge agent_status missing TQ cache updates
+`ws-bridge.ts:146-159`: SSE callback only calls handleWireEvent for
+agent_status. WS path additionally updates TQ `team.status()` and
+`threads.list()` caches. Agent panel and thread list go stale under SSE mode.
+
+QUERY-005 | HIGH | SSE bridge silently drops team_status events
+`ws-bridge.ts:161`: bare `break` on team_status. WS path replaces TQ agent
+cache and populates display name map. Team panel never updates under SSE.
+
+SSE-004 | MEDIUM | SSE client has no sequence dedup
+`sse-client.ts`: no lastSequences tracking. EventSource auto-reconnect may
+replay events, causing duplicate store entries. WS client has this protection.
+
+RACE-001 | MEDIUM | WS + SSE race on single connectionState atom
+Both transports write to `appStore.setConnectionState()`. When USE_SSE=true,
+WS reconnect cycle overwrites SSE state causing UI flicker.
+
+PERM-001 | MEDIUM | WS permission events show UUID as agent_name
+`mappers.ts:80`: `agent_name: wire.agent_id ?? 'Unknown'`. The WS bridge
+does not resolve agent_id against `_agentDisplayNames` before pushing to
+store. Snapshot path resolves correctly (inconsistency).
+
+PROXY-001 | MEDIUM | Vite dev proxy rules target wrong path prefix
+`vite.config.ts`: proxy rules are `/threads`, `/team`, `/teams`,
+`/permissions` but backend routes are `/api/threads`, `/api/team`, etc.
+Dead config — clients use absolute URLs — but misleading.
+
+DOCKER-DEV-002 | MEDIUM | VITE_API_BASE_URL not set in Docker dev compose
+`docker-compose.dev.yml`: only sets VITE_API_URL (build-time proxy target).
+Runtime clients read VITE_API_BASE_URL which falls back to localhost:8000,
+unreachable from browser in containerized dev mode.
+
+QUERY-003 | LOW | useCreateThread does not invalidate thread list after mutation
+No onSettled invalidation. Stale optimistic entry persists until 30s staleTime
+expires. WS agent_status events will eventually update, but not immediate.
+
+QUERY-006 | LOW | useSendMessage bypasses slice pattern with direct setState
+`use-send-message.ts:31`: only hook that calls appStore.setState directly
+instead of using a named action. Fragile if middleware stack changes.
+
+QUERY-011 | LOW | REST client captures error body as text, not parsed JSON
+`rest-client.ts:113-114`: error responses read with `res.text()`, losing
+structured HTTPValidationError detail. Limits error reporting.
+
+QUERY-015 | LOW | useThreadMetadataQuery returns raw wire type, no mapper
+Breaks the architectural pattern (all other queries map wire→frontend types).
+No frontend ThreadMetadata type exists in types.ts.
+
+ENV-001 | LOW | VITE_API_URL vs VITE_API_BASE_URL naming confusion
+Two vars for related but different purposes (build-time proxy vs runtime
+browser-side URL). Poorly documented distinction.
+
+### Informational — no action needed
+
+PERM-003 | INFO | Hydrated permissions always show tool_kind 'other'
+`_PermissionSnapshot` lacks tool_kind. WS path maps correctly. Cosmetic.
+
+TOOL-002 | INFO | ToolCallCard does not render diff_path or terminal_id
+Fields flow to inspector via JSON.stringify on click. No data loss.
+
+SSE-005 | INFO | SSE heartbeat listener is no-op
+No lastHeartbeat update from SSE connections. Minor monitoring gap.
+
+QUERY-008 | INFO | useThreadStateQuery staleTime Infinity edge case
+If Zustand events cleared and re-fetched, TQ serves stale cached snapshot
+status. Minor since hydration works correctly.
+
+RACE-002 | INFO | Sequence gap after WS reconnect — events during disconnect lost
+Known ADR-004 limitation. No gap-fill mechanism exists.
+
+### Out of scope — backend or future work
+
+BACKEND-PERM-001 | MEDIUM | `get_pending_permission_requests` lacks order_by
+Control layer uses `[-1]` for most recent request. Non-deterministic without
+explicit ordering. (Forwarded to PR #22 team.)

@@ -22,7 +22,9 @@ export const createPermissionSlice: StateCreator<
   pushPermission: (wireEvent) =>
     set(
       (draft) => {
-        draft.permissionQueue.push(mapPermissionRequest(wireEvent));
+        draft.permissionQueue.push(
+          mapPermissionRequest(wireEvent, draft._agentDisplayNames),
+        );
       },
       false,
       'permission/push',

@@ -44,10 +44,12 @@ function sseToFrontendConnectionState(sse: SseConnectionState): FrontendConnecti
 export function initWsBridge(): () => void {
   const store = appStore.getState();
 
-  // 1. Connection state → Zustand
-  wsClient.setConnectionCallback((wsState) => {
-    appStore.getState().setConnectionState(toFrontendConnectionState(wsState));
-  });
+  // 1. Connection state → Zustand (only when WS is the read transport)
+  if (!USE_SSE) {
+    wsClient.setConnectionCallback((wsState) => {
+      appStore.getState().setConnectionState(toFrontendConnectionState(wsState));
+    });
+  }
 
   // 2. Connected → log bootstrap info (progressive enhancement)
   wsClient.setConnectedCallback((event) => {
@@ -62,7 +64,8 @@ export function initWsBridge(): () => void {
     appStore.getState().setLastHeartbeat(Date.now());
   });
 
-  // 4. Wire events → Zustand + TQ cache
+  // 4. Wire events → Zustand + TQ cache (only when WS is the read transport)
+  if (!USE_SSE) {
   wsClient.setEventCallback((threadId, event) => {
     switch (event.type) {
       case 'message_chunk':
@@ -132,6 +135,7 @@ export function initWsBridge(): () => void {
       wsClient.updateLastSequence(threadId, event.sequence);
     }
   });
+  }
 
   wsClient.connect();
 
@@ -156,8 +160,34 @@ export function initWsBridge(): () => void {
           break;
         case 'agent_status':
           appStore.getState().handleWireEvent(threadId, event);
+          queryClient.setQueryData<AgentSummary[]>(
+            queryKeys.team.status(),
+            (prev = []) => {
+              const idx = prev.findIndex((a) => a.agent_id === event.agent_id);
+              if (idx >= 0) {
+                const updated = [...prev];
+                updated[idx] = { ...updated[idx], state: event.state };
+                return updated;
+              }
+              return prev;
+            },
+          );
+          queryClient.setQueryData<ThreadSummary[]>(
+            queryKeys.threads.list(),
+            (prev = []) =>
+              prev.map((t) =>
+                t.thread_id === threadId
+                  ? { ...t, agent_state: event.state }
+                  : t,
+              ),
+          );
           break;
         case 'team_status':
+          queryClient.setQueryData<AgentSummary[]>(
+            queryKeys.team.status(),
+            event.agents.map(mapAgentSummary),
+          );
+          appStore.getState().updateAgentDisplayNames(event.agents);
           break;
         case 'permission_request':
           appStore.getState().pushPermission(event);

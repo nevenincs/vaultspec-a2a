@@ -72,12 +72,16 @@ export function mapTeamPreset(wire: TeamPresetSummary): TeamPreset {
   };
 }
 
-export function mapPermissionRequest(wire: PermissionRequestEvent): PermissionRequest {
+export function mapPermissionRequest(
+  wire: PermissionRequestEvent,
+  agentDisplayNames?: Record<string, string>,
+): PermissionRequest {
+  const agentId = wire.agent_id ?? '';
   return {
     id: wire.request_id,
     thread_id: wire.thread_id,
-    agent_id: wire.agent_id ?? '',
-    agent_name: wire.agent_id ?? 'Unknown',
+    agent_id: agentId,
+    agent_name: (agentId && agentDisplayNames?.[agentId]) || agentId || 'Unknown',
     tool_name: wire.tool_call ?? '',
     tool_kind: wire.tool_kind ? mapToolKind(wire.tool_kind) : 'other',
     message: wire.description,

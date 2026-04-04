@@ -189,7 +189,14 @@ def _finalize_worker_response(
 ) -> dict[str, Any]:
     """Attach worker attribution and merge any side-channel state updates."""
     response.name = worker_name
-    return {"messages": [response], "mounted_context": None, **state_updates}
+    return {
+        "messages": [response],
+        "mounted_context": None,
+        # Approval outcomes are consumed by the worker turn they routed.
+        "approval_status": None,
+        "approval_request_id": None,
+        **state_updates,
+    }
 
 
 def _valid_option_ids(options: list[dict[str, Any]]) -> set[str]:

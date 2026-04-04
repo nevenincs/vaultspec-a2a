@@ -192,3 +192,29 @@ async def test_worker_resume_reinvokes_model_with_tool_result() -> None:
     assert follow_up_messages[-1].tool_call_id == "call_0"
     assert follow_up_messages[-1].content == '{"approved_option_id": "approve"}'
     assert "Human approval has been resolved" in str(follow_up_messages[-3].content)
+
+
+@pytest.mark.asyncio
+async def test_worker_turn_clears_consumed_approval_residue() -> None:
+    """A worker turn must consume the approval state that authorized it."""
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
+    model = AcpChatModel(
+        command=[PYTHON_EXE, str(SIMULATOR_PATH), "--response", "approved once"],
+        env_vars={},
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+    )
+
+    state = _make_state()
+    state["approval_status"] = "approved"
+    state["approval_request_id"] = "approval-1"
+
+    result = await node(state)
+
+    assert result["messages"][0].content == "approved once"
+    assert result["approval_status"] is None
+    assert result["approval_request_id"] is None

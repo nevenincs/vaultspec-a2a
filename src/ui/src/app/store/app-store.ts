@@ -16,6 +16,7 @@ import { createConnectionSlice, type ConnectionSlice } from './slices/connection
 import { createPermissionSlice, type PermissionSlice } from './slices/permission-slice';
 import { createTabSlice, type TabSlice } from './slices/tab-slice';
 import { createUiSlice, type UiSlice } from './slices/ui-slice';
+import type { ThemeMode } from '../data/types';
 
 export type AppStore = StreamSlice &
   ConnectionSlice &
@@ -42,6 +43,21 @@ export const appStore = createStore<AppStore>()(
           sidebarCollapsed: state.sidebarCollapsed,
           sidebarWidth: state.sidebarWidth,
         }),
+        onRehydrateStorage: () => (state) => {
+          if (!state) return;
+          // Apply persisted theme immediately to prevent FOUC
+          const mode: ThemeMode = state.themeMode;
+          const root = document.documentElement;
+          if (mode === 'dark') {
+            root.classList.add('dark');
+          } else if (mode === 'light') {
+            root.classList.remove('dark');
+          } else {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            if (prefersDark) root.classList.add('dark');
+            else root.classList.remove('dark');
+          }
+        },
       },
     ),
     {

@@ -96,6 +96,37 @@ status. Minor since hydration works correctly.
 RACE-002 | INFO | Sequence gap after WS reconnect — events during disconnect lost
 Known ADR-004 limitation. No gap-fill mechanism exists.
 
+## Round 2 — 2 parallel agents (2026-04-04)
+
+All Round 1 HIGH/MEDIUM confirmed fixed. New findings:
+
+THEME-001 | MEDIUM | **FIXED** No theme hydration on startup — FOUC
+`app-store.ts`: persist middleware had no `onRehydrateStorage` callback.
+Persisted dark/light preference was not applied to document root until
+user toggled theme. Fix: added `onRehydrateStorage` that applies the
+persisted `themeMode` to `document.documentElement` immediately.
+
+BARREL-001 | LOW | Dead barrel files in queries/ and store/
+`queries/index.ts` and `store/index.ts` re-export everything but are
+never imported — all consumers use direct file imports. Dead code.
+
+BRIDGE-002 | LOW | WS/SSE dispatch logic duplicated (~45 lines)
+Near-identical switch/case blocks in WS and SSE paths. Refactor to
+shared helper would prevent future drift. Not a bug.
+
+SSE-003 | LOW | Sequence dedup would drop first event if 0-based
+`lastSequence` init to 0 + guard `seq <= lastSequence` means seq=0
+is dropped. Backend uses 1-based sequences so this is a non-issue.
+
+THEME-002 | INFO | palette.ts hue labels drift from theme.css
+Cosmetic naming inconsistency. palette.ts values are dead documentation.
+
+DEAD-001 | INFO | palette.ts exports PALETTES/PaletteId/ACTIVE_PALETTE — unused
+Forward-looking infrastructure for palette switching.
+
+PKG-001 | INFO | No generate-types script in package.json
+openapi-typescript regen command only documented in wire-types.ts header.
+
 ### Out of scope — backend or future work
 
 BACKEND-PERM-001 | MEDIUM | `get_pending_permission_requests` lacks order_by

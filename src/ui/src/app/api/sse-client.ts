@@ -111,6 +111,9 @@ export class SSEClient {
         const data = JSON.parse(e.data as string) as ThreadTerminalEvent;
         log.info('[SSE] thread_terminal:', data.thread_id, data.status);
       } catch { /* skip malformed */ }
+      // Terminal means the server will close the stream. Disconnect now to
+      // prevent EventSource from auto-reconnecting in a loop.
+      this.disconnect();
     });
 
     // Heartbeat — just reset connection state, no dispatch to store

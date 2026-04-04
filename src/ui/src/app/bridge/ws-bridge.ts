@@ -136,14 +136,36 @@ export function initWsBridge(): () => void {
   wsClient.connect();
 
   // When USE_SSE is enabled, wire SSE callbacks for read-side events.
-  // The WS client stays connected for sending commands.
+  // The WS client stays connected for sending commands only — its event
+  // callback is NOT set so WS events are silently dropped (no flicker).
   if (USE_SSE) {
     sseClient.setConnectionCallback((sseState) => {
       appStore.getState().setConnectionState(sseToFrontendConnectionState(sseState));
     });
-    // SSE event callback mirrors the WS event callback above — same dispatch.
-    // In a full dual-transport mode the WS event callback would be removed,
-    // but for now both are wired and USE_SSE gates which one is active.
+    sseClient.setEventCallback((threadId, event) => {
+      // Identical dispatch to the WS event callback above.
+      switch (event.type) {
+        case 'message_chunk':
+        case 'thought_chunk':
+        case 'tool_call_start':
+        case 'tool_call_update':
+        case 'artifact_update':
+        case 'plan_update':
+        case 'error':
+          appStore.getState().handleWireEvent(threadId, event);
+          break;
+        case 'agent_status':
+          appStore.getState().handleWireEvent(threadId, event);
+          break;
+        case 'team_status':
+          break;
+        case 'permission_request':
+          appStore.getState().pushPermission(event);
+          break;
+        default:
+          break;
+      }
+    });
   }
 
   // Suppress the unused var warning — store ref kept for future use

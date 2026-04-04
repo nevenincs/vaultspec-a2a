@@ -145,13 +145,22 @@ export function useThreadStateQuery(threadId: string | null) {
       appStore.getState().hydrateThreadEvents(threadId, events, snapshot.last_sequence);
 
       // Step 1: Hydrate pending permissions
+      // _PermissionSnapshot lacks agent_id — best-effort: pick the agent in
+      // input_required state (permission requests pause the agent).
       if (snapshot.pending_permissions?.length) {
+        const waitingAgent = (snapshot.agents ?? []).find(
+          (a) => a.state === 'input_required',
+        );
+        const permAgentId = waitingAgent?.agent_id ?? '';
+        const permAgentName = waitingAgent
+          ? (agentNames[waitingAgent.agent_id] || waitingAgent.agent_id)
+          : '';
         const mapped: PermissionRequest[] = snapshot.pending_permissions.map(
           (perm: _PermissionSnapshot) => ({
             id: perm.request_id,
             thread_id: threadId,
-            agent_id: '',
-            agent_name: '',
+            agent_id: permAgentId,
+            agent_name: permAgentName,
             tool_name: perm.tool_call ?? '',
             tool_kind: 'other' as const,
             message: perm.description,

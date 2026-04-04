@@ -947,3 +947,19 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/nodes/vault_reader.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
+REVIEW-067 | MEDIUM | Stale supervisor routing_error could pollute recovered handoffs
+Audit `7` exposed another bounded handoff-state drift immediately after
+`REVIEW-066`. Rejected-plan and reroute notes in `routing_error` were sticky
+state: once set, later clean supervisor routes and successful re-approvals did
+not actively clear them. LangGraph handoff guidance treats routing as
+state-driven behavior across turns, so obsolete reroute notes must not remain
+authoritative after the handoff has recovered. Leaving them in state could
+pollute later worker anchoring and re-brief context with rejection instructions
+that were no longer true. The fix now clears `routing_error` on clean routes
+and successful approval resumes so recovered supervisor-to-worker handoffs do
+not carry obsolete rejection context forward.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
+`src/vaultspec_a2a/thread/state.py`.

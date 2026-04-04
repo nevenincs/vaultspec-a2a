@@ -1228,6 +1228,24 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
 
+## REVIEW-067: recovered supervisor handoffs must clear stale routing notes
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable re-briefing: when the supervisor recovers from a
+rejected or rerouted path, obsolete `routing_error` notes must not persist in
+shared graph state and bleed into later worker handoffs.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `src/vaultspec_a2a/thread/state.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

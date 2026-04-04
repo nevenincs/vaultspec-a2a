@@ -154,7 +154,7 @@ class TeamState(TypedDict):
     approval_request_id: NotRequired[str | None]
 
     # --- routing error: set by supervisor on parse failure ---
-    routing_error: NotRequired[str]
+    routing_error: NotRequired[str | None]
 
     # --- routing / identification ---
     thread_id: str

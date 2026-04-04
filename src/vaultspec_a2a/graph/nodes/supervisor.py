@@ -379,6 +379,7 @@ def create_supervisor_node(
                     "next": decision.next_route,
                     "pipeline_phase": decision.inferred_phase,
                     "approval_status": ApprovalStatus.APPROVED,
+                    "routing_error": None,
                 }
             revision_worker = _select_revision_worker(workers, worker_phase_map)
             _logger.info(
@@ -409,6 +410,7 @@ def create_supervisor_node(
             "next": decision.next_route,
             "pipeline_phase": decision.inferred_phase,
             "current_plan": [plan_entry],
+            "routing_error": None,
         }
 
     supervisor_node.__name__ = "supervisor_node"

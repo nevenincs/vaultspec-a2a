@@ -65,10 +65,11 @@ def _build_worker_messages(
     if mounted:
         messages.append(SystemMessage(content=mounted))
     messages.extend(working_state["messages"])
+    routing_error = state.get("routing_error")
     if (
         state.get("approval_status") == "rejected"
-        and isinstance(state.get("routing_error"), str)
-        and "Plan rejected by user" in state["routing_error"]
+        and isinstance(routing_error, str)
+        and "Plan rejected by user" in routing_error
     ):
         messages.append(
             SystemMessage(

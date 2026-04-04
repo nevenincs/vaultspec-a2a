@@ -2169,3 +2169,31 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+## REVIEW-067: recovered supervisor handoffs must clear stale routing_error context
+
+Audit `7` exposed a third bounded handoff-state defect immediately after
+`REVIEW-066`. The supervisor was persisting rejection and reroute notes in
+`routing_error`, but later clean routes and successful approval resumes were
+not actively clearing that field. In LangGraph handoff terms, that leaves
+obsolete handoff context in the shared state even after the state-driven route
+has recovered. The risk is not abstract: worker anchoring reads `routing_error`
+directly, so a later worker turn could still be told that a plan was rejected
+or rerouted when the supervisor had already moved back onto a clean path.
+
+The fix now clears `routing_error` on clean supervisor routes and on successful
+plan-approval resumes. That keeps the shared handoff state aligned with the
+current owner of the turn instead of letting stale rejection notes continue to
+shape later worker context.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `src/vaultspec_a2a/thread/state.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`

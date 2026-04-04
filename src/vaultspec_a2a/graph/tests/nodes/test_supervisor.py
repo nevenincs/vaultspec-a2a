@@ -1,8 +1,16 @@
 """Tests for deterministic supervisor routing and gating logic."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.messages import HumanMessage, SystemMessage
+import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, StateGraph
+from langgraph.types import Command
+from pydantic import PrivateAttr
 
 from vaultspec_a2a.thread.state import TeamState
 
@@ -11,7 +19,11 @@ from ...nodes.supervisor import (
     _evaluate_supervisor_response,
     _phase_for_route,
     _select_revision_worker,
+    create_supervisor_node,
 )
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 def _make_state() -> TeamState:
@@ -102,6 +114,39 @@ def _make_state_for_plan_approval(
     if approval_status is not None:
         state["approval_status"] = approval_status
     return state
+
+
+class _StaticSupervisorModel(BaseChatModel):
+    """Minimal async chat model that returns a fixed route choice."""
+
+    _content: str = PrivateAttr()
+
+    def __init__(self, content: str) -> None:
+        super().__init__()
+        self._content = content
+
+    @property
+    def _llm_type(self) -> str:
+        return "static-supervisor-model"
+
+    def _generate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise NotImplementedError("_StaticSupervisorModel only supports async")
+
+    async def _agenerate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        response = AIMessage(content=self._content)
+        return ChatResult(generations=[ChatGeneration(message=response)])
 
 
 def test_supervisor_routing_substring_collision() -> None:
@@ -315,3 +360,61 @@ def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:
         isinstance(m, SystemMessage) and "Project Coding Rules" in str(m.content)
         for m in messages
     )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> None:
+    """Recovered handoffs must not keep stale routing notes in graph state."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+    )
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    result = await node(state)
+
+    assert result["next"] == "vaultspec-coder"
+    assert result["pipeline_phase"] == "exec"
+    assert "routing_error" in result
+    assert result["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> None:
+    """Approval resume should clear stale rejection context before worker handoff."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-resume"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
+    assert resumed["next"] == "vaultspec-coder"
+    assert resumed["approval_status"] == "approved"
+    assert "routing_error" in resumed
+    assert resumed["routing_error"] is None

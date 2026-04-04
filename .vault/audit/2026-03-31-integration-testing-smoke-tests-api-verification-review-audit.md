@@ -928,3 +928,22 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
 `src/vaultspec_a2a/team/presets/teams/vaultspec-adaptive-coder.toml`,
 `src/vaultspec_a2a/team/presets/teams/vaultspec-continuous-audit.toml`.
+
+REVIEW-066 | MEDIUM | Supervisor phase handoff was artifact-driven instead of worker-owned
+Audit `7` exposed a second bounded multi-agent re-brief defect immediately
+behind `REVIEW-065`. Even after rerouting to the correct revision worker, the
+supervisor was still writing `pipeline_phase` from the highest artifact phase
+already present in `vault_index`, not from the worker that had just been
+selected. In practice that meant a rejected or rerouted planning worker could
+receive mounted `exec` context because prior execution artifacts already
+existed. The mount node keys its document selection from `pipeline_phase`, so
+this was a real re-brief drift between supervisor routing state and worker
+context. LangGraph handoff guidance treats handoffs as state-driven behavior
+across turns; the routed worker and the persisted phase context must agree.
+The fix now prefers the routed worker's phase mapping for `pipeline_phase`,
+and rejected plan revisions also remap phase ownership to the selected
+revision worker rather than reusing the previously selected exec phase.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/nodes/vault_reader.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.

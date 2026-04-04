@@ -9,6 +9,7 @@ from vaultspec_a2a.thread.state import TeamState
 from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,
+    _phase_for_route,
     _select_revision_worker,
 )
 
@@ -270,6 +271,33 @@ def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> N
         },
     )
     assert worker == "vaultspec-analyst"
+
+
+def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
+    result = _decision(
+        "vaultspec-planner",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        state=_make_state_for_phase_gate(
+            vault_index={
+                "plan": [".vault/plan/feature-plan.md"],
+                "exec": [".vault/exec/feature/step-001.md"],
+            },
+            active_feature=None,
+        ),
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    assert result.next_route == "vaultspec-planner"
+    assert result.inferred_phase == "plan"
+
+
+def test_revision_phase_prefers_revision_worker_phase() -> None:
+    phase = _phase_for_route(
+        "vaultspec-planner",
+        fallback_phase="exec",
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+    )
+    assert phase == "plan"
 
 
 def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:

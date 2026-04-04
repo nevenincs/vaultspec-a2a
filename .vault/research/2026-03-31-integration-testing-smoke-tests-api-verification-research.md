@@ -2133,3 +2133,39 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+## REVIEW-066: routed worker phase must override artifact-derived phase during multi-agent handoff
+
+Audit `7` immediately exposed a second supervisor/worker drift after
+`REVIEW-065`. The supervisor had started rerouting rejected exec plans to the
+correct plan-phase worker, but it was still persisting `pipeline_phase` from
+`infer_phase_from_vault_index(...)`, which prefers the highest artifact phase
+already present in `vault_index`. That is not a safe handoff contract once a
+multi-agent team starts revising or re-briefing work after later-phase
+artifacts already exist.
+
+This mattered because the mount node selects phase documents from
+`state["pipeline_phase"]`. A rerouted planning worker could therefore receive
+mounted `exec` documents instead of the planning documents it actually owned.
+That is a direct state/context split at the handoff boundary: supervisor
+routing says one worker should act next, while mounted phase context tells the
+worker it is still in a later phase. LangGraph handoff guidance is explicit
+that handoffs should be driven by persistent state variables such as
+`active_agent` or the current step, not by incidental historical artifacts.
+
+The fix now treats the routed worker as the authority for `pipeline_phase`
+whenever a `worker_phase_map` entry exists, and rejected plan revisions also
+recompute phase ownership from the chosen revision worker rather than
+reusing the previously selected exec phase.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`

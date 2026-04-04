@@ -1210,6 +1210,24 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
 
+## REVIEW-066: routed worker phase must control the mounted handoff phase
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable re-briefing: when the supervisor routes to a
+worker, the persisted `pipeline_phase` must match that worker's owned phase
+instead of the highest historical artifact phase in `vault_index`.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/nodes/vault_reader.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

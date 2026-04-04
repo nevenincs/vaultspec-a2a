@@ -36,6 +36,20 @@ def _select_revision_worker(
     return workers[0] if workers else "FINISH"
 
 
+def _phase_for_route(
+    route: str,
+    *,
+    fallback_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Prefer the routed worker phase over artifact-derived phase inference."""
+    if worker_phase_map:
+        route_phase = worker_phase_map.get(route)
+        if route_phase:
+            return route_phase
+    return fallback_phase
+
+
 def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     """Parse the model response text into a route choice.
 
@@ -229,7 +243,11 @@ def _evaluate_supervisor_response(
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(
         next_route=next_route,
-        inferred_phase=inferred_phase,
+        inferred_phase=_phase_for_route(
+            next_route,
+            fallback_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        ),
     )
 
 
@@ -369,7 +387,11 @@ def create_supervisor_node(
             )
             return {
                 "next": revision_worker,
-                "pipeline_phase": decision.inferred_phase,
+                "pipeline_phase": _phase_for_route(
+                    revision_worker,
+                    fallback_phase=decision.inferred_phase,
+                    worker_phase_map=worker_phase_map,
+                ),
                 "approval_status": ApprovalStatus.REJECTED,
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."

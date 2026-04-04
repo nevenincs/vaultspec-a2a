@@ -419,24 +419,20 @@ async def enrich_snapshot_from_durable_state(
                     snapshot.approval_request_id = None
                 continue
             snapshot.pending_permissions.append(projected)
-        if snapshot.approval_status is None:
-            for permission in snapshot.pending_permissions:
-                if (
-                    permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
-                    or permission.tool_call == PermissionType.PLAN_APPROVAL.value
-                ):
-                    snapshot.approval_status = ApprovalStatus.PENDING
-                    snapshot.approval_request_id = permission.request_id
-                    break
-    if snapshot.approval_status == ApprovalStatus.PENDING:
-        has_projected_plan_approval = any(
+    projected_plan_approvals = [
+        permission
+        for permission in snapshot.pending_permissions
+        if (
             permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
             or permission.tool_call == PermissionType.PLAN_APPROVAL.value
-            for permission in snapshot.pending_permissions
         )
-        if not has_projected_plan_approval:
-            snapshot.approval_status = None
-            snapshot.approval_request_id = None
+    ]
+    if projected_plan_approvals:
+        snapshot.approval_status = ApprovalStatus.PENDING
+        snapshot.approval_request_id = projected_plan_approvals[-1].request_id
+    elif snapshot.approval_status is not None:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
     _clear_non_actionable_pause_state(snapshot)
 
     return snapshot

@@ -771,6 +771,140 @@ async def test_plan_approval_without_tool_call_preserves_pending_approval(
 
 
 @pytest.mark.asyncio
+async def test_rejected_thread_approval_is_replaced_by_live_pending_plan_approval(
+    tmp_path: Path,
+) -> None:
+    """Public thread state must follow the live durable pending plan approval."""
+    case_dir = tmp_path / "thread-state-service-db-rejected-stale-live-plan"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-rejected-stale-live-plan"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-rejected-stale-live-plan",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                thread_id="thread-rejected-stale-live-plan",
+                status="input_required",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread.approval_status = "rejected"
+            thread.approval_request_id = "perm-stale-rejected-plan"
+            await record_permission_request(
+                session,
+                request_id="perm-live-pending-plan",
+                thread_id="thread-rejected-stale-live-plan",
+                pause_reason_type="plan_approval_request",
+                description="Approve revised plan?",
+                allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                tool_call=None,
+            )
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-rejected-stale-live-plan",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.approval_status == "pending"
+    assert snapshot.approval_request_id == "perm-live-pending-plan"
+    assert len(snapshot.pending_permissions) == 1
+    assert snapshot.pending_permissions[0].request_id == "perm-live-pending-plan"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_rejected_thread_approval_residue_does_not_surface_without_live_plan(
+    tmp_path: Path,
+) -> None:
+    """Rejected approval residue must not remain on the public thread snapshot."""
+    case_dir = tmp_path / "thread-state-service-db-rejected-residue"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+
+    session_factory = async_sessionmaker(
+        engine,
+        class_=AsyncSession,
+        expire_on_commit=False,
+    )
+
+    checkpoints_file = case_dir / "checkpoints.db"
+    async with AsyncSqliteSaver.from_conn_string(str(checkpoints_file)) as checkpointer:
+        await checkpointer.setup()
+        checkpoint = empty_checkpoint()
+        checkpoint["id"] = "cp-rejected-residue"
+        await checkpointer.aput(
+            {
+                "configurable": {
+                    "thread_id": "thread-rejected-residue",
+                    "checkpoint_ns": "",
+                }
+            },
+            checkpoint,
+            {"source": "loop", "step": 1, "parents": {}},
+            {},
+        )
+        async with session_factory() as session:
+            thread = await create_thread(
+                session,
+                thread_id="thread-rejected-residue",
+                status="running",
+                repair_status="healthy",
+                execution_readiness="healthy",
+            )
+            thread.approval_status = "rejected"
+            thread.approval_request_id = "perm-rejected-residue"
+            await session.commit()
+
+        async with session_factory() as session:
+            snapshot = await build_thread_state(
+                session,
+                thread_id="thread-rejected-residue",
+                aggregator=EventAggregator(),
+                checkpointer=checkpointer,
+            )
+
+    assert snapshot is not None
+    assert snapshot.approval_status is None
+    assert snapshot.approval_request_id is None
+    assert snapshot.pending_permissions == []
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_terminal_thread_excludes_durable_pending_permission_from_thread_state(
     tmp_path: Path,
 ) -> None:

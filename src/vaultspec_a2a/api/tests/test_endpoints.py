@@ -329,6 +329,83 @@ class TestListThreads:
         assert thread["approval_status"] == "pending"
         assert thread["approval_request_id"] == "perm-list-live-plan"
 
+    def test_list_threads_prefers_live_plan_approval_over_stale_rejected_status(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not let stale rejected state hide live approval."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_live_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-rejected-live-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "rejected"
+                thread.approval_request_id = "perm-list-stale-rejected-plan"
+                await record_permission_request(
+                    session,
+                    request_id="perm-list-live-after-reject",
+                    thread_id="thread-list-rejected-live-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve revised plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_live_plan_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-rejected-live-plan"
+        )
+        assert thread["approval_status"] == "pending"
+        assert thread["approval_request_id"] == "perm-list-live-after-reject"
+
+    def test_list_threads_clears_stale_rejected_plan_approval_residue(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Thread summaries must not expose non-actionable rejected approval residue."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_rejected_residue_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="thread-list-rejected-residue",
+                    status="running",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "rejected"
+                thread.approval_request_id = "perm-list-rejected-residue"
+                await session.commit()
+
+        asyncio.run(_seed_rejected_residue_thread())
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "thread-list-rejected-residue"
+        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
+
     def test_list_threads_clears_terminal_thread_pending_approval(
         self, session_factory, checkpointer
     ) -> None:

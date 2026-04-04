@@ -897,6 +897,52 @@ class TestListThreadsViaApp:
         assert thread["approval_status"] is None
         assert thread["approval_request_id"] is None
 
+    def test_list_threads_prefers_live_plan_after_rejected_residue(
+        self, session_factory, checkpointer
+    ) -> None:
+        """GET /api/threads must not let stale rejected state hide live approval."""
+
+        async def _seed_live_plan_thread() -> None:
+            async with session_factory() as session:
+                thread = await create_thread(
+                    session,
+                    thread_id="mcp-thread-list-rejected-live-plan",
+                    status="input_required",
+                    repair_status="healthy",
+                    execution_readiness="healthy",
+                )
+                thread.approval_status = "rejected"
+                thread.approval_request_id = (
+                    "mcp-thread-list-stale-rejected-plan:perm-1"
+                )
+                await record_permission_request(
+                    session,
+                    request_id="mcp-thread-list-live-after-reject:perm-1",
+                    thread_id="mcp-thread-list-rejected-live-plan",
+                    pause_reason_type="plan_approval_request",
+                    description="Approve revised plan?",
+                    allowed_options=[{"option_id": "approve", "name": "Approve"}],
+                    tool_call=None,
+                )
+                await session.commit()
+
+        asyncio.run(_seed_live_plan_thread())
+
+        with _make_test_client(session_factory, checkpointer) as client:
+            resp = client.get("/api/threads")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        thread = next(
+            item
+            for item in data["threads"]
+            if item["thread_id"] == "mcp-thread-list-rejected-live-plan"
+        )
+        assert thread["approval_status"] == "pending"
+        assert (
+            thread["approval_request_id"] == "mcp-thread-list-live-after-reject:perm-1"
+        )
+
     def test_list_threads_degrades_checkpoint_mismatched_summary(
         self, session_factory, checkpointer
     ) -> None:

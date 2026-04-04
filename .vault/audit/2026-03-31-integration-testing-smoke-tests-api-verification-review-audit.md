@@ -866,3 +866,49 @@ and lifecycle public gates. The remaining material risks have shifted to the
 next roadmap domains rather than checkpoint-authority drift: supervisor
 plan-approval certification, multi-agent cooperation and re-briefing, sandbox
 and artifact behavior, and streaming/trace lineage.
+
+REVIEW-063 | MEDIUM | Supervisor approval-response payload still flattened reject and approve into pending
+Audit `5` exposed one remaining supervisor-facing semantic leak on the public
+REST boundary. `POST /api/permissions/{request_id}/respond` was returning
+`approval_status="pending"` for supervisor-owned plan decisions even after the
+user had already approved or rejected the plan. LangGraph's interrupt contract
+does not keep the human decision pending at that boundary; the resume payload
+is the decision, and the graph continues from there. Returning `pending`
+flattened the immediate response, especially for rejection, and could mislead
+clients into treating the original approval as still awaiting action. The fix
+now reports the submitted decision directly on the response payload while
+leaving thread-state authority with checkpoint-backed surfaces.
+Evidence anchors:
+`src/vaultspec_a2a/control/permission_service.py`,
+`src/vaultspec_a2a/service_tests/test_permissions_resume.py`.
+
+REVIEW-064 | MEDIUM | Stale rejected supervisor approval residue could leak onto or hide public actionable approval state
+Audit `5` exposed one more bounded public-state derivation defect after
+`REVIEW-063`. Stale `approval_status="rejected"` and
+`approval_request_id` residue on the thread row could still leak onto public
+thread-state and thread-summary surfaces, and worse, could hide a fresh
+durable `plan_approval_request` that should have been surfaced as the next
+actionable supervisor approval. LangGraph's reject semantics make the rejected
+decision feedback-bearing resume data, not an authoritative pending approval
+surface. The fix now recomputes public approval metadata from live durable
+pending plan approvals, clears stale rejected residue when no live plan
+approval exists, and proves that REST, reconnect/thread-state, and MCP thread
+summaries all prefer live durable pending approval truth over stale thread-row
+residue.
+Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`,
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_thread_state_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/protocols/mcp/tests/test_server.py`.
+
+AUDIT-5 CLOSEOUT | Supervisor plan-approval certification is functionally complete
+After `REVIEW-064`, the real-stack supervisor lane now certifies the main
+contracts that mattered for this audit: the first pause is supervisor-owned,
+rejection carries revision context into the resumed worker path, a fresh
+plan-approval request appears before privileged execution can continue, and
+both the immediate permission-response payload and the later public
+thread-state/summary surfaces now stop flattening or shadowing completed
+supervisor decisions. No stronger supervisor-owned public or operator-surface
+drift remained obvious in the bounded closeout scan, so the next active
+roadmap front moves to Audit `7` multi-agent cooperation and re-briefing.

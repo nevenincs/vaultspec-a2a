@@ -29,7 +29,6 @@ from ..database import (
     create_thread,
     delete_thread,
     get_pending_permission_requests,
-    get_permission_request,
     get_thread,
     get_thread_execution_state,
     list_threads,
@@ -223,7 +222,7 @@ async def list_threads_service(
         if is_terminal_thread:
             approval_status = None
             approval_request_id = None
-        elif approval_status == ApprovalStatus.PENDING.value:
+        else:
             live_plan_permissions = [
                 permission
                 for permission in await get_pending_permission_requests(
@@ -239,17 +238,9 @@ async def list_threads_service(
                     approval_status = None
                     approval_request_id = None
                 else:
+                    approval_status = ApprovalStatus.PENDING.value
                     approval_request_id = live_permission.request_id
             else:
-                approval_status = None
-                approval_request_id = None
-        elif approval_status is not None and approval_request_id is not None:
-            permission = await get_permission_request(db, approval_request_id)
-            if (
-                permission is not None
-                and not extract_allowed_option_ids(permission.allowed_options_json)
-                and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
-            ):
                 approval_status = None
                 approval_request_id = None
         summaries.append(

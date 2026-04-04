@@ -357,6 +357,7 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
     )
     assert plan_response["accepted"] is True
     assert plan_response["action_status"] == "accepted_not_applied"
+    assert plan_response["approval_status"] == "approved"
 
     worker_paused = _wait_for_pending_permission_matching(
         service_stack,
@@ -444,6 +445,7 @@ def test_supervisor_plan_rejection_requires_revision_before_reapproval(
     )
     assert rejected["accepted"] is True
     assert rejected["action_status"] == "accepted_not_applied"
+    assert rejected["approval_status"] == "rejected"
 
     second_plan_pause = _wait_for_pending_permission_matching(
         service_stack,

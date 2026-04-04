@@ -1994,6 +1994,83 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor`
 - `uv run ruff check src/vaultspec_a2a/context/anchoring.py src/vaultspec_a2a/context/tests/test_anchoring.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
 
+## REVIEW-063: supervisor permission-response payload must report the submitted decision, not a flattened pending state
+
+LangGraph's interrupt contract treats the resume payload as the human decision
+that continues the graph. In the approval/reject examples, resuming with a
+truthy or falsy decision immediately routes execution onward; the decision is
+no longer "pending" at the response boundary. Audit `5` still had one public
+surface that flattened this: the REST permission-response payload reported
+`approval_status="pending"` for supervisor-owned plan decisions, even after
+the operator had already approved or rejected the plan. That was especially
+misleading for rejection because it made a feedback-bearing resume look like an
+unanswered approval. The fix now reports `approved` or `rejected` on the
+response payload itself while preserving checkpoint-backed thread state as the
+authority for whether a fresh actionable approval exists.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langgraph/interrupts`
+- `https://docs.langchain.com/oss/python/langchain/human-in-the-loop`
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k "supervisor_plan_approval_pause_can_resume_through_real_stack or supervisor_plan_rejection_requires_revision_before_reapproval"`
+- `uv run pytest -m service src/vaultspec_a2a/service_tests -q`
+- `uv run ruff check src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+## REVIEW-064: stale rejected supervisor approval residue must not shadow live durable plan approval
+
+LangGraph HITL reject semantics are feedback-bearing resume data, not a still-
+pending approval target. Once the reject decision has been submitted, public
+actionability has to be derived from the next live durable pending
+`plan_approval_request`, not from stale `approval_status="rejected"` residue
+left on the thread row. Audit `5` still had one stronger public-state
+derivation defect after `REVIEW-063`: stale rejected metadata could remain on
+thread-state and summary surfaces, and could even hide a fresh durable pending
+plan approval that should have replaced it. The fix now recomputes public
+approval metadata from live durable pending plan approvals, clears rejected
+residue when no live plan approval exists, and proves the contract across the
+reconnect snapshot, REST thread list, and MCP list-thread surfaces.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/human-in-the-loop`
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "rejected_thread_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_list_threads_prefers_live_plan_approval_over_stale_rejected_status or test_list_threads_clears_stale_rejected_plan_approval_residue"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k test_list_threads_prefers_live_plan_after_rejected_residue`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## Audit 5 closeout
+
+After `REVIEW-064`, the bounded supervisor-certification scan no longer
+exposed a stronger remaining public or operator-surface drift in the
+supervisor plan-approval flow. The real-stack lane now certifies:
+
+- the first interrupt is a supervisor-owned `plan_approval_request`
+- plan rejection resumes with revision context instead of collapsing into
+  generic privileged permission
+- a fresh supervisor-owned approval is required before execution can continue
+- the immediate REST response no longer misreports a completed human decision
+  as a still-pending approval
+- stale rejected approval residue neither surfaces publicly nor hides a fresh
+  durable pending supervisor approval
+
+That does not make the higher-level stack simple or low risk. It means the
+strongest remaining risks have moved to the next roadmap layers: multi-agent
+cooperation and re-briefing, sandbox/artifact behavior, and streaming/trace
+lineage.
+
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`

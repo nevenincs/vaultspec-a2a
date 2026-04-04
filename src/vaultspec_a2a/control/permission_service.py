@@ -24,6 +24,7 @@ from ..database import (
     set_thread_approval_state,
     update_thread_status,
 )
+from ..graph.enums import REJECT_OPTION_IDS
 from ..ipc.schemas import DispatchRequest
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
 from ..thread.enums import (
@@ -63,6 +64,15 @@ def _allowed_option_ids(permission: object) -> set[str]:
     """Extract valid option ids from a durable permission request row."""
     raw_options = getattr(permission, "allowed_options_json", "[]")
     return extract_allowed_option_ids(raw_options)
+
+
+def _plan_response_approval_status(option_id: str) -> str:
+    """Report the submitted plan decision without flattening it to pending."""
+    return (
+        ApprovalStatus.REJECTED.value
+        if option_id in REJECT_OPTION_IDS or option_id == "reject"
+        else ApprovalStatus.APPROVED.value
+    )
 
 
 def _rejected_permission_error(
@@ -602,7 +612,7 @@ async def respond_to_permission(
         action_id=action.id,
         idempotency_key=resolved_idempotency_key,
         approval_status=(
-            ApprovalStatus.PENDING.value
+            _plan_response_approval_status(option_id)
             if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES
             else thread_record.approval_status
         ),

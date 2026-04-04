@@ -1129,6 +1129,67 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor`
 - `uv run ruff check src/vaultspec_a2a/context/anchoring.py src/vaultspec_a2a/context/tests/test_anchoring.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
 
+## REVIEW-063: supervisor permission-response payload must report the submitted decision
+
+Keep this as the next bounded Audit `5` guardrail. The mission is
+deterministic, controllable supervisor certification on the real stack:
+the immediate permission-response API must report the submitted supervisor
+decision as `approved` or `rejected`, not flatten it back to a still-pending
+approval.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/permission_service.py`
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k "supervisor_plan_approval_pause_can_resume_through_real_stack or supervisor_plan_rejection_requires_revision_before_reapproval"`
+- `uv run pytest -m service src/vaultspec_a2a/service_tests -q`
+- `uv run ruff check src/vaultspec_a2a/control/permission_service.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+## REVIEW-064: public approval derivation must prefer live durable plan approval over rejected residue
+
+Keep this as the final bounded Audit `5` guardrail. The mission is
+deterministic, controllable supervisor certification on the real stack:
+stale rejected supervisor approval metadata must not surface publicly or hide
+a fresh durable pending `plan_approval_request`. Public thread-state and
+summary surfaces must be recomputed from live durable pending plan approvals.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/projection.py`
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/tests/test_thread_state_service.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/api/tests/test_thread_state_service.py -q -k "rejected_thread_approval"`
+- `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "test_list_threads_prefers_live_plan_approval_over_stale_rejected_status or test_list_threads_clears_stale_rejected_plan_approval_residue"`
+- `uv run pytest src/vaultspec_a2a/protocols/mcp/tests/test_server.py -q -k test_list_threads_prefers_live_plan_after_rejected_residue`
+- `uv run ruff check src/vaultspec_a2a/control/projection.py src/vaultspec_a2a/control/thread_service.py src/vaultspec_a2a/api/tests/test_thread_state_service.py src/vaultspec_a2a/api/tests/test_endpoints.py src/vaultspec_a2a/protocols/mcp/tests/test_server.py`
+
+## Audit 5 closeout
+
+Treat Audit `5` as burned down after `REVIEW-064` unless a new stronger
+supervisor-owned public or operator-surface defect appears during later
+phases. The supervisor lane is now certifying the right boundaries:
+
+- the first pause is a supervisor-owned `plan_approval_request`
+- rejection carries revision context into the resumed worker path
+- a fresh supervisor-owned approval is required before privileged execution
+- immediate permission-response payloads report the submitted decision
+- public thread-state and summary surfaces prefer live durable plan approval
+  truth over stale rejected residue
+
+The next primary execution fronts should now move forward:
+
+- Audit `7`: multi-agent cooperation and re-briefing audit
+- Audit `8`: sandbox, artifact, and hostile-environment audit
+- Audit `9`: streaming/replay/trace lineage audit
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

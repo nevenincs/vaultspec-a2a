@@ -977,3 +977,18 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
 `src/vaultspec_a2a/context/anchoring.py`.
+
+REVIEW-069 | MEDIUM | Supervisor handoffs were not updating active_agent ownership
+Audit `7` then exposed a broader handoff-contract gap the repo had carried for
+some time: `TeamState` defines `active_agent` as the shared owner marker, but
+the star-topology supervisor was not updating it on clean routes, recovered
+reroutes, or `FINISH`. LangGraph's handoff guidance uses an owner-tracking
+state variable as the authoritative routing context across turns, so leaving it
+stale or blank creates a real shadow-contract drift between intended handoff
+state and actual graph state. The fix now stamps `active_agent` on supervisor
+routes and clears it on `FINISH`, so checkpointed handoff ownership matches the
+actual routed worker.
+Evidence anchors:
+`src/vaultspec_a2a/thread/state.py`,
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.

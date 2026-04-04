@@ -383,6 +383,7 @@ async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> No
     result = await node(state)
 
     assert result["next"] == "vaultspec-coder"
+    assert result["active_agent"] == "vaultspec-coder"
     assert result["pipeline_phase"] == "exec"
     assert "approval_status" in result
     assert result["approval_status"] is None
@@ -454,3 +455,26 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
     assert resumed["approval_status"] == "approved"
     assert "routing_error" in resumed
     assert resumed["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
+    """Completed routes should not leave a stale worker marked as active."""
+    model = _StaticSupervisorModel("FINISH")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+        active_feature=None,
+    )
+    state["active_agent"] = "vaultspec-coder"
+
+    result = await node(state)
+
+    assert result["next"] == "FINISH"
+    assert result["active_agent"] == ""

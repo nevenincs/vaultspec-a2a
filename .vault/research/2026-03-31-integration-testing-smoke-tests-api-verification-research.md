@@ -2156,6 +2156,29 @@ Evidence:
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+
+## REVIEW-069: supervisor handoffs must stamp active_agent ownership
+
+Audit `7` exposed a broader handoff-contract gap after `REVIEW-068`. This
+repo's shared `TeamState` already defines `active_agent`, and LangGraph's
+handoff guidance uses that kind of owner-tracking state variable as the
+authoritative route context across turns. But the supervisor node in the
+star-topology path was not updating `active_agent` on clean routes, recovered
+reroutes, or `FINISH`, so the checkpointed handoff owner could remain stale or
+blank even when the supervisor had already decided which worker owned the next
+turn. The fix stamps `active_agent` on supervisor routes and clears it on
+`FINISH` so checkpointed ownership matches the actual routed worker.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/thread/state.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
 
 ## REVIEW-066: routed worker phase must override artifact-derived phase during multi-agent handoff

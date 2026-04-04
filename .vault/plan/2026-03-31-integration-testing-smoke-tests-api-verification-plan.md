@@ -1259,6 +1259,22 @@ Scope and evidence:
 
 Verification:
 
+## REVIEW-069: supervisor handoffs must stamp active_agent ownership
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable handoff state: the shared owner marker
+`active_agent` must match the worker the supervisor actually routed to, and it
+must clear on `FINISH` so checkpointed ownership does not drift from the real
+graph route.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/thread/state.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
 

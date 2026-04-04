@@ -24,6 +24,11 @@ _logger = logging.getLogger(__name__)
 __all__ = ["create_supervisor_node"]
 
 
+def _active_agent_for_route(route: str) -> str:
+    """Return the shared-state owner marker for a routed supervisor decision."""
+    return "" if route == "FINISH" else route
+
+
 def _select_revision_worker(
     workers: list[str],
     worker_phase_map: dict[str, str] | None,
@@ -359,6 +364,7 @@ def create_supervisor_node(
         if decision.routing_error:
             return {
                 "next": decision.next_route,
+                "active_agent": _active_agent_for_route(decision.next_route),
                 "pipeline_phase": decision.inferred_phase,
                 "approval_status": None,
                 "approval_request_id": None,
@@ -379,8 +385,10 @@ def create_supervisor_node(
                 )
                 return {
                     "next": decision.next_route,
+                    "active_agent": _active_agent_for_route(decision.next_route),
                     "pipeline_phase": decision.inferred_phase,
                     "approval_status": ApprovalStatus.APPROVED,
+                    "approval_request_id": None,
                     "routing_error": None,
                 }
             revision_worker = _select_revision_worker(workers, worker_phase_map)
@@ -390,12 +398,14 @@ def create_supervisor_node(
             )
             return {
                 "next": revision_worker,
+                "active_agent": _active_agent_for_route(revision_worker),
                 "pipeline_phase": _phase_for_route(
                     revision_worker,
                     fallback_phase=decision.inferred_phase,
                     worker_phase_map=worker_phase_map,
                 ),
                 "approval_status": ApprovalStatus.REJECTED,
+                "approval_request_id": None,
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."
                 ),
@@ -410,6 +420,7 @@ def create_supervisor_node(
         }
         return {
             "next": decision.next_route,
+            "active_agent": _active_agent_for_route(decision.next_route),
             "pipeline_phase": decision.inferred_phase,
             "current_plan": [plan_entry],
             "approval_status": None,

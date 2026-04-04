@@ -24,6 +24,18 @@ _logger = logging.getLogger(__name__)
 __all__ = ["create_supervisor_node"]
 
 
+def _select_revision_worker(
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Prefer the plan-phase worker when a rejected exec plan needs revision."""
+    if worker_phase_map:
+        for worker in workers:
+            if worker_phase_map.get(worker) == "plan":
+                return worker
+    return workers[0] if workers else "FINISH"
+
+
 def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     """Parse the model response text into a route choice.
 
@@ -350,11 +362,13 @@ def create_supervisor_node(
                     "pipeline_phase": decision.inferred_phase,
                     "approval_status": ApprovalStatus.APPROVED,
                 }
+            revision_worker = _select_revision_worker(workers, worker_phase_map)
             _logger.info(
-                "plan rejected by user — rerouting to first worker for revision"
+                "plan rejected by user — rerouting to %r for revision",
+                revision_worker,
             )
             return {
-                "next": workers[0] if workers else "FINISH",
+                "next": revision_worker,
                 "pipeline_phase": decision.inferred_phase,
                 "approval_status": ApprovalStatus.REJECTED,
                 "routing_error": (

@@ -9,6 +9,7 @@ from vaultspec_a2a.thread.state import TeamState
 from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,
+    _select_revision_worker,
 )
 
 
@@ -245,6 +246,30 @@ def test_plan_approval_interrupt_skipped_in_autonomous_mode() -> None:
         autonomous=True,
     )
     assert result.plan_approval_request is None
+
+
+def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
+    worker = _select_revision_worker(
+        ["vaultspec-reviewer", "vaultspec-planner", "vaultspec-coder"],
+        {
+            "vaultspec-reviewer": "audit",
+            "vaultspec-planner": "plan",
+            "vaultspec-coder": "exec",
+        },
+    )
+    assert worker == "vaultspec-planner"
+
+
+def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
+    worker = _select_revision_worker(
+        ["vaultspec-analyst", "vaultspec-reviewer", "vaultspec-coder"],
+        {
+            "vaultspec-analyst": "research",
+            "vaultspec-reviewer": "audit",
+            "vaultspec-coder": "exec",
+        },
+    )
+    assert worker == "vaultspec-analyst"
 
 
 def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:

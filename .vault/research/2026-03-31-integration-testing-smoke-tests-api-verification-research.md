@@ -2107,3 +2107,29 @@ That does not mean the system is simple or risk-free. It means the strongest
 remaining risks have shifted away from persistence/public-state drift and into
 the next roadmap layers: supervisor plan-approval certification, multi-agent
 cooperation and re-briefing, sandbox/artifact behavior, and trace lineage.
+
+## REVIEW-065: rejected exec-plan re-briefs must route by phase ownership, not worker list order
+
+Audit `7` opened with a concrete supervisor handoff defect. After a rejected
+exec-phase plan approval, the supervisor node was hardcoding the re-brief path
+to `workers[0]`. That happened to work for the single-worker certification
+team, but it made multi-agent revision ownership depend on declaration order
+instead of the worker that owns the plan phase. LangGraph handoff guidance
+frames routing as persistent state-driven behavior across turns; the handoff
+contract should follow the state/phase model, not positional list order. The
+fix now prefers the worker mapped to the `plan` phase when a rejected exec
+plan needs revision, and only falls back to the first worker when no plan-
+phase worker exists.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `src/vaultspec_a2a/team/presets/teams/vaultspec-adaptive-coder.toml`
+- `src/vaultspec_a2a/team/presets/teams/vaultspec-continuous-audit.toml`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`

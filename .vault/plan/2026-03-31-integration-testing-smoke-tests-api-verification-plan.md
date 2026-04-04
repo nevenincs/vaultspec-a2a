@@ -1190,6 +1190,26 @@ The next primary execution fronts should now move forward:
 - Audit `8`: sandbox, artifact, and hostile-environment audit
 - Audit `9`: streaming/replay/trace lineage audit
 
+## REVIEW-065: rejected exec-plan re-briefs must prefer the plan-phase worker
+
+Keep this as the first bounded Audit `7` guardrail. The mission is
+deterministic, controllable multi-agent cooperation: when an exec-phase plan
+approval is rejected, the re-brief path must route to the worker that owns
+plan revision rather than whichever worker happens to be first in the star
+team declaration.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+- `src/vaultspec_a2a/team/presets/teams/vaultspec-adaptive-coder.toml`
+- `src/vaultspec_a2a/team/presets/teams/vaultspec-continuous-audit.toml`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+- `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

@@ -912,3 +912,19 @@ thread-state/summary surfaces now stop flattening or shadowing completed
 supervisor decisions. No stronger supervisor-owned public or operator-surface
 drift remained obvious in the bounded closeout scan, so the next active
 roadmap front moves to Audit `7` multi-agent cooperation and re-briefing.
+
+REVIEW-065 | MEDIUM | Rejected supervisor re-brief routing depended on worker list order instead of phase ownership
+Audit `7` opened with a concrete multi-agent handoff defect in the supervisor
+node. When an exec-phase plan approval was rejected, the re-brief path always
+rerouted to `workers[0]`. In single-worker certification this was harmless,
+but in real star teams it made revision ownership depend on list order rather
+than the plan-phase worker that should receive the re-brief. LangGraph handoff
+guidance treats routing as state-driven behavior across turns, not positional
+array luck. The fix now prefers the worker mapped to the `plan` phase when a
+rejected exec plan needs revision, and only falls back to the first worker
+when no plan-phase worker exists.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
+`src/vaultspec_a2a/team/presets/teams/vaultspec-adaptive-coder.toml`,
+`src/vaultspec_a2a/team/presets/teams/vaultspec-continuous-audit.toml`.

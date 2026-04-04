@@ -1970,6 +1970,30 @@ Evidence:
 - `src/vaultspec_a2a/graph/nodes/supervisor.py`
 - `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
 
+## REVIEW-062: supervisor rejection must carry revision context into the resumed worker path
+
+LangGraph's rejection semantics are feedback-bearing resumes, not just a false
+branch on the original interrupt. The rejection needs to survive checkpointed
+resume as explicit next-node context; otherwise the resumed worker falls back
+to the same privileged permission request path that the rejected plan was
+supposed to revise. For Audit `5`, the bounded hardening keeps this explicit:
+the anchoring context now includes rejected approval state and the routing
+note, the VidaiMock worker tape uses that anchored context to emit a revision
+message instead of requesting `session_request_permission`, and the compose
+service lane proves the real reject -> revise -> fresh `plan_approval_request`
+sequence before any privileged work resumes.
+
+Evidence:
+
+- `src/vaultspec_a2a/context/anchoring.py`
+- `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor`
+- `uv run ruff check src/vaultspec_a2a/context/anchoring.py src/vaultspec_a2a/context/tests/test_anchoring.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`

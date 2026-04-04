@@ -1,10 +1,22 @@
 """Tests for deterministic worker node helpers."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import pytest
+from langchain_core.messages import HumanMessage, SystemMessage
 
 from vaultspec_a2a.thread.errors import WorkerExecutionError
 
-from ...nodes.worker import _resolve_resume_option_id, _wrap_worker_exception
+if TYPE_CHECKING:
+    from vaultspec_a2a.thread.state import TeamState
+
+from ...nodes.worker import (
+    _build_worker_messages,
+    _resolve_resume_option_id,
+    _wrap_worker_exception,
+)
 
 
 def test_worker_exception_wraps_with_context() -> None:
@@ -59,3 +71,37 @@ def test_resolve_resume_option_id_rejects_missing_option_id_in_dict() -> None:
     options = [{"optionId": "approve"}, {"optionId": "reject_once"}]
     with pytest.raises(RuntimeError, match="option_id string"):
         _resolve_resume_option_id({"approved": True}, options)
+
+
+def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
+    """Rejected supervisor plans should add a deterministic revision instruction."""
+    state: TeamState = {
+        "messages": [HumanMessage(content="Implement the approved feature.")],
+        "active_agent": "mock-coder-human",
+        "artifacts": [],
+        "current_plan": [],
+        "thread_id": "thread-worker-reject",
+        "token_usage": {},
+        "next": "",
+        "active_feature": "audit-five-reject",
+        "approval_status": "rejected",
+        "routing_error": (
+            "Plan rejected by user — revise before proceeding to execution."
+        ),
+    }
+
+    messages = _build_worker_messages(
+        state=state,
+        system_prompt="You are a mock coder.",
+        workspace_root=None,
+    )
+
+    assert any(
+        isinstance(message, SystemMessage)
+        and (
+            "revise the implementation plan before requesting privileged "
+            "execution again"
+        )
+        in str(message.content)
+        for message in messages
+    )

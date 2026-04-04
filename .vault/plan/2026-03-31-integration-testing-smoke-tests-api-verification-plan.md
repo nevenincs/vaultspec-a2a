@@ -1109,6 +1109,26 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`
 - `uv run ruff check src/vaultspec_a2a/service_tests/test_permissions_resume.py`
 
+## REVIEW-062: supervisor rejection must revise before privileged permission can reappear
+
+Keep this as the next bounded Audit `5` guardrail. The mission is still
+deterministic, controllable supervisor certification on the real stack:
+rejecting a plan approval must feed revision context into the resumed worker
+path, must not collapse into a generic privileged permission request, and must
+re-enter a fresh supervisor-owned `plan_approval_request` before execution can
+continue.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/context/anchoring.py`
+- `src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor`
+- `uv run ruff check src/vaultspec_a2a/context/anchoring.py src/vaultspec_a2a/context/tests/test_anchoring.py src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

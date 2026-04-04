@@ -402,3 +402,87 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         "Permission approved. The privileged command completed successfully "
         "and the task is now finished."
     )
+
+
+def test_supervisor_plan_rejection_requires_revision_before_reapproval(
+    service_stack: ServiceStack,
+) -> None:
+    """Supervisor rejection should revise first, then require a fresh approval."""
+    feature_tag = "audit-five-reject"
+    workspace_root = service_stack.runtime_dir / "supervisor-plan-reject-workspace"
+    plan_dir = workspace_root / ".vault" / "plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / f"{feature_tag}-plan.md").write_text(
+        "# Audit 5 Plan\n\nExecute the approved implementation path.\n",
+        encoding="utf-8",
+    )
+
+    created = service_stack.create_thread(
+        initial_message="Implement the approved feature through the supervisor path.",
+        team_preset="mock-supervisor-human-in-loop",
+        title="service supervisor reject revise",
+        metadata={
+            "workspace_root": str(workspace_root),
+            "feature_tag": feature_tag,
+        },
+    )
+    thread_id = created["thread_id"]
+
+    first_plan_pause = _wait_for_pending_permission_matching(
+        service_stack,
+        thread_id,
+        description_contains="Approve plan for feature",
+    )
+    first_request = next(
+        permission
+        for permission in first_plan_pause["pending_permissions"]
+        if "Approve plan for feature" in str(permission.get("description", ""))
+    )
+    rejected = service_stack.respond_permission(
+        first_request["request_id"],
+        option_id=_select_option_id(first_request, label="reject"),
+    )
+    assert rejected["accepted"] is True
+    assert rejected["action_status"] == "accepted_not_applied"
+
+    second_plan_pause = _wait_for_pending_permission_matching(
+        service_stack,
+        thread_id,
+        description_contains="Approve plan for feature",
+    )
+    service_stack.record(
+        f"supervisor-plan-rejected-retry:{thread_id}",
+        second_plan_pause,
+    )
+    second_request = next(
+        permission
+        for permission in second_plan_pause["pending_permissions"]
+        if "Approve plan for feature" in str(permission.get("description", ""))
+    )
+    assert second_request["request_id"] != first_request["request_id"]
+    assert second_plan_pause["pause_cause"] == "plan_approval_request"
+    assert second_plan_pause["approval_status"] == "pending"
+    assert second_plan_pause["approval_request_id"] == second_request["request_id"]
+    assert second_request["tool_call"] == "plan_approval"
+    assert {option["option_id"] for option in second_request.get("options", [])} == {
+        "approve",
+        "reject",
+    }
+
+    assistant_messages = [
+        message
+        for message in second_plan_pause["messages"]
+        if message.get("role") == "assistant"
+    ]
+    assert any(
+        message.get("content")
+        == (
+            "Revising the implementation plan based on the rejection feedback "
+            "before asking for approval again."
+        )
+        for message in assistant_messages
+    )
+    assert not any(
+        permission.get("tool_call") == "session_request_permission"
+        for permission in second_plan_pause["pending_permissions"]
+    )

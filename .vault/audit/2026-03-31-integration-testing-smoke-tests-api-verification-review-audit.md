@@ -835,6 +835,21 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
 
+REVIEW-062 | MEDIUM | Supervisor rejection still needed deterministic revision context before re-approval
+Audit `5` then moved to the supervisor rejection branch. LangGraph's
+interrupt/replay contract treats rejection as feedback-bearing resume data, so
+the next node invocation must see enough context to revise rather than falling
+through to the generic privileged-permission path. The fix now pushes the
+rejected approval status and routing note into the worker-visible anchor,
+teaches the VidaiMock worker tape to emit a revision message under that
+context, and proves on the real stack that rejecting the first
+`plan_approval_request` causes a revision step and a fresh supervisor-owned
+plan-approval request before any worker permission request appears.
+Evidence anchors:
+`src/vaultspec_a2a/context/anchoring.py`,
+`src/vaultspec_a2a/team/presets/mock/tapes/templates/mock-coder-human-chat.json.j2`,
+`src/vaultspec_a2a/service_tests/test_permissions_resume.py`.
+
 AUDIT-6 CLOSEOUT | Persistence/public-state burn-down is functionally complete
 After `REVIEW-060`, no stronger persistence/public-state or operator-surface
 drift remained obvious in the audited REST, MCP, team-status, thread-state,

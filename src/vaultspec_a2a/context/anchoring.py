@@ -38,6 +38,14 @@ def build_anchoring_context(state: TeamState) -> str | None:
     if phase:
         lines.append(f"- **Phase:** {phase}")
 
+    approval_status = state.get("approval_status")
+    if approval_status:
+        lines.append(f"- **Approval Status:** {approval_status}")
+
+    routing_error = state.get("routing_error")
+    if routing_error:
+        lines.append(f"- **Routing Note:** {routing_error}")
+
     vault_index: dict[str, list[str]] = state.get("vault_index") or {}
     if vault_index:
         lines.append("\n### Available Vault Documents")

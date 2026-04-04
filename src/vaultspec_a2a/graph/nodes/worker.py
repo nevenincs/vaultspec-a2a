@@ -65,6 +65,19 @@ def _build_worker_messages(
     if mounted:
         messages.append(SystemMessage(content=mounted))
     messages.extend(working_state["messages"])
+    if (
+        state.get("approval_status") == "rejected"
+        and isinstance(state.get("routing_error"), str)
+        and "Plan rejected by user" in state["routing_error"]
+    ):
+        messages.append(
+            SystemMessage(
+                content=(
+                    "Plan rejected by user — revise the implementation plan "
+                    "before requesting privileged execution again."
+                )
+            )
+        )
     return messages
 
 

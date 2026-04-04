@@ -52,7 +52,7 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'agent_message') {
                 entry.content += event.content;
@@ -96,7 +96,7 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'thought') {
                 entry.content += event.content;
@@ -179,7 +179,7 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'tool_call') {
                 if (event.status) entry.status = mapToolCallStatus(event.status);

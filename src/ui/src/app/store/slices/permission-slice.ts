@@ -22,6 +22,8 @@ export const createPermissionSlice: StateCreator<
   pushPermission: (wireEvent) =>
     set(
       (draft) => {
+        // Dedup: skip if this request_id is already queued (server re-delivery)
+        if (draft.permissionQueue.some((p) => p.id === wireEvent.request_id)) return;
         draft.permissionQueue.push(
           mapPermissionRequest(wireEvent, draft._agentDisplayNames),
         );

@@ -127,6 +127,37 @@ Forward-looking infrastructure for palette switching.
 PKG-001 | INFO | No generate-types script in package.json
 openapi-typescript regen command only documented in wire-types.ts header.
 
+## Round 3 — deep edge cases (2026-04-04)
+
+PERM-DEDUP | MEDIUM | **FIXED** pushPermission allows duplicate request_id
+`permission-slice.ts`: no dedup guard. Server re-delivery after reconnect
+creates duplicate permission cards. Fix: added `.some()` check on
+`request_id` before pushing.
+
+CHUNK-BOUNDS | MEDIUM | **FIXED** Stale chunk index after hydration
+`stream-slice.ts`: handleWireEvent reads `_chunkIndex` outside the draft,
+then mutates at `existing.idx` inside the draft. If the array was replaced
+by hydration between read and write, `idx` could be out of bounds. Fix:
+added `existing.idx >= arr.length` bounds check inside the draft for
+message_chunk, thought_chunk, and tool_call_update.
+
+WS-GAP | MEDIUM | Events during reconnect window permanently lost
+`websocket-client.ts`: after reconnect, re-subscribe does not include
+last known sequence numbers. Server cannot replay missed events. For
+already-populated threads, `useThreadStateQuery` won't re-fire (guarded
+by `hasEvents`). **Out of scope** — requires protocol-level gap recovery.
+
+WS-CONTROL-DROP | MEDIUM | sendAgentControl silently drops during reconnect
+`websocket-client.ts:send()`: silent no-op when socket not OPEN. UI uses
+REST for messages (safe), but agent control commands via WS would be lost
+during reconnect. **Out of scope** — needs command acknowledgement design.
+
+MEMORY-UNBOUNDED | MEDIUM | streamEvents grow unboundedly per open tab
+No upper bound or pruning for `streamEvents[threadId]` or `_chunkIndex`.
+Long-running agent threads with heavy tool-call activity accumulate
+indefinitely. Cleanup only on tab close. **Out of scope** — needs pruning
+strategy decision (LRU, cap, archive).
+
 ### Out of scope — backend or future work
 
 BACKEND-PERM-001 | MEDIUM | `get_pending_permission_requests` lacks order_by

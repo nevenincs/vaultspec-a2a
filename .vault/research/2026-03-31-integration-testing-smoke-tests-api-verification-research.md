@@ -1930,6 +1930,51 @@ supervisor plan-approval certification and Audit `7` multi-agent
 cooperation and re-briefing rather than continuing to slice the same
 boundary.
 
+## Audit 5 slice 1: certify the supervisor-owned pause contract
+
+The first Audit `5` service-certification slice strengthens the existing
+real-stack supervisor approval scenario rather than broadening the matrix.
+The service test now asserts the supervisor-owned contract directly:
+
+- the first pause is `plan_approval_request`
+- mirrored approval metadata stays aligned with that pending request
+- the permission tool call is `plan_approval`
+- the option set is the supervisor-owned `{approve, reject}` pair
+- the later worker-owned permission pause is distinct and remains separately
+  controllable
+
+This keeps the audit focused on the supervisor boundary that is specific to the
+LangGraph-driven orchestration layer, instead of treating both pauses as
+undifferentiated permission events.
+
+Evidence:
+
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`
+
+## REVIEW-061: supervisor plan-approval service certification now asserts the supervisor-owned contract directly
+
+LangGraph human-in-the-loop checkpoints are not just generic permission
+pauses. The real-stack supervisor certification now checks the
+supervisor-owned plan-approval pause explicitly, then distinguishes it from
+the later worker-owned permission pause that follows plan approval. That
+keeps the service lane aligned with the actual supervisory contract instead
+of treating all pauses as the same kind of actionable work.
+
+Evidence:
+
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`
+- `uv run ruff check src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
 ## Audit 6 closeout
 
 After `REVIEW-060`, no stronger persistence/public-state or operator-surface

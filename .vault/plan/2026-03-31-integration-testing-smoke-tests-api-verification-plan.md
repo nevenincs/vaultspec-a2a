@@ -1090,6 +1090,25 @@ surfaces, and the next primary execution fronts should move forward:
 - Audit `8`: sandbox, artifact, and hostile-environment audit
 - Audit `9`: streaming/replay/trace lineage audit
 
+## REVIEW-061: supervisor plan-approval service certification now asserts the supervisor-owned contract directly
+
+Keep this as a bounded Audit `5` guardrail. The mission is to certify the
+supervisor-owned plan-approval contract on the real stack, not merely prove
+that a thread can eventually finish after multiple pauses. The first pause
+must be validated as a supervisor plan-approval interrupt, and the later
+worker-owned permission pause must remain a separate boundary.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service -k supervisor_plan_approval_pause_can_resume_through_real_stack`
+- `uv run ruff check src/vaultspec_a2a/service_tests/test_permissions_resume.py`
+
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 
 Keep this as a separate bounded Audit `6` guardrail. The mission is

@@ -342,6 +342,15 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         for permission in plan_paused["pending_permissions"]
         if "Approve plan for feature" in str(permission.get("description", ""))
     )
+    assert plan_paused["status"] == "input_required"
+    assert plan_paused["pause_cause"] == "plan_approval_request"
+    assert plan_paused["approval_status"] == "pending"
+    assert plan_paused["approval_request_id"] == plan_request["request_id"]
+    assert plan_request["tool_call"] == "plan_approval"
+    assert {option["option_id"] for option in plan_request.get("options", [])} == {
+        "approve",
+        "reject",
+    }
     plan_response = service_stack.respond_permission(
         plan_request["request_id"],
         option_id=_select_option_id(plan_request, label="approve"),
@@ -361,6 +370,14 @@ def test_supervisor_plan_approval_pause_can_resume_through_real_stack(
         for permission in worker_paused["pending_permissions"]
         if "Permission required" in str(permission.get("description", ""))
     )
+    assert worker_paused["status"] == "input_required"
+    assert worker_paused["pause_cause"] == "session_request_permission"
+    assert worker_request["request_id"] != plan_request["request_id"]
+    assert worker_request["tool_call"] == "session_request_permission"
+    assert {option["option_id"] for option in worker_request.get("options", [])} == {
+        "approve",
+        "reject_once",
+    }
     worker_response = service_stack.respond_permission(
         worker_request["request_id"],
         option_id=_select_option_id(worker_request, label="approve"),

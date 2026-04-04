@@ -811,6 +811,30 @@ exposes checkpoint-authority degradation instead of hiding it behind raw
 status. The next active fronts are Audit `5` supervisor plan-approval
 certification and Audit `7` multi-agent cooperation and re-briefing.
 
+Audit 5 slice 1
+The first supervisor-certification slice hardens the existing real-stack
+service scenario instead of introducing a new synthetic path. The service test
+now proves that the first pause is supervisor-owned plan approval with the
+expected pause cause, approval metadata, tool call, and option set, and that
+the later worker-owned permission pause is distinct and still controllable.
+This keeps Audit `5` focused on certifying the supervisor boundary itself
+rather than merely observing eventual completion after two generic pauses.
+
+REVIEW-061 | MEDIUM | Supervisor plan-approval service certification still treated the first pause like a generic permission
+Audit `5` now starts with a service-certification tightening pass rather than a
+new harness. The real-stack supervisor approval scenario was already proving
+that the thread could eventually complete after two pauses, but it was not yet
+asserting the first pause as a supervisor-owned `plan_approval_request`
+boundary. The service test now validates the first pause directly via
+`pause_cause`, `approval_status`, `approval_request_id`, `tool_call`, and the
+expected approve/reject option set, then asserts the later worker-owned
+permission pause separately so the supervisor boundary is not conflated with
+generic worker permission handling.
+Evidence anchors:
+`src/vaultspec_a2a/service_tests/test_permissions_resume.py`,
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
 AUDIT-6 CLOSEOUT | Persistence/public-state burn-down is functionally complete
 After `REVIEW-060`, no stronger persistence/public-state or operator-surface
 drift remained obvious in the audited REST, MCP, team-status, thread-state,

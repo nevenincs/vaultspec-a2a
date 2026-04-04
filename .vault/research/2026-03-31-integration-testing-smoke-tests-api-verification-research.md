@@ -2361,3 +2361,25 @@ context. It is not a proven live bug in the current graph path because the
 active runtime handoff path remains grounded in persisted/checkpoint-backed
 state, but it should stay on watch because promoting the helper into a live
 handoff surface later could reintroduce owner-vs-context drift.
+
+## REVIEW-075: hard delete must purge thread-scoped checkpoint state
+
+Audit `8` found that the delete path only proved the gateway row was removed
+and that a root-namespace checkpoint lookup no longer returned state for the
+thread. That does not satisfy LangGraph's thread-scoped persistence model.
+A correct hard delete must purge all checkpoint state for the `thread_id`,
+including subgraph namespaces and checkpoint history, not just absence of
+`checkpoint_ns=""`. If any thread-scoped checkpoint state survives, the
+application can report the thread as deleted while LangGraph still retains
+resumable or inspectable state for that same `thread_id`.
+
+The grounding is the same checkpoint-first contract used elsewhere in the
+audit trail: checkpoints are thread-scoped, `thread_id` is the durable pointer
+used to save and resume state, and `get_state` / `get_state_history` operate
+over that persisted thread state. The delete boundary therefore has to fail
+closed across the full thread scope, not just a single namespace probe.
+
+Sources:
+
+- https://docs.langchain.com/oss/python/langgraph/persistence
+- https://docs.langchain.com/langsmith/use-remote-graph#persist-state-at-the-thread-level

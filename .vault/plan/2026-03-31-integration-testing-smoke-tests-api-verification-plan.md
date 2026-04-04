@@ -502,6 +502,10 @@ Scope and evidence:
 
 Verification:
 
+- Prove the delete path removes the gateway row and the full thread-scoped
+  LangGraph checkpoint state for the same `thread_id`, not just the root
+  `checkpoint_ns=""` tuple.
+
 - `uv run pytest src/vaultspec_a2a/api/tests/test_endpoints.py -q -k "failed_resume_dispatch_restores_permission_to_pending or rejects_permission_request_when_thread_terminal or stale_permission_request_when_newer_interrupt_exists"`
 - `uv run pytest src/vaultspec_a2a/control/tests/test_dispatch_failure_transitions.py -q`
 - `uv run pytest src/vaultspec_a2a/service_tests/test_permissions_resume.py -q -m service`
@@ -1350,6 +1354,22 @@ fix. Keep `src/vaultspec_a2a/context/token_budget.py::prepare_handoff()` as a
 watch item because it still omits phase, vault, and approval-state fields from
 handoff context; it is not a proven bug in the current runtime path, but it
 could reintroduce drift if promoted into a live handoff surface later.
+
+## REVIEW-075: hard delete must purge thread-scoped checkpoint state
+
+Keep this as the next bounded Audit `8` guardrail. The mission is
+deterministic destructive-action hygiene: hard delete must remove the full
+thread-scoped LangGraph checkpoint state for the `thread_id`, not just prove
+absence of the root checkpoint namespace.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/control/thread_service.py`
+- `src/vaultspec_a2a/api/routes/threads.py`
+- `src/vaultspec_a2a/api/tests/test_endpoints.py`
+- `src/vaultspec_a2a/database/checkpoints.py`
+
+Verification:
 
 ## REVIEW-052: MCP delete must fail closed with a usable tool error on non-terminal threads
 

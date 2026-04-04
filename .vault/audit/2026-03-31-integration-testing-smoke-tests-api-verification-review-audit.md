@@ -1074,3 +1074,19 @@ untrusted. The fix now tracks whether a corrupted plan-approval row was seen
 during the loop and suppresses approval re-projection when that flag is set,
 keeping approval metadata cleared and the degradation authoritative. Evidence
 anchors: `src/vaultspec_a2a/control/projection.py`.
+
+REVIEW-075 | MEDIUM | Hard delete must purge thread-scoped checkpoint state, not just the root namespace
+Audit `8` found that the hard-delete path was only proving the gateway row
+was removed and that the root checkpoint namespace was absent for the thread.
+LangGraph persistence is thread-scoped: a correct delete must purge all
+checkpoint state for the `thread_id`, including subgraph namespaces and
+history, not just a single `checkpoint_ns=""` lookup. The risk is a thread
+that appears deleted in the gateway DB while LangGraph still retains
+resumable or inspectable state for the same `thread_id`. The fix should keep
+the delete boundary fail-closed by clearing the full thread-scoped checkpoint
+record, with coverage that verifies the purge across checkpoint namespaces and
+history, not only the root tuple. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/routes/threads.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`,
+`src/vaultspec_a2a/database/checkpoints.py`.

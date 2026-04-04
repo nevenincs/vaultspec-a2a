@@ -364,7 +364,7 @@ def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:
 
 @pytest.mark.asyncio
 async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> None:
-    """Recovered handoffs must not keep stale routing notes in graph state."""
+    """Recovered handoffs must not keep stale approval/routing state."""
     model = _StaticSupervisorModel("vaultspec-coder")
     node = create_supervisor_node(
         model=model,
@@ -376,14 +376,50 @@ async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> No
     state = _make_state_for_phase_gate(
         vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
     )
+    state["approval_status"] = "rejected"
+    state["approval_request_id"] = "approval-1"
     state["routing_error"] = "Plan rejected by user — revise before proceeding."
 
     result = await node(state)
 
     assert result["next"] == "vaultspec-coder"
     assert result["pipeline_phase"] == "exec"
+    assert "approval_status" in result
+    assert result["approval_status"] is None
+    assert "approval_request_id" in result
+    assert result["approval_request_id"] is None
     assert "routing_error" in result
     assert result["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
+    """Routing failures must not preserve stale approval residue."""
+    model = _StaticSupervisorModel("I have no idea what to do next!")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+    )
+    state["approval_status"] = "rejected"
+    state["approval_request_id"] = "approval-1"
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    result = await node(state)
+
+    assert result["next"] == "FINISH"
+    assert "approval_status" in result
+    assert result["approval_status"] is None
+    assert "approval_request_id" in result
+    assert result["approval_request_id"] is None
+    assert "routing_error" in result
+    assert result["routing_error"] is not None
+    assert "I have no idea" in result["routing_error"]
 
 
 @pytest.mark.asyncio

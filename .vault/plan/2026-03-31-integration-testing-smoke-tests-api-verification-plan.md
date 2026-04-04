@@ -1243,6 +1243,22 @@ Scope and evidence:
 
 Verification:
 
+## REVIEW-068: clean supervisor routes must clear stale approval residue
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable re-briefing: once the supervisor has cleanly
+rerouted ownership, stale `approval_status` and `approval_request_id` values
+from an earlier plan-approval exchange must not remain in shared graph state
+and leak into later worker handoffs.
+
+Scope and evidence:
+
+- `src/vaultspec_a2a/context/anchoring.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
 

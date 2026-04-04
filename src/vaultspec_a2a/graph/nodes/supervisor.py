@@ -360,6 +360,8 @@ def create_supervisor_node(
             return {
                 "next": decision.next_route,
                 "pipeline_phase": decision.inferred_phase,
+                "approval_status": None,
+                "approval_request_id": None,
                 "routing_error": decision.routing_error,
             }
 
@@ -410,6 +412,8 @@ def create_supervisor_node(
             "next": decision.next_route,
             "pipeline_phase": decision.inferred_phase,
             "current_plan": [plan_entry],
+            "approval_status": None,
+            "approval_request_id": None,
             "routing_error": None,
         }
 

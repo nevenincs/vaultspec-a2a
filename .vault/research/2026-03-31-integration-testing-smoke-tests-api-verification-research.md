@@ -2132,6 +2132,30 @@ Evidence:
 Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
+
+## REVIEW-068: clean supervisor routes must clear stale approval residue
+
+Audit `7` exposed the adjacent handoff-state problem after `REVIEW-067`. The
+supervisor's clean-route path was still omitting `approval_status` and
+`approval_request_id`, which meant the shared checkpoint state retained old
+plan-approval residue by default. LangGraph handoff guidance treats route and
+owner state as the source of truth across turns, so later worker handoffs
+should not inherit obsolete approval outcomes once the supervisor has already
+cleanly rerouted the workflow. In this codebase that mattered because worker
+anchoring reads approval state directly from shared graph state. The fix clears
+stale approval residue on clean supervisor routes so re-brief context matches
+the current routed owner rather than a previous approval exchange.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/context/anchoring.py`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
+- `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
 
 ## REVIEW-066: routed worker phase must override artifact-derived phase during multi-agent handoff

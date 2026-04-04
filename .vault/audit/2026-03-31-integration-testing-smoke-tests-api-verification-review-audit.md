@@ -963,3 +963,17 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
 `src/vaultspec_a2a/thread/state.py`.
+
+REVIEW-068 | MEDIUM | Clean supervisor routes preserved stale approval residue
+Audit `7` exposed the adjacent handoff-state leak after `REVIEW-067`. The
+supervisor's clean-route return path still omitted `approval_status` and
+`approval_request_id`, so LangGraph preserved previously rejected or already
+consumed plan-approval residue in checkpoint state. That left later worker
+handoffs and re-briefing context reading obsolete approval state even after the
+supervisor had cleanly rerouted ownership. The fix now clears stale approval
+residue on clean supervisor routes so recovered multi-agent handoffs do not
+carry old plan-approval state into subsequent worker turns.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`,
+`src/vaultspec_a2a/context/anchoring.py`.

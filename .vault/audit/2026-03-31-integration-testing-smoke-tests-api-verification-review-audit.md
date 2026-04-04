@@ -1039,19 +1039,18 @@ Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
 
-REVIEW-073 | LOW | `_PLAN_APPROVAL_PAUSE_CAUSES` duplicated as local set in `thread_service.py`
-Cross-phase code review found that `list_threads_service` in
-`src/vaultspec_a2a/control/thread_service.py` re-defined
-`_PLAN_APPROVAL_PAUSE_CAUSES` as a local `set` literal instead of importing
-the canonical `frozenset` from `src/vaultspec_a2a/thread/snapshots.py`. The
-values matched (`PermissionType.PLAN_APPROVAL.value` and
-`"plan_approval_request"`), so there was no correctness drift, but it created
-a maintenance seam where a third pause cause could be added to one definition
-but not the other. The fix replaces the local definition with an alias of the
-canonical import, matching the pattern already used in `projection.py` and
-`permission_service.py`. Evidence anchors:
-`src/vaultspec_a2a/control/thread_service.py`,
-`src/vaultspec_a2a/thread/snapshots.py`.
+REVIEW-073 | MEDIUM | Worker turns could reuse approved exec gate residue after the unlocked turn
+Audit `7` exposed a multi-agent handoff leak in the exec-gate path. An
+approved exec gate must be consumed by the specific worker turn it unlocked,
+not survive into later worker turns, re-briefs, or handoffs as if that
+approval were still reusable. If the approved residue persists, later
+multi-agent flows can silently over-authorize downstream work, skip a fresh
+plan/exec gate, and cross the intended human-in-the-loop boundary without a
+new approval. The fix now consumes approved exec-gate residue in the unlocked
+worker turn so later turns do not inherit a stale grant as reusable authority.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/worker.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`.
 
 REVIEW-074 | MEDIUM | Corrupted plan-approval row could be shadowed by a later valid plan-approval projection
 Cross-phase code review found that `enrich_snapshot_from_durable_state` in

@@ -2326,3 +2326,27 @@ Verification:
 
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+## REVIEW-073: worker turns must consume approved exec gate residue
+
+Audit `7` exposed the next adjacent handoff-state problem in the worker exec
+gate flow. An approved exec gate is action-scoped interrupt/resume state for
+the specific paused worker turn it unlocked, not a durable general grant that
+later worker turns, re-briefs, or handoffs may reuse. If that approved residue
+survives past the unlocked turn, downstream multi-agent flows can silently
+over-authorize later work, skip a fresh exec gate, and violate the intended
+human-in-the-loop boundary.
+
+The LangGraph and LangChain grounding is the same checkpoint-first contract
+behind the earlier Audit `7` findings. Human-in-the-loop approvals belong to a
+specific paused action on a specific thread and must be consumed when that
+action resumes. The repo now enforces that in the worker turn path by consuming
+approved exec-gate residue in `worker.py`, with the integration coverage
+locking the handoff semantics at the worker boundary.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langgraph/interrupts`
+- `https://docs.langchain.com/oss/python/langchain/human-in-the-loop`
+- `src/vaultspec_a2a/graph/nodes/worker.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_worker_integration.py`

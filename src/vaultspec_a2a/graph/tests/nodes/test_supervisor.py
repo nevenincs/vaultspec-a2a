@@ -208,8 +208,10 @@ def test_supervisor_validation_error_gate_blocks_finish() -> None:
         "FINISH",
         workers=["planner", "coder"],
         state=_make_state_with_errors(["missing return type", "unused import"]),
+        worker_phase_map={"planner": "plan", "coder": "exec"},
     )
     assert result.next_route == "planner"
+    assert result.inferred_phase == "plan"
     assert result.routing_error is not None
     assert "FINISH blocked" in result.routing_error
 
@@ -228,8 +230,10 @@ def test_review_gate_blocks_finish_when_exec_done_no_audit() -> None:
             exec_paths=[".vault/exec/my-feature/step-001.md"],
             audit_paths=[],
         ),
+        worker_phase_map={"planner": "plan", "reviewer": "audit"},
     )
-    assert result.next_route == "planner"
+    assert result.next_route == "reviewer"
+    assert result.inferred_phase == "audit"
     assert "FINISH blocked" in result.routing_error
 
 
@@ -254,6 +258,7 @@ def test_phase_gate_hard_blocks_exec_without_plan() -> None:
         state=_make_state_for_phase_gate(vault_index={}),
         worker_phase_map={"coder": "exec", "planner": "plan"},
     )
+    assert result.inferred_phase == "exec"
     assert result.routing_error is not None
     assert "plan" in result.routing_error
 

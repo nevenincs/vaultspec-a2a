@@ -1296,6 +1296,21 @@ Verification:
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py src/vaultspec_a2a/thread/state.py`
 
+## REVIEW-072: missing-review FINISH gates must reroute to the audit-phase owner
+
+Keep this as the next bounded Audit `7` guardrail. The mission is
+deterministic, controllable re-briefing: when FINISH is blocked because exec
+work exists but the audit artifact is still missing, the supervisor must
+reroute to the audit-phase owner rather than the first worker in the list.
+
+Scope and evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
 ## REVIEW-071: consumed supervisor approval requests must clear on resume
 
 Keep this as the next bounded Audit `7` guardrail. The mission is

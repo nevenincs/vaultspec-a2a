@@ -1024,3 +1024,46 @@ handoff state cannot keep a consumed plan-approval request alive.
 Evidence anchors:
 `src/vaultspec_a2a/graph/nodes/supervisor.py`,
 `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
+REVIEW-072 | MEDIUM | Missing-review FINISH gates routed to the first worker instead of the audit-phase owner
+Audit `7` exposed a multi-agent ownership error in the blocked-FINISH path.
+When exec work existed but the review artifact was still missing, the
+supervisor rerouted to the first worker rather than the audit-phase owner.
+That meant the next turn could go to the wrong specialist, `next` and
+`active_agent` could point at a worker that did not satisfy the blocked-finish
+condition, and the workflow could loop or re-brief the wrong agent instead of
+producing the missing audit output. The fix now reroutes blocked-FINISH
+review cases to the audit-phase owner so the next handoff matches the actual
+missing work.
+Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`.
+
+REVIEW-073 | LOW | `_PLAN_APPROVAL_PAUSE_CAUSES` duplicated as local set in `thread_service.py`
+Cross-phase code review found that `list_threads_service` in
+`src/vaultspec_a2a/control/thread_service.py` re-defined
+`_PLAN_APPROVAL_PAUSE_CAUSES` as a local `set` literal instead of importing
+the canonical `frozenset` from `src/vaultspec_a2a/thread/snapshots.py`. The
+values matched (`PermissionType.PLAN_APPROVAL.value` and
+`"plan_approval_request"`), so there was no correctness drift, but it created
+a maintenance seam where a third pause cause could be added to one definition
+but not the other. The fix replaces the local definition with an alias of the
+canonical import, matching the pattern already used in `projection.py` and
+`permission_service.py`. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/thread/snapshots.py`.
+
+REVIEW-074 | MEDIUM | Corrupted plan-approval row could be shadowed by a later valid plan-approval projection
+Cross-phase code review found that `enrich_snapshot_from_durable_state` in
+`src/vaultspec_a2a/control/projection.py` could re-set
+`approval_status=PENDING` from a later valid durable plan-approval row even
+after an earlier corrupted plan-approval row had already degraded the snapshot
+to `OPERATOR_INTERVENTION_REQUIRED` and cleared approval metadata. That left
+the snapshot internally inconsistent: the degraded reason
+`permission_projection_unreadable` was present alongside an apparently
+actionable pending approval. LangGraph's checkpoint-first contract requires
+public state to fail closed when any part of the durable permission chain is
+untrusted. The fix now tracks whether a corrupted plan-approval row was seen
+during the loop and suppresses approval re-projection when that flag is set,
+keeping approval metadata cleared and the degradation authoritative. Evidence
+anchors: `src/vaultspec_a2a/control/projection.py`.

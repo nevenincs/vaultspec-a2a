@@ -2298,5 +2298,31 @@ Evidence:
 
 Verification:
 
+## REVIEW-072: missing-review FINISH gates must reroute to the audit-phase owner
+
+Audit `7` exposed a multi-agent ownership error in the blocked-FINISH path.
+When exec work existed but the audit artifact was still missing, the
+supervisor rerouted to the first worker instead of the audit-phase owner. That
+meant the next turn could go to the wrong specialist, `next` and
+`active_agent` could point at a worker that did not satisfy the blocked-finish
+condition, and the workflow could loop or re-brief the wrong agent instead of
+producing the missing audit output.
+
+The grounding here is the LangChain multi-agent handoff guidance. Handoffs are
+about transferring control to the specialist who should own the next subtask,
+so a blocked-FINISH review gap should route to the audit/review owner rather
+than an arbitrary first worker.
+
+The fix reroutes blocked-FINISH review cases to the audit-phase owner so the
+next handoff matches the actual missing work.
+
+Evidence:
+
+- `https://docs.langchain.com/oss/python/langchain/multi-agent/handoffs`
+- `src/vaultspec_a2a/graph/nodes/supervisor.py`
+- `src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`
+
+Verification:
+
 - `uv run pytest src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py -q`
 - `uv run ruff check src/vaultspec_a2a/graph/nodes/supervisor.py src/vaultspec_a2a/graph/tests/nodes/test_supervisor.py`

@@ -35,7 +35,6 @@ from ..database import (
     update_thread_status,
 )
 from ..graph.compiler import build_initial_vault_index
-from ..graph.enums import PermissionType
 from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
@@ -49,7 +48,7 @@ from ..thread.enums import (
 )
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
-from ..thread.snapshots import project_checkpoint_tuple
+from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
 from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
@@ -79,10 +78,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-_PLAN_APPROVAL_PAUSE_CAUSES = {
-    PermissionType.PLAN_APPROVAL.value,
-    "plan_approval_request",
-}
+_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 
 
 def _degrade_stale_execution_state_summary(

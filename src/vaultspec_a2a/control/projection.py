@@ -393,6 +393,7 @@ async def enrich_snapshot_from_durable_state(
         snapshot.approval_request_id = None
         return snapshot
 
+    corrupted_plan_approval = False
     if durable_permissions:
         if snapshot.pause_cause is None:
             snapshot.pause_cause = durable_permissions[0].pause_reason_type
@@ -417,6 +418,7 @@ async def enrich_snapshot_from_durable_state(
                 if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
                     snapshot.approval_status = None
                     snapshot.approval_request_id = None
+                    corrupted_plan_approval = True
                 continue
             snapshot.pending_permissions.append(projected)
     projected_plan_approvals = [
@@ -427,7 +429,10 @@ async def enrich_snapshot_from_durable_state(
             or permission.tool_call == PermissionType.PLAN_APPROVAL.value
         )
     ]
-    if projected_plan_approvals:
+    if corrupted_plan_approval:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+    elif projected_plan_approvals:
         snapshot.approval_status = ApprovalStatus.PENDING
         snapshot.approval_request_id = projected_plan_approvals[-1].request_id
     elif snapshot.approval_status is not None:

@@ -42,9 +42,18 @@ def _select_revision_worker(
     worker_phase_map: dict[str, str] | None,
 ) -> str:
     """Prefer the plan-phase worker when a rejected exec plan needs revision."""
+    return _select_phase_worker("plan", workers, worker_phase_map)
+
+
+def _select_phase_worker(
+    target_phase: str,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Return the worker that owns *target_phase*, falling back to the first worker."""
     if worker_phase_map:
         for worker in workers:
-            if worker_phase_map.get(worker) == "plan":
+            if worker_phase_map.get(worker) == target_phase:
                 return worker
     return workers[0] if workers else "FINISH"
 
@@ -81,6 +90,7 @@ def _check_finish_blocked(
     vault_index: dict[str, list[str]],
     workers: list[str],
     inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
 ) -> dict[str, Any] | None:
     """Check if FINISH should be blocked due to validation errors or missing review.
 
@@ -109,9 +119,9 @@ def _check_finish_blocked(
         _logger.warning(
             "supervisor blocked FINISH: no review"
             " artifact in vault_index['audit']"
-            " — rerouting to first available worker",
+            " — rerouting to audit-phase worker",
         )
-        next_route = workers[0] if workers else "FINISH"
+        next_route = _select_phase_worker("audit", workers, worker_phase_map)
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,
@@ -201,11 +211,22 @@ def _evaluate_supervisor_response(
         )
 
     if next_route == "FINISH":
-        blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
+        blocked = _check_finish_blocked(
+            state,
+            vault_index,
+            workers,
+            inferred_phase,
+            worker_phase_map,
+        )
         if blocked is not None:
+            blocked_route = cast("str", blocked["next"])
             return _SupervisorDecision(
-                next_route=cast("str", blocked["next"]),
-                inferred_phase=cast("str", blocked["pipeline_phase"]),
+                next_route=blocked_route,
+                inferred_phase=_phase_for_route(
+                    blocked_route,
+                    fallback_phase=cast("str", blocked["pipeline_phase"]),
+                    worker_phase_map=worker_phase_map,
+                ),
                 routing_error=cast("str", blocked["routing_error"]),
             )
 
@@ -221,7 +242,11 @@ def _evaluate_supervisor_response(
                 )
                 return _SupervisorDecision(
                     next_route=next_route,
-                    inferred_phase=inferred_phase,
+                    inferred_phase=_phase_for_route(
+                        next_route,
+                        fallback_phase=inferred_phase,
+                        worker_phase_map=worker_phase_map,
+                    ),
                     routing_error=gate_result.message,
                 )
 

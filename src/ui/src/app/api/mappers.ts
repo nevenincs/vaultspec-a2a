@@ -7,10 +7,10 @@
 
 import type { components } from '../data/wire-types';
 import type {
-  WsAgentSummary,
+  AgentSummary as WsAgentSummary,
   PermissionRequestEvent,
-  WsPermissionOption,
-} from '../data/wire-types';
+  PermissionOption as WsPermissionOption,
+} from '../data/ws-types';
 
 type WireThreadSummary = components['schemas']['ThreadSummary'];
 type AgentStatusEntry = components['schemas']['AgentStatusEntry'];

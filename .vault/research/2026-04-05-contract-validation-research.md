@@ -112,22 +112,54 @@ For WS events: a Zod/Valibot schema generated alongside TypeScript types
 would replace the `as ServerEvent` cast with a parse call. Cost: ~0.5ms
 per event parse at WS event volumes — negligible.
 
-### 5. Recommended strategy for this project
+### 5. JSON Schema → TypeScript tooling assessment
+
+Deep research on all viable tools for converting Pydantic JSON Schema
+output (discriminated unions with `const` fields) to TypeScript:
+
+| Tool | Status | const | oneOf | CLI | Verdict |
+|------|--------|-------|-------|-----|---------|
+| json-schema-to-typescript | 15mo stale | Yes | Partial | Yes | Functional but maintenance risk |
+| quicktype | Sporadic | Broken | Broken | Yes | Disqualified |
+| json-schema-to-zod | Unmaintained (Mar 2026) | Yes | Yes | Yes | Dead dependency |
+| json-schema-to-ts | 19mo stale | Yes | Yes | No | No CLI, type-level only |
+| @hey-api/openapi-ts | Very active | N/A | N/A | Yes | Requires OpenAPI wrapper |
+| pydantic-to-typescript | Abandoned | Wraps json2ts | Wraps json2ts | Yes | Dead |
+| Custom Python script | You own it | Perfect | Perfect | Yes | Zero dependency |
+
+Most tools are dead, broken, or require OpenAPI envelopes. The two viable
+paths are `json-schema-to-typescript` (mature but stale) and a custom
+Python codegen script (~100-150 lines). Given the project mandate against
+stale dependencies, the **custom script is the recommended path**: zero
+external dependency, runs in the Python CI pipeline, handles Pydantic's
+specific `const`/`oneOf`/`$defs` output format exactly, and precedent
+exists (FastUI project by Pydantic's creator uses custom codegen).
+
+### 6. Recommended strategy for this project
 
 Three tiers of increasing investment:
 
 **Tier 1 — CI contract gate (minimum viable)**
 
-- `scripts/export_openapi.py`: extract `openapi.json` offline
-- `scripts/export_ws_schemas.py`: extract WS JSON Schemas offline
-- CI step: regenerate `wire-types.ts` from `openapi.json`, regenerate
-  `ws-types.ts` from WS schemas, `git diff --exit-code`, `tsc --noEmit`
+- `scripts/export_openapi.py`: extract `openapi.json` offline via
+  `create_app().openapi()` (works without starting the server)
+- `scripts/export_ws_schema.py`: extract WS JSON Schemas via
+  `TypeAdapter(ServerEvent).json_schema()` and
+  `TypeAdapter(ClientMessage).json_schema()`
+- `scripts/generate_ws_types.py`: custom Python codegen (~100-150 lines)
+  that traverses the JSON Schema and emits TypeScript interfaces with
+  literal discriminators. No npm dependency needed.
+- CI step: regenerate `wire-types.ts` from `openapi.json` (via
+  `openapi-typescript`), regenerate WS types from schemas (via custom
+  script), `git diff --exit-code`, `tsc --noEmit`
 - Pre-commit: add `tsc --noEmit` hook
-- Investment: ~1 day. Catches 90% of contract drift.
+- Investment: ~1-2 days. Catches 90% of contract drift. Zero new
+  external dependencies beyond already-installed `openapi-typescript`.
 
 **Tier 2 — Runtime boundary validation**
 
-- Generate Zod/Valibot schemas from Pydantic JSON Schema export
+- Generate Valibot schemas (1.4KB tree-shaken) from the same JSON Schema
+  export, or hand-author them alongside the generated types
 - Replace `as ServerEvent` cast in WS/SSE clients with parse calls
 - Invalid payloads logged and dropped instead of silently corrupting state
 - Investment: ~2 days. Catches the remaining 10% (runtime shape errors).

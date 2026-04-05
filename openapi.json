@@ -5,10 +5,31 @@
     "version": "0.1.0"
   },
   "paths": {
+    "/api/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Public health endpoint aggregating gateway, worker, and database status.",
+        "operationId": "health_api_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Api Health Get"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/threads": {
       "post": {
         "summary": "Create Thread Endpoint",
-        "description": "Create a new orchestration thread and dispatch to the worker.\n\nIf ``team_preset`` is set in the request, the work is dispatched to the\nworker process which handles graph compilation and ``ingest()`` execution\n(ADR-019).\n\nWhen ``metadata`` is provided (ADR-014), the endpoint:\n- Validates ``workspace_root`` as an existing directory (422 if not)\n- Auto-discovers ``.vault/`` documents when ``feature_tag`` is set\n- Generates a nickname if not explicitly provided\n- Sends context preamble content to the worker for injection\n- Threads ``workspace_root`` to the worker for config resolution",
+        "description": "Create a new orchestration thread and dispatch to the worker.",
         "operationId": "create_thread_endpoint_api_threads_post",
         "requestBody": {
           "required": true,
@@ -45,7 +66,7 @@
       },
       "get": {
         "summary": "List Threads Endpoint",
-        "description": "List orchestration threads with pagination.\n\nEnriches each thread summary with metadata fields (ADR-014) when\navailable. Legacy threads without metadata gracefully omit these fields.",
+        "description": "List orchestration threads with pagination and optional status filter.",
         "operationId": "list_threads_endpoint_api_threads_get",
         "parameters": [
           {
@@ -69,6 +90,22 @@
               "minimum": 1,
               "default": 50,
               "title": "Limit"
+            }
+          },
+          {
+            "name": "status",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
             }
           }
         ],
@@ -99,7 +136,7 @@
     "/api/threads/{thread_id}/metadata": {
       "get": {
         "summary": "Get Thread Metadata Endpoint",
-        "description": "Return the full ThreadMetadata object for a thread.\n\nUsed by the inspector panel for detailed provenance display.\nReturns 404 if the thread does not exist or has no metadata.",
+        "description": "Return the full ThreadMetadata object for a thread.",
         "operationId": "get_thread_metadata_endpoint_api_threads__thread_id__metadata_get",
         "parameters": [
           {
@@ -136,10 +173,125 @@
         }
       }
     },
+    "/api/threads/{thread_id}": {
+      "delete": {
+        "summary": "Delete Thread Endpoint",
+        "description": "Hard-delete a thread and all cascading artifacts.",
+        "operationId": "delete_thread_endpoint_api_threads__thread_id__delete",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/archive": {
+      "post": {
+        "summary": "Archive Thread Endpoint",
+        "description": "Transition a thread to ARCHIVED status.",
+        "operationId": "archive_thread_endpoint_api_threads__thread_id__archive_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Archive Thread Endpoint Api Threads  Thread Id  Archive Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/threads/{thread_id}/stream": {
+      "get": {
+        "summary": "Stream Thread Events",
+        "description": "Stream thread events over SSE for clients that do not use WebSockets.",
+        "operationId": "stream_thread_events_api_threads__thread_id__stream_get",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/threads/{thread_id}/state": {
       "get": {
         "summary": "Get Thread State Endpoint",
-        "description": "Return a complete thread state snapshot for client reconnection.\n\nThe ``last_sequence`` field enables gap detection: the client discards\nany subsequent WebSocket events with ``sequence <= last_sequence``\n(ADR-011 section 2.3).\n\nADR-019: The graph is no longer registered locally.  Snapshot enrichment\nreads directly from the shared SQLite checkpointer (read-only in the\ncontrol surface, safe under WAL mode).  If checkpointer data is not\navailable (e.g. worker hasn't written yet), a basic snapshot is returned.",
+        "description": "Return a complete thread state snapshot for client reconnection.\n\nThe ``last_sequence`` field enables gap detection: the client discards\nany subsequent WebSocket events with ``sequence <= last_sequence``\n(ADR-011 section 2.3).",
         "operationId": "get_thread_state_endpoint_api_threads__thread_id__state_get",
         "parameters": [
           {
@@ -190,6 +342,22 @@
               "type": "string",
               "title": "Thread Id"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
           }
         ],
         "requestBody": {
@@ -226,10 +394,66 @@
         }
       }
     },
+    "/api/threads/{thread_id}/cancel": {
+      "post": {
+        "summary": "Cancel Thread Endpoint",
+        "description": "Cancel a running thread by dispatching a cancel action to the worker.",
+        "operationId": "cancel_thread_endpoint_api_threads__thread_id__cancel_post",
+        "parameters": [
+          {
+            "name": "thread_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Thread Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelThreadResponse"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/team/status": {
       "get": {
         "summary": "Get Team Status Endpoint",
-        "description": "Return current team status: agents, active threads, pending permissions.\n\nADR-019 NOTE: The control surface aggregator is lightweight.  Agent\nsummaries come from node metadata registered via the worker relay.\nPending permissions are tracked by the aggregator (MCP-R5).",
+        "description": "Return current team status: agents, active threads, pending permissions.",
         "operationId": "get_team_status_endpoint_api_team_status_get",
         "responses": {
           "200": {
@@ -248,7 +472,7 @@
     "/api/teams": {
       "get": {
         "summary": "List Team Presets Endpoint",
-        "description": "Return all available team presets for the team picker UI.\n\nDynamically discovers presets by globbing ``lib/core/presets/teams/*.toml``.\nWorkspace-local overrides are not included in this listing (they\nshadow individual presets but are not auto-discovered in v1).",
+        "description": "Return all available team presets for the team picker UI.",
         "operationId": "list_team_presets_endpoint_api_teams_get",
         "responses": {
           "200": {
@@ -267,7 +491,7 @@
     "/api/permissions/{request_id}/respond": {
       "post": {
         "summary": "Respond To Permission Endpoint",
-        "description": "Submit a permission response via REST for guaranteed delivery.\n\nPermission responses are handled via REST rather than WebSocket\nto ensure guaranteed delivery (ADR-011 S3.1).\n\nADR-019: The resume is dispatched to the worker which owns the graph\nand calls ``Command(resume=option_id)`` on the interrupted graph.\n\nThe DB is queried for ``team_preset`` and ``workspace_root`` so the\nworker can lazily recompile the graph if it was evicted or the worker\nrestarted since the thread was created (ADR-019 lazy recompile path).",
+        "description": "Submit a permission response via REST for guaranteed delivery.",
         "operationId": "respond_to_permission_endpoint_api_permissions__request_id__respond_post",
         "parameters": [
           {
@@ -277,6 +501,22 @@
             "schema": {
               "type": "string",
               "title": "Request Id"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
             }
           }
         ],
@@ -314,19 +554,52 @@
         }
       }
     },
-    "/api/threads/{thread_id}/cancel": {
+    "/api/admin/shutdown": {
       "post": {
-        "summary": "Cancel Thread Endpoint",
-        "description": "Cancel a running thread by dispatching a cancel action to the worker.\n\nSets the thread status to ``cancelled`` in the database and sends a\ncancel dispatch to the worker process (MCP-R3, ADR-019).",
-        "operationId": "cancel_thread_endpoint_api_threads__thread_id__cancel_post",
+        "summary": "Shutdown Endpoint",
+        "description": "Initiate graceful server shutdown.",
+        "operationId": "shutdown_endpoint_api_admin_shutdown_post",
+        "responses": {
+          "202": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "type": "object",
+                  "title": "Response Shutdown Endpoint Api Admin Shutdown Post"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/internal/health": {
+      "get": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Internal Health",
+        "description": "Readiness probe -- confirms the internal API is accepting connections.",
+        "operationId": "internal_health_internal_health_get",
         "parameters": [
           {
-            "name": "thread_id",
-            "in": "path",
-            "required": true,
+            "name": "authorization",
+            "in": "header",
+            "required": false,
             "schema": {
-              "type": "string",
-              "title": "Thread Id"
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
             }
           }
         ],
@@ -336,7 +609,11 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CancelThreadResponse"
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Internal Health Internal Health Get"
                 }
               }
             }
@@ -354,23 +631,53 @@
         }
       }
     },
-    "/internal/health": {
-      "get": {
-        "tags": ["internal"],
-        "summary": "Internal Health",
-        "description": "Readiness probe -- confirms the internal API is accepting connections.",
-        "operationId": "internal_health_internal_health_get",
+    "/internal/events": {
+      "post": {
+        "tags": [
+          "internal"
+        ],
+        "summary": "Receive Worker Event",
+        "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
+        "operationId": "receive_worker_event_internal_events_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "type": "object",
-                  "title": "Response Internal Health Internal Health Get"
+                  "title": "Response Receive Worker Event Internal Events Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -378,23 +685,53 @@
         }
       }
     },
-    "/internal/events": {
+    "/internal/events/batch": {
       "post": {
-        "tags": ["internal"],
-        "summary": "Receive Worker Event",
-        "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
-        "operationId": "receive_worker_event_internal_events_post",
+        "tags": [
+          "internal"
+        ],
+        "summary": "Receive Worker Event Batch",
+        "description": "Receive a batch of events from the worker (CRIT-02).\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
+        "operationId": "receive_worker_event_batch_internal_events_batch_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "type": "object",
-                  "title": "Response Receive Worker Event Internal Events Post"
+                  "title": "Response Receive Worker Event Batch Internal Events Batch Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
                 }
               }
             }
@@ -404,21 +741,72 @@
     },
     "/internal/heartbeat": {
       "post": {
-        "tags": ["internal"],
+        "tags": [
+          "internal"
+        ],
         "summary": "Receive Worker Heartbeat",
-        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the control surface can monitor worker\nliveness without a persistent WebSocket connection.",
+        "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
         "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
+        "parameters": [
+          {
+            "name": "authorization",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "description": "Successful Response",
             "content": {
               "application/json": {
                 "schema": {
+                  "type": "object",
                   "additionalProperties": {
                     "type": "string"
                   },
-                  "type": "object",
                   "title": "Response Receive Worker Heartbeat Internal Heartbeat Post"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health Endpoint",
+        "description": "Top-level liveness check for external probes.\n\n`/health` stays green when the gateway process is alive. Aggregate\ndependency readiness is exposed separately via `/api/health`.",
+        "operationId": "health_endpoint_health_get",
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": true,
+                  "type": "object",
+                  "title": "Response Health Endpoint Health Get"
                 }
               }
             }
@@ -430,7 +818,7 @@
   "components": {
     "schemas": {
       "AgentLifecycleState": {
-        "description": "Observable agent states exposed to the frontend.\n\nMaps to ADR-003 MCP states. Distinct from ``lib.utils.enums.AgentState``\nwhich tracks internal process lifecycle (init/ready/running/error/done).",
+        "type": "string",
         "enum": [
           "submitted",
           "idle",
@@ -442,7 +830,7 @@
           "cancelled"
         ],
         "title": "AgentLifecycleState",
-        "type": "string"
+        "description": "Observable agent states exposed to the frontend.\n\nMaps to ADR-003 MCP states. Distinct from ``AgentState`` which tracks\ninternal process lifecycle (init/ready/running/error/done)."
       },
       "AgentStatusEntry": {
         "properties": {
@@ -494,7 +882,11 @@
           }
         },
         "type": "object",
-        "required": ["agent_id", "node_name", "state"],
+        "required": [
+          "agent_id",
+          "node_name",
+          "state"
+        ],
         "title": "AgentStatusEntry",
         "description": "Agent status within a team status response."
       },
@@ -518,7 +910,12 @@
           }
         },
         "type": "object",
-        "required": ["artifact_id", "filename", "content", "complete"],
+        "required": [
+          "artifact_id",
+          "filename",
+          "content",
+          "complete"
+        ],
         "title": "ArtifactSnapshot",
         "description": "Fully materialized file artifact."
       },
@@ -535,10 +932,51 @@
           "cancelled": {
             "type": "boolean",
             "title": "Cancelled"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": false
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status",
+            "default": "rejected_invalid_state"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "type": "object",
-        "required": ["thread_id", "status", "cancelled"],
+        "required": [
+          "thread_id",
+          "status",
+          "cancelled"
+        ],
         "title": "CancelThreadResponse",
         "description": "Response after requesting thread cancellation."
       },
@@ -559,7 +997,10 @@
           }
         },
         "type": "object",
-        "required": ["path", "stage"],
+        "required": [
+          "path",
+          "stage"
+        ],
         "title": "ContextRef",
         "description": "Reference to a context document in the .vault hierarchy."
       },
@@ -604,6 +1045,18 @@
               }
             ]
           },
+          "nickname": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 64
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nickname"
+          },
           "autonomous": {
             "anyOf": [
               {
@@ -614,32 +1067,14 @@
               }
             ],
             "title": "Autonomous"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Provider"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ]
           }
         },
         "type": "object",
-        "required": ["initial_message"],
+        "required": [
+          "initial_message"
+        ],
         "title": "CreateThreadRequest",
-        "description": "Create a new orchestration thread.\n\n**Model Selection Policy**: When ``team_preset`` is specified, the ``provider``\nand ``model`` fields are ignored. Models are defined statically in the team\nTOML configuration (per ADR-013 \u00a72.3). Per-request model overrides are not\nsupported for team presets. To customize models for a team, create a custom\nteam preset in the workspace or modify bundled presets."
+        "description": "Create a new orchestration thread."
       },
       "CreateThreadResponse": {
         "properties": {
@@ -664,9 +1099,78 @@
           }
         },
         "type": "object",
-        "required": ["thread_id", "status"],
+        "required": [
+          "thread_id",
+          "status"
+        ],
         "title": "CreateThreadResponse",
         "description": "Response after successfully creating a thread."
+      },
+      "ExecutionTaskSnapshot": {
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "title": "Task Id"
+          },
+          "name": {
+            "type": "string",
+            "title": "Name"
+          },
+          "path": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Path"
+          },
+          "has_error": {
+            "type": "boolean",
+            "title": "Has Error",
+            "default": false
+          },
+          "error_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Type"
+          },
+          "interrupt_ids": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interrupt Ids"
+          },
+          "interrupt_types": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Interrupt Types"
+          },
+          "has_nested_state": {
+            "type": "boolean",
+            "title": "Has Nested State",
+            "default": false
+          },
+          "has_result": {
+            "type": "boolean",
+            "title": "Has Result",
+            "default": false
+          }
+        },
+        "type": "object",
+        "required": [
+          "task_id",
+          "name"
+        ],
+        "title": "ExecutionTaskSnapshot",
+        "description": "Normalized execution task used in reconnect snapshots."
       },
       "HTTPValidationError": {
         "properties": {
@@ -713,15 +1217,25 @@
           }
         },
         "type": "object",
-        "required": ["message_id", "role", "content", "timestamp"],
+        "required": [
+          "message_id",
+          "role",
+          "content",
+          "timestamp"
+        ],
         "title": "MessageSnapshot",
         "description": "Fully materialized message in a thread replay."
       },
       "Model": {
-        "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden.",
-        "enum": ["low", "mid", "high", "max"],
+        "type": "string",
+        "enum": [
+          "low",
+          "mid",
+          "high",
+          "max"
+        ],
         "title": "Model",
-        "type": "string"
+        "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden."
       },
       "PendingPermission": {
         "properties": {
@@ -736,18 +1250,32 @@
           "description": {
             "type": "string",
             "title": "Description"
+          },
+          "request_status": {
+            "type": "string",
+            "title": "Request Status",
+            "default": "pending"
           }
         },
         "type": "object",
-        "required": ["request_id", "thread_id", "description"],
+        "required": [
+          "request_id",
+          "thread_id",
+          "description"
+        ],
         "title": "PendingPermission",
         "description": "Outstanding permission request summary."
       },
       "PermissionOptionKind": {
-        "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nM12: Documented for OpenAPI schema generation.\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting.",
-        "enum": ["allow_once", "allow_always", "reject_once", "reject_always"],
+        "type": "string",
+        "enum": [
+          "allow_once",
+          "allow_always",
+          "reject_once",
+          "reject_always"
+        ],
         "title": "PermissionOptionKind",
-        "type": "string"
+        "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting."
       },
       "PermissionResponseRequest": {
         "properties": {
@@ -767,7 +1295,9 @@
           }
         },
         "type": "object",
-        "required": ["option_id"],
+        "required": [
+          "option_id"
+        ],
         "title": "PermissionResponseRequest",
         "description": "Submit a permission response via REST (guaranteed delivery)."
       },
@@ -781,53 +1311,97 @@
             "type": "boolean",
             "title": "Accepted"
           },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status",
+            "default": "rejected_invalid_state"
+          },
           "thread_id": {
             "type": "string",
             "title": "Thread Id"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
           }
         },
         "type": "object",
-        "required": ["request_id", "accepted", "thread_id"],
+        "required": [
+          "request_id",
+          "accepted",
+          "thread_id"
+        ],
         "title": "PermissionResponseResult",
         "description": "Result of submitting a permission response."
       },
       "PlanEntry": {
-        "description": "A single entry in the agent's execution plan.",
         "properties": {
           "content": {
-            "title": "Content",
-            "type": "string"
+            "type": "string",
+            "title": "Content"
           },
           "status": {
-            "$ref": "#/components/schemas/PlanEntryStatus",
+            "type": "string",
+            "title": "Status",
             "default": "pending"
           },
           "priority": {
-            "$ref": "#/components/schemas/PlanEntryPriority",
+            "type": "string",
+            "title": "Priority",
             "default": "medium"
           }
         },
-        "required": ["content"],
-        "title": "PlanEntry",
-        "type": "object"
-      },
-      "PlanEntryPriority": {
-        "description": "Priority level for a plan entry.",
-        "enum": ["high", "medium", "low"],
-        "title": "PlanEntryPriority",
-        "type": "string"
-      },
-      "PlanEntryStatus": {
-        "description": "Execution status of a plan entry.",
-        "enum": ["pending", "in_progress", "completed"],
-        "title": "PlanEntryStatus",
-        "type": "string"
+        "type": "object",
+        "required": [
+          "content"
+        ],
+        "title": "PlanEntry"
       },
       "Provider": {
-        "description": "Supported LLM providers.",
-        "enum": ["claude", "gemini", "openai", "zhipu"],
+        "type": "string",
+        "enum": [
+          "claude",
+          "gemini",
+          "mock",
+          "openai",
+          "zhipu"
+        ],
         "title": "Provider",
-        "type": "string"
+        "description": "Supported LLM providers."
       },
       "SendMessageRequest": {
         "properties": {
@@ -850,7 +1424,9 @@
           }
         },
         "type": "object",
-        "required": ["content"],
+        "required": [
+          "content"
+        ],
         "title": "SendMessageRequest",
         "description": "Send a user message into an existing thread via REST."
       },
@@ -863,10 +1439,50 @@
           "thread_id": {
             "type": "string",
             "title": "Thread Id"
+          },
+          "accepted": {
+            "type": "boolean",
+            "title": "Accepted",
+            "default": true
+          },
+          "applied": {
+            "type": "boolean",
+            "title": "Applied",
+            "default": false
+          },
+          "action_status": {
+            "type": "string",
+            "title": "Action Status",
+            "default": "accepted_not_applied"
+          },
+          "action_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Action Id"
+          },
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
           }
         },
         "type": "object",
-        "required": ["status", "thread_id"],
+        "required": [
+          "status",
+          "thread_id"
+        ],
         "title": "SendMessageResponse",
         "description": "Response after accepting a user message (202 Accepted)."
       },
@@ -894,9 +1510,15 @@
           }
         },
         "type": "object",
-        "required": ["id", "display_name", "description", "topology", "worker_count"],
+        "required": [
+          "id",
+          "display_name",
+          "description",
+          "topology",
+          "worker_count"
+        ],
         "title": "TeamPresetSummary",
-        "description": "Lightweight team preset descriptor for the team picker UI (ADR-013 \u00a76)."
+        "description": "Lightweight team preset descriptor for the team picker UI (ADR-013 §6)."
       },
       "TeamPresetsResponse": {
         "properties": {
@@ -909,9 +1531,11 @@
           }
         },
         "type": "object",
-        "required": ["presets"],
+        "required": [
+          "presets"
+        ],
         "title": "TeamPresetsResponse",
-        "description": "Response for GET /teams: list of available team presets (ADR-013 \u00a76)."
+        "description": "Response for GET /teams: list of available team presets (ADR-013 §6)."
       },
       "TeamStatusResponse": {
         "properties": {
@@ -938,7 +1562,11 @@
           }
         },
         "type": "object",
-        "required": ["agents", "active_threads", "pending_permissions"],
+        "required": [
+          "agents",
+          "active_threads",
+          "pending_permissions"
+        ],
         "title": "TeamStatusResponse",
         "description": "Current team status snapshot via REST."
       },
@@ -957,7 +1585,10 @@
           }
         },
         "type": "object",
-        "required": ["threads", "total"],
+        "required": [
+          "threads",
+          "total"
+        ],
         "title": "ThreadListResponse",
         "description": "Paginated thread listing."
       },
@@ -1001,7 +1632,9 @@
           }
         },
         "type": "object",
-        "required": ["workspace_root"],
+        "required": [
+          "workspace_root"
+        ],
         "title": "ThreadMetadata",
         "description": "Provenance and context attached to an orchestration thread."
       },
@@ -1071,10 +1704,185 @@
               }
             ],
             "title": "Checkpoint Id"
+          },
+          "checkpoint_created_at": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date-time"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Created At"
+          },
+          "checkpoint_parent_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Parent Id"
+          },
+          "checkpoint_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Source"
+          },
+          "checkpoint_step": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkpoint Step"
+          },
+          "checkpoint_updated_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Checkpoint Updated Channels"
+          },
+          "pending_write_channels": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Pending Write Channels"
+          },
+          "pending_write_count": {
+            "type": "integer",
+            "title": "Pending Write Count",
+            "default": 0
+          },
+          "history_depth": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "History Depth"
+          },
+          "next_nodes": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Next Nodes"
+          },
+          "task_count": {
+            "type": "integer",
+            "title": "Task Count",
+            "default": 0
+          },
+          "pending_interrupt_count": {
+            "type": "integer",
+            "title": "Pending Interrupt Count",
+            "default": 0
+          },
+          "execution_tasks": {
+            "items": {
+              "$ref": "#/components/schemas/ExecutionTaskSnapshot"
+            },
+            "type": "array",
+            "title": "Execution Tasks"
+          },
+          "snapshot_complete": {
+            "type": "boolean",
+            "title": "Snapshot Complete",
+            "default": true
+          },
+          "degraded_reasons": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array",
+            "title": "Degraded Reasons"
+          },
+          "replay_status": {
+            "type": "string",
+            "title": "Replay Status",
+            "default": "unknown"
+          },
+          "repair_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Status"
+          },
+          "execution_readiness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Readiness"
+          },
+          "pause_cause": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pause Cause"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
+          },
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
           }
         },
         "type": "object",
-        "required": ["thread_id", "status", "last_sequence"],
+        "required": [
+          "thread_id",
+          "status",
+          "last_sequence"
+        ],
         "title": "ThreadStateSnapshot",
         "description": "Complete thread state for reconnection replay.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any WebSocket events with ``sequence <= last_sequence``."
       },
@@ -1098,6 +1906,50 @@
           "status": {
             "type": "string",
             "title": "Status"
+          },
+          "repair_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Repair Status"
+          },
+          "execution_readiness": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Execution Readiness"
+          },
+          "approval_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Status"
+          },
+          "approval_request_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approval Request Id"
           },
           "agent_state": {
             "anyOf": [
@@ -1176,22 +2028,26 @@
           }
         },
         "type": "object",
-        "required": ["thread_id", "status", "created_at", "updated_at"],
+        "required": [
+          "thread_id",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
         "title": "ThreadSummary",
         "description": "Lightweight thread descriptor for list endpoints."
       },
       "ToolCallContentDiff": {
-        "description": "Diff content block within a tool call.",
         "properties": {
           "content_type": {
+            "type": "string",
             "const": "diff",
-            "default": "diff",
             "title": "Content Type",
-            "type": "string"
+            "default": "diff"
           },
           "path": {
-            "title": "Path",
-            "type": "string"
+            "type": "string",
+            "title": "Path"
           },
           "old_text": {
             "anyOf": [
@@ -1202,60 +2058,66 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Old Text"
           },
           "new_text": {
-            "title": "New Text",
-            "type": "string"
+            "type": "string",
+            "title": "New Text"
           }
         },
-        "required": ["path", "new_text"],
+        "type": "object",
+        "required": [
+          "path",
+          "new_text"
+        ],
         "title": "ToolCallContentDiff",
-        "type": "object"
+        "description": "Diff content block within a tool call."
       },
       "ToolCallContentTerminal": {
-        "description": "Terminal output content block within a tool call.",
         "properties": {
           "content_type": {
+            "type": "string",
             "const": "terminal",
-            "default": "terminal",
             "title": "Content Type",
-            "type": "string"
+            "default": "terminal"
           },
           "terminal_id": {
-            "title": "Terminal Id",
-            "type": "string"
+            "type": "string",
+            "title": "Terminal Id"
           }
         },
-        "required": ["terminal_id"],
+        "type": "object",
+        "required": [
+          "terminal_id"
+        ],
         "title": "ToolCallContentTerminal",
-        "type": "object"
+        "description": "Terminal output content block within a tool call."
       },
       "ToolCallContentText": {
-        "description": "Plain text content block within a tool call.",
         "properties": {
           "content_type": {
+            "type": "string",
             "const": "text",
-            "default": "text",
             "title": "Content Type",
-            "type": "string"
+            "default": "text"
           },
           "text": {
-            "title": "Text",
-            "type": "string"
+            "type": "string",
+            "title": "Text"
           }
         },
-        "required": ["text"],
+        "type": "object",
+        "required": [
+          "text"
+        ],
         "title": "ToolCallContentText",
-        "type": "object"
+        "description": "Plain text content block within a tool call."
       },
       "ToolCallLocation": {
-        "description": "File location associated with a tool call.",
         "properties": {
           "path": {
-            "title": "Path",
-            "type": "string"
+            "type": "string",
+            "title": "Path"
           },
           "line": {
             "anyOf": [
@@ -1266,13 +2128,15 @@
                 "type": "null"
               }
             ],
-            "default": null,
             "title": "Line"
           }
         },
-        "required": ["path"],
+        "type": "object",
+        "required": [
+          "path"
+        ],
         "title": "ToolCallLocation",
-        "type": "object"
+        "description": "File location associated with a tool call."
       },
       "ToolCallSnapshot": {
         "properties": {
@@ -1324,18 +2188,28 @@
           }
         },
         "type": "object",
-        "required": ["tool_call_id", "title", "kind", "status"],
+        "required": [
+          "tool_call_id",
+          "title",
+          "kind",
+          "status"
+        ],
         "title": "ToolCallSnapshot",
         "description": "Fully materialized tool call (all incremental updates merged)."
       },
       "ToolCallStatus": {
-        "description": "Lifecycle states for a single tool invocation.",
-        "enum": ["pending", "in_progress", "completed", "failed"],
+        "type": "string",
+        "enum": [
+          "pending",
+          "in_progress",
+          "completed",
+          "failed"
+        ],
         "title": "ToolCallStatus",
-        "type": "string"
+        "description": "Lifecycle states for a single tool invocation."
       },
       "ToolKind": {
-        "description": "ACP tool categories (mirrors agentclientprotocol.com schema).",
+        "type": "string",
         "enum": [
           "read",
           "edit",
@@ -1349,7 +2223,7 @@
           "other"
         ],
         "title": "ToolKind",
-        "type": "string"
+        "description": "ACP tool categories (mirrors agentclientprotocol.com schema)."
       },
       "ValidationError": {
         "properties": {
@@ -1384,7 +2258,11 @@
           }
         },
         "type": "object",
-        "required": ["loc", "msg", "type"],
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
         "title": "ValidationError"
       },
       "_AgentSnapshot": {
@@ -1419,10 +2297,29 @@
                 "type": "null"
               }
             ]
+          },
+          "role": {
+            "type": "string",
+            "title": "Role",
+            "default": ""
+          },
+          "display_name": {
+            "type": "string",
+            "title": "Display Name",
+            "default": ""
+          },
+          "description": {
+            "type": "string",
+            "title": "Description",
+            "default": ""
           }
         },
         "type": "object",
-        "required": ["agent_id", "node_name", "state"],
+        "required": [
+          "agent_id",
+          "node_name",
+          "state"
+        ],
         "title": "_AgentSnapshot",
         "description": "Agent state within a thread snapshot."
       },
@@ -1441,7 +2338,11 @@
           }
         },
         "type": "object",
-        "required": ["option_id", "name", "kind"],
+        "required": [
+          "option_id",
+          "name",
+          "kind"
+        ],
         "title": "_PermissionOptionSnapshot",
         "description": "Permission option within a snapshot."
       },
@@ -1475,1273 +2376,13 @@
           }
         },
         "type": "object",
-        "required": ["request_id", "description", "options"],
-        "title": "_PermissionSnapshot",
-        "description": "Outstanding permission request in a state snapshot."
-      },
-      "AgentStatusEvent": {
-        "description": "Agent lifecycle state transition.",
-        "properties": {
-          "type": {
-            "const": "agent_status",
-            "default": "agent_status",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "state": {
-            "$ref": "#/components/schemas/AgentLifecycleState"
-          },
-          "node_name": {
-            "title": "Node Name",
-            "type": "string"
-          },
-          "detail": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Detail"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "state", "node_name"],
-        "title": "AgentStatusEvent",
-        "type": "object"
-      },
-      "AgentSummary": {
-        "description": "Lightweight agent descriptor for team status broadcasts.",
-        "properties": {
-          "agent_id": {
-            "title": "Agent Id",
-            "type": "string"
-          },
-          "node_name": {
-            "title": "Node Name",
-            "type": "string"
-          },
-          "state": {
-            "$ref": "#/components/schemas/AgentLifecycleState"
-          },
-          "provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Provider"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "model": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/Model"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "role": {
-            "default": "",
-            "title": "Role",
-            "type": "string"
-          },
-          "display_name": {
-            "default": "",
-            "title": "Display Name",
-            "type": "string"
-          },
-          "description": {
-            "default": "",
-            "title": "Description",
-            "type": "string"
-          }
-        },
-        "required": ["agent_id", "node_name", "state"],
-        "title": "AgentSummary",
-        "type": "object"
-      },
-      "ArtifactUpdateEvent": {
-        "description": "Streaming file artifact content.",
-        "properties": {
-          "type": {
-            "const": "artifact_update",
-            "default": "artifact_update",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "artifact_id": {
-            "title": "Artifact Id",
-            "type": "string"
-          },
-          "filename": {
-            "title": "Filename",
-            "type": "string"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "append": {
-            "default": false,
-            "title": "Append",
-            "type": "boolean"
-          },
-          "last_chunk": {
-            "default": false,
-            "title": "Last Chunk",
-            "type": "boolean"
-          }
-        },
         "required": [
-          "thread_id",
-          "timestamp",
-          "sequence",
-          "artifact_id",
-          "filename",
-          "content"
-        ],
-        "title": "ArtifactUpdateEvent",
-        "type": "object"
-      },
-      "ConnectedEvent": {
-        "description": "Sent once on WebSocket open; connection-scoped, not thread-scoped.",
-        "properties": {
-          "type": {
-            "const": "connected",
-            "default": "connected",
-            "title": "Type",
-            "type": "string"
-          },
-          "client_id": {
-            "title": "Client Id",
-            "type": "string"
-          },
-          "server_version": {
-            "title": "Server Version",
-            "type": "string"
-          },
-          "active_threads": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Active Threads",
-            "type": "array"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          }
-        },
-        "required": ["client_id", "server_version"],
-        "title": "ConnectedEvent",
-        "type": "object"
-      },
-      "ErrorEvent": {
-        "description": "Server-side error notification.",
-        "properties": {
-          "type": {
-            "const": "error",
-            "default": "error",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "code": {
-            "title": "Code",
-            "type": "string"
-          },
-          "message": {
-            "title": "Message",
-            "type": "string"
-          },
-          "recoverable": {
-            "default": true,
-            "title": "Recoverable",
-            "type": "boolean"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "code", "message"],
-        "title": "ErrorEvent",
-        "type": "object"
-      },
-      "HeartbeatEvent": {
-        "description": "Periodic keepalive; connection-scoped, not thread-scoped.",
-        "properties": {
-          "type": {
-            "const": "heartbeat",
-            "default": "heartbeat",
-            "title": "Type",
-            "type": "string"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "server_uptime_seconds": {
-            "title": "Server Uptime Seconds",
-            "type": "number"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          }
-        },
-        "required": ["timestamp", "server_uptime_seconds"],
-        "title": "HeartbeatEvent",
-        "type": "object"
-      },
-      "MessageChunkEvent": {
-        "description": "Streaming agent message token.",
-        "properties": {
-          "type": {
-            "const": "message_chunk",
-            "default": "message_chunk",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "message_id": {
-            "title": "Message Id",
-            "type": "string"
-          },
-          "finish_reason": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Finish Reason"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "content", "message_id"],
-        "title": "MessageChunkEvent",
-        "type": "object"
-      },
-      "PermissionOption": {
-        "description": "A selectable option in a permission request.",
-        "properties": {
-          "option_id": {
-            "title": "Option Id",
-            "type": "string"
-          },
-          "name": {
-            "title": "Name",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/PermissionOptionKind"
-          }
-        },
-        "required": ["option_id", "name", "kind"],
-        "title": "PermissionOption",
-        "type": "object"
-      },
-      "PermissionRequestEvent": {
-        "description": "Agent is requesting user permission to proceed.",
-        "properties": {
-          "type": {
-            "const": "permission_request",
-            "default": "permission_request",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          },
-          "description": {
-            "title": "Description",
-            "type": "string"
-          },
-          "options": {
-            "items": {
-              "$ref": "#/components/schemas/PermissionOption"
-            },
-            "title": "Options",
-            "type": "array"
-          },
-          "tool_call": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Tool Call"
-          }
-        },
-        "required": [
-          "thread_id",
-          "timestamp",
-          "sequence",
           "request_id",
           "description",
           "options"
         ],
-        "title": "PermissionRequestEvent",
-        "type": "object"
-      },
-      "PlanUpdateEvent": {
-        "description": "Full plan state replacement.",
-        "properties": {
-          "type": {
-            "const": "plan_update",
-            "default": "plan_update",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "entries": {
-            "items": {
-              "$ref": "#/components/schemas/PlanEntry"
-            },
-            "title": "Entries",
-            "type": "array"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "entries"],
-        "title": "PlanUpdateEvent",
-        "type": "object"
-      },
-      "TeamStatusEvent": {
-        "description": "Team-wide agent status broadcast.",
-        "properties": {
-          "type": {
-            "const": "team_status",
-            "default": "team_status",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "agents": {
-            "items": {
-              "$ref": "#/components/schemas/AgentSummary"
-            },
-            "title": "Agents",
-            "type": "array"
-          },
-          "active_thread_ids": {
-            "items": {
-              "type": "string"
-            },
-            "title": "Active Thread Ids",
-            "type": "array"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "agents"],
-        "title": "TeamStatusEvent",
-        "type": "object"
-      },
-      "ThoughtChunkEvent": {
-        "description": "Streaming agent thought/reasoning token.",
-        "properties": {
-          "type": {
-            "const": "thought_chunk",
-            "default": "thought_chunk",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "content": {
-            "title": "Content",
-            "type": "string"
-          },
-          "message_id": {
-            "title": "Message Id",
-            "type": "string"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "content", "message_id"],
-        "title": "ThoughtChunkEvent",
-        "type": "object"
-      },
-      "ToolCallStartEvent": {
-        "description": "A new tool invocation has begun.",
-        "properties": {
-          "type": {
-            "const": "tool_call_start",
-            "default": "tool_call_start",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "tool_call_id": {
-            "title": "Tool Call Id",
-            "type": "string"
-          },
-          "title": {
-            "title": "Title",
-            "type": "string"
-          },
-          "kind": {
-            "$ref": "#/components/schemas/ToolKind"
-          },
-          "status": {
-            "$ref": "#/components/schemas/ToolCallStatus",
-            "default": "pending"
-          },
-          "locations": {
-            "items": {
-              "$ref": "#/components/schemas/ToolCallLocation"
-            },
-            "title": "Locations",
-            "type": "array"
-          },
-          "content": {
-            "items": {
-              "discriminator": {
-                "mapping": {
-                  "diff": "#/components/schemas/ToolCallContentDiff",
-                  "terminal": "#/components/schemas/ToolCallContentTerminal",
-                  "text": "#/components/schemas/ToolCallContentText"
-                },
-                "propertyName": "content_type"
-              },
-              "oneOf": [
-                {
-                  "$ref": "#/components/schemas/ToolCallContentText"
-                },
-                {
-                  "$ref": "#/components/schemas/ToolCallContentDiff"
-                },
-                {
-                  "$ref": "#/components/schemas/ToolCallContentTerminal"
-                }
-              ]
-            },
-            "title": "Content",
-            "type": "array"
-          }
-        },
-        "required": [
-          "thread_id",
-          "timestamp",
-          "sequence",
-          "tool_call_id",
-          "title",
-          "kind"
-        ],
-        "title": "ToolCallStartEvent",
-        "type": "object"
-      },
-      "ToolCallUpdateEvent": {
-        "description": "Incremental update to an in-progress tool call (merge semantics).",
-        "properties": {
-          "type": {
-            "const": "tool_call_update",
-            "default": "tool_call_update",
-            "title": "Type",
-            "type": "string"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          },
-          "timestamp": {
-            "format": "date-time",
-            "title": "Timestamp",
-            "type": "string"
-          },
-          "sequence": {
-            "title": "Sequence",
-            "type": "integer"
-          },
-          "metadata": {
-            "anyOf": [
-              {
-                "additionalProperties": true,
-                "type": "object"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Metadata"
-          },
-          "tool_call_id": {
-            "title": "Tool Call Id",
-            "type": "string"
-          },
-          "title": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Title"
-          },
-          "kind": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ToolKind"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "status": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/ToolCallStatus"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null
-          },
-          "locations": {
-            "anyOf": [
-              {
-                "items": {
-                  "$ref": "#/components/schemas/ToolCallLocation"
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Locations"
-          },
-          "content": {
-            "anyOf": [
-              {
-                "items": {
-                  "discriminator": {
-                    "mapping": {
-                      "diff": "#/components/schemas/ToolCallContentDiff",
-                      "terminal": "#/components/schemas/ToolCallContentTerminal",
-                      "text": "#/components/schemas/ToolCallContentText"
-                    },
-                    "propertyName": "content_type"
-                  },
-                  "oneOf": [
-                    {
-                      "$ref": "#/components/schemas/ToolCallContentText"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ToolCallContentDiff"
-                    },
-                    {
-                      "$ref": "#/components/schemas/ToolCallContentTerminal"
-                    }
-                  ]
-                },
-                "type": "array"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Content"
-          }
-        },
-        "required": ["thread_id", "timestamp", "sequence", "tool_call_id"],
-        "title": "ToolCallUpdateEvent",
-        "type": "object"
-      },
-      "AgentControlAction": {
-        "description": "Actions a user can issue to control a running agent.",
-        "enum": ["pause", "resume", "terminate"],
-        "title": "AgentControlAction",
-        "type": "string"
-      },
-      "AgentControlCommand": {
-        "description": "Issue a control action (pause/resume/terminate) to an agent.",
-        "properties": {
-          "type": {
-            "const": "agent_control",
-            "default": "agent_control",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Request Id"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "agent_id": {
-            "title": "Agent Id",
-            "type": "string"
-          },
-          "action": {
-            "$ref": "#/components/schemas/AgentControlAction"
-          },
-          "option_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Option Id"
-          }
-        },
-        "required": ["thread_id", "agent_id", "action"],
-        "title": "AgentControlCommand",
-        "type": "object"
-      },
-      "PermissionResponseCommand": {
-        "description": "Respond to a permission request via WebSocket.",
-        "properties": {
-          "type": {
-            "const": "permission_response",
-            "default": "permission_response",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "title": "Request Id",
-            "type": "string"
-          },
-          "option_id": {
-            "title": "Option Id",
-            "type": "string"
-          }
-        },
-        "required": ["request_id", "option_id"],
-        "title": "PermissionResponseCommand",
-        "type": "object"
-      },
-      "PingCommand": {
-        "description": "Client keepalive ping.",
-        "properties": {
-          "type": {
-            "const": "ping",
-            "default": "ping",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Request Id"
-          }
-        },
-        "title": "PingCommand",
-        "type": "object"
-      },
-      "SendMessageCommand": {
-        "description": "Send a user message into a thread.",
-        "properties": {
-          "type": {
-            "const": "send_message",
-            "default": "send_message",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Request Id"
-          },
-          "thread_id": {
-            "title": "Thread Id",
-            "type": "string"
-          },
-          "content": {
-            "maxLength": 65536,
-            "title": "Content",
-            "type": "string"
-          },
-          "agent_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Agent Id"
-          }
-        },
-        "required": ["thread_id", "content"],
-        "title": "SendMessageCommand",
-        "type": "object"
-      },
-      "SubscribeCommand": {
-        "description": "Subscribe to real-time events for one or more threads.\n\nM15: thread_ids are validated as exact IDs (max 50 per command) to\nprevent subscription abuse. IDs are treated as opaque strings \u2014 the\naggregator uses exact-match comparison, never prefix matching.",
-        "properties": {
-          "type": {
-            "const": "subscribe",
-            "default": "subscribe",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Request Id"
-          },
-          "thread_ids": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 50,
-            "title": "Thread Ids",
-            "type": "array"
-          }
-        },
-        "required": ["thread_ids"],
-        "title": "SubscribeCommand",
-        "type": "object"
-      },
-      "UnsubscribeCommand": {
-        "description": "Unsubscribe from real-time events for one or more threads.",
-        "properties": {
-          "type": {
-            "const": "unsubscribe",
-            "default": "unsubscribe",
-            "title": "Type",
-            "type": "string"
-          },
-          "request_id": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "default": null,
-            "title": "Request Id"
-          },
-          "thread_ids": {
-            "items": {
-              "type": "string"
-            },
-            "maxItems": 50,
-            "title": "Thread Ids",
-            "type": "array"
-          }
-        },
-        "required": ["thread_ids"],
-        "title": "UnsubscribeCommand",
-        "type": "object"
-      },
-      "ServerEvent": {
-        "discriminator": {
-          "mapping": {
-            "agent_status": "#/components/schemas/AgentStatusEvent",
-            "artifact_update": "#/components/schemas/ArtifactUpdateEvent",
-            "connected": "#/components/schemas/ConnectedEvent",
-            "error": "#/components/schemas/ErrorEvent",
-            "heartbeat": "#/components/schemas/HeartbeatEvent",
-            "message_chunk": "#/components/schemas/MessageChunkEvent",
-            "permission_request": "#/components/schemas/PermissionRequestEvent",
-            "plan_update": "#/components/schemas/PlanUpdateEvent",
-            "team_status": "#/components/schemas/TeamStatusEvent",
-            "thought_chunk": "#/components/schemas/ThoughtChunkEvent",
-            "tool_call_start": "#/components/schemas/ToolCallStartEvent",
-            "tool_call_update": "#/components/schemas/ToolCallUpdateEvent"
-          },
-          "propertyName": "type"
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/AgentStatusEvent"
-          },
-          {
-            "$ref": "#/components/schemas/MessageChunkEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ThoughtChunkEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ToolCallStartEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ToolCallUpdateEvent"
-          },
-          {
-            "$ref": "#/components/schemas/PermissionRequestEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ArtifactUpdateEvent"
-          },
-          {
-            "$ref": "#/components/schemas/PlanUpdateEvent"
-          },
-          {
-            "$ref": "#/components/schemas/TeamStatusEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ErrorEvent"
-          },
-          {
-            "$ref": "#/components/schemas/ConnectedEvent"
-          },
-          {
-            "$ref": "#/components/schemas/HeartbeatEvent"
-          }
-        ]
-      },
-      "ClientMessage": {
-        "discriminator": {
-          "mapping": {
-            "agent_control": "#/components/schemas/AgentControlCommand",
-            "permission_response": "#/components/schemas/PermissionResponseCommand",
-            "ping": "#/components/schemas/PingCommand",
-            "send_message": "#/components/schemas/SendMessageCommand",
-            "subscribe": "#/components/schemas/SubscribeCommand",
-            "unsubscribe": "#/components/schemas/UnsubscribeCommand"
-          },
-          "propertyName": "type"
-        },
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/SubscribeCommand"
-          },
-          {
-            "$ref": "#/components/schemas/UnsubscribeCommand"
-          },
-          {
-            "$ref": "#/components/schemas/SendMessageCommand"
-          },
-          {
-            "$ref": "#/components/schemas/AgentControlCommand"
-          },
-          {
-            "$ref": "#/components/schemas/PermissionResponseCommand"
-          },
-          {
-            "$ref": "#/components/schemas/PingCommand"
-          }
-        ]
+        "title": "_PermissionSnapshot",
+        "description": "Outstanding permission request in a state snapshot."
       }
     }
   }

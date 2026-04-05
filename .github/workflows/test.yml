@@ -15,3 +15,33 @@ jobs:
       - run: uv run ty check
       - run: uv run pytest
       - run: uv cache prune --ci
+
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: src/ui/package.json
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: cd src/ui && npm ci
+
+      # Export schemas from Pydantic models (no running server)
+      - run: uv run python scripts/export_openapi.py
+      - run: uv run python scripts/export_ws_schema.py
+
+      # Generate TypeScript types from schemas
+      - run: cd src/ui && npx openapi-typescript ../../openapi.json -o src/app/data/wire-types.ts
+      - run: uv run python scripts/generate_ws_types.py
+
+      # Fail if generated types differ from committed types
+      - run: git diff --exit-code openapi.json schemas/ src/ui/src/app/data/wire-types.ts src/ui/src/app/data/ws-types.ts
+        name: Check for schema/type drift
+
+      # TypeScript compilation gate
+      - run: cd src/ui && npx tsc --noEmit
+        name: TypeScript type check

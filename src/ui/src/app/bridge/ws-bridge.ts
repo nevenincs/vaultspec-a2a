@@ -55,7 +55,7 @@ export function initWsBridge(): () => void {
   wsClient.setConnectedCallback((event) => {
     console.info(
       `[ws-bridge] connected — server ${event.server_version}, ` +
-        `${event.active_threads.length} active thread(s)`,
+        `${(event.active_threads ?? []).length} active thread(s)`,
     );
   });
 

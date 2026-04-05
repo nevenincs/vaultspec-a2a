@@ -21,7 +21,7 @@ import type {
   AgentControlCommand,
   PingCommand,
   AgentControlAction,
-} from '../data/wire-types';
+} from '../data/ws-types';
 
 export type {
   ServerEvent,

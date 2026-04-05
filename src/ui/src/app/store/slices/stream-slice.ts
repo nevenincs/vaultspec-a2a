@@ -1,7 +1,13 @@
 import type { StateCreator } from 'zustand';
 import type { StreamEvent } from '../../data/types';
-import type { ServerEvent, WsToolCallContent, components } from '../../data/wire-types';
-type WirePlanEntry = components['schemas']['PlanEntry'];
+import type {
+  ServerEvent,
+  ToolCallContentText,
+  ToolCallContentDiff,
+  ToolCallContentTerminal,
+  PlanEntry as WirePlanEntry,
+} from '../../data/ws-types';
+type WsToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal;
 import { mapToolKind, mapToolCallStatus } from '../../api/mappers';
 import { wsClient } from '../../api/websocket-client';
 import type { AppStore } from '../app-store';
@@ -18,7 +24,7 @@ export interface StreamSlice {
 
   handleWireEvent: (threadId: string, event: ServerEvent) => void;
   updateAgentDisplayNames: (
-    agents: Array<{ agent_id: string; display_name: string }>,
+    agents: Array<{ agent_id: string; display_name?: string }>,
   ) => void;
   hydrateThreadEvents: (
     threadId: string,
@@ -39,7 +45,7 @@ export const createStreamSlice: StateCreator<
   _agentDisplayNames: {},
 
   handleWireEvent: (threadId, event) => {
-    const resolveAgentName = (agentId: string | null): string => {
+    const resolveAgentName = (agentId: string | null | undefined): string => {
       const id = agentId ?? '';
       return get()._agentDisplayNames[id] || id;
     };
@@ -154,7 +160,7 @@ export const createStreamSlice: StateCreator<
               tool_call_id: event.tool_call_id,
               tool_name: event.title,
               tool_kind: mapToolKind(event.kind),
-              status: mapToolCallStatus(event.status),
+              status: mapToolCallStatus(event.status ?? 'pending'),
               location: loc
                 ? { file: loc.path, line: loc.line ?? undefined }
                 : undefined,
@@ -222,11 +228,11 @@ export const createStreamSlice: StateCreator<
             const existingIdx = arr.findIndex(
               (e) => e.type === 'artifact' && e.id === event.artifact_id,
             );
-            if (existingIdx >= 0 && event.append) {
+            if (existingIdx >= 0 && (event.append ?? false)) {
               const entry = arr[existingIdx];
               if (entry.type === 'artifact') {
                 entry.content += event.content;
-                entry.complete = event.last_chunk;
+                entry.complete = event.last_chunk ?? false;
               }
             } else {
               arr.push({
@@ -239,7 +245,7 @@ export const createStreamSlice: StateCreator<
                 artifact_id: event.artifact_id,
                 filename: event.filename,
                 content: event.content,
-                complete: event.last_chunk,
+                complete: event.last_chunk ?? false,
               });
             }
           },
@@ -265,8 +271,8 @@ export const createStreamSlice: StateCreator<
               entries: event.entries.map((e: WirePlanEntry, i: number) => ({
                 id: `plan-entry-${i}`,
                 content: e.content,
-                status: e.status,
-                priority: e.priority,
+                status: e.status ?? '',
+                priority: e.priority ?? '',
               })),
             });
           },

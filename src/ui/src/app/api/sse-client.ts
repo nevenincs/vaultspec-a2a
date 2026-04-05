@@ -9,7 +9,7 @@
  * backoff, so no custom retry logic is needed.
  */
 
-import type { ServerEvent } from '../data/wire-types';
+import type { ServerEvent } from '../data/ws-types';
 import { log } from '../utils/logger';
 
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';

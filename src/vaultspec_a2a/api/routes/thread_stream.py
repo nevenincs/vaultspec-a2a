@@ -106,6 +106,8 @@ async def _stream_thread_events(
                 payload,
                 event=str(event_type) if isinstance(event_type, str) else None,
             )
+            if event_type == "thread_terminal":
+                return
     finally:
         aggregator.remove_subscriber(client_id)
 

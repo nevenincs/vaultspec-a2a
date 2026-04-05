@@ -1316,8 +1316,15 @@ type-checkable. Evidence anchors:
 `src/vaultspec_a2a/context/anchoring.py`,
 `src/vaultspec_a2a/team/presets/teams/*.toml`.
 
-Audit 8 summary
-Seven MEDIUM findings fixed (REVIEW-080/081/085-088/091/094). One new
-MEDIUM finding (REVIEW-095) identified for typed phase/role registry.
+Resolved in Audit 8 second pass:
+
+- REVIEW-095: PipelinePhase StrEnum introduced in graph/enums.py, wired
+  through supervisor routing, compiler role-to-phase map, vault reader queue
+  phases, and phase prerequisite gate table.
+
+Audit 8 closeout
+All MEDIUM findings resolved (REVIEW-080/081/085-088/091/094/095).
 Remaining LOW findings (REVIEW-082/083/089/090/092/093) are accepted
 architectural tradeoffs or config-only risks. No CRITICAL or HIGH issues.
+1177 tests passing. Audit 8 is functionally complete. Next: Audit 9
+streaming/replay/trace lineage.

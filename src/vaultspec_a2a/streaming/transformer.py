@@ -249,6 +249,9 @@ async def process_langgraph_event(
         data = event_data.get("data", {})
         content = data if isinstance(data, str) else str(data.get("content", ""))
         if content:
+            max_len = domain_config.tool_arg_truncate_len
+            if len(content) > max_len:
+                content = content[:max_len] + "..."
             await emitters.emit_thought_chunk(
                 thread_id=thread_id,
                 agent_id=effective_agent_id,

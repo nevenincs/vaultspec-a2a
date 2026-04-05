@@ -58,6 +58,9 @@ _TERMINAL_COMMAND_ALLOWLIST: frozenset[str] = frozenset(
 # invoke a shell but these chars indicate injection attempts).
 _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 
+# Server-side cap for subprocess-supplied terminal wait_for_exit timeout.
+_MAX_TERMINAL_TIMEOUT: float = 300.0
+
 # Valid POSIX environment variable name pattern (PROV-M3).
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
@@ -414,7 +417,7 @@ async def on_terminal_wait_for_exit(
                 "message": f"Unknown terminal: {terminal_id}",
             },
         }
-    timeout = params.get("timeout") or 60.0
+    timeout = min(float(params.get("timeout") or 60.0), _MAX_TERMINAL_TIMEOUT)
     try:
         await asyncio.wait_for(process.wait(), timeout=timeout)
     except TimeoutError:

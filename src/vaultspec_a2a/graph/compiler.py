@@ -34,7 +34,7 @@ from vaultspec_a2a.thread.errors import (
 )
 from vaultspec_a2a.thread.state import TeamState
 
-from .enums import Model, Provider
+from .enums import Model, PipelinePhase, Provider
 from .nodes.supervisor import create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
@@ -46,21 +46,21 @@ logger = logging.getLogger(__name__)
 __all__ = ["build_initial_vault_index", "compile_team_graph"]
 
 _VAULT_STAGE_PATTERNS: dict[str, str] = {
-    "research": ".vault/research/*{tag}*.md",
+    PipelinePhase.RESEARCH: ".vault/research/*{tag}*.md",
     "reference": ".vault/reference/*{tag}*.md",
-    "adr": ".vault/adr/*{tag}*.md",
-    "plan": ".vault/plan/*{tag}*.md",
-    "exec": ".vault/exec/*{tag}*/**/*.md",
-    "audit": ".vault/audit/*{tag}*.md",
+    PipelinePhase.ADR: ".vault/adr/*{tag}*.md",
+    PipelinePhase.PLAN: ".vault/plan/*{tag}*.md",
+    PipelinePhase.EXEC: ".vault/exec/*{tag}*/**/*.md",
+    PipelinePhase.AUDIT: ".vault/audit/*{tag}*.md",
 }
 # ADR-023: maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
 _ROLE_TO_PHASE: dict[str, str] = {
-    "researcher": "research",
-    "analyst": "adr",
-    "planner": "plan",
-    "coder": "exec",
-    "reviewer": "audit",
+    "researcher": PipelinePhase.RESEARCH,
+    "analyst": PipelinePhase.ADR,
+    "planner": PipelinePhase.PLAN,
+    "coder": PipelinePhase.EXEC,
+    "reviewer": PipelinePhase.AUDIT,
 }
 
 # Transient exceptions that warrant a retry at the LangGraph node level.

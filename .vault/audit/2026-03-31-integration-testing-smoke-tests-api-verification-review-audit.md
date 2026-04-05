@@ -1281,11 +1281,43 @@ comes from team config TOML (not runtime input), so risk is LOW, but no
 explicit traversal check exists. Evidence anchors:
 `src/vaultspec_a2a/graph/tools/task_queue.py`.
 
+Resolved in Audit 8 fix pass:
+
+- REVIEW-080: artifact file cleanup on delete
+- REVIEW-081: artifact path traversal guard at create_artifact
+- REVIEW-085: option_id max_length=256
+- REVIEW-086/087: worker relay description/options capped
+- REVIEW-088: custom event content truncated before SSE
+- REVIEW-091: terminal timeout capped at 300s server-side
+- REVIEW-094: feature_tag traversal guard
+
+Pre-existing test fixes applied:
+- test_degraded_projection assertion corrected (stale reason only)
+- validation-error routing test updated for phase-aware routing
+- all absolute artifact paths in test_database.py corrected to relative
+
+REVIEW-095 | MEDIUM | Pipeline phase names and worker roles are bare strings with no typed registry
+The supervisor routing layer uses bare string comparisons for pipeline
+phases (`"plan"`, `"exec"`, `"audit"`) and worker roles (`"planner"`,
+`"coder"`, `"reviewer"`). These values originate from TOML team preset
+configs, flow through `worker_phase_map`, and are matched in
+`_select_phase_worker`, `_check_finish_blocked`, and `_phase_for_route`.
+A typo in a TOML file or a mismatched `_select_phase_worker("exec", ...)`
+call silently falls through to the `workers[0]` fallback rather than
+failing closed. The same bare-string pattern appears in
+`src/vaultspec_a2a/context/anchoring.py` (phase matching),
+`src/vaultspec_a2a/graph/nodes/vault_reader.py` (mount document selection),
+and `src/vaultspec_a2a/graph/nodes/supervisor.py` (routing decisions).
+A typed `PipelinePhase` enum and a `WorkerRole` registry would formalize
+the contract, catch typos at config-load time, and make the routing logic
+type-checkable. Evidence anchors:
+`src/vaultspec_a2a/graph/nodes/supervisor.py`,
+`src/vaultspec_a2a/graph/nodes/vault_reader.py`,
+`src/vaultspec_a2a/context/anchoring.py`,
+`src/vaultspec_a2a/team/presets/teams/*.toml`.
+
 Audit 8 summary
-Four MEDIUM findings: REVIEW-080 (artifact file orphaning on delete),
-REVIEW-081 (artifact path traversal at record layer), REVIEW-088 (SSE custom
-event reflection), REVIEW-091 (unbounded terminal timeout). The rest are LOW
-severity with internal-auth or config-only mitigations. No CRITICAL or HIGH
-issues found. The SQLAlchemy CASCADE coverage for DB-layer delete is
-complete; the gap is exclusively in filesystem cleanup and record-level path
-safety.
+Seven MEDIUM findings fixed (REVIEW-080/081/085-088/091/094). One new
+MEDIUM finding (REVIEW-095) identified for typed phase/role registry.
+Remaining LOW findings (REVIEW-082/083/089/090/092/093) are accepted
+architectural tradeoffs or config-only risks. No CRITICAL or HIGH issues.

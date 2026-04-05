@@ -27,6 +27,7 @@ from ...thread.enums import ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
+    get_aggregator,
     get_checkpointer,
     get_circuit_breaker,
     get_services,
@@ -212,6 +213,7 @@ async def get_thread_metadata_endpoint(
 async def delete_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> None:
     """Hard-delete a thread and all cascading artifacts."""
@@ -220,6 +222,7 @@ async def delete_thread_endpoint(
         raise HTTPException(status_code=404, detail="Thread not found")
     if not result.deleted:
         raise HTTPException(status_code=409, detail=result.error_detail)
+    aggregator.clear_thread_state(thread_id)
 
 
 # ---------------------------------------------------------------------------

@@ -209,6 +209,20 @@ class BufferingManager:
             del self._tool_update_last_emit[k]
         self._plan_update_last_emit.pop(thread_id, None)
 
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge all buffered and debounced state scoped to ``thread_id``."""
+        task = self._chunk_flush_tasks.pop(thread_id, None)
+        if task is not None:
+            task.cancel()
+            self._debounce_tasks.discard(task)
+        self._chunk_buffers.pop(thread_id, None)
+        self._chunk_buffer_meta.pop(thread_id, None)
+        self.prune_tool_debounce(thread_id)
+        stale_tool_pending = [k for k in self._tool_update_pending if k[0] == thread_id]
+        for key in stale_tool_pending:
+            self._tool_update_pending.pop(key, None)
+        self._plan_update_pending.pop(thread_id, None)
+
     # ------------------------------------------------------------------
     # Shutdown
     # ------------------------------------------------------------------

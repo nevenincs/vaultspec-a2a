@@ -74,6 +74,14 @@ class IngestManager:
         """Remove the cancellation event for *thread_id*."""
         self._cancel_events.pop(thread_id, None)
 
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge ingest-owned state scoped to ``thread_id``."""
+        self._cancel_events.pop(thread_id, None)
+        self._ingest_queues.pop(thread_id, None)
+        task = self._fanout_tasks.pop(thread_id, None)
+        if task is not None:
+            task.cancel()
+
     # ------------------------------------------------------------------
     # LangGraph graph ingest (research §1.3)
     # ------------------------------------------------------------------

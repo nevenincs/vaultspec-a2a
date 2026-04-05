@@ -19,6 +19,7 @@ from ...graph.enums import (
 )
 from ...graph.events import (
     AgentStatus,
+    ArtifactUpdate,
     ErrorOccurred,
     MessageChunk,
     PermissionRequest,
@@ -630,6 +631,39 @@ class TestLangGraphEventProcessing:
         assert isinstance(event, ToolCallUpdate)
         assert event.tool_call_id == "run-456"
         assert event.status == ToolCallStatus.COMPLETED
+
+    @pytest.mark.asyncio
+    async def test_on_tool_end_redacts_raw_file_paths_from_artifact_updates(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """Artifact updates must not expose hostile absolute file paths."""
+        queue = aggregator.add_subscriber("client-1")
+        aggregator.subscribe("client-1", ["thread-1"])
+
+        await aggregator.process_langgraph_event(
+            event_data={
+                "event": "on_tool_end",
+                "run_id": "run-456",
+                "name": "delete_file",
+                "metadata": {"langgraph_node": "coder"},
+                "data": {
+                    "input": {"path": r"C:\\sensitive\\secret.txt"},
+                    "output": "",
+                },
+            },
+            thread_id="thread-1",
+            agent_id="agent-1",
+        )
+
+        tool_update = queue.get_nowait().event
+        artifact_update = queue.get_nowait().event
+
+        assert isinstance(tool_update, ToolCallUpdate)
+        assert isinstance(artifact_update, ArtifactUpdate)
+        assert artifact_update.artifact_id == "run-456:secret.txt"
+        assert artifact_update.filename == "secret.txt"
+        assert "C:\\sensitive\\secret.txt" not in artifact_update.content
+        assert artifact_update.content == "[delete_file] secret.txt"
 
     @pytest.mark.asyncio
     async def test_on_tool_end_without_node_filtered(

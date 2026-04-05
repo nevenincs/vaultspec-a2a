@@ -1090,3 +1090,70 @@ history, not only the root tuple. Evidence anchors:
 `src/vaultspec_a2a/api/routes/threads.py`,
 `src/vaultspec_a2a/api/tests/test_endpoints.py`,
 `src/vaultspec_a2a/database/checkpoints.py`.
+
+PR review triage (2026-04-05)
+Three external review bots (Claude, Codex, Gemini) produced findings on
+PR #22. The following were triaged as real fixes; the remainder were dismissed
+as false positives or accepted limitations (see notes below).
+
+REVIEW-076 | MEDIUM | Pre-dispatch approval stamp flattened actual decision to PENDING
+PR review found that `set_thread_approval_state` in
+`src/vaultspec_a2a/control/permission_service.py` was stamping
+`ApprovalStatus.PENDING` on the thread row before dispatching the resume to
+the worker, even though the operator had already submitted an approve or
+reject decision. That opened a window where
+`GET /api/threads/{id}/state` could reflect `approval_status="pending"` via
+the thread row while the operator already knew the outcome. The response
+payload was correctly reporting the submitted decision (REVIEW-063), but the
+pre-dispatch thread-row stamp was still stale. The fix now stamps the actual
+submitted decision (`APPROVED` or `REJECTED`) using
+`_plan_response_approval_status(option_id)` so the durable row stays
+consistent with the operator's action from the moment of submission.
+Evidence anchors: `src/vaultspec_a2a/control/permission_service.py`.
+
+REVIEW-077 | MEDIUM | Validation-error FINISH block routed to workers[0] instead of phase-aware target
+PR review found that the validation-error blocked-FINISH path in
+`src/vaultspec_a2a/graph/nodes/supervisor.py` was still falling back to
+`workers[0]` instead of using `_select_phase_worker` like the adjacent
+missing-review block (REVIEW-072). In a planner/reviewer team where
+`workers[0]` is the planner but the errors belong to exec-phase validation,
+this would misroute revision work. The fix now routes validation-error
+blocked-FINISH to the exec-phase worker via `_select_phase_worker("exec",
+...)` for consistency with the rest of the phase-aware routing. Evidence
+anchors: `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+
+REVIEW-078 | MEDIUM | Thread summaries could repopulate approval after checkpoint_unverified cleared it
+PR review (Codex P1) found that `list_threads_service` in
+`src/vaultspec_a2a/control/thread_service.py` cleared `approval_status` and
+`approval_request_id` when `checkpoint_unverified` was set, but the
+subsequent live-permission block could unconditionally repopulate them for
+non-terminal threads. That allowed `/api/threads` to advertise a pending
+actionable approval even when checkpoint truth was not verified, violating
+the checkpoint-first contract already enforced by the reconnect snapshot path
+(REVIEW-049). The fix now short-circuits live-permission repopulation when
+`checkpoint_unverified` is set, keeping the summary surface aligned with the
+stricter thread-state contract. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`.
+
+REVIEW-079 | LOW | Dead `or` branch in plan-approval filter
+PR review found that the plan-approval filter in
+`enrich_snapshot_from_durable_state` (projection.py) included a redundant
+`or permission.tool_call == PermissionType.PLAN_APPROVAL.value` branch.
+That value is already a member of `_PLAN_APPROVAL_PAUSE_CAUSES`, making the
+`or` branch dead code. The fix removes it for clarity. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`.
+
+Dismissed findings (false positives / accepted limitations):
+- Gemini: `json` not imported in `projection.py` and `mock_chat_model.py` —
+  false positive; both files have `import json` at the top (line 5 and 3
+  respectively). The bots only saw the diff context.
+- Gemini/Codex P2: sequential checkpoint probing in `list_threads_service` —
+  known architectural tradeoff. Per-thread probing with 2s timeout is the
+  accepted cost for checkpoint-first authority in summaries.
+- Gemini: SSE generator missing `unsubscribe` — false positive;
+  `remove_subscriber` in `subscribers.py:61-64` already pops both
+  `_subscribers` and `_subscriptions` dicts.
+- Claude Low #5: `StrEnum` bare comparison in `lifecycle_guards.py` —
+  cosmetic; `StrEnum` comparison semantics make it correct.
+- Claude Low #6: port selection TOCTOU in test harness — accepted limitation
+  for test infrastructure on non-shared hosts.

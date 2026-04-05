@@ -24,6 +24,54 @@ _logger = logging.getLogger(__name__)
 __all__ = ["create_supervisor_node"]
 
 
+def _active_agent_for_route(route: str) -> str:
+    """Return the shared-state owner marker for a routed supervisor decision."""
+    return "" if route == "FINISH" else route
+
+
+def _plan_entry_for_route(route: str) -> dict[str, str]:
+    """Return the route summary that should replace stale supervisor plan state."""
+    return {
+        "content": f"Route to {route}" if route != "FINISH" else "Complete task",
+        "status": "in_progress" if route != "FINISH" else "completed",
+    }
+
+
+def _select_revision_worker(
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Prefer the plan-phase worker when a rejected exec plan needs revision."""
+    return _select_phase_worker("plan", workers, worker_phase_map)
+
+
+def _select_phase_worker(
+    target_phase: str,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Return the worker that owns *target_phase*, falling back to the first worker."""
+    if worker_phase_map:
+        for worker in workers:
+            if worker_phase_map.get(worker) == target_phase:
+                return worker
+    return workers[0] if workers else "FINISH"
+
+
+def _phase_for_route(
+    route: str,
+    *,
+    fallback_phase: str,
+    worker_phase_map: dict[str, str] | None,
+) -> str:
+    """Prefer the routed worker phase over artifact-derived phase inference."""
+    if worker_phase_map:
+        route_phase = worker_phase_map.get(route)
+        if route_phase:
+            return route_phase
+    return fallback_phase
+
+
 def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     """Parse the model response text into a route choice.
 
@@ -42,6 +90,7 @@ def _check_finish_blocked(
     vault_index: dict[str, list[str]],
     workers: list[str],
     inferred_phase: str,
+    worker_phase_map: dict[str, str] | None,
 ) -> dict[str, Any] | None:
     """Check if FINISH should be blocked due to validation errors or missing review.
 
@@ -70,9 +119,9 @@ def _check_finish_blocked(
         _logger.warning(
             "supervisor blocked FINISH: no review"
             " artifact in vault_index['audit']"
-            " — rerouting to first available worker",
+            " — rerouting to audit-phase worker",
         )
-        next_route = workers[0] if workers else "FINISH"
+        next_route = _select_phase_worker("audit", workers, worker_phase_map)
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,
@@ -162,11 +211,22 @@ def _evaluate_supervisor_response(
         )
 
     if next_route == "FINISH":
-        blocked = _check_finish_blocked(state, vault_index, workers, inferred_phase)
+        blocked = _check_finish_blocked(
+            state,
+            vault_index,
+            workers,
+            inferred_phase,
+            worker_phase_map,
+        )
         if blocked is not None:
+            blocked_route = cast("str", blocked["next"])
             return _SupervisorDecision(
-                next_route=cast("str", blocked["next"]),
-                inferred_phase=cast("str", blocked["pipeline_phase"]),
+                next_route=blocked_route,
+                inferred_phase=_phase_for_route(
+                    blocked_route,
+                    fallback_phase=cast("str", blocked["pipeline_phase"]),
+                    worker_phase_map=worker_phase_map,
+                ),
                 routing_error=cast("str", blocked["routing_error"]),
             )
 
@@ -182,7 +242,11 @@ def _evaluate_supervisor_response(
                 )
                 return _SupervisorDecision(
                     next_route=next_route,
-                    inferred_phase=inferred_phase,
+                    inferred_phase=_phase_for_route(
+                        next_route,
+                        fallback_phase=inferred_phase,
+                        worker_phase_map=worker_phase_map,
+                    ),
                     routing_error=gate_result.message,
                 )
 
@@ -217,7 +281,11 @@ def _evaluate_supervisor_response(
     _logger.debug("supervisor routed to %r (raw=%r)", next_route, response_text[:80])
     return _SupervisorDecision(
         next_route=next_route,
-        inferred_phase=inferred_phase,
+        inferred_phase=_phase_for_route(
+            next_route,
+            fallback_phase=inferred_phase,
+            worker_phase_map=worker_phase_map,
+        ),
     )
 
 
@@ -329,7 +397,11 @@ def create_supervisor_node(
         if decision.routing_error:
             return {
                 "next": decision.next_route,
+                "active_agent": _active_agent_for_route(decision.next_route),
                 "pipeline_phase": decision.inferred_phase,
+                "current_plan": [_plan_entry_for_route(decision.next_route)],
+                "approval_status": None,
+                "approval_request_id": None,
                 "routing_error": decision.routing_error,
             }
 
@@ -347,32 +419,41 @@ def create_supervisor_node(
                 )
                 return {
                     "next": decision.next_route,
+                    "active_agent": _active_agent_for_route(decision.next_route),
                     "pipeline_phase": decision.inferred_phase,
+                    "current_plan": [_plan_entry_for_route(decision.next_route)],
                     "approval_status": ApprovalStatus.APPROVED,
+                    "approval_request_id": None,
+                    "routing_error": None,
                 }
+            revision_worker = _select_revision_worker(workers, worker_phase_map)
             _logger.info(
-                "plan rejected by user — rerouting to first worker for revision"
+                "plan rejected by user — rerouting to %r for revision",
+                revision_worker,
             )
             return {
-                "next": workers[0] if workers else "FINISH",
-                "pipeline_phase": decision.inferred_phase,
+                "next": revision_worker,
+                "active_agent": _active_agent_for_route(revision_worker),
+                "pipeline_phase": _phase_for_route(
+                    revision_worker,
+                    fallback_phase=decision.inferred_phase,
+                    worker_phase_map=worker_phase_map,
+                ),
+                "current_plan": [_plan_entry_for_route(revision_worker)],
                 "approval_status": ApprovalStatus.REJECTED,
+                "approval_request_id": None,
                 "routing_error": (
                     "Plan rejected by user — revise before proceeding to execution."
                 ),
             }
-        plan_entry: dict[str, str] = {
-            "content": f"Route to {decision.next_route}"
-            if decision.next_route != "FINISH"
-            else "Complete task",
-            "status": (
-                "in_progress" if decision.next_route != "FINISH" else "completed"
-            ),
-        }
         return {
             "next": decision.next_route,
+            "active_agent": _active_agent_for_route(decision.next_route),
             "pipeline_phase": decision.inferred_phase,
-            "current_plan": [plan_entry],
+            "current_plan": [_plan_entry_for_route(decision.next_route)],
+            "approval_status": None,
+            "approval_request_id": None,
+            "routing_error": None,
         }
 
     supervisor_node.__name__ = "supervisor_node"

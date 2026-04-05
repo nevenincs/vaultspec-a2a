@@ -197,6 +197,7 @@ def _resolve_supervisor_model(
     workspace_root: Path | None = None,
     *,
     provider_factory: ProviderFactoryProtocol,
+    supervisor_agent_config: Any | None = None,
 ) -> BaseChatModel:
     """Resolve the supervisor model from team config."""
     factory = provider_factory
@@ -206,7 +207,12 @@ def _resolve_supervisor_model(
         or Provider.CLAUDE
     )
     capability: Model = team_config.supervisor.capability or Model.MAX
-    return factory.create(provider, model=capability, workspace_root=workspace_root)
+    return factory.create(
+        provider,
+        model=capability,
+        agent_config=supervisor_agent_config,
+        workspace_root=workspace_root,
+    )
 
 
 def build_initial_vault_index(
@@ -406,7 +412,10 @@ def _compile_star(
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
     supervisor_model = _resolve_supervisor_model(
-        team_config, workspace_root, provider_factory=provider_factory
+        team_config,
+        workspace_root,
+        provider_factory=provider_factory,
+        supervisor_agent_config=supervisor_agent_config,
     )
 
     if supervisor_agent_config is not None:

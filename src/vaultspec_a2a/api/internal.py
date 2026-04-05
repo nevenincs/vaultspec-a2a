@@ -39,6 +39,18 @@ __all__ = ["internal_router"]
 logger = logging.getLogger(__name__)
 
 
+def _normalize_worker_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """Mirror ``type``/``event_type`` keys so both legacy and new paths work."""
+    normalized = dict(payload)
+    payload_type = normalized.get("type")
+    event_type = normalized.get("event_type")
+    if isinstance(event_type, str) and event_type and not payload_type:
+        normalized["type"] = event_type
+    if isinstance(payload_type, str) and payload_type and not event_type:
+        normalized["event_type"] = payload_type
+    return normalized
+
+
 def _validate_event_envelope(
     thread_id: str,
     payload: dict[str, Any],
@@ -101,17 +113,21 @@ async def _relay_single_event(
     avoid copy-pasting the broadcast → aggregator sync → relay_event
     sequence.
     """
+    payload = _normalize_worker_payload(payload)
     if payload.get("type") == "execution_state_projection":
         await _handle_execution_state_event(
             thread_id, payload, session_factory=session_factory
         )
         return
 
-    if cm is not None:
+    if agg is not None:
+        agg.relay_payload(thread_id, payload)
+        agg.sync_worker_event(thread_id, payload)
+    elif cm is not None:
         await cm.broadcast_to_thread(thread_id, payload)
     else:
         logger.warning(
-            "ConnectionManager not available -- dropping event for %s",
+            "No relay target available -- dropping event for %s",
             thread_id,
             extra={
                 "thread_id": thread_id,
@@ -120,9 +136,6 @@ async def _relay_single_event(
                 "action": "relay_drop_event",
             },
         )
-
-    if agg is not None:
-        agg.sync_worker_event(thread_id, payload)
     await relay_event(
         thread_id,
         payload,
@@ -265,17 +278,18 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     _validate_event_envelope(thread_id, payload, context="worker event POST")
 
     cm = getattr(request.app.state, "connection_manager", None)
-    if cm is None:
+    agg = getattr(request.app.state, "aggregator", None)
+    if cm is None and agg is None:
         raise HTTPException(
             status_code=503,
-            detail="ConnectionManager not available -- gateway not ready",
+            detail="No relay target available -- gateway not ready",
         )
 
     await _relay_single_event(
         thread_id,
         payload,
         cm=cm,
-        agg=getattr(request.app.state, "aggregator", None),
+        agg=agg,
         session_factory=getattr(request.app.state, "db_session_factory", None),
     )
     return {"status": "ok"}
@@ -315,13 +329,13 @@ async def receive_worker_event_batch(request: Request) -> dict[str, str]:
     events.sort(key=lambda e: e.get("ts", 0.0))
 
     cm = getattr(request.app.state, "connection_manager", None)
-    if cm is None:
+    agg = getattr(request.app.state, "aggregator", None)
+    if cm is None and agg is None:
         raise HTTPException(
             status_code=503,
-            detail="ConnectionManager not available -- gateway not ready",
+            detail="No relay target available -- gateway not ready",
         )
 
-    agg = getattr(request.app.state, "aggregator", None)
     session_factory = getattr(request.app.state, "db_session_factory", None)
 
     for idx, evt in enumerate(events):

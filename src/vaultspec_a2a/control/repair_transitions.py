@@ -53,7 +53,7 @@ async def mark_permission_response_applied(
         thread_id,
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
-        last_requested_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
+        last_applied_action=ControlActionType.PERMISSION_RESPONSE_SUBMITTED,
     )
 
 
@@ -77,7 +77,7 @@ async def mark_message_followup_applied(
         thread_id,
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
-        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_REQUESTED,
+        last_applied_action=ControlActionType.MESSAGE_FOLLOWUP_APPLIED,
     )
 
 
@@ -88,4 +88,19 @@ async def mark_cancel_requested(db: AsyncSession, thread_id: str) -> ThreadModel
         repair_status=RepairStatus.CANCEL_PENDING,
         execution_readiness=RepairStatus.CANCEL_PENDING.value,
         last_requested_action=ControlActionType.CANCEL,
+    )
+
+
+async def mark_dispatch_failed(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    reason: str = "Worker dispatch failed",
+) -> ThreadModel | None:
+    return await set_thread_repair_state(
+        db,
+        thread_id,
+        repair_status=RepairStatus.OPERATOR_INTERVENTION_REQUIRED,
+        repair_reason=reason,
+        execution_readiness=RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
     )

@@ -53,6 +53,22 @@ class TestBuildAnchoringContext:
         assert result is not None
         assert "Phase" not in result
 
+    def test_includes_approval_status_when_set(self) -> None:
+        state = _make_state(active_feature="auth-flow", approval_status="rejected")
+        result = build_anchoring_context(state)
+        assert result is not None
+        assert "**Approval Status:** rejected" in result
+
+    def test_includes_routing_error_when_set(self) -> None:
+        state = _make_state(
+            active_feature="auth-flow",
+            routing_error="Plan rejected by user — revise before proceeding.",
+        )
+        result = build_anchoring_context(state)
+        assert result is not None
+        assert "Routing Note" in result
+        assert "Plan rejected by user" in result
+
     def test_includes_vault_paths(self) -> None:
         state = _make_state(
             active_feature="auth-flow",

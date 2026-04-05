@@ -41,6 +41,7 @@ __all__ = [
     "mark_permission_request_applied",
     "record_permission_request",
     "record_permission_response_submission",
+    "reset_permission_response_submission",
     "supersede_permission_requests",
 ]
 
@@ -96,14 +97,13 @@ async def get_pending_permission_requests(
     session: AsyncSession,
     *,
     thread_id: str | None = None,
+    include_answered_pending_apply: bool = True,
 ) -> Sequence[PermissionRequestModel]:
+    statuses = [PermissionRequestStatus.PENDING.value]
+    if include_answered_pending_apply:
+        statuses.append(PermissionRequestStatus.ANSWERED_PENDING_APPLY.value)
     stmt = select(PermissionRequestModel).where(
-        PermissionRequestModel.request_status.in_(
-            [
-                PermissionRequestStatus.PENDING.value,
-                PermissionRequestStatus.ANSWERED_PENDING_APPLY.value,
-            ]
-        )
+        PermissionRequestModel.request_status.in_(statuses)
     )
     if thread_id is not None:
         stmt = stmt.where(PermissionRequestModel.thread_id == thread_id)
@@ -140,6 +140,23 @@ async def mark_permission_request_applied(
         return None
     permission.request_status = _coerce_permission_request_status(status).value
     permission.applied_at = _utcnow()
+    await session.flush()
+    return permission
+
+
+async def reset_permission_response_submission(
+    session: AsyncSession,
+    *,
+    request_id: str,
+) -> PermissionRequestModel | None:
+    """Roll back a submitted response when resume dispatch never succeeded."""
+    permission = await session.get(PermissionRequestModel, request_id)
+    if permission is None:
+        return None
+    permission.request_status = PermissionRequestStatus.PENDING.value
+    permission.response_option_id = None
+    permission.idempotency_key = None
+    permission.responded_at = None
     await session.flush()
     return permission
 

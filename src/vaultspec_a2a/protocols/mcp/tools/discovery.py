@@ -4,12 +4,14 @@ Handlers: ``get_team_status``, ``get_pending_permissions``,
 ``respond_to_permission``, ``list_team_presets``.
 """
 
+import contextlib
 from typing import Annotated
 
+from mcp.server.fastmcp.exceptions import ToolError
 from pydantic import Field
 
 from ....control.config import settings
-from .._http import _mcp_request
+from .._http import _HTTP_CONFLICT, HTTPStatusError, _mcp_request
 from ..server import mcp
 
 
@@ -34,8 +36,8 @@ async def get_team_status() -> str:
     - Count and list of active thread IDs
     - Count and list of agents with their current lifecycle state
       (idle, working, blocked, finished)
-    - Count and list of pending permission requests with request IDs and
-      descriptions
+    - Count and list of checkpoint-actionable pending permission requests with
+      request IDs and descriptions
     """
     data = await _mcp_request(
         "GET",
@@ -70,7 +72,7 @@ async def get_team_status() -> str:
 
 @mcp.tool()
 async def get_pending_permissions() -> str:
-    """List all pending permission requests across active threads that need a response.
+    """List all pending permission requests the gateway still considers actionable.
 
     Use this tool to discover which agent actions are blocked waiting for
     human approval.  After reviewing the results, call
@@ -79,8 +81,9 @@ async def get_pending_permissions() -> str:
     permission requests.
 
     This tool queries the team status endpoint and extracts only the
-    permissions data.  If no threads are running in non-autonomous mode, or if
-    all permissions have been resolved, returns 'No pending permission
+    permissions data.  If no threads are running in non-autonomous mode, if
+    all permissions have been resolved, or if a thread has lost
+    checkpoint-backed actionability, it returns 'No pending permission
     requests.'  For a broader system overview that includes agents and threads
     alongside permissions, use ``get_team_status`` instead.
 
@@ -158,13 +161,24 @@ async def respond_to_permission(
                                options list, e.g. 'allow', 'deny', 'allow_always'.
                                Use ``get_pending_permissions`` to see available options.
     """
-    data = await _mcp_request(
-        "POST",
-        f"/api/permissions/{permission_request_id}/respond",
-        json={"option_id": option_id},
-        timeout=settings.mcp_query_timeout_seconds,
-        not_found_msg=f"Permission request {permission_request_id!r} not found.",
-    )
+    try:
+        data = await _mcp_request(
+            "POST",
+            f"/api/permissions/{permission_request_id}/respond",
+            json={"option_id": option_id},
+            timeout=settings.mcp_query_timeout_seconds,
+            not_found_msg=f"Permission request {permission_request_id!r} not found.",
+        )
+    except HTTPStatusError as exc:
+        if exc.response.status_code == _HTTP_CONFLICT:
+            detail = ""
+            with contextlib.suppress(Exception):
+                detail = exc.response.json().get("detail", "")
+            raise ToolError(
+                f"Cannot respond to permission {permission_request_id}: "
+                f"{detail or 'permission request is not in an actionable state'}."
+            ) from exc
+        raise ToolError(f"Server error: HTTP {exc.response.status_code}") from exc
     accepted = data.get("accepted", False)
     thread_id = data.get("thread_id", "unknown")
     status = "accepted" if accepted else "rejected"

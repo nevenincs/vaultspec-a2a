@@ -1,0 +1,123 @@
+# Deterministic certification stack for issue #17.
+# Usage:
+#   just dev service start integration
+#   just dev service logs integration
+#
+# Stack:
+#   gateway + worker + VidaiMock + Jaeger
+
+services:
+  gateway:
+    build:
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
+      target: gateway
+    restart: unless-stopped
+    ports:
+      - '${VAULTSPEC_PORT:-8000}:8000'
+    volumes:
+      - db-data:/app/data
+    environment:
+      VAULTSPEC_ENVIRONMENT: 'production'
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_WORKER_URL: 'http://worker:8001'
+      VAULTSPEC_AUTO_SPAWN_WORKER: 'false'
+      VAULTSPEC_INTERNAL_TOKEN: 'vaultspec-integration-token'
+      MOCK_API_BASE: 'http://vidaimock:8100'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
+      OTEL_EXPORTER_OTLP_INSECURE: 'true'
+    depends_on:
+      jaeger:
+        condition: service_healthy
+      vidaimock:
+        condition: service_healthy
+      worker:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import json, sys, urllib.request; data = json.load(urllib.request.urlopen('http://localhost:8000/api/health')); sys.exit(0 if data.get('status') == 'ok' else 1)",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  worker:
+    build:
+      context: ..
+      dockerfile: service/docker/prod.Dockerfile
+      target: worker
+    restart: unless-stopped
+    volumes:
+      - db-data:/app/data
+    environment:
+      VAULTSPEC_ENVIRONMENT: 'production'
+      VAULTSPEC_DATABASE_URL: 'sqlite+aiosqlite:////app/data/vaultspec.db'
+      VAULTSPEC_DATABASE_BACKEND: sqlite
+      VAULTSPEC_CHECKPOINT_BACKEND: sqlite
+      VAULTSPEC_GATEWAY_URL: 'http://gateway:8000'
+      VAULTSPEC_INTERNAL_TOKEN: 'vaultspec-integration-token'
+      MOCK_API_BASE: 'http://vidaimock:8100'
+      OTEL_EXPORTER_OTLP_ENDPOINT: 'http://jaeger:4317'
+      OTEL_EXPORTER_OTLP_INSECURE: 'true'
+    depends_on:
+      jaeger:
+        condition: service_healthy
+      vidaimock:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import urllib.request; urllib.request.urlopen('http://localhost:8001/health')",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  vidaimock:
+    build:
+      context: ..
+      dockerfile: service/docker/vidaimock.Dockerfile
+    restart: unless-stopped
+    ports:
+      - '${VIDAIMOCK_PORT:-8100}:8100'
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'python',
+          '-c',
+          "import socket, sys; sock = socket.socket(); sock.settimeout(1); sys.exit(0 if sock.connect_ex(('127.0.0.1', 8100)) == 0 else 1)",
+        ]
+      interval: 5s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
+
+  jaeger:
+    image: cr.jaegertracing.io/jaegertracing/jaeger:2.16.0
+    restart: unless-stopped
+    ports:
+      - '${JAEGER_OTLP_PORT:-4317}:4317'
+      - '${JAEGER_UI_PORT:-16686}:16686'
+    environment:
+      COLLECTOR_OTLP_ENABLED: 'true'
+    healthcheck:
+      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:13133/status']
+      interval: 5s
+      timeout: 2s
+      retries: 10
+      start_period: 5s
+
+volumes:
+  db-data:

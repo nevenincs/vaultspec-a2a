@@ -1,15 +1,29 @@
 """Tests for deterministic supervisor routing and gating logic."""
 
 from pathlib import Path
+from typing import TYPE_CHECKING, Any, cast
 
-from langchain_core.messages import HumanMessage, SystemMessage
+import pytest
+from langchain_core.language_models.chat_models import BaseChatModel
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from langchain_core.outputs import ChatGeneration, ChatResult
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, StateGraph
+from langgraph.types import Command
+from pydantic import PrivateAttr
 
 from vaultspec_a2a.thread.state import TeamState
 
 from ...nodes.supervisor import (
     _build_supervisor_messages,
     _evaluate_supervisor_response,
+    _phase_for_route,
+    _select_revision_worker,
+    create_supervisor_node,
 )
+
+if TYPE_CHECKING:
+    from langchain_core.runnables import RunnableConfig
 
 
 def _make_state() -> TeamState:
@@ -102,6 +116,39 @@ def _make_state_for_plan_approval(
     return state
 
 
+class _StaticSupervisorModel(BaseChatModel):
+    """Minimal async chat model that returns a fixed route choice."""
+
+    _content: str = PrivateAttr()
+
+    def __init__(self, content: str) -> None:
+        super().__init__()
+        self._content = content
+
+    @property
+    def _llm_type(self) -> str:
+        return "static-supervisor-model"
+
+    def _generate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        raise NotImplementedError("_StaticSupervisorModel only supports async")
+
+    async def _agenerate(
+        self,
+        messages: list[Any],
+        stop: list[str] | None = None,
+        run_manager: Any | None = None,
+        **kwargs: Any,
+    ) -> ChatResult:
+        response = AIMessage(content=self._content)
+        return ChatResult(generations=[ChatGeneration(message=response)])
+
+
 def test_supervisor_routing_substring_collision() -> None:
     result = _decision("the coder should handle this", workers=["code", "coder"])
     assert result.next_route == "coder"
@@ -161,8 +208,10 @@ def test_supervisor_validation_error_gate_blocks_finish() -> None:
         "FINISH",
         workers=["planner", "coder"],
         state=_make_state_with_errors(["missing return type", "unused import"]),
+        worker_phase_map={"planner": "plan", "coder": "exec"},
     )
     assert result.next_route == "planner"
+    assert result.inferred_phase == "plan"
     assert result.routing_error is not None
     assert "FINISH blocked" in result.routing_error
 
@@ -181,8 +230,10 @@ def test_review_gate_blocks_finish_when_exec_done_no_audit() -> None:
             exec_paths=[".vault/exec/my-feature/step-001.md"],
             audit_paths=[],
         ),
+        worker_phase_map={"planner": "plan", "reviewer": "audit"},
     )
-    assert result.next_route == "planner"
+    assert result.next_route == "reviewer"
+    assert result.inferred_phase == "audit"
     assert "FINISH blocked" in result.routing_error
 
 
@@ -207,6 +258,7 @@ def test_phase_gate_hard_blocks_exec_without_plan() -> None:
         state=_make_state_for_phase_gate(vault_index={}),
         worker_phase_map={"coder": "exec", "planner": "plan"},
     )
+    assert result.inferred_phase == "exec"
     assert result.routing_error is not None
     assert "plan" in result.routing_error
 
@@ -247,8 +299,59 @@ def test_plan_approval_interrupt_skipped_in_autonomous_mode() -> None:
     assert result.plan_approval_request is None
 
 
-def test_build_supervisor_messages_adds_workspace_rules() -> None:
-    workspace_root = Path(".tmp-supervisor-rules")
+def test_plan_rejection_prefers_plan_phase_worker_for_revision() -> None:
+    worker = _select_revision_worker(
+        ["vaultspec-reviewer", "vaultspec-planner", "vaultspec-coder"],
+        {
+            "vaultspec-reviewer": "audit",
+            "vaultspec-planner": "plan",
+            "vaultspec-coder": "exec",
+        },
+    )
+    assert worker == "vaultspec-planner"
+
+
+def test_plan_rejection_falls_back_to_first_worker_without_plan_phase_map() -> None:
+    worker = _select_revision_worker(
+        ["vaultspec-analyst", "vaultspec-reviewer", "vaultspec-coder"],
+        {
+            "vaultspec-analyst": "research",
+            "vaultspec-reviewer": "audit",
+            "vaultspec-coder": "exec",
+        },
+    )
+    assert worker == "vaultspec-analyst"
+
+
+def test_supervisor_prefers_worker_phase_over_vault_inference() -> None:
+    result = _decision(
+        "vaultspec-planner",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        state=_make_state_for_phase_gate(
+            vault_index={
+                "plan": [".vault/plan/feature-plan.md"],
+                "exec": [".vault/exec/feature/step-001.md"],
+            },
+            active_feature=None,
+        ),
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    assert result.next_route == "vaultspec-planner"
+    assert result.inferred_phase == "plan"
+
+
+def test_revision_phase_prefers_revision_worker_phase() -> None:
+    phase = _phase_for_route(
+        "vaultspec-planner",
+        fallback_phase="exec",
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+    )
+    assert phase == "plan"
+
+
+def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:
+    workspace_root = tmp_path / "supervisor-rules"
     rules_dir = workspace_root / ".vaultspec" / "rules" / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
     rule_file = rules_dir / "project.md"
@@ -262,3 +365,205 @@ def test_build_supervisor_messages_adds_workspace_rules() -> None:
         isinstance(m, SystemMessage) and "Project Coding Rules" in str(m.content)
         for m in messages
     )
+
+
+@pytest.mark.asyncio
+async def test_supervisor_node_clears_stale_routing_error_on_clean_route() -> None:
+    """Recovered handoffs must not keep stale approval/routing state."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+    )
+    state["approval_status"] = "rejected"
+    state["approval_request_id"] = "approval-1"
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    result = await node(state)
+
+    assert result["next"] == "vaultspec-coder"
+    assert result["active_agent"] == "vaultspec-coder"
+    assert result["pipeline_phase"] == "exec"
+    assert result["current_plan"] == [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
+    assert "approval_status" in result
+    assert result["approval_status"] is None
+    assert "approval_request_id" in result
+    assert result["approval_request_id"] is None
+    assert "routing_error" in result
+    assert result["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_parse_failure_clears_stale_approval_state() -> None:
+    """Routing failures must not preserve stale approval residue."""
+    model = _StaticSupervisorModel("I have no idea what to do next!")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+    )
+    state["approval_status"] = "rejected"
+    state["approval_request_id"] = "approval-1"
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    result = await node(state)
+
+    assert result["next"] == "FINISH"
+    assert result["current_plan"] == [
+        {"content": "Complete task", "status": "completed"}
+    ]
+    assert "approval_status" in result
+    assert result["approval_status"] is None
+    assert "approval_request_id" in result
+    assert result["approval_request_id"] is None
+    assert "routing_error" in result
+    assert result["routing_error"] is not None
+    assert "I have no idea" in result["routing_error"]
+
+
+@pytest.mark.asyncio
+async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> None:
+    """Approval resume should clear stale rejection context before worker handoff."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-resume"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["approval_request_id"] = "approval-1"
+    state["routing_error"] = "Plan rejected by user — revise before proceeding."
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": True}), config=config)
+    assert resumed["next"] == "vaultspec-coder"
+    assert resumed["current_plan"] == [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
+    assert resumed["approval_status"] == "approved"
+    assert "approval_request_id" in resumed
+    assert resumed["approval_request_id"] is None
+    assert "routing_error" in resumed
+    assert resumed["routing_error"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_clears_consumed_approval_request_id() -> None:
+    """Rejected plan resumes must not leave the consumed approval request active."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["approval_request_id"] = "approval-1"
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    assert resumed["next"] == "vaultspec-planner"
+    assert resumed["approval_status"] == "rejected"
+    assert "approval_request_id" in resumed
+    assert resumed["approval_request_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_supervisor_clean_finish_clears_active_agent_owner() -> None:
+    """Completed routes should not leave a stale worker marked as active."""
+    model = _StaticSupervisorModel("FINISH")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-coder"],
+        worker_phase_map={"vaultspec-coder": "exec"},
+        autonomous=True,
+    )
+    state = _make_state_for_phase_gate(
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+        active_feature=None,
+    )
+    state["active_agent"] = "vaultspec-coder"
+
+    result = await node(state)
+
+    assert result["next"] == "FINISH"
+    assert result["active_agent"] == ""
+
+
+@pytest.mark.asyncio
+async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
+    """Rejected reroutes must replace stale plan summaries with the new owner."""
+    model = _StaticSupervisorModel("vaultspec-coder")
+    node = create_supervisor_node(
+        model=model,
+        system_prompt="You are a supervisor.",
+        workers=["vaultspec-planner", "vaultspec-coder"],
+        worker_phase_map={"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+        autonomous=False,
+    )
+
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", node)
+    builder.set_entry_point("supervisor")
+    builder.add_edge("supervisor", END)
+    graph = builder.compile(checkpointer=InMemorySaver())
+    config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
+
+    state = _make_state_for_plan_approval(
+        vault_index={"plan": [".vault/plan/plan.md"]},
+    )
+    state["current_plan"] = [
+        {"content": "Route to vaultspec-coder", "status": "in_progress"}
+    ]
+
+    first = await graph.ainvoke(state, config=config)
+    assert "__interrupt__" in first
+
+    resumed = await graph.ainvoke(Command(resume={"approved": False}), config=config)
+    assert resumed["next"] == "vaultspec-planner"
+    assert resumed["active_agent"] == "vaultspec-planner"
+    assert resumed["current_plan"] == [
+        {"content": "Route to vaultspec-planner", "status": "in_progress"}
+    ]
+    assert resumed["approval_status"] == "rejected"

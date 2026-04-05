@@ -16,7 +16,11 @@ from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
 from starlette.testclient import TestClient
 
-from ...database import create_thread, get_thread_execution_state
+from ...database import (
+    create_thread,
+    get_permission_request,
+    get_thread_execution_state,
+)
 from ...streaming.aggregator import EventAggregator
 from ..internal import internal_router
 from ..websocket import ConnectionManager
@@ -29,6 +33,7 @@ from ..websocket import ConnectionManager
 def _make_test_app(
     *,
     with_connection_manager: bool = False,
+    with_aggregator: bool = False,
     session_factory=None,
 ) -> FastAPI:
     """Create a minimal FastAPI app with the internal router and wired state.
@@ -45,12 +50,14 @@ def _make_test_app(
     if session_factory is not None:
         app.state.db_session_factory = session_factory
 
+    app.state.connection_manager = None
+    app.state.aggregator = None
+
     if with_connection_manager:
         aggregator = EventAggregator()
-        cm = ConnectionManager(aggregator)
-        app.state.connection_manager = cm
-    else:
-        app.state.connection_manager = None
+        app.state.connection_manager = ConnectionManager(aggregator)
+    elif with_aggregator:
+        app.state.aggregator = EventAggregator()
 
     return app
 
@@ -202,8 +209,9 @@ class TestInternalHeartbeat:
 class TestInternalEvents:
     """Verify the /internal/events endpoint.
 
-    When no connection_manager is present, the endpoint returns 503 so the
-    worker can detect the unready gateway and retry or backoff.
+    When at least one relay target is present, the endpoint accepts the event.
+    When no relay target is present, it returns 503 so the worker can detect
+    the unready gateway and retry or backoff.
     """
 
     @pytest.mark.asyncio(loop_scope="function")
@@ -224,12 +232,32 @@ class TestInternalEvents:
             assert resp.json() == {"status": "ok"}
 
     @pytest.mark.asyncio(loop_scope="function")
-    async def test_event_without_connection_manager_returns_503(
+    async def test_event_with_aggregator_only_returns_ok(
         self, caplog: pytest.LogCaptureFixture
     ) -> None:
-        """When connection_manager is None, /internal/events returns 503."""
+        """The HTTP path should accept events when the aggregator is available."""
+        app = _make_test_app(with_aggregator=True)
+        assert app.state.connection_manager is None
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/internal/events",
+                json={
+                    "type": "event",
+                    "thread_id": "t-42",
+                    "payload": {"event_type": "chunk", "data": "hello"},
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "ok"}
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_event_without_relay_target_returns_503(self) -> None:
+        """When both relay targets are absent, /internal/events returns 503."""
         app = _make_test_app()
         assert app.state.connection_manager is None
+        assert app.state.aggregator is None
         async with AsyncClient(
             transport=ASGITransport(app=app), base_url="http://test"
         ) as client:
@@ -347,6 +375,70 @@ class TestInternalEvents:
         assert projection.checkpoint_id == "cp-1"
         assert projection.parent_checkpoint_id == "cp-0"
         assert projection.task_count == 1
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_plan_approval_relay_creates_durable_permission_and_can_be_responded(
+        self,
+        session_factory,
+        checkpointer,
+    ) -> None:
+        """A relayed plan approval must become durably respondable."""
+        from .conftest import make_app
+
+        app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+
+        async with session_factory() as session:
+            thread = await create_thread(session, title="Relay plan approval")
+            await session.commit()
+
+        request_id = f"{thread.id}:plan-approval"
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+        ) as client:
+            relay = await client.post(
+                "/internal/events",
+                json={
+                    "type": "event",
+                    "thread_id": thread.id,
+                    "payload": {
+                        "type": "plan_approval_request",
+                        "request_id": request_id,
+                        "description": "Approve plan before execution",
+                        "options": [
+                            {
+                                "option_id": "approve",
+                                "name": "Approve Plan",
+                                "kind": "allow_once",
+                            },
+                            {
+                                "option_id": "reject",
+                                "name": "Reject Plan",
+                                "kind": "reject_once",
+                            },
+                        ],
+                    },
+                },
+            )
+
+        assert relay.status_code == 200
+
+        async with session_factory() as session:
+            permission = await get_permission_request(session, request_id)
+
+        assert permission is not None
+        assert permission.pause_reason_type == "plan_approval_request"
+        assert permission.request_status == "pending"
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.post(
+                f"/api/permissions/{request_id}/respond",
+                json={"option_id": "approve"},
+            )
+
+        assert resp.status_code == 200
+        assert len(worker.dispatches) == 1
+        assert worker.dispatches[0]["option_id"] == {"approved": True}
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_degraded_execution_state_projection_preserves_last_good_state(
@@ -492,6 +584,46 @@ class TestInternalEvents:
             )
             assert resp.status_code == 422
 
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_batch_with_aggregator_only_returns_ok(self) -> None:
+        """The batch HTTP path should accept events when only the aggregator exists."""
+        app = _make_test_app(with_aggregator=True)
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/internal/events/batch",
+                json={
+                    "events": [
+                        {"thread_id": "t-1", "payload": {"event_type": "chunk"}},
+                        {
+                            "thread_id": "t-1",
+                            "payload": {
+                                "event_type": "thread_terminal",
+                                "status": "completed",
+                            },
+                        },
+                    ]
+                },
+            )
+            assert resp.status_code == 200
+            assert resp.json() == {"status": "ok"}
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_batch_without_relay_target_returns_503(self) -> None:
+        """The batch HTTP path should fail fast when no relay target exists."""
+        app = _make_test_app()
+        async with AsyncClient(
+            transport=ASGITransport(app=app), base_url="http://test"
+        ) as client:
+            resp = await client.post(
+                "/internal/events/batch",
+                json={
+                    "events": [{"thread_id": "t-1", "payload": {"event_type": "chunk"}}]
+                },
+            )
+            assert resp.status_code == 503
+
 
 class TestInternalWebSocketLogging:
     """Verify structured logging on the internal worker WebSocket path."""
@@ -540,7 +672,7 @@ class TestInternalWebSocketLogging:
         record = next(
             rec
             for rec in caplog.records
-            if "ConnectionManager not available -- dropping event" in rec.message
+            if "No relay target available -- dropping event" in rec.message
         )
         assert record.__dict__["thread_id"] == "t-drop"
         assert record.__dict__["event_type"] == "chunk"

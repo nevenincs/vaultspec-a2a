@@ -70,7 +70,7 @@ def compute_reconciliation_actions(
         checkpoint_available = checkpoint_results.get(tid, False)
         checkpoint_error = checkpoint_errors.get(tid)
 
-        if has_pending:
+        if has_pending and checkpoint_available:
             new_status: str | None = None
             if thread.status not in (
                 ThreadStatus.INPUT_REQUIRED.value,
@@ -90,7 +90,7 @@ def compute_reconciliation_actions(
                     ),
                 ),
             )
-        elif thread.status == ThreadStatus.CANCELLING.value:
+        elif thread.status == ThreadStatus.CANCELLING.value and checkpoint_available:
             actions.append(
                 ReconciliationAction(
                     thread_id=tid,

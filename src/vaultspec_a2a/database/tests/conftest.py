@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 
@@ -19,13 +18,11 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
 
 
 @pytest.fixture
-def runtime_dir() -> Path:
+def runtime_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
     """Return a local writable runtime dir instead of pytest's global temp root.
 
     The workspace can be mounted on a filesystem that does not behave reliably
     for file-backed SQLite WAL/migration tests. Use the local Codex writable
     root so these tests exercise SQLite itself rather than mapped-drive quirks.
     """
-    root = Path.home() / ".codex" / "memories" / "tmp" / "database-tests" / uuid4().hex
-    root.mkdir(parents=True, exist_ok=True)
-    return root
+    return tmp_path_factory.mktemp("database-tests")

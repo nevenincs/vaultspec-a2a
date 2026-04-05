@@ -8,22 +8,29 @@ response formatting.
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import json
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
 from ..context.metadata import ThreadMetadata, discover_context_refs, generate_nickname
 from ..context.preamble import build_context_preamble
 from ..control.dispatch import safe_dispatch
-from ..control.repair_transitions import mark_ingest_applied, mark_ingest_requested
+from ..control.repair_transitions import (
+    mark_dispatch_failed,
+    mark_ingest_applied,
+    mark_ingest_requested,
+)
 from ..database import (
     create_control_action,
     create_thread,
     delete_thread,
+    get_pending_permission_requests,
     get_thread,
+    get_thread_execution_state,
     list_threads,
     update_thread_status,
 )
@@ -32,9 +39,17 @@ from ..ipc.schemas import DispatchRequest
 from ..team.team_config import load_team_config
 from ..thread.creation import requires_dispatch, resolve_autonomous
 from ..thread.dispatch_policy import FailureType, classify_dispatch_failure
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import (
+    TERMINAL_STATUSES,
+    ApprovalStatus,
+    ControlActionType,
+    RepairStatus,
+    ThreadStatus,
+)
 from ..thread.errors import ConfigError, TeamConfigNotFoundError
 from ..thread.lifecycle_guards import can_archive, can_delete
+from ..thread.snapshots import PLAN_APPROVAL_PAUSE_CAUSES, project_checkpoint_tuple
+from .permission_options import extract_allowed_option_ids
 
 if TYPE_CHECKING:
     from datetime import datetime
@@ -62,6 +77,29 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+_PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
+
+
+def _degrade_stale_execution_state_summary(
+    *,
+    repair_status: str | None,
+    execution_readiness: str | None,
+) -> tuple[str | None, str | None]:
+    """Fail closed when summary lineage is stale but still readable."""
+    if repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.NEEDS_RECONCILIATION.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.NEEDS_RECONCILIATION.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+    return repair_status, execution_readiness
 
 
 def generate_thread_id() -> str:
@@ -123,6 +161,7 @@ async def list_threads_service(
     status_filter: ThreadStatus | None = None,
     limit: int = 50,
     offset: int = 0,
+    checkpointer: Any | None = None,
 ) -> ListThreadsResult:
     """Query threads and assemble summary data with parsed metadata."""
     threads, total = await list_threads(
@@ -133,15 +172,82 @@ async def list_threads_service(
         feature_tag, source_branch, callee = _parse_thread_summary_metadata(
             t.thread_metadata
         )
+        repair_status = t.repair_status
+        execution_readiness = t.execution_readiness
+        approval_status = t.approval_status
+        approval_request_id = t.approval_request_id
+        is_terminal_thread = t.status in {status.value for status in TERMINAL_STATUSES}
+        execution_state = await get_thread_execution_state(db, t.id)
+        checkpoint_id: str | None = None
+        checkpoint_present = False
+        checkpoint_unverified = False
+        if checkpointer is not None:
+            try:
+                checkpoint_tuple = await asyncio.wait_for(
+                    checkpointer.aget_tuple({"configurable": {"thread_id": t.id}}),
+                    timeout=2.0,
+                )
+                if checkpoint_tuple is not None:
+                    checkpoint_present = True
+                    checkpoint_id = project_checkpoint_tuple(
+                        checkpoint_tuple,
+                        thread_id=t.id,
+                    ).checkpoint_id
+            except (TimeoutError, Exception):
+                checkpoint_unverified = True
+        if checkpoint_unverified:
+            repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+            # Checkpoint state is LangGraph's resumability authority. If the
+            # probe itself is unverified, the summary surface must not expose a
+            # still-actionable approval target.
+            approval_status = None
+            approval_request_id = None
+        if execution_state is not None and (
+            execution_state.recovery_epoch != t.recovery_epoch
+            or (
+                checkpoint_present
+                and checkpoint_id is not None
+                and execution_state.checkpoint_id != checkpoint_id
+            )
+        ):
+            repair_status, execution_readiness = _degrade_stale_execution_state_summary(
+                repair_status=repair_status,
+                execution_readiness=execution_readiness,
+            )
+        if is_terminal_thread:
+            approval_status = None
+            approval_request_id = None
+        else:
+            live_plan_permissions = [
+                permission
+                for permission in await get_pending_permission_requests(
+                    db,
+                    thread_id=t.id,
+                    include_answered_pending_apply=False,
+                )
+                if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+            ]
+            if live_plan_permissions:
+                live_permission = live_plan_permissions[-1]
+                if not extract_allowed_option_ids(live_permission.allowed_options_json):
+                    approval_status = None
+                    approval_request_id = None
+                else:
+                    approval_status = ApprovalStatus.PENDING.value
+                    approval_request_id = live_permission.request_id
+            else:
+                approval_status = None
+                approval_request_id = None
         summaries.append(
             ThreadSummaryData(
                 thread_id=t.id,
                 title=t.title,
                 status=t.status,
-                repair_status=t.repair_status,
-                execution_readiness=t.execution_readiness,
-                approval_status=t.approval_status,
-                approval_request_id=t.approval_request_id,
+                repair_status=repair_status,
+                execution_readiness=execution_readiness,
+                approval_status=approval_status,
+                approval_request_id=approval_request_id,
                 team_preset=t.team_preset,
                 created_at=t.created_at,
                 updated_at=t.updated_at,
@@ -361,6 +467,7 @@ async def create_and_dispatch_thread(
         )
         if policy.should_mark_failed:
             await update_thread_status(db, thread.id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(db, thread.id)
         await db.commit()
         return ThreadCreationResult(
             thread_id=thread.id,
@@ -403,7 +510,12 @@ class DeleteResult:
     error_detail: str | None = None
 
 
-async def delete_thread_service(db: AsyncSession, thread_id: str) -> DeleteResult:
+async def delete_thread_service(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    checkpointer: Any | None = None,
+) -> DeleteResult:
     """Hard-delete a thread after lifecycle-guard validation.
 
     Commits the session before returning — the service owns its
@@ -420,6 +532,9 @@ async def delete_thread_service(db: AsyncSession, thread_id: str) -> DeleteResul
     deleted = await delete_thread(db, thread_id)
     if not deleted:
         return DeleteResult(deleted=False, not_found=True)
+
+    if checkpointer is not None:
+        await checkpointer.adelete_thread(thread_id)
 
     await db.commit()
     return DeleteResult(deleted=True)

@@ -1,12 +1,13 @@
 """Worker node for LangGraph agent task execution."""
 
+import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from langchain_core.language_models import BaseChatModel
-from langchain_core.messages import BaseMessage, SystemMessage
+from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import interrupt
 
@@ -64,6 +65,20 @@ def _build_worker_messages(
     if mounted:
         messages.append(SystemMessage(content=mounted))
     messages.extend(working_state["messages"])
+    routing_error = state.get("routing_error")
+    if (
+        state.get("approval_status") == "rejected"
+        and isinstance(routing_error, str)
+        and "Plan rejected by user" in routing_error
+    ):
+        messages.append(
+            SystemMessage(
+                content=(
+                    "Plan rejected by user — revise the implementation plan "
+                    "before requesting privileged execution again."
+                )
+            )
+        )
     return messages
 
 
@@ -108,6 +123,64 @@ def _drain_worker_state_updates(
     return drain_fn() if drain_fn is not None else {}
 
 
+async def _apply_mock_permission_gate(
+    *,
+    messages: list[BaseMessage],
+    response: BaseMessage,
+    model: BaseChatModel,
+    autonomous: bool,
+) -> BaseMessage:
+    """Gate mock-provider permission tool calls inside the graph node context.
+
+    VidaiMock can deterministically replay permission tool calls, but the
+    LangGraph interrupt must still be raised from a runnable context the graph
+    owns. The mock provider therefore surfaces the tool call normally and the
+    worker node performs the actual interrupt/resume gate here.
+    """
+    if autonomous or getattr(model, "_llm_type", "") != "mock-chat-model":
+        return response
+    if not isinstance(response, AIMessage):
+        return response
+
+    for tool_call in response.tool_calls:
+        if tool_call.get("name") != "session_request_permission":
+            continue
+        tool_input = tool_call.get("args", {})
+        if not isinstance(tool_input, dict):
+            tool_input = {}
+        options = tool_input.get("options", [])
+        if not isinstance(options, list):
+            options = []
+        selected_option = await _interrupt_permission_callback(
+            "session_request_permission",
+            tool_input,
+            options,
+        )
+        tool_call_id = tool_call.get("id")
+        if not isinstance(tool_call_id, str) or not tool_call_id:
+            raise RuntimeError(
+                "Mock permission gate requires a stable tool call id to resume"
+            )
+
+        follow_up_messages = [
+            *messages,
+            SystemMessage(
+                content=(
+                    "Human approval has been resolved. Continue the task using "
+                    "the tool result below."
+                )
+            ),
+            response,
+            ToolMessage(
+                content=json.dumps({"approved_option_id": selected_option}),
+                tool_call_id=tool_call_id,
+            ),
+        ]
+        return await model.ainvoke(follow_up_messages)
+
+    return response
+
+
 def _finalize_worker_response(
     *,
     response: BaseMessage,
@@ -116,22 +189,63 @@ def _finalize_worker_response(
 ) -> dict[str, Any]:
     """Attach worker attribution and merge any side-channel state updates."""
     response.name = worker_name
-    return {"messages": [response], "mounted_context": None, **state_updates}
+    return {
+        "messages": [response],
+        "mounted_context": None,
+        # Approval outcomes are consumed by the worker turn they routed.
+        "approval_status": None,
+        "approval_request_id": None,
+        **state_updates,
+    }
 
 
-def _first_option_id(options: list[dict[str, Any]]) -> str:
-    """Extract the first optionId from ACP permission options list."""
-    return options[0]["optionId"] if options else "allow_once"
+def _valid_option_ids(options: list[dict[str, Any]]) -> set[str]:
+    """Return the valid ACP permission option ids for resume validation."""
+    return {
+        option_id
+        for option in options
+        if isinstance(option, dict)
+        and isinstance((option_id := option.get("optionId")), str)
+        and option_id
+    }
 
 
-def _validate_option_id(candidate: str, options: list[dict[str, Any]]) -> str:
-    """Return *candidate* if it is a valid optionId, else the first option.
+def _require_valid_option_id(candidate: object, options: list[dict[str, Any]]) -> str:
+    """Validate a resumed option id and fail closed on malformed input."""
+    valid_ids = _valid_option_ids(options)
+    if not valid_ids:
+        raise RuntimeError("Permission resume received no valid option ids")
+    if not isinstance(candidate, str) or not candidate:
+        raise RuntimeError(
+            "Permission resume payload must include a non-empty option_id string"
+        )
+    if candidate not in valid_ids:
+        raise RuntimeError(
+            f"Permission resume payload specified unknown option_id {candidate!r}"
+        )
+    return candidate
 
-    Prevents a client sending an arbitrary string via ``Command(resume=...)``
-    from bypassing permission options with an unrecognised id.
-    """
-    valid_ids = {opt["optionId"] for opt in options if "optionId" in opt}
-    return candidate if candidate in valid_ids else _first_option_id(options)
+
+def _resolve_resume_option_id(
+    resume_value: object,
+    options: list[dict[str, Any]],
+) -> str:
+    """Resolve the resumed option id from a LangGraph interrupt payload."""
+    if isinstance(resume_value, str):
+        return _require_valid_option_id(resume_value, options)
+    if isinstance(resume_value, dict):
+        payload = cast("dict[str, object]", resume_value)
+        candidate = payload.get("option_id")
+        if candidate is None:
+            candidate = payload.get("optionId")
+        return _require_valid_option_id(
+            candidate,
+            options,
+        )
+    raise RuntimeError(
+        "LangGraph interrupt returned an unsupported resume payload type: "
+        f"{type(resume_value).__name__}"
+    )
 
 
 async def _interrupt_permission_callback(
@@ -163,12 +277,13 @@ async def _interrupt_permission_callback(
             "options": options,
         }
     )
-    if isinstance(resume_value, str):
-        return _validate_option_id(resume_value, options)
-    if isinstance(resume_value, dict):
-        candidate = resume_value.get("option_id", _first_option_id(options))
-        return _validate_option_id(candidate, options)
-    return _first_option_id(options)
+    try:
+        return _resolve_resume_option_id(resume_value, options)
+    except RuntimeError as exc:
+        raise RuntimeError(
+            "LangGraph interrupt returned an invalid resume payload for "
+            f"{tool_name!r}: {exc}"
+        ) from exc
 
 
 def create_worker_node(
@@ -221,6 +336,12 @@ def create_worker_node(
         )
         try:
             response = await effective_model.ainvoke(messages)
+            response = await _apply_mock_permission_gate(
+                messages=messages,
+                response=response,
+                model=effective_model,
+                autonomous=autonomous,
+            )
         except GraphBubbleUp:
             if drain_fn is not None:
                 drain_fn()

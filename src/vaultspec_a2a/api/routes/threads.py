@@ -27,6 +27,7 @@ from ...thread.enums import ThreadStatus
 from ...thread.errors import NicknameConflictError
 from .._utils import mark_worker_connected, trace_headers
 from ..dependencies import (
+    get_checkpointer,
     get_circuit_breaker,
     get_services,
     get_worker_spawner,
@@ -140,6 +141,7 @@ async def create_thread_endpoint(
 
 @router.get("/threads", response_model=ThreadListResponse)
 async def list_threads_endpoint(
+    request: Request,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     status: str | None = Query(default=None),
@@ -156,7 +158,11 @@ async def list_threads_endpoint(
                 detail=f"Invalid status filter: {status!r}",
             ) from None
     result = await list_threads_service(
-        db, status_filter=status_filter, limit=limit, offset=offset
+        db,
+        status_filter=status_filter,
+        limit=limit,
+        offset=offset,
+        checkpointer=request.app.state.checkpointer,
     )
     summaries = [
         ThreadSummary(
@@ -206,9 +212,10 @@ async def get_thread_metadata_endpoint(
 async def delete_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
+    checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> None:
     """Hard-delete a thread and all cascading artifacts."""
-    result = await delete_thread_service(db, thread_id)
+    result = await delete_thread_service(db, thread_id, checkpointer=checkpointer)
     if result.not_found:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not result.deleted:

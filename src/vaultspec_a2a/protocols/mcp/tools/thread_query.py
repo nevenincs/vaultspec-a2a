@@ -57,8 +57,9 @@ async def get_thread_status(
 
     Returns a structured plain-text block containing:
     - Thread ID and status (one of: 'submitted', 'running', 'input_required',
-      'completed', 'failed', 'cancelled' — 'input_required' means a permission
-      response is needed; use ``get_pending_permissions`` to find it)
+      'completed', 'failed', 'cancelled')
+    - Repair status and execution readiness so degraded or non-actionable
+      pauses are visible to operators
     - Message count and a preview of the last message (truncated to 200 chars)
     - Agent list with lifecycle states (idle, working, blocked, finished)
     - Plan entries with completion status
@@ -80,6 +81,8 @@ async def get_thread_status(
     )
 
     status = data.get("status", "unknown")
+    repair_status = data.get("repair_status")
+    execution_readiness = data.get("execution_readiness")
     messages = data.get("messages", [])
     agents = data.get("agents", [])
     plan = data.get("plan", [])
@@ -88,6 +91,8 @@ async def get_thread_status(
     lines: list[str] = [
         f"Thread: {thread_id}",
         f"Status: {status}",
+        f"Repair status: {repair_status or 'unknown'}",
+        f"Execution readiness: {execution_readiness or 'unknown'}",
         f"Messages: {len(messages)}",
     ]
 
@@ -157,8 +162,8 @@ async def list_threads(
 
     Returns a plain-text listing with one block per thread containing:
     thread_id (UUID), status (one of: 'submitted', 'running', 'input_required',
-    'completed', 'failed', 'cancelled'), team preset ID, creation timestamp
-    (ISO 8601), and optional nickname/title.
+    'completed', 'failed', 'cancelled'), repair status, execution readiness,
+    team preset ID, creation timestamp (ISO 8601), and optional nickname/title.
     Returns 'No threads found.' when no threads exist.
 
     Args:
@@ -183,11 +188,17 @@ async def list_threads(
     for t in threads:
         tid = t.get("thread_id", "?")
         status = t.get("status", "unknown")
+        repair_status = t.get("repair_status") or "unknown"
+        execution_readiness = t.get("execution_readiness") or "unknown"
         preset = t.get("team_preset") or "—"
         created = t.get("created_at", "?")
         nickname = t.get("nickname")
         title = t.get("title") or ""
-        entry = f"  [{status}] {tid}\n    preset: {preset}  created: {created}\n"
+        entry = (
+            f"  [{status}] {tid}\n"
+            f"    repair: {repair_status}  readiness: {execution_readiness}\n"
+            f"    preset: {preset}  created: {created}\n"
+        )
         if nickname:
             entry += f"    nickname: {nickname}\n"
         if title:

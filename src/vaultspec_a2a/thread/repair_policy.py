@@ -45,7 +45,7 @@ _REPAIR_MAP: dict[tuple[ControlActionType, str], RepairTransition] = {
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
     ),
-    (ControlActionType.MESSAGE_FOLLOWUP_REQUESTED, "applied"): RepairTransition(
+    (ControlActionType.MESSAGE_FOLLOWUP_APPLIED, "applied"): RepairTransition(
         repair_status=RepairStatus.HEALTHY,
         execution_readiness=RepairStatus.HEALTHY.value,
     ),

@@ -20,7 +20,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
-from ..thread.enums import ApprovalStatus
+from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
     CheckpointProjection,
@@ -36,10 +36,79 @@ from ..thread.snapshots import (
 _PLAN_APPROVAL_PAUSE_CAUSES = PLAN_APPROVAL_PAUSE_CAUSES
 
 
+def _mark_execution_state_stale(snapshot: ThreadStateData) -> None:
+    """Fail closed when durable execution-state lineage no longer matches truth."""
+    snapshot.snapshot_complete = False
+    if "execution_state_projection_stale" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("execution_state_projection_stale")
+
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
+def _mark_terminal_permission_residue(snapshot: ThreadStateData) -> None:
+    """Fail closed when terminal threads still carry pending permission residue."""
+    snapshot.snapshot_complete = False
+    if "terminal_thread_pending_permission_residue" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("terminal_thread_pending_permission_residue")
+
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+
+def _clear_non_actionable_pause_state(snapshot: ThreadStateData) -> None:
+    """Clear pause metadata when no user-actionable permission remains."""
+    if snapshot.pending_permissions:
+        return
+    if snapshot.approval_status is not None or snapshot.approval_request_id is not None:
+        return
+    snapshot.pause_cause = None
+
+
+def clear_permissions_without_checkpoint_truth(
+    snapshot: ThreadStateData,
+) -> ThreadStateData:
+    """Fail closed when pending approval state has no checkpoint authority."""
+    had_actionable_permission_state = bool(snapshot.pending_permissions) or bool(
+        snapshot.approval_status or snapshot.approval_request_id or snapshot.pause_cause
+    )
+    snapshot.pending_permissions = []
+    snapshot.approval_status = None
+    snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
+    if had_actionable_permission_state and (
+        "pending_permission_without_checkpoint_truth" not in snapshot.degraded_reasons
+    ):
+        snapshot.degraded_reasons.append("pending_permission_without_checkpoint_truth")
+    return snapshot
+
+
 def _permission_data_from_model(
     permission: PermissionRequestModel,
 ) -> PermissionData:
     raw_options = json.loads(permission.allowed_options_json)
+    tool_call = permission.tool_call
+    if (
+        tool_call in (None, "")
+        and permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES
+    ):
+        tool_call = PermissionType.PLAN_APPROVAL.value
     options = [
         PermissionOptionData(
             option_id=str(option.get("option_id", "")),
@@ -53,7 +122,7 @@ def _permission_data_from_model(
         request_id=permission.request_id,
         description=permission.description,
         options=options,
-        tool_call=permission.tool_call,
+        tool_call=tool_call,
     )
 
 
@@ -174,6 +243,46 @@ def apply_checkpoint_projection(
     return snapshot
 
 
+def reconcile_checkpoint_permissions_with_durable_state(
+    snapshot: ThreadStateData,
+    *,
+    durable_request_ids: set[str],
+) -> ThreadStateData:
+    """Fail closed when checkpoint-only interrupts are not durably actionable."""
+    filtered_permissions: list[PermissionData] = []
+    dropped_request_ids: set[str] = set()
+    for permission in snapshot.pending_permissions:
+        if permission.request_id in durable_request_ids:
+            filtered_permissions.append(permission)
+            continue
+        dropped_request_ids.add(permission.request_id)
+
+    if not dropped_request_ids:
+        return snapshot
+
+    snapshot.pending_permissions = filtered_permissions
+    snapshot.snapshot_complete = False
+    if "checkpoint_permission_without_durable_row" not in snapshot.degraded_reasons:
+        snapshot.degraded_reasons.append("checkpoint_permission_without_durable_row")
+    if snapshot.repair_status not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.repair_status = RepairStatus.NEEDS_RECONCILIATION.value
+    if snapshot.execution_readiness not in {
+        RepairStatus.CHECKPOINT_UNAVAILABLE.value,
+        RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value,
+    }:
+        snapshot.execution_readiness = RepairStatus.NEEDS_RECONCILIATION.value
+
+    if snapshot.approval_request_id in dropped_request_ids:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
+
+    return snapshot
+
+
 def project_execution_state_model(
     model: ThreadExecutionStateModel,
 ) -> ExecutionStateProjection:
@@ -269,27 +378,67 @@ async def enrich_snapshot_from_durable_state(
     snapshot.execution_readiness = thread.execution_readiness
     snapshot.approval_status = thread.approval_status
     snapshot.approval_request_id = thread.approval_request_id
+    is_terminal_thread = thread.status in {status.value for status in TERMINAL_STATUSES}
 
     durable_permissions = await get_pending_permission_requests(
-        session, thread_id=thread.id
+        session,
+        thread_id=thread.id,
+        include_answered_pending_apply=False,
     )
+    if is_terminal_thread:
+        if durable_permissions or snapshot.approval_status == ApprovalStatus.PENDING:
+            _mark_terminal_permission_residue(snapshot)
+        snapshot.pending_permissions = []
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+        return snapshot
+
+    corrupted_plan_approval = False
     if durable_permissions:
         if snapshot.pause_cause is None:
             snapshot.pause_cause = durable_permissions[0].pause_reason_type
         existing = {
             permission.request_id for permission in snapshot.pending_permissions
         }
-        snapshot.pending_permissions.extend(
-            _permission_data_from_model(permission)
-            for permission in durable_permissions
-            if permission.request_id not in existing
-        )
-        if snapshot.approval_status is None:
-            for permission in durable_permissions:
+        for permission in durable_permissions:
+            if permission.request_id in existing:
+                continue
+            try:
+                projected = _permission_data_from_model(permission)
+            except (TypeError, ValueError, json.JSONDecodeError):
+                snapshot.snapshot_complete = False
+                if "permission_projection_unreadable" not in snapshot.degraded_reasons:
+                    snapshot.degraded_reasons.append("permission_projection_unreadable")
+                snapshot.repair_status = (
+                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+                )
+                snapshot.execution_readiness = (
+                    RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+                )
                 if permission.pause_reason_type in _PLAN_APPROVAL_PAUSE_CAUSES:
-                    snapshot.approval_status = ApprovalStatus.PENDING
-                    snapshot.approval_request_id = permission.request_id
-                    break
+                    snapshot.approval_status = None
+                    snapshot.approval_request_id = None
+                    corrupted_plan_approval = True
+                continue
+            snapshot.pending_permissions.append(projected)
+    projected_plan_approvals = [
+        permission
+        for permission in snapshot.pending_permissions
+        if (
+            permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
+            or permission.tool_call == PermissionType.PLAN_APPROVAL.value
+        )
+    ]
+    if corrupted_plan_approval:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+    elif projected_plan_approvals:
+        snapshot.approval_status = ApprovalStatus.PENDING
+        snapshot.approval_request_id = projected_plan_approvals[-1].request_id
+    elif snapshot.approval_status is not None:
+        snapshot.approval_status = None
+        snapshot.approval_request_id = None
+    _clear_non_actionable_pause_state(snapshot)
 
     return snapshot
 
@@ -317,22 +466,17 @@ async def enrich_snapshot_from_execution_state(
         snapshot.snapshot_complete = False
         if "execution_state_projection_unreadable" not in snapshot.degraded_reasons:
             snapshot.degraded_reasons.append("execution_state_projection_unreadable")
+        snapshot.repair_status = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
+        snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
         return snapshot
 
-    snapshot = apply_execution_state_projection(snapshot, projection)
-
-    if row.recovery_epoch != thread.recovery_epoch:
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_stale" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_stale")
-
-    if (
+    is_stale = row.recovery_epoch != thread.recovery_epoch or (
         checkpoint_present
         and checkpoint_id is not None
         and row.checkpoint_id != checkpoint_id
-    ):
-        snapshot.snapshot_complete = False
-        if "execution_state_projection_stale" not in snapshot.degraded_reasons:
-            snapshot.degraded_reasons.append("execution_state_projection_stale")
+    )
+    if is_stale:
+        _mark_execution_state_stale(snapshot)
+        return snapshot
 
-    return snapshot
+    return apply_execution_state_projection(snapshot, projection)

@@ -15,11 +15,9 @@ import logging
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..database import (
-    get_thread_execution_state,
-    update_thread_status,
-)
+from ..database import get_thread_execution_state
 from ..thread.enums import ThreadStatus
+from .repair_transitions import mark_dispatch_failed
 
 __all__ = [
     "MissingThreadClassification",
@@ -96,6 +94,17 @@ async def classify_missing_ws_thread(
         "checkpoint_present": checkpoint_present,
         "checkpoint_unverified": checkpoint_unverified,
     }
+    if checkpoint_unverified:
+        return MissingThreadClassification(
+            thread_id=thread_id,
+            code="THREAD_STATE_UNVERIFIED",
+            message=(
+                "Thread is missing from the gateway database and checkpoint truth "
+                "could not be verified. Retry after the backend is healthy."
+            ),
+            recoverable=True,
+            metadata=metadata,
+        )
     if execution_state_present or checkpoint_present:
         return MissingThreadClassification(
             thread_id=thread_id,
@@ -104,17 +113,6 @@ async def classify_missing_ws_thread(
                 "Thread is missing from the gateway database, but durable backend "
                 "state still exists. Refresh thread state or trigger repair before "
                 "sending follow-up commands."
-            ),
-            recoverable=True,
-            metadata=metadata,
-        )
-    if checkpoint_unverified:
-        return MissingThreadClassification(
-            thread_id=thread_id,
-            code="THREAD_STATE_UNVERIFIED",
-            message=(
-                "Thread is missing from the gateway database and checkpoint truth "
-                "could not be verified. Retry after the backend is healthy."
             ),
             recoverable=True,
             metadata=metadata,
@@ -131,6 +129,7 @@ async def classify_missing_ws_thread(
 async def mark_thread_failed(
     thread_id: str,
     session_factory: Any,
+    aggregator: Any | None = None,
 ) -> None:
     """Mark a thread as FAILED in the database.
 
@@ -139,8 +138,27 @@ async def mark_thread_failed(
     broadcast separately.
     """
     try:
+        from .event_handlers import _handle_terminal_event
+
+        await _handle_terminal_event(
+            thread_id,
+            {
+                "event_type": "thread_terminal",
+                "thread_id": thread_id,
+                "status": ThreadStatus.FAILED.value,
+                "error_detail": (
+                    "Worker dispatch failed during websocket command handling"
+                ),
+            },
+            aggregator=aggregator,
+            session_factory=session_factory,
+        )
         async with session_factory() as db:
-            await update_thread_status(db, thread_id, ThreadStatus.FAILED)
+            await mark_dispatch_failed(
+                db,
+                thread_id,
+                reason="Worker dispatch failed during websocket command handling",
+            )
             await db.commit()
     except Exception:
         logger.warning(

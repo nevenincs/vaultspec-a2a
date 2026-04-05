@@ -28,6 +28,14 @@ def can_send_followup(status: str) -> MessageEligibility:
                 "Cannot send a follow-up message while the thread is paused for input"
             ),
         )
+    if status in {
+        ThreadStatus.REPAIR_NEEDED.value,
+        ThreadStatus.RECONCILING.value,
+    }:
+        return MessageEligibility(
+            allowed=False,
+            reason=f"Cannot send messages while thread is in {status!r} repair state",
+        )
     if status in NON_ACTIVE_STATUSES:
         return MessageEligibility(
             allowed=False,

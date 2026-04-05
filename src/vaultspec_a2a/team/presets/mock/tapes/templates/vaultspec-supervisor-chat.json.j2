@@ -1,0 +1,7 @@
+{%- set last_message = json.messages | last -%}
+{%- set last_content = last_message | get(key='content') -%}
+{%- if last_content is containing('task is now finished') -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"FINISH"}]}}]}
+{%- else -%}
+{"choices":[{"message":{"role":"assistant","content":[{"type":"text","text":"mock-coder-human"}]}}]}
+{%- endif -%}

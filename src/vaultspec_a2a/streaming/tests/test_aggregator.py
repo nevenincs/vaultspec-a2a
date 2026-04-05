@@ -254,6 +254,30 @@ class TestEventEmission:
         assert event.options[0]["kind"] == str(PermissionOptionKind.ALLOW_ONCE)
 
     @pytest.mark.asyncio
+    async def test_emit_permission_request_replaces_stale_request_for_thread(
+        self, aggregator: EventAggregator
+    ) -> None:
+        """A new permission request should replace older pending ones."""
+        await aggregator.emit_permission_request(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            request_id="perm-old",
+            description="Old request",
+            options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+        )
+
+        await aggregator.emit_permission_request(
+            thread_id="thread-1",
+            agent_id="agent-1",
+            request_id="perm-new",
+            description="New request",
+            options=[{"option_id": "allow", "name": "Allow", "kind": "allow_once"}],
+        )
+
+        pending = aggregator.get_pending_permissions("thread-1")
+        assert [event.request_id for event in pending] == ["perm-new"]
+
+    @pytest.mark.asyncio
     async def test_emit_error(self, aggregator: EventAggregator) -> None:
         """emit_error delivers an ErrorEvent with the supplied code."""
         queue = aggregator.add_subscriber("client-1")

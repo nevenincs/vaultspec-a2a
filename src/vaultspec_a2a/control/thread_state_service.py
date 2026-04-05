@@ -13,8 +13,10 @@ from typing import TYPE_CHECKING
 
 from ..control.projection import (
     apply_checkpoint_projection,
+    clear_permissions_without_checkpoint_truth,
     enrich_snapshot_from_durable_state,
     enrich_snapshot_from_execution_state,
+    reconcile_checkpoint_permissions_with_durable_state,
 )
 from ..control.snapshot import (
     MinimalState,
@@ -71,6 +73,9 @@ async def build_thread_state(
     snapshot = await enrich_snapshot_from_durable_state(
         db, thread=thread, snapshot=snapshot
     )
+    durable_permission_ids = {
+        permission.request_id for permission in snapshot.pending_permissions
+    }
     checkpoint_loaded = False
     checkpoint_present = False
     checkpoint_error = False
@@ -111,6 +116,10 @@ async def build_thread_state(
                 aggregator=aggregator,
             )
             snapshot = apply_checkpoint_projection(snapshot, projection)
+            snapshot = reconcile_checkpoint_permissions_with_durable_state(
+                snapshot,
+                durable_request_ids=durable_permission_ids,
+            )
             checkpoint_loaded = True
     except TimeoutError:
         logger.warning(
@@ -123,6 +132,8 @@ async def build_thread_state(
         snapshot.degraded_reasons.append("checkpoint_timeout")
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
     except Exception:
         logger.warning(
             "Could not load checkpoint for thread %s; returning partial snapshot",
@@ -134,6 +145,21 @@ async def build_thread_state(
         snapshot.degraded_reasons.append("checkpoint_unavailable")
         snapshot.replay_status = "unknown"
         snapshot.repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot.execution_readiness = RepairStatus.CHECKPOINT_UNAVAILABLE.value
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
+
+    if (
+        not checkpoint_loaded
+        and not checkpoint_present
+        and (
+            thread.status != "submitted"
+            or snapshot.pending_permissions
+            or snapshot.approval_status is not None
+            or snapshot.approval_request_id is not None
+            or snapshot.pause_cause is not None
+        )
+    ):
+        snapshot = clear_permissions_without_checkpoint_truth(snapshot)
 
     snapshot = await enrich_snapshot_from_execution_state(
         db,

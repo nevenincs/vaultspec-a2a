@@ -57,6 +57,14 @@ class CancelResult:
     failure_type: FailureType | None = None
 
 
+@dataclass(frozen=True, slots=True)
+class _PriorRepairState:
+    repair_status: str
+    repair_reason: str | None
+    execution_readiness: str
+    last_requested_action: str | None
+
+
 async def cancel_thread(
     db: AsyncSession,
     *,
@@ -120,6 +128,12 @@ async def cancel_thread(
         idempotency_key=resolved_idempotency_key,
         payload={"thread_status": thread.status},
     )
+    prior_repair_state = _PriorRepairState(
+        repair_status=thread.repair_status,
+        repair_reason=thread.repair_reason,
+        execution_readiness=thread.execution_readiness,
+        last_requested_action=thread.last_requested_action,
+    )
     await mark_cancel_requested(db, thread_id)
 
     dispatch = DispatchRequest(
@@ -153,7 +167,7 @@ async def cancel_thread(
             FailureType(outcome.failure_type) if outcome.failure_type else None
         )
         logger.warning(
-            "Cancel dispatch failed for thread %s — leaving DB status unchanged",
+            "Cancel dispatch failed for thread %s — restoring durable repair state",
             thread_id,
             extra={
                 "thread_id": thread_id,
@@ -161,6 +175,10 @@ async def cancel_thread(
                 "action": dispatch.action,
             },
         )
+        thread.repair_status = prior_repair_state.repair_status
+        thread.repair_reason = prior_repair_state.repair_reason
+        thread.execution_readiness = prior_repair_state.execution_readiness
+        thread.last_requested_action = prior_repair_state.last_requested_action
         if policy.should_mark_failed:
             action.result_status = (
                 ControlActionResultStatus.REJECTED_INVALID_STATE.value

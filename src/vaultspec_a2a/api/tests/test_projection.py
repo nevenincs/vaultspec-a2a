@@ -2,7 +2,6 @@
 
 from datetime import UTC, datetime
 from pathlib import Path
-from uuid import uuid4
 
 import pytest
 from langgraph.checkpoint.base import CheckpointTuple
@@ -15,7 +14,11 @@ from ...control.projection import (
     enrich_snapshot_from_execution_state,
     project_execution_state_model,
 )
-from ...database import create_thread, record_thread_execution_state
+from ...database import (
+    create_thread,
+    record_thread_execution_state,
+    set_thread_repair_state,
+)
 from ...database.models import Base, ThreadExecutionStateModel
 from ...thread.snapshots import (
     CheckpointProjection,
@@ -270,16 +273,11 @@ def test_apply_execution_state_projection_merges_normalized_fields() -> None:
 
 
 @pytest.mark.asyncio
-async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint() -> None:
+async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint(
+    tmp_path: Path,
+) -> None:
     """Checkpoint mismatch should explicitly mark execution-state projection stale."""
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-projection-db"
-        / uuid4().hex
-    )
+    case_dir = tmp_path / "api-test-projection-db-stale"
     case_dir.mkdir(parents=True, exist_ok=True)
     db_file = case_dir / "test.db"
     engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
@@ -319,5 +317,136 @@ async def test_enrich_snapshot_from_execution_state_detects_stale_checkpoint() -
 
         assert snapshot.snapshot_complete is False
         assert "execution_state_projection_stale" in snapshot.degraded_reasons
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
+    tmp_path: Path,
+) -> None:
+    """A degraded-only projection must not refresh recovery_epoch on old state."""
+    case_dir = tmp_path / "api-test-projection-db-epoch"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        thread = await create_thread(session, thread_id="thread-epoch")
+        await record_thread_execution_state(
+            session,
+            thread_id="thread-epoch",
+            checkpoint_id="cp-good",
+            parent_checkpoint_id=None,
+            snapshot_created_at=None,
+            task_count=0,
+            interrupt_count=0,
+            next_nodes=["worker"],
+            interrupt_types=[],
+            tasks=[],
+            degraded_reasons=[],
+        )
+        await set_thread_repair_state(
+            session,
+            "thread-epoch",
+            repair_status="needs_reconciliation",
+            execution_readiness="needs_reconciliation",
+            increment_recovery_epoch=True,
+        )
+        await record_thread_execution_state(
+            session,
+            thread_id="thread-epoch",
+            checkpoint_id=None,
+            parent_checkpoint_id=None,
+            snapshot_created_at=None,
+            task_count=0,
+            interrupt_count=0,
+            next_nodes=[],
+            interrupt_types=[],
+            tasks=[],
+            degraded_reasons=["execution_state_projection_unavailable"],
+        )
+        await session.commit()
+        await session.refresh(thread)
+
+        snapshot = ThreadStateData(
+            thread_id="thread-epoch",
+            status=thread.status,
+            last_sequence=0,
+        )
+        snapshot = await enrich_snapshot_from_execution_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+            checkpoint_present=False,
+            checkpoint_id=None,
+        )
+
+        projection = await session.get(ThreadExecutionStateModel, "thread-epoch")
+
+    assert projection is not None
+    assert projection.checkpoint_id == "cp-good"
+    assert projection.recovery_epoch == 0
+    assert snapshot.snapshot_complete is False
+    assert "execution_state_projection_stale" in snapshot.degraded_reasons
+    assert "execution_state_projection_unavailable" in snapshot.degraded_reasons
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unreadable_execution_state_requires_operator_intervention(
+    tmp_path: Path,
+) -> None:
+    """Corrupted durable execution-state rows must fail closed on readiness."""
+    case_dir = tmp_path / "api-test-projection-db-corrupt"
+    case_dir.mkdir(parents=True, exist_ok=True)
+    db_file = case_dir / "test.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session:
+        thread = await create_thread(
+            session,
+            thread_id="thread-corrupt-execution-state",
+            repair_status="healthy",
+            execution_readiness="healthy",
+        )
+        session.add(
+            ThreadExecutionStateModel(
+                thread_id="thread-corrupt-execution-state",
+                checkpoint_id="cp-1",
+                parent_checkpoint_id=None,
+                recovery_epoch=0,
+                task_count=0,
+                interrupt_count=0,
+                next_nodes_json="{",
+                interrupt_types_json="[]",
+                tasks_json="[]",
+                degraded_reasons_json="[]",
+            )
+        )
+        await session.commit()
+
+        snapshot = ThreadStateData(
+            thread_id=thread.id,
+            status=thread.status,
+            last_sequence=0,
+        )
+        snapshot = await enrich_snapshot_from_execution_state(
+            session,
+            thread=thread,
+            snapshot=snapshot,
+            checkpoint_present=True,
+            checkpoint_id="cp-1",
+        )
+
+    assert snapshot.snapshot_complete is False
+    assert "execution_state_projection_unreadable" in snapshot.degraded_reasons
+    assert snapshot.repair_status == "operator_intervention_required"
+    assert snapshot.execution_readiness == "operator_intervention_required"
 
     await engine.dispose()

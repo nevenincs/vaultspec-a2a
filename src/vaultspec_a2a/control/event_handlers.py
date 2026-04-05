@@ -208,20 +208,22 @@ async def _handle_permission_event(
     else:
         factory = session_factory
     async with factory() as db:
-        if event_type == "permission_request":
+        if event_type in {"permission_request", "plan_approval_request"}:
             request_id = str(payload.get("request_id", ""))
             if not request_id:
                 return
             tool_call = payload.get("tool_call")
-            pause_reason_type = classify_permission_pause_reason(tool_call)
+            pause_reason_type = (
+                "plan_approval_request"
+                if event_type == "plan_approval_request"
+                else classify_permission_pause_reason(tool_call)
+            )
             fx = compute_permission_request_effects(pause_reason_type)
-            if fx.is_plan_approval:
-                await supersede_permission_requests(
-                    db,
-                    thread_id=thread_id,
-                    pause_reason_type=pause_reason_type,
-                    except_request_id=request_id,
-                )
+            await supersede_permission_requests(
+                db,
+                thread_id=thread_id,
+                except_request_id=request_id,
+            )
             await record_permission_request(
                 db,
                 request_id=request_id,
@@ -261,7 +263,10 @@ async def _handle_permission_event(
         else:
             request_id = str(payload.get("request_id", ""))
             permission = await get_permission_request(db, request_id)
-            if permission is not None:
+            if (
+                permission is not None
+                and permission.request_status == "answered_pending_apply"
+            ):
                 fx_res = compute_permission_resolution_effects(
                     permission.response_option_id,
                     permission.pause_reason_type,

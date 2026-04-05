@@ -16,7 +16,6 @@ checkpointer implementation, not a ``MemorySaver`` stub.
 
 from contextlib import asynccontextmanager
 from pathlib import Path
-from uuid import uuid4
 
 import httpx
 import pytest
@@ -57,10 +56,9 @@ __all__: list[str] = []
 
 
 @pytest_asyncio.fixture
-async def engine():
+async def engine(tmp_path_factory: pytest.TempPathFactory):
     """File-backed async SQLAlchemy engine with all tables created."""
-    case_dir = Path.home() / ".codex" / "memories" / "tmp" / "api-test-db" / uuid4().hex
-    case_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path_factory.mktemp("api-test-db")
     db_file = case_dir / "test.db"
     eng = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
     async with eng.begin() as conn:
@@ -89,21 +87,13 @@ async def session(engine):
 
 
 @pytest_asyncio.fixture
-async def checkpointer():
+async def checkpointer(tmp_path_factory: pytest.TempPathFactory):
     """Real AsyncSqliteSaver backed by a temporary SQLite file per test.
 
     Replaces the former MemorySaver stub so that gateway read-path enrichment
     exercises the real checkpointer implementation (AsyncSqliteSaver).
     """
-    case_dir = (
-        Path.home()
-        / ".codex"
-        / "memories"
-        / "tmp"
-        / "api-test-checkpoints"
-        / uuid4().hex
-    )
-    case_dir.mkdir(parents=True, exist_ok=True)
+    case_dir = tmp_path_factory.mktemp("api-test-checkpoints")
     db_file = case_dir / "test_checkpoints.db"
     async with AsyncSqliteSaver.from_conn_string(str(db_file)) as cp:
         yield cp

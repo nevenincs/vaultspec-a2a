@@ -9,6 +9,7 @@ import asyncio
 import logging
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
+from typing import cast
 
 from vaultspec_a2a.thread.errors import EventAggregatorError
 
@@ -101,6 +102,31 @@ class SubscriberManager:
         for threads in list(self._subscriptions.values()):
             all_threads.update(threads)
         return sorted(all_threads)
+
+    def enqueue_payload(self, thread_id: str, payload: object) -> None:
+        """Enqueue a pre-serialized payload for all subscribers of ``thread_id``."""
+        for client_id, queue in list(self._subscribers.items()):
+            client_subs = self._subscriptions.get(client_id, set())
+            if thread_id not in client_subs:
+                continue
+            if queue.full():
+                try:
+                    queue.get_nowait()
+                    logger.warning(
+                        "Dropped oldest event for slow client %s "
+                        "(relay backpressure, maxsize=%d)",
+                        client_id,
+                        queue.maxsize,
+                    )
+                except asyncio.QueueEmpty:
+                    pass
+            try:
+                queue.put_nowait(cast("SequencedEvent", payload))
+            except asyncio.QueueFull:
+                logger.warning(
+                    "Relay event dropped for client %s — queue still full",
+                    client_id,
+                )
 
     # ------------------------------------------------------------------
     # Graph registration (ADR-012 §6)

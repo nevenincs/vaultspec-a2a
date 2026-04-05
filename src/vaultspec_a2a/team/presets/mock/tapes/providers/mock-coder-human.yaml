@@ -3,6 +3,6 @@ name: mock-coder-human
 priority: 100
 request_mapping:
   model: mock-coder-human
-response_body: '{%- set n = json.messages | length -%}{"choices":[{"message":{"role":"assistant","content":[{"type":"reasoning","reasoning":"I need to run a privileged operation. I must request human approval before proceeding."},{"type":"text","text":"Requesting permission to execute a privileged command."}],"tool_calls":[{"id":"call_0","type":"function","function":{"name":"session_request_permission","arguments":"{\"description\": \"Run a privileged shell command: sudo apt-get update\", \"options\": [{\"optionId\": \"approve\", \"name\": \"Approve\", \"kind\": \"proceed\"}, {\"optionId\": \"deny\", \"name\": \"Deny\", \"kind\": \"block\"}]}"}}]}}]}'
+response_template: "mock-coder-human-chat.json.j2"
 stream:
-  enabled: false
+  enabled: true

@@ -1328,3 +1328,81 @@ Remaining LOW findings (REVIEW-082/083/089/090/092/093) are accepted
 architectural tradeoffs or config-only risks. No CRITICAL or HIGH issues.
 1177 tests passing. Audit 8 is functionally complete. Next: Audit 9
 streaming/replay/trace lineage.
+
+Audit 9 — streaming/replay/trace lineage
+
+Two parallel review agents scanned SSE streaming, replay semantics,
+checkpoint lineage, and event relay ordering. Findings below.
+
+REVIEW-096 | MEDIUM | SSE stream never terminated after thread_terminal event
+The SSE generator looped indefinitely after yielding a terminal event,
+leaving clients hanging. Fixed: the generator now returns after yielding
+`thread_terminal`. Evidence anchors:
+`src/vaultspec_a2a/api/routes/thread_stream.py`.
+
+REVIEW-097 | LOW | Sequence counter increment not formally atomic
+`next_sequence` in emitters.py does `_sequences[thread_id] += 1` with no
+lock. Safe under CPython GIL but not formally serialized. Evidence anchors:
+`src/vaultspec_a2a/streaming/emitters.py`.
+
+REVIEW-098 | LOW | Replay for completed threads emits only terminal sentinel
+SSE replay for completed threads delivers a single `thread_terminal` event
+with no prior history. The `GET /threads/{id}/state` endpoint is the
+designated recovery surface for full state reconstruction. Architectural
+limitation. Evidence anchors:
+`src/vaultspec_a2a/api/routes/thread_stream.py`.
+
+REVIEW-099 | LOW | Domain events lack run_id for per-invocation trace lineage
+The `DomainEvent` base class carries thread_id, agent_id, timestamp but
+no `run_id`. Agent status and plan update events cannot be traced to a
+specific LangGraph invocation. Evidence anchors:
+`src/vaultspec_a2a/graph/events.py`.
+
+REVIEW-100 | LOW | Execution state double-write guard is fragile
+The `_relay_single_event` short-circuit for execution_state_projection
+events prevents relay_event from running them twice. Safe today but
+the guard is implicit. Evidence anchors:
+`src/vaultspec_a2a/api/internal.py`.
+
+REVIEW-101 | MEDIUM | Stale execution state merged into degraded snapshot when checkpoint unavailable
+When checkpoint probing failed, execution state was still merged into the
+snapshot even though lineage could not be verified. Fixed: checkpoint
+unavailability now forces staleness classification, preventing unverifiable
+execution metadata from reaching the public snapshot. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`.
+
+REVIEW-102 | LOW | No per-thread serialization in event relay path
+Concurrent relay_event calls for the same thread can interleave, briefly
+leaving inconsistent durable state. The system's fail-closed degradation
+markers (terminal permission residue detection) handle this on reconnect.
+Accepted architectural tradeoff. Evidence anchors:
+`src/vaultspec_a2a/control/event_handlers.py`.
+
+REVIEW-103 | MEDIUM | Terminal event not guaranteed last — stale execution state on terminal threads
+Out-of-order terminal events could leave stale execution metadata on a
+terminal thread. Fixed: `enrich_snapshot_from_execution_state` now skips
+merge for terminal threads entirely. Evidence anchors:
+`src/vaultspec_a2a/control/projection.py`.
+
+REVIEW-104 | LOW | Lost execution-state write self-heals through reconciliation
+Missing execution state does not cause permanent staleness — reconciliation
+bumps recovery_epoch and the next worker run writes fresh state. No defect.
+Evidence anchors: `src/vaultspec_a2a/control/projection.py`.
+
+REVIEW-105 | LOW | Concurrent build_thread_state sees different truth
+Read-without-lock design means concurrent callers get point-in-time views.
+Acceptable because the snapshot is read-only and streaming updates supersede
+it. No data corruption. Evidence anchors:
+`src/vaultspec_a2a/control/thread_state_service.py`.
+
+Resolved in Audit 9 fix pass:
+
+- REVIEW-096: SSE stream closes after thread_terminal
+- REVIEW-101: Checkpoint unavailability forces staleness classification
+- REVIEW-103: Terminal threads skip execution state merge
+
+Audit 9 closeout
+Three MEDIUM findings fixed (REVIEW-096/101/103). Seven LOW findings are
+accepted architectural tradeoffs or trace gaps with no functional impact.
+No CRITICAL or HIGH issues. 1177 tests passing. Audit 9 is functionally
+complete.

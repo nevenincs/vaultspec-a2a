@@ -467,11 +467,21 @@ async def enrich_snapshot_from_execution_state(
         snapshot.execution_readiness = RepairStatus.OPERATOR_INTERVENTION_REQUIRED.value
         return snapshot
 
+    # REVIEW-103: terminal threads should not merge execution state —
+    # out-of-order terminal events can leave stale metadata on the row.
+    is_terminal = thread.status in {s.value for s in TERMINAL_STATUSES}
+    if is_terminal:
+        return snapshot
+
     is_stale = row.recovery_epoch != thread.recovery_epoch or (
         checkpoint_present
         and checkpoint_id is not None
         and row.checkpoint_id != checkpoint_id
     )
+    # REVIEW-101: when checkpoint is unavailable, the execution state row
+    # is unverifiable — fail closed instead of merging stale metadata.
+    if not checkpoint_present:
+        is_stale = True
     if is_stale:
         _mark_execution_state_stale(snapshot)
         return snapshot

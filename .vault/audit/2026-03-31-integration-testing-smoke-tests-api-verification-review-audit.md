@@ -1157,3 +1157,135 @@ Dismissed findings (false positives / accepted limitations):
   cosmetic; `StrEnum` comparison semantics make it correct.
 - Claude Low #6: port selection TOCTOU in test harness — accepted limitation
   for test infrastructure on non-shared hosts.
+
+Audit 8 — sandbox, artifact, and hostile-environment audit
+
+Three parallel review agents scanned artifact boundaries, hostile input
+paths, and subprocess containment. Findings below.
+
+REVIEW-080 | MEDIUM | Hard delete does not clean up artifact files from the workspace filesystem
+`delete_thread_service` in `src/vaultspec_a2a/control/thread_service.py`
+performs gateway DB row deletion (with CASCADE to artifact rows), checkpoint
+purge, and aggregator cleanup — but does not remove the corresponding files
+from the workspace filesystem. The artifact DB rows are cascaded away by
+SQLAlchemy, but workspace files at `workspace_root + artifact.path` survive,
+leaving orphaned files on disk. The fix requires the delete service to read
+`thread_metadata` for `workspace_root`, query artifact rows before deletion,
+resolve each path through sandbox validation, and unlink files before the
+CASCADE destroys path references. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/api/tests/test_endpoints.py`.
+
+REVIEW-081 | MEDIUM | Artifact path column accepts unsanitized values with no traversal guard
+`create_artifact` in `src/vaultspec_a2a/database/artifact_repository.py`
+stores the `path` parameter directly into `ArtifactModel.path` with no
+validation. The ACP tool layer sandboxes paths at write-time via
+`sandbox_path()`, but the artifact record itself could contain `../` segments
+or absolute paths if any code path calls `create_artifact` without the ACP
+sandbox. If REVIEW-080 is fixed and the delete path naively concatenates
+`workspace_root + artifact.path` and calls `unlink()`, a traversal payload
+could escape the sandbox. The artifact repository should validate that `path`
+is relative and contains no `..` components at record-creation time. Evidence
+anchors: `src/vaultspec_a2a/database/artifact_repository.py`,
+`src/vaultspec_a2a/database/models.py`.
+
+REVIEW-082 | LOW | workspace_root validation is existence-only, not confinement-scoped
+`process_metadata` in `src/vaultspec_a2a/control/thread_service.py` validates
+`workspace_root` by resolving and checking `.is_dir()` but does not confine
+it to any expected parent directory. A client-supplied root pointing to `/`
+or `C:\` would pass validation and become the sandbox root for the thread.
+Accepted architectural tradeoff for local-first tooling (gateway trusts its
+caller), but the sandbox guarantee collapses if the gateway is exposed to
+untrusted callers. Evidence anchors:
+`src/vaultspec_a2a/control/thread_service.py`,
+`src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+
+REVIEW-083 | LOW | Cross-thread artifact path collision not prevented at the DB layer
+`ArtifactModel` does not enforce a unique constraint on `(thread_id, path)`.
+If two threads share the same `workspace_root`, deleting one thread's
+artifacts could destroy files that a second live thread still references.
+Current CASCADE-only delete avoids this (no filesystem cleanup), but any
+future file-cleanup implementation must account for cross-thread overlap.
+Evidence anchors: `src/vaultspec_a2a/database/models.py`.
+
+REVIEW-085 | LOW | PermissionResponseRequest.option_id has no length constraint
+The `option_id: str` field has no `max_length`. A hostile client can force
+the server to hash, log, and persist an arbitrarily large string on the
+rejection path before validation rejects the value. Recommend `max_length=128`.
+Evidence anchors: `src/vaultspec_a2a/api/schemas/rest.py`,
+`src/vaultspec_a2a/control/permission_service.py`.
+
+REVIEW-086 | LOW | Worker event description field persisted unbounded
+`_handle_permission_event` stores `description` from worker relay payload
+with no length cap into `PermissionRequestModel.description` (Text column).
+Internal auth mitigates this to an internal-only surface. Recommend truncate
+to 4096 chars. Evidence anchors:
+`src/vaultspec_a2a/control/event_handlers.py`,
+`src/vaultspec_a2a/database/permission_repository.py`.
+
+REVIEW-087 | LOW | Worker event allowed_options list persisted without size bound
+Same handler stores `allowed_options` as JSON without capping list size.
+A hostile worker payload with thousands of entries would be persisted and
+later deserialized on every permission response attempt. Recommend cap at 50.
+Evidence anchors: `src/vaultspec_a2a/control/event_handlers.py`.
+
+REVIEW-088 | MEDIUM | on_custom_event reflects arbitrary worker data to SSE clients unsanitized
+`process_langgraph_event` in `src/vaultspec_a2a/streaming/transformer.py`
+passes custom event content directly to `emit_thought_chunk` with no
+sanitization, length cap, or content-type filtering. A hostile LangGraph
+custom event could inject large payloads (memory exhaustion for connected SSE
+clients) or carry content that downstream UIs might render as HTML. Recommend
+truncating to `domain_config.tool_arg_truncate_len` and documenting that SSE
+consumers must treat all content fields as untrusted text. Evidence anchors:
+`src/vaultspec_a2a/streaming/transformer.py`.
+
+REVIEW-089 | LOW | title field accepts control characters and bidi overrides
+`CreateThreadRequest.title` has `max_length=200` but no character-set
+restriction. Accepts null bytes, control characters, and Unicode bidi
+overrides that could confuse log parsing or UI rendering. Not exploitable for
+server-side injection. Evidence anchors:
+`src/vaultspec_a2a/api/schemas/rest.py`.
+
+REVIEW-090 | MEDIUM | ACP shell spawn on Windows passes command through create_subprocess_shell
+On Windows when `use_exec=False`, `_subprocess.py` builds a shell command
+string via `list2cmdline` and passes it to `create_subprocess_shell`. The
+command list is constructed from config-layer constants and `shutil.which()`
+results (not user-supplied), but the shell intermediary widens the attack
+surface if a future caller passes user-influenced elements. Evidence anchors:
+`src/vaultspec_a2a/providers/_subprocess.py`.
+
+REVIEW-091 | MEDIUM | Terminal wait_for_exit timeout is subprocess-controlled with no upper bound
+`on_terminal_wait_for_exit` accepts a `timeout` parameter directly from the
+ACP subprocess JSON-RPC request. A misbehaving subprocess could send an
+extremely large timeout, causing the handler task to block indefinitely.
+Recommend a server-side cap: `min(timeout, MAX_TERMINAL_TIMEOUT)`. Evidence
+anchors: `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+
+REVIEW-092 | LOW | Terminal command allowlist includes general-purpose shells
+The allowlist permits `bash`, `sh`, `cmd`, `pwsh`. A subprocess that is
+itself a shell can execute arbitrary commands via stdin. Expected behavior
+for terminal-capable agents but represents the widest execution boundary.
+Evidence anchors: `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+
+REVIEW-093 | LOW | Terminal env override values are not validated beyond name pattern
+Environment variable names are validated but values are not. A subprocess
+could inject `PATH` overrides or `LD_PRELOAD` to alter execution
+environment. The `resolve_env_vars()` base scrubs known secrets but the
+`extra_env` overlay is applied last. Evidence anchors:
+`src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+
+REVIEW-094 | LOW | Task queue feature_tag concatenated into path without traversal guard
+`create_mark_task_complete_tool` constructs
+`workspace_root / ".vault" / "plan" / f"{feature_tag}-queue.md"`. The tag
+comes from team config TOML (not runtime input), so risk is LOW, but no
+explicit traversal check exists. Evidence anchors:
+`src/vaultspec_a2a/graph/tools/task_queue.py`.
+
+Audit 8 summary
+Four MEDIUM findings: REVIEW-080 (artifact file orphaning on delete),
+REVIEW-081 (artifact path traversal at record layer), REVIEW-088 (SSE custom
+event reflection), REVIEW-091 (unbounded terminal timeout). The rest are LOW
+severity with internal-auth or config-only mitigations. No CRITICAL or HIGH
+issues found. The SQLAlchemy CASCADE coverage for DB-layer delete is
+complete; the gap is exclusively in filesystem cleanup and record-level path
+safety.

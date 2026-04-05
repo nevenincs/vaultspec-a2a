@@ -424,10 +424,7 @@ async def enrich_snapshot_from_durable_state(
     projected_plan_approvals = [
         permission
         for permission in snapshot.pending_permissions
-        if (
-            permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
-            or permission.tool_call == PermissionType.PLAN_APPROVAL.value
-        )
+        if permission.tool_call in _PLAN_APPROVAL_PAUSE_CAUSES
     ]
     if corrupted_plan_approval:
         snapshot.approval_status = None

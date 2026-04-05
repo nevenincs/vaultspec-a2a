@@ -506,10 +506,11 @@ async def respond_to_permission(
         idempotency_key=resolved_idempotency_key,
     )
     if permission.pause_reason_type in PLAN_APPROVAL_PAUSE_CAUSES:
+        submitted_status = _plan_response_approval_status(option_id)
         await set_thread_approval_state(
             db,
             thread_id,
-            approval_status=ApprovalStatus.PENDING,
+            approval_status=submitted_status,
             approval_request_id=request_id,
             approval_reason=permission.description,
             approval_response_action_id=action.id,

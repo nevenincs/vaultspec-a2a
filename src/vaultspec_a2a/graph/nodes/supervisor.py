@@ -100,10 +100,10 @@ def _check_finish_blocked(
     if errors:
         _logger.warning(
             "supervisor blocked FINISH: %d validation error(s) active — "
-            "rerouting to first available worker",
+            "rerouting to exec-phase worker",
             len(errors),
         )
-        next_route = workers[0] if workers else "FINISH"
+        next_route = _select_phase_worker("exec", workers, worker_phase_map)
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,

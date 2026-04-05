@@ -510,7 +510,12 @@ class DeleteResult:
     error_detail: str | None = None
 
 
-async def delete_thread_service(db: AsyncSession, thread_id: str) -> DeleteResult:
+async def delete_thread_service(
+    db: AsyncSession,
+    thread_id: str,
+    *,
+    checkpointer: Any | None = None,
+) -> DeleteResult:
     """Hard-delete a thread after lifecycle-guard validation.
 
     Commits the session before returning — the service owns its
@@ -527,6 +532,9 @@ async def delete_thread_service(db: AsyncSession, thread_id: str) -> DeleteResul
     deleted = await delete_thread(db, thread_id)
     if not deleted:
         return DeleteResult(deleted=False, not_found=True)
+
+    if checkpointer is not None:
+        await checkpointer.adelete_thread(thread_id)
 
     await db.commit()
     return DeleteResult(deleted=True)

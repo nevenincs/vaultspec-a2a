@@ -2376,6 +2376,85 @@ class TestDeleteThread:
         assert resp.status_code == 409
         assert resp.json()["detail"] == "Cannot delete thread in 'input_required' state"
 
+    def test_deletes_checkpoint_state_for_terminal_thread(
+        self, session_factory, checkpointer
+    ) -> None:
+        """Hard delete must remove all persisted checkpoint state for the thread."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+
+        async def _seed_thread() -> None:
+            await checkpointer.setup()
+            from langgraph.checkpoint.base import empty_checkpoint
+
+            checkpoint = empty_checkpoint()
+            checkpoint["id"] = "cp-delete-terminal-thread-root"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-delete-terminal",
+                        "checkpoint_ns": "",
+                    }
+                },
+                checkpoint,
+                {"source": "loop", "step": 1, "parents": {}},
+                {},
+            )
+            child_checkpoint = empty_checkpoint()
+            child_checkpoint["id"] = "cp-delete-terminal-thread-child"
+            await checkpointer.aput(
+                {
+                    "configurable": {
+                        "thread_id": "thread-delete-terminal",
+                        "checkpoint_ns": "worker:child",
+                    }
+                },
+                child_checkpoint,
+                {"source": "loop", "step": 2, "parents": {}},
+                {},
+            )
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-delete-terminal",
+                    status="completed",
+                )
+                await session.commit()
+
+        async def _checkpoint_exists() -> bool:
+            config = {
+                "configurable": {
+                    "thread_id": "thread-delete-terminal",
+                    "checkpoint_ns": "",
+                }
+            }
+            return await checkpointer.aget_tuple(config) is not None
+
+        async def _child_checkpoint_exists() -> bool:
+            config = {
+                "configurable": {
+                    "thread_id": "thread-delete-terminal",
+                    "checkpoint_ns": "worker:child",
+                }
+            }
+            return await checkpointer.aget_tuple(config) is not None
+
+        async def _checkpoint_history_count() -> int:
+            config = {"configurable": {"thread_id": "thread-delete-terminal"}}
+            return len([item async for item in checkpointer.alist(config, limit=10)])
+
+        asyncio.run(_seed_thread())
+        assert asyncio.run(_checkpoint_exists()) is True
+        assert asyncio.run(_child_checkpoint_exists()) is True
+        assert asyncio.run(_checkpoint_history_count()) >= 2
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.delete("/api/threads/thread-delete-terminal")
+
+        assert resp.status_code == 204
+        assert asyncio.run(_checkpoint_exists()) is False
+        assert asyncio.run(_child_checkpoint_exists()) is False
+        assert asyncio.run(_checkpoint_history_count()) == 0
+
     def test_plan_approval_response_succeeds_after_real_event_relay(
         self, session_factory, checkpointer
     ) -> None:

@@ -1406,3 +1406,96 @@ Three MEDIUM findings fixed (REVIEW-096/101/103). Seven LOW findings are
 accepted architectural tradeoffs or trace gaps with no functional impact.
 No CRITICAL or HIGH issues. 1177 tests passing. Audit 9 is functionally
 complete.
+
+Numbering notes (gap analysis housekeeping):
+- REVIEW-021 appears twice: first (line ~108) covers thread summaries
+  exposing stale approval metadata; second (line ~111) covers plan approval
+  trusting stale thread-row pointers. Both are distinct findings that share
+  a number due to codex agent sequencing. Treat as REVIEW-021a and
+  REVIEW-021b for citation.
+- REVIEW-052 appears twice (lines ~659 and ~672): editorial duplicate from
+  codex agent. The second entry is canonical.
+- REVIEW-054 appears twice (lines ~258 and ~702): the first is a
+  positional summary entry; the second is the full writeup. The full
+  writeup is canonical.
+- REVIEW-084 was never assigned — the sequence jumps from 083 to 085.
+  This is a numbering gap, not a missing finding.
+
+Retroactive closeout statements:
+
+Audit 1 closeout (interrupt, permission, resume correctness)
+Resolved items: REVIEW-001, 002, 003 (LOW residual), 004, 005, 006.
+All MEDIUM+ findings fixed by codex agent. REVIEW-003 and 009 remain as
+LOW residual contracts (SSE replay coverage, VidaiMock tape sensitivity).
+
+Audit 4 closeout (persistence, corruption, restart)
+Resolved items: REVIEW-011 through REVIEW-023. All findings fixed by codex
+agent. The repair_transitions → projection → thread_service pipeline is
+internally consistent with monotonic degradation.
+
+Deferred item:
+- REVIEW-007 (LOW): Stale Docker compose projects from interrupted sessions.
+  Resource hygiene, not correctness. Accepted-deferred for this PR scope.
+
+Audit 10 — unaudited package sweep
+
+Gap analysis found 5 source packages with zero prior coverage. Sweep
+results below. `workspace/` and `utils/` are clean — no findings.
+
+REVIEW-106 | LOW | /admin/shutdown endpoint on worker subprocess lacks auth
+`POST /admin/shutdown` in `src/vaultspec_a2a/worker/app.py` sends SIGTERM
+with no authentication dependency, unlike `/dispatch` which uses dispatch
+token verification. Any client with network access to the worker port can
+terminate the process. Mitigated by worker typically being on private
+network. Evidence anchors: `src/vaultspec_a2a/worker/app.py`.
+
+REVIEW-107 | DISMISSED | Empty pending_writes correctly indicates completion
+The original finding claimed empty `pending_writes` could be a false
+positive for completion. LangGraph docs confirm `pending_writes: []` on the
+latest checkpoint genuinely means the graph reached END — pending tasks are
+written atomically with the checkpoint, so no mid-execution window exists
+where pending_writes would be empty. The pre_flight_checkpoint logic is
+correct per LangGraph semantics. Evidence anchors:
+`src/vaultspec_a2a/worker/state_projection.py`,
+LangGraph checkpoint documentation (aget_tuple response).
+
+REVIEW-108 | LOW | Top-level dispatch exception handler does not emit terminal status
+`handle_dispatch` in `src/vaultspec_a2a/worker/executor.py` catches all
+exceptions at the outermost level but does not emit terminal status for the
+thread. The log message acknowledges "thread may be stuck in RUNNING."
+Exceptions before entering INGEST/RESUME method bodies leave the thread
+permanently stuck. Mitigated by gateway-side reconciliation detecting stale
+running threads. Evidence anchors:
+`src/vaultspec_a2a/worker/executor.py`.
+
+REVIEW-109 | LOW | asdict() on domain events has no depth/size guard
+`sequenced_to_dict` in `src/vaultspec_a2a/ipc/serializers.py` calls
+`dataclasses.asdict()` recursively with no depth limit. Current event types
+are flat, but no defensive guard against future deeply nested structures.
+Evidence anchors: `src/vaultspec_a2a/ipc/serializers.py`.
+
+REVIEW-110 | LOW | DispatchRequest.option_id accepts arbitrary dict without schema constraint
+`option_id: str | dict | None` in `src/vaultspec_a2a/ipc/schemas.py` allows
+an unconstrained dict to flow through to `Command(resume=...)`. No
+depth/size limit on dict contents. Evidence anchors:
+`src/vaultspec_a2a/ipc/schemas.py`.
+
+REVIEW-111 | LOW | url.full span attribute may include query-string tokens
+Telemetry middleware in `src/vaultspec_a2a/telemetry/middleware.py` records
+`url.full` including query parameters. Sensitive query-string tokens would
+reach the OTLP collector. Standard OTel convention but more aggressive than
+`http.route` alone. Evidence anchors:
+`src/vaultspec_a2a/telemetry/middleware.py`.
+
+Audit 10 closeout
+One finding dismissed (REVIEW-107) per LangGraph docs grounding. Five LOW
+findings documented — all mitigated by network isolation, gateway-side
+reconciliation, or bounded current usage. No MEDIUM, HIGH, or CRITICAL
+issues. Two packages (`workspace/`, `utils/`) are clean.
+
+Full audit pipeline closeout
+Audits 1-10 complete. 111 REVIEW items produced (106 active after
+dismissals). All MEDIUM+ findings resolved across 9 fix passes. Remaining
+LOW items are accepted architectural tradeoffs, config-only risks, or
+mitigated by defense-in-depth layers. 1177 tests passing. No unaudited
+source packages remain.

@@ -1,7 +1,6 @@
 import type { StateCreator } from 'zustand';
 import type { PermissionRequest } from '../../data/types';
-import type { components } from '../../data/wire-types';
-type PermissionRequestEvent = components['schemas']['PermissionRequestEvent'];
+import type { PermissionRequestEvent } from '../../data/ws-types';
 import { mapPermissionRequest } from '../../api/mappers';
 import type { AppStore } from '../app-store';
 
@@ -23,7 +22,11 @@ export const createPermissionSlice: StateCreator<
   pushPermission: (wireEvent) =>
     set(
       (draft) => {
-        draft.permissionQueue.push(mapPermissionRequest(wireEvent));
+        // Dedup: skip if this request_id is already queued (server re-delivery)
+        if (draft.permissionQueue.some((p) => p.id === wireEvent.request_id)) return;
+        draft.permissionQueue.push(
+          mapPermissionRequest(wireEvent, draft._agentDisplayNames),
+        );
       },
       false,
       'permission/push',

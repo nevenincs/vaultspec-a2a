@@ -59,7 +59,10 @@ function getAgentInfo(
 ): { agentId: string; agentName: string } | null {
   if (event.type === 'user_message' || event.type === 'error') return null;
   if ('agent_id' in event && event.agent_id && 'agent_name' in event) {
-    return { agentId: event.agent_id, agentName: (event as any).agent_name };
+    return {
+      agentId: event.agent_id,
+      agentName: (event as Extract<StreamEvent, { agent_name: string }>).agent_name,
+    };
   }
   return null;
 }
@@ -217,18 +220,20 @@ export function MessageStream({
 
   const handleInspect = useCallback(
     (e: StreamEvent) => {
+      const title =
+        e.type === 'tool_call'
+          ? `Tool: ${e.tool_name}`
+          : e.type === 'artifact'
+            ? e.filename
+            : 'Event Detail';
+      const content =
+        'agent_name' in e
+          ? `Agent: ${e.agent_name}\n\n${JSON.stringify(e, null, 2)}`
+          : JSON.stringify(e, null, 2);
       const doc: ContextDocument = {
         id: e.id,
-        title:
-          e.type === 'tool_call'
-            ? `Tool: ${(e as any).tool_name}`
-            : e.type === 'artifact'
-              ? (e as any).filename
-              : 'Event Detail',
-        content:
-          'agent_id' in e
-            ? `Agent: ${(e as any).agent_name}\n\n${JSON.stringify(e, null, 2)}`
-            : JSON.stringify(e, null, 2),
+        title,
+        content,
         type: e.type === 'artifact' ? 'file' : 'note',
         updated_at: e.timestamp,
       };
@@ -252,8 +257,8 @@ export function MessageStream({
   const availableAgents = useMemo(() => {
     const map = new Map<string, string>();
     events.forEach((e) => {
-      if ('agent_id' in e && e.agent_id && (e as any).agent_name) {
-        map.set(e.agent_id, (e as any).agent_name);
+      if ('agent_name' in e && e.agent_id && e.agent_name) {
+        map.set(e.agent_id, e.agent_name);
       }
     });
     return Array.from(map.entries()).map(([id, name]) => ({ id, name }));

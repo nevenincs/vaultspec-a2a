@@ -15,19 +15,7 @@ export default defineConfig({
   ],
   server: {
     proxy: {
-      '/threads': {
-        target: gatewayTarget,
-        changeOrigin: true,
-      },
-      '/team': {
-        target: gatewayTarget,
-        changeOrigin: true,
-      },
-      '/teams': {
-        target: gatewayTarget,
-        changeOrigin: true,
-      },
-      '/permissions': {
+      '/api': {
         target: gatewayTarget,
         changeOrigin: true,
       },

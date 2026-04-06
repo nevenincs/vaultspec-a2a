@@ -1,0 +1,270 @@
+{
+  "$defs": {
+    "AgentControlAction": {
+      "description": "Actions a user can issue to control a running agent.",
+      "enum": [
+        "pause",
+        "resume",
+        "terminate"
+      ],
+      "title": "AgentControlAction",
+      "type": "string"
+    },
+    "AgentControlCommand": {
+      "description": "Issue a control action (pause/resume/terminate) to an agent.",
+      "properties": {
+        "type": {
+          "const": "agent_control",
+          "default": "agent_control",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "action": {
+          "$ref": "#/$defs/AgentControlAction"
+        },
+        "option_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Option Id"
+        }
+      },
+      "required": [
+        "thread_id",
+        "agent_id",
+        "action"
+      ],
+      "title": "AgentControlCommand",
+      "type": "object"
+    },
+    "PermissionResponseCommand": {
+      "description": "Respond to a permission request via WebSocket.",
+      "properties": {
+        "type": {
+          "const": "permission_response",
+          "default": "permission_response",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "option_id": {
+          "title": "Option Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "request_id",
+        "option_id"
+      ],
+      "title": "PermissionResponseCommand",
+      "type": "object"
+    },
+    "PingCommand": {
+      "description": "Client keepalive ping.",
+      "properties": {
+        "type": {
+          "const": "ping",
+          "default": "ping",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        }
+      },
+      "title": "PingCommand",
+      "type": "object"
+    },
+    "SendMessageCommand": {
+      "description": "Send a user message into a thread.",
+      "properties": {
+        "type": {
+          "const": "send_message",
+          "default": "send_message",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "content": {
+          "maxLength": 65536,
+          "title": "Content",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        }
+      },
+      "required": [
+        "thread_id",
+        "content"
+      ],
+      "title": "SendMessageCommand",
+      "type": "object"
+    },
+    "SubscribeCommand": {
+      "description": "Subscribe to real-time events for one or more threads.\n\nM15: thread_ids are validated as exact IDs (max 50 per command) to\nprevent subscription abuse. IDs are treated as opaque strings — the\naggregator uses exact-match comparison, never prefix matching.",
+      "properties": {
+        "type": {
+          "const": "subscribe",
+          "default": "subscribe",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Thread Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_ids"
+      ],
+      "title": "SubscribeCommand",
+      "type": "object"
+    },
+    "UnsubscribeCommand": {
+      "description": "Unsubscribe from real-time events for one or more threads.",
+      "properties": {
+        "type": {
+          "const": "unsubscribe",
+          "default": "unsubscribe",
+          "title": "Type",
+          "type": "string"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Request Id"
+        },
+        "thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 50,
+          "title": "Thread Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_ids"
+      ],
+      "title": "UnsubscribeCommand",
+      "type": "object"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "agent_control": "#/$defs/AgentControlCommand",
+      "permission_response": "#/$defs/PermissionResponseCommand",
+      "ping": "#/$defs/PingCommand",
+      "send_message": "#/$defs/SendMessageCommand",
+      "subscribe": "#/$defs/SubscribeCommand",
+      "unsubscribe": "#/$defs/UnsubscribeCommand"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/SubscribeCommand"
+    },
+    {
+      "$ref": "#/$defs/UnsubscribeCommand"
+    },
+    {
+      "$ref": "#/$defs/SendMessageCommand"
+    },
+    {
+      "$ref": "#/$defs/AgentControlCommand"
+    },
+    {
+      "$ref": "#/$defs/PermissionResponseCommand"
+    },
+    {
+      "$ref": "#/$defs/PingCommand"
+    }
+  ]
+}

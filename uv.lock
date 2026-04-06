@@ -2261,7 +2261,7 @@ dev = [
 [[package]]
 name = "vaultspec-core"
 version = "0.1.7"
-source = { git = "https://github.com/wgergely/vaultspec-core.git?branch=main#21dcd81dee04ae70db5fed64f408df073a5ee06f" }
+source = { git = "https://github.com/wgergely/vaultspec-core.git?branch=main#c97db64a22ab00423fe322da158a1efa01b7c71c" }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },

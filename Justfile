@@ -289,11 +289,31 @@ _dev-code-check-type:
 _dev-code-check-ui:
     cd src/ui && npm run check
 
-# Run all code quality checks: lint + type + ui
+# Run all code quality checks: lint + type + ui + contract
 _dev-code-check-all:
     just _dev-code-check-lint
     just _dev-code-check-type
     just _dev-code-check-ui
+    just _dev-contract-check
+
+# --- contract validation recipes ---
+
+# Export OpenAPI + WS schemas from Pydantic models (no running server)
+_dev-contract-export:
+    uv run python scripts/export_openapi.py
+    uv run python scripts/export_ws_schema.py
+
+# Generate TypeScript types from exported schemas
+_dev-contract-generate:
+    cd src/ui && npx openapi-typescript ../../openapi.json -o src/app/data/wire-types.ts
+    uv run python scripts/generate_ws_types.py
+
+# Full contract check: export, generate, diff, tsc
+_dev-contract-check:
+    just _dev-contract-export
+    just _dev-contract-generate
+    git diff --exit-code openapi.json schemas/ src/ui/src/app/data/wire-types.ts src/ui/src/app/data/ws-types.ts
+    cd src/ui && npm run check
 
 # --- fix recipes (auto-repair) ---
 

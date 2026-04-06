@@ -55,9 +55,19 @@ export function useCreateThread() {
       const newThread: ThreadSummary = {
         thread_id: res.thread_id,
         title: message.slice(0, 40) + (message.length > 40 ? '...' : ''),
+        status: 'submitted',
         agent_state: 'submitted',
+        team_preset: opts.preset?.id ?? null,
+        created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-        nickname: res.nickname ?? undefined,
+        nickname: res.nickname ?? null,
+        feature_tag: opts.featureTag ?? null,
+        source_branch: opts.branch ?? null,
+        callee: null,
+        repair_status: null,
+        execution_readiness: null,
+        approval_status: null,
+        approval_request_id: null,
       };
 
       // Optimistic prepend to thread list cache

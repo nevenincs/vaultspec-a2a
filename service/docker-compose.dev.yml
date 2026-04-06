@@ -75,6 +75,8 @@ services:
     environment:
       # Vite proxy target inside Docker network
       VITE_API_URL: http://gateway:8000
+      # Empty = browser uses relative URLs that hit the Vite dev proxy
+      VITE_API_BASE_URL: ''
     depends_on:
       gateway:
         condition: service_healthy

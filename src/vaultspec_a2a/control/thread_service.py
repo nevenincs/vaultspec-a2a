@@ -215,7 +215,7 @@ async def list_threads_service(
                 repair_status=repair_status,
                 execution_readiness=execution_readiness,
             )
-        if is_terminal_thread:
+        if is_terminal_thread or checkpoint_unverified:
             approval_status = None
             approval_request_id = None
         else:

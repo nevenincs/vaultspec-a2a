@@ -476,6 +476,12 @@ async def enrich_snapshot_from_execution_state(
         and row.checkpoint_id != checkpoint_id
     )
     if is_stale:
+        # Carry forward the projection's own degraded_reasons (e.g.
+        # "execution_state_projection_unavailable") before adding the
+        # staleness marker — both conditions are independently true.
+        for reason in projection.degraded_reasons:
+            if reason not in snapshot.degraded_reasons:
+                snapshot.degraded_reasons.append(reason)
         _mark_execution_state_stale(snapshot)
         return snapshot
 

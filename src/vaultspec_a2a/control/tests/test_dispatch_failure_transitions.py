@@ -13,7 +13,6 @@ from vaultspec_a2a.control.message_service import send_followup_message
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 from vaultspec_a2a.database import (
     create_thread,
-    get_pending_permission_requests,
     get_thread,
     record_permission_request,
 )

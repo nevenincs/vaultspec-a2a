@@ -67,13 +67,7 @@ export class RestClient {
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    const res = await fetch(`${this.baseUrl}/api/threads/${encodeURIComponent(threadId)}`, {
-      method: 'DELETE',
-    });
-    if (!res.ok) {
-      const body = await res.text().catch(() => undefined);
-      throw new RestClientError(res.status, res.statusText, body);
-    }
+    await this.del(`/api/threads/${encodeURIComponent(threadId)}`);
   }
 
   async archiveThread(threadId: string): Promise<{ thread_id: string; status: string }> {
@@ -133,6 +127,14 @@ export class RestClient {
       throw new RestClientError(res.status, res.statusText, body);
     }
     return res.json() as Promise<T>;
+  }
+
+  private async del(path: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}${path}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.text().catch(() => undefined);
+      throw new RestClientError(res.status, res.statusText, body);
+    }
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {

@@ -54,7 +54,7 @@ dev = [
 ]
 
 [tool.uv.sources]
-vaultspec-core = { path = "Y:/code/vaultspec-core-worktrees/main", editable = true }
+vaultspec-core = { git = "https://github.com/wgergely/vaultspec-core.git", branch = "main" }
 
 [build-system]
 requires = ["hatchling"]

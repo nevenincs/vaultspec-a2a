@@ -47,9 +47,7 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
   };
 }
 
-export function mapAgentSummary(
-  wire: WsAgentSummary | AgentStatusEntry,
-): AgentSummary {
+export function mapAgentSummary(wire: WsAgentSummary | AgentStatusEntry): AgentSummary {
   return {
     agent_id: wire.agent_id,
     node_name: wire.node_name,

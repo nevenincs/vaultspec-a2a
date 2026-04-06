@@ -34,7 +34,9 @@ function toFrontendConnectionState(ws: WsConnectionState): FrontendConnectionSta
   return ws;
 }
 
-function sseToFrontendConnectionState(sse: SseConnectionState): FrontendConnectionState {
+function sseToFrontendConnectionState(
+  sse: SseConnectionState,
+): FrontendConnectionState {
   return sse;
 }
 
@@ -57,26 +59,19 @@ function dispatchEvent(threadId: string, event: ServerEvent): void {
 
     case 'agent_status': {
       appStore.getState().handleWireEvent(threadId, event);
-      queryClient.setQueryData<AgentSummary[]>(
-        queryKeys.team.status(),
-        (prev = []) => {
-          const idx = prev.findIndex((a) => a.agent_id === event.agent_id);
-          if (idx >= 0) {
-            const updated = [...prev];
-            updated[idx] = { ...updated[idx], state: event.state };
-            return updated;
-          }
-          return prev;
-        },
-      );
-      queryClient.setQueryData<ThreadSummary[]>(
-        queryKeys.threads.list(),
-        (prev = []) =>
-          prev.map((t) =>
-            t.thread_id === threadId
-              ? { ...t, agent_state: event.state }
-              : t,
-          ),
+      queryClient.setQueryData<AgentSummary[]>(queryKeys.team.status(), (prev = []) => {
+        const idx = prev.findIndex((a) => a.agent_id === event.agent_id);
+        if (idx >= 0) {
+          const updated = [...prev];
+          updated[idx] = { ...updated[idx], state: event.state };
+          return updated;
+        }
+        return prev;
+      });
+      queryClient.setQueryData<ThreadSummary[]>(queryKeys.threads.list(), (prev = []) =>
+        prev.map((t) =>
+          t.thread_id === threadId ? { ...t, agent_state: event.state } : t,
+        ),
       );
       break;
     }

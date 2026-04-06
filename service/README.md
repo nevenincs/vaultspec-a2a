@@ -5,12 +5,12 @@ running the Vaultspec A2A orchestrator as containerised services.
 
 ## Compose files
 
-| File | Type | Description |
-|---|---|---|
-| `docker-compose.dev.yml` | Standalone | Frontend-ready dev environment: gateway + worker + Vite HMR |
-| `docker-compose.integration.yml` | Standalone | Deterministic certification stack: gateway + worker + VidaiMock + Jaeger |
-| `docker-compose.prod.yml` | Standalone | Single-node SQLite deployment: gateway + worker + Jaeger |
-| `docker-compose.prod.postgres.yml` | Overlay | Adds Postgres to the prod stack (replaces SQLite) |
+| File                               | Type       | Description                                                              |
+| ---------------------------------- | ---------- | ------------------------------------------------------------------------ |
+| `docker-compose.dev.yml`           | Standalone | Frontend-ready dev environment: gateway + worker + Vite HMR              |
+| `docker-compose.integration.yml`   | Standalone | Deterministic certification stack: gateway + worker + VidaiMock + Jaeger |
+| `docker-compose.prod.yml`          | Standalone | Single-node SQLite deployment: gateway + worker + Jaeger                 |
+| `docker-compose.prod.postgres.yml` | Overlay    | Adds Postgres to the prod stack (replaces SQLite)                        |
 
 ## Usage
 

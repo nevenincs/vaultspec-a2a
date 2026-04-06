@@ -2,11 +2,7 @@
   "$defs": {
     "AgentControlAction": {
       "description": "Actions a user can issue to control a running agent.",
-      "enum": [
-        "pause",
-        "resume",
-        "terminate"
-      ],
+      "enum": ["pause", "resume", "terminate"],
       "title": "AgentControlAction",
       "type": "string"
     },
@@ -55,11 +51,7 @@
           "title": "Option Id"
         }
       },
-      "required": [
-        "thread_id",
-        "agent_id",
-        "action"
-      ],
+      "required": ["thread_id", "agent_id", "action"],
       "title": "AgentControlCommand",
       "type": "object"
     },
@@ -81,10 +73,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "request_id",
-        "option_id"
-      ],
+      "required": ["request_id", "option_id"],
       "title": "PermissionResponseCommand",
       "type": "object"
     },
@@ -156,15 +145,12 @@
           "title": "Agent Id"
         }
       },
-      "required": [
-        "thread_id",
-        "content"
-      ],
+      "required": ["thread_id", "content"],
       "title": "SendMessageCommand",
       "type": "object"
     },
     "SubscribeCommand": {
-      "description": "Subscribe to real-time events for one or more threads.\n\nM15: thread_ids are validated as exact IDs (max 50 per command) to\nprevent subscription abuse. IDs are treated as opaque strings — the\naggregator uses exact-match comparison, never prefix matching.",
+      "description": "Subscribe to real-time events for one or more threads.\n\nM15: thread_ids are validated as exact IDs (max 50 per command) to\nprevent subscription abuse. IDs are treated as opaque strings ï¿½ the\naggregator uses exact-match comparison, never prefix matching.",
       "properties": {
         "type": {
           "const": "subscribe",
@@ -193,9 +179,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "thread_ids"
-      ],
+      "required": ["thread_ids"],
       "title": "SubscribeCommand",
       "type": "object"
     },
@@ -229,9 +213,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "thread_ids"
-      ],
+      "required": ["thread_ids"],
       "title": "UnsubscribeCommand",
       "type": "object"
     }

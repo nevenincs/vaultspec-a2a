@@ -579,9 +579,7 @@
     },
     "/internal/health": {
       "get": {
-        "tags": [
-          "internal"
-        ],
+        "tags": ["internal"],
         "summary": "Internal Health",
         "description": "Readiness probe -- confirms the internal API is accepting connections.",
         "operationId": "internal_health_internal_health_get",
@@ -633,9 +631,7 @@
     },
     "/internal/events": {
       "post": {
-        "tags": [
-          "internal"
-        ],
+        "tags": ["internal"],
         "summary": "Receive Worker Event",
         "description": "Receive a single event from the worker and relay to browser clients.\n\nThe ``WorkerBridge`` in the worker process POSTs here instead of\nsending a WebSocket frame.  The payload format matches\n``WorkerEventEnvelope``.",
         "operationId": "receive_worker_event_internal_events_post",
@@ -687,9 +683,7 @@
     },
     "/internal/events/batch": {
       "post": {
-        "tags": [
-          "internal"
-        ],
+        "tags": ["internal"],
         "summary": "Receive Worker Event Batch",
         "description": "Receive a batch of events from the worker (CRIT-02).\n\nThe ``WorkerBridge`` accumulates events for a short interval then\nPOSTs them as a single ``{\"events\": [...]}`` payload.  Each entry\nhas the same shape as a single-event envelope (``thread_id`` +\n``payload``).",
         "operationId": "receive_worker_event_batch_internal_events_batch_post",
@@ -741,9 +735,7 @@
     },
     "/internal/heartbeat": {
       "post": {
-        "tags": [
-          "internal"
-        ],
+        "tags": ["internal"],
         "summary": "Receive Worker Heartbeat",
         "description": "Receive a heartbeat from the worker.\n\nUpdates ``app.state`` so the gateway can monitor worker\nliveness without a persistent WebSocket connection.",
         "operationId": "receive_worker_heartbeat_internal_heartbeat_post",
@@ -882,11 +874,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "agent_id",
-          "node_name",
-          "state"
-        ],
+        "required": ["agent_id", "node_name", "state"],
         "title": "AgentStatusEntry",
         "description": "Agent status within a team status response."
       },
@@ -910,12 +898,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "artifact_id",
-          "filename",
-          "content",
-          "complete"
-        ],
+        "required": ["artifact_id", "filename", "content", "complete"],
         "title": "ArtifactSnapshot",
         "description": "Fully materialized file artifact."
       },
@@ -972,11 +955,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "thread_id",
-          "status",
-          "cancelled"
-        ],
+        "required": ["thread_id", "status", "cancelled"],
         "title": "CancelThreadResponse",
         "description": "Response after requesting thread cancellation."
       },
@@ -997,10 +976,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "path",
-          "stage"
-        ],
+        "required": ["path", "stage"],
         "title": "ContextRef",
         "description": "Reference to a context document in the .vault hierarchy."
       },
@@ -1070,9 +1046,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "initial_message"
-        ],
+        "required": ["initial_message"],
         "title": "CreateThreadRequest",
         "description": "Create a new orchestration thread."
       },
@@ -1099,10 +1073,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "thread_id",
-          "status"
-        ],
+        "required": ["thread_id", "status"],
         "title": "CreateThreadResponse",
         "description": "Response after successfully creating a thread."
       },
@@ -1165,10 +1136,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "task_id",
-          "name"
-        ],
+        "required": ["task_id", "name"],
         "title": "ExecutionTaskSnapshot",
         "description": "Normalized execution task used in reconnect snapshots."
       },
@@ -1217,23 +1185,13 @@
           }
         },
         "type": "object",
-        "required": [
-          "message_id",
-          "role",
-          "content",
-          "timestamp"
-        ],
+        "required": ["message_id", "role", "content", "timestamp"],
         "title": "MessageSnapshot",
         "description": "Fully materialized message in a thread replay."
       },
       "Model": {
         "type": "string",
-        "enum": [
-          "low",
-          "mid",
-          "high",
-          "max"
-        ],
+        "enum": ["low", "mid", "high", "max"],
         "title": "Model",
         "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden."
       },
@@ -1258,22 +1216,13 @@
           }
         },
         "type": "object",
-        "required": [
-          "request_id",
-          "thread_id",
-          "description"
-        ],
+        "required": ["request_id", "thread_id", "description"],
         "title": "PendingPermission",
         "description": "Outstanding permission request summary."
       },
       "PermissionOptionKind": {
         "type": "string",
-        "enum": [
-          "allow_once",
-          "allow_always",
-          "reject_once",
-          "reject_always"
-        ],
+        "enum": ["allow_once", "allow_always", "reject_once", "reject_always"],
         "title": "PermissionOptionKind",
         "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting."
       },
@@ -1295,9 +1244,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "option_id"
-        ],
+        "required": ["option_id"],
         "title": "PermissionResponseRequest",
         "description": "Submit a permission response via REST (guaranteed delivery)."
       },
@@ -1360,11 +1307,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "request_id",
-          "accepted",
-          "thread_id"
-        ],
+        "required": ["request_id", "accepted", "thread_id"],
         "title": "PermissionResponseResult",
         "description": "Result of submitting a permission response."
       },
@@ -1386,20 +1329,12 @@
           }
         },
         "type": "object",
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "title": "PlanEntry"
       },
       "Provider": {
         "type": "string",
-        "enum": [
-          "claude",
-          "gemini",
-          "mock",
-          "openai",
-          "zhipu"
-        ],
+        "enum": ["claude", "gemini", "mock", "openai", "zhipu"],
         "title": "Provider",
         "description": "Supported LLM providers."
       },
@@ -1424,9 +1359,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "content"
-        ],
+        "required": ["content"],
         "title": "SendMessageRequest",
         "description": "Send a user message into an existing thread via REST."
       },
@@ -1479,10 +1412,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "status",
-          "thread_id"
-        ],
+        "required": ["status", "thread_id"],
         "title": "SendMessageResponse",
         "description": "Response after accepting a user message (202 Accepted)."
       },
@@ -1510,15 +1440,9 @@
           }
         },
         "type": "object",
-        "required": [
-          "id",
-          "display_name",
-          "description",
-          "topology",
-          "worker_count"
-        ],
+        "required": ["id", "display_name", "description", "topology", "worker_count"],
         "title": "TeamPresetSummary",
-        "description": "Lightweight team preset descriptor for the team picker UI (ADR-013 §6)."
+        "description": "Lightweight team preset descriptor for the team picker UI (ADR-013 ï¿½6)."
       },
       "TeamPresetsResponse": {
         "properties": {
@@ -1531,11 +1455,9 @@
           }
         },
         "type": "object",
-        "required": [
-          "presets"
-        ],
+        "required": ["presets"],
         "title": "TeamPresetsResponse",
-        "description": "Response for GET /teams: list of available team presets (ADR-013 §6)."
+        "description": "Response for GET /teams: list of available team presets (ADR-013 ï¿½6)."
       },
       "TeamStatusResponse": {
         "properties": {
@@ -1562,11 +1484,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "agents",
-          "active_threads",
-          "pending_permissions"
-        ],
+        "required": ["agents", "active_threads", "pending_permissions"],
         "title": "TeamStatusResponse",
         "description": "Current team status snapshot via REST."
       },
@@ -1585,10 +1503,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "threads",
-          "total"
-        ],
+        "required": ["threads", "total"],
         "title": "ThreadListResponse",
         "description": "Paginated thread listing."
       },
@@ -1632,9 +1547,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "workspace_root"
-        ],
+        "required": ["workspace_root"],
         "title": "ThreadMetadata",
         "description": "Provenance and context attached to an orchestration thread."
       },
@@ -1878,11 +1791,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "thread_id",
-          "status",
-          "last_sequence"
-        ],
+        "required": ["thread_id", "status", "last_sequence"],
         "title": "ThreadStateSnapshot",
         "description": "Complete thread state for reconnection replay.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any WebSocket events with ``sequence <= last_sequence``."
       },
@@ -2028,12 +1937,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "thread_id",
-          "status",
-          "created_at",
-          "updated_at"
-        ],
+        "required": ["thread_id", "status", "created_at", "updated_at"],
         "title": "ThreadSummary",
         "description": "Lightweight thread descriptor for list endpoints."
       },
@@ -2066,10 +1970,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "path",
-          "new_text"
-        ],
+        "required": ["path", "new_text"],
         "title": "ToolCallContentDiff",
         "description": "Diff content block within a tool call."
       },
@@ -2087,9 +1988,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "terminal_id"
-        ],
+        "required": ["terminal_id"],
         "title": "ToolCallContentTerminal",
         "description": "Terminal output content block within a tool call."
       },
@@ -2107,9 +2006,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "text"
-        ],
+        "required": ["text"],
         "title": "ToolCallContentText",
         "description": "Plain text content block within a tool call."
       },
@@ -2132,9 +2029,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "path"
-        ],
+        "required": ["path"],
         "title": "ToolCallLocation",
         "description": "File location associated with a tool call."
       },
@@ -2188,23 +2083,13 @@
           }
         },
         "type": "object",
-        "required": [
-          "tool_call_id",
-          "title",
-          "kind",
-          "status"
-        ],
+        "required": ["tool_call_id", "title", "kind", "status"],
         "title": "ToolCallSnapshot",
         "description": "Fully materialized tool call (all incremental updates merged)."
       },
       "ToolCallStatus": {
         "type": "string",
-        "enum": [
-          "pending",
-          "in_progress",
-          "completed",
-          "failed"
-        ],
+        "enum": ["pending", "in_progress", "completed", "failed"],
         "title": "ToolCallStatus",
         "description": "Lifecycle states for a single tool invocation."
       },
@@ -2258,11 +2143,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "loc",
-          "msg",
-          "type"
-        ],
+        "required": ["loc", "msg", "type"],
         "title": "ValidationError"
       },
       "_AgentSnapshot": {
@@ -2315,11 +2196,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "agent_id",
-          "node_name",
-          "state"
-        ],
+        "required": ["agent_id", "node_name", "state"],
         "title": "_AgentSnapshot",
         "description": "Agent state within a thread snapshot."
       },
@@ -2338,11 +2215,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "option_id",
-          "name",
-          "kind"
-        ],
+        "required": ["option_id", "name", "kind"],
         "title": "_PermissionOptionSnapshot",
         "description": "Permission option within a snapshot."
       },
@@ -2376,11 +2249,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "request_id",
-          "description",
-          "options"
-        ],
+        "required": ["request_id", "description", "options"],
         "title": "_PermissionSnapshot",
         "description": "Outstanding permission request in a state snapshot."
       }

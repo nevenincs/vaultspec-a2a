@@ -81,7 +81,7 @@ files reference these Dockerfiles directly for clarity and consistency.
   - `vidaimock` → `docker/vidaimock.Dockerfile`
   - `jaeger` → upstream image
 
-- `docker-compose.prod.yml`  
+- `docker-compose.prod.yml`
   - `gateway` → `docker/prod.Dockerfile` `gateway`
   - `worker` → `docker/prod.Dockerfile` `worker`
   - base SQLite transitional stack

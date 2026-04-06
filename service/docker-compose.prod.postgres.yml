@@ -13,7 +13,7 @@ services:
     volumes:
       - postgres-data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vaultspec -d vaultspec"]
+      test: ['CMD-SHELL', 'pg_isready -U vaultspec -d vaultspec']
       interval: 5s
       timeout: 5s
       retries: 10
@@ -25,7 +25,7 @@ services:
       VAULTSPEC_CHECKPOINT_BACKEND: postgres
       VAULTSPEC_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
       VAULTSPEC_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
-      VAULTSPEC_POSTGRES_REQUIRED: "true"
+      VAULTSPEC_POSTGRES_REQUIRED: 'true'
     depends_on:
       postgres:
         condition: service_healthy
@@ -40,7 +40,7 @@ services:
       VAULTSPEC_CHECKPOINT_BACKEND: postgres
       VAULTSPEC_DATABASE_URL: postgresql+asyncpg://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec
       VAULTSPEC_CHECKPOINT_DATABASE_URL: postgresql://vaultspec:${POSTGRES_PASSWORD}@postgres:5432/vaultspec?sslmode=disable
-      VAULTSPEC_POSTGRES_REQUIRED: "true"
+      VAULTSPEC_POSTGRES_REQUIRED: 'true'
     depends_on:
       postgres:
         condition: service_healthy

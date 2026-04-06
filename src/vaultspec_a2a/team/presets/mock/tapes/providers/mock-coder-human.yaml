@@ -3,6 +3,6 @@ name: mock-coder-human
 priority: 100
 request_mapping:
   model: mock-coder-human
-response_template: "mock-coder-human-chat.json.j2"
+response_template: 'mock-coder-human-chat.json.j2'
 stream:
   enabled: true

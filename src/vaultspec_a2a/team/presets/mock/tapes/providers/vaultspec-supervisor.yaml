@@ -3,6 +3,6 @@ name: vaultspec-supervisor
 priority: 100
 request_mapping:
   model: vaultspec-supervisor
-response_template: "vaultspec-supervisor-chat.json.j2"
+response_template: 'vaultspec-supervisor-chat.json.j2'
 stream:
   enabled: true

@@ -13,7 +13,10 @@ type ToolCallContentText = components['schemas']['ToolCallContentText'];
 type ToolCallContentDiff = components['schemas']['ToolCallContentDiff'];
 type ToolCallContentTerminal = components['schemas']['ToolCallContentTerminal'];
 
-type ToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal;
+type ToolCallContent =
+  | ToolCallContentText
+  | ToolCallContentDiff
+  | ToolCallContentTerminal;
 
 /**
  * Fetches the thread state snapshot from the REST API.
@@ -80,9 +83,15 @@ export function useThreadStateQuery(threadId: string | null) {
       for (const tc of snapshot.tool_calls ?? []) {
         const loc = tc.locations?.[0];
         const contents = tc.content as ToolCallContent[] | undefined;
-        const textC = contents?.find((c): c is ToolCallContentText => c.content_type === 'text');
-        const diffC = contents?.find((c): c is ToolCallContentDiff => c.content_type === 'diff');
-        const termC = contents?.find((c): c is ToolCallContentTerminal => c.content_type === 'terminal');
+        const textC = contents?.find(
+          (c): c is ToolCallContentText => c.content_type === 'text',
+        );
+        const diffC = contents?.find(
+          (c): c is ToolCallContentDiff => c.content_type === 'diff',
+        );
+        const termC = contents?.find(
+          (c): c is ToolCallContentTerminal => c.content_type === 'terminal',
+        );
         const isCompleted = tc.status === 'completed';
 
         events.push({
@@ -157,7 +166,7 @@ export function useThreadStateQuery(threadId: string | null) {
           );
           const permAgentId = waitingAgent?.agent_id ?? '';
           const permAgentName = waitingAgent
-            ? (agentNames[waitingAgent.agent_id] || waitingAgent.agent_id)
+            ? agentNames[waitingAgent.agent_id] || waitingAgent.agent_id
             : '';
           const mapped: PermissionRequest[] = snapshot.pending_permissions.map(
             (perm: _PermissionSnapshot) => ({

@@ -1094,11 +1094,8 @@ class TestListThreadsViaApp:
         )
         assert thread["repair_status"] == "checkpoint_unavailable"
         assert thread["execution_readiness"] == "checkpoint_unavailable"
-        assert thread["approval_status"] == "pending"
-        assert (
-            thread["approval_request_id"]
-            == "mcp-thread-list-checkpoint-unverified-plan:perm-1"
-        )
+        assert thread["approval_status"] is None
+        assert thread["approval_request_id"] is None
 
 
 # ---------------------------------------------------------------------------

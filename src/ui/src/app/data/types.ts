@@ -34,6 +34,39 @@ export type ToolKind =
 
 export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
+export type ThreadStatus =
+  | 'submitted'
+  | 'running'
+  | 'input_required'
+  | 'cancelling'
+  | 'cancelled'
+  | 'completed'
+  | 'failed'
+  | 'archived'
+  | 'repair_needed'
+  | 'reconciling';
+
+export type RepairStatus =
+  | 'healthy'
+  | 'paused_resumable'
+  | 'cancel_pending'
+  | 'replay_gap'
+  | 'checkpoint_unavailable'
+  | 'needs_reconciliation'
+  | 'operator_intervention_required';
+
+export type ApprovalStatus = 'pending' | 'approved' | 'rejected' | 'superseded';
+
+export type PlanEntryStatus = 'pending' | 'in_progress' | 'completed';
+
+export type PlanEntryPriority = 'high' | 'medium' | 'low';
+
+export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+
+export type Provider = 'claude' | 'gemini' | 'mock' | 'openai' | 'zhipu';
+
+export type ModelTier = 'low' | 'mid' | 'high' | 'max';
+
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -45,7 +78,7 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export interface ThreadSummary {
   thread_id: string;
   title: string;
-  status: string;
+  status: ThreadStatus;
   agent_state: AgentLifecycleState;
   team_preset: string | null;
   created_at: string;
@@ -54,10 +87,9 @@ export interface ThreadSummary {
   feature_tag: string | null;
   source_branch: string | null;
   callee: string | null;
-  // PR #22 additions
-  repair_status: string | null;
-  execution_readiness: string | null;
-  approval_status: string | null;
+  repair_status: RepairStatus | null;
+  execution_readiness: RepairStatus | null;
+  approval_status: ApprovalStatus | null;
   approval_request_id: string | null;
 }
 
@@ -65,8 +97,8 @@ export interface AgentSummary {
   agent_id: string;
   node_name: string;
   state: AgentLifecycleState;
-  provider: string | null;
-  model: string | null;
+  provider: Provider | null;
+  model: ModelTier | null;
   role: string;
   display_name: string;
   description: string;
@@ -93,7 +125,7 @@ export interface PermissionRequest {
 
 export interface PermissionOption {
   id: string;
-  kind: string;
+  kind: PermissionOptionKind;
   label: string;
 }
 
@@ -188,8 +220,8 @@ export interface PlanUpdateEvent extends StreamEventBase {
 export interface PlanEntry {
   id: string;
   content: string;
-  status: string;
-  priority: string;
+  status: PlanEntryStatus;
+  priority: PlanEntryPriority;
 }
 
 export interface AgentStatusStreamEvent extends StreamEventBase {

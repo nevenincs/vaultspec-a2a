@@ -13,6 +13,7 @@ import pytest
 from pydantic import TypeAdapter
 
 from ....graph.enums import Model, Provider
+from ....thread.enums import ThreadStatus
 from .. import (
     AgentControlAction,
     AgentControlCommand,
@@ -407,7 +408,7 @@ class TestRESTModels:
             threads=[
                 ThreadSummary(
                     thread_id="t-1",
-                    status="active",
+                    status=ThreadStatus.RUNNING,
                     approval_status="pending",
                     approval_request_id="approval-1",
                     created_at=NOW,
@@ -460,7 +461,7 @@ class TestSnapshotModels:
         expected_seq = 42
         snapshot = ThreadStateSnapshot(
             thread_id="t-1",
-            status="active",
+            status=ThreadStatus.RUNNING,
             messages=[
                 MessageSnapshot(
                     message_id="m-1",
@@ -541,7 +542,7 @@ class TestSnapshotModels:
         """ThreadStateSnapshot defaults all collections to empty lists."""
         snapshot = ThreadStateSnapshot(
             thread_id="t-2",
-            status="idle",
+            status=ThreadStatus.SUBMITTED,
             last_sequence=0,
         )
         assert snapshot.messages == []

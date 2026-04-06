@@ -5,7 +5,7 @@ import { mapToolKind, mapToolCallStatus } from '../api/mappers';
 import { appStore } from '../store/app-store';
 import { queryClient } from './query-client';
 import { queryKeys } from './query-keys';
-import type { StreamEvent, ThreadSummary, PermissionRequest } from '../data/types';
+import type { StreamEvent, ThreadSummary, PermissionRequest, PlanEntryStatus, PlanEntryPriority } from '../data/types';
 import type { components } from '../data/wire-types';
 
 type _PermissionSnapshot = components['schemas']['_PermissionSnapshot'];
@@ -135,8 +135,8 @@ export function useThreadStateQuery(threadId: string | null) {
           entries: snapshot.plan.map((e, i) => ({
             id: `plan-entry-${i}`,
             content: e.content,
-            status: e.status,
-            priority: e.priority,
+            status: e.status as PlanEntryStatus,
+            priority: e.priority as PlanEntryPriority,
           })),
         });
       }
@@ -166,7 +166,7 @@ export function useThreadStateQuery(threadId: string | null) {
               agent_id: permAgentId,
               agent_name: permAgentName,
               tool_name: perm.tool_call ?? '',
-              tool_kind: 'other' as const,
+              tool_kind: perm.tool_kind ? mapToolKind(perm.tool_kind) : 'other',
               message: perm.description,
               options: perm.options.map((o) => ({
                 id: o.option_id,

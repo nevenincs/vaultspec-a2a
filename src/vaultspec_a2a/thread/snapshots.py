@@ -219,6 +219,7 @@ class PermissionData:
     description: str
     options: list[PermissionOptionData] = field(default_factory=list)
     tool_call: str | None = None
+    tool_kind: str | None = None
 
 
 @dataclass(slots=True)

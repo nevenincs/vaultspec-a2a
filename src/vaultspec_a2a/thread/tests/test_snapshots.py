@@ -344,10 +344,12 @@ def test_permission_data_round_trip() -> None:
             )
         ],
         tool_call="bash",
+        tool_kind="execute",
     )
     pydantic_obj = _PermissionSnapshot.model_validate(asdict(data))
     assert pydantic_obj.request_id == "r1"
     assert len(pydantic_obj.options) == 1
+    assert pydantic_obj.tool_kind == "execute"
 
 
 def test_agent_data_round_trip() -> None:

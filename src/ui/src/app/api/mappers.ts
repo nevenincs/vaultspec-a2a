@@ -20,7 +20,11 @@ type WireToolKind = components['schemas']['ToolKind'];
 
 import type {
   ThreadSummary,
+  RepairStatus,
+  ApprovalStatus,
   AgentSummary,
+  Provider,
+  ModelTier,
   TeamPreset,
   PermissionRequest,
   ToolCallStatus,
@@ -40,9 +44,9 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
     feature_tag: wire.feature_tag ?? null,
     source_branch: wire.source_branch ?? null,
     callee: wire.callee ?? null,
-    repair_status: wire.repair_status ?? null,
-    execution_readiness: wire.execution_readiness ?? null,
-    approval_status: wire.approval_status ?? null,
+    repair_status: (wire.repair_status ?? null) as RepairStatus | null,
+    execution_readiness: (wire.execution_readiness ?? null) as RepairStatus | null,
+    approval_status: (wire.approval_status ?? null) as ApprovalStatus | null,
     approval_request_id: wire.approval_request_id ?? null,
   };
 }
@@ -54,8 +58,8 @@ export function mapAgentSummary(
     agent_id: wire.agent_id,
     node_name: wire.node_name,
     state: wire.state,
-    provider: wire.provider ?? null,
-    model: wire.model ?? null,
+    provider: (wire.provider ?? null) as Provider | null,
+    model: (wire.model ?? null) as ModelTier | null,
     role: wire.role ?? '',
     display_name: wire.display_name ?? '',
     description: wire.description ?? '',
@@ -106,8 +110,15 @@ const FRONTEND_TOOL_KINDS = new Set<string>([
   'other',
 ]);
 
+const TOOL_CALL_STATUSES: Record<WireToolCallStatus, ToolCallStatus> = {
+  pending: 'pending',
+  in_progress: 'in_progress',
+  completed: 'completed',
+  failed: 'failed',
+};
+
 export function mapToolCallStatus(wire: WireToolCallStatus): ToolCallStatus {
-  return wire as ToolCallStatus;
+  return TOOL_CALL_STATUSES[wire];
 }
 
 export function mapToolKind(wire: WireToolKind): ToolKind {

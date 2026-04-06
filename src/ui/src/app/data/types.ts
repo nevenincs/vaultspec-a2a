@@ -63,6 +63,10 @@ export type PlanEntryPriority = 'high' | 'medium' | 'low';
 
 export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
 
+export type Provider = 'claude' | 'gemini' | 'mock' | 'openai' | 'zhipu';
+
+export type ModelTier = 'low' | 'mid' | 'high' | 'max';
+
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -93,8 +97,8 @@ export interface AgentSummary {
   agent_id: string;
   node_name: string;
   state: AgentLifecycleState;
-  provider: string | null;
-  model: string | null;
+  provider: Provider | null;
+  model: ModelTier | null;
   role: string;
   display_name: string;
   description: string;

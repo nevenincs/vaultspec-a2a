@@ -64,6 +64,41 @@ repos:
     pass_filenames: true
     types:
     - markdown
+  - id: eslint
+    name: Lint JS/TS files (ESLint)
+    entry: npx eslint
+    language: system
+    types_or:
+    - javascript
+    - jsx
+    - ts
+    - tsx
+    pass_filenames: true
+  - id: prettier-check
+    name: Check JS/TS/CSS/JSON formatting (Prettier)
+    entry: npx prettier --check
+    language: system
+    types_or:
+    - javascript
+    - jsx
+    - ts
+    - tsx
+    - css
+    - json
+    pass_filenames: true
+  - id: stylelint
+    name: Lint CSS files (Stylelint)
+    entry: npx stylelint
+    language: system
+    types:
+    - css
+    pass_filenames: true
+  - id: lint-imports
+    name: Check import boundaries (import-linter)
+    entry: uv run lint-imports
+    language: system
+    pass_filenames: false
+    always_run: true
   - id: vault-doctor
     name: Vault Doctor
     entry: uv run python -m vaultspec_core vault check all

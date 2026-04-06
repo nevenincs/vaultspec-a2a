@@ -1,0 +1,35 @@
+name: Migration Check
+
+on:
+  push:
+    paths:
+      - 'src/vaultspec_a2a/database/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-migrations.yml'
+  pull_request:
+    paths:
+      - 'src/vaultspec_a2a/database/**'
+      - 'alembic/**'
+      - 'alembic.ini'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-migrations.yml'
+  workflow_dispatch:
+
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run alembic upgrade head
+      - run: uv run alembic check
+      - run: uv run alembic downgrade base
+      - run: uv run alembic upgrade head

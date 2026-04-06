@@ -1,0 +1,37 @@
+name: Frontend CI
+
+on:
+  push:
+    paths:
+      - 'src/ui/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.js'
+      - '.prettierrc'
+      - '.stylelintrc.json'
+      - '.github/workflows/ci-frontend.yml'
+  pull_request:
+    paths:
+      - 'src/ui/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'eslint.config.js'
+      - '.prettierrc'
+      - '.stylelintrc.json'
+      - '.github/workflows/ci-frontend.yml'
+  workflow_dispatch:
+
+jobs:
+  lint-and-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+      - run: npm ci
+      - run: npm ci --prefix src/ui
+      - run: npx prettier --check .
+      - run: npx eslint .
+      - run: cd src/ui && npm run build

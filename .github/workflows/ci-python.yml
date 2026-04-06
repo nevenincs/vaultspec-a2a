@@ -1,0 +1,87 @@
+name: Python CI
+
+on:
+  push:
+    paths:
+      - 'src/vaultspec_a2a/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-python.yml'
+  pull_request:
+    paths:
+      - 'src/vaultspec_a2a/**'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/ci-python.yml'
+  workflow_dispatch:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run ruff check --output-format=github .
+      - run: uv run ruff format --check .
+      - run: uv run deptry .
+
+  type-check:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run ty check --output-format github src/vaultspec_a2a
+
+  boundary-check:
+    needs: lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run lint-imports
+
+  test-core:
+    needs: type-check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest -m core --junitxml=reports/core.xml
+
+  test-middleware:
+    needs: test-core
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v7
+        with:
+          enable-cache: true
+      - run: uv python install 3.13
+      - run: uv sync --locked --all-groups
+      - run: uv run pytest -m middleware --junitxml=reports/middleware.xml
+
+  gate:
+    if: always()
+    needs: [lint, type-check, boundary-check, test-core, test-middleware]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: re-actors/alls-green@release/v1
+        with:
+          jobs: ${{ toJSON(needs) }}

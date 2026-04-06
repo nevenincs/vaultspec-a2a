@@ -147,10 +147,22 @@ DEP002 = [
   "pytest-timeout",
   "pytest-cov",
   "deptry",
+  "import-linter",
   "vaultspec-core",
   # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
   # "sqlite+aiosqlite://..." — never imported directly.
   "aiosqlite",
+  # Runtime deps loaded by SQLAlchemy/LangGraph drivers, APScheduler, or
+  # WebSocket protocol — never imported at module level.
+  "apscheduler",
+  "asyncpg",
+  "psycopg",
+  "websockets",
+  "click",
+]
+# DEP003: src-layout project importing its own namespace is expected.
+DEP003 = [
+  "vaultspec_a2a",
 ]
 # DEP004: test files inside src/**/ import dev packages (pytest, tenacity) as expected.
 # This is the standard src-layout pattern; suppressing per-package is cleaner than

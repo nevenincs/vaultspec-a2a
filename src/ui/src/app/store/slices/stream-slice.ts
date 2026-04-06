@@ -7,7 +7,10 @@ import type {
   ToolCallContentTerminal,
   PlanEntry as WirePlanEntry,
 } from '../../data/ws-types';
-type WsToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal;
+type WsToolCallContent =
+  | ToolCallContentText
+  | ToolCallContentDiff
+  | ToolCallContentTerminal;
 import { mapToolKind, mapToolCallStatus } from '../../api/mappers';
 import { wsClient } from '../../api/websocket-client';
 import type { AppStore } from '../app-store';
@@ -139,9 +142,15 @@ export const createStreamSlice: StateCreator<
 
       case 'tool_call_start': {
         const loc = event.locations?.[0];
-        const textC = event.content?.find((c: WsToolCallContent) => c.content_type === 'text');
-        const diffC = event.content?.find((c: WsToolCallContent) => c.content_type === 'diff');
-        const termC = event.content?.find((c: WsToolCallContent) => c.content_type === 'terminal');
+        const textC = event.content?.find(
+          (c: WsToolCallContent) => c.content_type === 'text',
+        );
+        const diffC = event.content?.find(
+          (c: WsToolCallContent) => c.content_type === 'diff',
+        );
+        const termC = event.content?.find(
+          (c: WsToolCallContent) => c.content_type === 'terminal',
+        );
         set(
           (draft) => {
             if (!draft.streamEvents[threadId]) {
@@ -170,7 +179,8 @@ export const createStreamSlice: StateCreator<
                   ? { old_content: diffC.old_text ?? '', new_content: diffC.new_text }
                   : undefined,
               diff_path: diffC?.content_type === 'diff' ? diffC.path : undefined,
-              terminal_id: termC?.content_type === 'terminal' ? termC.terminal_id : undefined,
+              terminal_id:
+                termC?.content_type === 'terminal' ? termC.terminal_id : undefined,
             });
           },
           false,
@@ -196,9 +206,15 @@ export const createStreamSlice: StateCreator<
                   entry.location = { file: loc.path, line: loc.line ?? undefined };
                 }
                 if (event.content) {
-                  const t = event.content.find((c: WsToolCallContent) => c.content_type === 'text');
-                  const d = event.content.find((c: WsToolCallContent) => c.content_type === 'diff');
-                  const term = event.content.find((c: WsToolCallContent) => c.content_type === 'terminal');
+                  const t = event.content.find(
+                    (c: WsToolCallContent) => c.content_type === 'text',
+                  );
+                  const d = event.content.find(
+                    (c: WsToolCallContent) => c.content_type === 'diff',
+                  );
+                  const term = event.content.find(
+                    (c: WsToolCallContent) => c.content_type === 'terminal',
+                  );
                   if (t?.content_type === 'text') entry.output = t.text;
                   if (d?.content_type === 'diff') {
                     entry.diff = {
@@ -207,7 +223,8 @@ export const createStreamSlice: StateCreator<
                     };
                     entry.diff_path = d.path;
                   }
-                  if (term?.content_type === 'terminal') entry.terminal_id = term.terminal_id;
+                  if (term?.content_type === 'terminal')
+                    entry.terminal_id = term.terminal_id;
                 }
               }
             },

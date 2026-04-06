@@ -82,13 +82,7 @@
           "title": "Detail"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "state",
-        "node_name"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "state", "node_name"],
       "title": "AgentStatusEvent",
       "type": "object"
     },
@@ -144,11 +138,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "agent_id",
-        "node_name",
-        "state"
-      ],
+      "required": ["agent_id", "node_name", "state"],
       "title": "AgentSummary",
       "type": "object"
     },
@@ -271,10 +261,7 @@
           "title": "Metadata"
         }
       },
-      "required": [
-        "client_id",
-        "server_version"
-      ],
+      "required": ["client_id", "server_version"],
       "title": "ConnectedEvent",
       "type": "object"
     },
@@ -339,13 +326,7 @@
           "type": "boolean"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "code",
-        "message"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "code", "message"],
       "title": "ErrorEvent",
       "type": "object"
     },
@@ -381,10 +362,7 @@
           "title": "Metadata"
         }
       },
-      "required": [
-        "timestamp",
-        "server_uptime_seconds"
-      ],
+      "required": ["timestamp", "server_uptime_seconds"],
       "title": "HeartbeatEvent",
       "type": "object"
     },
@@ -456,24 +434,13 @@
           "title": "Finish Reason"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "content",
-        "message_id"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "content", "message_id"],
       "title": "MessageChunkEvent",
       "type": "object"
     },
     "Model": {
       "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden.",
-      "enum": [
-        "low",
-        "mid",
-        "high",
-        "max"
-      ],
+      "enum": ["low", "mid", "high", "max"],
       "title": "Model",
       "type": "string"
     },
@@ -492,22 +459,13 @@
           "$ref": "#/$defs/PermissionOptionKind"
         }
       },
-      "required": [
-        "option_id",
-        "name",
-        "kind"
-      ],
+      "required": ["option_id", "name", "kind"],
       "title": "PermissionOption",
       "type": "object"
     },
     "PermissionOptionKind": {
       "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting.",
-      "enum": [
-        "allow_once",
-        "allow_always",
-        "reject_once",
-        "reject_always"
-      ],
+      "enum": ["allow_once", "allow_always", "reject_once", "reject_always"],
       "title": "PermissionOptionKind",
       "type": "string"
     },
@@ -625,9 +583,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "content"
-      ],
+      "required": ["content"],
       "title": "PlanEntry",
       "type": "object"
     },
@@ -686,24 +642,13 @@
           "type": "array"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "entries"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "entries"],
       "title": "PlanUpdateEvent",
       "type": "object"
     },
     "Provider": {
       "description": "Supported LLM providers.",
-      "enum": [
-        "claude",
-        "gemini",
-        "mock",
-        "openai",
-        "zhipu"
-      ],
+      "enum": ["claude", "gemini", "mock", "openai", "zhipu"],
       "title": "Provider",
       "type": "string"
     },
@@ -769,12 +714,7 @@
           "type": "array"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "agents"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "agents"],
       "title": "TeamStatusEvent",
       "type": "object"
     },
@@ -834,13 +774,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "content",
-        "message_id"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "content", "message_id"],
       "title": "ThoughtChunkEvent",
       "type": "object"
     },
@@ -874,10 +808,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "path",
-        "new_text"
-      ],
+      "required": ["path", "new_text"],
       "title": "ToolCallContentDiff",
       "type": "object"
     },
@@ -895,9 +826,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "terminal_id"
-      ],
+      "required": ["terminal_id"],
       "title": "ToolCallContentTerminal",
       "type": "object"
     },
@@ -915,9 +844,7 @@
           "type": "string"
         }
       },
-      "required": [
-        "text"
-      ],
+      "required": ["text"],
       "title": "ToolCallContentText",
       "type": "object"
     },
@@ -941,9 +868,7 @@
           "title": "Line"
         }
       },
-      "required": [
-        "path"
-      ],
+      "required": ["path"],
       "title": "ToolCallLocation",
       "type": "object"
     },
@@ -1055,12 +980,7 @@
     },
     "ToolCallStatus": {
       "description": "Lifecycle states for a single tool invocation.",
-      "enum": [
-        "pending",
-        "in_progress",
-        "completed",
-        "failed"
-      ],
+      "enum": ["pending", "in_progress", "completed", "failed"],
       "title": "ToolCallStatus",
       "type": "string"
     },
@@ -1198,12 +1118,7 @@
           "title": "Content"
         }
       },
-      "required": [
-        "thread_id",
-        "timestamp",
-        "sequence",
-        "tool_call_id"
-      ],
+      "required": ["thread_id", "timestamp", "sequence", "tool_call_id"],
       "title": "ToolCallUpdateEvent",
       "type": "object"
     },

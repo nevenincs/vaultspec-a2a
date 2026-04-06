@@ -355,45 +355,45 @@ service/
 
 ## Layer 1 Consumers
 
-| Layer 1 module | Consumed by | Stack |
-|---|---|---|
-| **domain_config** | All Layer 1 modules, control/config (composes into Settings) | Pydantic |
-| **team/team_config** | providers/factory, providers/acp_chat_model, worker/executor | LangChain, subprocess |
-| **thread/enums** | database/thread_repository, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum |
-| **thread/transitions** | database/thread_repository, control/event_handlers | Pure dict lookup |
-| **thread/snapshots** | control/snapshot, control/projection, api/routes/thread_state | Dataclasses |
-| **thread/errors** | database/*_repository, providers/factory, workspace/git_manager, streaming/subscribers | SQLAlchemy, subprocess |
-| **thread/state** | worker/executor, api/routes/* (via graph/) | LangGraph, FastAPI |
-| **thread/permission_fsm** | control/permission_service | Pure state machine |
-| **thread/dispatch_policy** | control/dispatch, control/thread_service | Pure predicate |
-| **thread/lifecycle_guards** | control/thread_service | Pure predicate |
-| **thread/cancel_policy** | control/cancel_service | Pure predicate |
-| **thread/message_policy** | control/message_service | Pure predicate |
-| **thread/repair_policy** | control/repair_transitions | Pure predicate |
-| **thread/creation** | control/thread_service | Pure factory |
-| **thread/idempotency** | control/thread_service | Pure helper |
-| **context/*** | graph/nodes/* only (via facade) | Internal — not consumed by Layer 2 directly |
-| **graph/compiler** | worker/graph_lifecycle | LangGraph, LangChain |
-| **graph/events** | api/event_adapter | Pydantic (wire translation) |
-| **graph/enums** | team/team_config, streaming/, api/schemas/enums (re-export) | StrEnum |
-| **graph/protocols** | providers/factory (implements), worker/executor (passes) | LangChain |
+| Layer 1 module              | Consumed by                                                                                                 | Stack                                       |
+| --------------------------- | ----------------------------------------------------------------------------------------------------------- | ------------------------------------------- |
+| **domain_config**           | All Layer 1 modules, control/config (composes into Settings)                                                | Pydantic                                    |
+| **team/team_config**        | providers/factory, providers/acp_chat_model, worker/executor                                                | LangChain, subprocess                       |
+| **thread/enums**            | database/thread_repository, control/event_handlers, control/projection, control/snapshot, api/schemas/enums | StrEnum                                     |
+| **thread/transitions**      | database/thread_repository, control/event_handlers                                                          | Pure dict lookup                            |
+| **thread/snapshots**        | control/snapshot, control/projection, api/routes/thread_state                                               | Dataclasses                                 |
+| **thread/errors**           | database/\*\_repository, providers/factory, workspace/git_manager, streaming/subscribers                    | SQLAlchemy, subprocess                      |
+| **thread/state**            | worker/executor, api/routes/\* (via graph/)                                                                 | LangGraph, FastAPI                          |
+| **thread/permission_fsm**   | control/permission_service                                                                                  | Pure state machine                          |
+| **thread/dispatch_policy**  | control/dispatch, control/thread_service                                                                    | Pure predicate                              |
+| **thread/lifecycle_guards** | control/thread_service                                                                                      | Pure predicate                              |
+| **thread/cancel_policy**    | control/cancel_service                                                                                      | Pure predicate                              |
+| **thread/message_policy**   | control/message_service                                                                                     | Pure predicate                              |
+| **thread/repair_policy**    | control/repair_transitions                                                                                  | Pure predicate                              |
+| **thread/creation**         | control/thread_service                                                                                      | Pure factory                                |
+| **thread/idempotency**      | control/thread_service                                                                                      | Pure helper                                 |
+| **context/\***              | graph/nodes/\* only (via facade)                                                                            | Internal — not consumed by Layer 2 directly |
+| **graph/compiler**          | worker/graph_lifecycle                                                                                      | LangGraph, LangChain                        |
+| **graph/events**            | api/event_adapter                                                                                           | Pydantic (wire translation)                 |
+| **graph/enums**             | team/team_config, streaming/, api/schemas/enums (re-export)                                                 | StrEnum                                     |
+| **graph/protocols**         | providers/factory (implements), worker/executor (passes)                                                    | LangChain                                   |
 
 ## Layer 1.5 Consumers
 
-| Layer 1.5 module | Consumed by | Stack |
-|---|---|---|
-| **streaming/** | api/websocket, api/routes/*, worker/ipc, control/event_handlers | FastAPI WebSocket, httpx |
-| **lifecycle/** | api/app (startup hook only) | FastAPI lifespan |
+| Layer 1.5 module | Consumed by                                                      | Stack                    |
+| ---------------- | ---------------------------------------------------------------- | ------------------------ |
+| **streaming/**   | api/websocket, api/routes/\*, worker/ipc, control/event_handlers | FastAPI WebSocket, httpx |
+| **lifecycle/**   | api/app (startup hook only)                                      | FastAPI lifespan         |
 
 ## IPC Contract Consumers
 
-| IPC type | Consumed by |
-|---|---|
-| **DispatchRequest** | api/routes/*, api/ws_dispatch, control/dispatch, worker/app, worker/executor |
-| **DispatchResponse** | control/dispatch, worker/app |
-| **ExecutionStateProjectionPayload** | control/event_handlers, worker/state_projection |
-| **ExecutionTaskProjectionPayload** | worker/state_projection |
-| **sequenced_to_dict** | worker/executor |
+| IPC type                            | Consumed by                                                                   |
+| ----------------------------------- | ----------------------------------------------------------------------------- |
+| **DispatchRequest**                 | api/routes/\*, api/ws_dispatch, control/dispatch, worker/app, worker/executor |
+| **DispatchResponse**                | control/dispatch, worker/app                                                  |
+| **ExecutionStateProjectionPayload** | control/event_handlers, worker/state_projection                               |
+| **ExecutionTaskProjectionPayload**  | worker/state_projection                                                       |
+| **sequenced_to_dict**               | worker/executor                                                               |
 
 ## Layer Boundary Rules
 
@@ -426,11 +426,11 @@ pytest -m service       # 0 tests — placeholder for service-layer integration
 
 Marker hierarchy:
 
-| Marker | Layer | Count | What it needs |
-|--------|-------|-------|---------------|
-| `core` | 1 | 509 | Nothing — bare Python |
-| `middleware` | 2 | 526 | Nothing — no orchestration |
-| `service` | future | 0 | Service-layer integration (planned) |
+| Marker       | Layer  | Count | What it needs                       |
+| ------------ | ------ | ----- | ----------------------------------- |
+| `core`       | 1      | 509   | Nothing — bare Python               |
+| `middleware` | 2      | 526   | Nothing — no orchestration          |
+| `service`    | future | 0     | Service-layer integration (planned) |
 
 All infrastructure-gated tests hard-fail (not skip) when their dependency
 is unreachable.
@@ -469,56 +469,56 @@ grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from
 
 ### Layer 1 + Layer 2a — PASS (PR #3 + PR #4)
 
-| Check | Status |
-|-------|--------|
-| Layer 1 imports nothing from Layer 2+ | PASS |
-| Entry points don't cross-import | PASS |
-| Handlers are thin protocol adapters | PASS |
-| Configuration centralized (Settings) | PASS |
-| Docker files contain no business logic | PASS |
-| Test markers correctly isolate layers | PASS |
-| Infrastructure failures hard-fail | PASS |
+| Check                                  | Status |
+| -------------------------------------- | ------ |
+| Layer 1 imports nothing from Layer 2+  | PASS   |
+| Entry points don't cross-import        | PASS   |
+| Handlers are thin protocol adapters    | PASS   |
+| Configuration centralized (Settings)   | PASS   |
+| Docker files contain no business logic | PASS   |
+| Test markers correctly isolate layers  | PASS   |
+| Infrastructure failures hard-fail      | PASS   |
 
 ### Layer 2b Infrastructure Services — CLEAN (PR #9)
 
-| Package | Status | Finding |
-|---------|--------|---------|
-| `providers/` | CLEAN | Correct dependency inversion via ProviderFactoryProtocol |
-| `telemetry/` | CLEAN | Correct TelemetryHook protocol implementation |
-| `workspace/` | CLEAN | Thin subprocess wrapper |
-| `ipc/` | CLEAN | Neutral contract |
-| `database/` | CLEAN | Domain enums extracted to `thread/enums`. Modules renamed to repository convention (`thread_repository`, `permission_repository`, `artifact_repository`, `_helpers`). `crud.py` re-export hub deleted. |
-| `control/` | CLEAN | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain. |
-| `utils/` | CLEAN | Dead code removed. Layer inversions fixed. |
+| Package      | Status | Finding                                                                                                                                                                                                |
+| ------------ | ------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `providers/` | CLEAN  | Correct dependency inversion via ProviderFactoryProtocol                                                                                                                                               |
+| `telemetry/` | CLEAN  | Correct TelemetryHook protocol implementation                                                                                                                                                          |
+| `workspace/` | CLEAN  | Thin subprocess wrapper                                                                                                                                                                                |
+| `ipc/`       | CLEAN  | Neutral contract                                                                                                                                                                                       |
+| `database/`  | CLEAN  | Domain enums extracted to `thread/enums`. Modules renamed to repository convention (`thread_repository`, `permission_repository`, `artifact_repository`, `_helpers`). `crud.py` re-export hub deleted. |
+| `control/`   | CLEAN  | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain.                                                                  |
+| `utils/`     | CLEAN  | Dead code removed. Layer inversions fixed.                                                                                                                                                             |
 
 ### Layer 2c Database + Handlers — CLEAN (PR #11)
 
-| Check | Status | Finding |
-|-------|--------|---------|
-| Handler extraction | DONE | Route handlers thinned: threads 425→281, messages 205→92, cancel 163→66, permissions 309→81, thread_state 145→50 |
-| Service modules | DONE | 6 new control/ services: thread_service, cancel_service, message_service, permission_service, thread_state_service, repair_transitions |
+| Check              | Status | Finding                                                                                                                                |
+| ------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Handler extraction | DONE   | Route handlers thinned: threads 425→281, messages 205→92, cancel 163→66, permissions 309→81, thread_state 145→50                       |
+| Service modules    | DONE   | 6 new control/ services: thread_service, cancel_service, message_service, permission_service, thread_state_service, repair_transitions |
 
 ### Layer 2d File Size Violations — RESOLVED (PR #15)
 
-| Check | Status | Finding |
-|-------|--------|---------|
-| `protocols/mcp/server.py` | RESOLVED | Split from 1,045 → 55 lines. Handlers in `tools/` sub-package. Shared HTTP helper in `_http.py`. |
+| Check                         | Status   | Finding                                                                                                                                                                                                                                     |
+| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `protocols/mcp/server.py`     | RESOLVED | Split from 1,045 → 55 lines. Handlers in `tools/` sub-package. Shared HTTP helper in `_http.py`.                                                                                                                                            |
 | `providers/acp_chat_model.py` | RESOLVED | Split from 1,821 → 658 lines. Session lifecycle in `_acp_session.py` (259 lines). Auth in `_acp_auth.py` (381 lines). Types in `_acp_types.py` (89 lines). Protocol dispatch in `_acp_protocol.py`. RPC handlers in `_acp_rpc_handlers.py`. |
-| No file over 1,000 lines | PASS | Max is `graph/compiler.py` at 792 lines |
-| Zero httpx in MCP tools/ | PASS | All HTTP via `_http.py` |
-| MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
+| No file over 1,000 lines      | PASS     | Max is `graph/compiler.py` at 792 lines                                                                                                                                                                                                     |
+| Zero httpx in MCP tools/      | PASS     | All HTTP via `_http.py`                                                                                                                                                                                                                     |
+| MCP HTTP loopback preserved   | PASS     | Standalone process model unchanged                                                                                                                                                                                                          |
 
 ### Layer 3 Infrastructure Config — DONE (PR #16)
 
-| Check | Status | Finding |
-|-------|--------|---------|
-| Settings god-object reduction | DONE | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 30 prod files (19%). |
-| `DomainConfig` env_file parity | DONE | Added `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence |
-| Stale tapes volume mount | FIXED | `docker-compose.integration.yml` path corrected: `core/` → `team/` |
-| Orphan `docker-compose.postgres.yml` | DELETED | Legacy duplicate with missing `CHECKPOINT_DATABASE_URL` bug |
-| `.dockerignore` gaps | FIXED | Added `.vault/`, `.vaultspec/`, `Justfile`, compose files, `CLAUDE.md` |
-| `.env.example` alignment | FIXED | Added `VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS` |
-| Justfile preps comments | FIXED | Removed misleading backward-compat labels |
+| Check                                | Status  | Finding                                                                                              |
+| ------------------------------------ | ------- | ---------------------------------------------------------------------------------------------------- |
+| Settings god-object reduction        | DONE    | 8 domain-only files switched from `settings` → `domain_config`. Footprint: 37 → 30 prod files (19%). |
+| `DomainConfig` env_file parity       | DONE    | Added `env_file=".env"` to `DomainConfig.model_config` for runtime equivalence                       |
+| Stale tapes volume mount             | FIXED   | `docker-compose.integration.yml` path corrected: `core/` → `team/`                                   |
+| Orphan `docker-compose.postgres.yml` | DELETED | Legacy duplicate with missing `CHECKPOINT_DATABASE_URL` bug                                          |
+| `.dockerignore` gaps                 | FIXED   | Added `.vault/`, `.vaultspec/`, `Justfile`, compose files, `CLAUDE.md`                               |
+| `.env.example` alignment             | FIXED   | Added `VAULTSPEC_ACP_INTERACTIVE_AUTH_TIMEOUT_SECONDS`                                               |
+| Justfile preps comments              | FIXED   | Removed misleading backward-compat labels                                                            |
 
 ### Service Layer — In Progress
 

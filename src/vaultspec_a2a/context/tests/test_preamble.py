@@ -1,9 +1,15 @@
 """Tests for the context preamble builder (ADR-014 §2.3)."""
 
+import tempfile
+from pathlib import Path
+
 from langchain_core.messages import SystemMessage
 
 from vaultspec_a2a.context.metadata import ContextRef, ThreadMetadata
 from vaultspec_a2a.context.preamble import build_context_preamble
+
+# Platform-independent absolute path for tests that need workspace_root.
+_WORKSPACE = str(Path(tempfile.gettempdir()) / "test-workspace")
 
 
 class TestBuildContextPreamble:
@@ -11,22 +17,22 @@ class TestBuildContextPreamble:
 
     def test_returns_system_message(self) -> None:
         """Result must be a SystemMessage instance."""
-        meta = ThreadMetadata(workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(workspace_root=_WORKSPACE)
         result = build_context_preamble(meta)
         assert isinstance(result, SystemMessage)
 
     def test_minimal_preamble_workspace_only(self) -> None:
         """Minimal preamble with only workspace_root."""
-        meta = ThreadMetadata(workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(workspace_root=_WORKSPACE)
         result = build_context_preamble(meta)
         content = str(result.content)
         assert "## Project Context" in content
-        assert "Y:/code/vaultspec" in content
+        assert _WORKSPACE in content
 
     def test_includes_feature_tag(self) -> None:
         """Feature tag appears in the preamble when provided."""
         meta = ThreadMetadata(
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=_WORKSPACE,
             feature_tag="auth-flow",
         )
         result = build_context_preamble(meta)
@@ -37,7 +43,7 @@ class TestBuildContextPreamble:
     def test_includes_source_repo(self) -> None:
         """Source repo appears in the preamble when provided."""
         meta = ThreadMetadata(
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=_WORKSPACE,
             source_repo="github.com/org/vaultspec",
         )
         result = build_context_preamble(meta)
@@ -48,7 +54,7 @@ class TestBuildContextPreamble:
     def test_includes_source_branch(self) -> None:
         """Source branch appears in the preamble when provided."""
         meta = ThreadMetadata(
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=_WORKSPACE,
             source_branch="feat/auth-flow",
         )
         result = build_context_preamble(meta)
@@ -70,7 +76,7 @@ class TestBuildContextPreamble:
             ),
         ]
         meta = ThreadMetadata(
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=_WORKSPACE,
             source_repo="github.com/org/vaultspec",
             source_branch="feat/auth-flow",
             feature_tag="auth-flow",
@@ -80,7 +86,7 @@ class TestBuildContextPreamble:
         content = str(result.content)
 
         assert "## Project Context" in content
-        assert "Y:/code/vaultspec" in content
+        assert _WORKSPACE in content
         assert "auth-flow" in content
         assert "github.com/org/vaultspec" in content
         assert "feat/auth-flow" in content
@@ -95,7 +101,7 @@ class TestBuildContextPreamble:
         """Context refs without summaries omit the dash separator."""
         ref = ContextRef(path=".vault/adrs/014-auth.md", stage="adr")
         meta = ThreadMetadata(
-            workspace_root="Y:/code/vaultspec",
+            workspace_root=_WORKSPACE,
             context_refs=[ref],
         )
         result = build_context_preamble(meta)
@@ -106,7 +112,7 @@ class TestBuildContextPreamble:
 
     def test_no_optional_fields_no_extra_lines(self) -> None:
         """When optional fields are empty, their lines are omitted."""
-        meta = ThreadMetadata(workspace_root="Y:/code/vaultspec")
+        meta = ThreadMetadata(workspace_root=_WORKSPACE)
         result = build_context_preamble(meta)
         content = str(result.content)
         assert "**Feature:**" not in content

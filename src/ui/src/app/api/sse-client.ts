@@ -39,11 +39,11 @@ export class SSEClient {
   private onConnectionChange: ConnectionCallback | null = null;
 
   constructor(url?: string) {
-    this.baseUrl =
-      (url || import.meta.env.VITE_API_BASE_URL || 'http://localhost:8000').replace(
-        /\/$/,
-        '',
-      );
+    this.baseUrl = (
+      url ||
+      import.meta.env.VITE_API_BASE_URL ||
+      'http://localhost:8000'
+    ).replace(/\/$/, '');
   }
 
   // --- Public API ---
@@ -119,7 +119,9 @@ export class SSEClient {
       try {
         const data = JSON.parse(e.data as string) as ThreadTerminalEvent;
         log.info('[SSE] thread_terminal:', data.thread_id, data.status);
-      } catch { /* skip malformed */ }
+      } catch {
+        /* skip malformed */
+      }
       // Terminal means the server will close the stream. Disconnect now to
       // prevent EventSource from auto-reconnecting in a loop.
       this.disconnect();

@@ -49,6 +49,7 @@ dev = [
   "ruff>=0.15.2",
   "tenacity>=9.0.0",
   "ty>=0.0.15",
+  "import-linter>=2.0",
   "vaultspec-core",
   "websockets>=16.0",
 ]
@@ -146,10 +147,22 @@ DEP002 = [
   "pytest-timeout",
   "pytest-cov",
   "deptry",
+  "import-linter",
   "vaultspec-core",
   # aiosqlite is loaded as the SQLAlchemy async driver via the URL scheme
   # "sqlite+aiosqlite://..." — never imported directly.
   "aiosqlite",
+  # Runtime deps loaded by SQLAlchemy/LangGraph drivers, APScheduler, or
+  # WebSocket protocol — never imported at module level.
+  "apscheduler",
+  "asyncpg",
+  "psycopg",
+  "websockets",
+  "click",
+]
+# DEP003: src-layout project importing its own namespace is expected.
+DEP003 = [
+  "vaultspec_a2a",
 ]
 # DEP004: test files inside src/**/ import dev packages (pytest, tenacity) as expected.
 # This is the standard src-layout pattern; suppressing per-package is cleaner than
@@ -165,3 +178,156 @@ python-version = "3.13"
 root = [".", "src"]
 
 [tool.ty.src]
+
+[tool.importlinter]
+root_packages = ["vaultspec_a2a"]
+
+[[tool.importlinter.contracts]]
+name = "L1 -> L1.5 -> L2 architectural layers"
+type = "layers"
+layers = [
+    "vaultspec_a2a.api | vaultspec_a2a.worker | vaultspec_a2a.protocols",
+    "vaultspec_a2a.control | vaultspec_a2a.database | vaultspec_a2a.providers | vaultspec_a2a.telemetry | vaultspec_a2a.ipc | vaultspec_a2a.workspace | vaultspec_a2a.utils",
+    "vaultspec_a2a.streaming | vaultspec_a2a.lifecycle",
+    "vaultspec_a2a.graph | vaultspec_a2a.context | vaultspec_a2a.thread | vaultspec_a2a.team | vaultspec_a2a.domain_config",
+]
+# Pre-existing violations documented as architectural debt.
+# Each line records a cross-layer import that predates the contract.
+ignore_imports = [
+    # team <-> graph/thread circular (graph.enums shared enum dependency)
+    "vaultspec_a2a.team.team_config -> vaultspec_a2a.graph.enums",
+    "vaultspec_a2a.team.tests.test_team_config -> vaultspec_a2a.graph.enums",
+    "vaultspec_a2a.team.team_config -> vaultspec_a2a.thread.errors",
+    "vaultspec_a2a.team.tests.test_team_config -> vaultspec_a2a.thread.errors",
+    # graph -> thread (state, errors, enums used by graph nodes)
+    "vaultspec_a2a.graph.compiler -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.compiler -> vaultspec_a2a.thread.errors",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.thread.enums",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.thread.errors",
+    "vaultspec_a2a.graph.nodes.vault_reader -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.tests.nodes.test_worker -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.tests.nodes.test_worker -> vaultspec_a2a.thread.errors",
+    "vaultspec_a2a.graph.tests.nodes.test_worker_integration -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.tests.nodes.test_supervisor -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.graph.tests.test_compiler -> vaultspec_a2a.thread.errors",
+    # graph -> context (context building in graph nodes)
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.context.stage",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.context.token_budget",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.context.rules",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.context.anchoring",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.context.token_budget",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.context.rules",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.context.anchoring",
+    # graph -> domain_config
+    "vaultspec_a2a.graph.compiler -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.graph.nodes.supervisor -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.graph.nodes.worker -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.graph.nodes.vault_reader -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.graph.tools.task_queue -> vaultspec_a2a.domain_config",
+    # graph -> team
+    "vaultspec_a2a.graph.compiler -> vaultspec_a2a.team.team_config",
+    "vaultspec_a2a.graph.tests.test_compiler -> vaultspec_a2a.team.team_config",
+    # graph -> providers (test-only)
+    "vaultspec_a2a.graph.tests.nodes.test_worker_integration -> vaultspec_a2a.providers.acp_chat_model",
+    # thread -> graph.enums (shared enum dependency)
+    "vaultspec_a2a.thread.snapshots -> vaultspec_a2a.graph.enums",
+    "vaultspec_a2a.thread.permission_fsm -> vaultspec_a2a.graph.enums",
+    # thread -> api (test-only schema validation)
+    "vaultspec_a2a.thread.tests.test_snapshots -> vaultspec_a2a.api.schemas.snapshots",
+    # context -> thread (anchoring and token budget)
+    "vaultspec_a2a.context.anchoring -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.context.token_budget -> vaultspec_a2a.thread.state",
+    "vaultspec_a2a.context.tests.test_token_budget -> vaultspec_a2a.thread.state",
+    # context -> domain_config
+    "vaultspec_a2a.context.metadata -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.context.anchoring -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.context.token_budget -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.context.tests.test_metadata -> vaultspec_a2a.domain_config",
+    "vaultspec_a2a.context.tests.test_anchoring -> vaultspec_a2a.domain_config",
+    # control -> database (service layer uses repository)
+    "vaultspec_a2a.control.team_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.message_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.thread_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.permission_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.cancel_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.dispatch -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.dispatch -> vaultspec_a2a.database.session",
+    "vaultspec_a2a.control.diagnostics -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.event_handlers -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.event_handlers -> vaultspec_a2a.database.session",
+    "vaultspec_a2a.control.health -> vaultspec_a2a.database.session",
+    "vaultspec_a2a.control.projection -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.projection -> vaultspec_a2a.database.models",
+    "vaultspec_a2a.control.snapshot -> vaultspec_a2a.database.checkpoints",
+    "vaultspec_a2a.control.thread_state_service -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.thread_state_service -> vaultspec_a2a.database.checkpoints",
+    "vaultspec_a2a.control.repair_transitions -> vaultspec_a2a.database",
+    "vaultspec_a2a.control.repair_transitions -> vaultspec_a2a.database.models",
+    "vaultspec_a2a.control.team_service -> vaultspec_a2a.database.models",
+    # control -> ipc (IPC schemas shared)
+    "vaultspec_a2a.control.permission_service -> vaultspec_a2a.ipc.schemas",
+    "vaultspec_a2a.control.message_service -> vaultspec_a2a.ipc.schemas",
+    "vaultspec_a2a.control.cancel_service -> vaultspec_a2a.ipc.schemas",
+    "vaultspec_a2a.control.dispatch -> vaultspec_a2a.ipc.schemas",
+    "vaultspec_a2a.control.thread_service -> vaultspec_a2a.ipc.schemas",
+    "vaultspec_a2a.control.event_handlers -> vaultspec_a2a.ipc.schemas",
+    # control -> utils
+    "vaultspec_a2a.control.config -> vaultspec_a2a.utils.enums",
+    # database -> control.config (settings dependency)
+    "vaultspec_a2a.database.checkpoints -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.database.migrate -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.database.session -> vaultspec_a2a.control.config",
+    # providers -> control.config (settings dependency)
+    "vaultspec_a2a.providers.factory -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers.gemini_auth -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers.mock_chat_model -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers.acp_chat_model -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers._acp_rpc_handlers -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers._acp_auth -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers._acp_session -> vaultspec_a2a.control.config",
+    "vaultspec_a2a.providers.tests.test_gemini_auth -> vaultspec_a2a.control.config",
+    # providers -> utils
+    "vaultspec_a2a.providers.acp_chat_model -> vaultspec_a2a.utils.enums",
+    "vaultspec_a2a.providers._acp_session -> vaultspec_a2a.utils.enums",
+    "vaultspec_a2a.providers._acp_auth -> vaultspec_a2a.utils.enums",
+    # providers -> workspace
+    "vaultspec_a2a.providers.acp_chat_model -> vaultspec_a2a.workspace.environment",
+    "vaultspec_a2a.providers._acp_session -> vaultspec_a2a.workspace.environment",
+    "vaultspec_a2a.providers._acp_rpc_handlers -> vaultspec_a2a.workspace.environment",
+    "vaultspec_a2a.providers._acp_rpc_handlers -> vaultspec_a2a.workspace.git_manager",
+    # utils -> control (test-only)
+    "vaultspec_a2a.utils.tests.test_logging -> vaultspec_a2a.control.config",
+    # entry-point cross-imports (test-only)
+    "vaultspec_a2a.protocols.mcp.tests.test_server -> vaultspec_a2a.api.app",
+    "vaultspec_a2a.api.tests.test_internal -> vaultspec_a2a.worker.ipc",
+]
+
+[[tool.importlinter.contracts]]
+name = "Entry points never cross-import"
+type = "independence"
+modules = [
+    "vaultspec_a2a.api",
+    "vaultspec_a2a.worker",
+    "vaultspec_a2a.protocols",
+]
+ignore_imports = [
+    # test-only cross-imports (not production code)
+    "vaultspec_a2a.protocols.mcp.tests.test_server -> vaultspec_a2a.api.app",
+    "vaultspec_a2a.api.tests.test_internal -> vaultspec_a2a.worker.ipc",
+]
+
+[[tool.importlinter.contracts]]
+name = "Infra services never import from entry points"
+type = "forbidden"
+source_modules = [
+    "vaultspec_a2a.control",
+    "vaultspec_a2a.database",
+    "vaultspec_a2a.providers",
+    "vaultspec_a2a.telemetry",
+]
+forbidden_modules = [
+    "vaultspec_a2a.api",
+    "vaultspec_a2a.worker",
+]

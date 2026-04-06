@@ -26,16 +26,7 @@ venv/
 
 # Agent configs (per-developer, not shared)
 .profile
-.claude/
-.gemini/
-.codex/
 .agent/
-.agents/
-.vaultspec/
-.mcp.json
-AGENTS.md
-CLAUDE.md
-GEMINI.md
 
 # Node.js
 node_modules/
@@ -69,7 +60,6 @@ data/
 !src/ui/src/app/data/
 
 # Runtime artifacts
-.vault/runtime/
 .tmp-*/
 
 # Scratch workspaces (test/audit throwaway)

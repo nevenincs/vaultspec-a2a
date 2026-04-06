@@ -24,4 +24,3 @@ jobs:
             --id ${{ steps.add.outputs.itemId }} \
             --field-id PVTF_lAHOAKyuWc4BS9uczhAaFWg \
             --date "$DEADLINE"
-

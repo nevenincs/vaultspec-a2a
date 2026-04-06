@@ -1,5 +1,5 @@
 /**
- * WebSocket protocol types — auto-generated from Pydantic models.
+ * WebSocket protocol types ï¿½ auto-generated from Pydantic models.
  *
  * DO NOT EDIT MANUALLY. Regenerate with:
  *   uv run python scripts/export_ws_schema.py
@@ -14,26 +14,48 @@
 // ======================================================================
 
 /** Observable agent states exposed to the frontend. */
-export type AgentLifecycleState = "submitted" | "idle" | "working" | "input_required" | "auth_required" | "completed" | "failed" | "cancelled";
+export type AgentLifecycleState =
+  | 'submitted'
+  | 'idle'
+  | 'working'
+  | 'input_required'
+  | 'auth_required'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
 
 /** LLM capability levels. */
-export type Model = "low" | "mid" | "high" | "max";
+export type Model = 'low' | 'mid' | 'high' | 'max';
 
 /** User permission response options (mirrors ACP PermissionOption.kind). */
-export type PermissionOptionKind = "allow_once" | "allow_always" | "reject_once" | "reject_always";
+export type PermissionOptionKind =
+  | 'allow_once'
+  | 'allow_always'
+  | 'reject_once'
+  | 'reject_always';
 
 /** Supported LLM providers. */
-export type Provider = "claude" | "gemini" | "mock" | "openai" | "zhipu";
+export type Provider = 'claude' | 'gemini' | 'mock' | 'openai' | 'zhipu';
 
 /** Lifecycle states for a single tool invocation. */
-export type ToolCallStatus = "pending" | "in_progress" | "completed" | "failed";
+export type ToolCallStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
 
 /** ACP tool categories (mirrors agentclientprotocol.com schema). */
-export type ToolKind = "read" | "edit" | "delete" | "move" | "search" | "execute" | "think" | "fetch" | "switch_mode" | "other";
+export type ToolKind =
+  | 'read'
+  | 'edit'
+  | 'delete'
+  | 'move'
+  | 'search'
+  | 'execute'
+  | 'think'
+  | 'fetch'
+  | 'switch_mode'
+  | 'other';
 
 /** Agent lifecycle state transition. */
 export interface AgentStatusEvent {
-  type: "agent_status";
+  type: 'agent_status';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -58,7 +80,7 @@ export interface AgentSummary {
 
 /** Streaming file artifact content. */
 export interface ArtifactUpdateEvent {
-  type: "artifact_update";
+  type: 'artifact_update';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -73,7 +95,7 @@ export interface ArtifactUpdateEvent {
 
 /** Sent once on WebSocket open; connection-scoped, not thread-scoped. */
 export interface ConnectedEvent {
-  type: "connected";
+  type: 'connected';
   client_id: string;
   server_version: string;
   active_threads?: string[];
@@ -82,7 +104,7 @@ export interface ConnectedEvent {
 
 /** Server-side error notification. */
 export interface ErrorEvent {
-  type: "error";
+  type: 'error';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -95,7 +117,7 @@ export interface ErrorEvent {
 
 /** Periodic keepalive; connection-scoped, not thread-scoped. */
 export interface HeartbeatEvent {
-  type: "heartbeat";
+  type: 'heartbeat';
   timestamp: string;
   server_uptime_seconds: number;
   metadata?: Record<string, unknown> | null;
@@ -103,7 +125,7 @@ export interface HeartbeatEvent {
 
 /** Streaming agent message token. */
 export interface MessageChunkEvent {
-  type: "message_chunk";
+  type: 'message_chunk';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -123,7 +145,7 @@ export interface PermissionOption {
 
 /** Agent is requesting user permission to proceed. */
 export interface PermissionRequestEvent {
-  type: "permission_request";
+  type: 'permission_request';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -144,7 +166,7 @@ export interface PlanEntry {
 
 /** Full plan state replacement. */
 export interface PlanUpdateEvent {
-  type: "plan_update";
+  type: 'plan_update';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -155,7 +177,7 @@ export interface PlanUpdateEvent {
 
 /** Team-wide agent status broadcast. */
 export interface TeamStatusEvent {
-  type: "team_status";
+  type: 'team_status';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -167,7 +189,7 @@ export interface TeamStatusEvent {
 
 /** Streaming agent thought/reasoning token. */
 export interface ThoughtChunkEvent {
-  type: "thought_chunk";
+  type: 'thought_chunk';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -179,7 +201,7 @@ export interface ThoughtChunkEvent {
 
 /** Diff content block within a tool call. */
 export interface ToolCallContentDiff {
-  content_type: "diff";
+  content_type: 'diff';
   path: string;
   old_text?: string | null;
   new_text: string;
@@ -187,13 +209,13 @@ export interface ToolCallContentDiff {
 
 /** Terminal output content block within a tool call. */
 export interface ToolCallContentTerminal {
-  content_type: "terminal";
+  content_type: 'terminal';
   terminal_id: string;
 }
 
 /** Plain text content block within a tool call. */
 export interface ToolCallContentText {
-  content_type: "text";
+  content_type: 'text';
   text: string;
 }
 
@@ -205,7 +227,7 @@ export interface ToolCallLocation {
 
 /** A new tool invocation has begun. */
 export interface ToolCallStartEvent {
-  type: "tool_call_start";
+  type: 'tool_call_start';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -221,7 +243,7 @@ export interface ToolCallStartEvent {
 
 /** Incremental update to an in-progress tool call (merge semantics). */
 export interface ToolCallUpdateEvent {
-  type: "tool_call_update";
+  type: 'tool_call_update';
   thread_id: string;
   agent_id?: string | null;
   timestamp: string;
@@ -232,7 +254,9 @@ export interface ToolCallUpdateEvent {
   kind?: ToolKind | null;
   status?: ToolCallStatus | null;
   locations?: ToolCallLocation[] | null;
-  content?: (ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal)[] | null;
+  content?:
+    | (ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal)[]
+    | null;
 }
 
 /** Discriminated union on "type" field. */
@@ -255,11 +279,11 @@ export type ServerEvent =
 // ======================================================================
 
 /** Actions a user can issue to control a running agent. */
-export type AgentControlAction = "pause" | "resume" | "terminate";
+export type AgentControlAction = 'pause' | 'resume' | 'terminate';
 
 /** Issue a control action (pause/resume/terminate) to an agent. */
 export interface AgentControlCommand {
-  type: "agent_control";
+  type: 'agent_control';
   request_id?: string | null;
   thread_id: string;
   agent_id: string;
@@ -269,20 +293,20 @@ export interface AgentControlCommand {
 
 /** Respond to a permission request via WebSocket. */
 export interface PermissionResponseCommand {
-  type: "permission_response";
+  type: 'permission_response';
   request_id: string;
   option_id: string;
 }
 
 /** Client keepalive ping. */
 export interface PingCommand {
-  type: "ping";
+  type: 'ping';
   request_id?: string | null;
 }
 
 /** Send a user message into a thread. */
 export interface SendMessageCommand {
-  type: "send_message";
+  type: 'send_message';
   request_id?: string | null;
   thread_id: string;
   content: string;
@@ -291,14 +315,14 @@ export interface SendMessageCommand {
 
 /** Subscribe to real-time events for one or more threads. */
 export interface SubscribeCommand {
-  type: "subscribe";
+  type: 'subscribe';
   request_id?: string | null;
   thread_ids: string[];
 }
 
 /** Unsubscribe from real-time events for one or more threads. */
 export interface UnsubscribeCommand {
-  type: "unsubscribe";
+  type: 'unsubscribe';
   request_id?: string | null;
   thread_ids: string[];
 }

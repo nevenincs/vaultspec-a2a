@@ -50,8 +50,15 @@ export class RestClient {
     return this.post<CreateThreadResponse>('/api/threads', req);
   }
 
-  async listThreads(offset = 0, limit = 50, status?: ThreadStatus): Promise<ThreadListResponse> {
-    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+  async listThreads(
+    offset = 0,
+    limit = 50,
+    status?: ThreadStatus,
+  ): Promise<ThreadListResponse> {
+    const params = new URLSearchParams({
+      offset: String(offset),
+      limit: String(limit),
+    });
     if (status) params.set('status', status);
     return this.get<ThreadListResponse>(`/api/threads?${params.toString()}`);
   }

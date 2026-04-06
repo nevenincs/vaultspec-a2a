@@ -88,17 +88,17 @@ just dev service probe PROVIDER     # probe a specific LLM provider
 
 Service targets:
 
-| Target | Services | Ports |
-|--------|----------|-------|
-| `all` (default) | Everything in dependency order | — |
-| `prod` | gateway + worker + ui + postgres | — |
-| `dev` | jaeger + vidaimock | — |
-| `gateway` | Gateway API server | 8000 |
-| `worker` | Worker executor (LangGraph) | 8001 |
-| `ui` | Vite frontend dev server | 5173 |
-| `postgres` | PostgreSQL | 5432 |
-| `jaeger` | Jaeger trace collector + UI | 4317, 16686 |
-| `vidaimock` | Mock LLM provider | 8100 |
+| Target          | Services                         | Ports       |
+| --------------- | -------------------------------- | ----------- |
+| `all` (default) | Everything in dependency order   | —           |
+| `prod`          | gateway + worker + ui + postgres | —           |
+| `dev`           | jaeger + vidaimock               | —           |
+| `gateway`       | Gateway API server               | 8000        |
+| `worker`        | Worker executor (LangGraph)      | 8001        |
+| `ui`            | Vite frontend dev server         | 5173        |
+| `postgres`      | PostgreSQL                       | 5432        |
+| `jaeger`        | Jaeger trace collector + UI      | 4317, 16686 |
+| `vidaimock`     | Mock LLM provider                | 8100        |
 
 Multiple targets: `just dev service start gateway worker`
 
@@ -205,12 +205,12 @@ vaultspec agent show NAME [--json]
 
 ### Global options
 
-| Option | Short | Effect |
-|--------|-------|--------|
-| `--verbose` | `-v` | INFO logging |
-| `--debug` | `-d` | DEBUG logging |
-| `--version` | `-V` | Print version, exit |
-| `--show-config` | | Print resolved settings, exit |
+| Option          | Short | Effect                        |
+| --------------- | ----- | ----------------------------- |
+| `--verbose`     | `-v`  | INFO logging                  |
+| `--debug`       | `-d`  | DEBUG logging                 |
+| `--version`     | `-V`  | Print version, exit           |
+| `--show-config` |       | Print resolved settings, exit |
 
 ### Production CLI passthrough via Justfile
 
@@ -225,16 +225,16 @@ Default port assignments. All ports are overridable via environment variables.
 In Docker, only the host side of port mappings changes — container-internal
 ports are fixed.
 
-| Port | Service | Env Override | Notes |
-|------|---------|--------------|-------|
-| 8000 | Gateway API | `VAULTSPEC_PORT` | REST + WebSocket |
-| 8001 | Worker | `VAULTSPEC_WORKER_PORT` | LangGraph executor |
-| 5173 | Vite UI | (Vite default) | Frontend dev server |
-| 8200 | MCP server | `VAULTSPEC_MCP_PORT` | Streamable HTTP transport |
-| 4317 | Jaeger OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` | Trace collector |
-| 16686 | Jaeger UI | — | Trace viewer |
-| 5432 | PostgreSQL | (embedded in `DATABASE_URL`) | Only when `backend=postgres` |
-| 8100 | VidaiMock | `MOCK_API_BASE` | Mock LLM, dev only |
+| Port  | Service     | Env Override                  | Notes                        |
+| ----- | ----------- | ----------------------------- | ---------------------------- |
+| 8000  | Gateway API | `VAULTSPEC_PORT`              | REST + WebSocket             |
+| 8001  | Worker      | `VAULTSPEC_WORKER_PORT`       | LangGraph executor           |
+| 5173  | Vite UI     | (Vite default)                | Frontend dev server          |
+| 8200  | MCP server  | `VAULTSPEC_MCP_PORT`          | Streamable HTTP transport    |
+| 4317  | Jaeger OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` | Trace collector              |
+| 16686 | Jaeger UI   | —                             | Trace viewer                 |
+| 5432  | PostgreSQL  | (embedded in `DATABASE_URL`)  | Only when `backend=postgres` |
+| 8100  | VidaiMock   | `MOCK_API_BASE`               | Mock LLM, dev only           |
 
 Auto-derived URLs (no explicit config needed):
 
@@ -282,12 +282,12 @@ Three workflows depending on what you need:
 
 Expected URLs:
 
-| Service | URL |
-|---------|-----|
-| Gateway API | `http://localhost:8000` |
+| Service       | URL                            |
+| ------------- | ------------------------------ |
+| Gateway API   | `http://localhost:8000`        |
 | Worker health | `http://localhost:8001/health` |
-| Vite UI | `http://localhost:5173` |
-| Jaeger UI | `http://localhost:16686` |
+| Vite UI       | `http://localhost:5173`        |
+| Jaeger UI     | `http://localhost:16686`       |
 
 ## Troubleshooting
 

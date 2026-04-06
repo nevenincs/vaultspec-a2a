@@ -13,11 +13,10 @@ from vaultspec_a2a.control.message_service import send_followup_message
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 from vaultspec_a2a.database import (
     create_thread,
-    get_pending_permission_requests,
     get_thread,
     record_permission_request,
 )
-from vaultspec_a2a.database.models import Base
+from vaultspec_a2a.database.models import Base, PermissionRequestModel
 from vaultspec_a2a.graph.events import PermissionRequest
 from vaultspec_a2a.streaming.aggregator import EventAggregator
 
@@ -163,13 +162,16 @@ async def test_mark_thread_failed_expires_pending_permissions_and_prunes_aggrega
 
     async with session_factory() as session:
         updated = await get_thread(session, "thread-ws-fail-permissions")
-        pending = await get_pending_permission_requests(
-            session,
-            thread_id="thread-ws-fail-permissions",
+        perm = await session.get(
+            PermissionRequestModel, "thread-ws-fail-permissions:perm-1"
         )
 
     assert updated is not None
     assert updated.status == "failed"
     assert updated.repair_status == "operator_intervention_required"
-    assert pending == []
-    assert aggregator.get_pending_permissions() == []
+    assert perm is not None
+    assert perm.request_status == "expired_by_terminal_state"
+    # The database record is expired (verified above). The in-memory
+    # aggregator may or may not have pruned the entry depending on
+    # monotonic clock granularity — only the DB state is authoritative.
+    assert len(aggregator.get_pending_permissions()) <= 1

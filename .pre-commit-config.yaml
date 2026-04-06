@@ -1,88 +1,124 @@
 repos:
-- repo: local
-  hooks:
-  - id: ruff-check
-    name: Lint Python code (Ruff)
-    entry: uv run ruff check
-    language: system
-    types:
-    - python
-    pass_filenames: true
-  - id: ruff-format-check
-    name: Check Python formatting (Ruff)
-    entry: uv run ruff format --check
-    language: system
-    types:
-    - python
-    pass_filenames: true
-  - id: taplo-format-check
-    name: Check TOML formatting (Taplo)
-    entry: taplo fmt --check
-    language: node
-    additional_dependencies:
-    - '@taplo/cli@0.7.0'
-    types:
-    - toml
-    pass_filenames: true
-  - id: taplo-lint
-    name: Lint TOML files (Taplo)
-    entry: taplo lint
-    language: node
-    additional_dependencies:
-    - '@taplo/cli@0.7.0'
-    types:
-    - toml
-    pass_filenames: true
-  - id: ty
-    name: Type-check Python codebase (Ty)
-    entry: uv run python -m ty check src/vaultspec_a2a
-    language: system
-    types:
-    - python
-    pass_filenames: false
-  - id: lychee
-    name: Check documentation links (Lychee)
-    entry: lychee
-    language: system
-    args:
-    - --no-progress
-    - --exclude-path
-    - README.md
-    - --accept
-    - 200..=299,403,429,504
-    types:
-    - markdown
-  - id: markdownlint
-    name: Lint Markdown style (markdownlint)
-    entry: markdownlint
-    language: node
-    additional_dependencies:
-    - markdownlint-cli@0.44.0
-    args:
-    - --config
-    - .markdownlint.json
-    pass_filenames: true
-    types:
-    - markdown
-  - id: tsc-check
-    name: TypeScript type check (UI)
-    entry: bash -c 'cd src/ui && npx tsc --noEmit'
-    language: system
-    types_or:
-    - ts
-    - tsx
-    pass_filenames: false
-  - id: vault-doctor
-    name: Vault Doctor
-    entry: uv run python -m vaultspec_core vault check all
-    language: system
-    types:
-    - markdown
-    pass_filenames: false
-  - id: vault-doctor-deep
-    name: Vault Doctor (chain + links)
-    entry: uv run python -m vaultspec_core doctor
-    language: system
-    types:
-    - markdown
-    pass_filenames: false
+  # ── Read-only checks only ───────────────────────────────────────────
+  # Every hook here is a pure gate: it exits non-zero when the code is
+  # not acceptable but NEVER modifies files.  Auto-fixing lives in
+  # `just dev format` which is safe to run outside the stash cycle.
+  #
+  # Why: pre-commit stashes unstaged changes before running hooks, then
+  # restores them afterward.  If any hook modifies files AND the restore
+  # conflicts, pre-commit rolls back ALL fixes — even from unrelated
+  # hooks that succeeded.  Keeping hooks read-only avoids this entirely.
+  - repo: local
+    hooks:
+      - id: ruff-check
+        name: Lint Python code (Ruff)
+        entry: uv run ruff check
+        language: system
+        types:
+          - python
+        pass_filenames: true
+      - id: ruff-format-check
+        name: Check Python formatting (Ruff)
+        entry: uv run ruff format --check
+        language: system
+        types:
+          - python
+        pass_filenames: true
+      - id: taplo-format-check
+        name: Check TOML formatting (Taplo)
+        entry: taplo fmt --check
+        language: node
+        additional_dependencies:
+          - '@taplo/cli@0.7.0'
+        types:
+          - toml
+        pass_filenames: true
+      - id: taplo-lint
+        name: Lint TOML files (Taplo)
+        entry: taplo lint
+        language: node
+        additional_dependencies:
+          - '@taplo/cli@0.7.0'
+        types:
+          - toml
+        pass_filenames: true
+      - id: ty
+        name: Type-check Python codebase (Ty)
+        entry: uv run python -m ty check src/vaultspec_a2a
+        language: system
+        types:
+          - python
+        pass_filenames: false
+      - id: lychee
+        name: Check documentation links (Lychee)
+        entry: lychee
+        language: system
+        args:
+          - --no-progress
+          - --exclude-path
+          - README.md
+          - --accept
+          - 200..=299,403,429,504
+        types:
+          - markdown
+      - id: markdownlint
+        name: Lint Markdown style (markdownlint)
+        entry: markdownlint
+        language: node
+        additional_dependencies:
+          - markdownlint-cli@0.44.0
+        args:
+          - --config
+          - .markdownlint.json
+        pass_filenames: true
+        types:
+          - markdown
+      - id: eslint
+        name: Lint JS/TS files (ESLint)
+        entry: npx eslint
+        language: system
+        types_or:
+          - javascript
+          - jsx
+          - ts
+          - tsx
+        pass_filenames: true
+      - id: prettier-check
+        name: Check JS/TS/CSS/JSON formatting (Prettier)
+        entry: npx prettier --check
+        language: system
+        types_or:
+          - javascript
+          - jsx
+          - ts
+          - tsx
+          - css
+          - json
+        pass_filenames: true
+      - id: stylelint
+        name: Lint CSS files (Stylelint)
+        entry: npx stylelint
+        language: system
+        types:
+          - css
+        pass_filenames: true
+      - id: lint-imports
+        name: Check import boundaries (import-linter)
+        entry: uv run lint-imports
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: vault-doctor
+        name: Vault Doctor
+        entry: uv run python -m vaultspec_core vault check all
+        language: system
+        types:
+          - markdown
+        pass_filenames: false
+      - id: vault-doctor-deep
+        name: Vault Doctor (chain + links)
+        entry: uv run python -m vaultspec_core doctor
+        language: system
+        types:
+          - markdown
+        pass_filenames: false

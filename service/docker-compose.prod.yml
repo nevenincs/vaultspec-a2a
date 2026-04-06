@@ -93,7 +93,15 @@ services:
     environment:
       COLLECTOR_OTLP_ENABLED: 'true'
     healthcheck:
-      test: ['CMD', 'wget', '--quiet', '--tries=1', '--spider', 'http://localhost:13133/status']
+      test:
+        [
+          'CMD',
+          'wget',
+          '--quiet',
+          '--tries=1',
+          '--spider',
+          'http://localhost:13133/status',
+        ]
       interval: 5s
       timeout: 2s
       retries: 10

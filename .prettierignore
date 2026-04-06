@@ -1,0 +1,17 @@
+# Build artifacts
+src/ui/dist/
+
+# Python virtual environment
+.venv/
+
+# Package caches
+node_modules/
+.ruff_cache/
+
+# Lock files (managed by tools)
+uv.lock
+package-lock.json
+src/ui/package-lock.json
+
+# Import linter cache
+.import_linter_cache/

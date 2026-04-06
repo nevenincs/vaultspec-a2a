@@ -179,9 +179,11 @@ def test_setup_logging_attaches_correlation_filter_rich_path(
     """Interactive dev setup attaches the correlation filter to Rich logging."""
     monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
     monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+    monkeypatch.delenv("CI", raising=False)
     settings_override = Settings(
         environment=Environment.DEVELOPMENT,
         log_level=LogLevel.DEBUG,
+        ci=False,
     )
 
     setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]

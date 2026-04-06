@@ -53,7 +53,9 @@ export const appStore = createStore<AppStore>()(
           } else if (mode === 'light') {
             root.classList.remove('dark');
           } else {
-            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            const prefersDark = window.matchMedia(
+              '(prefers-color-scheme: dark)',
+            ).matches;
             if (prefersDark) root.classList.add('dark');
             else root.classList.remove('dark');
           }

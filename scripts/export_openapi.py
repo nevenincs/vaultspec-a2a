@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 
 
-def main() -> None:
+def main() -> int | None:
     try:
         from vaultspec_a2a.api.app import create_app
     except ImportError as exc:

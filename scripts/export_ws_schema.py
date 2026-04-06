@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 SCHEMAS_DIR = ROOT / "schemas"
 
 
-def main() -> None:
+def main() -> int | None:
     try:
         from pydantic import TypeAdapter
 

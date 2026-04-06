@@ -35,3 +35,12 @@ synthesized by hydration/stream mappers (`plan-entry-${i}`). The wire
 `PlanEntry` (ws-types.ts) correctly lacks `id`. Two separate types for
 different layers — working as designed.
 
+## Round 2 — 1 agent deep sweep (2026-04-06)
+
+RETURN-TYPE | MEDIUM | **FIXED** Export scripts `main() -> None` but return 1
+`export_openapi.py` and `export_ws_schema.py` had `def main() -> None:`
+but error paths returned `1`. `ty check` catches this as
+`invalid-return-type`. Fixed to `int | None`.
+
+No remaining MEDIUM+ findings after Round 2.
+

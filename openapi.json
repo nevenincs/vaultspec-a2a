@@ -885,10 +885,7 @@
           }
         },
         "type": "object",
-        "required": [
-          "thread_id",
-          "status"
-        ],
+        "required": ["thread_id", "status"],
         "title": "ArchiveThreadResponse",
         "description": "Response after archiving a thread."
       },

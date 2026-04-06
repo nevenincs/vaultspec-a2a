@@ -5,7 +5,13 @@ import { mapToolKind, mapToolCallStatus } from '../api/mappers';
 import { appStore } from '../store/app-store';
 import { queryClient } from './query-client';
 import { queryKeys } from './query-keys';
-import type { StreamEvent, ThreadSummary, PermissionRequest, PlanEntryStatus, PlanEntryPriority } from '../data/types';
+import type {
+  StreamEvent,
+  ThreadSummary,
+  PermissionRequest,
+  PlanEntryStatus,
+  PlanEntryPriority,
+} from '../data/types';
 import type { components } from '../data/wire-types';
 
 type _PermissionSnapshot = components['schemas']['_PermissionSnapshot'];

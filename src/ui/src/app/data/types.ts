@@ -61,7 +61,11 @@ export type PlanEntryStatus = 'pending' | 'in_progress' | 'completed';
 
 export type PlanEntryPriority = 'high' | 'medium' | 'low';
 
-export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+export type PermissionOptionKind =
+  | 'allow_once'
+  | 'allow_always'
+  | 'reject_once'
+  | 'reject_always';
 
 export type Provider = 'claude' | 'gemini' | 'mock' | 'openai' | 'zhipu';
 

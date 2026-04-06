@@ -61,6 +61,8 @@ export type PlanEntryStatus = 'pending' | 'in_progress' | 'completed';
 
 export type PlanEntryPriority = 'high' | 'medium' | 'low';
 
+export type PermissionOptionKind = 'allow_once' | 'allow_always' | 'reject_once' | 'reject_always';
+
 export type ConnectionState = 'connected' | 'reconnecting' | 'disconnected';
 
 export type ThemeMode = 'light' | 'dark' | 'system';
@@ -119,7 +121,7 @@ export interface PermissionRequest {
 
 export interface PermissionOption {
   id: string;
-  kind: string;
+  kind: PermissionOptionKind;
   label: string;
 }
 

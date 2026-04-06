@@ -166,7 +166,7 @@ export function useThreadStateQuery(threadId: string | null) {
               agent_id: permAgentId,
               agent_name: permAgentName,
               tool_name: perm.tool_call ?? '',
-              tool_kind: 'other' as const,
+              tool_kind: perm.tool_kind ? mapToolKind(perm.tool_kind) : 'other',
               message: perm.description,
               options: perm.options.map((o) => ({
                 id: o.option_id,

@@ -1079,6 +1079,7 @@ export interface components {
             options: components["schemas"]["_PermissionOptionSnapshot"][];
             /** Tool Call */
             tool_call?: string | null;
+            tool_kind?: components["schemas"]["ToolKind"] | null;
         };
     };
     responses: never;

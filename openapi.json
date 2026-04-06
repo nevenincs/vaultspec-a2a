@@ -2405,6 +2405,16 @@
               }
             ],
             "title": "Tool Call"
+          },
+          "tool_kind": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ToolKind"
+              },
+              {
+                "type": "null"
+              }
+            ]
           }
         },
         "type": "object",

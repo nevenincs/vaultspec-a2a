@@ -64,6 +64,7 @@ class _PermissionSnapshot(BaseModel):
     description: str
     options: list["_PermissionOptionSnapshot"]
     tool_call: str | None = None
+    tool_kind: ToolKind | None = None
 
 
 class _PermissionOptionSnapshot(BaseModel):

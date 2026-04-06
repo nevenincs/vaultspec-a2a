@@ -106,8 +106,15 @@ const FRONTEND_TOOL_KINDS = new Set<string>([
   'other',
 ]);
 
+const TOOL_CALL_STATUSES: Record<WireToolCallStatus, ToolCallStatus> = {
+  pending: 'pending',
+  in_progress: 'in_progress',
+  completed: 'completed',
+  failed: 'failed',
+};
+
 export function mapToolCallStatus(wire: WireToolCallStatus): ToolCallStatus {
-  return wire as ToolCallStatus;
+  return TOOL_CALL_STATUSES[wire];
 }
 
 export function mapToolKind(wire: WireToolKind): ToolKind {

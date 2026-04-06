@@ -18,7 +18,9 @@ type TeamStatusResponse = components['schemas']['TeamStatusResponse'];
 type TeamPresetsResponse = components['schemas']['TeamPresetsResponse'];
 type PermissionResponseRequest = components['schemas']['PermissionResponseRequest'];
 type PermissionResponseResult = components['schemas']['PermissionResponseResult'];
+type ArchiveThreadResponse = components['schemas']['ArchiveThreadResponse'];
 type CancelThreadResponse = components['schemas']['CancelThreadResponse'];
+type ThreadStatus = components['schemas']['ThreadStatus'];
 
 class RestClientError extends Error {
   constructor(
@@ -48,7 +50,7 @@ export class RestClient {
     return this.post<CreateThreadResponse>('/api/threads', req);
   }
 
-  async listThreads(offset = 0, limit = 50, status?: string): Promise<ThreadListResponse> {
+  async listThreads(offset = 0, limit = 50, status?: ThreadStatus): Promise<ThreadListResponse> {
     const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
     if (status) params.set('status', status);
     return this.get<ThreadListResponse>(`/api/threads?${params.toString()}`);
@@ -70,8 +72,8 @@ export class RestClient {
     await this.delete(`/api/threads/${encodeURIComponent(threadId)}`);
   }
 
-  async archiveThread(threadId: string): Promise<{ thread_id: string; status: string }> {
-    return this.post<{ thread_id: string; status: string }>(
+  async archiveThread(threadId: string): Promise<ArchiveThreadResponse> {
+    return this.post<ArchiveThreadResponse>(
       `/api/threads/${encodeURIComponent(threadId)}/archive`,
       {},
     );

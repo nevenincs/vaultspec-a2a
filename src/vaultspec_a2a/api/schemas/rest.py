@@ -17,6 +17,7 @@ from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [
     "AgentStatusEntry",
+    "ArchiveThreadResponse",
     "CancelThreadResponse",
     "CreateThreadRequest",
     "CreateThreadResponse",
@@ -68,6 +69,13 @@ class CreateThreadResponse(BaseModel):
     thread_id: str
     status: str
     nickname: str | None = None
+
+
+class ArchiveThreadResponse(BaseModel):
+    """Response after archiving a thread."""
+
+    thread_id: str
+    status: str
 
 
 class CancelThreadResponse(BaseModel):

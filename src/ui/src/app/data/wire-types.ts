@@ -432,6 +432,16 @@ export interface components {
             description: string;
         };
         /**
+         * ArchiveThreadResponse
+         * @description Response after archiving a thread.
+         */
+        ArchiveThreadResponse: {
+            /** Thread Id */
+            thread_id: string;
+            /** Status */
+            status: string;
+        };
+        /**
          * ArtifactSnapshot
          * @description Fully materialized file artifact.
          */
@@ -877,6 +887,12 @@ export interface components {
             approval_request_id?: string | null;
         };
         /**
+         * ThreadStatus
+         * @description Durable lifecycle states for orchestration threads.
+         * @enum {string}
+         */
+        ThreadStatus: "submitted" | "running" | "input_required" | "cancelling" | "cancelled" | "completed" | "failed" | "archived" | "repair_needed" | "reconciling";
+        /**
          * ThreadSummary
          * @description Lightweight thread descriptor for list endpoints.
          */
@@ -1100,7 +1116,7 @@ export interface operations {
             query?: {
                 offset?: number;
                 limit?: number;
-                status?: string | null;
+                status?: components["schemas"]["ThreadStatus"] | null;
             };
             header?: never;
             path?: never;
@@ -1238,9 +1254,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": {
-                        [key: string]: string;
-                    };
+                    "application/json": components["schemas"]["ArchiveThreadResponse"];
                 };
             };
             /** @description Validation Error */

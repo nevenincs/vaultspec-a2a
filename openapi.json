@@ -99,7 +99,7 @@
             "schema": {
               "anyOf": [
                 {
-                  "type": "string"
+                  "$ref": "#/components/schemas/ThreadStatus"
                 },
                 {
                   "type": "null"
@@ -228,11 +228,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "type": "object",
-                  "additionalProperties": {
-                    "type": "string"
-                  },
-                  "title": "Response Archive Thread Endpoint Api Threads  Thread Id  Archive Post"
+                  "$ref": "#/components/schemas/ArchiveThreadResponse"
                 }
               }
             }
@@ -889,6 +885,25 @@
         ],
         "title": "AgentStatusEntry",
         "description": "Agent status within a team status response."
+      },
+      "ArchiveThreadResponse": {
+        "properties": {
+          "thread_id": {
+            "type": "string",
+            "title": "Thread Id"
+          },
+          "status": {
+            "type": "string",
+            "title": "Status"
+          }
+        },
+        "type": "object",
+        "required": [
+          "thread_id",
+          "status"
+        ],
+        "title": "ArchiveThreadResponse",
+        "description": "Response after archiving a thread."
       },
       "ArtifactSnapshot": {
         "properties": {
@@ -1885,6 +1900,23 @@
         ],
         "title": "ThreadStateSnapshot",
         "description": "Complete thread state for reconnection replay.\n\nThe client fetches this via REST, notes ``last_sequence``, then\ndiscards any WebSocket events with ``sequence <= last_sequence``."
+      },
+      "ThreadStatus": {
+        "type": "string",
+        "enum": [
+          "submitted",
+          "running",
+          "input_required",
+          "cancelling",
+          "cancelled",
+          "completed",
+          "failed",
+          "archived",
+          "repair_needed",
+          "reconciling"
+        ],
+        "title": "ThreadStatus",
+        "description": "Durable lifecycle states for orchestration threads."
       },
       "ThreadSummary": {
         "properties": {

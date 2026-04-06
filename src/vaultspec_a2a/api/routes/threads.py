@@ -33,6 +33,7 @@ from ..dependencies import (
     get_worker_spawner,
 )
 from ..schemas.rest import (
+    ArchiveThreadResponse,
     CreateThreadRequest,
     CreateThreadResponse,
     ThreadListResponse,
@@ -144,19 +145,11 @@ async def list_threads_endpoint(
     request: Request,
     offset: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    status: str | None = Query(default=None),
+    status: ThreadStatus | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
 ) -> ThreadListResponse:
     """List orchestration threads with pagination and optional status filter."""
-    status_filter: ThreadStatus | None = None
-    if status is not None:
-        try:
-            status_filter = ThreadStatus(status)
-        except ValueError:
-            raise HTTPException(
-                status_code=422,
-                detail=f"Invalid status filter: {status!r}",
-            ) from None
+    status_filter = status
     result = await list_threads_service(
         db,
         status_filter=status_filter,
@@ -227,15 +220,19 @@ async def delete_thread_endpoint(
 # ---------------------------------------------------------------------------
 
 
-@router.post("/threads/{thread_id}/archive", status_code=200)
+@router.post(
+    "/threads/{thread_id}/archive",
+    response_model=ArchiveThreadResponse,
+    status_code=200,
+)
 async def archive_thread_endpoint(
     thread_id: str,
     db: AsyncSession = Depends(get_db),
-) -> dict[str, str]:
+) -> ArchiveThreadResponse:
     """Transition a thread to ARCHIVED status."""
     result = await archive_thread(db, thread_id)
     if result.not_found:
         raise HTTPException(status_code=404, detail="Thread not found")
     if not result.archived:
         raise HTTPException(status_code=409, detail=result.error_detail)
-    return {"thread_id": thread_id, "status": ThreadStatus.ARCHIVED}
+    return ArchiveThreadResponse(thread_id=thread_id, status=ThreadStatus.ARCHIVED)

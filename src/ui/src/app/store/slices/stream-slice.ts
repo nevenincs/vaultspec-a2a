@@ -1,7 +1,13 @@
 import type { StateCreator } from 'zustand';
 import type { StreamEvent } from '../../data/types';
-import type { components } from '../../data/wire-types';
-type ServerEvent = components['schemas']['ServerEvent'];
+import type {
+  ServerEvent,
+  ToolCallContentText,
+  ToolCallContentDiff,
+  ToolCallContentTerminal,
+  PlanEntry as WirePlanEntry,
+} from '../../data/ws-types';
+type WsToolCallContent = ToolCallContentText | ToolCallContentDiff | ToolCallContentTerminal;
 import { mapToolKind, mapToolCallStatus } from '../../api/mappers';
 import { wsClient } from '../../api/websocket-client';
 import type { AppStore } from '../app-store';
@@ -18,7 +24,7 @@ export interface StreamSlice {
 
   handleWireEvent: (threadId: string, event: ServerEvent) => void;
   updateAgentDisplayNames: (
-    agents: Array<{ agent_id: string; display_name: string }>,
+    agents: Array<{ agent_id: string; display_name?: string }>,
   ) => void;
   hydrateThreadEvents: (
     threadId: string,
@@ -39,7 +45,7 @@ export const createStreamSlice: StateCreator<
   _agentDisplayNames: {},
 
   handleWireEvent: (threadId, event) => {
-    const resolveAgentName = (agentId: string | null): string => {
+    const resolveAgentName = (agentId: string | null | undefined): string => {
       const id = agentId ?? '';
       return get()._agentDisplayNames[id] || id;
     };
@@ -52,7 +58,7 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'agent_message') {
                 entry.content += event.content;
@@ -96,7 +102,7 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'thought') {
                 entry.content += event.content;
@@ -133,8 +139,9 @@ export const createStreamSlice: StateCreator<
 
       case 'tool_call_start': {
         const loc = event.locations?.[0];
-        const textC = event.content?.find((c) => c.content_type === 'text');
-        const diffC = event.content?.find((c) => c.content_type === 'diff');
+        const textC = event.content?.find((c: WsToolCallContent) => c.content_type === 'text');
+        const diffC = event.content?.find((c: WsToolCallContent) => c.content_type === 'diff');
+        const termC = event.content?.find((c: WsToolCallContent) => c.content_type === 'terminal');
         set(
           (draft) => {
             if (!draft.streamEvents[threadId]) {
@@ -153,7 +160,7 @@ export const createStreamSlice: StateCreator<
               tool_call_id: event.tool_call_id,
               tool_name: event.title,
               tool_kind: mapToolKind(event.kind),
-              status: mapToolCallStatus(event.status),
+              status: mapToolCallStatus(event.status ?? 'pending'),
               location: loc
                 ? { file: loc.path, line: loc.line ?? undefined }
                 : undefined,
@@ -162,6 +169,8 @@ export const createStreamSlice: StateCreator<
                 diffC?.content_type === 'diff'
                   ? { old_content: diffC.old_text ?? '', new_content: diffC.new_text }
                   : undefined,
+              diff_path: diffC?.content_type === 'diff' ? diffC.path : undefined,
+              terminal_id: termC?.content_type === 'terminal' ? termC.terminal_id : undefined,
             });
           },
           false,
@@ -176,22 +185,29 @@ export const createStreamSlice: StateCreator<
           set(
             (draft) => {
               const arr = draft.streamEvents[threadId];
-              if (!arr) return;
+              if (!arr || existing.idx >= arr.length) return;
               const entry = arr[existing.idx];
               if (entry && entry.type === 'tool_call') {
                 if (event.status) entry.status = mapToolCallStatus(event.status);
                 if (event.title) entry.tool_name = event.title;
                 if (event.kind) entry.tool_kind = mapToolKind(event.kind);
+                if (event.locations?.[0]) {
+                  const loc = event.locations[0];
+                  entry.location = { file: loc.path, line: loc.line ?? undefined };
+                }
                 if (event.content) {
-                  const t = event.content.find((c) => c.content_type === 'text');
-                  const d = event.content.find((c) => c.content_type === 'diff');
+                  const t = event.content.find((c: WsToolCallContent) => c.content_type === 'text');
+                  const d = event.content.find((c: WsToolCallContent) => c.content_type === 'diff');
+                  const term = event.content.find((c: WsToolCallContent) => c.content_type === 'terminal');
                   if (t?.content_type === 'text') entry.output = t.text;
                   if (d?.content_type === 'diff') {
                     entry.diff = {
                       old_content: d.old_text ?? '',
                       new_content: d.new_text,
                     };
+                    entry.diff_path = d.path;
                   }
+                  if (term?.content_type === 'terminal') entry.terminal_id = term.terminal_id;
                 }
               }
             },
@@ -212,11 +228,11 @@ export const createStreamSlice: StateCreator<
             const existingIdx = arr.findIndex(
               (e) => e.type === 'artifact' && e.id === event.artifact_id,
             );
-            if (existingIdx >= 0 && event.append) {
+            if (existingIdx >= 0 && (event.append ?? false)) {
               const entry = arr[existingIdx];
               if (entry.type === 'artifact') {
                 entry.content += event.content;
-                entry.complete = event.last_chunk;
+                entry.complete = event.last_chunk ?? false;
               }
             } else {
               arr.push({
@@ -229,7 +245,7 @@ export const createStreamSlice: StateCreator<
                 artifact_id: event.artifact_id,
                 filename: event.filename,
                 content: event.content,
-                complete: event.last_chunk,
+                complete: event.last_chunk ?? false,
               });
             }
           },
@@ -252,11 +268,11 @@ export const createStreamSlice: StateCreator<
               thread_id: threadId,
               agent_id: event.agent_id ?? '',
               agent_name: resolveAgentName(event.agent_id),
-              entries: event.entries.map((e, i) => ({
+              entries: event.entries.map((e: WirePlanEntry, i: number) => ({
                 id: `plan-entry-${i}`,
                 content: e.content,
-                status: e.status,
-                priority: e.priority,
+                status: e.status ?? '',
+                priority: e.priority ?? '',
               })),
             });
           },
@@ -302,6 +318,7 @@ export const createStreamSlice: StateCreator<
               message: event.message,
               code: event.code,
               agent_id: event.agent_id ?? undefined,
+              recoverable: event.recoverable,
             });
           },
           false,

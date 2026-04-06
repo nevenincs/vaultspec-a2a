@@ -1,0 +1,1283 @@
+{
+  "$defs": {
+    "AgentLifecycleState": {
+      "description": "Observable agent states exposed to the frontend.\n\nMaps to ADR-003 MCP states. Distinct from ``AgentState`` which tracks\ninternal process lifecycle (init/ready/running/error/done).",
+      "enum": [
+        "submitted",
+        "idle",
+        "working",
+        "input_required",
+        "auth_required",
+        "completed",
+        "failed",
+        "cancelled"
+      ],
+      "title": "AgentLifecycleState",
+      "type": "string"
+    },
+    "AgentStatusEvent": {
+      "description": "Agent lifecycle state transition.",
+      "properties": {
+        "type": {
+          "const": "agent_status",
+          "default": "agent_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentLifecycleState"
+        },
+        "node_name": {
+          "title": "Node Name",
+          "type": "string"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "state",
+        "node_name"
+      ],
+      "title": "AgentStatusEvent",
+      "type": "object"
+    },
+    "AgentSummary": {
+      "description": "Lightweight agent descriptor for team status broadcasts.",
+      "properties": {
+        "agent_id": {
+          "title": "Agent Id",
+          "type": "string"
+        },
+        "node_name": {
+          "title": "Node Name",
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/$defs/AgentLifecycleState"
+        },
+        "provider": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Provider"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Model"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "role": {
+          "default": "",
+          "title": "Role",
+          "type": "string"
+        },
+        "display_name": {
+          "default": "",
+          "title": "Display Name",
+          "type": "string"
+        },
+        "description": {
+          "default": "",
+          "title": "Description",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent_id",
+        "node_name",
+        "state"
+      ],
+      "title": "AgentSummary",
+      "type": "object"
+    },
+    "ArtifactUpdateEvent": {
+      "description": "Streaming file artifact content.",
+      "properties": {
+        "type": {
+          "const": "artifact_update",
+          "default": "artifact_update",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "artifact_id": {
+          "title": "Artifact Id",
+          "type": "string"
+        },
+        "filename": {
+          "title": "Filename",
+          "type": "string"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "append": {
+          "default": false,
+          "title": "Append",
+          "type": "boolean"
+        },
+        "last_chunk": {
+          "default": false,
+          "title": "Last Chunk",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "artifact_id",
+        "filename",
+        "content"
+      ],
+      "title": "ArtifactUpdateEvent",
+      "type": "object"
+    },
+    "ConnectedEvent": {
+      "description": "Sent once on WebSocket open; connection-scoped, not thread-scoped.",
+      "properties": {
+        "type": {
+          "const": "connected",
+          "default": "connected",
+          "title": "Type",
+          "type": "string"
+        },
+        "client_id": {
+          "title": "Client Id",
+          "type": "string"
+        },
+        "server_version": {
+          "title": "Server Version",
+          "type": "string"
+        },
+        "active_threads": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Threads",
+          "type": "array"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        }
+      },
+      "required": [
+        "client_id",
+        "server_version"
+      ],
+      "title": "ConnectedEvent",
+      "type": "object"
+    },
+    "ErrorEvent": {
+      "description": "Server-side error notification.",
+      "properties": {
+        "type": {
+          "const": "error",
+          "default": "error",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "code": {
+          "title": "Code",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "recoverable": {
+          "default": true,
+          "title": "Recoverable",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "code",
+        "message"
+      ],
+      "title": "ErrorEvent",
+      "type": "object"
+    },
+    "HeartbeatEvent": {
+      "description": "Periodic keepalive; connection-scoped, not thread-scoped.",
+      "properties": {
+        "type": {
+          "const": "heartbeat",
+          "default": "heartbeat",
+          "title": "Type",
+          "type": "string"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "server_uptime_seconds": {
+          "title": "Server Uptime Seconds",
+          "type": "number"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        }
+      },
+      "required": [
+        "timestamp",
+        "server_uptime_seconds"
+      ],
+      "title": "HeartbeatEvent",
+      "type": "object"
+    },
+    "MessageChunkEvent": {
+      "description": "Streaming agent message token.",
+      "properties": {
+        "type": {
+          "const": "message_chunk",
+          "default": "message_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        },
+        "finish_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Finish Reason"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "content",
+        "message_id"
+      ],
+      "title": "MessageChunkEvent",
+      "type": "object"
+    },
+    "Model": {
+      "description": "LLM capability levels.\n\nAbstracts specific version strings to reduce maintenance burden.",
+      "enum": [
+        "low",
+        "mid",
+        "high",
+        "max"
+      ],
+      "title": "Model",
+      "type": "string"
+    },
+    "PermissionOption": {
+      "description": "A selectable option in a permission request.",
+      "properties": {
+        "option_id": {
+          "title": "Option Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/PermissionOptionKind"
+        }
+      },
+      "required": [
+        "option_id",
+        "name",
+        "kind"
+      ],
+      "title": "PermissionOption",
+      "type": "object"
+    },
+    "PermissionOptionKind": {
+      "description": "User permission response options (mirrors ACP PermissionOption.kind).\n\nValues:\n    ALLOW_ONCE: Allow the tool call this time only.\n    ALLOW_ALWAYS: Allow all future invocations of this tool without prompting.\n    REJECT_ONCE: Deny the tool call this time only.\n    REJECT_ALWAYS: Deny all future invocations of this tool without prompting.",
+      "enum": [
+        "allow_once",
+        "allow_always",
+        "reject_once",
+        "reject_always"
+      ],
+      "title": "PermissionOptionKind",
+      "type": "string"
+    },
+    "PermissionRequestEvent": {
+      "description": "Agent is requesting user permission to proceed.",
+      "properties": {
+        "type": {
+          "const": "permission_request",
+          "default": "permission_request",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "request_id": {
+          "title": "Request Id",
+          "type": "string"
+        },
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "options": {
+          "items": {
+            "$ref": "#/$defs/PermissionOption"
+          },
+          "title": "Options",
+          "type": "array"
+        },
+        "tool_call": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Call"
+        },
+        "tool_kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "request_id",
+        "description",
+        "options"
+      ],
+      "title": "PermissionRequestEvent",
+      "type": "object"
+    },
+    "PlanEntry": {
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "status": {
+          "default": "pending",
+          "title": "Status",
+          "type": "string"
+        },
+        "priority": {
+          "default": "medium",
+          "title": "Priority",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content"
+      ],
+      "title": "PlanEntry",
+      "type": "object"
+    },
+    "PlanUpdateEvent": {
+      "description": "Full plan state replacement.",
+      "properties": {
+        "type": {
+          "const": "plan_update",
+          "default": "plan_update",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "entries": {
+          "items": {
+            "$ref": "#/$defs/PlanEntry"
+          },
+          "title": "Entries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "entries"
+      ],
+      "title": "PlanUpdateEvent",
+      "type": "object"
+    },
+    "Provider": {
+      "description": "Supported LLM providers.",
+      "enum": [
+        "claude",
+        "gemini",
+        "mock",
+        "openai",
+        "zhipu"
+      ],
+      "title": "Provider",
+      "type": "string"
+    },
+    "TeamStatusEvent": {
+      "description": "Team-wide agent status broadcast.",
+      "properties": {
+        "type": {
+          "const": "team_status",
+          "default": "team_status",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "agents": {
+          "items": {
+            "$ref": "#/$defs/AgentSummary"
+          },
+          "title": "Agents",
+          "type": "array"
+        },
+        "active_thread_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Active Thread Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "agents"
+      ],
+      "title": "TeamStatusEvent",
+      "type": "object"
+    },
+    "ThoughtChunkEvent": {
+      "description": "Streaming agent thought/reasoning token.",
+      "properties": {
+        "type": {
+          "const": "thought_chunk",
+          "default": "thought_chunk",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "message_id": {
+          "title": "Message Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "content",
+        "message_id"
+      ],
+      "title": "ThoughtChunkEvent",
+      "type": "object"
+    },
+    "ToolCallContentDiff": {
+      "description": "Diff content block within a tool call.",
+      "properties": {
+        "content_type": {
+          "const": "diff",
+          "default": "diff",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "old_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Old Text"
+        },
+        "new_text": {
+          "title": "New Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "new_text"
+      ],
+      "title": "ToolCallContentDiff",
+      "type": "object"
+    },
+    "ToolCallContentTerminal": {
+      "description": "Terminal output content block within a tool call.",
+      "properties": {
+        "content_type": {
+          "const": "terminal",
+          "default": "terminal",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "terminal_id": {
+          "title": "Terminal Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "terminal_id"
+      ],
+      "title": "ToolCallContentTerminal",
+      "type": "object"
+    },
+    "ToolCallContentText": {
+      "description": "Plain text content block within a tool call.",
+      "properties": {
+        "content_type": {
+          "const": "text",
+          "default": "text",
+          "title": "Content Type",
+          "type": "string"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ToolCallContentText",
+      "type": "object"
+    },
+    "ToolCallLocation": {
+      "description": "File location associated with a tool call.",
+      "properties": {
+        "path": {
+          "title": "Path",
+          "type": "string"
+        },
+        "line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Line"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "title": "ToolCallLocation",
+      "type": "object"
+    },
+    "ToolCallStartEvent": {
+      "description": "A new tool invocation has begun.",
+      "properties": {
+        "type": {
+          "const": "tool_call_start",
+          "default": "tool_call_start",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "tool_call_id": {
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        },
+        "kind": {
+          "$ref": "#/$defs/ToolKind"
+        },
+        "status": {
+          "$ref": "#/$defs/ToolCallStatus",
+          "default": "pending"
+        },
+        "locations": {
+          "items": {
+            "$ref": "#/$defs/ToolCallLocation"
+          },
+          "title": "Locations",
+          "type": "array"
+        },
+        "content": {
+          "items": {
+            "discriminator": {
+              "mapping": {
+                "diff": "#/$defs/ToolCallContentDiff",
+                "terminal": "#/$defs/ToolCallContentTerminal",
+                "text": "#/$defs/ToolCallContentText"
+              },
+              "propertyName": "content_type"
+            },
+            "oneOf": [
+              {
+                "$ref": "#/$defs/ToolCallContentText"
+              },
+              {
+                "$ref": "#/$defs/ToolCallContentDiff"
+              },
+              {
+                "$ref": "#/$defs/ToolCallContentTerminal"
+              }
+            ]
+          },
+          "title": "Content",
+          "type": "array"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "tool_call_id",
+        "title",
+        "kind"
+      ],
+      "title": "ToolCallStartEvent",
+      "type": "object"
+    },
+    "ToolCallStatus": {
+      "description": "Lifecycle states for a single tool invocation.",
+      "enum": [
+        "pending",
+        "in_progress",
+        "completed",
+        "failed"
+      ],
+      "title": "ToolCallStatus",
+      "type": "string"
+    },
+    "ToolCallUpdateEvent": {
+      "description": "Incremental update to an in-progress tool call (merge semantics).",
+      "properties": {
+        "type": {
+          "const": "tool_call_update",
+          "default": "tool_call_update",
+          "title": "Type",
+          "type": "string"
+        },
+        "thread_id": {
+          "title": "Thread Id",
+          "type": "string"
+        },
+        "agent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Agent Id"
+        },
+        "timestamp": {
+          "format": "date-time",
+          "title": "Timestamp",
+          "type": "string"
+        },
+        "sequence": {
+          "title": "Sequence",
+          "type": "integer"
+        },
+        "metadata": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Metadata"
+        },
+        "tool_call_id": {
+          "title": "Tool Call Id",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "kind": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "status": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ToolCallStatus"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "locations": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ToolCallLocation"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Locations"
+        },
+        "content": {
+          "anyOf": [
+            {
+              "items": {
+                "discriminator": {
+                  "mapping": {
+                    "diff": "#/$defs/ToolCallContentDiff",
+                    "terminal": "#/$defs/ToolCallContentTerminal",
+                    "text": "#/$defs/ToolCallContentText"
+                  },
+                  "propertyName": "content_type"
+                },
+                "oneOf": [
+                  {
+                    "$ref": "#/$defs/ToolCallContentText"
+                  },
+                  {
+                    "$ref": "#/$defs/ToolCallContentDiff"
+                  },
+                  {
+                    "$ref": "#/$defs/ToolCallContentTerminal"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Content"
+        }
+      },
+      "required": [
+        "thread_id",
+        "timestamp",
+        "sequence",
+        "tool_call_id"
+      ],
+      "title": "ToolCallUpdateEvent",
+      "type": "object"
+    },
+    "ToolKind": {
+      "description": "ACP tool categories (mirrors agentclientprotocol.com schema).",
+      "enum": [
+        "read",
+        "edit",
+        "delete",
+        "move",
+        "search",
+        "execute",
+        "think",
+        "fetch",
+        "switch_mode",
+        "other"
+      ],
+      "title": "ToolKind",
+      "type": "string"
+    }
+  },
+  "discriminator": {
+    "mapping": {
+      "agent_status": "#/$defs/AgentStatusEvent",
+      "artifact_update": "#/$defs/ArtifactUpdateEvent",
+      "connected": "#/$defs/ConnectedEvent",
+      "error": "#/$defs/ErrorEvent",
+      "heartbeat": "#/$defs/HeartbeatEvent",
+      "message_chunk": "#/$defs/MessageChunkEvent",
+      "permission_request": "#/$defs/PermissionRequestEvent",
+      "plan_update": "#/$defs/PlanUpdateEvent",
+      "team_status": "#/$defs/TeamStatusEvent",
+      "thought_chunk": "#/$defs/ThoughtChunkEvent",
+      "tool_call_start": "#/$defs/ToolCallStartEvent",
+      "tool_call_update": "#/$defs/ToolCallUpdateEvent"
+    },
+    "propertyName": "type"
+  },
+  "oneOf": [
+    {
+      "$ref": "#/$defs/AgentStatusEvent"
+    },
+    {
+      "$ref": "#/$defs/MessageChunkEvent"
+    },
+    {
+      "$ref": "#/$defs/ThoughtChunkEvent"
+    },
+    {
+      "$ref": "#/$defs/ToolCallStartEvent"
+    },
+    {
+      "$ref": "#/$defs/ToolCallUpdateEvent"
+    },
+    {
+      "$ref": "#/$defs/PermissionRequestEvent"
+    },
+    {
+      "$ref": "#/$defs/ArtifactUpdateEvent"
+    },
+    {
+      "$ref": "#/$defs/PlanUpdateEvent"
+    },
+    {
+      "$ref": "#/$defs/TeamStatusEvent"
+    },
+    {
+      "$ref": "#/$defs/ErrorEvent"
+    },
+    {
+      "$ref": "#/$defs/ConnectedEvent"
+    },
+    {
+      "$ref": "#/$defs/HeartbeatEvent"
+    }
+  ]
+}

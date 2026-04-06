@@ -126,7 +126,7 @@ export function useThreadStateQuery(threadId: string | null) {
       // Step 2: Hydrate plan entries
       if (snapshot.plan?.length) {
         events.push({
-          id: `plan-hydrated`,
+          id: `plan-hydrated-${threadId}-${snapshot.last_sequence}`,
           type: 'plan_update',
           timestamp: '',
           thread_id: threadId,
@@ -144,34 +144,42 @@ export function useThreadStateQuery(threadId: string | null) {
       // Hydrate Zustand store — also updates WS lastSequence
       appStore.getState().hydrateThreadEvents(threadId, events, snapshot.last_sequence);
 
-      // Step 1: Hydrate pending permissions
-      // _PermissionSnapshot lacks agent_id — best-effort: pick the agent in
-      // input_required state (permission requests pause the agent).
-      if (snapshot.pending_permissions?.length) {
-        const waitingAgent = (snapshot.agents ?? []).find(
-          (a) => a.state === 'input_required',
-        );
-        const permAgentId = waitingAgent?.agent_id ?? '';
-        const permAgentName = waitingAgent
-          ? (agentNames[waitingAgent.agent_id] || waitingAgent.agent_id)
-          : '';
-        const mapped: PermissionRequest[] = snapshot.pending_permissions.map(
-          (perm: _PermissionSnapshot) => ({
-            id: perm.request_id,
-            thread_id: threadId,
-            agent_id: permAgentId,
-            agent_name: permAgentName,
-            tool_name: perm.tool_call ?? '',
-            tool_kind: 'other' as const,
-            message: perm.description,
-            options: perm.options.map((o) => ({
-              id: o.option_id,
-              kind: o.kind,
-              label: o.name,
-            })),
-          }),
-        );
-        appStore.getState().setPermissionQueue(mapped);
+      // Step 1: Hydrate pending permissions — merge by thread_id
+      // Remove stale entries for this thread, then add the snapshot's
+      // permissions. This preserves permissions from other open threads.
+      {
+        const currentQueue = appStore.getState().permissionQueue;
+        const otherThreads = currentQueue.filter((p) => p.thread_id !== threadId);
+
+        if (snapshot.pending_permissions?.length) {
+          const waitingAgent = (snapshot.agents ?? []).find(
+            (a) => a.state === 'input_required',
+          );
+          const permAgentId = waitingAgent?.agent_id ?? '';
+          const permAgentName = waitingAgent
+            ? (agentNames[waitingAgent.agent_id] || waitingAgent.agent_id)
+            : '';
+          const mapped: PermissionRequest[] = snapshot.pending_permissions.map(
+            (perm: _PermissionSnapshot) => ({
+              id: perm.request_id,
+              thread_id: threadId,
+              agent_id: permAgentId,
+              agent_name: permAgentName,
+              tool_name: perm.tool_call ?? '',
+              tool_kind: 'other' as const,
+              message: perm.description,
+              options: perm.options.map((o) => ({
+                id: o.option_id,
+                kind: o.kind,
+                label: o.name,
+              })),
+            }),
+          );
+          appStore.getState().setPermissionQueue([...otherThreads, ...mapped]);
+        } else {
+          // No permissions for this thread — clear stale entries only
+          appStore.getState().setPermissionQueue(otherThreads);
+        }
       }
 
       // Step 6: Update thread list cache with snapshot status

@@ -193,7 +193,14 @@ async def list_threads_service(
                         checkpoint_tuple,
                         thread_id=t.id,
                     ).checkpoint_id
-            except (TimeoutError, Exception):
+            except TimeoutError:
+                checkpoint_unverified = True
+            except Exception:
+                logger.warning(
+                    "Checkpoint probe failed for thread %s",
+                    t.id,
+                    exc_info=True,
+                )
                 checkpoint_unverified = True
         if checkpoint_unverified:
             repair_status = RepairStatus.CHECKPOINT_UNAVAILABLE.value

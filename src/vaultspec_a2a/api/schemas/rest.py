@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...graph.enums import Model, Provider
-from ...thread.enums import PermissionRequestStatus
+from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from .enums import AgentLifecycleState, PermissionOptionKind
 
 __all__ = [
@@ -75,7 +75,7 @@ class ArchiveThreadResponse(BaseModel):
     """Response after archiving a thread."""
 
     thread_id: str
-    status: str
+    status: ThreadStatus
 
 
 class CancelThreadResponse(BaseModel):
@@ -116,7 +116,7 @@ class ThreadSummary(BaseModel):
 
     thread_id: str
     title: str | None = None
-    status: str
+    status: ThreadStatus
     repair_status: str | None = None
     execution_readiness: str | None = None
     approval_status: str | None = None

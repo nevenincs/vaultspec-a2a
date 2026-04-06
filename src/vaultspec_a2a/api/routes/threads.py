@@ -161,7 +161,7 @@ async def list_threads_endpoint(
         ThreadSummary(
             thread_id=t.thread_id,
             title=t.title,
-            status=t.status,
+            status=ThreadStatus(t.status),
             repair_status=t.repair_status,
             execution_readiness=t.execution_readiness,
             approval_status=t.approval_status,

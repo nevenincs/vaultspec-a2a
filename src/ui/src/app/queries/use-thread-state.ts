@@ -5,7 +5,7 @@ import { mapToolKind, mapToolCallStatus } from '../api/mappers';
 import { appStore } from '../store/app-store';
 import { queryClient } from './query-client';
 import { queryKeys } from './query-keys';
-import type { StreamEvent, ThreadSummary, ThreadStatus, PermissionRequest, PlanEntryStatus, PlanEntryPriority } from '../data/types';
+import type { StreamEvent, ThreadSummary, PermissionRequest, PlanEntryStatus, PlanEntryPriority } from '../data/types';
 import type { components } from '../data/wire-types';
 
 type _PermissionSnapshot = components['schemas']['_PermissionSnapshot'];
@@ -186,7 +186,7 @@ export function useThreadStateQuery(threadId: string | null) {
       queryClient.setQueryData<ThreadSummary[]>(queryKeys.threads.list(), (prev) => {
         if (!prev) return prev;
         return prev.map((t) =>
-          t.thread_id === threadId ? { ...t, status: snapshot.status as ThreadStatus } : t,
+          t.thread_id === threadId ? { ...t, status: snapshot.status } : t,
         );
       });
 

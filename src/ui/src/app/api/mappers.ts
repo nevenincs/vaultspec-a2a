@@ -20,7 +20,6 @@ type WireToolKind = components['schemas']['ToolKind'];
 
 import type {
   ThreadSummary,
-  ThreadStatus,
   RepairStatus,
   ApprovalStatus,
   AgentSummary,
@@ -36,7 +35,7 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
   return {
     thread_id: wire.thread_id,
     title: wire.title ?? 'Untitled',
-    status: wire.status as ThreadStatus,
+    status: wire.status,
     agent_state: wire.agent_state ?? 'submitted',
     team_preset: wire.team_preset ?? null,
     created_at: wire.created_at,

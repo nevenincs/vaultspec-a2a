@@ -438,8 +438,7 @@ export interface components {
         ArchiveThreadResponse: {
             /** Thread Id */
             thread_id: string;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ThreadStatus"];
         };
         /**
          * ArtifactSnapshot
@@ -812,8 +811,7 @@ export interface components {
         ThreadStateSnapshot: {
             /** Thread Id */
             thread_id: string;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ThreadStatus"];
             /** Messages */
             messages?: components["schemas"]["MessageSnapshot"][];
             /** Tool Calls */
@@ -901,8 +899,7 @@ export interface components {
             thread_id: string;
             /** Title */
             title?: string | null;
-            /** Status */
-            status: string;
+            status: components["schemas"]["ThreadStatus"];
             /** Repair Status */
             repair_status?: string | null;
             /** Execution Readiness */

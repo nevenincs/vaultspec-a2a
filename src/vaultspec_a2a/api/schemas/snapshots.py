@@ -10,6 +10,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from ...graph.enums import Model, Provider
+from ...thread.enums import ThreadStatus
 from .enums import (
     AgentLifecycleState,
     PermissionOptionKind,
@@ -110,7 +111,7 @@ class ThreadStateSnapshot(BaseModel):
     """
 
     thread_id: str
-    status: str
+    status: ThreadStatus
     messages: list[MessageSnapshot] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     pending_permissions: list[_PermissionSnapshot] = Field(default_factory=list)

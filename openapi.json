@@ -893,8 +893,7 @@
             "title": "Thread Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/ThreadStatus"
           }
         },
         "type": "object",
@@ -1660,8 +1659,7 @@
             "title": "Thread Id"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/ThreadStatus"
           },
           "messages": {
             "items": {
@@ -1936,8 +1934,7 @@
             "title": "Title"
           },
           "status": {
-            "type": "string",
-            "title": "Status"
+            "$ref": "#/components/schemas/ThreadStatus"
           },
           "repair_status": {
             "anyOf": [

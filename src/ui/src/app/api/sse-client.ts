@@ -89,7 +89,9 @@ export class SSEClient {
     };
 
     // The SSE endpoint uses named events (event: <type>), so we
-    // listen for specific event types rather than the generic onmessage.
+    // Listen for thread-scoped event types. The SSE endpoint does NOT emit
+    // `connected` (that's WS-only — connection state is handled by onopen).
+    // `heartbeat` and `thread_terminal` have dedicated listeners below.
     const knownEvents = [
       'agent_status',
       'message_chunk',

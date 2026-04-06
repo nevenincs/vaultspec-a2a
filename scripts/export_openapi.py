@@ -13,7 +13,12 @@ ROOT = Path(__file__).resolve().parent.parent
 
 
 def main() -> None:
-    from vaultspec_a2a.api.app import create_app
+    try:
+        from vaultspec_a2a.api.app import create_app
+    except ImportError as exc:
+        print(f"Failed to import app factory: {exc}", file=sys.stderr)
+        print("Ensure dependencies are installed: uv sync", file=sys.stderr)
+        return 1
 
     app = create_app()
     spec = app.openapi()

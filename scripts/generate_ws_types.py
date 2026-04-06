@@ -50,6 +50,14 @@ def resolve_type(prop: dict, defs: dict) -> str:
     if "enum" in prop:
         return " | ".join(f'"{v}"' for v in prop["enum"])
 
+    # allOf -> intersection (Pydantic uses for single-item inheritance)
+    if "allOf" in prop:
+        types = [resolve_type(v, defs) for v in prop["allOf"]]
+        # Single-item allOf is just a $ref wrapper
+        if len(types) == 1:
+            return types[0]
+        return " & ".join(types)
+
     # anyOf -> nullable pattern or union
     if "anyOf" in prop:
         variants = prop["anyOf"]

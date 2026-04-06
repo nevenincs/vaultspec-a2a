@@ -17,10 +17,15 @@ SCHEMAS_DIR = ROOT / "schemas"
 
 
 def main() -> None:
-    from pydantic import TypeAdapter
+    try:
+        from pydantic import TypeAdapter
 
-    from vaultspec_a2a.api.schemas.commands import ClientMessage
-    from vaultspec_a2a.api.schemas.events import ServerEvent
+        from vaultspec_a2a.api.schemas.commands import ClientMessage
+        from vaultspec_a2a.api.schemas.events import ServerEvent
+    except ImportError as exc:
+        print(f"Failed to import schemas: {exc}", file=sys.stderr)
+        print("Ensure dependencies are installed: uv sync", file=sys.stderr)
+        return 1
 
     SCHEMAS_DIR.mkdir(exist_ok=True)
 

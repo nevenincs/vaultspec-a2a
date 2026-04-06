@@ -20,6 +20,9 @@ type WireToolKind = components['schemas']['ToolKind'];
 
 import type {
   ThreadSummary,
+  ThreadStatus,
+  RepairStatus,
+  ApprovalStatus,
   AgentSummary,
   TeamPreset,
   PermissionRequest,
@@ -31,7 +34,7 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
   return {
     thread_id: wire.thread_id,
     title: wire.title ?? 'Untitled',
-    status: wire.status,
+    status: wire.status as ThreadStatus,
     agent_state: wire.agent_state ?? 'submitted',
     team_preset: wire.team_preset ?? null,
     created_at: wire.created_at,
@@ -40,9 +43,9 @@ export function mapThreadSummary(wire: WireThreadSummary): ThreadSummary {
     feature_tag: wire.feature_tag ?? null,
     source_branch: wire.source_branch ?? null,
     callee: wire.callee ?? null,
-    repair_status: wire.repair_status ?? null,
-    execution_readiness: wire.execution_readiness ?? null,
-    approval_status: wire.approval_status ?? null,
+    repair_status: (wire.repair_status ?? null) as RepairStatus | null,
+    execution_readiness: (wire.execution_readiness ?? null) as RepairStatus | null,
+    approval_status: (wire.approval_status ?? null) as ApprovalStatus | null,
     approval_request_id: wire.approval_request_id ?? null,
   };
 }

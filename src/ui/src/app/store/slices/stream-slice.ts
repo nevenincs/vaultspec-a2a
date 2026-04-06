@@ -1,5 +1,5 @@
 import type { StateCreator } from 'zustand';
-import type { StreamEvent } from '../../data/types';
+import type { StreamEvent, PlanEntryStatus, PlanEntryPriority } from '../../data/types';
 import type {
   ServerEvent,
   ToolCallContentText,
@@ -271,8 +271,8 @@ export const createStreamSlice: StateCreator<
               entries: event.entries.map((e: WirePlanEntry, i: number) => ({
                 id: `plan-entry-${i}`,
                 content: e.content,
-                status: e.status ?? '',
-                priority: e.priority ?? '',
+                status: (e.status ?? 'pending') as PlanEntryStatus,
+                priority: (e.priority ?? 'medium') as PlanEntryPriority,
               })),
             });
           },

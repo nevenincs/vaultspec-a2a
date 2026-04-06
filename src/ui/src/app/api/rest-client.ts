@@ -48,8 +48,10 @@ export class RestClient {
     return this.post<CreateThreadResponse>('/api/threads', req);
   }
 
-  async listThreads(offset = 0, limit = 50): Promise<ThreadListResponse> {
-    return this.get<ThreadListResponse>(`/api/threads?offset=${offset}&limit=${limit}`);
+  async listThreads(offset = 0, limit = 50, status?: string): Promise<ThreadListResponse> {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (status) params.set('status', status);
+    return this.get<ThreadListResponse>(`/api/threads?${params.toString()}`);
   }
 
   async getThreadState(threadId: string): Promise<ThreadStateSnapshot> {
@@ -61,6 +63,23 @@ export class RestClient {
   async getThreadMetadata(threadId: string): Promise<ThreadMetadata> {
     return this.get<ThreadMetadata>(
       `/api/threads/${encodeURIComponent(threadId)}/metadata`,
+    );
+  }
+
+  async deleteThread(threadId: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}/api/threads/${encodeURIComponent(threadId)}`, {
+      method: 'DELETE',
+    });
+    if (!res.ok) {
+      const body = await res.text().catch(() => undefined);
+      throw new RestClientError(res.status, res.statusText, body);
+    }
+  }
+
+  async archiveThread(threadId: string): Promise<{ thread_id: string; status: string }> {
+    return this.post<{ thread_id: string; status: string }>(
+      `/api/threads/${encodeURIComponent(threadId)}/archive`,
+      {},
     );
   }
 

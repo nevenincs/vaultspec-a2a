@@ -18,7 +18,9 @@ type TeamStatusResponse = components['schemas']['TeamStatusResponse'];
 type TeamPresetsResponse = components['schemas']['TeamPresetsResponse'];
 type PermissionResponseRequest = components['schemas']['PermissionResponseRequest'];
 type PermissionResponseResult = components['schemas']['PermissionResponseResult'];
+type ArchiveThreadResponse = components['schemas']['ArchiveThreadResponse'];
 type CancelThreadResponse = components['schemas']['CancelThreadResponse'];
+type ThreadStatus = components['schemas']['ThreadStatus'];
 
 class RestClientError extends Error {
   constructor(
@@ -48,8 +50,10 @@ export class RestClient {
     return this.post<CreateThreadResponse>('/api/threads', req);
   }
 
-  async listThreads(offset = 0, limit = 50): Promise<ThreadListResponse> {
-    return this.get<ThreadListResponse>(`/api/threads?offset=${offset}&limit=${limit}`);
+  async listThreads(offset = 0, limit = 50, status?: ThreadStatus): Promise<ThreadListResponse> {
+    const params = new URLSearchParams({ offset: String(offset), limit: String(limit) });
+    if (status) params.set('status', status);
+    return this.get<ThreadListResponse>(`/api/threads?${params.toString()}`);
   }
 
   async getThreadState(threadId: string): Promise<ThreadStateSnapshot> {
@@ -61,6 +65,17 @@ export class RestClient {
   async getThreadMetadata(threadId: string): Promise<ThreadMetadata> {
     return this.get<ThreadMetadata>(
       `/api/threads/${encodeURIComponent(threadId)}/metadata`,
+    );
+  }
+
+  async deleteThread(threadId: string): Promise<void> {
+    await this.delete(`/api/threads/${encodeURIComponent(threadId)}`);
+  }
+
+  async archiveThread(threadId: string): Promise<ArchiveThreadResponse> {
+    return this.post<ArchiveThreadResponse>(
+      `/api/threads/${encodeURIComponent(threadId)}/archive`,
+      {},
     );
   }
 
@@ -114,6 +129,14 @@ export class RestClient {
       throw new RestClientError(res.status, res.statusText, body);
     }
     return res.json() as Promise<T>;
+  }
+
+  private async delete(path: string): Promise<void> {
+    const res = await fetch(`${this.baseUrl}${path}`, { method: 'DELETE' });
+    if (!res.ok) {
+      const body = await res.text().catch(() => undefined);
+      throw new RestClientError(res.status, res.statusText, body);
+    }
   }
 
   private async post<T>(path: string, body: unknown): Promise<T> {

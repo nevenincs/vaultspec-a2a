@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     )
 
 from ..graph.enums import PermissionOptionKind, PermissionType
+from ..streaming.types import classify_tool_kind
 from ..thread.enums import TERMINAL_STATUSES, ApprovalStatus, RepairStatus
 from ..thread.snapshots import (
     PLAN_APPROVAL_PAUSE_CAUSES,
@@ -123,6 +124,7 @@ def _permission_data_from_model(
         description=permission.description,
         options=options,
         tool_call=tool_call,
+        tool_kind=str(classify_tool_kind(tool_call)) if tool_call else None,
     )
 
 
@@ -176,6 +178,7 @@ def _permission_data_from_interrupt(
             description=f"Approval required for tool '{tool_name}'",
             options=options,
             tool_call=tool_name,
+            tool_kind=str(classify_tool_kind(tool_name)),
         )
 
     if interrupt.interrupt_type == "plan_approval_request":
@@ -206,6 +209,7 @@ def _permission_data_from_interrupt(
                 ),
             ],
             tool_call=PermissionType.PLAN_APPROVAL.value,
+            tool_kind="other",
         )
 
     return None

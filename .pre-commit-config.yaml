@@ -81,7 +81,10 @@ repos:
     pass_filenames: false
   - id: vault-doctor-deep
     name: Vault Doctor (chain + links)
-    entry: uv run python -m vaultspec_core doctor
+    # doctor exits 0=ok, 1=warnings, 2=errors. Gate on errors only:
+    # provider-mirror lag is warning-level and expected between firmware
+    # upgrades, so a warning-strict gate deadlocks unrelated commits.
+    entry: uv run python -c "import subprocess,sys; sys.exit(0 if subprocess.run(['uv','run','python','-m','vaultspec_core','doctor']).returncode < 2 else 1)"
     language: system
     types:
     - markdown

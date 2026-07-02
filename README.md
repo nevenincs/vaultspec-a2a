@@ -1,8 +1,12 @@
 # Vaultspec A2A Agent Orchestration
 
-A2A orchestration backend for Vaultspec's custom agentic coding workflow.
-Provides team-based and subagent-based task dispatch across Claude, Gemini, and
-Codex agents via a gateway/worker architecture.
+[![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
+[![Status: Early](https://img.shields.io/badge/status-early-orange.svg)](#status)
+
+A2A orchestration backend for the
+[vaultspec](https://github.com/nevenincs/vaultspec-core) agentic coding
+workflow. Provides team-based and subagent-based task dispatch across Claude,
+Gemini, and Codex agents via a gateway/worker architecture.
 
 Two modes:
 
@@ -12,6 +16,11 @@ Two modes:
 - **Subagent mode:** A single agent performs a task on behalf of a client
   application (Claude Code, Gemini CLI, Antigravity). Preferred for
   non-parallelized, sequential handoffs.
+
+## Status
+
+Early and still taking shape: interfaces, presets, and deployment surfaces
+change without notice. The rest of this README is developer-facing.
 
 ## Quickstart
 
@@ -351,3 +360,16 @@ Key ADRs:
 - Knowledge base: `knowledge/`
 - Environment variables: `.env.example`
 - IDE setup (MCP configuration for Cursor/Claude/Windsurf): `.vault/reference/2026-03-31-ide-mcp-server-setup-reference.md`
+
+## The vaultspec family
+
+vaultspec-a2a is the orchestration layer of the vaultspec family - a set of
+tools built around one shared vault:
+
+- [vaultspec-core](https://github.com/nevenincs/vaultspec-core) - the hub: the
+  `Research → Decide → Plan → Code → Review` pipeline, the git-tracked
+  Markdown vault, and the CLI that drives them.
+- [vaultspec-rag](https://github.com/nevenincs/vaultspec-rag) - semantic
+  search across the vault and the codebase.
+- vaultspec-dashboard - a visual companion for vault health, decision graphs,
+  and search activity. In development.

@@ -6,7 +6,6 @@ Creates the ASGI application with:
 - REST router from per-resource route modules
 - Internal router from ``internal.py`` (worker relay)
 - WebSocket route via ``ConnectionManager``
-- StaticFiles mount for React SPA build at ``src/ui/build/`` (ADR-007/018)
 
 The gateway NO LONGER runs agent execution locally.  All graph
 compilation and ``aggregator.ingest()`` calls are dispatched to the
@@ -27,7 +26,6 @@ import httpx
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.staticfiles import StaticFiles
 from opentelemetry import metrics, trace
 from starlette.websockets import WebSocket
 
@@ -305,19 +303,6 @@ def create_app(
         cm: ConnectionManager = app.state.connection_manager
         client_id = await cm.connect(websocket)
         await cm.listen(client_id)
-
-    if settings.ui_build_dir.is_dir():
-        app.mount(
-            "/",
-            StaticFiles(directory=str(settings.ui_build_dir), html=True),
-            name="ui",
-        )
-        logger.info("Mounted React SPA from %s", settings.ui_build_dir)
-    else:
-        logger.warning(
-            "SPA build not found at %s -- UI will not be served",
-            settings.ui_build_dir,
-        )
 
     return app
 

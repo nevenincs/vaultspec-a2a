@@ -20,7 +20,6 @@ from ..utils.enums import Environment, LogLevel
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
 _DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
-_DEFAULT_UI_BUILD_DIR: Path = _DEFAULT_PROJECT_ROOT / "src" / "ui" / "dist"
 # Machine-global A2A home for runtime state (ADR R8).  Kept outside the repo and
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
@@ -106,15 +105,6 @@ class InfraConfig(BaseSettings):
             "cache, queues, tmp) and the service discovery file.  Defaults to "
             "~/.vaultspec-a2a (ADR R8).  Relocated out of .vault/ because "
             "vaultspec firmware rejects foreign directories inside the vault."
-        ),
-    )
-    ui_build_dir: Path = Field(
-        default_factory=lambda: _DEFAULT_UI_BUILD_DIR,
-        alias="VAULTSPEC_UI_BUILD_DIR",
-        description=(
-            "Absolute path to the React SPA build output (src/ui/dist).  "
-            "Computed from project_root by default; override in Docker "
-            "non-editable installs."
         ),
     )
     mock_api_base: str | None = Field(
@@ -209,14 +199,14 @@ class InfraConfig(BaseSettings):
 
     cors_allowed_origins: list[str] = Field(
         default=[
-            "http://localhost:5173",  # Vite dev server
-            "http://localhost:4173",  # Vite preview
-            "http://localhost:8000",  # FastAPI itself
-            "http://127.0.0.1:5173",
-            "http://127.0.0.1:4173",
+            "http://localhost:8000",  # local gateway (operator tooling / health)
             "http://127.0.0.1:8000",
         ],
-        description="Allowed CORS origins for production deployments.",
+        description=(
+            "Allowed CORS origins.  A2A is headless (no browser frontend); the "
+            "former Vite dev-server origins were removed with src/ui.  Retained "
+            "loopback gateway origins for local operator tooling."
+        ),
     )
 
     # Worker process settings (ADR-031)

@@ -11,7 +11,9 @@ from pathlib import Path
 import pytest
 
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
-_MIDDLEWARE_FILES = frozenset({"test_worker_integration.py"})
+_MIDDLEWARE_FILES = frozenset(
+    {"test_worker_integration.py", "test_worker_authoring_wiring.py"}
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

@@ -31,6 +31,8 @@ dependencies = [
   "alembic>=1.15.1",
   "click>=8.1",
   "langsmith>=0.3.1",
+  "torch>=2.4",
+  "vaultspec-rag[mcp]>=0.2.28",
 ]
 
 [project.scripts]
@@ -55,7 +57,17 @@ dev = [
 
 [tool.uv.sources]
 vaultspec-core = { git = "https://github.com/wgergely/vaultspec-core.git", branch = "main" }
+torch = [
+    {index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'"},
+]
 
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[tool.vaultspec-rag]
+managed-torch-direct-dependency = "[project].dependencies"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

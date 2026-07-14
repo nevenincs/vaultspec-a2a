@@ -34,7 +34,7 @@ Commit the pending vaultspec housekeeping, remove dead top-level orphans, and re
 
 - [x] `W01.P02.S04` - Review and commit the pending vaultspec housekeeping (managed .gitignore block, vault pre-commit hooks, vaultspec-rag and torch additions) as a standalone commit; `.gitignore, .pre-commit-config.yaml, pyproject.toml, uv.lock`.
 - [x] `W01.P02.S05` - Relocate runtime state (graph cache, logs, tmp, queues) to the machine-global A2A home, repoint the .vault/runtime reference rag-first-discovering any other stale path consumers, and discard the parked .vault-local-state-moved-20260703 directory (user decision 2026-07-14: discard, not restore). Land this before S01 if the IPC check trips over the stale path; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/infra/, .vault-local-state-moved-20260703/`.
-- [ ] `W01.P02.S06` - Delete the empty orphan top-level packages (core, cli, tests, bin) and their stale caches after confirming zero inbound references via rag and grep; `src/vaultspec_a2a/core/, src/vaultspec_a2a/cli/, src/vaultspec_a2a/tests/, src/vaultspec_a2a/bin/`.
+- [x] `W01.P02.S06` - Delete the empty orphan top-level packages (core, cli, tests, bin) and their stale caches after confirming zero inbound references via rag and grep; `src/vaultspec_a2a/core/, src/vaultspec_a2a/cli/, src/vaultspec_a2a/tests/, src/vaultspec_a2a/bin/`.
 
 ### Phase `W01.P15` - Git-state reconciliation
 

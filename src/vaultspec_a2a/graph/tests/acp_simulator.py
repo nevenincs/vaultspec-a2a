@@ -22,6 +22,10 @@ def main() -> None:
     parser.add_argument(
         "--error", help="If set, return this error message for session/prompt"
     )
+    parser.add_argument(
+        "--record-session-new",
+        help="If set, write the received session/new params to this JSON file",
+    )
     args = parser.parse_args()
 
     for line in sys.stdin:
@@ -48,6 +52,9 @@ def main() -> None:
                 },
             }
         elif method == "session/new":
+            if args.record_session_new:
+                with open(args.record_session_new, "w", encoding="utf-8") as fh:
+                    json.dump(req.get("params", {}), fh)
             resp = {
                 "jsonrpc": "2.0",
                 "id": msg_id,

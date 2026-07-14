@@ -12,7 +12,6 @@ import pytest
 
 from ....authoring.catalog import CATALOG_SCHEMA_VERSION, parse_catalog
 from ..tools.authoring_bridge import (
-    authoring_mcp_server_config,
     build_authoring_mcp_server,
     build_tool_specs,
 )
@@ -96,15 +95,6 @@ _EXPECTED_NAMES = {
     "cancel",
     "request_apply",
 }
-
-
-def test_server_config_is_http_entry() -> None:
-    entry = authoring_mcp_server_config("authoring", "http://127.0.0.1:9/mcp")
-    assert entry == {
-        "type": "http",
-        "name": "authoring",
-        "url": "http://127.0.0.1:9/mcp",
-    }
 
 
 def test_tool_specs_carry_no_write_tool() -> None:

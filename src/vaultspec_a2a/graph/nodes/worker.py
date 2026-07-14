@@ -4,7 +4,7 @@ import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Protocol, cast
+from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
@@ -20,6 +20,9 @@ from vaultspec_a2a.thread.state import TeamState
 
 from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
+
+if TYPE_CHECKING:
+    from vaultspec_a2a.providers._acp_authoring import AuthoringToolBinding
 
 _logger = logging.getLogger(__name__)
 
@@ -94,6 +97,29 @@ def _resolve_effective_worker_model(
     return model.model_copy(
         update={"permission_callback": _interrupt_permission_callback}
     )
+
+
+def _attach_authoring_tools(
+    model: BaseChatModel,
+    binding: "AuthoringToolBinding | None",
+) -> BaseChatModel:
+    """Surface the run's bridged authoring tools to an ACP session model (R4).
+
+    When a binding is present and the model exposes an ACP ``mcp_servers``
+    surface, return a copy whose ``session/new`` advertises the loopback
+    authoring MCP server so the spawned CLI sees the propose/read tools. Models
+    without an MCP surface (mock, hosted APIs) are returned unchanged. The
+    binding lives only in this worker closure — never in graph state or a
+    checkpoint (R7).
+    """
+    if binding is None:
+        return model
+    attach = getattr(model, "with_mcp_servers", None)
+    if attach is None:
+        return model
+    from vaultspec_a2a.providers._acp_authoring import build_authoring_mcp_servers
+
+    return attach(build_authoring_mcp_servers(binding))
 
 
 def _wrap_worker_exception(
@@ -295,19 +321,25 @@ def create_worker_node(
     workspace_root: Path | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    authoring_binding: "AuthoringToolBinding | None" = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
     Args:
-        model:           The LangChain chat model to use for this node.
-        system_prompt:   The system prompt defining the worker's behaviour.
-        name:            The name of the worker, added to the generated message.
-        autonomous:      When True, skip permission_callback wiring (headless).
-        workspace_root:  Optional workspace root for RuleManager scoping.
-        feature_tag:     Optional feature tag gating task-queue wiring (ADR R5).
-        task_queue_port: Optional database-backed queue port; when present the
-                         mark-task-complete tool is bound per invocation to the
-                         running thread (ADR R5).
+        model:             The LangChain chat model to use for this node.
+        system_prompt:     The system prompt defining the worker's behaviour.
+        name:              The name of the worker, added to the generated message.
+        autonomous:        When True, skip permission_callback wiring (headless).
+        workspace_root:    Optional workspace root for RuleManager scoping.
+        feature_tag:       Optional feature tag gating task-queue wiring (ADR R5).
+        task_queue_port:   Optional database-backed queue port; when present the
+                           mark-task-complete tool is bound per invocation to the
+                           running thread (ADR R5).
+        authoring_binding: Optional per-run binding of the engine's bridged
+                           authoring tools; when present and the model exposes an
+                           ACP MCP surface, the spawned CLI session advertises the
+                           loopback authoring MCP server so the agent sees the
+                           propose/read tools and no vault-write path (ADR R4).
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -336,6 +368,7 @@ def create_worker_node(
             model=model,
             autonomous=autonomous,
         )
+        effective_model = _attach_authoring_tools(effective_model, authoring_binding)
 
         model_type = type(effective_model).__name__
         _logger.debug(

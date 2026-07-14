@@ -195,6 +195,19 @@ class AcpChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "acp-chat-model"
 
+    def with_mcp_servers(self, mcp_servers: list[dict[str, Any]]) -> "AcpChatModel":
+        """Return a copy that advertises ``mcp_servers`` in ``session/new``.
+
+        The frozen ``_config`` snapshot that ``setup_session`` reads is built in
+        ``model_post_init``; ``model_copy`` alone does not re-run it, so the new
+        servers would never reach the session. This rebuilds the snapshot on the
+        copy so the wired servers actually take effect (used by the worker node
+        to surface the per-run bridged authoring tools, ADR R4).
+        """
+        updated = self.model_copy(update={"mcp_servers": list(mcp_servers)})
+        updated.model_post_init(None)
+        return updated
+
     @override
     async def _astream(
         self,

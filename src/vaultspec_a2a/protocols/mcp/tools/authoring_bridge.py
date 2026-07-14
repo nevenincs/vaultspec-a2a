@@ -28,7 +28,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "McpToolSpec",
-    "authoring_mcp_server_config",
     "build_authoring_mcp_server",
     "build_tool_specs",
 ]
@@ -101,12 +100,3 @@ def build_authoring_mcp_server(
         return [types.TextContent(type="text", text=json.dumps(result, default=str))]
 
     return server
-
-
-def authoring_mcp_server_config(name: str, url: str) -> dict[str, Any]:
-    """Build the ACP ``mcpServers`` HTTP entry pointing at the authoring server.
-
-    The ACP session forwards this to ``session/new``'s ``mcpServers``; the agent
-    connects over HTTP (the handshake advertises ``mcpCapabilities.http``).
-    """
-    return {"type": "http", "name": name, "url": url}

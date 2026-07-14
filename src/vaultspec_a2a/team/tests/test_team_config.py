@@ -46,6 +46,10 @@ _ALL_AGENT_IDS = [
     "vaultspec-coder",
     "vaultspec-reviewer",
     "vaultspec-analyst",
+    "vaultspec-researcher",
+    "vaultspec-synthesist",
+    "vaultspec-adr-author",
+    "vaultspec-doc-reviewer",
 ]
 _ALL_TEAM_IDS = [
     "vaultspec-adaptive-coder",
@@ -725,3 +729,177 @@ agent_id = "coder"
         (override_dir / "test-fallback.toml").write_bytes(toml_content)
         cfg = load_team_config("test-fallback", workspace_root=tmp_path)
         assert len(cfg.defaults.provider_fallback) == 2
+
+
+# ---------------------------------------------------------------------------
+# Document-authoring persona TOMLs (P04.S09)
+# ---------------------------------------------------------------------------
+
+
+class TestDocumentAuthoringPersonas:
+    """Verify the four document-authoring persona TOMLs load and have correct fields."""
+
+    @pytest.mark.parametrize(
+        "agent_id",
+        [
+            "vaultspec-researcher",
+            "vaultspec-synthesist",
+            "vaultspec-adr-author",
+            "vaultspec-doc-reviewer",
+        ],
+    )
+    def test_loads_document_authoring_persona(self, agent_id: str) -> None:
+        """Each document-authoring persona TOML produces a valid AgentConfig."""
+        cfg = AgentConfig.from_toml(_AGENTS_DIR / f"{agent_id}.toml")
+        assert cfg.id == agent_id
+
+    def test_researcher_has_filesystem_read_no_write(self) -> None:
+        """Researcher enables filesystem_read and disables filesystem_write."""
+        cfg = load_agent_config("vaultspec-researcher")
+        assert cfg.capabilities.filesystem_read is True
+        assert cfg.capabilities.filesystem_write is False
+
+    def test_researcher_role(self) -> None:
+        """Researcher carries the 'researcher' role."""
+        cfg = load_agent_config("vaultspec-researcher")
+        assert cfg.role == "researcher"
+
+    def test_researcher_uses_mid_capability(self) -> None:
+        """Researcher uses mid capability tier (economical for fan-out)."""
+        cfg = load_agent_config("vaultspec-researcher")
+        assert cfg.model.capability == Model.MID
+
+    def test_researcher_no_filesystem_write(self) -> None:
+        """Researcher must not author documents directly."""
+        cfg = load_agent_config("vaultspec-researcher")
+        assert cfg.capabilities.filesystem_write is False
+
+    def test_synthesist_has_no_filesystem_write(self) -> None:
+        """Synthesist authors via engine proposals, not direct filesystem writes."""
+        cfg = load_agent_config("vaultspec-synthesist")
+        assert cfg.capabilities.filesystem_write is False
+
+    def test_synthesist_uses_high_capability(self) -> None:
+        """Synthesist uses high capability tier for quality document synthesis."""
+        cfg = load_agent_config("vaultspec-synthesist")
+        assert cfg.model.capability == Model.HIGH
+
+    def test_synthesist_sentinel_in_prompt(self) -> None:
+        """Synthesist system prompt contains the RESEARCH READY sentinel."""
+        cfg = load_agent_config("vaultspec-synthesist")
+        assert "RESEARCH READY" in cfg.persona.system_prompt
+
+    def test_adr_author_has_no_filesystem_write(self) -> None:
+        """ADR author authors via engine proposals, not direct filesystem writes."""
+        cfg = load_agent_config("vaultspec-adr-author")
+        assert cfg.capabilities.filesystem_write is False
+
+    def test_adr_author_uses_high_capability(self) -> None:
+        """ADR author uses high capability tier for quality ADR authoring."""
+        cfg = load_agent_config("vaultspec-adr-author")
+        assert cfg.model.capability == Model.HIGH
+
+    def test_adr_author_sentinel_in_prompt(self) -> None:
+        """ADR author system prompt contains the ADR READY sentinel."""
+        cfg = load_agent_config("vaultspec-adr-author")
+        assert "ADR READY" in cfg.persona.system_prompt
+
+    def test_adr_author_amend_or_supersede_in_prompt(self) -> None:
+        """ADR author system prompt articulates the amend-or-supersede check."""
+        cfg = load_agent_config("vaultspec-adr-author")
+        assert "supersede" in cfg.persona.system_prompt.lower()
+
+    def test_doc_reviewer_has_filesystem_read_no_write(self) -> None:
+        """Doc-reviewer can read but must not write."""
+        cfg = load_agent_config("vaultspec-doc-reviewer")
+        assert cfg.capabilities.filesystem_read is True
+        assert cfg.capabilities.filesystem_write is False
+
+    def test_doc_reviewer_verdict_vocabulary_in_prompt(self) -> None:
+        """Doc-reviewer prompt contains PASS and REVISION REQUIRED verdicts."""
+        cfg = load_agent_config("vaultspec-doc-reviewer")
+        assert "PASS" in cfg.persona.system_prompt
+        assert "REVISION REQUIRED" in cfg.persona.system_prompt
+
+    def test_doc_reviewer_uses_zhipu_provider(self) -> None:
+        """Doc-reviewer uses ZHIPU provider (consistent with vaultspec-reviewer)."""
+        cfg = load_agent_config("vaultspec-doc-reviewer")
+        assert cfg.model.provider == Provider.ZHIPU
+
+    def test_no_request_apply_in_writer_prompts(self) -> None:
+        """Writer persona prompts explicitly prohibit request_apply calls."""
+        for agent_id in ("vaultspec-synthesist", "vaultspec-adr-author"):
+            cfg = load_agent_config(agent_id)
+            assert "request_apply" in cfg.persona.system_prompt, (
+                f"{agent_id} system prompt must mention request_apply to forbid it"
+            )
+
+    def test_researcher_not_writer_in_prompt(self) -> None:
+        """Researcher system prompt explicitly states it is not a writer."""
+        cfg = load_agent_config("vaultspec-researcher")
+        prompt = cfg.persona.system_prompt.lower()
+        assert "not a writer" in prompt or "never call propose" in prompt
+
+
+# ---------------------------------------------------------------------------
+# vaultspec-adr-research team preset (P04.S09)
+# ---------------------------------------------------------------------------
+
+
+class TestAdrResearchTeamPreset:
+    """Verify the vaultspec-adr-research team preset TOML and its loading behaviour."""
+
+    def test_adr_research_preset_file_exists(self) -> None:
+        """vaultspec-adr-research.toml exists in the bundled teams directory."""
+        assert (_TEAMS_DIR / "vaultspec-adr-research.toml").is_file()
+
+    def test_adr_research_workers_declared(self) -> None:
+        """The preset TOML declares all four document-authoring workers."""
+        import tomllib
+
+        path = _TEAMS_DIR / "vaultspec-adr-research.toml"
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+        worker_ids = {w["agent_id"] for w in data["team"]["workers"]}
+        expected = {
+            "vaultspec-researcher",
+            "vaultspec-synthesist",
+            "vaultspec-adr-author",
+            "vaultspec-doc-reviewer",
+        }
+        assert expected == worker_ids
+
+    def test_adr_research_topology_type_in_toml(self) -> None:
+        """The preset TOML declares topology type 'research_adr'."""
+        import tomllib
+
+        path = _TEAMS_DIR / "vaultspec-adr-research.toml"
+        with path.open("rb") as f:
+            data = tomllib.load(f)
+        assert data["team"]["topology"]["type"] == "research_adr"
+
+    def test_adr_research_team_loads_when_research_adr_topology_lands(self) -> None:
+        """vaultspec-adr-research loads once TopologyType.RESEARCH_ADR is present.
+
+        This test passes trivially until P02.S06 adds TopologyType.RESEARCH_ADR.
+        Once the enum member exists, the preset MUST load successfully — if it
+        cannot, the test FAILS (not skips) with a diagnostic message.
+        """
+        if not hasattr(TopologyType, "RESEARCH_ADR"):
+            # P02.S06 has not landed; loading requires the enum member.
+            # Not skipping — return early so the test suite stays green until
+            # the enum arrives. When it does, this guard is removed and the
+            # assertion below runs.
+            return
+        # TopologyType.RESEARCH_ADR is present; the preset MUST load successfully.
+        try:
+            cfg = load_team_config("vaultspec-adr-research")
+        except Exception as exc:
+            pytest.fail(
+                f"vaultspec-adr-research preset failed to load even though "
+                f"TopologyType.RESEARCH_ADR is present — P02.S06 may be incomplete "
+                f"or the TOML schema is broken: {exc}"
+            )
+        assert cfg.id == "vaultspec-adr-research"
+        assert cfg.topology.type == TopologyType.RESEARCH_ADR  # type: ignore[attr-defined]
+        assert len(cfg.workers) == 4

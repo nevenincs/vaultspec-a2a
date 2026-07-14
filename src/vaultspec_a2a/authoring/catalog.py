@@ -49,6 +49,7 @@ class AgentTool:
     risk_tier: str
     permission_requirement: str
     idempotency_required: bool
+    commands: tuple[str, ...]
 
     @property
     def is_mutating(self) -> bool:
@@ -101,6 +102,12 @@ def parse_catalog(data: dict[str, Any]) -> CatalogSnapshot:
         if not isinstance(name, str) or not name:
             raise ValueError("catalog tool entry missing a name")
         input_schema = entry.get("input_schema")
+        raw_commands = entry.get("commands")
+        commands = (
+            tuple(str(c) for c in raw_commands)
+            if isinstance(raw_commands, list)
+            else ()
+        )
         tools.append(
             AgentTool(
                 name=name,
@@ -109,6 +116,7 @@ def parse_catalog(data: dict[str, Any]) -> CatalogSnapshot:
                 risk_tier=str(entry.get("risk_tier", "")),
                 permission_requirement=str(entry.get("permission_requirement", "")),
                 idempotency_required=bool(entry.get("idempotency_required", False)),
+                commands=commands,
             )
         )
     return CatalogSnapshot(schema_version=schema_version, tools=tuple(tools))

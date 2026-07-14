@@ -12,6 +12,7 @@ map.  Three topology types are supported (ADR-013 S2.5):
 
 import functools
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
@@ -33,6 +34,7 @@ from vaultspec_a2a.thread.errors import (
 from vaultspec_a2a.thread.state import TeamState
 
 from .enums import Model, PipelinePhase, Provider
+from .nodes.diverge import create_research_dispatch_node, researcher_node_name
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
@@ -206,6 +208,45 @@ def _resolve_supervisor_model(
         agent_config=supervisor_agent_config,
         workspace_root=workspace_root,
     )
+
+
+def _wire_diverge_stage(
+    builder: StateGraph,
+    *,
+    dispatch_name: str,
+    synthesis_name: str,
+    specs: list[dict[str, Any]],
+    make_researcher: Callable[[dict[str, Any]], WorkerNode],
+) -> str:
+    """Wire a Send-based diverge stage into ``builder`` (S04).
+
+    Adds the dispatch node, one researcher node per thread spec (named via
+    ``researcher_node_name``), and a static edge from each researcher into
+    ``synthesis_name`` to form the join. The dispatch node fans out with
+    ``Send`` through ``Command.goto`` and carries no static outgoing edges; the
+    synthesis node itself is wired by the caller (the topology owns the synthesis
+    stage and its inner review loop). Returns the dispatch node name so the
+    caller can edge into it.
+
+    ``make_researcher`` maps a thread spec to the branch node, so the topology
+    supplies model-backed researchers while the fan-out/join structure stays
+    model-agnostic and independently testable.
+    """
+    if not specs:
+        raise ConfigError(
+            f"diverge stage {dispatch_name!r} requires at least one research "
+            "thread spec"
+        )
+
+    researcher_names: list[str] = []
+    for index, spec in enumerate(specs):
+        name = researcher_node_name(dispatch_name, index)
+        builder.add_node(name, make_researcher(spec))
+        builder.add_edge(name, synthesis_name)
+        researcher_names.append(name)
+
+    builder.add_node(dispatch_name, create_research_dispatch_node(researcher_names))
+    return dispatch_name
 
 
 def _build_supervisor_prompt(

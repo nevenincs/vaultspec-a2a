@@ -8,7 +8,9 @@ _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 # Files that spawn a real ACP subprocess / network I/O declare their own
 # ``service`` marker and must NOT receive the pure ``unit``/``middleware`` marks.
-_LIVE_FILES = frozenset({"test_acp_authoring_bridge.py"})
+_LIVE_FILES = frozenset(
+    {"test_acp_authoring_bridge.py", "test_authoring_stdio_bridge.py"}
+)
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:

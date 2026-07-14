@@ -266,6 +266,18 @@ class AcpChatModel(BaseChatModel):
         # stall non-interactive ACP subprocesses.
         env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
+        # ADR R4: bridged runs must EAGERLY load their per-run authoring MCP
+        # tools. The pinned CLI defers MCP tool schemas under Tool Search
+        # ("deferred-tool registry"); a stdio bridge's tools are then deferred
+        # and unindexed, so the agent connects to the server but never finds the
+        # tools. ENABLE_TOOL_SEARCH=0 forces "standard" eager loading, landing
+        # the schemas directly in reasoning context. Scoped to bridged runs
+        # (allowed_tools present) so default agents keep Tool Search's context
+        # savings. This is transport-dependent: for HTTP MCP the flag is inert
+        # (that path is not surfaced at all in the pinned CLI); for stdio it is
+        # load-bearing, which is why it is gated on the bridge, not the transport.
+        if self._config.allowed_tools:
+            env["ENABLE_TOOL_SEARCH"] = "0"
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":
             await refresh_gemini_token(env=env)

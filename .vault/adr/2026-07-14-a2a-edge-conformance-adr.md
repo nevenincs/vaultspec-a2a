@@ -168,7 +168,47 @@ restated):
   alongside threads/checkpoints; the existing queue schema decision
   (`adr-17`) is amended accordingly. The capability is preserved; only its
   home changes. Any human-facing queue visibility later rides `run-status`,
-  never vault files.
+  never vault files. Refinement (2026-07-14, on the executor's finding
+  that no population path ever existed in code - rows were historically
+  authored externally as a vault artifact):
+  - **Population source: the planner role emits queue rows run-locally**
+    (option b). The planner node that proposes the plan document through
+    the authoring API also registers its execution-facing task
+    decomposition as rows in the A2A database. Rejected: carrying a task
+    list in the `run-start` payload (option a) - that changes the frozen
+    verb shape, a cross-repo contract event, and would move plan content
+    across the orchestration edge; ingesting from the engine plan document
+    at run startup (option c) - plan CONTENT is the engine's document, and
+    coupling queue construction to snapshot parsing rebuilds a document
+    reader the fence says we must not own. The document linkage is by
+    REFERENCE instead: each row stores the plan proposal's Vaultspec ids,
+    and the existing phase gate (per the R12 re-target of the
+    phase-artifact-gates record) verifies through the authoring API that
+    the plan proposal was approved before the exec phase consumes the
+    queue. Fence-clean: content stays engine-side, execution state stays
+    ours, approval stays human.
+  - **Schema (migration 0006)**: one table, rows owned by a thread -
+    `id` (uuid hex pk), `thread_id` (FK, cascade delete), `feature_tag`
+    (validated as in the merged traversal guard), `position` (int,
+    unique per thread, sole ordering authority), `task_key` (stable
+    per-thread row identity the mark-complete tool addresses),
+    `description` (the task's action text), `status` (bounded enum:
+    `pending | in_progress | completed | failed`), nullable Vaultspec
+    references `plan_changeset_id` and `plan_step_key` (D5 references,
+    never content), `created_at`/`updated_at`. The execution cursor
+    (`current_task_id`) stays in TeamState where it lives today - it is
+    graph state, not queue state. Mark-complete becomes an idempotent
+    status transition (completing a completed row is a no-op, matching
+    the engine's replay discipline).
+  - **Context injection preserved**: `vault_reader`'s queue view is
+    format-stable - the current row plus the next two pending by
+    `position`, rendered as the same table text the markdown path
+    injected, so prompts and recorded tapes are unaffected; only the
+    backing store changes from file parse to repository query.
+  - **Interim population**: until the planner wiring lands (full-team
+    wave), rows enter through the internal repository/service API only -
+    used by tests and future gateway internals; no agent-reachable
+    population path exists, preserving R2's closure.
 - **R6 - Gateway reshaping, not new service.** The five verbs map onto the
   existing FastAPI app: `run-start` -> reshaped thread-create+message flow
   accepting the actor-token bundle; `run-status` -> reshaped thread-state

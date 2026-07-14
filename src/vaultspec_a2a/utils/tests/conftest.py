@@ -15,7 +15,10 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
         if not str(item.path).startswith(_PACKAGE_DIR):
             continue
         if item.path.name == "test_logging.py":
+            # Layer 2 by import (control.config.Settings) but pure (no I/O),
+            # so it is middleware on the layer axis and still ``unit`` on purity.
             item.add_marker(pytest.mark.middleware)
+            item.add_marker(pytest.mark.unit)
         else:
             item.add_marker(pytest.mark.core)
             item.add_marker(pytest.mark.unit)

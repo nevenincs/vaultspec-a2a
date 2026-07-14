@@ -13,10 +13,13 @@ _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
 
 
 _MIDDLEWARE_FILES = frozenset({"test_worker_integration.py"})
+# Layer-1 tests that still perform real I/O (a live SQLite checkpointer here) —
+# they keep ``core`` but are NOT pure, so the orthogonal ``unit`` marker is withheld.
+_IMPURE_CORE_FILES = frozenset({"test_compiler.py"})
 
 
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark graph tests: ``middleware`` for L2 imports, else ``core`` + ``unit``."""
+    """Mark graph tests: ``middleware`` for L2 imports, else ``core`` (+ ``unit``)."""
     for item in items:
         if not str(item.path).startswith(_PACKAGE_DIR):
             continue
@@ -24,7 +27,8 @@ def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
             item.add_marker(pytest.mark.middleware)
         else:
             item.add_marker(pytest.mark.core)
-            item.add_marker(pytest.mark.unit)
+            if item.path.name not in _IMPURE_CORE_FILES:
+                item.add_marker(pytest.mark.unit)
 
 
 # ---------------------------------------------------------------------------

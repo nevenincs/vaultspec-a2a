@@ -40,11 +40,19 @@ from ..app import create_app
 _PACKAGE_DIR = str(Path(__file__).resolve().parent)
 
 
+# API tests are middleware-layer; most drive the real SQLite/ASGI fixtures below
+# and are impure.  These files test pure logic only (no I/O) and also earn ``unit``.
+_PURE_FILES = frozenset({"test_auth.py"})
+
+
 def pytest_collection_modifyitems(items: list[pytest.Item]) -> None:
-    """Mark tests collected from THIS directory as ``middleware``."""
+    """Mark tests here as ``middleware`` (plus ``unit`` for the pure-logic files)."""
     for item in items:
-        if str(item.path).startswith(_PACKAGE_DIR):
-            item.add_marker(pytest.mark.middleware)
+        if not str(item.path).startswith(_PACKAGE_DIR):
+            continue
+        item.add_marker(pytest.mark.middleware)
+        if item.path.name in _PURE_FILES:
+            item.add_marker(pytest.mark.unit)
 
 
 __all__: list[str] = []

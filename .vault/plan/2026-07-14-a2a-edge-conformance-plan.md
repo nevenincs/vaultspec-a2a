@@ -88,7 +88,7 @@ Build src/vaultspec_a2a/authoring: loopback httpx client, envelope and tiers dec
 Fetch and snapshot /v1/agent-tools per run and bridge the catalog into the agent session through the protocols/mcp server, executing via the engine under the calling role's token.
 
 - [ ] `W03.P07.S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/protocols/mcp/tools/`.
-- [ ] `W03.P07.S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess; `src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `W03.P07.S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess; `src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/nodes/worker.py`.
 
 ### Phase `W03.P08` - Solo-coder end-to-end proof
 

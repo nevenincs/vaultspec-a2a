@@ -168,19 +168,26 @@ restated):
   proposals is the engine's review lane (self-approval banned engine-side,
   origin-keyed), mirroring the dashboard operation-modes principle that
   autonomy is a recorded policy, never a bypass of the ledgered write
-  path. Mechanism, as corrected: the ACP-layer prompt was NEVER the
-  blocker - the RPC handler already auto-selects the allow option when no
-  permission callback is configured (the autonomous case), and zero
-  permission requests reached it on the failing turn. The operative gate
-  is the spawned CLI's own internal MCP-tool permission model in headless
-  mode, which can decline without raising an ACP request. The policy
-  therefore lands as: the orchestrator PRE-PERMITS the exact
-  catalog-snapshot allowlist of bridged tool names to the spawned CLI
-  through its permission configuration (no wildcards, no blanket
-  permission-mode bypass), scoped to autonomous presets only,
-  human-in-the-loop presets unchanged, with the granted allowlist logged
-  per run. Mechanism details pend the specialist investigation; the
-  W03 review verifies the implementation against these constraints.
+  path. Mechanism, root cause confirmed in the `claude-agent-acp` source:
+  the ACP-layer prompt was NEVER the blocker - the RPC handler already
+  auto-selects the allow option when no permission callback is configured
+  (the autonomous case), and zero permission requests reached it on the
+  failing turn. The operative gate is the spawned CLI's OWN permission
+  mode: the adapter resolves `default | acceptEdits | bypassPermissions`,
+  the session layer never set any mode, so headless runs sat in
+  prompt-required `default` where mutating MCP tools are never invokable
+  (read tools pass as auto-permitted; Claude gates internally, emitting
+  zero tool calls and zero ACP permission requests). The operative
+  decision is therefore how the orchestrator configures the spawned CLI's
+  permission surface for autonomous runs, least-privilege preference
+  order: an exact-tool allowlist (`mcp__<server>__<tool>` names from the
+  catalog snapshot) if threadable through session configuration,
+  otherwise the narrowest sufficient permission mode - autonomous presets
+  only, human-in-the-loop presets unchanged, the granted surface logged
+  per run. Unchanged rationale either way: the engine review lane is the
+  authoritative human gate, and the R2 deny policy independently protects
+  the vault under ANY permission mode. The W03 review verifies the
+  implementation against these constraints.
 - **R5 - Task queue leaves the vault.** The worker task queue is
   orchestration state (dashboard D5: ours), so its storage moves from the
   bespoke markdown table under `.vault/plan/` into A2A's own database

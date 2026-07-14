@@ -79,9 +79,9 @@ Greenfield construction of the engine authoring-API client and served-tool-catal
 
 Build src/vaultspec_a2a/authoring: loopback httpx client, envelope and tiers decoding, idempotency-key derivation, session lifecycle, proposal verbs. Real tests against a live loopback engine.
 
-- [ ] `W03.P06.S15` - Build the authoring package skeleton: loopback httpx client with machine-bearer plus per-actor auth, shared-envelope and tiers decoding, denial-as-value handling keyed on denial_kind; `src/vaultspec_a2a/authoring/`.
-- [ ] `W03.P06.S16` - Implement session lifecycle (create authoring_session per run, turns, id cross-referencing into thread state) and proposal verbs (create, append, replace, submit, snapshot, conflicts, provenance, rebase) with idempotency keys derived from stable run-local material; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/thread/`.
-- [ ] `W03.P06.S17` - Write live mock-free integration tests against a loopback dashboard engine covering the envelope, denials, idempotent replay, and whole-document proposal shapes; `src/vaultspec_a2a/authoring/tests/`.
+- [x] `W03.P06.S15` - Build the authoring package skeleton: loopback httpx client with machine-bearer plus per-actor auth, shared-envelope and tiers decoding, denial-as-value handling keyed on denial_kind; `src/vaultspec_a2a/authoring/`.
+- [x] `W03.P06.S16` - Implement session lifecycle (create authoring_session per run, turns, id cross-referencing into thread state) and proposal verbs (create, append, replace, submit, snapshot, conflicts, provenance, rebase) with idempotency keys derived from stable run-local material; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/thread/`.
+- [x] `W03.P06.S17` - Write live mock-free integration tests against a loopback dashboard engine covering the envelope, denials, idempotent replay, and whole-document proposal shapes; `src/vaultspec_a2a/authoring/tests/`.
 
 ### Phase `W03.P07` - Served tool-catalog bridge
 

@@ -24,6 +24,10 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S12]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S13]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S14]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P06-S15]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P06-S16]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P06-S17]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P07-S18]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -71,6 +75,10 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W02-P05-S12` - Write adversarial mock-free tests for the deny policy covering direct, traversal, symlink, relative-path, and case-variant attempts against a live handler
 - `2026-07-14-a2a-edge-conformance-W02-P05-S13` - Move the worker task queue from the .vault/plan markdown table into the A2A database (new Alembic migration), preserve mark-task-complete semantics, and delete the markdown read-write path
 - `2026-07-14-a2a-edge-conformance-W02-P05-S14` - Prove with live tests that a full mock-tape run performs zero .vault/ writes while the queue and worker loop still function
+- `2026-07-14-a2a-edge-conformance-W03-P06-S15` - Build the authoring package skeleton: loopback httpx client with machine-bearer plus per-actor auth, shared-envelope and tiers decoding, denial-as-value handling keyed on denial_kind
+- `2026-07-14-a2a-edge-conformance-W03-P06-S16` - Implement session lifecycle (create authoring_session per run, turns, id cross-referencing into thread state) and proposal verbs (create, append, replace, submit, snapshot, conflicts, provenance, rebase) with idempotency keys derived from stable run-local material
+- `2026-07-14-a2a-edge-conformance-W03-P06-S17` - Write live mock-free integration tests against a loopback dashboard engine covering the envelope, denials, idempotent replay, and whole-document proposal shapes
+- `2026-07-14-a2a-edge-conformance-W03-P07-S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token
 
 ### plan
 

@@ -8,8 +8,8 @@ cross-reference them into thread state as references (never content).
 
 Command discriminators match the engine ``CommandKind`` enum (snake_case,
 `authoring/model.rs`): create_session, start_prompt_turn, create_proposal,
-append_draft, replace_draft, validate_proposal, submit_for_review, rebase,
-cancel_proposal. Reads (snapshot/conflicts/provenance) are GETs with no command.
+append_draft, replace_draft, submit_for_review, rebase. Reads
+(snapshot/conflicts/provenance) are GETs with no command.
 """
 
 from __future__ import annotations
@@ -98,6 +98,14 @@ class AuthoringSession:
         }
 
     def _next_key(self, command: str) -> str:
+        """Derive the next idempotency key from run-local material.
+
+        Keyed on ``run_id + command + sequence``. This matches the LangGraph
+        replay model: a node re-run replays the same call order under the same
+        ``run_id``, reproducing the byte-identical key the engine dedupes on. A
+        within-session retry advances the sequence and is therefore a distinct
+        command, not a dedupe of the prior one.
+        """
         key = derive_idempotency_key(self._run_id, command, str(self._seq))
         self._seq += 1
         return key
@@ -231,15 +239,26 @@ class AuthoringSession:
         expected_revision: str,
         summary: str,
     ) -> AuthoringResponse | Denial:
-        """Submit a validated proposal into human review (``submit_for_review``)."""
+        """Submit a proposal into human review (``submit_for_review``).
+
+        Submission is where the engine mints the review-facing ``proposal_id``
+        (the changeset id addresses drafts; the proposal id addresses the
+        opened approval). It is captured from the receipt into the run's
+        produced-id references so thread state can match the engine's records.
+        """
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
-        return await self._client.post_command(
+        result = await self._client.post_command(
             f"/v1/proposals/{changeset_id}/submit",
             command="submit_for_review",
             payload={"expected_revision": expected_revision, "summary": summary},
             idempotency_key=self._next_key("submit_for_review"),
         )
+        if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
+            proposal_id = result.data.get("proposal_id")
+            if isinstance(proposal_id, str) and proposal_id not in self._proposal_ids:
+                self._proposal_ids.append(proposal_id)
+        return result
 
     async def rebase(
         self,
@@ -260,27 +279,6 @@ class AuthoringSession:
                 "summary": summary,
             },
             idempotency_key=self._next_key("rebase"),
-        )
-
-    async def cancel_proposal(
-        self,
-        *,
-        changeset_id: str,
-        expected_revision: str,
-        summary: str,
-    ) -> AuthoringResponse | Denial:
-        """Cancel a proposal (``cancel_proposal``)."""
-        validate_id(changeset_id, field="changeset_id")
-        validate_id(expected_revision, field="expected_revision")
-        return await self._client.post_command(
-            f"/v1/proposals/{changeset_id}/cancel",
-            command="cancel_proposal",
-            payload={
-                "changeset_id": changeset_id,
-                "expected_revision": expected_revision,
-                "summary": summary,
-            },
-            idempotency_key=self._next_key("cancel_proposal"),
         )
 
     # ------------------------------------------------------------------

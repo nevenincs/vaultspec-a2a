@@ -183,6 +183,33 @@ async def test_whole_document_proposal_creates_draft(
 
 @pytest.mark.service
 @pytest.mark.asyncio
+async def test_submit_captures_proposal_id_reference(
+    client: AuthoringClient,
+) -> None:
+    run_id = f"s17-{uuid.uuid4().hex[:8]}"
+    session = await _authenticated_session(client, run_id)
+    changeset_id = session.new_changeset_id("submitme")
+    created = await session.create_proposal(
+        changeset_id=changeset_id,
+        summary="s17 submit path",
+        operations=[_whole_document_op(run_id)],
+    )
+    assert isinstance(created, AuthoringResponse)
+    revision = created.data["changeset_revision"]
+
+    submitted = await session.submit(
+        changeset_id=changeset_id, expected_revision=revision, summary="s17 submit"
+    )
+    assert isinstance(submitted, AuthoringResponse)
+    assert isinstance(submitted.data, dict)
+    proposal_id = submitted.data.get("proposal_id")
+    assert isinstance(proposal_id, str) and proposal_id
+    # The proposal id is minted at submit and cross-referenced into thread state.
+    assert proposal_id in session.state_references()["authoring_proposal_ids"]
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
 async def test_idempotent_replay_returns_same_receipt(
     client: AuthoringClient,
 ) -> None:

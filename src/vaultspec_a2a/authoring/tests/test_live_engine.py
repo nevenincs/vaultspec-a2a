@@ -31,6 +31,7 @@ import pytest_asyncio
 from .. import AuthoringClient, AuthoringSession, mint_actor_token
 from .._envelope import AuthoringResponse
 from .._errors import AuthoringTransportError
+from ..catalog import CATALOG_SCHEMA_VERSION, execute_agent_tool, fetch_catalog
 
 _STALE_MS = 120_000
 _EXPECTED_TOOL_NAMES = {
@@ -232,6 +233,43 @@ async def test_idempotent_replay_returns_same_receipt(
     assert isinstance(first, AuthoringResponse)
     assert isinstance(second, AuthoringResponse)
     assert first.data["receipt_id"] == second.data["receipt_id"]
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_fetch_catalog_snapshot(client: AuthoringClient) -> None:
+    snapshot = await fetch_catalog(client)
+    assert snapshot.schema_version == CATALOG_SCHEMA_VERSION
+    assert set(snapshot.tool_names()) == _EXPECTED_TOOL_NAMES
+    read = snapshot.get("read_context")
+    propose = snapshot.get("propose_changeset")
+    assert read is not None and not read.is_mutating
+    assert propose is not None and propose.requires_human_approval
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_run_scoped_execute_of_read_tool(client: AuthoringClient) -> None:
+    run_id = f"s18-{uuid.uuid4().hex[:8]}"
+    session = await _authenticated_session(client, run_id)
+    turn = await session.start_turn(prompt="Research the edge contract.")
+    assert isinstance(turn, AuthoringResponse)
+    assert session.engine_run_id is not None
+
+    result = await execute_agent_tool(
+        client,
+        run_id=session.engine_run_id,
+        command="search_graph",
+        tool_call_id=f"tc-{run_id}",
+        name="search_graph",
+        tool_input={"query": "edge contract"},
+        idempotency_key=f"idk-exec-{run_id}",
+    )
+    assert isinstance(result, AuthoringResponse)
+    assert isinstance(result.data, dict)
+    assert result.data.get("disposition") == "dispatched"
+    assert result.data.get("eligibility", {}).get("allowed") is True
+    assert result.data.get("tool") == "search_graph"
 
 
 @pytest.mark.service

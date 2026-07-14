@@ -18,6 +18,11 @@ from ._ids import MAX_ID_BYTES as MAX_ID_BYTES
 from ._ids import derive_idempotency_key as derive_idempotency_key
 from ._ids import is_valid_id as is_valid_id
 from ._ids import validate_id as validate_id
+from .catalog import CATALOG_SCHEMA_VERSION as CATALOG_SCHEMA_VERSION
+from .catalog import AgentTool as AgentTool
+from .catalog import CatalogSnapshot as CatalogSnapshot
+from .catalog import execute_agent_tool as execute_agent_tool
+from .catalog import fetch_catalog as fetch_catalog
 from .client import ACTOR_TOKEN_HEADER as ACTOR_TOKEN_HEADER
 from .client import BEARER_HEADER as BEARER_HEADER
 from .client import AuthoringClient as AuthoringClient
@@ -27,15 +32,20 @@ from .session import mint_actor_token as mint_actor_token
 __all__ = [
     "ACTOR_TOKEN_HEADER",
     "BEARER_HEADER",
+    "CATALOG_SCHEMA_VERSION",
     "MAX_ID_BYTES",
+    "AgentTool",
     "AuthoringClient",
     "AuthoringError",
     "AuthoringResponse",
     "AuthoringSession",
     "AuthoringTransportError",
+    "CatalogSnapshot",
     "CommandEnvelope",
     "Denial",
     "derive_idempotency_key",
+    "execute_agent_tool",
+    "fetch_catalog",
     "is_valid_id",
     "mint_actor_token",
     "validate_id",

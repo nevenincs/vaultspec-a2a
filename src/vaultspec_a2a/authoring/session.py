@@ -67,6 +67,7 @@ class AuthoringSession:
         self._run_id = validate_id(run_id, field="run_id")
         self._seq = 0
         self._session_id: str | None = None
+        self._engine_run_id: str | None = None
         # Produced Vaultspec ids, accumulated for thread-state cross-reference.
         self._changeset_ids: list[str] = []
         self._proposal_ids: list[str] = []
@@ -79,6 +80,11 @@ class AuthoringSession:
     def session_id(self) -> str | None:
         """The engine session id once ``create_session`` has run."""
         return self._session_id
+
+    @property
+    def engine_run_id(self) -> str | None:
+        """The engine run id once ``start_turn`` has minted it (for execute)."""
+        return self._engine_run_id
 
     def new_changeset_id(self, label: str) -> str:
         """Mint a deterministic, engine-valid changeset id for this run."""
@@ -147,12 +153,17 @@ class AuthoringSession:
         payload: dict[str, Any] = {"prompt": prompt}
         if summary is not None:
             payload["summary"] = summary
-        return await self._client.post_command(
+        result = await self._client.post_command(
             f"/v1/sessions/{self._session_id}/turns",
             command="start_prompt_turn",
             payload=payload,
             idempotency_key=self._next_key("start_prompt_turn"),
         )
+        if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
+            run_id = result.data.get("run_id")
+            if isinstance(run_id, str):
+                self._engine_run_id = run_id
+        return result
 
     # ------------------------------------------------------------------
     # Proposal verbs (mutating)

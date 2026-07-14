@@ -16,10 +16,11 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
+from ._envelope import AuthoringResponse
 from ._ids import derive_idempotency_key, validate_id
 
 if TYPE_CHECKING:
-    from ._envelope import AuthoringResponse, Denial
+    from ._envelope import Denial
     from .client import AuthoringClient
 
 __all__ = ["AuthoringSession", "mint_actor_token"]
@@ -112,16 +113,21 @@ class AuthoringSession:
     async def create_session(
         self, *, scope: str, title: str
     ) -> AuthoringResponse | Denial:
-        """Open the authoring session for this run (``create_session``)."""
-        session_id = f"sess:{self._run_id}"
-        validate_id(session_id, field="session_id")
+        """Open the authoring session for this run (``create_session``).
+
+        The engine generates the ``session_id`` and returns it in the receipt
+        (``data.session_id``); the payload carries only ``scope`` and ``title``.
+        """
         result = await self._client.post_command(
             "/v1/sessions",
             command="create_session",
-            payload={"scope": scope, "title": title, "session_id": session_id},
+            payload={"scope": scope, "title": title},
             idempotency_key=self._next_key("create_session"),
         )
-        self._session_id = session_id
+        if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
+            session_id = result.data.get("session_id")
+            if isinstance(session_id, str):
+                self._session_id = session_id
         return result
 
     async def start_turn(

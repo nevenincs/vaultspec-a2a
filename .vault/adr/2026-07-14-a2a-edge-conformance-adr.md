@@ -161,7 +161,18 @@ restated):
   with execution routed through `/v1/runs/{run_id}/agent-tools/execute`
   under the calling role's token. Hand-rolled request builders are rejected
   (silent drift against an engine-versioned surface); a preset-level tool
-  list is rejected (presets do not carry tools).
+  list is rejected (presets do not carry tools). Refinement (2026-07-14,
+  owner-authorized on the first live bridged turn): in autonomous/headless
+  mode ONLY, local ACP permission prompts are auto-approved for the exact
+  catalog-snapshot allowlist of bridged authoring tool names (no
+  wildcards), with each decision logged with tool and run id;
+  human-in-the-loop presets are unchanged. Rationale: the authoritative
+  human gate for proposals is the engine's review lane (self-approval
+  banned engine-side, origin-keyed), so the local prompt is redundant
+  double-gating that deadlocks headless runs - the finding surfaced live
+  when the agent saw the bridged tools but zero calls dispatched. This
+  mirrors the dashboard operation-modes principle: autonomy is a recorded
+  policy, never a bypass of the ledgered write path.
 - **R5 - Task queue leaves the vault.** The worker task queue is
   orchestration state (dashboard D5: ours), so its storage moves from the
   bespoke markdown table under `.vault/plan/` into A2A's own database

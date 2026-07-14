@@ -43,11 +43,27 @@ ENV_BEARER = "VAULTSPEC_AUTHORING_BEARER"
 ENV_ACTOR_TOKEN = "VAULTSPEC_AUTHORING_ACTOR_TOKEN"
 ENV_RUN_ID = "VAULTSPEC_AUTHORING_RUN_ID"
 ENV_SERVER_NAME = "VAULTSPEC_AUTHORING_SERVER_NAME"
+# Debug-only: if set to a writable path, the bridge appends a value-free startup
+# line so an orchestrator can confirm the CLI actually spawned it. Never carries
+# tokens (R7); off unless explicitly enabled.
+ENV_DEBUG_MARKER = "VAULTSPEC_AUTHORING_DEBUG_MARKER"
 
 _DEFAULT_SERVER_NAME = "vaultspec-authoring"
 
 
+def _write_startup_marker(stage: str) -> None:
+    path = os.environ.get(ENV_DEBUG_MARKER)
+    if not path:
+        return
+    try:
+        with open(path, "a", encoding="utf-8") as fh:
+            fh.write(f"{stage} pid={os.getpid()}\n")
+    except OSError:
+        pass
+
+
 async def _amain() -> int:
+    _write_startup_marker("spawned")
     base_url = os.environ.get(ENV_BASE_URL)
     bearer = os.environ.get(ENV_BEARER)
     actor_token = os.environ.get(ENV_ACTOR_TOKEN)
@@ -68,6 +84,7 @@ async def _amain() -> int:
             client, run_id=run_id, actor_token=actor_token, snapshot=snapshot
         )
         server = build_authoring_mcp_server(snapshot, dispatch, server_name=server_name)
+        _write_startup_marker(f"serving tools={len(snapshot.tools)}")
         async with stdio_server() as (read_stream, write_stream):
             await server.run(
                 read_stream,

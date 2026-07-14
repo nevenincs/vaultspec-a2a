@@ -25,6 +25,7 @@ state or a checkpoint.
 
 from __future__ import annotations
 
+import os
 import sys
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -39,6 +40,9 @@ from ..protocols.mcp.authoring_stdio import (
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_BEARER as STDIO_ENV_BEARER,
+)
+from ..protocols.mcp.authoring_stdio import (
+    ENV_DEBUG_MARKER as STDIO_ENV_DEBUG_MARKER,
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_RUN_ID as STDIO_ENV_RUN_ID,
@@ -245,17 +249,24 @@ def build_authoring_stdio_mcp_servers(
             "binding; this binding carries only the HTTP transport"
         )
     command = python_executable or sys.executable
+    env = [
+        {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
+        {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
+        {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
+        {"name": STDIO_ENV_RUN_ID, "value": binding.run_id},
+        {"name": STDIO_ENV_SERVER_NAME, "value": AUTHORING_MCP_SERVER_NAME},
+    ]
+    # Forward the debug startup marker to the subprocess when enabled (the MCP
+    # SDK filters arbitrary parent env, so it must ride the explicit env list).
+    # Off unless the orchestrator sets it; carries no token (R7).
+    debug_marker = os.environ.get(STDIO_ENV_DEBUG_MARKER)
+    if debug_marker:
+        env.append({"name": STDIO_ENV_DEBUG_MARKER, "value": debug_marker})
     return [
         {
             "name": AUTHORING_MCP_SERVER_NAME,
             "command": command,
             "args": ["-m", AUTHORING_STDIO_MODULE],
-            "env": [
-                {"name": STDIO_ENV_BASE_URL, "value": binding.engine_base_url},
-                {"name": STDIO_ENV_BEARER, "value": binding.bearer_token},
-                {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
-                {"name": STDIO_ENV_RUN_ID, "value": binding.run_id},
-                {"name": STDIO_ENV_SERVER_NAME, "value": AUTHORING_MCP_SERVER_NAME},
-            ],
+            "env": env,
         }
     ]

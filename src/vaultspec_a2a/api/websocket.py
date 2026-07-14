@@ -525,25 +525,15 @@ class ConnectionManager:
             try:
                 match command.type:
                     case ClientCommandType.SUBSCRIBE:
-                        await self._handle_subscribe(
-                            client_id, cast("SubscribeCommand", command)
-                        )
+                        await self._handle_subscribe(client_id, command)
                     case ClientCommandType.UNSUBSCRIBE:
-                        await self._handle_unsubscribe(
-                            client_id, cast("UnsubscribeCommand", command)
-                        )
+                        await self._handle_unsubscribe(client_id, command)
                     case ClientCommandType.SEND_MESSAGE:
-                        await self._handle_send_message(
-                            client_id, cast("SendMessageCommand", command)
-                        )
+                        await self._handle_send_message(client_id, command)
                     case ClientCommandType.AGENT_CONTROL:
-                        await self._handle_agent_control(
-                            client_id, cast("AgentControlCommand", command)
-                        )
+                        await self._handle_agent_control(client_id, command)
                     case ClientCommandType.PERMISSION_RESPONSE:
-                        await self._handle_permission_response(
-                            client_id, cast("PermissionResponseCommand", command)
-                        )
+                        await self._handle_permission_response(client_id, command)
                     case ClientCommandType.PING:
                         await self._handle_ping(client_id)
             except WebSocketCommandRejectedError as exc:

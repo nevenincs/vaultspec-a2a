@@ -79,7 +79,7 @@ def _parse_route(text: str, options: list[str]) -> tuple[str, bool]:
     """
     if text in options:
         return text, False
-    for option in cast("list[str]", sorted(options, key=len, reverse=True)):
+    for option in sorted(options, key=len, reverse=True):
         if option.lower() in text.lower():
             return option, False
     return "FINISH", True

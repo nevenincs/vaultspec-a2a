@@ -64,14 +64,6 @@ repos:
     pass_filenames: true
     types:
     - markdown
-  - id: tsc-check
-    name: TypeScript type check (UI)
-    entry: bash -c 'cd src/ui && npx tsc --noEmit'
-    language: system
-    types_or:
-    - ts
-    - tsx
-    pass_filenames: false
   - id: vault-doctor
     name: Vault Doctor
     entry: uv run python -m vaultspec_core vault check all

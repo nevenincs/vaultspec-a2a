@@ -80,7 +80,7 @@ _dev-service-dispatch ACTION *TARGETS:
     }
 
     # Expand group targets
-    $prodTargets = @("gateway", "worker", "ui", "postgres")
+    $prodTargets = @("gateway", "worker", "postgres")
     $devTargets = @()
     $allTargets = $prodTargets + $devTargets
 
@@ -114,10 +114,6 @@ _dev-service-start-worker:
     $port = if ($env:VAULTSPEC_WORKER_PORT) { $env:VAULTSPEC_WORKER_PORT } else { "8001" }
     uv run uvicorn vaultspec_a2a.worker.app:create_worker_app --factory --reload --host 127.0.0.1 --port $port
 
-# Start the Vite frontend dev server (foreground)
-_dev-service-start-ui:
-    cd src/ui && npm run dev
-
 # Start PostgreSQL via docker compose
 _dev-service-start-postgres:
     docker compose -f service/docker-compose.prod.postgres.yml up -d postgres
@@ -143,12 +139,6 @@ _dev-service-stop-worker:
     $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "python|uvicorn" -and $_.CommandLine -match $port }
     if ($procs) { $procs | Stop-Process -Force; Write-Host "Worker stopped." } else { Write-Host "Worker not running." }
 
-# Stop the UI dev server
-_dev-service-stop-ui:
-    #!/usr/bin/env pwsh
-    $procs = Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -eq "node" -and $_.CommandLine -match "vite" }
-    if ($procs) { $procs | Stop-Process -Force; Write-Host "UI stopped." } else { Write-Host "UI not running." }
-
 # Stop PostgreSQL container
 _dev-service-stop-postgres:
     -docker compose -f service/docker-compose.prod.postgres.yml stop postgres
@@ -167,10 +157,6 @@ _dev-service-kill-gateway:
 # Force-kill the worker process (delegates to stop — both use Stop-Process -Force)
 _dev-service-kill-worker:
     just _dev-service-stop-worker
-
-# Force-kill the UI dev server (delegates to stop — both use Stop-Process -Force)
-_dev-service-kill-ui:
-    just _dev-service-stop-ui
 
 # Force-kill PostgreSQL container
 _dev-service-kill-postgres:
@@ -192,11 +178,6 @@ _dev-service-restart-gateway:
 _dev-service-restart-worker:
     just _dev-service-stop-worker
     just _dev-service-start-worker
-
-# Restart the UI dev server (stop then start)
-_dev-service-restart-ui:
-    just _dev-service-stop-ui
-    just _dev-service-start-ui
 
 # Restart PostgreSQL (stop then start)
 _dev-service-restart-postgres:
@@ -221,11 +202,6 @@ _dev-service-rebuild-worker:
     uv sync --all-groups
     just _dev-service-restart-worker
 
-# Rebuild UI: reinstall npm deps then restart
-_dev-service-rebuild-ui:
-    cd src/ui && npm install
-    just _dev-service-restart-ui
-
 # Rebuild PostgreSQL: destroy volume and recreate
 _dev-service-rebuild-postgres:
     docker compose -f service/docker-compose.prod.postgres.yml down -v
@@ -247,10 +223,6 @@ _dev-service-logs-gateway:
 # Tail worker logs (foreground services print to terminal — this is a no-op hint)
 _dev-service-logs-worker:
     @echo "Worker runs in foreground. Start it with: just dev service start worker"
-
-# Tail UI logs (foreground services print to terminal — this is a no-op hint)
-_dev-service-logs-ui:
-    @echo "UI runs in foreground. Start it with: just dev service start ui"
 
 # Tail PostgreSQL container logs
 _dev-service-logs-postgres:
@@ -286,34 +258,10 @@ _dev-code-check-type:
     uv run ty check
 
 # Run frontend type/lint checks
-_dev-code-check-ui:
-    cd src/ui && npm run check
-
-# Run all code quality checks: lint + type + ui + contract
+# Run all code quality checks: lint + type
 _dev-code-check-all:
     just _dev-code-check-lint
     just _dev-code-check-type
-    just _dev-code-check-ui
-    just _dev-contract-check
-
-# --- contract validation recipes ---
-
-# Export OpenAPI + WS schemas from Pydantic models (no running server)
-_dev-contract-export:
-    uv run python scripts/export_openapi.py
-    uv run python scripts/export_ws_schema.py
-
-# Generate TypeScript types from exported schemas
-_dev-contract-generate:
-    cd src/ui && npx openapi-typescript ../../openapi.json -o src/app/data/wire-types.ts
-    uv run python scripts/generate_ws_types.py
-
-# Full contract check: export, generate, diff, tsc
-_dev-contract-check:
-    just _dev-contract-export
-    just _dev-contract-generate
-    git diff --exit-code openapi.json schemas/ src/ui/src/app/data/wire-types.ts src/ui/src/app/data/ws-types.ts
-    cd src/ui && npm run check
 
 # --- fix recipes (auto-repair) ---
 
@@ -322,14 +270,9 @@ _dev-code-fix-lint:
     uv run ruff check --fix .
     uv run ruff format .
 
-# Auto-fix frontend lint/format issues
-_dev-code-fix-ui:
-    cd src/ui && npm run fix
-
-# Auto-fix all: lint + ui
+# Auto-fix all: lint + format
 _dev-code-fix-all:
     just _dev-code-fix-lint
-    just _dev-code-fix-ui
 
 # ===========================================================================
 # dev test — Testing
@@ -394,7 +337,6 @@ dev-deps ACTION:
 _dev-deps-install: _check-uv _check-node
     uv sync --all-groups
     npm install
-    cd src/ui && npm install
     @echo "Dependencies installed. Run 'just dev service start gateway' to begin."
 
 # Sync to lockfile (dev group only)

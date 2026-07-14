@@ -5,7 +5,7 @@ so the SQLite checkpointer can persist state without pickle errors
 (ADR-002, ADR-008).
 """
 
-from typing import Annotated, NotRequired, TypedDict
+from typing import Annotated, Any, NotRequired, TypedDict
 
 from langchain_core.messages import BaseMessage
 from langgraph.graph.message import add_messages
@@ -103,6 +103,20 @@ def _merge_unique_strs(
     return merged
 
 
+def _append_research_findings(
+    existing: list[dict[str, Any]],
+    new: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Append-only reducer for per-thread research findings.
+
+    Each Send-dispatched researcher branch of the diverge stage contributes its
+    findings (each a ``{"claim", "locators", "source_thread"}`` dict); the
+    reducer accumulates them across parallel branches in arrival order for the
+    synthesis stage to consume. Findings are appended and never removed.
+    """
+    return [*existing, *new]
+
+
 # ---------------------------------------------------------------------------
 # State TypedDict
 # ---------------------------------------------------------------------------
@@ -174,6 +188,24 @@ class TeamState(TypedDict):
     # "approved"`` during migration.
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
+
+    # --- document phase machine (adr-authoring-orchestration) ---
+    # research_findings: per-thread findings accumulated by the Send-based
+    # diverge stage. Each item is a ``{"claim", "locators", "source_thread"}``
+    # dict; the reducer is append-only and the synthesis stage consumes the
+    # accumulated list. NotRequired because only the research_adr topology
+    # populates it.
+    research_findings: NotRequired[
+        Annotated[list[dict[str, Any]], _append_research_findings]
+    ]
+    # gate_phase / gate_verdict: the most recent document phase-gate outcome.
+    # The phase-gate node records the phase it gated and the reviewer verdict
+    # (``approved`` / ``rejected`` / ``request_changes``) on resume, so the
+    # streaming and control layers can observe the human decision and downstream
+    # routing can branch on it. Mirrors the ``approval_status`` /
+    # ``approval_request_id`` pair the plan-approval gate uses; last-write-wins.
+    gate_phase: NotRequired[str | None]
+    gate_verdict: NotRequired[str | None]
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]

@@ -8,6 +8,7 @@ from langchain_core.messages import HumanMessage
 from ..state import (
     TeamState,
     _append_artifacts,
+    _append_research_findings,
     _merge_token_usage,
     _merge_unique_strs,
     _replace_plan,
@@ -71,6 +72,42 @@ class TestMergeUniqueStrs:
         existing = ["cs:1"]
         _merge_unique_strs(existing, ["cs:2"])
         assert existing == ["cs:1"]
+
+
+class TestAppendResearchFindings:
+    """Tests for the append-only research-findings reducer."""
+
+    def test_appends_findings_in_order(self) -> None:
+        existing = [{"claim": "c1", "locators": ["f.py:1"], "source_thread": "t1"}]
+        new = [{"claim": "c2", "locators": ["g.py:2"], "source_thread": "t2"}]
+        result = _append_research_findings(existing, new)
+        assert result == [existing[0], new[0]]
+
+    def test_accumulates_parallel_branches(self) -> None:
+        """Two branches contributing the same claim text both accumulate.
+
+        Findings are append-only with no dedup: parallel researchers legitimately
+        surface overlapping claims from distinct threads, and synthesis needs the
+        full set.
+        """
+        existing = [{"claim": "dup", "locators": [], "source_thread": "t1"}]
+        new = [{"claim": "dup", "locators": [], "source_thread": "t2"}]
+        result = _append_research_findings(existing, new)
+        assert len(result) == 2
+        assert result[0]["source_thread"] == "t1"
+        assert result[1]["source_thread"] == "t2"
+
+    def test_empty_new_keeps_existing(self) -> None:
+        existing = [{"claim": "c1", "locators": [], "source_thread": "t1"}]
+        result = _append_research_findings(existing, [])
+        assert result == existing
+
+    def test_does_not_mutate_existing(self) -> None:
+        existing = [{"claim": "c1", "locators": [], "source_thread": "t1"}]
+        _append_research_findings(
+            existing, [{"claim": "c2", "locators": [], "source_thread": "t2"}]
+        )
+        assert existing == [{"claim": "c1", "locators": [], "source_thread": "t1"}]
 
 
 class TestMergeTokenUsage:
@@ -232,6 +269,10 @@ class TestTeamStateStructure:
             # ADR-024: plan approval gate
             "approval_status",
             "approval_request_id",
+            # adr-authoring-orchestration: document phase machine
+            "research_findings",
+            "gate_phase",
+            "gate_verdict",
             # ADR-014: workspace root path
             "workspace_root",
         }

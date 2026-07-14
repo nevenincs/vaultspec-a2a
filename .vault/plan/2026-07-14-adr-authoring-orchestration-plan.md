@@ -24,7 +24,7 @@ Fix the two audited defects the phase machine depends on: mid-run vault_index re
 
 Build the reusable orchestration primitives: findings state, Send-based diverge stage, generalized phase-gate node, and the research_adr topology.
 
-- [ ] `P02.S03` - Add the research_findings append-reducer field and gate/verdict state fields to TeamState; `src/vaultspec_a2a/thread/state.py`.
+- [x] `P02.S03` - Add the research_findings append-reducer field and gate/verdict state fields to TeamState; `src/vaultspec_a2a/thread/state.py`.
 - [ ] `P02.S04` - Build the Send-based diverge stage: dispatch node emitting one Send per research thread, researcher workers appending findings, join into synthesis; `src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/graph/compiler.py`.
 - [ ] `P02.S05` - Generalize the plan_approval pattern into a phase-gate node factory with deterministic idempotent propose-and-submit before interrupt; `src/vaultspec_a2a/graph/nodes/, src/vaultspec_a2a/authoring/`.
 - [ ] `P02.S06` - Wire the research_adr topology type through team config and the compiler with structural phase sequencing; `src/vaultspec_a2a/graph/compiler.py, src/vaultspec_a2a/team/team_config.py`.

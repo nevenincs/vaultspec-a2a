@@ -52,15 +52,15 @@ Execute dashboard ADR D7 deletions (UI, Google-A2A stub) and close every agent-r
 
 Remove src/ui, its static mounting, routes, build steps, recipes, and dev dependencies; A2A is headless.
 
-- [ ] `W02.P03.S07` - Delete src/ui entirely, remove the FastAPI static mount and ui_build_dir setting, and rag-first sweep for every route or handler that exists only for the UI; `src/ui/, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/api/settings`.
-- [ ] `W02.P03.S08` - Remove UI build steps, dev dependencies, and recipes from the root package.json, Justfile, CI, and pre-commit, and delete the UI contract-validation gate; `package.json, Justfile, .github/workflows/, .pre-commit-config.yaml`.
-- [ ] `W02.P03.S09` - Run the full default test profile and boot the gateway headless to prove the deletion left no dangling imports or routes; `src/vaultspec_a2a/api/`.
+- [x] `W02.P03.S07` - Delete src/ui entirely, remove the FastAPI static mount and ui_build_dir setting, and rag-first sweep for every route or handler that exists only for the UI; `src/ui/, src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/api/settings`.
+- [x] `W02.P03.S08` - Remove UI build steps, dev dependencies, and recipes from the root package.json, Justfile, CI, and pre-commit, and delete the UI contract-validation gate; `package.json, Justfile, .github/workflows/, .pre-commit-config.yaml`.
+- [x] `W02.P03.S09` - Run the full default test profile and boot the gateway headless to prove the deletion left no dangling imports or routes; `src/vaultspec_a2a/api/`.
 
 ### Phase `W02.P04` - Google-A2A stub deletion and dead-reference sweep
 
 Delete protocols/a2a and scrub every stale protocols.a2a symbol reference; ACP and REST/SSE are the declared transports.
 
-- [ ] `W02.P04.S10` - Delete the zero-importer protocol stubs after re-verifying zero importers rag-first at execution time: src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub) and src/vaultspec_a2a/protocols/adapter/ (second 3-line stub, adopted-audit finding); confirm the parent protocols __init__ needs no change; do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides. Authorized rider on W02's first hygiene commit (W01 review ruling): remove the source-deleted providers/probes/ husk (pycache and empty tests cache only); `src/vaultspec_a2a/protocols/a2a/, src/vaultspec_a2a/protocols/adapter/, src/vaultspec_a2a/providers/probes/`.
+- [ ] `W02.P04.S10` - Delete the zero-importer protocol stubs after re-verifying zero importers rag-first at execution time: src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub) and src/vaultspec_a2a/protocols/adapter/ (second 3-line stub, adopted-audit finding); `confirm the parent protocols __init__ needs no change; do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides. Authorized rider on W02's first hygiene commit (W01 review ruling): remove the source-deleted providers/probes/ husk (pycache and empty tests cache only); `src/vaultspec_a2a/protocols/a2a/, src/vaultspec_a2a/protocols/adapter/, src/vaultspec_a2a/providers/probes/`.
 
 ### Phase `W02.P05` - Vault write-seam closure
 

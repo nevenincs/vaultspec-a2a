@@ -16,6 +16,9 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P15-S34]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P15-S35]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P15-S36]]'
+  - '[[2026-07-14-a2a-edge-conformance-W02-P03-S07]]'
+  - '[[2026-07-14-a2a-edge-conformance-W02-P03-S08]]'
+  - '[[2026-07-14-a2a-edge-conformance-W02-P03-S09]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -53,6 +56,9 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W01-P15-S34` - Review-merge feature/integration-testing-smoke-tests-api-veri-17 in full per the owner decision of 2026-07-14: run the full test baseline before and after, merge with a merge commit (squash and rebase are disabled), and review the diff against current architecture during the merge
 - `2026-07-14-a2a-edge-conformance-W01-P15-S35` - Spot-check feature/entry-point-layer conftest and vowel-counter test diffs for novel coverage, harvesting anything of value into the step record before the branch is deleted
 - `2026-07-14-a2a-edge-conformance-W01-P15-S36` - Execute the owner-authorized LOCAL cleanup of 2026-07-14 (destructive): remove the three merged worktrees and angry-jemison, drop all four pre-restructure stashes, delete feature/control-layer and feature/entry-point-layer locally, and remove the orphaned feature-ui-integration-wire-regen-28 directory
+- `2026-07-14-a2a-edge-conformance-W02-P03-S07` - Delete src/ui entirely, remove the FastAPI static mount and ui_build_dir setting, and rag-first sweep for every route or handler that exists only for the UI
+- `2026-07-14-a2a-edge-conformance-W02-P03-S08` - Remove UI build steps, dev dependencies, and recipes from the root package.json, Justfile, CI, and pre-commit, and delete the UI contract-validation gate
+- `2026-07-14-a2a-edge-conformance-W02-P03-S09` - Run the full default test profile and boot the gateway headless to prove the deletion left no dangling imports or routes
 
 ### plan
 

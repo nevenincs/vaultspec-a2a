@@ -18,6 +18,7 @@ from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import WorkerExecutionError
 from vaultspec_a2a.thread.state import TeamState
 
+from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
 _logger = logging.getLogger(__name__)
@@ -293,27 +294,38 @@ def create_worker_node(
     autonomous: bool = False,
     workspace_root: Path | None = None,
     feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
     Args:
-        model:          The LangChain chat model to use for this node.
-        system_prompt:  The system prompt defining the worker's behaviour.
-        name:           The name of the worker, added to the generated message.
-        autonomous:     When True, skip permission_callback wiring (headless).
-        workspace_root: Optional workspace root for task queue
-                        file resolution (ADR-021).
-        feature_tag:    Optional feature tag for task queue file resolution (ADR-021).
+        model:           The LangChain chat model to use for this node.
+        system_prompt:   The system prompt defining the worker's behaviour.
+        name:            The name of the worker, added to the generated message.
+        autonomous:      When True, skip permission_callback wiring (headless).
+        workspace_root:  Optional workspace root for RuleManager scoping.
+        feature_tag:     Optional feature tag gating task-queue wiring (ADR R5).
+        task_queue_port: Optional database-backed queue port; when present the
+                         mark-task-complete tool is bound per invocation to the
+                         running thread (ADR R5).
 
     Returns:
         An async function that conforms to the LangGraph node signature.
     """
-    drain_fn: Any = None
-    if workspace_root is not None and feature_tag is not None:
-        _tool_fn, drain_fn = create_mark_task_complete_tool(workspace_root, feature_tag)
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
+        # ADR R5: the task queue is thread-scoped, so bind the mark-complete
+        # tool per invocation using the thread_id carried in graph state — the
+        # compiled graph is shared across threads and cannot close over it.
+        drain_fn: Callable[[], dict[str, Any]] | None = None
+        if task_queue_port is not None and feature_tag is not None:
+            thread_id = state.get("thread_id")
+            if thread_id:
+                _tool_fn, drain_fn = create_mark_task_complete_tool(
+                    task_queue_port, thread_id
+                )
+
         messages = _build_worker_messages(
             state=state,
             system_prompt=system_prompt,

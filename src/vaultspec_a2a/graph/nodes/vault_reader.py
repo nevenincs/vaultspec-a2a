@@ -1,8 +1,9 @@
-"""Blackboard content mounting node (ADR-020)."""
+"""Blackboard content mounting node (ADR-020, ADR R5)."""
 
 from __future__ import annotations
 
 import asyncio
+import logging
 from typing import TYPE_CHECKING, Any
 
 from langchain_core.messages.utils import count_tokens_approximately
@@ -16,9 +17,13 @@ if TYPE_CHECKING:
 
     from vaultspec_a2a.thread.state import TeamState
 
-from ..tools.task_queue import _filter_queue_content
+    from ..protocols import TaskQueuePort
+
+from ..tools.task_queue import render_queue_view
 
 __all__ = ["create_mount_node"]
+
+_logger = logging.getLogger(__name__)
 
 _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
@@ -43,11 +48,17 @@ def _select_paths(state: TeamState, workspace_root: Path) -> list[Path]:
     return adr_paths + phase_paths
 
 
-def create_mount_node(workspace_root: Path | None) -> Callable:
+def create_mount_node(
+    workspace_root: Path | None,
+    task_queue_port: TaskQueuePort | None = None,
+) -> Callable:
     """Factory: returns a mount_node with a closure-scoped content cache.
 
     The cache is scoped to this factory call -- one cache per compiled graph,
-    not shared across threads or sessions.
+    not shared across threads or sessions.  When a ``task_queue_port`` is
+    injected, the database-backed queue view (ADR R5) is appended as a
+    mounted block during the plan and exec phases, replacing the former
+    ``.vault/plan`` markdown interception.
     """
     cache: dict[tuple[str, float], str] = {}
 
@@ -64,6 +75,35 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
             cache[key] = content
         return cache[key]
 
+    async def _render_queue_block(state: TeamState) -> str | None:
+        """Render the database-backed queue view as a mounted block, if any."""
+        if task_queue_port is None:
+            return None
+        feature = state.get("active_feature")
+        phase: str | None = state.get("pipeline_phase")
+        thread_id = state.get("thread_id")
+        if not feature or phase not in _QUEUE_PHASES or not thread_id:
+            return None
+        try:
+            entries = await task_queue_port.get_queue_view(
+                thread_id,
+                state.get("current_task_id"),
+                domain_config.task_queue_pending_horizon,
+            )
+        except Exception:
+            # Best-effort context assembly: a queue read failure degrades to
+            # no queue block rather than failing the worker turn (parity with
+            # the file path skipping a missing document).
+            _logger.warning(
+                "task-queue injection failed for thread %s", thread_id, exc_info=True
+            )
+            return None
+        queue_text = render_queue_view(feature, entries)
+        if not queue_text:
+            return None
+        header = _DOC_SEPARATOR.format(path="task-queue")
+        return f"{header}\n{queue_text}\n{_DOC_FOOTER}"
+
     async def mount_node(state: TeamState) -> dict[str, Any]:
         """Preprocessing node: read .vault/ documents and assemble mounted_context."""
         if workspace_root is None:
@@ -72,23 +112,14 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
         if not state.get("active_feature"):
             return {"mounted_context": None}
 
-        paths = _select_paths(state, workspace_root)
-        if not paths:
-            return {"mounted_context": None}
-
         blocks: list[str] = []
         tokens_used = 0
 
-        for path in paths:
+        for path in _select_paths(state, workspace_root):
             if not path.exists():
                 continue
 
             content = await _read_vault_doc(path)
-
-            # ADR-021: filter queue files to current task + next 2 pending rows
-            phase: str | None = state.get("pipeline_phase")
-            if path.name.endswith("-queue.md") and phase in _QUEUE_PHASES:
-                content = _filter_queue_content(content, state.get("current_task_id"))
 
             rel_path = str(path.relative_to(workspace_root))
             header = _DOC_SEPARATOR.format(path=rel_path)
@@ -108,6 +139,12 @@ def create_mount_node(workspace_root: Path | None) -> Callable:
                 break
             else:
                 break
+
+        queue_block = await _render_queue_block(state)
+        if queue_block is not None:
+            queue_tokens = count_tokens_approximately(queue_block)
+            if queue_tokens <= domain_config.mount_token_ceiling - tokens_used:
+                blocks.append(queue_block)
 
         if not blocks:
             return {"mounted_context": None}

@@ -9,16 +9,75 @@ implementations at construction time.
 from __future__ import annotations
 
 from contextlib import AbstractContextManager
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from pathlib import Path
 
 __all__ = [
+    "MarkCompleteOutcome",
     "NullTelemetryHook",
     "ProviderFactoryProtocol",
+    "QueueEntryView",
+    "TaskQueuePort",
     "TelemetryHook",
 ]
+
+
+@dataclass(frozen=True)
+class QueueEntryView:
+    """A single injectable task-queue row (Layer 1 DTO).
+
+    Plain primitives only, so graph nodes never touch persistence models.
+    """
+
+    task_key: str
+    status: str
+    description: str
+
+
+@dataclass(frozen=True)
+class MarkCompleteOutcome:
+    """Result of a mark-complete transition (Layer 1 DTO).
+
+    ``found`` is False when the addressed row does not exist for the thread.
+    ``did_complete`` is True when the row is now completed — either because it
+    transitioned from ``in_progress`` or because it was already ``completed``
+    (idempotent replay).  ``next_task_key`` is the next pending row by
+    ``position`` after the completed row, or None when the queue is drained.
+    """
+
+    found: bool
+    did_complete: bool
+    next_task_key: str | None
+
+
+@runtime_checkable
+class TaskQueuePort(Protocol):
+    """Protocol for the database-backed worker task queue (ADR R5).
+
+    Decouples the graph layer from the persistence layer: graph nodes depend
+    only on this abstract interface and receive a concrete adapter injected at
+    compile time, exactly as with :class:`ProviderFactoryProtocol`.
+    """
+
+    async def get_queue_view(
+        self,
+        thread_id: str,
+        current_task_id: str | None,
+        horizon: int,
+    ) -> list[QueueEntryView]:
+        """Return the current row plus up to ``horizon`` next pending rows."""
+        ...
+
+    async def mark_complete(
+        self,
+        thread_id: str,
+        task_key: str,
+    ) -> MarkCompleteOutcome:
+        """Idempotently complete ``task_key`` and report the next pending row."""
+        ...
 
 
 @runtime_checkable

@@ -38,7 +38,7 @@ from .enums import Model, PipelinePhase, Provider
 from .nodes.supervisor import create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
-from .protocols import ProviderFactoryProtocol
+from .protocols import ProviderFactoryProtocol, TaskQueuePort
 
 logger = logging.getLogger(__name__)
 
@@ -278,6 +278,7 @@ def compile_team_graph(
     autonomous: bool = False,
     step_timeout: float | None = None,
     feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -304,7 +305,9 @@ def compile_team_graph(
                                  team TOML ``step_timeout_seconds`` value is
                                  used as fallback (TOML-05).
         feature_tag:             Optional feature tag for task-queue scoping
-                                 (ADR-021).
+                                 (ADR R5).
+        task_queue_port:         Optional database-backed task-queue port
+                                 injected into worker and mount nodes (ADR R5).
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -341,6 +344,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
     elif topology.type == TopologyType.PIPELINE:
         _compile_pipeline(
@@ -351,6 +355,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
     elif topology.type == TopologyType.PIPELINE_LOOP:
         _compile_pipeline_loop(
@@ -362,6 +367,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
     else:
         raise ValueError(
@@ -403,6 +409,7 @@ def _compile_star(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -495,6 +502,7 @@ def _compile_star(
             autonomous=autonomous,
             workspace_root=workspace_root,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
         builder.add_node(
             agent_cfg.id,
@@ -508,7 +516,7 @@ def _compile_star(
         )
         builder.add_edge(agent_cfg.id, "supervisor")
         # ADR-020: insert mount node between supervisor routing and worker invocation.
-        mount_fn = create_mount_node(workspace_root)
+        mount_fn = create_mount_node(workspace_root, task_queue_port)
         builder.add_node(f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
         compiled_worker_ids.append(agent_cfg.id)
@@ -540,6 +548,7 @@ def _compile_pipeline(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -602,9 +611,10 @@ def _compile_pipeline(
             autonomous=autonomous,
             workspace_root=workspace_root,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
         # ADR-020: insert mount node between pipeline stages.
-        mount_fn = create_mount_node(workspace_root)
+        mount_fn = create_mount_node(workspace_root, task_queue_port)
         mount_id = f"mount_{agent_cfg.id}"
         builder.add_node(mount_id, mount_fn)
         builder.add_node(
@@ -711,6 +721,7 @@ def _compile_pipeline_loop(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     feature_tag: str | None = None,
+    task_queue_port: TaskQueuePort | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -753,13 +764,14 @@ def _compile_pipeline_loop(
             autonomous=autonomous,
             workspace_root=workspace_root,
             feature_tag=feature_tag,
+            task_queue_port=task_queue_port,
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
 
         # ADR-020: insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
-        mount_fn = create_mount_node(workspace_root)
+        mount_fn = create_mount_node(workspace_root, task_queue_port)
         builder.add_node(mount_id, mount_fn)
         builder.add_node(
             agent_cfg.id,

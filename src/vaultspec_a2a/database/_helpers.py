@@ -22,6 +22,7 @@ from .models import (
     CostTrackingModel,
     PermissionLogModel,
     PermissionRequestModel,
+    TaskQueueEntryModel,
     ThreadExecutionStateModel,
     ThreadModel,
 )
@@ -49,6 +50,7 @@ async def save_model[
         ControlActionModel,
         CostTrackingModel,
         ThreadExecutionStateModel,
+        TaskQueueEntryModel,
     )
 ](session: AsyncSession, model: M) -> M:
     """Persist any database model instance."""

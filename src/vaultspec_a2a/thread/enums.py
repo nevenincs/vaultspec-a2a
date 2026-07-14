@@ -79,6 +79,15 @@ class ApprovalStatus(StrEnum):
     SUPERSEDED = "superseded"
 
 
+class TaskQueueStatus(StrEnum):
+    """Durable execution states for a worker task-queue entry (ADR R5)."""
+
+    PENDING = "pending"
+    IN_PROGRESS = "in_progress"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
 TERMINAL_STATUSES: frozenset[ThreadStatus] = frozenset(
     {
         ThreadStatus.COMPLETED,

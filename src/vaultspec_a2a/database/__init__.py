@@ -30,6 +30,7 @@ from .models import ArtifactModel as ArtifactModel
 from .models import Base as Base
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
+from .models import TaskQueueEntryModel as TaskQueueEntryModel
 from .models import ThreadModel as ThreadModel
 from .permission_repository import create_control_action as create_control_action
 from .permission_repository import (
@@ -75,6 +76,10 @@ from .session import get_engine as get_engine
 from .session import get_session_factory as get_session_factory
 from .session import init_db as init_db
 from .session import verify_wal_mode as verify_wal_mode
+from .task_queue_repository import MarkCompleteResult as MarkCompleteResult
+from .task_queue_repository import get_queue_view as get_queue_view
+from .task_queue_repository import mark_task_complete as mark_task_complete
+from .task_queue_repository import seed_task_queue as seed_task_queue
 from .thread_repository import create_thread as create_thread
 from .thread_repository import delete_thread as delete_thread
 from .thread_repository import (
@@ -107,9 +112,11 @@ __all__ = [
     "ControlActionType",
     "CostTrackingModel",
     "InvalidTransitionError",
+    "MarkCompleteResult",
     "PermissionLogModel",
     "PermissionRequestStatus",
     "RepairStatus",
+    "TaskQueueEntryModel",
     "ThreadModel",
     "ThreadStatus",
     "append_cost_record",
@@ -130,6 +137,7 @@ __all__ = [
     "get_pending_permission_requests",
     "get_permission_logs_by_thread",
     "get_permission_request",
+    "get_queue_view",
     "get_session_factory",
     "get_thread",
     "get_thread_execution_state",
@@ -141,12 +149,14 @@ __all__ = [
     "mark_control_action_duplicate",
     "mark_control_action_superseded",
     "mark_permission_request_applied",
+    "mark_task_complete",
     "record_permission_request",
     "record_permission_response_submission",
     "record_thread_execution_state",
     "reset_permission_response_submission",
     "run_migrations",
     "save_model",
+    "seed_task_queue",
     "set_thread_approval_state",
     "set_thread_repair_state",
     "sum_cost_by_agent",

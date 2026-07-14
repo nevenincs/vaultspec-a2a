@@ -1,213 +1,225 @@
-"""Tests for graph.tools.task_queue."""
+"""Tests for graph.tools.task_queue (ADR R5).
 
-from __future__ import annotations
+The mark-complete tool is exercised through the real ``SqlTaskQueuePort``
+adapter backed by real in-memory aiosqlite — no mocks, no fakes. The pure
+render helper is tested directly.
+"""
 
-from typing import TYPE_CHECKING
+from collections.abc import AsyncGenerator
 
 import pytest
+import pytest_asyncio
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 
-if TYPE_CHECKING:
-    from pathlib import Path
+from ...database import create_thread, seed_task_queue
+from ...database.models import Base
+from ...worker.task_queue_port import SqlTaskQueuePort
+from ..protocols import QueueEntryView
+from ..tools.task_queue import create_mark_task_complete_tool, render_queue_view
 
-from ..tools.task_queue import _filter_queue_content, create_mark_task_complete_tool
+_FEATURE = "sdd-blackboard-integration"
 
-_SAMPLE_QUEUE = """\
-## Task Queue -- sdd-blackboard-integration
-
-| ID      | Status      | Title                             |
-|---------|-------------|-----------------------------------|
-| SBI-001 | completed   | Add 4 new fields to TeamState     |
-| SBI-002 | in_progress | Implement build_anchoring_context |
-| SBI-003 | pending     | Implement mount step node         |
-| SBI-004 | pending     | Wire queue injection              |
-| SBI-005 | pending     | Write audit tests                 |
-"""
-
-
-def _make_queue_file(tmp_path: Path, content: str = _SAMPLE_QUEUE) -> tuple[Path, Path]:
-    """Create .vault/plan/sdd-blackboard-integration-queue.md under tmp_path."""
-    plan_dir = tmp_path / ".vault" / "plan"
-    plan_dir.mkdir(parents=True)
-    queue_file = plan_dir / "sdd-blackboard-integration-queue.md"
-    queue_file.write_text(content, encoding="utf-8")
-    return tmp_path, queue_file
+_ENTRIES = [
+    {"task_key": "SBI-001", "description": "Add fields", "status": "completed"},
+    {"task_key": "SBI-002", "description": "Anchoring", "status": "in_progress"},
+    {"task_key": "SBI-003", "description": "Mount node", "status": "pending"},
+    {"task_key": "SBI-004", "description": "Queue inject", "status": "pending"},
+]
 
 
-def test_filter_returns_header_and_current_task() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-002")
-    assert "SBI-002" in result
-    assert "in_progress" in result
+# ---------------------------------------------------------------------------
+# render_queue_view — pure logic
+# ---------------------------------------------------------------------------
 
 
-def test_filter_includes_next_2_pending() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-002")
-    assert "SBI-003" in result
-    assert "SBI-004" in result
+def test_render_returns_empty_string_for_no_entries() -> None:
+    assert render_queue_view(_FEATURE, []) == ""
 
 
-def test_filter_excludes_third_pending() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-002")
-    assert "SBI-005" not in result
+def test_render_includes_header_and_rows() -> None:
+    entries = [
+        QueueEntryView("SBI-002", "in_progress", "Anchoring"),
+        QueueEntryView("SBI-003", "pending", "Mount node"),
+    ]
+    result = render_queue_view(_FEATURE, entries)
+    assert f"## Task Queue -- {_FEATURE}" in result
+    assert "| Task | Status | Description |" in result
+    assert "| SBI-002 | in_progress | Anchoring |" in result
+    assert "| SBI-003 | pending | Mount node |" in result
 
 
-def test_filter_excludes_completed_rows() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-002")
-    assert "SBI-001" not in result
+def test_render_row_order_is_preserved() -> None:
+    entries = [
+        QueueEntryView("SBI-002", "in_progress", "Anchoring"),
+        QueueEntryView("SBI-003", "pending", "Mount node"),
+    ]
+    result = render_queue_view(_FEATURE, entries)
+    assert result.index("SBI-002") < result.index("SBI-003")
 
 
-def test_filter_retains_header_lines() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-002")
-    assert "## Task Queue" in result
-    assert "| ID" in result
+# ---------------------------------------------------------------------------
+# mark-complete tool — real port over real SQLite
+# ---------------------------------------------------------------------------
 
 
-def test_filter_no_current_task_shows_only_pending() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, None)
-    assert "SBI-003" in result
-    assert "SBI-004" in result
-    assert "SBI-005" not in result
-    assert "SBI-002" not in result
+@pytest_asyncio.fixture
+async def engine() -> AsyncGenerator[AsyncEngine]:
+    """Fresh in-memory async engine with all tables created."""
+    eng = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
+    async with eng.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    yield eng
+    await eng.dispose()
 
 
-def test_filter_unknown_current_task_still_shows_pending() -> None:
-    result = _filter_queue_content(_SAMPLE_QUEUE, "SBI-999")
-    assert "SBI-003" in result
-    assert "SBI-004" in result
+@pytest_asyncio.fixture
+async def session_factory(
+    engine: AsyncEngine,
+) -> async_sessionmaker[AsyncSession]:
+    """Async session factory bound to the in-memory engine."""
+    return async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+@pytest_asyncio.fixture
+async def seeded_thread(session_factory: async_sessionmaker[AsyncSession]) -> str:
+    """Create a thread with a seeded queue; return the thread id."""
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Queue thread")
+        await seed_task_queue(
+            session, thread_id=thread.id, feature_tag=_FEATURE, entries=_ENTRIES
+        )
+        await session.commit()
+        return thread.id
 
 
 @pytest.mark.asyncio
-async def test_mark_task_complete_updates_file(tmp_path: Path) -> None:
-    workspace, queue_file = _make_queue_file(tmp_path)
-    tool_fn, _drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_tool_completes_and_reports_next_task(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, _drain = create_mark_task_complete_tool(port, seeded_thread)
 
     result = await tool_fn("SBI-002")
-    assert "marked complete" in result.lower()
-
-    updated = queue_file.read_text(encoding="utf-8")
-    assert "| SBI-002 | completed" in updated
-    assert "in_progress" not in updated
+    assert result == "Task SBI-002 marked complete. Next task: SBI-003."
 
 
 @pytest.mark.asyncio
-async def test_mark_task_complete_returns_next_task(tmp_path: Path) -> None:
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, _drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_tool_reports_no_further_tasks_when_drained(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        thread = await create_thread(session, title="single")
+        await seed_task_queue(
+            session,
+            thread_id=thread.id,
+            feature_tag=_FEATURE,
+            entries=[
+                {"task_key": "F-001", "description": "only", "status": "in_progress"}
+            ],
+        )
+        await session.commit()
+        thread_id = thread.id
 
-    result = await tool_fn("SBI-002")
-    assert "SBI-003" in result
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, _drain = create_mark_task_complete_tool(port, thread_id)
 
-
-@pytest.mark.asyncio
-async def test_mark_task_complete_no_further_tasks(tmp_path: Path) -> None:
-    content = """\
-## Task Queue -- feat
-
-| ID      | Status      | Title  |
-|---------|-------------|--------|
-| F-001   | in_progress | Step 1 |
-"""
-    workspace, _queue_file = _make_queue_file(tmp_path, content)
-    plan_dir = tmp_path / ".vault" / "plan"
-    (plan_dir / "sdd-blackboard-integration-queue.md").unlink(missing_ok=True)
-    (plan_dir / "feat-queue.md").write_text(content, encoding="utf-8")
-
-    tool_fn, _drain_fn = create_mark_task_complete_tool(workspace, "feat")
     result = await tool_fn("F-001")
-    assert "no further" in result.lower()
+    assert result == "Task F-001 marked complete. No further pending tasks."
 
 
 @pytest.mark.asyncio
-async def test_mark_task_complete_missing_file(tmp_path: Path) -> None:
-    tool_fn, _drain_fn = create_mark_task_complete_tool(tmp_path, "nonexistent-feature")
-    result = await tool_fn("NF-001")
-    assert "not found" in result.lower()
+async def test_tool_reports_not_found_for_missing_task(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, _drain = create_mark_task_complete_tool(port, seeded_thread)
+
+    result = await tool_fn("NOPE-1")
+    assert result == "Task NOPE-1 not found or not in_progress."
 
 
 @pytest.mark.asyncio
-async def test_mark_task_complete_task_not_found(tmp_path: Path) -> None:
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, _drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
-
-    result = await tool_fn("SBI-999")
-    assert "not found" in result.lower()
-
-
-@pytest.mark.asyncio
-async def test_mark_task_complete_wrong_status(tmp_path: Path) -> None:
-    """Trying to complete a pending task (not in_progress) should fail."""
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, _drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_tool_rejects_pending_task(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, _drain = create_mark_task_complete_tool(port, seeded_thread)
 
     result = await tool_fn("SBI-003")
-    assert "not found" in result.lower()
+    assert result == "Task SBI-003 not found or not in_progress."
 
 
 @pytest.mark.asyncio
-async def test_drain_returns_current_task_id(tmp_path: Path) -> None:
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_tool_recomplete_is_idempotent(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, _drain = create_mark_task_complete_tool(port, seeded_thread)
+
+    first = await tool_fn("SBI-002")
+    second = await tool_fn("SBI-002")
+    assert first == "Task SBI-002 marked complete. Next task: SBI-003."
+    assert second == "Task SBI-002 marked complete. Next task: SBI-003."
+
+
+@pytest.mark.asyncio
+async def test_drain_returns_next_task_id_after_completion(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, drain_fn = create_mark_task_complete_tool(port, seeded_thread)
 
     await tool_fn("SBI-002")
     updates = drain_fn()
-
-    assert "current_task_id" in updates
-    assert updates["current_task_id"] == "SBI-003"
+    assert updates == {"current_task_id": "SBI-003"}
 
 
 @pytest.mark.asyncio
-async def test_drain_clears_after_call(tmp_path: Path) -> None:
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    tool_fn, drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_drain_clears_after_call(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, drain_fn = create_mark_task_complete_tool(port, seeded_thread)
 
     await tool_fn("SBI-002")
     drain_fn()
-    updates2 = drain_fn()
-
-    assert updates2 == {}
+    assert drain_fn() == {}
 
 
 @pytest.mark.asyncio
-async def test_drain_empty_when_no_tool_called(tmp_path: Path) -> None:
-    workspace, _queue_file = _make_queue_file(tmp_path)
-    _tool_fn, drain_fn = create_mark_task_complete_tool(
-        workspace, "sdd-blackboard-integration"
-    )
+async def test_drain_empty_when_no_tool_called(
+    session_factory: async_sessionmaker[AsyncSession], seeded_thread: str
+) -> None:
+    port = SqlTaskQueuePort(session_factory)
+    _tool_fn, drain_fn = create_mark_task_complete_tool(port, seeded_thread)
 
-    updates = drain_fn()
-    assert updates == {}
+    assert drain_fn() == {}
 
 
 @pytest.mark.asyncio
-async def test_drain_merges_multiple_calls(tmp_path: Path) -> None:
-    """Last write wins when tool called multiple times before drain."""
-    content = """\
-## Task Queue -- feat
+async def test_drain_reports_none_when_queue_drained(
+    session_factory: async_sessionmaker[AsyncSession],
+) -> None:
+    async with session_factory() as session:
+        thread = await create_thread(session, title="single-drain")
+        await seed_task_queue(
+            session,
+            thread_id=thread.id,
+            feature_tag=_FEATURE,
+            entries=[
+                {"task_key": "F-001", "description": "only", "status": "in_progress"}
+            ],
+        )
+        await session.commit()
+        thread_id = thread.id
 
-| ID    | Status      | Title  |
-|-------|-------------|--------|
-| F-001 | in_progress | Step 1 |
-| F-002 | in_progress | Step 2 |
-| F-003 | pending     | Step 3 |
-"""
-    plan_dir = tmp_path / ".vault" / "plan"
-    plan_dir.mkdir(parents=True, exist_ok=True)
-    (plan_dir / "feat-queue.md").write_text(content, encoding="utf-8")
+    port = SqlTaskQueuePort(session_factory)
+    tool_fn, drain_fn = create_mark_task_complete_tool(port, thread_id)
 
-    tool_fn, drain_fn = create_mark_task_complete_tool(tmp_path, "feat")
     await tool_fn("F-001")
-    await tool_fn("F-002")
-    updates = drain_fn()
-
-    assert updates.get("current_task_id") == "F-003"
+    assert drain_fn() == {"current_task_id": None}

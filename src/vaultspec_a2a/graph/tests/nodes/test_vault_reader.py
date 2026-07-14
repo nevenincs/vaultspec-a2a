@@ -74,6 +74,54 @@ async def test_mount_node_returns_content_for_adr_files(tmp_path: Path) -> None:
     assert "Decision text." in result["mounted_context"]
 
 
+@pytest.mark.asyncio
+async def test_mount_refreshes_vault_index_for_documents_written_mid_run(
+    tmp_path: Path,
+) -> None:
+    """A document produced after compile time is discovered on the next pass.
+
+    The index is seeded empty; the mount node re-scans .vault/ each pass, so a
+    research document written during the run must appear in both the mounted
+    context and the returned vault_index update (S01).
+    """
+    research_dir = tmp_path / ".vault" / "research"
+    research_dir.mkdir(parents=True)
+    (research_dir / "my-feature-research.md").write_text(
+        "# Research\n\nProduced mid-run.", encoding="utf-8"
+    )
+
+    mount = create_mount_node(tmp_path)
+    state = _make_state(pipeline_phase="research", vault_index={})
+    result = await mount(state)
+
+    expected_rel = str(Path(".vault/research/my-feature-research.md"))
+    assert result["vault_index"] == {"research": [expected_rel]}
+    assert result["mounted_context"] is not None
+    assert "Produced mid-run." in result["mounted_context"]
+
+
+@pytest.mark.asyncio
+async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> None:
+    """The refresh is add-only: pre-existing state entries are not dropped."""
+    adr_dir = tmp_path / ".vault" / "adr"
+    adr_dir.mkdir(parents=True)
+    (adr_dir / "my-feature-adr.md").write_text("# ADR\n\nBinding.", encoding="utf-8")
+
+    mount = create_mount_node(tmp_path)
+    # A plan path lives only in state (no matching file on disk to re-glob).
+    state = _make_state(
+        pipeline_phase="adr",
+        vault_index={"plan": [".vault/plan/my-feature-plan.md"]},
+    )
+    result = await mount(state)
+
+    # The returned update carries only the freshly discovered ADR; the reducer
+    # merges it with the surviving plan entry already in state.
+    expected_rel = str(Path(".vault/adr/my-feature-adr.md"))
+    assert result["vault_index"] == {"adr": [expected_rel]}
+    assert "Binding." in result["mounted_context"]
+
+
 # ---------------------------------------------------------------------------
 # Database-backed queue injection (ADR R5) — real SQLite via SqlTaskQueuePort
 # ---------------------------------------------------------------------------

@@ -1,8 +1,15 @@
-"""Blackboard content mounting node (ADR-020, ADR R5)."""
+"""Blackboard content mounting node (ADR-020, ADR R5).
+
+The mount node also owns the canonical ``build_initial_vault_index`` scan so the
+same glob logic seeds the index at compile time and refreshes it on every mount
+pass (ADR authoring-orchestration S01). ``compiler`` re-exports the function to
+preserve the historical ``graph.compiler.build_initial_vault_index`` surface.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import glob as _glob
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -21,7 +28,7 @@ if TYPE_CHECKING:
 
 from ..tools.task_queue import render_queue_view
 
-__all__ = ["create_mount_node"]
+__all__ = ["build_initial_vault_index", "create_mount_node"]
 
 _logger = logging.getLogger(__name__)
 
@@ -29,17 +36,67 @@ _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
 _QUEUE_PHASES = frozenset({PipelinePhase.PLAN, PipelinePhase.EXEC})
 
+_VAULT_STAGE_PATTERNS: dict[str, str] = {
+    PipelinePhase.RESEARCH: ".vault/research/*{tag}*.md",
+    "reference": ".vault/reference/*{tag}*.md",
+    PipelinePhase.ADR: ".vault/adr/*{tag}*.md",
+    PipelinePhase.PLAN: ".vault/plan/*{tag}*.md",
+    PipelinePhase.EXEC: ".vault/exec/*{tag}*/**/*.md",
+    PipelinePhase.AUDIT: ".vault/audit/*{tag}*.md",
+}
 
-def _select_paths(state: TeamState, workspace_root: Path) -> list[Path]:
+
+def build_initial_vault_index(
+    workspace_root: Path | None,
+    feature_tag: str,
+) -> dict[str, list[str]]:
+    """Scan .vault/ for files matching feature_tag.
+
+    Returns empty dict when workspace_root is None.
+    """
+    if workspace_root is None:
+        return {}
+    index: dict[str, list[str]] = {}
+    for stage, pattern in _VAULT_STAGE_PATTERNS.items():
+        resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
+        matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
+        if matches:
+            index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
+    return index
+
+
+def _merge_index_views(
+    existing: dict[str, list[str]],
+    refreshed: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Add-only merge of a refreshed on-disk scan onto the state's index.
+
+    Mirrors the ``_merge_vault_index`` reducer semantics so the in-pass mount
+    view matches what the reducer will persist: newly produced documents are
+    added, prior entries are preserved, and removals are out of scope.
+    """
+    merged: dict[str, list[str]] = {k: list(v) for k, v in existing.items()}
+    for doc_type, paths in refreshed.items():
+        seen = set(merged.get(doc_type, []))
+        bucket = merged.setdefault(doc_type, [])
+        for p in paths:
+            if p not in seen:
+                bucket.append(p)
+                seen.add(p)
+    return merged
+
+
+def _select_paths(
+    vault_index: dict[str, list[str]],
+    phase: str | None,
+    workspace_root: Path,
+) -> list[Path]:
     """Select documents to mount: ADRs always, then current-phase docs.
 
     Priority order (used when budget is exceeded):
     1. ADR documents (always binding, always first)
     2. Current-phase documents in filesystem sort order
     """
-    vault_index: dict[str, list[str]] = state.get("vault_index") or {}
-    phase: str | None = state.get("pipeline_phase")
-
     adr_paths = [workspace_root / p for p in vault_index.get("adr", [])]
     phase_paths: list[Path] = []
     if phase and phase != "adr":
@@ -109,17 +166,37 @@ def create_mount_node(
         return f"{header}\n{queue_text}\n{_DOC_FOOTER}"
 
     async def mount_node(state: TeamState) -> dict[str, Any]:
-        """Preprocessing node: read .vault/ documents and assemble mounted_context."""
+        """Preprocessing node: read .vault/ documents and assemble mounted_context.
+
+        Each pass re-derives the active feature's vault index from disk so gates
+        and mounts observe documents produced earlier in the same run (S01). The
+        refresh is add-only: it discovers newly written documents and returns
+        them through the ``_merge_vault_index`` reducer; removals are out of
+        scope for the merge reducer and are not reflected here.
+        """
         if workspace_root is None:
             return {"mounted_context": None}
 
-        if not state.get("active_feature"):
+        active_feature = state.get("active_feature")
+        if not active_feature:
             return {"mounted_context": None}
+
+        refreshed_index = await asyncio.to_thread(
+            build_initial_vault_index, workspace_root, active_feature
+        )
+        mount_index = _merge_index_views(
+            state.get("vault_index") or {}, refreshed_index
+        )
+        index_update: dict[str, Any] = (
+            {"vault_index": refreshed_index} if refreshed_index else {}
+        )
 
         blocks: list[str] = []
         tokens_used = 0
 
-        for path in _select_paths(state, workspace_root):
+        for path in _select_paths(
+            mount_index, state.get("pipeline_phase"), workspace_root
+        ):
             if not path.exists():
                 continue
 
@@ -151,8 +228,8 @@ def create_mount_node(
                 blocks.append(queue_block)
 
         if not blocks:
-            return {"mounted_context": None}
+            return {"mounted_context": None, **index_update}
 
-        return {"mounted_context": "\n\n".join(blocks)}
+        return {"mounted_context": "\n\n".join(blocks), **index_update}
 
     return mount_node

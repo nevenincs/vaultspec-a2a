@@ -11,7 +11,6 @@ map.  Three topology types are supported (ADR-013 S2.5):
 """
 
 import functools
-import glob as _glob
 import logging
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
@@ -26,7 +25,6 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
 from langgraph.types import RetryPolicy
 
-from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import (
     ConfigError,
     ProviderSessionError,
@@ -36,23 +34,18 @@ from vaultspec_a2a.thread.state import TeamState
 
 from .enums import Model, PipelinePhase, Provider
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
-from .nodes.vault_reader import create_mount_node
+from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .protocols import ProviderFactoryProtocol, TaskQueuePort
 
 logger = logging.getLogger(__name__)
 
 
+# ``build_initial_vault_index`` is defined in ``nodes.vault_reader`` (the mount
+# node reuses it to refresh the index each pass) and re-exported here to preserve
+# the historical ``graph.compiler.build_initial_vault_index`` import surface.
 __all__ = ["build_initial_vault_index", "compile_team_graph"]
 
-_VAULT_STAGE_PATTERNS: dict[str, str] = {
-    PipelinePhase.RESEARCH: ".vault/research/*{tag}*.md",
-    "reference": ".vault/reference/*{tag}*.md",
-    PipelinePhase.ADR: ".vault/adr/*{tag}*.md",
-    PipelinePhase.PLAN: ".vault/plan/*{tag}*.md",
-    PipelinePhase.EXEC: ".vault/exec/*{tag}*/**/*.md",
-    PipelinePhase.AUDIT: ".vault/audit/*{tag}*.md",
-}
 # ADR-023: maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
 _ROLE_TO_PHASE: dict[str, str] = {
@@ -213,25 +206,6 @@ def _resolve_supervisor_model(
         agent_config=supervisor_agent_config,
         workspace_root=workspace_root,
     )
-
-
-def build_initial_vault_index(
-    workspace_root: Path | None,
-    feature_tag: str,
-) -> dict[str, list[str]]:
-    """Scan .vault/ for files matching feature_tag.
-
-    Returns empty dict when workspace_root is None.
-    """
-    if workspace_root is None:
-        return {}
-    index: dict[str, list[str]] = {}
-    for stage, pattern in _VAULT_STAGE_PATTERNS.items():
-        resolved = pattern.replace("{tag}", _glob.escape(feature_tag))
-        matches = sorted(workspace_root.glob(resolved))[: domain_config.vault_index_cap]
-        if matches:
-            index[stage] = [str(m.relative_to(workspace_root)) for m in matches]
-    return index
 
 
 def _build_supervisor_prompt(

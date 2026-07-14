@@ -60,7 +60,7 @@ Remove src/ui, its static mounting, routes, build steps, recipes, and dev depend
 
 Delete protocols/a2a and scrub every stale protocols.a2a symbol reference; ACP and REST/SSE are the declared transports.
 
-- [ ] `W02.P04.S10` - Delete src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub, zero importers - verified by the deletion manifest) and confirm the parent protocols __init__ needs no change; `do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides; `src/vaultspec_a2a/protocols/a2a/`.
+- [ ] `W02.P04.S10` - Delete the zero-importer protocol stubs after re-verifying zero importers rag-first at execution time: src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub) and src/vaultspec_a2a/protocols/adapter/ (second 3-line stub, adopted-audit finding); confirm the parent protocols __init__ needs no change; do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides. Authorized rider on W02's first hygiene commit (W01 review ruling): remove the source-deleted providers/probes/ husk (pycache and empty tests cache only); `src/vaultspec_a2a/protocols/a2a/, src/vaultspec_a2a/protocols/adapter/, src/vaultspec_a2a/providers/probes/`.
 
 ### Phase `W02.P05` - Vault write-seam closure
 

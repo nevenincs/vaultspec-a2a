@@ -119,7 +119,7 @@ class TestAlembicUpgradeDowngrade:
         row = conn.execute("SELECT version_num FROM alembic_version").fetchone()
         conn.close()
         assert row is not None
-        assert row[0] == "0006"
+        assert row[0] == "0007"
 
     def test_upgrade_head_rewrites_legacy_created_status(
         self, runtime_dir: Path

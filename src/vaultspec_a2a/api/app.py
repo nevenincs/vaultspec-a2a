@@ -29,10 +29,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from opentelemetry import metrics, trace
 from starlette.websockets import WebSocket
 
+from ..authoring import resolve_engine
 from ..control.circuit_breaker import WorkerCircuitBreaker
 from ..control.config import settings
 from ..control.dispatch import redispatch_reconciling_threads
 from ..control.health import assemble_health_status, build_sqlite_fallback_diagnostics
+from ..control.verdict_subscriber import VerdictSubscriber
 from ..control.worker_management import (
     LazyWorkerSpawner,
     WorkerState,
@@ -46,6 +48,7 @@ from ..database.session import (
     get_session_factory,
     init_db,
 )
+from ..domain_config import domain_config
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
@@ -195,9 +198,37 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
         )
 
+        verdict_subscriber_task: asyncio.Task[None] | None = None
+        if settings.authoring_subscriber_enabled:
+            verdict_subscriber = VerdictSubscriber(
+                session_factory=get_session_factory(),
+                checkpointer=checkpointer,
+                worker_client=worker_client,
+                circuit_breaker=circuit_breaker,
+                worker_spawner=worker_spawner,
+                endpoint_provider=resolve_engine,
+                recursion_limit=domain_config.graph_recursion_limit,
+                trace_headers_fn=trace_headers,
+                poll_interval_seconds=(
+                    settings.authoring_subscriber_poll_interval_seconds
+                ),
+                reconnect_base_seconds=(
+                    settings.authoring_subscriber_reconnect_base_seconds
+                ),
+                reconnect_max_seconds=(
+                    settings.authoring_subscriber_reconnect_max_seconds
+                ),
+            )
+            verdict_subscriber_task = asyncio.create_task(verdict_subscriber.run())
+            logger.info("Authoring verdict subscriber enabled")
+
         logger.info("Gateway startup complete")
 
         yield
+
+        if verdict_subscriber_task is not None:
+            verdict_subscriber_task.cancel()
+            await asyncio.gather(verdict_subscriber_task, return_exceptions=True)
 
         reconcile_task.cancel()
         await asyncio.gather(reconcile_task, return_exceptions=True)

@@ -253,6 +253,39 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_REPAIR_STRATEGY",
     )
 
+    # Authoring verdict subscriber (ADR R3, P03.S07)
+    authoring_subscriber_enabled: bool = Field(
+        default=False,
+        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED",
+        description=(
+            "Run the engine authoring-verdict subscriber as a gateway background "
+            "task. Consumes GET /authoring/v1/events and resumes parked runs with "
+            "reviewer verdicts. Off by default; enable when a live engine is "
+            "available to review agent-authored proposals."
+        ),
+    )
+    authoring_subscriber_poll_interval_seconds: float = Field(
+        default=3.0,
+        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_POLL_INTERVAL_SECONDS",
+        description=(
+            "Seconds to wait after an empty lifecycle page before re-opening the "
+            "engine SSE stream (steady-state poll cadence)."
+        ),
+    )
+    authoring_subscriber_reconnect_base_seconds: float = Field(
+        default=2.0,
+        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_RECONNECT_BASE_SECONDS",
+        description=(
+            "Initial exponential back-off (seconds) when the engine is absent or "
+            "the lifecycle stream fails."
+        ),
+    )
+    authoring_subscriber_reconnect_max_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_AUTHORING_SUBSCRIBER_RECONNECT_MAX_SECONDS",
+        description="Maximum back-off (seconds) between subscriber reconnect attempts.",
+    )
+
     # ACP backend selection (ADR-002 §5.1)
     acp_backend: Literal["node", "binary"] = Field(
         default="node",

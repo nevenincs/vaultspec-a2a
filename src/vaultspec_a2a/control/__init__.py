@@ -48,5 +48,6 @@ __all__ = [
     "team_service",
     "thread_service",
     "thread_state_service",
+    "verdict_subscriber",
     "worker_management",
 ]

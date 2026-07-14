@@ -26,6 +26,19 @@ from .catalog import fetch_catalog as fetch_catalog
 from .client import ACTOR_TOKEN_HEADER as ACTOR_TOKEN_HEADER
 from .client import BEARER_HEADER as BEARER_HEADER
 from .client import AuthoringClient as AuthoringClient
+from .discovery import SERVICE_JSON_ENV as SERVICE_JSON_ENV
+from .discovery import EngineEndpoint as EngineEndpoint
+from .discovery import resolve_engine as resolve_engine
+from .lifecycle import VERDICT_APPROVED as VERDICT_APPROVED
+from .lifecycle import VERDICT_REJECTED as VERDICT_REJECTED
+from .lifecycle import VERDICT_REQUEST_CHANGES as VERDICT_REQUEST_CHANGES
+from .lifecycle import GapSignal as GapSignal
+from .lifecycle import LifecycleEvent as LifecycleEvent
+from .lifecycle import SseFrame as SseFrame
+from .lifecycle import StreamError as StreamError
+from .lifecycle import changeset_status_verdict as changeset_status_verdict
+from .lifecycle import parse_sse_frame as parse_sse_frame
+from .lifecycle import verdict_from_event as verdict_from_event
 from .session import AuthoringSession as AuthoringSession
 from .session import mint_actor_token as mint_actor_token
 
@@ -34,6 +47,10 @@ __all__ = [
     "BEARER_HEADER",
     "CATALOG_SCHEMA_VERSION",
     "MAX_ID_BYTES",
+    "SERVICE_JSON_ENV",
+    "VERDICT_APPROVED",
+    "VERDICT_REJECTED",
+    "VERDICT_REQUEST_CHANGES",
     "AgentTool",
     "AuthoringClient",
     "AuthoringError",
@@ -43,10 +60,19 @@ __all__ = [
     "CatalogSnapshot",
     "CommandEnvelope",
     "Denial",
+    "EngineEndpoint",
+    "GapSignal",
+    "LifecycleEvent",
+    "SseFrame",
+    "StreamError",
+    "changeset_status_verdict",
     "derive_idempotency_key",
     "execute_agent_tool",
     "fetch_catalog",
     "is_valid_id",
     "mint_actor_token",
+    "parse_sse_frame",
+    "resolve_engine",
     "validate_id",
+    "verdict_from_event",
 ]

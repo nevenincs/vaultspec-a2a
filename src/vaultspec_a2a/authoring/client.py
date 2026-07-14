@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 if TYPE_CHECKING:
+    from collections.abc import AsyncIterator
     from types import TracebackType
 
 from ._envelope import (
@@ -28,6 +29,7 @@ from ._envelope import (
     extract_denial,
 )
 from ._errors import AuthoringError, raise_for_typed_error
+from .lifecycle import SseFrame, parse_sse_frame
 
 __all__ = ["ACTOR_TOKEN_HEADER", "BEARER_HEADER", "AuthoringClient"]
 
@@ -36,6 +38,42 @@ ACTOR_TOKEN_HEADER = "x-authoring-actor-token"
 
 # The authoring subtree is nested under /authoring in the engine router.
 _AUTHORING_PREFIX = "/authoring"
+
+
+async def _iter_sse_frames(response: httpx.Response) -> AsyncIterator[SseFrame]:
+    """Reassemble SSE line events from a stream and decode each into a frame.
+
+    Follows the SSE framing rules: an ``event:`` field names the type
+    (defaulting to ``message``), ``data:`` fields accumulate (joined by newline),
+    a blank line dispatches the buffered event, and a line starting with ``:`` is
+    a keep-alive comment. Undecodable or unrecognised frames are dropped by
+    :func:`parse_sse_frame` returning ``None``.
+    """
+    event_type = "message"
+    data_lines: list[str] = []
+    async for raw in response.aiter_lines():
+        line = raw.rstrip("\r")
+        if line == "":
+            if data_lines:
+                frame = parse_sse_frame(event_type, "\n".join(data_lines))
+                if frame is not None:
+                    yield frame
+            event_type = "message"
+            data_lines = []
+            continue
+        if line.startswith(":"):
+            continue
+        field, _, value = line.partition(":")
+        if value.startswith(" "):
+            value = value[1:]
+        if field == "event":
+            event_type = value
+        elif field == "data":
+            data_lines.append(value)
+    if data_lines:
+        frame = parse_sse_frame(event_type, "\n".join(data_lines))
+        if frame is not None:
+            yield frame
 
 
 class AuthoringClient:
@@ -189,6 +227,54 @@ class AuthoringClient:
                 f"unexpected denial value on read {path!r}: {decoded.denial_kind}"
             )
         return decoded
+
+    # ------------------------------------------------------------------
+    # Lifecycle stream and recovery
+    # ------------------------------------------------------------------
+
+    async def stream_lifecycle(self, *, last_seq: int = 0) -> AsyncIterator[SseFrame]:
+        """Open ``GET /v1/events`` from ``last_seq`` and yield decoded frames.
+
+        The engine serves a bounded replay page from the durable outbox and
+        closes the stream, so this iterator terminates naturally at end of page;
+        the caller re-opens from the advanced cursor to continue. Only the
+        machine bearer is required (no per-actor token). Cancelling the consuming
+        task closes the underlying stream via the async context manager.
+
+        Raises :class:`AuthoringError` when the transport rejects the request
+        (e.g. a missing/invalid machine bearer yields a 401 from the outer gate),
+        which is distinct from an in-band ``error`` frame carrying an
+        ``error_kind``.
+        """
+        async with self._client.stream(
+            "GET",
+            self._url("/v1/events"),
+            params={"last_seq": last_seq},
+            headers=self._headers(actor_token=None, with_actor=False),
+        ) as response:
+            if response.status_code != httpx.codes.OK:
+                await response.aread()
+                raise AuthoringError(
+                    "engine refused the lifecycle stream "
+                    f"(status {response.status_code})"
+                )
+            async for frame in _iter_sse_frames(response):
+                yield frame
+
+    async def recovery_snapshot(
+        self,
+        *,
+        last_seq: int = 0,
+        session_id: str | None = None,
+        run_id: str | None = None,
+    ) -> AuthoringResponse:
+        """Read the ``GET /v1/recovery`` snapshot (the SSE gap fallback)."""
+        params: dict[str, Any] = {"last_seq": last_seq}
+        if session_id is not None:
+            params["session_id"] = session_id
+        if run_id is not None:
+            params["run_id"] = run_id
+        return await self.get("/v1/recovery", params=params)
 
     # ------------------------------------------------------------------
     # Decoding

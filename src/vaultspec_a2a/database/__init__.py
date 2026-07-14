@@ -25,8 +25,18 @@ from .artifact_repository import (
 )
 from .artifact_repository import sum_cost_by_agent as sum_cost_by_agent
 from .artifact_repository import sum_cost_by_thread as sum_cost_by_thread
+from .authoring_cursor_repository import (
+    DEFAULT_SUBSCRIBER_ID as DEFAULT_SUBSCRIBER_ID,
+)
+from .authoring_cursor_repository import (
+    get_authoring_cursor as get_authoring_cursor,
+)
+from .authoring_cursor_repository import (
+    set_authoring_cursor as set_authoring_cursor,
+)
 from .migrate import run_migrations as run_migrations
 from .models import ArtifactModel as ArtifactModel
+from .models import AuthoringEventCursorModel as AuthoringEventCursorModel
 from .models import Base as Base
 from .models import CostTrackingModel as CostTrackingModel
 from .models import PermissionLogModel as PermissionLogModel
@@ -105,8 +115,10 @@ from .thread_repository import update_thread_metadata as update_thread_metadata
 from .thread_repository import update_thread_status as update_thread_status
 
 __all__ = [
+    "DEFAULT_SUBSCRIBER_ID",
     "ApprovalStatus",
     "ArtifactModel",
+    "AuthoringEventCursorModel",
     "Base",
     "ControlActionResultStatus",
     "ControlActionType",
@@ -130,6 +142,7 @@ __all__ = [
     "expire_pending_permission_requests",
     "get_artifact",
     "get_artifacts_by_thread",
+    "get_authoring_cursor",
     "get_control_action_by_idempotency_key",
     "get_db",
     "get_engine",
@@ -157,6 +170,7 @@ __all__ = [
     "run_migrations",
     "save_model",
     "seed_task_queue",
+    "set_authoring_cursor",
     "set_thread_approval_state",
     "set_thread_repair_state",
     "sum_cost_by_agent",

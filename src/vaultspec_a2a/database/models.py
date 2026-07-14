@@ -28,6 +28,7 @@ from ..thread.enums import PermissionRequestStatus, TaskQueueStatus, ThreadStatu
 
 __all__ = [
     "ArtifactModel",
+    "AuthoringEventCursorModel",
     "Base",
     "ControlActionModel",
     "CostTrackingModel",
@@ -280,6 +281,33 @@ class ThreadExecutionStateModel(Base):
     thread: Mapped["ThreadModel"] = relationship(
         back_populates="execution_state", lazy="raise"
     )
+
+
+class AuthoringEventCursorModel(Base):
+    """Durable cursor into the engine authoring lifecycle stream (ADR R3, P03.S07).
+
+    One row per subscriber records the last outbox sequence the verdict
+    subscriber has durably processed from ``GET /authoring/v1/events``. A gateway
+    restart reads this cursor and resumes the stream from where it left off,
+    rather than replaying from zero or dropping reviewer verdicts issued while
+    the gateway was down. The sequence is engine-owned and advances only
+    forward.
+    """
+
+    __tablename__ = "authoring_event_cursor"
+
+    subscriber_id: Mapped[str] = mapped_column(primary_key=True)
+    last_seq: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[datetime] = mapped_column(
+        UTCDateTime(), default=_utcnow, onupdate=_utcnow
+    )
+
+    def __repr__(self) -> str:
+        """Return developer-friendly representation."""
+        return (
+            f"AuthoringEventCursorModel(subscriber_id={self.subscriber_id!r}, "
+            f"last_seq={self.last_seq!r})"
+        )
 
 
 class CostTrackingModel(Base):

@@ -19,6 +19,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W02-P03-S07]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P03-S08]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P03-S09]]'
+  - '[[2026-07-14-a2a-edge-conformance-W02-P04-S10]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -59,6 +60,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W02-P03-S07` - Delete src/ui entirely, remove the FastAPI static mount and ui_build_dir setting, and rag-first sweep for every route or handler that exists only for the UI
 - `2026-07-14-a2a-edge-conformance-W02-P03-S08` - Remove UI build steps, dev dependencies, and recipes from the root package.json, Justfile, CI, and pre-commit, and delete the UI contract-validation gate
 - `2026-07-14-a2a-edge-conformance-W02-P03-S09` - Run the full default test profile and boot the gateway headless to prove the deletion left no dangling imports or routes
+- `2026-07-14-a2a-edge-conformance-W02-P04-S10` - Delete the zero-importer protocol stubs after re-verifying zero importers rag-first at execution time: src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub) and src/vaultspec_a2a/protocols/adapter/ (second 3-line stub, adopted-audit finding)
 
 ### plan
 

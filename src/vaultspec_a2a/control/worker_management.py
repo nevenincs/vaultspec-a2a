@@ -69,8 +69,12 @@ class WorkerState:
 
 
 def _runtime_dir() -> Path:
-    """Return the repo-local runtime directory for gateway-managed process logs."""
-    runtime_dir = settings.project_root / ".vault" / "runtime"
+    """Return the machine-global runtime directory for gateway-managed process logs.
+
+    Lives under the A2A home (ADR R8), not inside ``.vault/`` — vaultspec
+    firmware rejects foreign directories inside the vault.
+    """
+    runtime_dir = settings.a2a_home / "runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     return runtime_dir
 

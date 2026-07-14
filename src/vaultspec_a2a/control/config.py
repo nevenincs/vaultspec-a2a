@@ -21,6 +21,9 @@ from ..utils.enums import Environment, LogLevel
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
 _DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
 _DEFAULT_UI_BUILD_DIR: Path = _DEFAULT_PROJECT_ROOT / "src" / "ui" / "dist"
+# Machine-global A2A home for runtime state (ADR R8).  Kept outside the repo and
+# outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
+_DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
 
 
 class InfraConfig(BaseSettings):
@@ -93,6 +96,16 @@ class InfraConfig(BaseSettings):
             "Absolute path to the repository root.  Computed from __file__ by "
             "default; override in Docker non-editable installs where __file__ "
             "resolves inside site-packages."
+        ),
+    )
+    a2a_home: Path = Field(
+        default_factory=lambda: _DEFAULT_A2A_HOME,
+        alias="VAULTSPEC_A2A_HOME",
+        description=(
+            "Machine-global A2A home for runtime state (process logs, graph "
+            "cache, queues, tmp) and the service discovery file.  Defaults to "
+            "~/.vaultspec-a2a (ADR R8).  Relocated out of .vault/ because "
+            "vaultspec firmware rejects foreign directories inside the vault."
         ),
     )
     ui_build_dir: Path = Field(

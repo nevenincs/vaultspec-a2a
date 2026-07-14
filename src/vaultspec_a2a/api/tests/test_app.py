@@ -51,14 +51,19 @@ def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:
     assert f"stderr_log={stderr_log}" in detail
 
 
-def test_worker_stderr_log_path_is_repo_local() -> None:
-    """Gateway-managed worker stderr logs should live under .vault/runtime."""
+def test_worker_stderr_log_path_lives_in_a2a_home() -> None:
+    """Gateway-managed worker stderr logs live under the machine-global A2A home.
+
+    Runtime state was relocated out of ``.vault/`` (ADR R8) — vaultspec firmware
+    rejects foreign directories inside the vault — into ``~/.vaultspec-a2a``.
+    """
+    from ...control.config import settings
+
     log_path = _worker_stderr_log_path(8123)
 
     assert log_path.name == "worker-autospawn-8123.stderr.log"
-    assert log_path.parent.name == "runtime"
-    assert ".vault" in str(log_path)
-    assert ".vaultspec" not in str(log_path)
+    assert log_path.parent == settings.a2a_home / "runtime"
+    assert ".vault" not in log_path.parts
 
 
 def test_lazy_worker_spawner_avoids_stderr_log_path_when_auto_spawn_disabled() -> None:

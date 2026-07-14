@@ -16,12 +16,16 @@ from typing import TYPE_CHECKING, Any, cast
 
 import httpx
 
+from ..control.config import settings
+
 if TYPE_CHECKING:
     from collections.abc import Callable
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
-RUNTIME_ROOT = REPO_ROOT / ".vault" / "runtime" / "service-tests"
+# Service-test runtime lives in the machine-global A2A home (ADR R8), not inside
+# .vault/ — vaultspec firmware rejects foreign directories inside the vault.
+RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 
 
 def _pick_free_port() -> int:

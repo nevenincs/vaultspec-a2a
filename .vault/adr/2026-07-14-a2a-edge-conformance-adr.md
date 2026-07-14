@@ -58,9 +58,9 @@ plan must derive from this record.
 - The existing `/api` surface (threads, teams, health, SSE stream, cancel,
   messages, permissions) is a close cousin of the five-verb contract; the
   gateway work is reshaping, not invention.
-- The one-line Google-A2A stub is imported by nothing, but the symbol
-  `protocols.a2a` appears in `graph/compiler.py`, graph tests, and six
-  `streaming/*.py` files - deletion requires a dead-reference sweep.
+- The Google-A2A stub has zero importers (manifest-verified); the earlier
+  dead-reference-sweep concern was a name collision with
+  `graph/protocols.py`, an unrelated typing.Protocol module that stays.
 - The UI is mounted by FastAPI (`api/app.py`) behind `settings.ui_build_dir`;
   UI deps live in both the root `package.json` and `src/ui/package.json`;
   Justfile carries UI recipes. Local `adr-9`, `adr-018`, and the 2026-04-05

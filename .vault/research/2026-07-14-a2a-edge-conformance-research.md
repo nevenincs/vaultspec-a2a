@@ -111,10 +111,12 @@ observation, not functional verification.
   behind `settings.ui_build_dir`; UI dependencies live in both the root
   `package.json` and `src/ui/package.json`; the Justfile carries
   `_dev-service-*-ui` and `_dev-code-check-ui` recipes.
-- Google-A2A stub: `src/vaultspec_a2a/protocols/a2a/` is a one-line stub
-  imported by nothing, but the `protocols.a2a` symbol appears in
-  `graph/compiler.py`, graph tests, and six `streaming/*.py` files - a
-  dead-reference sweep is required alongside the deletion.
+- Google-A2A stub: `src/vaultspec_a2a/protocols/a2a/` is a dead 3-line stub
+  with ZERO importers (deletion-manifest verification, 2026-07-14,
+  correcting this survey's earlier claim: the apparent `protocols.a2a`
+  hits in `graph/compiler.py`, graph tests, and six `streaming/*.py`
+  files were a name collision with `graph/protocols.py`, an unrelated
+  typing.Protocol module that must not be touched).
 
 ### Reusable assets confirmed present (pending verification)
 

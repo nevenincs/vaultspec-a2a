@@ -66,8 +66,8 @@ Delete protocols/a2a and scrub every stale protocols.a2a symbol reference; ACP a
 
 Deny .vault/** writes at the ACP fs RPC chokepoint with a structured forbidden_actor-style denial, and move the worker task queue from the vault markdown table into the A2A database.
 
-- [ ] `W02.P05.S11` - Implement the .vault/** deny policy at the ACP fs write RPC handler returning a structured forbidden_actor-style denial that names the authoring tools, leaving reads untouched; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `W02.P05.S12` - Write adversarial mock-free tests for the deny policy covering direct, traversal, symlink, relative-path, and case-variant attempts against a live handler; `src/vaultspec_a2a/providers/tests/`.
+- [x] `W02.P05.S11` - Implement the .vault/** deny policy at the ACP fs write RPC handler returning a structured forbidden_actor-style denial that names the authoring tools, leaving reads untouched; `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `W02.P05.S12` - Write adversarial mock-free tests for the deny policy covering direct, traversal, symlink, relative-path, and case-variant attempts against a live handler; `src/vaultspec_a2a/providers/tests/`.
 - [ ] `W02.P05.S13` - Move the worker task queue from the .vault/plan markdown table into the A2A database (new Alembic migration), preserve mark-task-complete semantics, and delete the markdown read-write path; `src/vaultspec_a2a/graph/tools/task_queue.py, src/vaultspec_a2a/database/, src/vaultspec_a2a/graph/nodes/worker.py`.
 - [ ] `W02.P05.S14` - Prove with live tests that a full mock-tape run performs zero .vault/ writes while the queue and worker loop still function; `src/vaultspec_a2a/graph/tests/, src/vaultspec_a2a/service_tests/`.
 

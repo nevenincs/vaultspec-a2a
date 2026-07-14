@@ -23,6 +23,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S11]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S12]]'
   - '[[2026-07-14-a2a-edge-conformance-W02-P05-S13]]'
+  - '[[2026-07-14-a2a-edge-conformance-W02-P05-S14]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -67,6 +68,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W02-P05-S11` - Implement the .vault/** deny policy at the ACP fs write RPC handler returning a structured forbidden_actor-style denial that names the authoring tools, leaving reads untouched
 - `2026-07-14-a2a-edge-conformance-W02-P05-S12` - Write adversarial mock-free tests for the deny policy covering direct, traversal, symlink, relative-path, and case-variant attempts against a live handler
 - `2026-07-14-a2a-edge-conformance-W02-P05-S13` - Move the worker task queue from the .vault/plan markdown table into the A2A database (new Alembic migration), preserve mark-task-complete semantics, and delete the markdown read-write path
+- `2026-07-14-a2a-edge-conformance-W02-P05-S14` - Prove with live tests that a full mock-tape run performs zero .vault/ writes while the queue and worker loop still function
 
 ### plan
 

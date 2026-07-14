@@ -295,6 +295,191 @@ running:
   wrong; only step 4's liveness check catches this. This is the concrete
   case the attach-never-own discipline (R8) exists to guard against.
 
+### Live catalog snapshot (2026-07-14)
+
+Read-only W03 pre-flight probe against a live engine instance (GET-only,
+no sessions/proposals/tokens created). Discovery: the machine-global
+`~/.vaultspec/service.json` was stale (port 8823, pid 20372, confirmed
+not running -- the same specimen documented above). The live instance
+was found via the workspace-local exempt-serve file instead --
+`Y:/code/vaultspec-dashboard-worktrees/main/.vault/data/engine-data/
+service.json` -- `port: 8767`, `pid: 29664` (confirmed running via
+`Get-Process`), heartbeat 7s old at read time, `state: "ready"`. Bearer
+read from this file, never printed; referred to below as `<bearer>`.
+
+- `GET /health` (ungated): `{"data":{"ok":true,"service":"vaultspec",
+  "status":"running"},"tiers":{"declared":{"available":true},
+  "semantic":{"available":true},"structural":{"available":true},
+  "temporal":{"available":true}}}` -- exactly matches the `health()`
+  handler documented in `lib.rs`; no `pid`/`schema_version` fields
+  appear here (those belong to a DIFFERENT struct -- rag's own
+  `HealthInfo`, used by the discovery-file health probe in Discovery
+  section above -- not this engine's own liveness ping). No divergence.
+
+- `GET /authoring/v1/agent-tools` (with `<bearer>`) -- the tool catalog
+  our R4 bridge must mirror, `schema_version:
+  "authoring.semantic_tools.v1"`, 7 tools, verbatim (no token-ish
+  fields present):
+
+  ```json
+  {
+    "data": {
+      "schema_version": "authoring.semantic_tools.v1",
+      "tools": [
+        {
+          "name": "read_context",
+          "commands": ["read_context"],
+          "description": "Read bounded authoring context without side effects.",
+          "permission_requirement": "auto_permitted",
+          "risk_tier": "read_only",
+          "idempotency_required": false,
+          "input_schema": {
+            "additionalProperties": false,
+            "oneOf": [
+              {"target": "document", "required": ["document"], "optional": ["revision", "max_bytes"]},
+              {"target": "proposal", "required": ["changeset_id"], "optional": ["max_bytes"]},
+              {"target": "session", "required": ["session_id"], "optional": ["max_bytes"]},
+              {"target": "document_list", "optional": ["cursor", "cap"]}
+            ]
+          }
+        },
+        {
+          "name": "search_graph",
+          "commands": ["search_graph"],
+          "description": "Search the bounded project graph for authoring context.",
+          "permission_requirement": "auto_permitted",
+          "risk_tier": "read_only",
+          "idempotency_required": false,
+          "input_schema": {
+            "additionalProperties": false,
+            "required": ["query"],
+            "optional": ["scope", "type", "max_results"],
+            "bounds": {"max_results": 50, "query_chars_max": 512, "scope_chars_max": 256, "target": ["vault", "code"]}
+          }
+        },
+        {
+          "name": "propose_changeset",
+          "commands": ["create_proposal", "append_draft", "replace_draft"],
+          "description": "Create a proposal changeset through the backend authoring ledger.",
+          "permission_requirement": "human_approval_required",
+          "risk_tier": "mutating",
+          "idempotency_required": true,
+          "input_schema": {
+            "additionalProperties": false,
+            "oneOf": [
+              {"operation": "create", "payload": "CreateProposalRequest"},
+              {"operation": "append", "alias_of": "append_draft"},
+              {"operation": "replace", "alias_of": "replace_draft"}
+            ]
+          }
+        },
+        {
+          "name": "validate_proposal",
+          "commands": ["validate_proposal"],
+          "description": "Request backend validation for a proposal without applying it.",
+          "permission_requirement": "human_approval_required",
+          "risk_tier": "mutating",
+          "idempotency_required": true,
+          "input_schema": {
+            "additionalProperties": false,
+            "alias_of": "validate_proposal",
+            "required": ["changeset_id", "expected_revision", "summary"],
+            "backend_derived": ["current_revisions", "chunk_evidence"]
+          }
+        },
+        {
+          "name": "request_approval",
+          "commands": ["submit_for_review"],
+          "description": "Submit a validated proposal into backend-owned human review.",
+          "permission_requirement": "human_approval_required",
+          "risk_tier": "mutating",
+          "idempotency_required": true,
+          "input_schema": {
+            "additionalProperties": false,
+            "alias_of": "submit_for_review",
+            "payload": "RequestApprovalToolInput",
+            "required": ["changeset_id", "expected_revision", "summary"],
+            "composes": ["validate_proposal", "submit_for_review", "open_approval"]
+          }
+        },
+        {
+          "name": "cancel",
+          "commands": ["cancel_proposal", "cancel_run"],
+          "description": "Cancel a proposal or run through semantic authoring state.",
+          "permission_requirement": "human_approval_required",
+          "risk_tier": "mutating",
+          "idempotency_required": true,
+          "input_schema": {
+            "additionalProperties": false,
+            "oneOf": [
+              {"target": "proposal", "required": ["changeset_id", "expected_revision", "summary"]},
+              {"target": "run", "required": ["run_id", "reason"]}
+            ]
+          }
+        },
+        {
+          "name": "request_apply",
+          "commands": ["request_apply"],
+          "description": "Request application of an approved proposal through the apply boundary.",
+          "permission_requirement": "human_approval_required",
+          "risk_tier": "dangerous",
+          "idempotency_required": true,
+          "input_schema": {
+            "additionalProperties": false,
+            "alias_of": "request_apply",
+            "payload": "ApplyRequest"
+          }
+        }
+      ]
+    },
+    "tiers": { "...": "see envelope note below" }
+  }
+  ```
+
+  Note the semantic-level tool names (`read_context`, `search_graph`,
+  `propose_changeset`, `validate_proposal`, `request_approval`,
+  `cancel`, `request_apply`) are a HIGHER-LEVEL vocabulary than the wire
+  route names documented above (`create_proposal`, `submit_for_review`,
+  etc. appear as `commands`/aliases underneath, not as the top-level
+  `name`). Our R4 bridge should mirror `name` + `input_schema` +
+  `risk_tier` + `permission_requirement`, not assume a 1:1 mapping to
+  route paths.
+
+- `GET /authoring/v1/sessions` (with `<bearer>`) -- ADDITION to the
+  route table above (the list envelope shape wasn't captured there):
+  `{"data":{"cap":50,"items":[],"truncated":false},"tiers":{...}}`. No
+  `next_cursor` present (optional, absent here since `items` is empty).
+
+- `GET /authoring/v1/events?last_seq=0` (with `<bearer>`) -- confirmed
+  `200 OK`, `content-type: text/event-stream`, connection established
+  and held open (chunked transfer, no immediate frames since there are
+  zero active sessions to replay) -- matches the SSE behavior documented
+  above verbatim. No divergence.
+
+- **Negative probe 1** -- bogus route WITH bearer,
+  `GET /authoring/v1/nonexistent-route-xyz`: **404**,
+  `{"error":"unknown API path \`/v1/nonexistent-route-xyz\`",
+  "error_kind":"authoring_unknown_route","tiers":{...}}`. **File-worthy
+  addition**: `authoring_unknown_route` is a SIXTH `error_kind`, not
+  previously documented alongside the five `ResolvedCommandRejection`
+  kinds above (`authoring_actor_token_missing`,
+  `authoring_actor_token_unknown`, `authoring_store_unavailable`,
+  `authoring_request_invalid`, `authoring_authorization_denied`). Note
+  the error message reports the path relative to the `/authoring` nest
+  point (`/v1/...`, not `/authoring/v1/...`).
+- **Negative probe 2** -- `GET /authoring/v1/agent-tools` WITHOUT any
+  bearer header: **401**, `{"error":"Unauthorized","tiers":{...}}`.
+  **File-worthy confirmation**: no `error_kind` field at all here --
+  this is the OUTER machine `bearer_gate` (`app.rs:1402-1441`, which
+  returns a bare `StatusCode::UNAUTHORIZED` per its own signature),
+  distinct from the INNER actor-token-layer denials
+  (`authoring_actor_token_missing`, etc.) which DO carry `error_kind`.
+  Confirms the two-layer auth model produces two genuinely different
+  error shapes depending on which layer refuses the request -- useful
+  for the R4 bridge to distinguish "wrong machine bearer" from "wrong/
+  missing actor token" without guessing from status code alone (both
+  are 401).
+
 ### Scope note
 
 Not covered field-by-field: review/lease/comment/langgraph routes and the

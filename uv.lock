@@ -3091,8 +3091,8 @@ dev = [
 
 [[package]]
 name = "vaultspec-core"
-version = "0.1.38"
-source = { git = "https://github.com/wgergely/vaultspec-core.git?branch=main#c775390a8cfb845c5f7402a5cd18c4c279beddae" }
+version = "0.1.42"
+source = { git = "https://github.com/wgergely/vaultspec-core.git?branch=main#51638d090fb320ea04301d2a33ddf7de450798a8" }
 dependencies = [
     { name = "httpx" },
     { name = "mcp" },

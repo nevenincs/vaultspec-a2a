@@ -2,14 +2,13 @@
 
 import json
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol, cast
 
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolMessage
 from langgraph.errors import GraphBubbleUp
-from langgraph.types import interrupt
+from langgraph.types import Command, interrupt
 
 from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import RuleManager
@@ -22,6 +21,8 @@ from ..protocols import TaskQueuePort
 from ..tools.task_queue import create_mark_task_complete_tool
 
 if TYPE_CHECKING:
+    from langchain_core.tools import BaseTool
+
     from vaultspec_a2a.providers._acp_authoring import AuthoringToolBinding
 
 _logger = logging.getLogger(__name__)
@@ -155,11 +156,70 @@ def _wrap_worker_exception(
     )
 
 
-def _drain_worker_state_updates(
-    drain_fn: Callable[[], dict[str, Any]] | None,
-) -> dict[str, Any]:
-    """Drain side-channel task updates if ADR-021 wiring is active."""
-    return drain_fn() if drain_fn is not None else {}
+async def _apply_queue_tool_calls(
+    *,
+    messages: list[BaseMessage],
+    response: BaseMessage,
+    queue_tool: "BaseTool | None",
+    model: BaseChatModel,
+) -> tuple[BaseMessage, dict[str, Any]]:
+    """Dispatch mark_task_complete tool calls, propagating their Command update.
+
+    ADR-021 (revised) replaces the side-channel drain with a ``Command``-
+    returning tool. This worker uses direct ``model.ainvoke`` rather than a
+    ``ToolNode``, so it dispatches the queue tool the same way the permission
+    gate handles ``session_request_permission``: it inspects the model's emitted
+    tool calls, runs the tool (which returns a ``Command``), threads each
+    ``ToolMessage`` back for a follow-up model turn, and surfaces the Command's
+    non-message update (``current_task_id``). ``worker_node`` returns that patch
+    so it flows through the reducer pipeline -- never a closure-scoped list -- so
+    no advance is silently lost when a turn interrupts.
+
+    Returns ``(final_response, state_patch)``. When no queue tool is bound or the
+    model emitted no queue calls, the response passes through with an empty patch.
+    A single dispatch round is performed; a follow-up turn that emits further
+    queue calls advances them on the next worker invocation.
+    """
+    if queue_tool is None or not isinstance(response, AIMessage):
+        return response, {}
+    queue_calls = [
+        tool_call
+        for tool_call in response.tool_calls
+        if tool_call.get("name") == queue_tool.name
+    ]
+    if not queue_calls:
+        return response, {}
+
+    state_patch: dict[str, Any] = {}
+    tool_messages: list[ToolMessage] = []
+    for tool_call in queue_calls:
+        command = await queue_tool.ainvoke(tool_call)
+        if not isinstance(command, Command):
+            raise RuntimeError(
+                "mark_task_complete must return a Command(update=...); got "
+                f"{type(command).__name__}"
+            )
+        update = cast("dict[str, Any]", command.update or {})
+        for message in update.get("messages", []):
+            if isinstance(message, ToolMessage):
+                tool_messages.append(message)
+        for key, value in update.items():
+            if key != "messages":
+                state_patch[key] = value
+
+    follow_up_messages = [
+        *messages,
+        SystemMessage(
+            content=(
+                "The task-queue update has been recorded. Continue the task using "
+                "the tool result below."
+            )
+        ),
+        response,
+        *tool_messages,
+    ]
+    final_response = await model.ainvoke(follow_up_messages)
+    return final_response, state_patch
 
 
 async def _apply_mock_permission_gate(
@@ -226,7 +286,12 @@ def _finalize_worker_response(
     worker_name: str,
     state_updates: dict[str, Any],
 ) -> dict[str, Any]:
-    """Attach worker attribution and merge any side-channel state updates."""
+    """Attach worker attribution and merge the queue tool's Command update.
+
+    ``state_updates`` carries the non-message keys (e.g. ``current_task_id``)
+    from any ``mark_task_complete`` Command dispatched this turn; they flow
+    through the reducer pipeline via this node return.
+    """
     response.name = worker_name
     return {
         "messages": [response],
@@ -359,16 +424,16 @@ def create_worker_node(
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
-        # ADR R5: the task queue is thread-scoped, so bind the mark-complete
+        # ADR R5: the task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
-        # compiled graph is shared across threads and cannot close over it.
-        drain_fn: Callable[[], dict[str, Any]] | None = None
+        # compiled graph is shared across threads and cannot close over it. The
+        # tool returns a Command (ADR-021 revised); its update is propagated
+        # through this node's return, not a side-channel drain.
+        queue_tool: BaseTool | None = None
         if task_queue_port is not None and feature_tag is not None:
             thread_id = state.get("thread_id")
             if thread_id:
-                _tool_fn, drain_fn = create_mark_task_complete_tool(
-                    task_queue_port, thread_id
-                )
+                queue_tool = create_mark_task_complete_tool(task_queue_port, thread_id)
 
         messages = _build_worker_messages(
             state=state,
@@ -401,21 +466,21 @@ def create_worker_node(
                 model=effective_model,
                 autonomous=autonomous,
             )
+            response, state_updates = await _apply_queue_tool_calls(
+                messages=messages,
+                response=response,
+                queue_tool=queue_tool,
+                model=effective_model,
+            )
         except GraphBubbleUp:
-            if drain_fn is not None:
-                drain_fn()
             raise
         except Exception as exc:
-            if drain_fn is not None:
-                drain_fn()
             raise _wrap_worker_exception(
                 exc=exc,
                 worker=name,
                 model_type=model_type,
                 message_count=len(messages),
             ) from exc
-
-        state_updates = _drain_worker_state_updates(drain_fn)
 
         _logger.debug("worker[%s] response len=%d", name, len(str(response.content)))
         return _finalize_worker_response(

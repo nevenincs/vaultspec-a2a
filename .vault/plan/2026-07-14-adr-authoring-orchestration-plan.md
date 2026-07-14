@@ -18,7 +18,7 @@ related:
 Fix the two audited defects the phase machine depends on: mid-run vault_index refresh and the ADR-021 drain-pattern regression.
 
 - [x] `P01.S01` - Refresh vault_index for the active feature on every mount pass so gates and mounts observe newly produced documents mid-run; `src/vaultspec_a2a/graph/nodes/vault_reader.py, src/vaultspec_a2a/graph/compiler.py`.
-- [ ] `P01.S02` - Replace the ADR-021-rejected drain side-channel in the worker node with Command-returning tool wiring per the ADR's accepted revision; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/tools/task_queue.py`.
+- [x] `P01.S02` - Replace the ADR-021-rejected drain side-channel in the worker node with Command-returning tool wiring per the ADR's accepted revision; `src/vaultspec_a2a/graph/nodes/worker.py, src/vaultspec_a2a/graph/tools/task_queue.py`.
 
 ### Phase `P02` - Phase-machine primitives
 

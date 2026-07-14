@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 import pytest_asyncio
+from langgraph.types import Command
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
     AsyncSession,
@@ -159,7 +160,7 @@ async def test_db_queue_functions_with_zero_vault_writes(
 
     port = SqlTaskQueuePort(session_factory)
     mount = create_mount_node(workspace, port)
-    tool_fn, drain_fn = create_mark_task_complete_tool(port, thread_id)
+    tool = create_mark_task_complete_tool(port, thread_id)
 
     watcher = _VaultWriteWatcher(vault_dir)
     watcher.start()
@@ -173,10 +174,21 @@ async def test_db_queue_functions_with_zero_vault_writes(
         assert "| Q-1 | in_progress | First |" in context
         assert "| Q-2 | pending | Second |" in context
 
-        # 2. The worker loop advances the queue via the mark-complete tool.
-        ack = await tool_fn("Q-1")
-        assert ack == "Task Q-1 marked complete. Next task: Q-2."
-        assert drain_fn() == {"current_task_id": "Q-2"}
+        # 2. The worker loop advances the queue via the mark-complete tool; the
+        #    Command update carries the next task pointer (ADR-021 revised).
+        command = await tool.ainvoke(
+            {
+                "name": "mark_task_complete",
+                "args": {"task_id": "Q-1"},
+                "id": "call_q1",
+                "type": "tool_call",
+            }
+        )
+        assert isinstance(command, Command)
+        assert command.update["current_task_id"] == "Q-2"
+        assert command.update["messages"][0].content == (
+            "Task Q-1 marked complete. Next task: Q-2."
+        )
 
         # 3. Re-mounting reflects the advanced cursor, still DB-sourced.
         remounted = await mount(_exec_state(thread_id, "Q-2"))

@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, Any
 from langchain_core.messages.utils import count_tokens_approximately
 
 from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.graph.enums import PipelinePhase
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -21,7 +22,7 @@ __all__ = ["create_mount_node"]
 
 _DOC_SEPARATOR = "--- MOUNTED: {path} ---"
 _DOC_FOOTER = "--- END ---"
-_QUEUE_PHASES = frozenset({"plan", "exec"})
+_QUEUE_PHASES = frozenset({PipelinePhase.PLAN, PipelinePhase.EXEC})
 
 
 def _select_paths(state: TeamState, workspace_root: Path) -> list[Path]:

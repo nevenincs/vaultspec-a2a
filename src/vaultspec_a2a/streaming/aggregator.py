@@ -109,6 +109,13 @@ class EventAggregator:
     def get_active_thread_ids(self) -> list[str]:
         return self._subscribers_mgr.get_active_thread_ids()
 
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge all in-memory aggregator state scoped to ``thread_id``."""
+        self._subscribers_mgr.remove_thread(thread_id)
+        self._buffering.clear_thread_state(thread_id)
+        self._ingest.clear_thread_state(thread_id)
+        self._emitters.clear_thread_state(thread_id)
+
     def relay_payload(self, thread_id: str, payload: object) -> None:
         """Fan out a pre-serialized payload to all subscribers of ``thread_id``."""
         self._subscribers_mgr.enqueue_payload(thread_id, payload)

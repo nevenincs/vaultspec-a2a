@@ -473,12 +473,12 @@ class TestArtifactCRUD:
             session,
             thread_id=thread.id,
             artifact_type="file",
-            path="/src/main.py",
+            path="src/main.py",
         )
         assert artifact.id is not None
         assert artifact.thread_id == thread.id
         assert artifact.type == "file"
-        assert artifact.path == "/src/main.py"
+        assert artifact.path == "src/main.py"
 
     @pytest.mark.asyncio
     async def test_save_artifact_with_extra_fields(self, session: AsyncSession) -> None:
@@ -488,7 +488,7 @@ class TestArtifactCRUD:
             id=uuid4().hex,
             thread_id=thread.id,
             type="file",
-            path="/src/lib.py",
+            path="src/lib.py",
             content_hash="abc123",
             agent_id="coder-1",
         )
@@ -505,11 +505,11 @@ class TestArtifactCRUD:
             session,
             thread_id=thread.id,
             artifact_type="diff",
-            path="/src/lib.py",
+            path="src/lib.py",
         )
         found = await get_artifact(session, created.id)
         assert found is not None
-        assert found.path == "/src/lib.py"
+        assert found.path == "src/lib.py"
 
     @pytest.mark.asyncio
     async def test_get_artifact_not_found(self, session: AsyncSession) -> None:
@@ -521,7 +521,7 @@ class TestArtifactCRUD:
     async def test_get_artifacts_by_thread(self, session: AsyncSession) -> None:
         """get_artifacts_by_thread should return all artifacts for a thread."""
         thread = await create_thread(session, title="Multi-Artifact")
-        expected_paths = {"/a.py", "/b.py"}
+        expected_paths = {"a.py", "b.py"}
         for path in expected_paths:
             await create_artifact(
                 session,
@@ -850,7 +850,7 @@ class TestCascadeDelete:
             session,
             thread_id=thread.id,
             artifact_type="file",
-            path="/src/main.py",
+            path="src/main.py",
         )
         artifact_id = artifact.id
         await session.commit()
@@ -1010,7 +1010,7 @@ class TestDeleteThread:
         """delete_thread() removes cascading artifact records via CRUD function."""
         thread = await create_thread(session, title="With Artifacts")
         artifact = await create_artifact(
-            session, thread_id=thread.id, artifact_type="file", path="/x.py"
+            session, thread_id=thread.id, artifact_type="file", path="x.py"
         )
         artifact_id = artifact.id
         await delete_thread(session, thread.id)

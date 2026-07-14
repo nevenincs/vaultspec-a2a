@@ -91,6 +91,13 @@ def create_mark_task_complete_tool(
     drain_fn: called by worker_node after model.ainvoke() -- returns accumulated
               TeamState patch dict and clears the pending list.
     """
+    if (
+        not feature_tag
+        or "/" in feature_tag
+        or "\\" in feature_tag
+        or ".." in feature_tag
+    ):
+        raise ValueError(f"Invalid feature_tag: {feature_tag!r}")
     queue_path = workspace_root / ".vault" / "plan" / f"{feature_tag}-queue.md"
     pending_state_updates: list[dict[str, Any]] = []
 

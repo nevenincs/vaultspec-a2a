@@ -15,6 +15,7 @@ from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.stage import infer_phase_from_vault_index
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
 from vaultspec_a2a.domain_config import domain_config
+from vaultspec_a2a.graph.enums import PipelinePhase
 from vaultspec_a2a.thread.enums import ApprovalStatus
 from vaultspec_a2a.thread.state import TeamState
 
@@ -42,7 +43,7 @@ def _select_revision_worker(
     worker_phase_map: dict[str, str] | None,
 ) -> str:
     """Prefer the plan-phase worker when a rejected exec plan needs revision."""
-    return _select_phase_worker("plan", workers, worker_phase_map)
+    return _select_phase_worker(PipelinePhase.PLAN, workers, worker_phase_map)
 
 
 def _select_phase_worker(
@@ -100,10 +101,10 @@ def _check_finish_blocked(
     if errors:
         _logger.warning(
             "supervisor blocked FINISH: %d validation error(s) active — "
-            "rerouting to first available worker",
+            "rerouting to exec-phase worker",
             len(errors),
         )
-        next_route = workers[0] if workers else "FINISH"
+        next_route = _select_phase_worker(PipelinePhase.EXEC, workers, worker_phase_map)
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,
@@ -121,7 +122,9 @@ def _check_finish_blocked(
             " artifact in vault_index['audit']"
             " — rerouting to audit-phase worker",
         )
-        next_route = _select_phase_worker("audit", workers, worker_phase_map)
+        next_route = _select_phase_worker(
+            PipelinePhase.AUDIT, workers, worker_phase_map
+        )
         return {
             "next": next_route,
             "pipeline_phase": inferred_phase,
@@ -152,10 +155,10 @@ class _SupervisorDecision:
 
 # Maps target phase -> (required vault_index key, is_hard_gate)
 _PHASE_PREREQUISITES: dict[str, tuple[str, bool]] = {
-    "adr": ("research", False),  # SOFT -- warn only
-    "plan": ("adr", True),  # HARD -- block
-    "exec": ("plan", True),  # HARD -- block
-    "audit": ("exec", True),  # HARD -- block
+    PipelinePhase.ADR: (PipelinePhase.RESEARCH, False),  # SOFT -- warn only
+    PipelinePhase.PLAN: (PipelinePhase.ADR, True),  # HARD -- block
+    PipelinePhase.EXEC: (PipelinePhase.PLAN, True),  # HARD -- block
+    PipelinePhase.AUDIT: (PipelinePhase.EXEC, True),  # HARD -- block
 }
 
 
@@ -256,7 +259,7 @@ def _evaluate_supervisor_response(
     if (
         not autonomous
         and worker_phase_map
-        and worker_phase_map.get(next_route) == "exec"
+        and worker_phase_map.get(next_route) == PipelinePhase.EXEC
         and state.get("active_feature")
         and vault_index.get("plan")
         and not approval_granted

@@ -10,6 +10,7 @@ references to perform side effects but hold no state of their own.
 
 import asyncio
 import logging
+from pathlib import PurePath
 from typing import Any
 from uuid import uuid4
 
@@ -47,6 +48,14 @@ except ImportError:
     _GraphRecursionError = None
 
 logger = logging.getLogger(__name__)
+
+
+def _artifact_label_from_tool_input(file_path: str) -> str:
+    """Collapse a raw tool path to a display-safe filename label."""
+    normalized = file_path.replace("\\", "/").rstrip("/")
+    if not normalized:
+        return "artifact"
+    return PurePath(normalized).name or "artifact"
 
 
 async def process_langgraph_event(
@@ -203,16 +212,14 @@ async def process_langgraph_event(
                         or tool_input.get("filename", "")
                     )
                 if file_path:
-                    filename = (
-                        file_path.rsplit("/", 1)[-1] if "/" in file_path else file_path
-                    )
+                    filename = _artifact_label_from_tool_input(file_path)
                     await emitters.emit_artifact_update(
                         thread_id=thread_id,
-                        artifact_id=f"{run_id}:{file_path}",
+                        artifact_id=f"{run_id}:{filename}",
                         filename=filename,
                         content=output_str[:500]
                         if output_str
-                        else f"[{tool_name}] {file_path}",
+                        else f"[{tool_name}] {filename}",
                     )
         return
 
@@ -242,6 +249,9 @@ async def process_langgraph_event(
         data = event_data.get("data", {})
         content = data if isinstance(data, str) else str(data.get("content", ""))
         if content:
+            max_len = domain_config.tool_arg_truncate_len
+            if len(content) > max_len:
+                content = content[:max_len] + "..."
             await emitters.emit_thought_chunk(
                 thread_id=thread_id,
                 agent_id=effective_agent_id,

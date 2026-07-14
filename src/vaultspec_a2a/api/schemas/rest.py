@@ -172,7 +172,7 @@ class TeamStatusResponse(BaseModel):
 class PermissionResponseRequest(BaseModel):
     """Submit a permission response via REST (guaranteed delivery)."""
 
-    option_id: str
+    option_id: str = Field(max_length=256)
     # Forward-compatibility: ``kind`` is accepted but not yet acted upon by the
     # endpoint handler.  It is preserved here so that future routing logic (e.g.
     # dispatching ``ALLOW_ALWAYS`` vs ``ALLOW_ONCE`` to different persistence

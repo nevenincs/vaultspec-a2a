@@ -25,6 +25,7 @@ from sqlalchemy import select
 
 from ...control.config import settings
 from ...database import (
+    create_artifact,
     create_control_action,
     create_thread,
     record_permission_request,
@@ -2454,6 +2455,46 @@ class TestDeleteThread:
         assert asyncio.run(_checkpoint_exists()) is False
         assert asyncio.run(_child_checkpoint_exists()) is False
         assert asyncio.run(_checkpoint_history_count()) == 0
+
+    def test_deletes_workspace_artifact_files_for_terminal_thread(
+        self, session_factory, checkpointer, tmp_path
+    ) -> None:
+        """Hard delete must remove sandboxed artifact files owned by the thread."""
+        app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+        workspace_root = tmp_path / "workspace"
+        artifact_path = workspace_root / "outputs" / "report.md"
+
+        async def _seed_thread() -> None:
+            await checkpointer.setup()
+            artifact_path.parent.mkdir(parents=True, exist_ok=True)
+            artifact_path.write_text("artifact body", encoding="utf-8")
+            async with session_factory() as session:
+                await create_thread(
+                    session,
+                    thread_id="thread-delete-artifacts",
+                    status="completed",
+                    metadata=(
+                        '{"workspace_root": "'
+                        + workspace_root.as_posix()
+                        + '", "feature_tag": "artifact-delete"}'
+                    ),
+                )
+                await create_artifact(
+                    session,
+                    thread_id="thread-delete-artifacts",
+                    artifact_type="file",
+                    path="outputs/report.md",
+                )
+                await session.commit()
+
+        asyncio.run(_seed_thread())
+        assert artifact_path.exists() is True
+
+        with TestClient(app, raise_server_exceptions=True) as client:
+            resp = client.delete("/api/threads/thread-delete-artifacts")
+
+        assert resp.status_code == 204
+        assert artifact_path.exists() is False
 
     def test_plan_approval_response_succeeds_after_real_event_relay(
         self, session_factory, checkpointer

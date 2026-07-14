@@ -18,10 +18,21 @@ __all__ = [
     "Model",
     "PermissionOptionKind",
     "PermissionType",
+    "PipelinePhase",
     "Provider",
     "ToolCallStatus",
     "ToolKind",
 ]
+
+
+class PipelinePhase(StrEnum):
+    """Canonical pipeline phases for supervisor routing and vault gating."""
+
+    RESEARCH = "research"
+    ADR = "adr"
+    PLAN = "plan"
+    EXEC = "exec"
+    AUDIT = "audit"
 
 
 class AgentState(StrEnum):

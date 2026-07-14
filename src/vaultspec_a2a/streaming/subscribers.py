@@ -74,6 +74,11 @@ class SubscriberManager:
         if client_id in self._subscriptions:
             self._subscriptions[client_id].difference_update(thread_ids)
 
+    def remove_thread(self, thread_id: str) -> None:
+        """Remove ``thread_id`` from every active subscriber subscription set."""
+        for client_id in list(self._subscriptions):
+            self._subscriptions[client_id].discard(thread_id)
+
     def add_broadcast_hook(
         self, hook: Callable[[SequencedEvent], Awaitable[None]]
     ) -> None:

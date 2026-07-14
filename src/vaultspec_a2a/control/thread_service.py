@@ -12,6 +12,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import pathlib
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
@@ -28,6 +29,7 @@ from ..database import (
     create_control_action,
     create_thread,
     delete_thread,
+    get_artifacts_by_thread,
     get_pending_permission_requests,
     get_thread,
     get_thread_execution_state,
@@ -536,6 +538,9 @@ async def delete_thread_service(
     if not eligibility.allowed:
         return DeleteResult(deleted=False, error_detail=eligibility.reason)
 
+    # Collect artifact file paths before CASCADE destroys the rows.
+    _cleanup_artifact_files(thread, await get_artifacts_by_thread(db, thread_id))
+
     deleted = await delete_thread(db, thread_id)
     if not deleted:
         return DeleteResult(deleted=False, not_found=True)
@@ -545,6 +550,43 @@ async def delete_thread_service(
 
     await db.commit()
     return DeleteResult(deleted=True)
+
+
+def _cleanup_artifact_files(
+    thread: Any,
+    artifacts: Any,
+) -> None:
+    """Best-effort removal of workspace artifact files.
+
+    Resolves each artifact path against the thread workspace_root and
+    validates that the resolved path is confined within the workspace
+    before unlinking.  Failures are suppressed — file cleanup is
+    best-effort during hard delete.
+    """
+    if not artifacts:
+        return
+    metadata_json = getattr(thread, "thread_metadata", None)
+    if not metadata_json:
+        return
+    try:
+        meta = json.loads(metadata_json)
+    except (json.JSONDecodeError, TypeError):
+        return
+    workspace_root_str = meta.get("workspace_root")
+    if not workspace_root_str:
+        return
+    workspace_root = pathlib.Path(workspace_root_str).resolve()
+    if not workspace_root.is_dir():
+        return
+    for artifact in artifacts:
+        try:
+            target = (workspace_root / artifact.path).resolve()
+            if not target.is_relative_to(workspace_root):
+                continue
+            if target.is_file():
+                target.unlink()
+        except (OSError, ValueError):
+            continue
 
 
 # ---------------------------------------------------------------------------

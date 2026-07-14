@@ -210,8 +210,8 @@ def test_supervisor_validation_error_gate_blocks_finish() -> None:
         state=_make_state_with_errors(["missing return type", "unused import"]),
         worker_phase_map={"planner": "plan", "coder": "exec"},
     )
-    assert result.next_route == "planner"
-    assert result.inferred_phase == "plan"
+    assert result.next_route == "coder"
+    assert result.inferred_phase == "exec"
     assert result.routing_error is not None
     assert "FINISH blocked" in result.routing_error
 

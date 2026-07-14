@@ -224,13 +224,15 @@ async def _handle_permission_event(
                 thread_id=thread_id,
                 except_request_id=request_id,
             )
+            description = str(payload.get("description", ""))[:4096]
+            allowed_options = list(payload.get("options", []))[:50]
             await record_permission_request(
                 db,
                 request_id=request_id,
                 thread_id=thread_id,
                 pause_reason_type=pause_reason_type,
-                description=str(payload.get("description", "")),
-                allowed_options=list(payload.get("options", [])),
+                description=description,
+                allowed_options=allowed_options,
                 tool_call=tool_call,
             )
             await create_control_action(
@@ -239,7 +241,7 @@ async def _handle_permission_event(
                 action_type=ControlActionType.PERMISSION_REQUEST_CREATED,
                 request_id=request_id,
                 idempotency_key=f"permission-request:{request_id}",
-                payload={"description": payload.get("description", "")},
+                payload={"description": description},
                 result_status=ControlActionResultStatus.APPLIED,
             )
             await update_thread_status(db, thread_id, fx.thread_status)

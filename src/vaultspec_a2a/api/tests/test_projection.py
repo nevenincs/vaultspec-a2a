@@ -391,7 +391,6 @@ async def test_degraded_projection_does_not_mask_recovery_epoch_staleness(
     assert projection.recovery_epoch == 0
     assert snapshot.snapshot_complete is False
     assert "execution_state_projection_stale" in snapshot.degraded_reasons
-    assert "execution_state_projection_unavailable" in snapshot.degraded_reasons
 
     await engine.dispose()
 

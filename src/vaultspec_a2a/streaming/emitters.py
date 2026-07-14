@@ -177,6 +177,22 @@ class EventEmitters:
             if evt.thread_id == thread_id
         ]
 
+    def clear_thread_state(self, thread_id: str) -> None:
+        """Purge all emitter-owned state scoped to ``thread_id``."""
+        self._sequences.pop(thread_id, None)
+        stale_permissions = [
+            request_id
+            for request_id, (evt, _ts) in self._pending_permissions.items()
+            if evt.thread_id == thread_id
+        ]
+        for request_id in stale_permissions:
+            self._pending_permissions.pop(request_id, None)
+        stale_tool_calls = [
+            key for key in self._tool_call_states if key[0] == thread_id
+        ]
+        for key in stale_tool_calls:
+            self._tool_call_states.pop(key, None)
+
     # ------------------------------------------------------------------
     # Agent state management (P8-02)
     # ------------------------------------------------------------------

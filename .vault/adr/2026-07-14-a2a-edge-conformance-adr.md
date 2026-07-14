@@ -180,11 +180,15 @@ restated):
   zero tool calls and zero ACP permission requests). The operative
   decision is therefore how the orchestrator configures the spawned CLI's
   permission surface for autonomous runs, least-privilege preference
-  order: an exact-tool allowlist (`mcp__<server>__<tool>` names from the
-  catalog snapshot) if threadable through session configuration,
-  otherwise the narrowest sufficient permission mode - autonomous presets
-  only, human-in-the-loop presets unchanged, the granted surface logged
-  per run. Unchanged rationale either way: the engine review lane is the
+  order (specialist-confirmed against the CLI's documented permission
+  model, where a tool without a matching allow rule is declined
+  internally and silently): an exact-name allowlist of
+  `mcp__<server>__<tool>` rules from the catalog snapshot (the CLI's
+  allowedTools / permissions.allow surface; wildcards exist but are not
+  used), `bypassPermissions` prohibited, optionally `dontAsk` mode as a
+  hard-deny for unlisted tools where the pinned ACP adapter threads it -
+  autonomous presets only, human-in-the-loop presets unchanged, the
+  granted surface logged per run. Unchanged rationale either way: the engine review lane is the
   authoritative human gate, and the R2 deny policy independently protects
   the vault under ANY permission mode. The W03 review verifies the
   implementation against these constraints.

@@ -12,6 +12,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P02-S04]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P02-S05]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-plan]]'
   - '[[2026-07-14-a2a-edge-conformance-reference]]'
@@ -47,6 +48,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 
 ### reference
 
+- `2026-07-14-a2a-edge-conformance-deletion-manifest-reference` - `a2a-edge-conformance` reference: `UI and Google-A2A stub deletion manifest`
 - `2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference` - `a2a-edge-conformance` reference: `engine authoring wire shapes`
 - `2026-07-14-a2a-edge-conformance-reference` - `a2a-edge-conformance` reference: `frozen dashboard edge contract, a2a side`
 

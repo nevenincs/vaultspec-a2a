@@ -7,6 +7,8 @@ date: '2026-07-14'
 modified: '2026-07-14'
 related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S01]]'
+  - '[[2026-07-14-a2a-edge-conformance-W01-P01-S02]]'
+  - '[[2026-07-14-a2a-edge-conformance-W01-P01-S33]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P02-S04]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P02-S05]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
@@ -34,6 +36,8 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 ### exec
 
 - `2026-07-14-a2a-edge-conformance-W01-P01-S01` - Boot gateway and worker together and prove live IPC dispatch (worker_connected true, a message round-trips), fixing whatever blocks it
+- `2026-07-14-a2a-edge-conformance-W01-P01-S02` - Execute one full agent turn end-to-end on a mock-tape preset and capture the evidence in the step record
+- `2026-07-14-a2a-edge-conformance-W01-P01-S33` - Audit the agent/tool provisioning mechanism with live evidence: how a session is constructed, the subprocess spawned, the chat-model adapter bound, and tools actually surfaced to the agent (ACP session wiring, subprocess management, chat-model adapter, provider factory), recording what is proven versus presumed
 - `2026-07-14-a2a-edge-conformance-W01-P02-S04` - Review and commit the pending vaultspec housekeeping (managed .gitignore block, vault pre-commit hooks, vaultspec-rag and torch additions) as a standalone commit
 - `2026-07-14-a2a-edge-conformance-W01-P02-S05` - Relocate runtime state (graph cache, logs, tmp, queues) to the machine-global A2A home, repoint the .vault/runtime reference rag-first-discovering any other stale path consumers, and discard the parked .vault-local-state-moved-20260703 directory (user decision 2026-07-14: discard, not restore). Land this before S01 if the IPC check trips over the stale path
 

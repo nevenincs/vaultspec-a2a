@@ -17,9 +17,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
+
+from ._envelope import AuthoringResponse
+from ._ids import derive_idempotency_key
 
 if TYPE_CHECKING:
-    from ._envelope import AuthoringResponse, Denial
+    from collections.abc import Awaitable, Callable
+
+    from ._envelope import Denial
     from .client import AuthoringClient
 
 __all__ = [
@@ -28,6 +34,8 @@ __all__ = [
     "CatalogSnapshot",
     "execute_agent_tool",
     "fetch_catalog",
+    "make_tool_dispatch",
+    "resolve_tool_command",
 ]
 
 CATALOG_SCHEMA_VERSION = "authoring.semantic_tools.v1"
@@ -162,3 +170,69 @@ async def execute_agent_tool(
         idempotency_key=idempotency_key,
         actor_token=actor_token,
     )
+
+
+def resolve_tool_command(tool: AgentTool, arguments: dict[str, Any]) -> str:
+    """Resolve the engine command discriminator for a tool call.
+
+    Single-command tools (e.g. ``read_context`` -> ``read_context``) map
+    directly. Multi-command tools carry a discriminator in their arguments:
+    ``propose_changeset`` keys on ``operation`` (create -> create_proposal,
+    append -> append_draft, replace -> replace_draft) and ``cancel`` keys on
+    ``target`` (proposal -> cancel_proposal, run -> cancel_run). The
+    discriminator value is matched against the command names the catalog
+    declares, so the mapping follows the engine rather than a hardcoded table.
+    """
+    if len(tool.commands) == 1:
+        return tool.commands[0]
+    if not tool.commands:
+        return tool.name
+    discriminator = arguments.get("operation") or arguments.get("target")
+    if isinstance(discriminator, str):
+        for command in tool.commands:
+            if discriminator in command:
+                return command
+    return tool.commands[0]
+
+
+def make_tool_dispatch(
+    client: AuthoringClient,
+    *,
+    run_id: str,
+    actor_token: str,
+    snapshot: CatalogSnapshot,
+) -> Callable[[str, dict[str, Any]], Awaitable[dict[str, Any]]]:
+    """Build the dispatcher the authoring MCP server routes tool calls through.
+
+    Each call resolves the command from the catalog, issues the run-scoped
+    execute, and returns the engine ``data`` payload (or a denial rendered as a
+    value). Idempotency keys are derived from stable run-local material so a
+    replayed call dedupes at the engine. Unknown tools fail loudly.
+    """
+
+    async def dispatch(name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+        tool = snapshot.get(name)
+        if tool is None:
+            raise ValueError(f"tool {name!r} is not in the run's catalog snapshot")
+        command = resolve_tool_command(tool, arguments)
+        idempotency_key = derive_idempotency_key(run_id, command, uuid4().hex)
+        result = await execute_agent_tool(
+            client,
+            run_id=run_id,
+            command=command,
+            tool_call_id=uuid4().hex,
+            name=name,
+            tool_input=arguments,
+            idempotency_key=idempotency_key,
+            actor_token=actor_token,
+        )
+        if isinstance(result, AuthoringResponse):
+            data = result.data
+            return data if isinstance(data, dict) else {"result": data}
+        return {
+            "status": "denied",
+            "denial_kind": result.denial_kind,
+            "reason": result.reason,
+        }
+
+    return dispatch

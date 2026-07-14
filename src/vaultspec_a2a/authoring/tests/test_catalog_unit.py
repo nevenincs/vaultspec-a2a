@@ -10,9 +10,48 @@ import pytest
 from ...protocols.mcp.tools.authoring_bridge import build_tool_specs
 from ..catalog import (
     CATALOG_SCHEMA_VERSION,
+    AgentTool,
     CatalogSnapshot,
     parse_catalog,
+    resolve_tool_command,
 )
+
+
+def _tool(name: str, commands: tuple[str, ...]) -> AgentTool:
+    return AgentTool(
+        name=name,
+        description="",
+        input_schema={},
+        risk_tier="mutating",
+        permission_requirement="human_approval_required",
+        idempotency_required=True,
+        commands=commands,
+    )
+
+
+class TestResolveToolCommand:
+    def test_single_command_maps_directly(self) -> None:
+        tool = _tool("read_context", ("read_context",))
+        assert resolve_tool_command(tool, {}) == "read_context"
+
+    def test_propose_operation_selects_command(self) -> None:
+        tool = _tool(
+            "propose_changeset",
+            ("create_proposal", "append_draft", "replace_draft"),
+        )
+        assert resolve_tool_command(tool, {"operation": "create"}) == "create_proposal"
+        assert resolve_tool_command(tool, {"operation": "append"}) == "append_draft"
+        assert resolve_tool_command(tool, {"operation": "replace"}) == "replace_draft"
+
+    def test_cancel_target_selects_command(self) -> None:
+        tool = _tool("cancel", ("cancel_proposal", "cancel_run"))
+        assert resolve_tool_command(tool, {"target": "proposal"}) == "cancel_proposal"
+        assert resolve_tool_command(tool, {"target": "run"}) == "cancel_run"
+
+    def test_missing_discriminator_falls_back_to_first(self) -> None:
+        tool = _tool("cancel", ("cancel_proposal", "cancel_run"))
+        assert resolve_tool_command(tool, {}) == "cancel_proposal"
+
 
 _SAMPLE_CATALOG = {
     "schema_version": CATALOG_SCHEMA_VERSION,

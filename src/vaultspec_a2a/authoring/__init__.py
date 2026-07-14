@@ -21,6 +21,8 @@ from ._ids import validate_id as validate_id
 from .client import ACTOR_TOKEN_HEADER as ACTOR_TOKEN_HEADER
 from .client import BEARER_HEADER as BEARER_HEADER
 from .client import AuthoringClient as AuthoringClient
+from .session import AuthoringSession as AuthoringSession
+from .session import mint_actor_token as mint_actor_token
 
 __all__ = [
     "ACTOR_TOKEN_HEADER",
@@ -29,10 +31,12 @@ __all__ = [
     "AuthoringClient",
     "AuthoringError",
     "AuthoringResponse",
+    "AuthoringSession",
     "AuthoringTransportError",
     "CommandEnvelope",
     "Denial",
     "derive_idempotency_key",
     "is_valid_id",
+    "mint_actor_token",
     "validate_id",
 ]

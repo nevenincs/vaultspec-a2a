@@ -9,6 +9,7 @@ from ..state import (
     TeamState,
     _append_artifacts,
     _merge_token_usage,
+    _merge_unique_strs,
     _replace_plan,
 )
 
@@ -49,6 +50,27 @@ class TestAppendArtifacts:
         existing = [{"id": "a1", "path": "/f", "type": "file", "created_by": ""}]
         result = _append_artifacts(existing, [])
         assert result == existing
+
+
+class TestMergeUniqueStrs:
+    """Tests for the append-and-deduplicate string reducer (authoring refs)."""
+
+    def test_appends_new_ids(self) -> None:
+        result = _merge_unique_strs(["cs:1"], ["cs:2"])
+        assert result == ["cs:1", "cs:2"]
+
+    def test_deduplicates_preserving_order(self) -> None:
+        result = _merge_unique_strs(["cs:1", "cs:2"], ["cs:2", "cs:3"])
+        assert result == ["cs:1", "cs:2", "cs:3"]
+
+    def test_empty_new_keeps_existing(self) -> None:
+        result = _merge_unique_strs(["cs:1"], [])
+        assert result == ["cs:1"]
+
+    def test_does_not_mutate_existing(self) -> None:
+        existing = ["cs:1"]
+        _merge_unique_strs(existing, ["cs:2"])
+        assert existing == ["cs:1"]
 
 
 class TestMergeTokenUsage:
@@ -203,6 +225,10 @@ class TestTeamStateStructure:
             "mounted_context",
             # ADR-021: task queue pointer
             "current_task_id",
+            # ADR R3: authoring proposal references
+            "authoring_session_id",
+            "authoring_changeset_ids",
+            "authoring_proposal_ids",
             # ADR-024: plan approval gate
             "approval_status",
             "approval_request_id",

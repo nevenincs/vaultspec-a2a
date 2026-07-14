@@ -89,6 +89,20 @@ def _append_validation_errors(
     return existing + new
 
 
+def _merge_unique_strs(
+    existing: list[str],
+    new: list[str],
+) -> list[str]:
+    """Append-and-deduplicate reducer preserving first-seen order."""
+    merged = list(existing)
+    seen = set(existing)
+    for item in new:
+        if item not in seen:
+            merged.append(item)
+            seen.add(item)
+    return merged
+
+
 # ---------------------------------------------------------------------------
 # State TypedDict
 # ---------------------------------------------------------------------------
@@ -144,6 +158,14 @@ class TeamState(TypedDict):
     # or no task has been assigned. Updated via
     # Command(update={...}) from mark_task_complete.
     current_task_id: NotRequired[str | None]
+
+    # --- authoring proposal references (ADR R3) ---
+    # References (D5) to engine authoring artifacts this run produced — the
+    # session id and the changeset/proposal ids, never document content. Ids
+    # are appended and de-duplicated as proposals are created and submitted.
+    authoring_session_id: NotRequired[str | None]
+    authoring_changeset_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
+    authoring_proposal_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
 
     # --- plan approval gate (ADR-024) ---
     # Durable approval-state linkage for execution approval. Legacy

@@ -1,8 +1,7 @@
 """Shared ACP subprocess lifecycle utilities.
 
 Provides platform-aware process spawning and tree killing for ACP agent
-subprocesses.  Used by both ``acp_chat_model`` (production) and
-``probes/_protocol`` (manual verification).
+subprocesses.  Used by ``acp_chat_model`` (production).
 """
 
 from __future__ import annotations

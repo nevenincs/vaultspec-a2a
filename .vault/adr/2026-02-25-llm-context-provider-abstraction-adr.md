@@ -3,257 +3,63 @@ tags:
 - '#adr'
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
-modified: '2026-02-25'
+modified: '2026-07-14'
 related:
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-07-14-orchestration-capabilities-research]]'
+  - '[[2026-07-14-orchestration-capabilities-audit]]'
 ---
 
-# `llm-context-provider-abstraction` adr: `adr-2` | (**status:** `proposed`)
+# `llm-context-provider-abstraction` adr: `subscription-first provider harness over ACP` | (**status:** `accepted`)
 
-## Migration Note
+## Problem Statement
 
-This ADR was migrated from the legacy pre-pipeline documentation tree during the issue #19 cleanup so that the repository no longer depends on the removed `docs/` directory.
+The orchestrator's economic foundation is flat-rate consumer subscriptions: coding agents (Claude, Gemini) run as provider CLIs wrapped over ACP stdio JSON-RPC so agentic loops bill against subscriptions, never pay-as-you-go developer APIs. That core decision stands. What has decayed is the implementation strategy around it: the capability audit (`2026-07-14-orchestration-capabilities-audit`) found hand-rolled ACP protocol plumbing, a deprecated Claude adapter package pin, hardcoded multi-step command-resolution chains, provider-identity leaks inside the generic session layer, and a `Provider` enum that conflates vendor with execution mechanism. Meanwhile the ACP ecosystem matured into exactly the harness this project was hand-building (`2026-07-14-orchestration-capabilities-research`). A decision is needed now on how the provider layer is provisioned going forward, before further agents are added.
 
-- Original ADR number: `ADR-2`
-- Original title: `LLM Context & Provider Abstraction`
-- Legacy status at migration time: `Proposed`
+This record amends the original ADR-002 (2026-02-25, migrated from the legacy docs tree) in place; the original's context-management decisions (state checkpointing, clean handoffs) are unchanged and remain in force.
 
-## Original ADR
+## Considerations
 
-## ADR-002: LLM Context & Provider Abstraction
+- Subscription economics are the knockout driver: CLI wrapping exists to absorb agentic loops into flat-rate plans (original ADR-002 rationale, reaffirmed by the owner 2026-07-14).
+- No surveyed project unifies API and CLI execution under one abstraction; Zed runs two subsystems joined at the client (`2026-07-14-orchestration-capabilities-research`).
+- An official Python ACP SDK (`agent-client-protocol@0.11.0`, Python 3.13-compatible) and a CDN-served agent registry (~50 agents, pinned binary/npx specs) now exist (research, same stem).
+- ACP standardizes auth negotiation (`authMethods`/`authenticate`) and per-session MCP server injection (research).
+- The Claude adapter moved to `@agentclientprotocol/claude-agent-acp`; the currently pinned `@zed-industries` path is deprecated (research).
+- gemini-cli headless OAuth over ACP is broken upstream; API-key auth is the only reliable headless Gemini path today (research).
+- No live end-to-end agent turn has ever been verified (`2026-07-14-orchestration-capabilities-audit`); integration claims must be probe-verified before load-bearing adoption.
 
-**Date:** 2026-02-25
-**Status:** Proposed
+## Considered options
 
-## 1. Context & Problem Statement
+- **Status quo (hand-rolled ACP plumbing, hardcoded resolution).** Rejected: four in-house `_acp_*` modules duplicate a maintained SDK, the adapter pin is deprecated, resolution chains break across machines, and auth grows as inline branches - the drift the audit documents.
+- **Force-unified single provider abstraction spanning API and CLI.** Rejected: unsolved industry-wide; would invent novel architecture where the mission is to stop inventing. The `BaseChatModel` facade already gives sufficient call-site uniformity.
+- **API-first, subscriptions demoted.** Rejected outright: violates the economic driver; developer-API billing for agentic loops is the exact failure mode this architecture exists to prevent.
+- **Modernized dual architecture on ACP ecosystem components (chosen).** Subscription CLI execution stays primary, rebuilt on the official SDK, registry-based resolution, and negotiated auth; direct-API providers remain a sanctioned fallback tier behind the same facade.
 
-The orchestrator must manage the cognitive state and authentication of a
-multi-agent team (Claude, Gemini, GLM-5, etc.). This presents two
-critical challenges:
+## Constraints
 
-- **Cost & Authentication:** Using standard developer API keys for
-  agentic coding loops incurs massive, unpredictable costs. The
-  orchestrator must wrap provider CLIs to inherit the user's flat-rate
-  consumer subscriptions (e.g., Claude Pro, Gemini Advanced). If cached
-  session tokens expire mid-task, the orchestrator will crash due to
-  unhandled `401 Unauthorized` errors.
-- **Context Window Exhaustion:** Agents discussing a project and reading
-  files will rapidly exceed maximum context windows (e.g., 200k tokens).
-  If a Planner agent attempts to pass its entire thought history to a
-  Coder agent, the API will reject the payload, instantly halting the
-  team.
+- `agent-client-protocol@0.11.0` client-side coverage (permission RPCs, terminal RPCs, session fork/list) is README-claimed but unverified; adoption is gated on a probe script proving parity with the current `_acp_*` layer against a real adapter.
+- The ACP registry has no PyPI consumer; a small HTTP reader with a local cache is required, and offline operation must fall back to cached or settings-declared launch specs.
+- gemini-cli headless OAuth (upstream issues 7549/12042) forces API-key auth for Gemini until fixed; this is an upstream dependency outside our control.
+- Consumer OAuth flows remain volatile by nature (original ADR-002 consequence, still true): providers can rotate or deprecate headless token flows at their discretion.
+- The Windows subprocess constraints of the original record (no PTY, no `cmd.exe /c` wrapping, `.cmd`-shim-aware spawning) remain binding on whatever the SDK's transport does; if the SDK's spawn path violates them it cannot be adopted for transport, only for schema/framing.
 
-## 2. The Decision
+## Implementation
 
-### Provider Abstraction & Authentication: Dual Architecture
+Five layers, replacing the current factory-branch design:
 
-- **ACP-LangChain Wrapper Architecture (`AcpChatModel`):** The
-  orchestrator will **not** use standard REST LangChain SDKs (e.g.,
-  `ChatAnthropic`) to communicate with flat-rate consumer models
-  (Claude, Gemini) because those SDKs strictly expect developer
-  `x-api-key` headers and reject consumer OAuth tokens with `401
-Unauthorized`. Instead, we build `AcpChatModel` — a custom
-  `BaseChatModel` in `src/vaultspec_a2a/providers/acp_chat_model.py` — that spawns
-  the provider's CLI as a managed subprocess and communicates via
-  JSON-RPC over `stdio`.
-  - **Zero PTY / Zero Batch:** Subprocesses are invoked without a PTY
-    and never via `cmd.exe /c`. This is critical for pipe integrity on
-    Windows.
-  - **For Claude:** `AcpChatModel` resolves the `@zed-industries` npm
-    package's raw deployment path (`dist/index.js`) via filesystem
-- **ACP-LangChain Wrapper Architecture (`AcpChatModel`):** The
-  orchestrator will **not** use standard REST LangChain SDKs (e.g.,
-  `ChatAnthropic`) to communicate with flat-rate consumer models
-  (Claude, Gemini) because those SDKs strictly expect developer
-  `x-api-key` headers and reject consumer OAuth tokens with `401
-  Unauthorized`. Instead, we build `AcpChatModel` — a custom
-  `BaseChatModel` in `src/vaultspec_a2a/providers/acp_chat_model.py` — that spawns
-  the provider's CLI as a managed subprocess and communicates via
-  JSON-RPC over `stdio`.
-  - **Zero PTY / Zero Batch:** Subprocesses are invoked without a PTY
-    and never via `cmd.exe /c`. This is critical for pipe integrity on
-    Windows.
-  - **For Claude:** `AcpChatModel` resolves the `@zed-industries` npm
-    package's raw deployment path (`dist/index.js`) via filesystem
-    resolution and invokes it under `node.exe` directly.
-    `CLAUDE_CODE_OAUTH_TOKEN=<token>` is injected into the subprocess
-    `env` dict. Token acquisition: user runs `claude setup-token` once,
-    generating a static headless token with a ~1-year lifecycle. This
-    has been **validated** — injecting the token immediately bypasses
-    the CLI login prompt.
-  - **For Gemini:** The Gemini CLI installs as a `.CMD` npm shim
-    (verified: `C:\Users\...\npm\gemini.CMD`), **not** a native `.exe`.
-    However, `create_subprocess_shell("gemini --experimental-acp")` is
-    safe because the OS shell resolves `.CMD` shims natively — no
-    `shutil.which` resolution or `cmd.exe /c` wrapping is needed. Zero
-    credential injection: Gemini CLI manages its own OAuth from
-    `~/.gemini/oauth_creds.json`. This was **validated** via probe on
-    2026-02-26 — initialize, session/new, session/prompt, and
-    end_turn all succeeded with no injected credentials.
-  - **Protocol Parity:** Both Claude and Gemini speak identical ACP
-    JSON-RPC (verified by Toad's `geminicli.com.toml` which uses the
-    same `Agent` class as Claude — only the command string differs).
-- **Direct API Architecture (GLM-5 only):** Zhipu's GLM-5 remains the
-  sole exception. It lacks a consumer CLI, so the orchestrator
-  interacts directly with its REST API via `langchain_openai` with
-  `base_url` override and a traditional `x-api-key` header.
+- **Provider descriptors and registry.** Each provider/agent is a declarative descriptor - vendor, execution mode (`cli` or `api`), launch spec or API binding, auth methods, model catalog - registered in a provider registry consulted by the existing `ProviderFactoryProtocol` seam. The flat vendor enum splits into vendor identity plus explicit execution mode, threaded through agent/team TOML config.
+- **Agent resolution.** CLI agents resolve from declarative settings entries (command, args, env) and the ACP registry index (pinned platform binaries or npx specs) with a local cache, replacing hardcoded npm paths, the Docker absolute path, and per-vendor fallback chains. The Claude adapter pin migrates to `@agentclientprotocol/claude-agent-acp`.
+- **Auth.** CLI-agent auth moves to ACP `authMethods`/`authenticate` negotiation where the adapter supports it; the 1-year headless Claude token (`claude setup-token`, validated in the original record) remains the Claude method of choice; Gemini uses API-key auth headlessly until upstream OAuth is fixed. API-tier credentials follow stored-credential, then environment, then explicit-option resolution. The environment-scrubbing model is retained as sandbox hygiene, no longer as the auth mechanism.
+- **Session runtime.** The ACP schema/framing layer is replaced by the official Python SDK (probe-gated per Constraints); the session model, streaming translation to LangChain chunks, and cancellation semantics of the current `AcpChatModel` are preserved on top of it. Per-session MCP server injection uses the protocol's first-class `mcpServers` field.
+- **API fallback tier.** Direct-API providers instantiate per-vendor LangChain packages behind the same descriptor registry, replacing the one-`ChatOpenAI`-branch-per-vendor pattern. GLM remains the reference case.
 
-### Context Management
+## Rationale
 
-- **State Checkpointing (LangGraph Pattern):** We will explicitly
-  decouple the _Conversation History_ from the _Architectural State_.
-  The Orchestrator will maintain a strict `TypedDict` representing the
-  compiled state of the project (e.g., `current_plan`, `files_to_edit`,
-  `approved_code`).
-- **Clean Handoffs:** When transferring control from one agent to
-  another (e.g., Planner → Coder), the Orchestrator will initialize the
-  receiving agent with _only_ the explicitly compiled `State` object
-  via the A2A `ContextId`. The transmitting agent's internal reasoning
-  loops (e.g., a 50-turn deliberation) are intentionally dropped.
+The subscription-first CLI architecture was correct and is reaffirmed; the research shows the surrounding ecosystem caught up and now maintains, as shared infrastructure, everything this repo hand-rolled - protocol framing (official SDK), agent distribution (registry consumed by Zed and JetBrains), and login standardization (`authMethods`). Adopting those components eliminates the audited drift (deprecated pins, resolution chains, inline auth) without touching the economic driver or the `BaseChatModel`/`ProviderFactoryProtocol` facade the graph layer depends on. Mirroring Zed's two-subsystem split rather than force-unifying keeps us on the proven pattern; the explicit vendor-x-mechanism config axis fixes the audited enum conflation with a contained blast radius.
 
-## 3. Rationale
+## Consequences
 
-- **Cost & Stability:** Using 1-year headless OAuth tokens driving
-  official CLIs completely eliminates the need for the orchestrator to
-  build complex polling logic to catch `401` refresh race conditions.
-  Crucially, the CLI wrapper architecture entirely bypasses
-  pay-as-you-go developer billing APIs, absorbing agentic coding loops
-  into the user's flat-rate $20/month subscription.
-- **Amnesia Prevention:** "Sliding Window" truncation (dropping the
-  oldest 10 messages) causes fatal "amnesia," where the Coder forgets
-  the core requirements defined by the Planner at the start of the
-  session. Checkpointing guarantees the core objective is preserved
-  while resetting token usage to ~1k per handoff.
-- **GLM-5 Simplicity:** Recognizing that GLM-5 natively supports
-  standard OpenAI function calling schemas eliminates a massive amount
-  of unnecessary mapping code in the provider adapter layer, making it
-  the perfect candidate for our direct `x-api-key` integration.
-
-## 4. Rejected Alternatives
-
-- **Interactive `/login` tokens:** Rejected. The OAuth tokens generated
-  by standard interactive browser logins are aggressively rotated and
-  typically expire within 8–12 hours. They are entirely unsuitable for
-  a headless orchestrator service.
-- **LangChain SDKs for Frontier Models:** Rejected. Injecting an OAuth
-  token into `ChatAnthropic(api_key=...)` results in `401
-  Unauthorized` errors because the LangChain adapter strictly hits the
-  developer API endpoint (expecting `x-api-key`), not the consumer
-  endpoint the CLI is wired for.
-- **cmd.exe / PTY subprocess invocation:** Rejected. Using
-  `cmd.exe /c node claude-agent-acp` or a PTY to launch CLIs destroys
-  pipe framing on Windows. `node.exe` must be resolved and invoked
-  directly via filesystem path resolution.
-- **`shutil.which` for Claude in Python `create_subprocess_exec`:**
-  Rejected. `shutil.which("claude")` was historically banned because it
-  resolved a `.CMD` shim incompatible with `create_subprocess_exec`.
-  This ban still applies: never pass the `claude` binary as the Python
-  subprocess command — the orchestrator must continue spawning
-  `node dist/index.js` via filesystem resolution. However,
-  `shutil.which("claude")` **is** valid for resolving the
-  `CLAUDE_CODE_EXECUTABLE` env var — see §5.1. As of Claude Code
-  v2.1.62+, the system binary is a native PE32+ Bun executable
-  (`~/.local/bin/claude.exe`), not a Node.js package or `.CMD` shim.
-- **`shutil.which` for Gemini:** Not needed.
-  `create_subprocess_shell` handles the `.CMD` shim natively. Using
-  `shutil.which("gemini")` to get the path and then
-  `create_subprocess_exec` would break — it would try to execute the
-  `.CMD` file directly without a shell interpreter.
-- **Sliding-Window Truncation:** Rejected. As noted, it corrupts the
-  structural integrity of long-horizon tasks.
-- **Sharing Full Chat History:** Rejected. It guarantees an
-  out-of-memory/token-exhaustion failure on complex tasks.
-
-## 5. Implementation Constraints & Pitfalls
-
-- **Credential Leakage:** Tokens are passed via the `env` dict in
-  `subprocess.Popen` (never via command-line arguments, which appear in
-  process listings). `CLAUDE_CODE_OAUTH_TOKEN` and Gemini credentials
-  must **never** be logged to `stdout`/`stderr`, captured in LangSmith
-  traces, or forwarded to the frontend UI.
-- **Node.js Path Resolution Brittleness:** The `@zed-industries` npm
-  package installation path for `dist/index.js` must be resolved at
-  runtime (e.g., via `node --print
-"require.resolve('@zed-industries/claude-agent-acp')"` or filesystem
-  traversal from the known npm prefix). Hardcoding absolute paths will
-  break across machines.
-- **Serialization Integrity:** The `TeamState` (`TypedDict`) must remain
-  strictly serializable to JSON so it can be losslessly encoded and
-  decoded as it passes through the A2A protocol payloads.
-
-### 5.1 System Binary Override (`CLAUDE_CODE_EXECUTABLE`)
-
-When `CLAUDE_CODE_OAUTH_TOKEN` is active, the `CLAUDE_CODE_EXECUTABLE`
-environment variable **MUST** be set to the path of the system-installed
-`claude` binary (resolved via `shutil.which("claude")`) before spawning the
-ACP subprocess. This applies to both `AcpChatModel._astream()` and
-`probes._protocol.run_probe()`.
-
-- **Mandate:** The bundled `@anthropic-ai/claude-agent-sdk/cli.js`
-  inside the `@zed-industries/claude-agent-acp` npm package **MUST** be
-  bypassed. The system binary takes precedence.
-- **Rationale:** The bundled `cli.js` (e.g. v2.1.62) may lag behind the
-  system binary (v2.1.63+). The system binary is the canonical,
-  versioned, user-installed tool. Version skew between the bundled
-  `cli.js` and the system `claude` binary can cause subtle protocol
-  mismatches, credential handling differences, or missing bug fixes.
-- **Guard condition:** The injection is conditional — it only fires when
-  both `CLAUDE_CODE_OAUTH_TOKEN` is present in the environment **and**
-  `shutil.which("claude")` successfully resolves a system binary. If no
-  system binary is found, the bundled `cli.js` is used as a fallback
-  (no error is raised).
-- **Windows path note:** `shutil.which("claude")` on Windows returns the
-  Windows-native path (e.g. `C:\Users\hello\.local\bin\claude.exe`)
-  which Node.js in the child process can spawn correctly.
-
-## 6. Negative Consequences
-
-- **Provider Volatility:** We are relying on consumer-facing OAuth token
-  flows for Claude and Gemini. The providers could break, rotate, or
-  deprecate these headless setup flows at their discretion, requiring
-  immediate updates to the orchestrator's authentication layer.
-- **Loss of Subtle Context:** By aggressively dropping an agent's
-  internal reasoning loops during handoff, the receiving agent may miss
-  subtle, undocumented rationale for _why_ a certain decision was made,
-  unless the transmitting agent explicitly writes it into the
-  `TeamState`.
-
-## 7. References
-
-### 7.1 Local Research & Distilled Docs
-
-- Agents Domain - Distilled
-- Agents Gaps Research
-- Architecture Domain - Distilled
-- Architecture Gaps Research
-- Claude Agent Support
-- Gemini Agent Support
-- GLM-5 Agent Support
-
-### 7.2 Codebase Modules & Patterns
-
-- **Authentication/Environment Injection:** `os.environ` (Python
-  standard library) and `subprocess.Popen` (standard library).
-- **GLM-5 Integration:** `openai` Python package
-  (`openai.OpenAI(base_url=...)`) for OpenAI-compatible API
-  interaction.
-- **Context Management:** `typing.TypedDict` (Python standard library)
-  for defining structured state objects.
-- **State Checkpointing:** Patterns observed in
-  `knowledge/repositories/langgraph/` for state management within
-  agentic workflows.
-- **A2A Context Handoff:** `a2a.types.ContextId`
-  (`knowledge/repositories/a2a-python/src/a2a/types.py`) for
-  maintaining conversation threads between agents.
-
-### 7.3 Online Reference Implementation
-
-- **Claude `setup-token`:** Claude Code CLI
-  Documentation (specific section on
-  headless authentication).
-- **LangGraph Checkpointers:** LangChain/LangGraph
-  Documentation
-  (section on "Memory and Checkpointing" for agent state).
-- **OpenAI Compatible APIs:** Zhipu AI GLM-5 API
-  Documentation (referenced
-  for tool-calling format and `base_url` override).
+- Gains: four in-house protocol modules deleted in favor of a maintained SDK; new coding agents (Codex, Copilot CLI, Goose, OpenCode) become registry entries plus a descriptor instead of code; login becomes protocol-negotiated instead of env-var archaeology; the audited provider-identity leaks in the generic session layer are removed.
+- Difficulties: dependency on the SDK's release cadence and on registry availability (mitigated by local cache and settings-declared fallbacks); migration touches every preset TOML and the team-config schema; the probe gate must pass before the SDK swap lands - if it fails, only the descriptor/registry/auth layers proceed and framing stays in-house.
+- Opens: per-session MCP injection gives the orchestrator direct control over each agent's tool surface, the foundation for per-agent security constraints; the descriptor model is the natural home for future per-agent capability policy.
+- Unchanged risks: consumer OAuth volatility persists; upstream gemini-cli auth bugs bound Gemini's headless auth options.

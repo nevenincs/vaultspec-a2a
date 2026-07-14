@@ -22,6 +22,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-plan]]'
   - '[[2026-07-14-a2a-edge-conformance-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-research]]'
+  - '[[2026-07-14-a2a-edge-conformance-w01-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
 ---
 
@@ -37,6 +38,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 
 ### audit
 
+- `2026-07-14-a2a-edge-conformance-w01-review-audit` - `a2a-edge-conformance` audit: `W01 code review: salvage verification and hygiene`
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
 
 ### exec

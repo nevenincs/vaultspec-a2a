@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#service-lifecycle-architecture'
 date: 2026-03-20
+modified: '2026-03-20'
 related:
 - '[[2026-03-04-worker-process-architecture-adr]]'
 - '[[2026-03-19-control-layer-cli-justfile-separation-adr]]'
@@ -76,7 +77,6 @@ This starts gateway + worker + UI with:
 - Dependency ordering (`depends_on` with `service_healthy`)
 - Log aggregation (`docker compose logs -f`)
 - Jaeger traces for distributed observability
-
 
 This is the same model used by LangGraph Platform (`langgraph up`), Dify, and
 Open WebUI — all of which are the closest architectural analogs to VaultSpec A2A.

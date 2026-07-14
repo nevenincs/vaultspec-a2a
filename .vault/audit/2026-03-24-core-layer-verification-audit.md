@@ -3,6 +3,7 @@ tags:
   - '#audit'
   - '#core-layer'
 date: '2026-03-24'
+modified: '2026-03-24'
 related:
   - '[[2026-03-23-core-layer-boundary-adr]]'
   - '[[2026-03-23-core-layer-boundary-research]]'

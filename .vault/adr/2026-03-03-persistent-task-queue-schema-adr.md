@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#persistent-task-queue-schema'
 date: 2026-03-03
+modified: '2026-03-03'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-blackboard-content-mounting-adr]]'
@@ -10,7 +11,7 @@ related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
-# `persistent-task-queue-schema` adr: `adr-17` | (**status:** `revised`)
+# `persistent-task-queue-schema` adr: `adr-17` | (**status:** `accepted`)
 
 ## Migration Note
 

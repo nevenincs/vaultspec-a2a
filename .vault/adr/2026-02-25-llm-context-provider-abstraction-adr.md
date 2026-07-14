@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#llm-context-provider-abstraction'
 date: 2026-02-25
+modified: '2026-02-25'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
@@ -21,7 +22,7 @@ This ADR was migrated from the legacy pre-pipeline documentation tree during the
 
 ## ADR-002: LLM Context & Provider Abstraction
 
-**Date:** 2026-02-25  
+**Date:** 2026-02-25
 **Status:** Proposed
 
 ## 1. Context & Problem Statement

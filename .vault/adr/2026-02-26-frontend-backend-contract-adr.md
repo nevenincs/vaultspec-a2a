@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#frontend-backend-contract'
 date: 2026-02-26
+modified: '2026-02-26'
 related:
 - '[[2026-02-26-protocol-bridging-translation-adr]]'
 - '[[2026-02-26-event-aggregation-server-side-replay-adr]]'

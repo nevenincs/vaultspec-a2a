@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#universal-rule-propagation'
 date: 2026-03-31
+modified: '2026-03-31'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
@@ -38,7 +39,6 @@ Must check and verify that .vaultspec manages and deploys custom rules via its c
 
 I propose that we make the Langgraph pipeline know about these rules in the vaultspec/rules/rules dir and always export the custom rules as system context.
 The outstanding question is what to do about the builtin rules. The concern is context bloat and informatino duplication if their sematic meaning has already been added to the agent personas.
-
 
 ### The Problem
 

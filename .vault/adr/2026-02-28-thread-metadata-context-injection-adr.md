@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#thread-metadata-context-injection'
 date: 2026-02-28
+modified: '2026-02-28'
 related:
 - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
 - '[[2026-02-26-frontend-backend-contract-adr]]'

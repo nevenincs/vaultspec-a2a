@@ -3,6 +3,7 @@ tags:
   - '#research'
   - '#domain-logic'
 date: '2026-03-27'
+modified: '2026-03-27'
 related:
   - '[[2026-03-24-core-layer-boundary-audit]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'

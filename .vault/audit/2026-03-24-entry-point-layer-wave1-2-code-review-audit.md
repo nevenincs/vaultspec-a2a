@@ -3,19 +3,11 @@ tags:
   - '#audit'
   - '#entry-point-layer'
 date: '2026-03-24'
+modified: '2026-03-24'
 related:
   - '[[2026-03-24-entry-point-layer-plan]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'
 ---
-
-<!-- DO NOT add 'Related:', 'tags:', 'date:', or other frontmatter fields
-     outside the YAML frontmatter above -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
 
 # `entry-point-layer` audit: `wave-1-2-code-review`
 

@@ -3,6 +3,7 @@ tags:
   - '#research'
   - '#contract-validation'
 date: 2026-04-05
+modified: '2026-04-05'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
   - "[[2026-04-04-ui-integration-wire-regen-rolling-audit]]"

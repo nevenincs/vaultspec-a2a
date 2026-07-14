@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#approved-module-hierarchy'
 date: 2026-02-26
+modified: '2026-02-26'
 related:
 - '[[2026-02-26-process-and-workspace-management-adr]]'
 - '[[2026-02-25-llm-context-provider-abstraction-adr]]'

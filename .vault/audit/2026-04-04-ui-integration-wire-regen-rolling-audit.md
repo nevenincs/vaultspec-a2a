@@ -3,6 +3,7 @@ tags:
   - '#audit'
   - '#ui-integration-wire-regen'
 date: 2026-04-04
+modified: '2026-04-04'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
   - "[[2026-04-04-ui-integration-wire-regen-review-audit]]"
@@ -12,10 +13,6 @@ related:
 
 Continuous discovery of drifts, wiring gaps, and regression risks across the
 frontend codebase. Findings appended by parallel sub-agents.
-
-<!-- Findings below are appended as discovered. Format:
-     {DOMAIN}-{NNN} | {LEVEL} | {Summary}
-     {Description with file:line references} -->
 
 ## Round 1 — 4 parallel agents (2026-04-04)
 

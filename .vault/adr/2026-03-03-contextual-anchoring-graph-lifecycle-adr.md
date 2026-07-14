@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#contextual-anchoring-graph-lifecycle'
 date: 2026-03-03
+modified: '2026-03-03'
 related:
 - '[[2026-02-27-team-composition-topology-adr]]'
 - '[[2026-02-28-thread-metadata-context-injection-adr]]'
@@ -11,7 +12,7 @@ related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
 
-# `contextual-anchoring-graph-lifecycle` adr: `adr-18` | (**status:** `implemented`)
+# `contextual-anchoring-graph-lifecycle` adr: `adr-18` | (**status:** `accepted`)
 
 ## Migration Note
 

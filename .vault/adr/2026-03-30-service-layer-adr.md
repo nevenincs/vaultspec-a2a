@@ -3,6 +3,7 @@ tags:
   - "#adr"
   - "#service-layer"
 date: 2026-03-30
+modified: '2026-03-30'
 related:
   - "[[2026-03-30-service-layer-research]]"
   - "[[2026-03-30-service-layer-plan]]"

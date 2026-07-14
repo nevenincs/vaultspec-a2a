@@ -3,6 +3,7 @@ tags:
   - '#audit'
   - '#ui-integration-wire-regen'
 date: 2026-04-04
+modified: '2026-04-04'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
   - "[[2026-04-04-ui-integration-wire-regen-summary-exec]]"

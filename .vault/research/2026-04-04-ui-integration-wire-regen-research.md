@@ -3,6 +3,7 @@ tags:
   - '#research'
   - '#ui-integration-wire-regen'
 date: 2026-04-04
+modified: '2026-04-04'
 related:
   - "[[2026-02-26-frontend-backend-contract-adr]]"
   - "[[2026-02-28-react-tailwind-figma-migration-adr]]"

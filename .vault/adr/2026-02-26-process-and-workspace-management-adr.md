@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#process-and-workspace-management'
 date: 2026-02-26
+modified: '2026-02-26'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---
@@ -21,7 +22,7 @@ This ADR was migrated from the legacy pre-pipeline documentation tree during the
 
 ## ADR-001: Process & Workspace Management (LangGraph Core)
 
-**Date:** 2026-02-26  
+**Date:** 2026-02-26
 **Status:** Proposed
 
 ## 1. Context & Problem Statement

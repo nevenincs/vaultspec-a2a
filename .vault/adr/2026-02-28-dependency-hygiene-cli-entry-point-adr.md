@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#dependency-hygiene-cli-entry-point'
 date: 2026-02-28
+modified: '2026-02-28'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-approved-module-hierarchy-adr]]'

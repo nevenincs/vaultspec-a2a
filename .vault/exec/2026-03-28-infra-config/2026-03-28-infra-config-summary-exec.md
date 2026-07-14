@@ -3,20 +3,12 @@ tags:
   - '#exec'
   - '#infra-config'
 date: '2026-03-28'
+modified: '2026-03-28'
 related:
   - '[[2026-03-28-infra-config-plan]]'
   - '[[2026-03-28-infra-config-adr]]'
   - '[[2026-03-28-infra-config-research]]'
 ---
-
-<!-- DO NOT add 'Related:', 'tags:', 'date:', or other frontmatter fields
-     outside the YAML frontmatter above -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
 
 # `infra-config` summary
 

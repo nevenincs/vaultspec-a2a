@@ -3,6 +3,7 @@ tags:
   - '#audit'
   - '#core-layer'
 date: '2026-03-24'
+modified: '2026-03-24'
 related:
   - '[[2026-03-23-core-layer-boundary-plan]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'
@@ -10,10 +11,6 @@ related:
 ---
 
 # `core-layer` Code Review
-
-<!-- Persistent log of audit findings appended below. -->
-
-<!-- Use: {TOPIC}-### | {LEVEL} | {Summary} \n {DESCRIPTION} format-->
 
 ## Phase 1: `thread/` Review
 

@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#agent-definition-schema'
 date: 2026-02-27
+modified: '2026-02-27'
 related:
 - '[[2026-02-25-llm-context-provider-abstraction-adr]]'
 - '[[2026-02-26-orchestration-topology-pipeline-adr]]'

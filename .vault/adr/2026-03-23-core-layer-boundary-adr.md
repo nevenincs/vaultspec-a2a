@@ -3,6 +3,7 @@ tags:
   - '#adr'
   - '#core-layer'
 date: '2026-03-23'
+modified: '2026-03-23'
 related:
   - '[[2026-03-23-core-layer-boundary-research]]'
   - '[[2026-03-23-core-layer-boundary-plan]]'

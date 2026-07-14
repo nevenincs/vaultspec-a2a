@@ -3,21 +3,13 @@ tags:
   - '#adr'
   - '#domain-logic'
 date: '2026-03-27'
+modified: '2026-03-27'
 related:
   - '[[2026-03-27-domain-logic-extraction-research]]'
   - '[[2026-03-24-entry-point-decomposition-adr]]'
   - '[[2026-03-23-core-layer-boundary-adr]]'
   - '[[2026-03-24-core-layer-boundary-audit]]'
 ---
-
-<!-- DO NOT add 'Related:', 'tags:', 'date:', or other frontmatter fields
-     outside the YAML frontmatter above -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
 
 # `domain-logic` adr: `layer-2b-domain-logic-extraction` | (**status:** `proposed`)
 

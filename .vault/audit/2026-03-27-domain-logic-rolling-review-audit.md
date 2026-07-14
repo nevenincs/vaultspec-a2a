@@ -3,6 +3,7 @@ tags:
   - "#audit"
   - "#domain-logic"
 date: "2026-03-27"
+modified: '2026-03-27'
 related:
   - "[[2026-03-27-domain-logic-plan]]"
   - "[[2026-03-27-domain-logic-extraction-adr]]"

@@ -3,6 +3,7 @@ tags:
   - '#audit'
   - '#entry-point-layer'
 date: '2026-03-25'
+modified: '2026-03-25'
 related:
   - '[[2026-03-24-entry-point-decomposition-adr]]'
   - '[[2026-03-24-api-module-research]]'
@@ -11,15 +12,6 @@ related:
   - '[[2026-03-24-entry-point-audit]]'
   - '[[2026-03-24-entry-point-layer-plan]]'
 ---
-
-<!-- DO NOT add 'Related:', 'tags:', 'date:', or other frontmatter fields
-     outside the YAML frontmatter above -->
-
-<!-- LINK RULES:
-     - quoted wiki-links are ONLY for .vault/ documents in the related: field above.
-     - NEVER use wiki-link syntax or markdown path links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
 
 # `entry-point-layer` audit: `curation-audit`
 
@@ -103,12 +95,12 @@ ADR does not reference the audit review).
 
 | File | Expected format | Actual title | Status |
 |------|----------------|--------------|--------|
-| Research (api) | `# \`{feature}\` research: \`{topic}\`` | `# \`entry-point-layer\` research: \`api-module-static-analysis\`` | PASS |
-| Research (worker) | `# \`{feature}\` research: \`{topic}\`` | `# \`entry-point-layer\` research: \`worker-cli-static-analysis\`` | PASS |
-| Research (deps) | `# \`{feature}\` research: \`{topic}\`` | `# \`entry-point-layer\` research: \`cross-import-dependency-map\`` | PASS |
-| ADR | `# \`{feature}\` adr: \`{title}\` \| (**status:** \`{status}\`)` | `# \`entry-point-layer\` adr: \`layer-2-entry-point-decomposition\` \| (**status:** \`proposed\`)` | PASS |
-| Audit | `# \`{feature}\` audit: \`{title}\`` | `# \`entry-point-layer\` audit: \`adr-review\`` | PASS |
-| Plan | `# \`{feature}\` \`{phase}\` plan` | `# \`entry-point-layer\` plan` | PASS (covers all phases) |
+| Research (api) | `` # `{feature}` research: `{topic}` `` | `` # `entry-point-layer` research: `api-module-static-analysis` `` | PASS |
+| Research (worker) | `` # `{feature}` research: `{topic}` `` | `` # `entry-point-layer` research: `worker-cli-static-analysis` `` | PASS |
+| Research (deps) | `` # `{feature}` research: `{topic}` `` | `` # `entry-point-layer` research: `cross-import-dependency-map` `` | PASS |
+| ADR | `` # `{feature}` adr: `{title}` \| (**status:** `{status}`) `` | `` # `entry-point-layer` adr: `layer-2-entry-point-decomposition` \| (**status:** `proposed`) `` | PASS |
+| Audit | `` # `{feature}` audit: `{title}` `` | `` # `entry-point-layer` audit: `adr-review` `` | PASS |
+| Plan | `` # `{feature}` `{phase}` plan `` | `` # `entry-point-layer` plan `` | PASS (covers all phases) |
 
 ### PASS -- Filename conventions
 

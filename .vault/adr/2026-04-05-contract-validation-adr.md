@@ -3,6 +3,7 @@ tags:
   - '#adr'
   - '#contract-validation'
 date: 2026-04-05
+modified: '2026-04-05'
 related:
   - "[[2026-04-05-contract-validation-research]]"
   - "[[2026-02-26-frontend-backend-contract-adr]]"

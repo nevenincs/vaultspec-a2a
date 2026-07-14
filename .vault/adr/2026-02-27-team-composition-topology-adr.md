@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#team-composition-topology'
 date: 2026-02-27
+modified: '2026-02-27'
 related:
 - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
 - '[[2026-02-26-approved-module-hierarchy-adr]]'

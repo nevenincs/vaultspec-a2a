@@ -3,6 +3,7 @@ tags:
   - "#exec"
   - "#entry-point-layer"
 date: "2026-03-24"
+modified: '2026-03-24'
 related:
   - "[[2026-03-24-entry-point-layer-plan]]"
 ---

@@ -3,22 +3,16 @@ tags:
   - '#plan'
   - '#ui-integration-wire-regen'
 date: 2026-04-04
+modified: '2026-04-04'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-research]]"
   - "[[2026-02-26-frontend-backend-contract-adr]]"
   - "[[2026-02-28-react-tailwind-figma-migration-adr]]"
   - "[[2026-02-26-event-aggregation-server-side-replay-adr]]"
+  - '[[2026-04-04-ci-contract-gates-research]]'
+  - '[[2026-04-04-ws-sse-schema-validation-research]]'
+  - '[[2026-04-05-ui-integration-wire-regen-research]]'
 ---
-
-<!-- DO NOT add 'Related:', 'tags:', 'date:', or other frontmatter fields
-     outside the YAML frontmatter above -->
-
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the related: field above.
-     - NEVER use [[wiki-links]] or markdown links in the document body.
-     - NEVER reference file paths in the body. If you must name a source file,
-       class, or function, use inline backtick code: `src/module.py`. -->
-
 # `ui-integration-wire-regen` plan
 
 Regenerate wire types and fix every frontend drift point against the

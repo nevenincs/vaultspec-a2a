@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#worker-process-architecture'
 date: 2026-03-04
+modified: '2026-03-04'
 related:
 - '[[2026-02-26-tech-stack-deployment-adr]]'
 - '[[2026-02-26-observability-telemetry-integration-adr]]'

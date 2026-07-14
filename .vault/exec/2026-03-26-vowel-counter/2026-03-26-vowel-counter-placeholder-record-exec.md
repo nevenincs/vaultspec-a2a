@@ -3,6 +3,7 @@ tags:
   - "#exec"
   - "#vowel-counter"
 date: 2026-03-26
+modified: '2026-03-26'
 related:
   - "[[2026-03-26-vowel-counter-implementation-plan]]"
   - "[[2026-03-26-vowel-counter-implementation-create-file-exec]]"

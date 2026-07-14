@@ -3,6 +3,7 @@ tags:
 - '#adr'
 - '#react-tailwind-figma-migration'
 date: 2026-02-28
+modified: '2026-02-28'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---

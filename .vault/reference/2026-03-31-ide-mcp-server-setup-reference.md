@@ -3,6 +3,7 @@ tags:
   - "#reference"
   - "#ide-mcp-setup"
 date: 2026-03-31
+modified: '2026-03-31'
 related:
   - "[[2026-02-25-llm-context-provider-abstraction-adr]]"
   - "[[2026-03-04-worker-process-architecture-adr]]"

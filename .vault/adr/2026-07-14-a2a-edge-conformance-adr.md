@@ -162,17 +162,25 @@ restated):
   under the calling role's token. Hand-rolled request builders are rejected
   (silent drift against an engine-versioned surface); a preset-level tool
   list is rejected (presets do not carry tools). Refinement (2026-07-14,
-  owner-authorized on the first live bridged turn): in autonomous/headless
-  mode ONLY, local ACP permission prompts are auto-approved for the exact
-  catalog-snapshot allowlist of bridged authoring tool names (no
-  wildcards), with each decision logged with tool and run id;
-  human-in-the-loop presets are unchanged. Rationale: the authoritative
-  human gate for proposals is the engine's review lane (self-approval
-  banned engine-side, origin-keyed), so the local prompt is redundant
-  double-gating that deadlocks headless runs - the finding surfaced live
-  when the agent saw the bridged tools but zero calls dispatched. This
-  mirrors the dashboard operation-modes principle: autonomy is a recorded
-  policy, never a bypass of the ledgered write path.
+  owner-authorized on the first live bridged turn; causal claim CORRECTED
+  same day): headless runs must not double-gate bridged authoring tools
+  behind a local permission layer - the authoritative human gate for
+  proposals is the engine's review lane (self-approval banned engine-side,
+  origin-keyed), mirroring the dashboard operation-modes principle that
+  autonomy is a recorded policy, never a bypass of the ledgered write
+  path. Mechanism, as corrected: the ACP-layer prompt was NEVER the
+  blocker - the RPC handler already auto-selects the allow option when no
+  permission callback is configured (the autonomous case), and zero
+  permission requests reached it on the failing turn. The operative gate
+  is the spawned CLI's own internal MCP-tool permission model in headless
+  mode, which can decline without raising an ACP request. The policy
+  therefore lands as: the orchestrator PRE-PERMITS the exact
+  catalog-snapshot allowlist of bridged tool names to the spawned CLI
+  through its permission configuration (no wildcards, no blanket
+  permission-mode bypass), scoped to autonomous presets only,
+  human-in-the-loop presets unchanged, with the granted allowlist logged
+  per run. Mechanism details pend the specialist investigation; the
+  W03 review verifies the implementation against these constraints.
 - **R5 - Task queue leaves the vault.** The worker task queue is
   orchestration state (dashboard D5: ours), so its storage moves from the
   bespoke markdown table under `.vault/plan/` into A2A's own database

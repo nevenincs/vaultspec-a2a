@@ -25,7 +25,7 @@ Prove the integrated layer live: worker-gateway IPC dispatch and one real end-to
 
 - [x] `W01.P01.S01` - Boot gateway and worker together and prove live IPC dispatch (worker_connected true, a message round-trips), fixing whatever blocks it; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/worker/app.py, src/vaultspec_a2a/api/app.py`.
 - [x] `W01.P01.S02` - Execute one full agent turn end-to-end on a mock-tape preset and capture the evidence in the step record; `src/vaultspec_a2a/team/presets/, src/vaultspec_a2a/graph/`.
-- [ ] `W01.P01.S03` - Audit pytest marker partitioning (unit/core/middleware/service select identical sets today) and repair marker assignments so selections partition the suite; `pyproject.toml, src/vaultspec_a2a/**/tests/`.
+- [x] `W01.P01.S03` - Audit pytest marker partitioning (unit/core/middleware/service select identical sets today) and repair marker assignments so selections partition the suite; `pyproject.toml, src/vaultspec_a2a/**/tests/`.
 - [x] `W01.P01.S33` - Audit the agent/tool provisioning mechanism with live evidence: how a session is constructed, the subprocess spawned, the chat-model adapter bound, and tools actually surfaced to the agent (ACP session wiring, subprocess management, chat-model adapter, provider factory), recording what is proven versus presumed; `src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/providers/_subprocess.py, src/vaultspec_a2a/providers/acp_chat_model.py, src/vaultspec_a2a/providers/factory.py`.
 
 ### Phase `W01.P02` - Worktree and runtime-path hygiene
@@ -40,7 +40,7 @@ Commit the pending vaultspec housekeeping, remove dead top-level orphans, and re
 
 Resolve every unmerged branch, worktree, stash, and orphan identified by the reconciliation audit before W02 touches overlapping files. Branch -17 merges or is consciously superseded per the pending owner decision; all discards require the pending owner cleanup authorization.
 
-- [ ] `W01.P15.S34` - Review-merge feature/integration-testing-smoke-tests-api-veri-17 in full per the owner decision of 2026-07-14: run the full test baseline before and after, merge with a merge commit (squash and rebase are disabled), and review the diff against current architecture during the merge; `this step blocks W02; `this step blocks W02 and must not proceed before the decision lands; `src/vaultspec_a2a/graph/tools/task_queue.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/control/thread_service.py`.
+- [x] `W01.P15.S34` - Review-merge feature/integration-testing-smoke-tests-api-veri-17 in full per the owner decision of 2026-07-14: run the full test baseline before and after, merge with a merge commit (squash and rebase are disabled), and review the diff against current architecture during the merge; `this step blocks W02; `this step blocks W02 and must not proceed before the decision lands; `src/vaultspec_a2a/graph/tools/task_queue.py, src/vaultspec_a2a/providers/_acp_rpc_handlers.py, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/control/thread_service.py`.
 - [ ] `W01.P15.S35` - Spot-check feature/entry-point-layer conftest and vowel-counter test diffs for novel coverage, harvesting anything of value into the step record before the branch is deleted; `conftest.py, src/vaultspec_a2a/**/tests/`.
 - [ ] `W01.P15.S36` - Execute the owner-authorized LOCAL cleanup of 2026-07-14 (destructive): remove the three merged worktrees and angry-jemison, drop all four pre-restructure stashes, delete feature/control-layer and feature/entry-point-layer locally, and remove the orphaned feature-ui-integration-wire-regen-28 directory; `NO remote deletions (origin/claude/* stay), and feature/ci-resolve-vaultspec-core-dep-23 stays untouched pending W02.P03; `defer feature/ci-resolve-vaultspec-core-dep-23 until W02.P03 lands; `git worktrees, git stashes, git branches`.
 
@@ -60,7 +60,7 @@ Remove src/ui, its static mounting, routes, build steps, recipes, and dev depend
 
 Delete protocols/a2a and scrub every stale protocols.a2a symbol reference; ACP and REST/SSE are the declared transports.
 
-- [ ] `W02.P04.S10` - Delete src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub, zero importers - verified by the deletion manifest) and confirm the parent protocols __init__ needs no change; do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides; `src/vaultspec_a2a/protocols/a2a/`.
+- [ ] `W02.P04.S10` - Delete src/vaultspec_a2a/protocols/a2a/ (dead 3-line stub, zero importers - verified by the deletion manifest) and confirm the parent protocols __init__ needs no change; `do NOT touch graph/protocols.py, an unrelated typing.Protocol module whose name collides; `src/vaultspec_a2a/protocols/a2a/`.
 
 ### Phase `W02.P05` - Vault write-seam closure
 

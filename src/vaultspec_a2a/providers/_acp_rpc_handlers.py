@@ -74,6 +74,55 @@ def sandbox_path(path: str, config: _AcpModelConfig) -> Path:
     return resolved
 
 
+def _targets_vault(file_path: Path, config: _AcpModelConfig) -> bool:
+    """Return True if a sandbox-resolved path targets a ``.vault/`` location.
+
+    ADR R2: agents may not write the vault corpus through their coding-CLI file
+    tools. ``file_path`` is already ``.resolve()``-d and confined to the agent
+    cwd by :func:`sandbox_path`, so symlinks and ``..`` traversal are already
+    collapsed to a real path under the workspace. We deny if any component is
+    ``.vault`` — compared case-insensitively via ``casefold()`` because the
+    Windows/macOS filesystems are case-insensitive (a ``.VAULT`` write resolves
+    to the same directory) — which also catches nested ``.vault`` dirs.
+    """
+    cwd = Path(config.workspace_root or config.cwd or str(Path.cwd())).resolve()
+    try:
+        rel = file_path.relative_to(cwd)
+    except ValueError:
+        return False
+    return any(part.casefold() == ".vault" for part in rel.parts)
+
+
+def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:
+    """Build the value-typed ``.vault`` write denial (ADR R2).
+
+    Mirrors the engine's ``forbidden_actor`` 200-value shape (wire-shapes
+    reference §2): a value-typed ``result`` carrying a snake_case
+    ``denial_kind`` beside a human-readable ``eligibility.reason`` that names
+    the authoring tools as the correct path — never a bare JSON-RPC error, so
+    the agent is steered rather than left retrying a failed write.
+    """
+    return {
+        "jsonrpc": "2.0",
+        "id": rpc_id,
+        "result": {
+            "status": "denied",
+            "denial_kind": "forbidden_actor",
+            "eligibility": {
+                "command": "fs/write_text_file",
+                "allowed": False,
+                "reason": (
+                    "Agents may not write .vault/ files directly. Propose the "
+                    "change through the authoring tools (propose_changeset / "
+                    "append_draft / replace_draft); a human reviews and applies "
+                    "it in the dashboard."
+                ),
+            },
+            "path": path,
+        },
+    }
+
+
 async def on_request_permission(
     rpc_id: int | str,
     params: dict,
@@ -214,6 +263,17 @@ async def on_fs_write_text_file(
 
     try:
         file_path = sandbox_path(params["path"], config)
+
+        # ADR R2: deny agent writes into the vault corpus. Returns a value-typed
+        # forbidden_actor denial (not a transport error) so the agent is steered
+        # to the authoring tools. Reads (on_fs_read_text_file) stay permitted.
+        if _targets_vault(file_path, config):
+            logger.info(
+                "Denied .vault/ write via ACP fs (R2 forbidden_actor): %r",
+                params["path"],
+            )
+            return _vault_write_denial(rpc_id, params["path"])
+
         content: str = params["content"]
 
         def _write() -> None:

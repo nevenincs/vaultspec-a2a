@@ -156,10 +156,17 @@ restated):
   Because tool grants are transport-level, engine authoring tools reach
   agents by bridging the engine's served `/v1/agent-tools` catalog into the
   agent-facing tool surface at session start: the catalog is fetched per
-  run, snapshotted, and its tools surfaced to the spawned CLI session
-  through the existing `protocols/mcp` server (new authoring tool module),
-  with execution routed through `/v1/runs/{run_id}/agent-tools/execute`
-  under the calling role's token. Hand-rolled request builders are rejected
+  run, snapshotted, and its tools surfaced to the spawned CLI session by
+  our own per-run MCP bridge process; the bridge's agent-facing transport
+  is an orchestration-internal choice (D5) - stdio where the pinned CLI
+  cannot consume local HTTP MCP servers headlessly (the verified adapter
+  limitation, upstream issues 40314 and 57033), HTTP where it can - and is
+  NEVER part of the frozen edge: every mutating tool call executes through
+  `/v1/runs/{run_id}/agent-tools/execute` over loopback HTTP under the
+  calling role's token, regardless of the agent-side hop. The bridge
+  process carries the R7 token discipline: it holds only the calling
+  role's token, per run, never logged, dropped at run end (owner decision
+  2026-07-14 adopting the stdio bridge). Hand-rolled request builders are rejected
   (silent drift against an engine-versioned surface); a preset-level tool
   list is rejected (presets do not carry tools). Refinement (2026-07-14,
   owner-authorized on the first live bridged turn; causal claim CORRECTED

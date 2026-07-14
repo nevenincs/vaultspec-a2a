@@ -122,6 +122,40 @@ class TestVaultWriteDeny:
         assert not (real_vault / "x.md").exists()
 
 
+class TestWorkspaceRootedInsideVault:
+    """Hardening rider (#34): a workspace root that itself lies under a .vault
+    ancestor makes every write a vault write, even with no .vault component
+    relative to the root — the deny check must catch it on the absolute path."""
+
+    @pytest.mark.asyncio
+    async def test_denies_write_when_workspace_root_is_inside_vault(
+        self, tmp_path: Path
+    ) -> None:
+        ws = tmp_path / ".vault" / "run-workspace"
+        ws.mkdir(parents=True)
+        config = _make_config(str(ws))
+        # "notes/output.md" has NO .vault component relative to the workspace
+        # root; the old workspace-relative check would have wrongly allowed it.
+        result = await _write(config, "notes/output.md")
+        _assert_denied(result)
+        assert not (ws / "notes" / "output.md").exists()
+
+    @pytest.mark.asyncio
+    async def test_permits_write_when_workspace_root_outside_vault(
+        self, tmp_path: Path
+    ) -> None:
+        # Contrast: a normal workspace root (no .vault ancestor) still permits
+        # ordinary writes — the hardening does not over-deny.
+        ws = tmp_path / "clean-workspace"
+        ws.mkdir()
+        config = _make_config(str(ws))
+        result = await on_fs_write_text_file(
+            1, {"path": "notes/output.md", "content": "ok"}, _NO_CTX, config
+        )
+        assert result["result"] == {}
+        assert (ws / "notes" / "output.md").read_text(encoding="utf-8") == "ok"
+
+
 class TestNonVaultAndReadsPermitted:
     """The policy is surgical: non-vault writes and vault reads still work."""
 

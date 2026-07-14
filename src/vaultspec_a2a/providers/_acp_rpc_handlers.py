@@ -74,23 +74,24 @@ def sandbox_path(path: str, config: _AcpModelConfig) -> Path:
     return resolved
 
 
-def _targets_vault(file_path: Path, config: _AcpModelConfig) -> bool:
-    """Return True if a sandbox-resolved path targets a ``.vault/`` location.
+def _targets_vault(file_path: Path, _config: _AcpModelConfig) -> bool:
+    """Return True if a sandbox-resolved path lies within any ``.vault`` dir.
 
     ADR R2: agents may not write the vault corpus through their coding-CLI file
     tools. ``file_path`` is already ``.resolve()``-d and confined to the agent
     cwd by :func:`sandbox_path`, so symlinks and ``..`` traversal are already
-    collapsed to a real path under the workspace. We deny if any component is
-    ``.vault`` — compared case-insensitively via ``casefold()`` because the
-    Windows/macOS filesystems are case-insensitive (a ``.VAULT`` write resolves
-    to the same directory) — which also catches nested ``.vault`` dirs.
+    collapsed to a real path under the workspace. We deny if ANY component of
+    the resolved ABSOLUTE path is ``.vault`` — compared case-insensitively via
+    ``casefold()`` because the Windows/macOS filesystems are case-insensitive (a
+    ``.VAULT`` write resolves to the same directory).
+
+    Checking the absolute path (not the workspace-relative one) closes the case
+    where the workspace root is ITSELF rooted inside a ``.vault`` ancestor: such
+    a workspace makes every write a vault write even though no ``.vault``
+    component appears relative to the root. It also still catches a ``.vault``
+    dir nested under the workspace.
     """
-    cwd = Path(config.workspace_root or config.cwd or str(Path.cwd())).resolve()
-    try:
-        rel = file_path.relative_to(cwd)
-    except ValueError:
-        return False
-    return any(part.casefold() == ".vault" for part in rel.parts)
+    return any(part.casefold() == ".vault" for part in file_path.parts)
 
 
 def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:

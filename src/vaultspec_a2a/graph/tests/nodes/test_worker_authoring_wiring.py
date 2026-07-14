@@ -23,12 +23,13 @@ from vaultspec_a2a.providers._acp_authoring import (
     ACTOR_TOKEN_HEADER,
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
+    authoring_allowed_tool_names,
 )
 from vaultspec_a2a.providers._acp_authoring import (
     BEARER_HEADER as _BEARER_HEADER,
 )
 
-from ...nodes.worker import create_worker_node
+from ...nodes.worker import _attach_authoring_tools, create_worker_node
 
 if TYPE_CHECKING:
     from vaultspec_a2a.thread.state import TeamState
@@ -122,6 +123,47 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
     headers = {h["name"]: h["value"] for h in entry["headers"]}
     assert headers[_BEARER_HEADER] == "Bearer machine-bearer-xyz"
     assert headers[ACTOR_TOKEN_HEADER] == "actor-token-abc"
+
+    # ADR R4: the headless run auto-permits EXACTLY the bridged tool names so
+    # the CLI can invoke them, and nothing else.
+    allowed = params["_meta"]["claudeCode"]["options"]["allowedTools"]
+    assert allowed == [
+        "mcp__vaultspec-authoring__read_context",
+        "mcp__vaultspec-authoring__propose_changeset",
+    ]
+    # A non-bridged mutating tool (e.g. the built-in Write) is NOT permitted.
+    assert "Write" not in allowed
+    assert not any(name == "mcp__vaultspec-authoring__*" for name in allowed)
+
+
+class TestAuthoringAllowlist:
+    """The auto-permit allowlist is exact, catalog-derived, and autonomous-only."""
+
+    def test_allowed_names_are_exact_and_catalog_scoped(self) -> None:
+        binding = _binding()
+        names = authoring_allowed_tool_names(binding)
+        assert names == [
+            "mcp__vaultspec-authoring__read_context",
+            "mcp__vaultspec-authoring__propose_changeset",
+        ]
+        assert "*" not in "".join(names)
+
+    def test_autonomous_attaches_allowlist(self) -> None:
+        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
+        model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+        wired = _attach_authoring_tools(model, _binding(), autonomous=True)
+        assert isinstance(wired, AcpChatModel)
+        assert wired.allowed_tools == authoring_allowed_tool_names(_binding())
+
+    def test_human_in_loop_gets_no_allowlist(self) -> None:
+        from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
+        model = AcpChatModel(command=["echo"], env_vars={}, workspace_root="/tmp/ws")
+        wired = _attach_authoring_tools(model, _binding(), autonomous=False)
+        assert isinstance(wired, AcpChatModel)
+        # No allowlist → the human-in-loop permission prompt still gates every tool.
+        assert wired.allowed_tools == []
 
 
 @pytest.mark.asyncio

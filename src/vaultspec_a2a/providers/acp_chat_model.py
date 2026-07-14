@@ -93,6 +93,14 @@ class AcpChatModel(BaseChatModel):
         default_factory=list,
         description="MCP server configs to pass via session/new or session/load.",
     )
+    allowed_tools: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Exact tool names auto-permitted for a headless run (mcp__<server>__"
+            "<tool>); passed to the CLI via session/new _meta. Empty keeps the "
+            "default prompt for human-in-loop runs."
+        ),
+    )
     cwd: str | None = Field(
         default=None,
         description="Working directory for the agent session.",
@@ -179,6 +187,7 @@ class AcpChatModel(BaseChatModel):
             env_vars=dict(self.env_vars),
             session_id=self.session_id,
             mcp_servers=list(self.mcp_servers),
+            allowed_tools=list(self.allowed_tools),
             use_exec=self.use_exec,
             provider=self.provider,
             runtime_authority=self.runtime_authority,
@@ -195,16 +204,25 @@ class AcpChatModel(BaseChatModel):
     def _llm_type(self) -> str:
         return "acp-chat-model"
 
-    def with_mcp_servers(self, mcp_servers: list[dict[str, Any]]) -> "AcpChatModel":
+    def with_mcp_servers(
+        self,
+        mcp_servers: list[dict[str, Any]],
+        allowed_tools: list[str] | None = None,
+    ) -> "AcpChatModel":
         """Return a copy that advertises ``mcp_servers`` in ``session/new``.
 
         The frozen ``_config`` snapshot that ``setup_session`` reads is built in
         ``model_post_init``; ``model_copy`` alone does not re-run it, so the new
         servers would never reach the session. This rebuilds the snapshot on the
         copy so the wired servers actually take effect (used by the worker node
-        to surface the per-run bridged authoring tools, ADR R4).
+        to surface the per-run bridged authoring tools, ADR R4). When
+        ``allowed_tools`` is supplied (headless runs only), the exact tool names
+        are auto-permitted so the CLI can invoke them without a local prompt.
         """
-        updated = self.model_copy(update={"mcp_servers": list(mcp_servers)})
+        update: dict[str, Any] = {"mcp_servers": list(mcp_servers)}
+        if allowed_tools is not None:
+            update["allowed_tools"] = list(allowed_tools)
+        updated = self.model_copy(update=update)
         updated.model_post_init(None)
         return updated
 

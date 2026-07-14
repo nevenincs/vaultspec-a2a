@@ -38,6 +38,7 @@ __all__ = [
     "AUTHORING_MCP_SERVER_NAME",
     "LOOPBACK_HOSTS",
     "AuthoringToolBinding",
+    "authoring_allowed_tool_names",
     "build_authoring_mcp_servers",
     "is_write_tool_name",
 ]
@@ -124,6 +125,17 @@ class AuthoringToolBinding:
             f"tools={self.tool_names!r}, bearer_token=<redacted>, "
             f"actor_token=<redacted>)"
         )
+
+
+def authoring_allowed_tool_names(binding: AuthoringToolBinding) -> list[str]:
+    """Return the exact CLI tool names to auto-permit for the run (ADR R4).
+
+    Claude Code names an MCP tool ``mcp__<server-name>__<tool-name>``. This
+    returns exactly the run's bridged tool names under the authoring server —
+    never a wildcard — so a headless run can invoke the propose/read tools while
+    every other tool (built-ins, other MCP servers) stays gated.
+    """
+    return [f"mcp__{AUTHORING_MCP_SERVER_NAME}__{name}" for name in binding.tool_names]
 
 
 def build_authoring_mcp_servers(

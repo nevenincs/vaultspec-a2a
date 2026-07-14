@@ -136,6 +136,19 @@ async def setup_session(
     working_dir = config.workspace_root or config.cwd or str(Path.cwd())
     method = "session/new"
     params: dict[str, object] = {"cwd": working_dir, "mcpServers": config.mcp_servers}
+    if config.allowed_tools:
+        # ADR R4 (headless): auto-permit exactly the bridged authoring tools so
+        # the CLI can invoke them without a local prompt. This is a recorded
+        # approval policy, not a bypass — the real human gate is the engine
+        # review lane, and the .vault deny policy still blocks fs writes.
+        params["_meta"] = {
+            "claudeCode": {"options": {"allowedTools": list(config.allowed_tools)}}
+        }
+        logger.info(
+            "ACP auto-permitting bridged authoring tools (headless): %s",
+            config.allowed_tools,
+            extra=runtime_log_extra(config, process=ctx.process),
+        )
     if config.session_id and agent_capabilities.get("loadSession"):
         method = "session/load"
         params["sessionId"] = config.session_id

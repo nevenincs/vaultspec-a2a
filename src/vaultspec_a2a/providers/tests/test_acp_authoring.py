@@ -181,6 +181,7 @@ def _config_with_authoring(workspace_root: str) -> _AcpModelConfig:
         env_vars={},
         session_id=None,
         mcp_servers=build_authoring_mcp_servers(binding),
+        allowed_tools=[],
         use_exec=False,
         provider=None,
         runtime_authority=None,

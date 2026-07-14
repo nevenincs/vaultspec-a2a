@@ -102,6 +102,8 @@ def _resolve_effective_worker_model(
 def _attach_authoring_tools(
     model: BaseChatModel,
     binding: "AuthoringToolBinding | None",
+    *,
+    autonomous: bool,
 ) -> BaseChatModel:
     """Surface the run's bridged authoring tools to an ACP session model (R4).
 
@@ -111,15 +113,25 @@ def _attach_authoring_tools(
     without an MCP surface (mock, hosted APIs) are returned unchanged. The
     binding lives only in this worker closure — never in graph state or a
     checkpoint (R7).
+
+    In autonomous (headless) mode ONLY, the exact bridged tool names are
+    auto-permitted so the CLI can invoke them without a local prompt — a
+    recorded approval policy, never a wildcard, and never for human-in-loop
+    runs, which keep their prompts. The real human gate stays the engine review
+    lane; the .vault deny policy still blocks fs writes.
     """
     if binding is None:
         return model
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
-    from vaultspec_a2a.providers._acp_authoring import build_authoring_mcp_servers
+    from vaultspec_a2a.providers._acp_authoring import (
+        authoring_allowed_tool_names,
+        build_authoring_mcp_servers,
+    )
 
-    return attach(build_authoring_mcp_servers(binding))
+    allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
+    return attach(build_authoring_mcp_servers(binding), allowed_tools)
 
 
 def _wrap_worker_exception(
@@ -368,7 +380,9 @@ def create_worker_node(
             model=model,
             autonomous=autonomous,
         )
-        effective_model = _attach_authoring_tools(effective_model, authoring_binding)
+        effective_model = _attach_authoring_tools(
+            effective_model, authoring_binding, autonomous=autonomous
+        )
 
         model_type = type(effective_model).__name__
         _logger.debug(

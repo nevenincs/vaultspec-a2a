@@ -1,0 +1,285 @@
+---
+tags:
+  - '#adr'
+  - '#a2a-edge-conformance'
+date: '2026-07-14'
+modified: '2026-07-14'
+related:
+  - '[[2026-07-14-a2a-edge-conformance-reference]]'
+  - '[[2026-07-14-a2a-edge-conformance-research]]'
+  - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
+---
+
+# `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
+
+## Problem Statement
+
+The dashboard has frozen the cross-repo edge (its edge ADR, decisions D1-D8)
+and issued a dev-team brief this repo must conform to; both are mirrored in
+`2026-07-14-a2a-edge-conformance-reference`. This record decides how THIS
+repository adopts that contract: which local decisions the contract
+supersedes or amends, what implementation shape the repo-side conformance
+work takes, and under what evidentiary posture the "reusable core" is
+treated. A decision is needed now because no in-flight plan exists, the last
+substantive work predates the contract by three months, and every subsequent
+plan must derive from this record.
+
+## Considerations
+
+- The dashboard surface is frozen; conformance work is unilateral only on
+  this side of the HTTP edge (`2026-07-14-a2a-edge-conformance-reference`).
+- Functional-reality posture, refined by evidence: the standalone layer is
+  verified healthy (clean import, 1165-test collection, 536 unit tests
+  passing, headless SQLite gateway boot); the integrated layer
+  (worker-gateway IPC dispatch, a real agent turn, the agent/tool
+  provisioning mechanism) remains unverified and gates the plan
+  (`2026-07-14-a2a-edge-conformance-research`).
+- Owner's qualifier (2026-07-14, recorded at acceptance): EVERYTHING in this
+  repo is fluid and suspect until tested - including the repo's own
+  standards, conventions, and prior ADR corpus, which the owner rates as
+  "somewhat incorrect". Local ADRs and conventions are inputs to verify,
+  never authorities; only the frozen dashboard contract and this record are
+  binding without re-validation.
+- The agent write seam is a single chokepoint we own: the ACP
+  `fs/write_text_file` RPC handler in `providers/_acp_rpc_handlers.py`,
+  through which spawned coding CLIs author all files under a sandbox root -
+  plus one in-graph task-queue tool writing a markdown table under
+  `.vault/plan/`. General document authoring for in-graph agents was never
+  built; Workstream 1 is greenfield.
+- Tool grants are transport-level, not preset-level: presets declare
+  topology/provider/permissions/persona only, so authoring tools must be
+  surfaced at the transport layer, not in preset TOML.
+- No `vaultspec-a2a` CLI entrypoint exists today (only `vaultspec-mcp`),
+  while the brief declares the headless surface as CLI + engine-facing
+  REST/SSE + health.
+- The five existing real presets include `vaultspec-solo-coder` (the W2
+  proof vehicle) with `vaultspec-adaptive-coder` as the configured default
+  in `control/worker_management.py`; gating lives in `team/team_config.py`.
+- The existing `/api` surface (threads, teams, health, SSE stream, cancel,
+  messages, permissions) is a close cousin of the five-verb contract; the
+  gateway work is reshaping, not invention.
+- The one-line Google-A2A stub is imported by nothing, but the symbol
+  `protocols.a2a` appears in `graph/compiler.py`, graph tests, and six
+  `streaming/*.py` files - deletion requires a dead-reference sweep.
+- The UI is mounted by FastAPI (`api/app.py`) behind `settings.ui_build_dir`;
+  UI deps live in both the root `package.json` and `src/ui/package.json`;
+  Justfile carries UI recipes. Local `adr-9`, `adr-018`, and the 2026-04-05
+  contract-validation ADR exist for that UI.
+- Worktree hygiene: vaultspec housekeeping is uncommitted, and runtime state
+  was moved out of `.vault/` on 2026-07-03 while
+  `control/worker_management.py` still references `.vault/runtime`.
+- Startup enforces `settings.validate_postgres_requirement()` - headless
+  boot must remain possible with the SQLite default.
+
+## Considered options
+
+- **Adopt-and-conform under salvage-and-verify (CHOSEN).** Keep the repo,
+  verify the core before trusting it, build the write seam greenfield.
+  Preserves presets/topology/queue investment while refusing unverified
+  claims about their health.
+- **Adopt-and-conform trusting the dashboard survey.** Rejected: the
+  "substantial, current, tested" framing is external and three months stale;
+  building the write seam atop an unverified runtime risks debugging two
+  unknowns at once.
+- **Fresh thin orchestrator cherry-picking this repo.** Held as fallback
+  (mirrors the dashboard ADR's own fallback) if the verification gate shows
+  the core does not salvage economically; not preferred while presets,
+  queue, and providers lift cleanly.
+
+## Constraints
+
+- Frontier deps: `langgraph 1.x`, ACP (`@zed-industries/claude-agent-acp`)
+  - both fast-moving; the engine fences event-shape drift via versioned
+  schemas, and this repo must do the same on its SSE frames.
+- The engine's served tool catalog (`/v1/agent-tools`) is versioned with the
+  engine; binding to it couples our worker tools to a surface we do not
+  control - by design. Hand-rolled request builders would trade that for
+  silent drift instead.
+- Whole-document proposal shapes only (engine-side section-operations
+  deferral); nothing here may assume sub-document operations.
+- Actor tokens exist only inside a run's lifetime and only in the owning
+  worker; logging or persistence of tokens is prohibited.
+- No engine import may ever enter this dependency graph; the edge is
+  loopback HTTP.
+
+## Implementation
+
+Repo-side decisions (the dashboard's D1-D8 are adopted verbatim and not
+restated):
+
+- **R1 - Verification gate before conformance work.** The narrowed salvage
+  audit is the first executable phase of any plan under this record: prove
+  live worker-gateway dispatch over IPC and one real end-to-end agent turn
+  (mock-tape presets are acceptable evidence), and audit the pytest marker
+  taxonomy (unit/core/middleware/service selections currently do not
+  partition the suite) so later marker-based triage is trustworthy.
+  The gate extends to the agent/tool provisioning mechanism (the ACP
+  session wiring: session construction, subprocess management, chat-model
+  adapter, provider factory), presumed untested until live evidence exists.
+  Standalone-layer health is already verified
+  (`2026-07-14-a2a-edge-conformance-research`). Failures are fixed or the
+  component is declared non-salvageable and the fallback re-evaluated.
+  Per the owner's qualifier, the gate's spirit generalizes: any step that
+  relies on a local standard, convention, or prior ADR must validate it
+  before depending on it.
+- **R2 - Vault-write denial at the ACP filesystem chokepoint.** The
+  `fs/write_text_file` handler (and any sibling fs-mutation RPCs) enforces a
+  path policy denying `.vault/**`: a structured, actionable denial
+  mirroring the engine's `forbidden_actor` semantics exactly as wired - a
+  value-typed result (the engine returns HTTP 200 with `data.denial_kind`
+  in snake_case beside a human-readable `eligibility.reason`, never a
+  transport error; see
+  `2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`) - naming
+  the authoring tools as the correct path, rather than silent exclusion
+  from `sandbox_path` resolution. Silent exclusion was rejected: an unexplained write failure
+  leaves the CLI agent retrying or corrupting its plan, while a structured
+  denial steers it. Reads through the ACP fs surface remain permitted
+  (dashboard D4). The denial policy gets adversarial tests (traversal,
+  symlink, relative-path attempts).
+- **R3 - Authoring client placement.** A new `src/vaultspec_a2a/authoring/`
+  package owns the engine edge: httpx-based loopback client, envelope/tiers
+  decoding, idempotency-key derivation (stable run-local material), session
+  lifecycle, proposal verbs, and the served-tool-catalog binding. No other
+  package speaks to the engine directly. The client speaks the engine's
+  exact wire grammar
+  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`): dual
+  auth headers (machine bearer plus `x-authoring-actor-token`), every
+  mutating call wrapped in the CommandEnvelope with the idempotency key as
+  a BODY field (`{api_version, command, idempotency_key, payload}` - the
+  sole exception being the bare actor-tokens bootstrap route), the
+  `expected_revision` fence threaded through every draft mutation, the
+  160-byte restricted-charset id rules enforced client-side, and the two
+  denial vocabularies distinguished: typed HTTP errors for
+  transport/identity, 200-value `denial_kind` results for business
+  denials.
+- **R4 - Tool exposure: engine catalog bridged into the agent session.**
+  Because tool grants are transport-level, engine authoring tools reach
+  agents by bridging the engine's served `/v1/agent-tools` catalog into the
+  agent-facing tool surface at session start: the catalog is fetched per
+  run, snapshotted, and its tools surfaced to the spawned CLI session
+  through the existing `protocols/mcp` server (new authoring tool module),
+  with execution routed through `/v1/runs/{run_id}/agent-tools/execute`
+  under the calling role's token. Hand-rolled request builders are rejected
+  (silent drift against an engine-versioned surface); a preset-level tool
+  list is rejected (presets do not carry tools).
+- **R5 - Task queue leaves the vault.** The worker task queue is
+  orchestration state (dashboard D5: ours), so its storage moves from the
+  bespoke markdown table under `.vault/plan/` into A2A's own database
+  alongside threads/checkpoints; the existing queue schema decision
+  (`adr-17`) is amended accordingly. The capability is preserved; only its
+  home changes. Any human-facing queue visibility later rides `run-status`,
+  never vault files.
+- **R6 - Gateway reshaping, not new service.** The five verbs map onto the
+  existing FastAPI app: `run-start` -> reshaped thread-create+message flow
+  accepting the actor-token bundle; `run-status` -> reshaped thread-state
+  read designed as a recovery snapshot; `run-cancel` -> existing cancel made
+  idempotent; `presets-list` -> existing teams listing; `service-state` ->
+  health/doctor rollup. Endpoint shapes are versioned; UI static mounting
+  and every UI-only route are removed. Shapes are designed against the
+  engine's pass-through template
+  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`): the
+  engine whitelists verbs and 403s unknown ones before I/O, validates args
+  field-by-field with bounded types, forwards our envelope verbatim inside
+  its tiers envelope, degrades to a tier block (never 5xx) when we are
+  down, and caps calls at 8 MiB / 120s - so our responses must be bounded,
+  self-describing, and safe to wrap verbatim.
+- **R7 - Token-bundle threading.** The `run-start` payload's per-role tokens
+  are held in worker-scoped runtime state (never checkpointed, never
+  logged), injected into the authoring client per worker, and dropped at run
+  end. Supervisor holds its own token; roles never share.
+- **R8 - Discovery contract and runtime paths.** A machine-global
+  `~/.vaultspec-a2a/service.json` (rag precedent) written by the resident
+  gateway service, adopting the rag contract's exact field and freshness
+  semantics
+  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`):
+  `port` required; optional `pid`, `service_token`, and `last_heartbeat`
+  (ms-epoch integer or ISO-8601 string); producer refreshes every 15s,
+  consumers treat >120s as stale; stale or malformed reads as Crashed
+  (attach-never-own), and only Absent licenses a start. Hot-path discovery
+  is filesystem-only; the ungated health endpoint reporting ready + live
+  pid is probed by lifecycle callers only, and `status == "ready"` is the
+  sole liveness predicate. `adr-039` service-lifecycle architecture is
+  amended, not replaced, to add the discovery file. The design is
+  validated by a live specimen: recon found a stale engine discovery file
+  (plausible "ready" state, dead pid, 20-hour-old heartbeat) that would
+  have misdirected any file-trusting client - exactly the Crashed case
+  attach-never-own exists for
+  (`2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference`). All A2A runtime state (graph cache, logs, queues, tmp)
+  relocates out of `.vault/` into the same machine-global home - vaultspec
+  firmware rejects foreign directories inside `.vault/`, and
+  `control/worker_management.py` still points at the old `.vault/runtime`
+  path; the parked `.vault-local-state-moved-20260703/` contents are
+  restored there or discarded.
+- **R9 - CLI surface re-established, minimally.** The brief's declared
+  surface is CLI + engine-facing REST/SSE + health, but no `vaultspec-a2a`
+  entrypoint exists. A minimal operator CLI (serve, doctor/service-state,
+  presets-list, run-start/status/cancel against the local gateway) is
+  restored as a thin client of the same five-verb surface - no second code
+  path. Anything beyond operator parity with the five verbs is out of
+  scope.
+- **R10 - Gateway/worker split retained.** The split (gateway FastAPI +
+  spawned worker process) is kept as-is through conformance; simplification
+  is out of scope until after the acceptance criteria pass.
+- **R11 - Rag-led discovery is the working method.** The repo is presumed
+  semantically misorganised; identifier names and directory layout are not
+  trusted as a map. All discovery during conformance work - code and vault -
+  leads with vaultspec-rag semantic search (`--type code` for source,
+  `--type vault` with a doc-type filter for decisions), with grep reserved
+  for exact-symbol confirmation. Every plan step that involves locating code
+  or decisions must instruct rag-first discovery explicitly. Per the
+  owner's qualifier this extends beyond location to trust: what a local
+  document or convention claims about the code is a hypothesis to test
+  against the code itself, never a fact to build on.
+- **R12 - Local ADR dispositions.** As enumerated in the supersession map of
+  `2026-07-14-a2a-edge-conformance-reference`: UI-serving ADRs superseded;
+  protocol ADRs amended to drop Google-A2A; read-mount and gating ADRs
+  amended to route artifact production through the authoring API; `adr-17`
+  amended per R5; topology, worker-process, database, provider, and
+  layer-boundary ADRs preserved subject to R1 verification. "Preserved" is
+  provisional under the owner's qualifier: every preserved record remains
+  suspect until a step has tested its claims, and dispositions may be
+  revised on audit evidence without reopening this record.
+
+## Rationale
+
+Salvage-and-verify wins because both alternatives fail a knockout: trusting
+the external survey builds the contract's most security-sensitive code
+(token handling, write seam) on an unverified runtime, and a fresh
+orchestrator discards the preset/topology/queue investment the dashboard
+chose this repo for. The posture has already paid for itself: the
+verification pass it demanded disproved "presumed broken" for the standalone
+layer, located the real write seam at a single ACP RPC chokepoint rather
+than a diffuse tool inventory, and narrowed the remaining risk to
+worker-gateway dispatch and one live agent turn. The greenfield finding (no
+in-graph authoring tool exists) removes the "swap" framing entirely: since
+Workstream 1 is new construction either way, the only question is what
+runtime it lands on, and R1 answers that with evidence instead of
+assumption. Structured denial at the chokepoint (R2) is preferred over
+silent exclusion because the engine's own denial contract treats denials as
+readable values - agents are steered, not stranded. Binding to the served
+tool catalog (R4) follows the brief's own preference and keeps tool shapes
+versioned with the engine that owns them.
+
+## Consequences
+
+- Every document an agent produces becomes a human-reviewed proposal in the
+  dashboard lane; this repo's agents lose all direct vault mutation,
+  including through their coding-CLI file tools, enforced by the `.vault/**`
+  path policy at the ACP filesystem RPC chokepoint.
+- The verification gate adds an upfront phase before any visible
+  conformance progress, but converts the unknown-unknowns of a stale repo
+  into a checklist and preserves the fallback decision point.
+- Binding worker tools to the engine catalog means engine upgrades can
+  change our tool surface mid-run; run-start snapshots the catalog per run
+  to fence this.
+- The five-verb gateway makes the existing richer `/api` surface (thread
+  metadata, permissions, messages) internal-only; anything the dashboard
+  needs beyond the five verbs is a cross-repo contract event, not a local
+  addition.
+- Two repos now hold halves of one contract; the mirrored reference must be
+  kept in sync with the dashboard's brief, and drift between them is itself
+  a defect.
+- Deleting the UI and its contract-validation CI gate removes the repo's
+  only end-to-end consumer of the SSE surface; the plan must replace that
+  coverage with gateway-level tests or the streaming layer regresses
+  silently.

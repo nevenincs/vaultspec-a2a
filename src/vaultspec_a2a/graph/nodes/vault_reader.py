@@ -60,20 +60,24 @@ def create_mount_node(
     mounted block during the plan and exec phases, replacing the former
     ``.vault/plan`` markdown interception.
     """
-    cache: dict[tuple[str, float], str] = {}
+    # One entry per path holding (mtime, content): a re-edited file replaces
+    # its entry instead of accreting stale mtime-keyed copies, so the cache is
+    # bounded by the number of mounted documents.
+    cache: dict[str, tuple[float, str]] = {}
 
     async def _read_vault_doc(path: Path) -> str:
-        """Read a .vault/ document asynchronously with mtime-keyed cache."""
+        """Read a .vault/ document asynchronously with an mtime-validated cache."""
 
-        def _read_with_stat() -> tuple[tuple[str, float], str]:
+        def _read_with_stat() -> tuple[float, str]:
             mtime = path.stat().st_mtime
-            key = (str(path), mtime)
-            return key, path.read_text(encoding="utf-8")
+            cached = cache.get(str(path))
+            if cached is not None and cached[0] == mtime:
+                return cached
+            return mtime, path.read_text(encoding="utf-8")
 
-        key, content = await asyncio.to_thread(_read_with_stat)
-        if key not in cache:
-            cache[key] = content
-        return cache[key]
+        mtime, content = await asyncio.to_thread(_read_with_stat)
+        cache[str(path)] = (mtime, content)
+        return content
 
     async def _render_queue_block(state: TeamState) -> str | None:
         """Render the database-backed queue view as a mounted block, if any."""

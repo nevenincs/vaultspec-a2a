@@ -19,6 +19,7 @@ from ...nodes.supervisor import (
     _evaluate_supervisor_response,
     _phase_for_route,
     _select_revision_worker,
+    create_plan_approval_node,
     create_supervisor_node,
 )
 
@@ -87,6 +88,29 @@ def _make_state_for_phase_gate(
         state["active_feature"] = active_feature
     state["vault_index"] = vault_index
     return state
+
+
+def _build_approval_graph(
+    supervisor_node: Any,
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None,
+) -> Any:
+    """Mirror the star wiring: supervisor marks pending, plan_approval interrupts."""
+    builder = StateGraph(cast("Any", TeamState))
+    builder.add_node("supervisor", supervisor_node)
+    builder.add_node(
+        "plan_approval", create_plan_approval_node(workers, worker_phase_map)
+    )
+    builder.set_entry_point("supervisor")
+    builder.add_conditional_edges(
+        "supervisor",
+        lambda state: (
+            "plan_approval" if state.get("approval_status") == "pending" else "__end__"
+        ),
+        {"plan_approval": "plan_approval", "__end__": END},
+    )
+    builder.add_edge("plan_approval", END)
+    return builder.compile(checkpointer=InMemorySaver())
 
 
 def _make_state_for_plan_approval(
@@ -446,11 +470,9 @@ async def test_supervisor_resume_clears_stale_routing_error_after_approval() -> 
         autonomous=False,
     )
 
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("supervisor", node)
-    builder.set_entry_point("supervisor")
-    builder.add_edge("supervisor", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = _build_approval_graph(
+        node, ["vaultspec-coder"], {"vaultspec-coder": "exec"}
+    )
     config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-resume"}}
 
     state = _make_state_for_plan_approval(
@@ -486,11 +508,11 @@ async def test_supervisor_rejection_clears_consumed_approval_request_id() -> Non
         autonomous=False,
     )
 
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("supervisor", node)
-    builder.set_entry_point("supervisor")
-    builder.add_edge("supervisor", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = _build_approval_graph(
+        node,
+        ["vaultspec-planner", "vaultspec-coder"],
+        {"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+    )
     config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
 
     state = _make_state_for_plan_approval(
@@ -543,11 +565,11 @@ async def test_supervisor_rejection_replaces_stale_current_plan() -> None:
         autonomous=False,
     )
 
-    builder = StateGraph(cast("Any", TeamState))
-    builder.add_node("supervisor", node)
-    builder.set_entry_point("supervisor")
-    builder.add_edge("supervisor", END)
-    graph = builder.compile(checkpointer=InMemorySaver())
+    graph = _build_approval_graph(
+        node,
+        ["vaultspec-planner", "vaultspec-coder"],
+        {"vaultspec-planner": "plan", "vaultspec-coder": "exec"},
+    )
     config: RunnableConfig = {"configurable": {"thread_id": "test-supervisor-reject"}}
 
     state = _make_state_for_plan_approval(

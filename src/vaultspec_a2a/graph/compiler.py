@@ -24,7 +24,7 @@ from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.errors import GraphRecursionError
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.state import CompiledStateGraph
-from langgraph.pregel._retry import RetryPolicy
+from langgraph.types import RetryPolicy
 
 from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import (
@@ -35,7 +35,7 @@ from vaultspec_a2a.thread.errors import (
 from vaultspec_a2a.thread.state import TeamState
 
 from .enums import Model, PipelinePhase, Provider
-from .nodes.supervisor import create_supervisor_node
+from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
 from .protocols import ProviderFactoryProtocol, TaskQueuePort
@@ -529,11 +529,40 @@ def _compile_star(
             "All worker AgentConfigs are missing or unresolvable."
         )
 
+    # ADR-024 (revised): the dedicated approval node owns the plan-approval
+    # interrupt; the supervisor only marks approval_status="pending". The node
+    # is replay-safe because nothing before its interrupt() has side effects.
+    approval_node = create_plan_approval_node(
+        compiled_worker_ids, worker_phase_map or None
+    )
+    builder.add_node(
+        "plan_approval",
+        approval_node,
+        metadata={
+            "display_name": "Plan Approval",
+            "role": "gate",
+            "description": "Pauses for human plan approval before execution.",
+        },
+    )
+
     # ADR-020: supervisor routes to mount_{wid} which then edges to wid.
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = END
+
+    def _route_from_supervisor(state: TeamState) -> str:
+        if state.get("approval_status") == "pending":
+            return "plan_approval"
+        return state["next"]
+
+    supervisor_route_map = {**route_map, "plan_approval": "plan_approval"}
     builder.add_conditional_edges(
         "supervisor",
+        _route_from_supervisor,
+        cast("dict[Hashable, str]", supervisor_route_map),
+    )
+    # Approved -> exec worker's mount; rejected -> revision worker's mount.
+    builder.add_conditional_edges(
+        "plan_approval",
         lambda state: state["next"],
         cast("dict[Hashable, str]", route_map),
     )
@@ -800,11 +829,16 @@ def _compile_pipeline_loop(
     max_loops = team_config.topology.max_loops
 
     def _loop_router(state: TeamState) -> str:
-        """Route loop_node output: enforce max_loops guard."""
+        """Route loop_node output: enforce max_loops guard.
+
+        Only the literal "FINISH" ends the loop early; any other residue in
+        ``state["next"]`` (stale star-route values, empty strings from graph
+        input defaults) must not escape the {revise, FINISH} route map.
+        """
         loop_count = state.get("loop_count", 0)
         if loop_count >= max_loops:
             return "FINISH"
-        return state.get("next", "revise")
+        return "FINISH" if state.get("next") == "FINISH" else "revise"
 
     builder.add_conditional_edges(
         loop_node_id,

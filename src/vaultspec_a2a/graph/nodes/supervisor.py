@@ -22,7 +22,7 @@ from vaultspec_a2a.thread.state import TeamState
 _logger = logging.getLogger(__name__)
 
 
-__all__ = ["create_supervisor_node"]
+__all__ = ["create_plan_approval_node", "create_supervisor_node"]
 
 
 def _active_agent_for_route(route: str) -> str:
@@ -330,6 +330,78 @@ class SupervisorNode(Protocol):
         ...
 
 
+def create_plan_approval_node(
+    workers: list[str],
+    worker_phase_map: dict[str, str] | None = None,
+) -> SupervisorNode:
+    """Create the dedicated plan-approval interrupt node (ADR-024, revised).
+
+    A resumed LangGraph node re-runs from its start, so everything before the
+    ``interrupt()`` call must be deterministic and side-effect free. This node
+    only reads state to rebuild the approval payload — no model invocation —
+    which makes the pause/resume replay-safe, unlike the rejected
+    inline-interrupt-in-supervisor design.
+
+    The interrupt payload and resume shapes are the existing wire contract
+    consumed by the control and streaming layers: payload
+    ``{"type": "plan_approval_request", "feature", "plan_paths",
+    "exec_worker"}``; resume ``{"approved": bool}`` or the literal
+    ``"approve"``.
+    """
+
+    async def plan_approval_node(state: TeamState) -> dict[str, Any]:
+        """Pause for human plan approval, then route or reroute for revision."""
+        exec_worker = state.get("next") or ""
+        vault_index: dict[str, list[str]] = state.get("vault_index") or {}
+        resume_value = interrupt(
+            {
+                "type": "plan_approval_request",
+                "feature": state.get("active_feature"),
+                "plan_paths": vault_index.get("plan", []),
+                "exec_worker": exec_worker,
+            }
+        )
+        approved = (
+            resume_value.get("approved")
+            if isinstance(resume_value, dict)
+            else resume_value == "approve"
+        )
+        if approved:
+            _logger.info(
+                "plan approved by user — routing to exec_worker=%r", exec_worker
+            )
+            return {
+                "next": exec_worker,
+                "active_agent": _active_agent_for_route(exec_worker),
+                "current_plan": [_plan_entry_for_route(exec_worker)],
+                "approval_status": ApprovalStatus.APPROVED,
+                "approval_request_id": None,
+                "routing_error": None,
+            }
+        revision_worker = _select_revision_worker(workers, worker_phase_map)
+        _logger.info(
+            "plan rejected by user — rerouting to %r for revision", revision_worker
+        )
+        return {
+            "next": revision_worker,
+            "active_agent": _active_agent_for_route(revision_worker),
+            "pipeline_phase": _phase_for_route(
+                revision_worker,
+                fallback_phase=state.get("pipeline_phase") or "",
+                worker_phase_map=worker_phase_map,
+            ),
+            "current_plan": [_plan_entry_for_route(revision_worker)],
+            "approval_status": ApprovalStatus.REJECTED,
+            "approval_request_id": None,
+            "routing_error": (
+                "Plan rejected by user — revise before proceeding to execution."
+            ),
+        }
+
+    plan_approval_node.__name__ = "plan_approval_node"
+    return plan_approval_node
+
+
 def create_supervisor_node(
     model: BaseChatModel,
     system_prompt: str,
@@ -409,45 +481,25 @@ def create_supervisor_node(
             }
 
         if decision.plan_approval_request is not None:
-            resume_value = interrupt(decision.plan_approval_request)
-            approved = (
-                resume_value.get("approved")
-                if isinstance(resume_value, dict)
-                else resume_value == "approve"
-            )
-            if approved:
-                _logger.info(
-                    "plan approved by user — routing to exec_worker=%r",
-                    decision.next_route,
-                )
-                return {
-                    "next": decision.next_route,
-                    "active_agent": _active_agent_for_route(decision.next_route),
-                    "pipeline_phase": decision.inferred_phase,
-                    "current_plan": [_plan_entry_for_route(decision.next_route)],
-                    "approval_status": ApprovalStatus.APPROVED,
-                    "approval_request_id": None,
-                    "routing_error": None,
-                }
-            revision_worker = _select_revision_worker(workers, worker_phase_map)
+            # ADR-024 (revised): the supervisor never calls interrupt() itself —
+            # a resumed node re-runs from its start, so the routing LLM call
+            # would replay non-deterministically and could drop the human's
+            # verdict. Mark the approval as pending; the dedicated
+            # plan_approval node (replay-safe: no side effects before its
+            # interrupt) owns the actual pause/resume.
             _logger.info(
-                "plan rejected by user — rerouting to %r for revision",
-                revision_worker,
+                "supervisor plan approval pending: feature=%r exec_worker=%r",
+                state.get("active_feature"),
+                decision.next_route,
             )
             return {
-                "next": revision_worker,
-                "active_agent": _active_agent_for_route(revision_worker),
-                "pipeline_phase": _phase_for_route(
-                    revision_worker,
-                    fallback_phase=decision.inferred_phase,
-                    worker_phase_map=worker_phase_map,
-                ),
-                "current_plan": [_plan_entry_for_route(revision_worker)],
-                "approval_status": ApprovalStatus.REJECTED,
+                "next": decision.next_route,
+                "active_agent": _active_agent_for_route(decision.next_route),
+                "pipeline_phase": decision.inferred_phase,
+                "current_plan": [_plan_entry_for_route(decision.next_route)],
+                "approval_status": ApprovalStatus.PENDING,
                 "approval_request_id": None,
-                "routing_error": (
-                    "Plan rejected by user — revise before proceeding to execution."
-                ),
+                "routing_error": None,
             }
         return {
             "next": decision.next_route,

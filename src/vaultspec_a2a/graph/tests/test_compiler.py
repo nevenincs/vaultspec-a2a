@@ -140,6 +140,7 @@ async def test_compile_team_graph_accepts_workspace_root(
         "vaultspec-coder",
         "vaultspec-reviewer",
         "supervisor",
+        "plan_approval",
         "mount_vaultspec-planner",
         "mount_vaultspec-coder",
         "mount_vaultspec-reviewer",

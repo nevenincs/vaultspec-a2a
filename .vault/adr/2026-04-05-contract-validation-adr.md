@@ -1,16 +1,16 @@
 ---
 tags:
-  - '#adr'
-  - '#contract-validation'
-date: 2026-04-05
-modified: '2026-04-05'
+  - "#adr"
+  - "#contract-validation"
+date: '2026-04-05'
 related:
   - "[[2026-04-05-contract-validation-research]]"
   - "[[2026-02-26-frontend-backend-contract-adr]]"
   - "[[2026-04-04-ui-integration-wire-regen-rolling-audit]]"
+superseded_by: '2026-07-14-a2a-edge-conformance-adr'
+modified: '2026-07-15'
 ---
-
-# `contract-validation` adr: ci contract gate with custom ws codegen | (**status:** `accepted`)
+# `contract-validation` adr: ci contract gate with custom ws codegen | (**status:** `superseded`)
 
 ## Problem Statement
 

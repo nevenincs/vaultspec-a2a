@@ -416,3 +416,16 @@ src/vaultspec_a2a/core/
 - legacy-research/2026-03-03-task-queue-schema-derisking.md — MetaGPT pattern, markdown table format, session persistence
 - MetaGPT arXiv 2308.00352 §3.3 — machine-writes, LLM-reads, sequential IDs
 - SWE-agent — filtered task injection pattern
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The queue's STORAGE moved out of the `.vault/plan/` markdown table into the
+A2A database (`task_queue_entries`, Alembic 0006) - orchestration state is
+this repo's own, never a vault artifact (dashboard D5). Rows are populated
+run-locally (planner-emitted) and link to the engine plan proposal by
+Vaultspec-id reference, never by content. The read-and-mark-complete
+capability, filtered current-plus-horizon injection, and sequential
+ordering this record defines are preserved; only the backing store changed
+(file parse to repository query, format-stable). See
+`2026-07-14-a2a-edge-conformance-adr` (R5) and
+`2026-07-14-a2a-edge-conformance-reference`.

@@ -121,3 +121,15 @@ mechanisms:
 
 - LangGraph Gap Audit Research
 - Gateway Domain - Distilled
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+Superseded WHERE this record served the deleted React UI. The event model
+it defines is replaced by the engine-relayed SSE split: orchestration
+progress frames are now versioned, bounded, and droppable
+(non-authoritative), with durable truth read from `run-status` and the
+engine's authoring events. Server-side replay for document lifecycle is the
+engine's `/authoring/v1/events` outbox, not this repo's concern. The
+in-repo event dataclasses survive as the relay substrate. See
+`2026-07-14-a2a-edge-conformance-adr` and its supersession map in
+`2026-07-14-a2a-edge-conformance-reference`.

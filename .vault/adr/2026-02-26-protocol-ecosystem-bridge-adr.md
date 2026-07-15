@@ -207,3 +207,11 @@ await process.stdout.readline()`. The loop exits naturally on EOF when
 - **Protocol Types:**
   `knowledge/repositories/toad/src/toad/acp/protocol.py` — authoritative
   Python `TypedDict` definitions for all ACP message schemas.
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The Google-A2A protocol-ecosystem ambition is dropped; the stub package was
+deleted (W02). Declared transports are ACP and REST/SSE only; "a2a" is a
+project label. The ACP half of this record's bridging remains valid. See
+`2026-07-14-a2a-edge-conformance-adr` and
+`2026-07-14-a2a-edge-conformance-reference`.

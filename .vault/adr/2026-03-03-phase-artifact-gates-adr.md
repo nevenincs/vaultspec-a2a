@@ -281,3 +281,14 @@ src/vaultspec_a2a/core/
 - ADR-026 — `pipeline_phase` inference (complementary, not conflicting)
 - legacy-research/2026-03-03-phase-artifact-gates-research.md — gate table derivation, mechanism options, edge case analysis
 - `src/vaultspec_a2a/core/nodes/supervisor.py` — existing FINISH gate implementation reference
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The phase gate now tests PROPOSAL existence and approval through the engine
+authoring API, not files appearing under `.vault/`. A phase's artifact is
+present when its whole-document proposal exists on the changeset (and, for
+the exec gate, when the plan proposal was approved) - the filesystem cannot
+see unapplied proposals (dashboard D4). This aligns with the queue-by-
+reference model (W02.S13) and the run-local generalized document gate (W03).
+See `2026-07-14-a2a-edge-conformance-adr` (R12) and
+`2026-07-14-a2a-edge-conformance-reference`.

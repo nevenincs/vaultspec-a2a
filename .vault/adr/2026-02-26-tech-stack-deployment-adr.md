@@ -149,3 +149,12 @@ We formalize the following technology stack and deployment architecture:
   (referenced for static site generation and build process).
 - **uv Package Manager:** astral.sh/uv (referenced
   for modern Python dependency management).
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The frontend/UI stack is dropped from the approved tech stack: this project
+is headless (CLI + engine-facing REST/SSE + health). Any React/Vite/Tailwind
+tooling and UI build/deploy steps this record approves are void; the Python
+orchestration stack and ACP runtime remain. See
+`2026-07-14-a2a-edge-conformance-adr` (D7 as adopted) and
+`2026-07-14-a2a-edge-conformance-reference`.

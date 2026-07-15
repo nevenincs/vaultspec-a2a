@@ -114,3 +114,12 @@ We will handle Protocol Bridging via the following mechanisms:
 
 - LangGraph Gap Audit Research
 - Protocols Domain - Distilled
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The Google-A2A transport ambition is dropped. This project's declared
+transports are ACP (agent subprocesses) and REST/SSE (engine-facing); "a2a"
+survives as a project label only. Any bridging/translation this record
+specifies for the Google-A2A protocol is void; ACP and REST/SSE bridging
+remain. See `2026-07-14-a2a-edge-conformance-adr` (D7d as adopted) and
+`2026-07-14-a2a-edge-conformance-reference`.

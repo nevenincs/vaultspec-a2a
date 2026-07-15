@@ -1,15 +1,18 @@
 ---
 tags:
-  - '#adr'
-  - '#a2a-edge-conformance'
+  - "#adr"
+  - "#a2a-edge-conformance"
 date: '2026-07-14'
-modified: '2026-07-14'
 related:
-  - '[[2026-07-14-a2a-edge-conformance-reference]]'
-  - '[[2026-07-14-a2a-edge-conformance-research]]'
-  - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
+  - "[[2026-07-14-a2a-edge-conformance-reference]]"
+  - "[[2026-07-14-a2a-edge-conformance-research]]"
+  - "[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]"
+supersedes:
+  - '2026-02-28-react-tailwind-figma-migration-adr'
+  - '2026-02-26-frontend-backend-contract-adr'
+  - '2026-04-05-contract-validation-adr'
+modified: '2026-07-15'
 ---
-
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
 
 ## Problem Statement

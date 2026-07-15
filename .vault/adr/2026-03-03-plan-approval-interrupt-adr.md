@@ -457,3 +457,13 @@ src/vaultspec_a2a/api/
 - `src/vaultspec_a2a/core/nodes/worker.py` — `_interrupt_permission_callback`, existing interrupt pattern
 - `src/vaultspec_a2a/core/aggregator.py` — `_emit_interrupt_events`, interrupt payload detection
 - `src/vaultspec_a2a/api/endpoints.py` — `respond_to_permission_endpoint`, resume via REST
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+Plan approval maps onto the engine's interrupt/resume surface and human
+review in the dashboard review lane, not a local approval UI (which was
+deleted). The interrupt mechanism and resume-by-id flow this record defines
+are retained as orchestration primitives; the human decision is the engine's
+ledgered approval (self-approval banned engine-side, origin-keyed). See
+`2026-07-14-a2a-edge-conformance-adr` (R12) and
+`2026-07-14-a2a-edge-conformance-reference`.

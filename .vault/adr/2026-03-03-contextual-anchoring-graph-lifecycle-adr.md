@@ -408,3 +408,11 @@ src/vaultspec_a2a/core/
 - arXiv 2602.20478 --- Codified Context trigger tables, contextual routing
 - contextpatterns.com/patterns/grounding --- anchoring directives, grounding pattern
 - Google ADK Architecture --- context as compiled view per invocation
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+Valid for READS: contextual anchoring over the vault corpus is retained as a
+read-only compiled view. Any write-side artifact production it implies now
+routes through the engine authoring API as a reviewed proposal. See
+`2026-07-14-a2a-edge-conformance-adr` (R2) and
+`2026-07-14-a2a-edge-conformance-reference`.

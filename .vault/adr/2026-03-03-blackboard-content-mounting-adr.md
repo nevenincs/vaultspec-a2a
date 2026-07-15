@@ -447,3 +447,12 @@ src/vaultspec_a2a/core/
 - arXiv 2507.01701 — blackboard content injection, phase-scoped selection
 - MetaGPT arXiv 2308.00352 — role-relevant document injection
 - Google ADK Architecture — artifact handle pattern, per-invocation expansion
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+Valid for READS: the read-only, token-budgeted `.vault/` content mount is
+retained for corpus context (compatible with the engine's read-and-infer
+posture). Any WRITE-side artifact production this record implies now routes
+through the engine authoring API as a reviewed proposal - agents never
+mount-then-write a vault file. See `2026-07-14-a2a-edge-conformance-adr`
+(R2) and `2026-07-14-a2a-edge-conformance-reference`.

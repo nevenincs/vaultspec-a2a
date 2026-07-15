@@ -1,14 +1,14 @@
 ---
 tags:
-- '#adr'
-- '#react-tailwind-figma-migration'
-date: 2026-02-28
-modified: '2026-02-28'
+  - "#adr"
+  - "#react-tailwind-figma-migration"
+date: '2026-02-28'
 related:
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-07-14-a2a-edge-conformance-adr'
+modified: '2026-07-15'
 ---
-
-# `react-tailwind-figma-migration` adr: `adr-018` | (**status:** `proposed`)
+# `react-tailwind-figma-migration` adr: `adr-018` | (**status:** `superseded`)
 
 ## Migration Note
 

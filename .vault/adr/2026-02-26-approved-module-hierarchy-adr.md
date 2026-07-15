@@ -194,3 +194,13 @@ patches, stubs, or skips.
 - LangGraph Gap Audit Research
 - Module Hierarchy Research
 - `knowledge/repositories/langgraph`
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+The approved layout drops the deleted entries: `src/ui/` (React/Vite
+frontend) and `src/vaultspec_a2a/protocols/a2a/` plus
+`src/vaultspec_a2a/protocols/adapter/` (Google-A2A stubs), all removed in
+W02. A new `src/vaultspec_a2a/authoring/` package owns the engine edge
+(W03). The layer-boundary and facade principles this record establishes are
+otherwise preserved. See `2026-07-14-a2a-edge-conformance-adr` and
+`2026-07-14-a2a-edge-conformance-reference`.

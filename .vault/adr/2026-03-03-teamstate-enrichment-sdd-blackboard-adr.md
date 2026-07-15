@@ -368,3 +368,12 @@ src/vaultspec_a2a/database/
 - Google ADK Architecture --- artifact handle pattern
 - arXiv 2507.01701 --- blackboard phase gate / stopping condition
 - MetaGPT arXiv 2308.00352 --- validation quality gate
+
+## Amendment - a2a-edge-conformance (2026-07-15)
+
+Valid for READS: teamstate enrichment over the blackboard remains a
+read-side context mechanism. Any write-side artifact production it implies
+now routes through the engine authoring API as a reviewed proposal;
+document state is engine-owned (dashboard D5). See
+`2026-07-14-a2a-edge-conformance-adr` (R2) and
+`2026-07-14-a2a-edge-conformance-reference`.

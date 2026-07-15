@@ -1,18 +1,18 @@
 ---
 tags:
-- '#adr'
-- '#frontend-backend-contract'
-date: 2026-02-26
-modified: '2026-02-26'
+  - "#adr"
+  - "#frontend-backend-contract"
+date: '2026-02-26'
 related:
-- '[[2026-02-26-protocol-bridging-translation-adr]]'
-- '[[2026-02-26-event-aggregation-server-side-replay-adr]]'
-- '[[2026-02-26-protocol-ecosystem-bridge-adr]]'
-- '[[2026-02-26-approved-module-hierarchy-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - "[[2026-02-26-protocol-bridging-translation-adr]]"
+  - "[[2026-02-26-event-aggregation-server-side-replay-adr]]"
+  - "[[2026-02-26-protocol-ecosystem-bridge-adr]]"
+  - "[[2026-02-26-approved-module-hierarchy-adr]]"
+  - "[[2026-03-31-docs-vault-migration-research]]"
+superseded_by: '2026-07-14-a2a-edge-conformance-adr'
+modified: '2026-07-15'
 ---
-
-# `frontend-backend-contract` adr: `adr-9` | (**status:** `proposed`)
+# `frontend-backend-contract` adr: `adr-9` | (**status:** `superseded`)
 
 ## Migration Note
 

@@ -245,12 +245,18 @@ class AuthoringClient:
         (e.g. a missing/invalid machine bearer yields a 401 from the outer gate),
         which is distinct from an in-band ``error`` frame carrying an
         ``error_kind``.
+
+        The read timeout is disabled for the stream: a durable event stream may
+        idle between frames (server keep-alives), and the default per-request
+        read timeout would tear an idle-but-healthy stream down and churn the
+        caller's reconnect back-off. The connect timeout still bounds the open.
         """
         async with self._client.stream(
             "GET",
             self._url("/v1/events"),
             params={"last_seq": last_seq},
             headers=self._headers(actor_token=None, with_actor=False),
+            timeout=httpx.Timeout(None, connect=5.0),
         ) as response:
             if response.status_code != httpx.codes.OK:
                 await response.aread()

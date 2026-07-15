@@ -32,6 +32,7 @@ from ..authoring import (
     AuthoringClient,
     GapSignal,
     LifecycleEvent,
+    SseFrame,
     StreamError,
     changeset_status_verdict,
     verdict_from_event,
@@ -116,7 +117,10 @@ class VerdictSubscriber:
         logger.info("Authoring verdict subscriber started")
         try:
             while True:
-                endpoint = self._endpoint_provider()
+                # ``endpoint_provider`` (``resolve_engine``) does blocking file
+                # reads and a blocking ``/health`` probe; keep it off the shared
+                # event loop so a slow probe never stalls the gateway.
+                endpoint = await asyncio.to_thread(self._endpoint_provider)
                 if endpoint is None:
                     await asyncio.sleep(backoff)
                     backoff = min(backoff * 2, self._reconnect_max)
@@ -151,22 +155,30 @@ class VerdictSubscriber:
         processed = 0
         async with AuthoringClient(endpoint.base_url, endpoint.bearer_token) as client:
             async for frame in client.stream_lifecycle(last_seq=last_seq):
-                if isinstance(frame, StreamError):
-                    logger.warning(
-                        "Engine lifecycle stream error: %s (%s)",
-                        frame.error,
-                        frame.error_kind,
-                    )
-                    # A store-side error ends the page; back off and retry.
-                    raise _StreamInterruptedError(frame.error_kind)
-                if isinstance(frame, GapSignal):
-                    await self._handle_gap(client, frame)
-                    processed += 1
-                    continue
-                await self._process_event(frame)
-                await self._advance_cursor(frame.seq)
+                await self._process_frame(client, frame)
                 processed += 1
         return processed
+
+    async def _process_frame(self, client: AuthoringClient, frame: SseFrame) -> None:
+        """Route one decoded SSE frame to its handler and advance the cursor.
+
+        A ``StreamError`` ends the page (raised for the loop to back off); a
+        ``GapSignal`` triggers recovery reconciliation; a ``LifecycleEvent`` is
+        correlated-and-resumed, then its sequence is committed as the cursor.
+        """
+        if isinstance(frame, StreamError):
+            logger.warning(
+                "Engine lifecycle stream error: %s (%s)",
+                frame.error,
+                frame.error_kind,
+            )
+            # A store-side error ends the page; back off and retry.
+            raise _StreamInterruptedError(frame.error_kind)
+        if isinstance(frame, GapSignal):
+            await self._handle_gap(client, frame)
+            return
+        await self._process_event(frame)
+        await self._advance_cursor(frame.seq)
 
     async def _process_event(self, event: LifecycleEvent) -> None:
         """Resume the run a resolving event belongs to; ignore non-verdicts."""
@@ -210,7 +222,22 @@ class VerdictSubscriber:
             logger.warning("Recovery snapshot fetch failed", exc_info=True)
             return
 
-        for proposal in _iter_recovery_proposals(snapshot.data):
+        await self._reconcile_recovery(snapshot.data)
+
+        high_water = gap.latest_outbox_seq
+        if high_water is None:
+            high_water = _recovery_high_water(snapshot.data)
+        if high_water is not None:
+            await self._advance_cursor(high_water)
+
+    async def _reconcile_recovery(self, snapshot_data: Any) -> None:
+        """Resume parked runs for terminal-verdict proposals in a recovery snapshot.
+
+        Pure over the decoded snapshot payload: every proposal now in a terminal
+        verdict status whose id correlates to a still-parked run is resumed with
+        that verdict. Non-verdict statuses and uncorrelated proposals are skipped.
+        """
+        for proposal in _iter_recovery_proposals(snapshot_data):
             verdict = changeset_status_verdict(proposal["status"])
             if verdict is None:
                 continue
@@ -218,12 +245,6 @@ class VerdictSubscriber:
             if thread_id is None:
                 continue
             await self._resume_with_verdict(thread_id, verdict, None)
-
-        high_water = gap.latest_outbox_seq
-        if high_water is None:
-            high_water = _recovery_high_water(snapshot.data)
-        if high_water is not None:
-            await self._advance_cursor(high_water)
 
     # ------------------------------------------------------------------
     # Correlation

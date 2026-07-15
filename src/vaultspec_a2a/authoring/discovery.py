@@ -21,13 +21,48 @@ from pathlib import Path
 
 import httpx
 
-__all__ = ["SERVICE_JSON_ENV", "EngineEndpoint", "resolve_engine"]
+__all__ = [
+    "HEARTBEAT_STALE_MS",
+    "SERVICE_JSON_ENV",
+    "EngineEndpoint",
+    "heartbeat_is_fresh",
+    "read_service_json",
+    "resolve_engine",
+]
 
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
 
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
-# not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
-_STALE_MS = 120_000
+# not as an available service (mirrors the engine's HEARTBEAT_STALE_MS, ADR R8).
+HEARTBEAT_STALE_MS = 120_000
+_STALE_MS = HEARTBEAT_STALE_MS
+
+
+def read_service_json(path: Path) -> dict | None:
+    """Read and parse a service.json, or ``None`` if unreadable or not an object.
+
+    The shared reader half of the R8 discovery contract: it never raises, so both
+    the engine consumer here and the resident-gateway producer's own boot check
+    can classify a candidate without guarding every failure mode.
+    """
+    try:
+        info = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return info if isinstance(info, dict) else None
+
+
+def heartbeat_is_fresh(info: dict, now_ms: int) -> bool:
+    """Return ``False`` only when a present heartbeat is older than the window.
+
+    A record with no ``last_heartbeat`` is treated as fresh (the field is
+    optional per the contract); a present ms-epoch heartbeat older than
+    :data:`HEARTBEAT_STALE_MS` reads as a crash.
+    """
+    heartbeat = info.get("last_heartbeat")
+    if isinstance(heartbeat, bool) or not isinstance(heartbeat, (int, float)):
+        return True
+    return now_ms - heartbeat <= HEARTBEAT_STALE_MS
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,14 +95,8 @@ def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
     """
     now_ms = int(time.time() * 1000)
     for path in _candidates():
-        try:
-            info = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            continue
-        if not isinstance(info, dict):
-            continue
-        heartbeat = info.get("last_heartbeat")
-        if isinstance(heartbeat, (int, float)) and now_ms - heartbeat > _STALE_MS:
+        info = read_service_json(path)
+        if info is None or not heartbeat_is_fresh(info, now_ms):
             continue
         port = info.get("port")
         token = info.get("service_token")

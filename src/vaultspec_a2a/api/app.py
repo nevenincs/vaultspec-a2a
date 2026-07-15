@@ -18,6 +18,7 @@ See: ADR-007 (FastAPI serving, SPA)
 
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
 import logging
+import os
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, cast
@@ -49,6 +50,13 @@ from ..database.session import (
     init_db,
 )
 from ..domain_config import domain_config
+from ..lifecycle.discovery import (
+    HEARTBEAT_REFRESH_SECONDS,
+    another_resident_is_live,
+    remove_service_json_if_owned,
+    service_json_path,
+    write_service_json,
+)
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
@@ -69,6 +77,26 @@ __all__ = [
 ]
 
 logger = logging.getLogger(__name__)
+
+
+async def _discovery_heartbeat(
+    path: Any, port: int, pid: int, service_token: str | None
+) -> None:
+    """Refresh the machine-global discovery heartbeat every cadence (ADR R8).
+
+    Non-fatal: a transient write failure is logged and retried on the next tick
+    so a full disk or race never crashes the gateway.
+    """
+    while True:
+        try:
+            write_service_json(path, port=port, pid=pid, service_token=service_token)
+        except OSError:
+            logger.warning(
+                "Failed to refresh service discovery heartbeat at %s",
+                path,
+                exc_info=True,
+            )
+        await asyncio.sleep(HEARTBEAT_REFRESH_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +226,34 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
         )
 
+        # ADR R8: publish and heartbeat the machine-global discovery file so the
+        # engine can attach-never-own. A crashed/stale prior record is reclaimed;
+        # a live resident is only warned about (the OS port bind is the real
+        # single-instance guard) so tests and intentional restarts are not broken.
+        discovery_path = service_json_path(settings.a2a_home)
+        discovery_pid = os.getpid()
+        if another_resident_is_live(settings.a2a_home):
+            logger.warning(
+                "A live resident gateway already holds %s; starting anyway "
+                "(the port bind is the authoritative single-instance guard)",
+                discovery_path,
+            )
+        write_service_json(
+            discovery_path,
+            port=settings.port,
+            pid=discovery_pid,
+            service_token=settings.internal_token,
+        )
+        discovery_task = asyncio.create_task(
+            _discovery_heartbeat(
+                discovery_path,
+                settings.port,
+                discovery_pid,
+                settings.internal_token,
+            )
+        )
+        logger.info("Service discovery published at %s", discovery_path)
+
         verdict_subscriber_task: asyncio.Task[None] | None = None
         if settings.authoring_subscriber_enabled:
             verdict_subscriber = VerdictSubscriber(
@@ -232,6 +288,19 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
         reconcile_task.cancel()
         await asyncio.gather(reconcile_task, return_exceptions=True)
+
+        # ADR R8: stop heartbeating and drop our own discovery record so the next
+        # start sees Absent, not a stale record it must treat as Crashed.
+        discovery_task.cancel()
+        await asyncio.gather(discovery_task, return_exceptions=True)
+        try:
+            remove_service_json_if_owned(discovery_path, discovery_pid)
+        except OSError:
+            logger.warning(
+                "Failed to remove discovery file %s on shutdown",
+                discovery_path,
+                exc_info=True,
+            )
 
         logger.info("Shutting down gateway")
 
@@ -321,6 +390,9 @@ def create_app(
             "status": "ok",
             "service": "gateway",
             "ready": ready,
+            # ADR R8: the ungated health endpoint reports the live pid so a
+            # lifecycle caller can confirm the discovery record's owner is alive.
+            "pid": os.getpid(),
             **shared,
             "production_certifying": (
                 settings.resolved_database_backend == "postgres"

@@ -3,10 +3,15 @@
 [![Python 3.13+](https://img.shields.io/badge/python-3.13%2B-blue.svg)](https://www.python.org/)
 [![Status: Early](https://img.shields.io/badge/status-early-orange.svg)](#status)
 
-A2A orchestration backend for the
+Headless A2A orchestration sibling for the
 [vaultspec](https://github.com/nevenincs/vaultspec-core) agentic coding
 workflow. Provides team-based and subagent-based task dispatch across Claude,
 Gemini, and Codex agents via a gateway/worker architecture.
+
+A2A is headless: it ships no bundled UI. The dashboard engine fronts it across a
+loopback HTTP edge (a versioned five-verb surface), and every document an agent
+produces becomes a human-reviewed proposal in the engine's review lane through
+the authoring API — agents never write to the vault directly.
 
 Two modes:
 
@@ -69,7 +74,7 @@ Docker Compose is the production deployment unit:
 docker compose -f docker-compose.prod.yml up -d
 ```
 
-This starts gateway, worker, and UI with Docker healthchecks, `restart:
+This starts gateway and worker with Docker healthchecks, `restart:
 unless-stopped` policies, dependency ordering, and Jaeger distributed tracing.
 Log aggregation: `docker compose -f docker-compose.prod.yml logs -f`.
 
@@ -100,11 +105,10 @@ Service targets:
 | Target | Services | Ports |
 |--------|----------|-------|
 | `all` (default) | Everything in dependency order | — |
-| `prod` | gateway + worker + ui + postgres | — |
+| `prod` | gateway + worker + postgres | — |
 | `dev` | jaeger + vidaimock | — |
 | `gateway` | Gateway API server | 8000 |
 | `worker` | Worker executor (LangGraph) | 8001 |
-| `ui` | Vite frontend dev server | 5173 |
 | `postgres` | PostgreSQL | 5432 |
 | `jaeger` | Jaeger trace collector + UI | 4317, 16686 |
 | `vidaimock` | Mock LLM provider | 8100 |
@@ -127,7 +131,7 @@ they become confusing startup failures:
 
 ```bash
 just doctor              # full environment check
-just doctor ports        # what is listening on 8000, 8001, 5173?
+just doctor ports        # what is listening on 8000, 8001?
 just doctor config       # API keys, DB backend, required env vars
 just doctor services     # HTTP probe to /health endpoints
 ```
@@ -142,7 +146,7 @@ just dev code check [target]    # read-only lint + type check
 just dev code fix [target]      # auto-repair
 ```
 
-Targets: `lint`, `type`, `ui`, `all` (default)
+Targets: `lint`, `type`, `all` (default)
 
 ### Testing
 
@@ -238,7 +242,6 @@ ports are fixed.
 |------|---------|--------------|-------|
 | 8000 | Gateway API | `VAULTSPEC_PORT` | REST + WebSocket |
 | 8001 | Worker | `VAULTSPEC_WORKER_PORT` | LangGraph executor |
-| 5173 | Vite UI | (Vite default) | Frontend dev server |
 | 8200 | MCP server | `VAULTSPEC_MCP_PORT` | Streamable HTTP transport |
 | 4317 | Jaeger OTLP | `OTEL_EXPORTER_OTLP_ENDPOINT` | Trace collector |
 | 16686 | Jaeger UI | — | Trace viewer |
@@ -262,41 +265,6 @@ VAULTSPEC_DATABASE_BACKEND=postgres
 VAULTSPEC_DATABASE_URL=postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/vaultspec
 VAULTSPEC_CHECKPOINT_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/vaultspec?sslmode=disable
 ```
-
-## Frontend Development
-
-Three workflows depending on what you need:
-
-1. **Split-terminal local development** — fastest iteration, native Vite HMR:
-
-   ```bash
-   just dev service start gateway    # terminal 1
-   just dev service start worker     # terminal 2
-   just dev service start ui         # terminal 3
-   ```
-
-2. **Frontend-ready Docker stack** — lowest-friction shared stack:
-
-   ```bash
-   just dev service start prod
-   ```
-
-   Starts gateway, worker, UI, and Postgres via Docker.
-
-3. **Full integration stack** — adds Jaeger tracing and VidaiMock:
-
-   ```bash
-   just dev service start all
-   ```
-
-Expected URLs:
-
-| Service | URL |
-|---------|-----|
-| Gateway API | `http://localhost:8000` |
-| Worker health | `http://localhost:8001/health` |
-| Vite UI | `http://localhost:5173` |
-| Jaeger UI | `http://localhost:16686` |
 
 ## Troubleshooting
 
@@ -342,8 +310,10 @@ service is unhealthy.
   - `thread/`, `context/`, `team/`, `graph/`, `streaming/` — layered domain and orchestration packages
   - `database/` — SQLAlchemy models, Alembic migrations
   - `providers/` — LLM provider adapters (Claude/ACP, Gemini, OpenAI)
+  - `authoring/` — loopback client for the engine's authoring API (proposals)
+  - `lifecycle/` — machine-global service discovery and heartbeat
+  - `cli/` — the `vaultspec-a2a` operator CLI (thin client of the five-verb gateway)
   - `control/` — service orchestration, health, config, and runtime support modules
-- `src/ui/` — React + Vite frontend
 - `.vault/adr/` — Architecture Decision Records (binding)
 - `knowledge/` — implementation notes and repository snippets
 

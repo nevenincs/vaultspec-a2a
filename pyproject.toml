@@ -1,7 +1,7 @@
 [project]
 name = "vaultspec-a2a"
 version = "0.1.0"
-description = "A2A Agent Orchestration Implementation"
+description = "Headless A2A agent orchestration for the vaultspec workflow (gateway + worker, engine-facing five-verb edge)"
 requires-python = ">=3.13"
 
 dependencies = [
@@ -85,7 +85,7 @@ log_cli = true
 log_cli_level = "INFO"
 log_cli_format = "%(asctime)s [%(levelname)8s] %(name)s: %(message)s"
 log_cli_date_format = "%H:%M:%S"
-norecursedirs = [".venv", "knowledge", "node_modules", "ui"]
+norecursedirs = [".venv", "knowledge", "node_modules"]
 strict_xfail = true
 # OTEL_SDK_DISABLED=true is set in the root conftest.py (collection-time)
 # to silence gRPC exporter noise.  Service tests override this via CI env.

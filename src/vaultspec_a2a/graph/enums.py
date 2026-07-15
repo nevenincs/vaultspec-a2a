@@ -13,6 +13,7 @@ __all__ = [
     "MODEL_MAP",
     "PROVIDER_DEFAULT_MODELS",
     "REJECT_OPTION_IDS",
+    "RESEARCH_ADR_NODE_PHASE",
     "AgentLifecycleState",
     "AgentState",
     "Model",
@@ -22,6 +23,7 @@ __all__ = [
     "Provider",
     "ToolCallStatus",
     "ToolKind",
+    "research_adr_semantic_phase",
 ]
 
 
@@ -188,3 +190,40 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.OPENAI: Model.HIGH,
     Provider.ZHIPU: Model.HIGH,
 }
+
+
+# ---------------------------------------------------------------------------
+# research_adr node -> semantic authoring phase (a2a-edge-conformance)
+# ---------------------------------------------------------------------------
+
+# Canonical map from a research_adr structural node name to the product-safe
+# semantic authoring phase. The node names are graph-owned (the research_adr
+# topology in the compiler), so this lives here as the single source both the
+# run-status projection (control) and the SSE frame stamping (streaming) import,
+# rather than duplicating the vocabulary in each layer. The dispatch/researcher
+# fan-out nodes map by prefix (see ``research_adr_semantic_phase``).
+RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
+    "synthesis": "synthesizing_research",
+    "research_review": "reviewing_research",
+    "research_gate": "awaiting_research_decision",
+    "adr_author": "writing_adr",
+    "adr_review": "reviewing_adr",
+    "adr_gate": "awaiting_adr_decision",
+}
+
+
+def research_adr_semantic_phase(node_name: str) -> str | None:
+    """Map a research_adr node name to its semantic authoring phase, or None.
+
+    Strips the ADR-020 ``mount_`` prefix, resolves the dispatch and researcher
+    fan-out nodes to ``researching`` by prefix, and looks up the remaining
+    structural nodes in :data:`RESEARCH_ADR_NODE_PHASE`. Returns None for a node
+    that is not part of the research_adr topology (a coder node, the supervisor,
+    an empty or end marker), so callers never fabricate a phase.
+    """
+    node = node_name.removeprefix("mount_")
+    if not node or node == "__end__":
+        return None
+    if node.startswith("research_dispatch"):
+        return "researching"
+    return RESEARCH_ADR_NODE_PHASE.get(node)

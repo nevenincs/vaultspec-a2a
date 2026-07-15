@@ -275,6 +275,9 @@ class GraphLifecycleManager:
             task_queue_port=self._task_queue_port,
             provider_factory=self._provider_factory,
             proposal_submitter=proposal_submitter,
+            # model-profiles ADR: compile against the run's frozen effective
+            # assignment so a restart reproduces the exact launched models.
+            model_assignment=req.model_assignment,
         )
 
     def _build_proposal_submitter(self) -> DocumentProposalSubmitter:

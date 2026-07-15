@@ -27,6 +27,8 @@ from ...thread.enums import ThreadStatus
 __all__ = [
     "PresetSummary",
     "PresetsListResponse",
+    "ProfileSummary",
+    "RoleAssignmentSummary",
     "RoleState",
     "RunCancelResponse",
     "RunStartRequest",
@@ -65,6 +67,10 @@ class RunStartRequest(BaseModel):
     # dispatch-exactly-once: a retry with the same id returns the existing run
     # instead of starting a second. Absent, the gateway mints a server-side id.
     run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    # model-profiles ADR: the selected model profile id. Defaults to the implicit
+    # team-defaults profile (the team's normal resolution). An unknown or
+    # ineligible profile is refused before dispatch - never silently replaced.
+    profile_id: str = Field(default="team-defaults", min_length=1, max_length=64)
 
     @field_validator("message")
     @classmethod
@@ -88,6 +94,11 @@ class RunStartResponse(BaseModel):
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
+    # model-profiles ADR: the profile the run was frozen with and its effective
+    # per-role assignment (additive v1). Absent on the idempotent-replay short
+    # path where the response is reconstructed from the existing run row.
+    profile_id: str | None = None
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
 
 
 class TopologyPosition(BaseModel):
@@ -144,6 +155,11 @@ class RunStatusResponse(BaseModel):
     repair_status: str | None = None
     execution_readiness: str | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
+    # model-profiles ADR: the frozen profile the run launched with and its
+    # effective per-role assignment, reproduced verbatim from run metadata across
+    # restarts (additive v1; absent for runs started before profiles landed).
+    profile_id: str | None = None
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
 
 
 class RunCancelResponse(BaseModel):
@@ -157,6 +173,44 @@ class RunCancelResponse(BaseModel):
     applied: bool = False
     action_status: str = "rejected_invalid_state"
     idempotency_key: str | None = None
+
+
+class RoleAssignmentSummary(BaseModel):
+    """Effective per-role model assignment under a profile (model-profiles ADR).
+
+    Only safe operational metadata: role id, agent id, provider id, capability,
+    the stable concrete model name, ordered fallbacks, current provider readiness,
+    and which precedence layer the assignment came from. Never a credential, env
+    value, token, or private path.
+    """
+
+    role_id: str
+    agent_id: str
+    provider_id: str
+    capability: str | None = None
+    model_name: str | None = None
+    fallback_providers: list[str] = Field(default_factory=list)
+    provider_ready: bool = False
+    source: str = "team_default"
+    resolution_error: str | None = None
+
+
+class ProfileSummary(BaseModel):
+    """One selectable model profile for a preset (model-profiles ADR).
+
+    Carries the profile's identity, whether it is the default, its per-role
+    effective assignments (resolved by the same shared resolver launch uses, so
+    picker truth cannot drift from execution truth), and backend-computed
+    eligibility with safe reasons.
+    """
+
+    id: str
+    display_name: str = ""
+    description: str = ""
+    is_default: bool = False
+    eligible: bool = False
+    unavailable_reasons: list[str] = Field(default_factory=list)
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
 
 
 class PresetSummary(BaseModel):
@@ -179,6 +233,14 @@ class PresetSummary(BaseModel):
     authoring_capability: str | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
+    # model-profiles ADR additions (additive v1 fields, absent-safe):
+    # preset origin (bundled | workspace | test_mock), the document outputs the
+    # topology delivers, the selectable profiles with effective assignments and
+    # eligibility, and the default profile id.
+    origin: str | None = None
+    supported_capabilities: list[str] = Field(default_factory=list)
+    profiles: list[ProfileSummary] = Field(default_factory=list)
+    default_profile_id: str | None = None
 
 
 class PresetsListResponse(BaseModel):

@@ -117,13 +117,20 @@ def _resolve_model_for_worker(
     workspace_root: Path | None = None,
     *,
     provider_factory: ProviderFactoryProtocol,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> BaseChatModel:
-    """Resolve provider + capability following ADR-013 S2.3 precedence."""
+    """Resolve provider + capability following ADR-013 S2.3 precedence.
+
+    When a ``frozen_assignment`` names this worker, its provider/capability/
+    fallback are used verbatim (model-profiles ADR: restart reproduces the exact
+    launched models, never a re-resolution against possibly-drifted config).
+    """
     factory = provider_factory
     primary_provider, capability, fallback_chain = _resolve_worker_model_preferences(
         worker_ref,
         agent_config,
         team_config,
+        frozen_assignment=frozen_assignment,
     )
     providers_to_try = [primary_provider, *fallback_chain]
     last_exc: Exception | None = None
@@ -161,22 +168,58 @@ def _resolve_worker_model_preferences(
     worker_ref: Any,
     agent_config: Any,
     team_config: Any,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[Provider, Model | None, list[Provider]]:
     """Resolve provider + capability following ADR-013 S2.3 precedence.
 
-    Delegates to the shared model-profile resolver (the single source discovery,
-    launch, and compilation all consume) with no profile overlay selected, which
-    is byte-identical to the historical chain: [[team.workers]] override > agent
-    TOML [agent.model] > [team.defaults], with provider_fallback resolved at the
-    same priority. A run-selected profile becomes the topmost layer without
-    changing this call site (the frozen assignment is threaded in at run-start).
+    A ``frozen_assignment`` entry for this worker wins outright and is applied
+    verbatim (model-profiles ADR: the run's frozen effective assignment is
+    reproduced exactly across restarts, never re-resolved). Absent a frozen entry,
+    delegates to the shared model-profile resolver (the single source discovery,
+    launch, and compilation all consume) with no profile overlay - byte-identical
+    to the historical chain: [[team.workers]] override > agent TOML [agent.model]
+    > [team.defaults], with provider_fallback resolved at the same priority.
     """
+    if frozen_assignment:
+        frozen = frozen_assignment.get(worker_ref.agent_id)
+        if frozen is not None:
+            return _parse_frozen_preferences(frozen)
+
     from ..providers.model_profiles import resolve_role_assignment
 
     assignment = resolve_role_assignment(
         worker_ref, agent_config, team_config, profile_overlay=None
     )
     return assignment.provider, assignment.capability, assignment.fallback_providers
+
+
+def _parse_frozen_preferences(
+    frozen: dict[str, Any],
+) -> tuple[Provider, Model | None, list[Provider]]:
+    """Parse a persisted frozen assignment entry into resolved model preferences.
+
+    Tolerant of an unknown provider/capability string (config drift): an
+    unrecognised value falls back to the historical default rather than raising,
+    keeping a restarted run runnable.
+    """
+    try:
+        provider = Provider(frozen["provider"])
+    except (KeyError, ValueError):
+        provider = Provider.CLAUDE
+    capability: Model | None = None
+    raw_capability = frozen.get("capability")
+    if raw_capability:
+        try:
+            capability = Model(raw_capability)
+        except ValueError:
+            capability = None
+    fallback: list[Provider] = []
+    for raw in frozen.get("fallback", []):
+        try:
+            fallback.append(Provider(raw))
+        except ValueError:
+            continue
+    return provider, capability, fallback
 
 
 def _resolve_supervisor_model(
@@ -287,6 +330,7 @@ def compile_team_graph(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
+    model_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
@@ -355,6 +399,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.PIPELINE:
         _compile_pipeline(
@@ -366,6 +411,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.PIPELINE_LOOP:
         _compile_pipeline_loop(
@@ -378,6 +424,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.RESEARCH_ADR:
         _compile_research_adr(
@@ -388,6 +435,7 @@ def compile_team_graph(
             workspace_root=workspace_root,
             autonomous=autonomous,
             proposal_submitter=proposal_submitter,
+            frozen_assignment=model_assignment,
         )
     else:
         raise ValueError(
@@ -430,6 +478,7 @@ def _compile_star(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END.
 
@@ -514,6 +563,7 @@ def _compile_star(
             team_config,
             workspace_root,
             provider_factory=provider_factory,
+            frozen_assignment=frozen_assignment,
         )
         worker_node = create_worker_node(
             model,
@@ -598,6 +648,7 @@ def _compile_pipeline(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
@@ -652,6 +703,7 @@ def _compile_pipeline(
             team_config,
             workspace_root,
             provider_factory=provider_factory,
+            frozen_assignment=frozen_assignment,
         )
         worker_node = create_worker_node(
             model,
@@ -771,6 +823,7 @@ def _compile_pipeline_loop(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
 
@@ -805,6 +858,7 @@ def _compile_pipeline_loop(
             team_config,
             workspace_root,
             provider_factory=provider_factory,
+            frozen_assignment=frozen_assignment,
         )
         worker_node = create_worker_node(
             model,
@@ -891,6 +945,7 @@ def _resolve_research_adr_models(
     workspace_root: Path | None,
     *,
     provider_factory: ProviderFactoryProtocol,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> dict[str, BaseChatModel]:
     """Resolve one model per required research_adr role.
 
@@ -922,6 +977,7 @@ def _resolve_research_adr_models(
             team_config,
             workspace_root,
             provider_factory=provider_factory,
+            frozen_assignment=frozen_assignment,
         )
     return models
 
@@ -999,6 +1055,7 @@ def _compile_research_adr(
     workspace_root: Path | None = None,
     autonomous: bool = False,
     proposal_submitter: DocumentProposalSubmitter | None,
+    frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire the research_adr document phase machine.
 
@@ -1030,6 +1087,7 @@ def _compile_research_adr(
         agent_configs,
         workspace_root,
         provider_factory=provider_factory,
+        frozen_assignment=frozen_assignment,
     )
 
     specs: list[dict[str, Any]] = [

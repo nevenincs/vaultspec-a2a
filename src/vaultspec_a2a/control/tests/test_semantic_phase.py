@@ -115,3 +115,18 @@ def test_end_and_empty_nodes_are_skipped() -> None:
         )
         == "reviewing_adr"
     )
+
+
+def test_run_status_projection_reads_the_shared_phase_vocabulary() -> None:
+    """run-status projects every shared-map node to that map's phase (one source)."""
+    from vaultspec_a2a.graph.enums import RESEARCH_ADR_NODE_PHASE
+
+    for node, expected in RESEARCH_ADR_NODE_PHASE.items():
+        assert (
+            project_semantic_phase(
+                status=ThreadStatus.RUNNING.value,
+                next_nodes=[node],
+                repair_status=None,
+            )
+            == expected
+        )

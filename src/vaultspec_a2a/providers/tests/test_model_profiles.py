@@ -28,6 +28,8 @@ from ..model_profiles import (
     RoleAssignment,
     acceptance_gate_reason,
     evaluate_profile_eligibility,
+    freeze_assignment,
+    frozen_from_record,
     probe_provider_readiness,
     resolve_effective_assignment,
     resolve_role_assignment,
@@ -270,3 +272,49 @@ class TestEligibility:
         )
         assert elig.eligible is False
         assert any("engine is not reachable" in r for r in elig.reasons)
+
+
+class TestFreeze:
+    def test_freeze_produces_compiler_map_and_stable_digest(self) -> None:
+        team = load_team_config("vaultspec-adr-research")
+        assignment = resolve_effective_assignment(team, "fast")
+        frozen = freeze_assignment(assignment)
+        assert frozen.profile_id == "fast"
+        assert frozen.digest  # non-empty sha256
+        # The compiler map is the provider/capability/fallback subset per role.
+        cmap = frozen.compiler_map()
+        r = cmap["vaultspec-researcher"]
+        assert r["provider"] == "claude"
+        assert r["capability"] == "low"
+        assert "fallback" in r
+        # The disclosure roles carry role_id + model_name + source too.
+        assert frozen.roles["vaultspec-researcher"]["role_id"] == "researcher"
+        assert frozen.roles["vaultspec-researcher"]["source"] == "profile"
+
+    def test_digest_is_deterministic_and_profile_sensitive(self) -> None:
+        team = load_team_config("vaultspec-adr-research")
+        d_default = freeze_assignment(
+            resolve_effective_assignment(team, "team-defaults")
+        ).digest
+        d_default2 = freeze_assignment(
+            resolve_effective_assignment(team, "team-defaults")
+        ).digest
+        d_fast = freeze_assignment(resolve_effective_assignment(team, "fast")).digest
+        assert d_default == d_default2  # deterministic
+        assert d_default != d_fast  # a different profile changes the digest
+
+    def test_frozen_round_trips_through_record(self) -> None:
+        team = load_team_config("vaultspec-adr-research")
+        frozen = freeze_assignment(resolve_effective_assignment(team, "fast"))
+        record = frozen.to_record()
+        restored = frozen_from_record(record)
+        assert restored is not None
+        assert restored.profile_id == frozen.profile_id
+        assert restored.digest == frozen.digest
+        assert restored.compiler_map() == frozen.compiler_map()
+
+    def test_frozen_from_bad_record_is_none(self) -> None:
+        assert frozen_from_record(None) is None
+        assert frozen_from_record({}) is None
+        assert frozen_from_record({"profile_id": "x"}) is None
+        assert frozen_from_record("garbage") is None

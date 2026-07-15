@@ -131,6 +131,66 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_service_state_degrades_when_circuit_breaker_opens(
+    session_factory, checkpointer
+) -> None:
+    """A real dependency failure (open circuit) degrades service-state (P03.S06).
+
+    Evidence battery: an open worker circuit breaker is a genuine dependency
+    failure. service-state must report it truthfully - not ready, status degraded,
+    the failure named in degraded_reasons - rather than a hardcoded ok.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    # Trip the real circuit breaker the gateway reads, then probe service-state.
+    app.state.circuit_breaker.force_open()
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/service")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["alive"] is True  # process still answers
+        assert body["can_accept_run"] is False  # but cannot accept a run
+        assert body["status"] == "degraded"
+        assert body["circuit_breaker"] == "open"
+        assert any("circuit_breaker" in reason for reason in body["degraded_reasons"])
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_status_carries_reconnect_cursor(
+    session_factory, checkpointer
+) -> None:
+    """run-status carries the monotonic last_sequence reconnect cursor (P03.S06).
+
+    Evidence battery, SSE reconnect with non-authoritative semantics: durable
+    reconnect reconciliation comes from run-status (last_sequence), not from the
+    droppable SSE progress stream. This asserts the cursor is served.
+    """
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session, status=ThreadStatus.RUNNING, title="cursor"
+        )
+        await session.commit()
+        run_id = thread.id
+
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get(f"/v1/runs/{run_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "last_sequence" in body
+        assert isinstance(body["last_sequence"], int)
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_service_state_is_probe_backed_and_distinguishes_readiness(
     session_factory, checkpointer
 ) -> None:
@@ -204,6 +264,95 @@ async def test_presets_list_is_truthful_and_resilient(
         assert authoring["is_mock"] is False
         assert authoring["authoring_capability"] == "document_authoring"
         assert "vaultspec-researcher" in authoring["required_roles"]
+
+        # model-profiles: origin, supported outputs, and the profile set.
+        assert authoring["origin"] == "bundled"
+        assert authoring["supported_capabilities"] == [
+            "research_document",
+            "architecture_decision",
+        ]
+        assert authoring["default_profile_id"] == "team-defaults"
+        profiles = {p["id"]: p for p in authoring["profiles"]}
+        assert set(profiles) == {"team-defaults", "fast"}
+        assert profiles["team-defaults"]["is_default"] is True
+
+        # team-defaults effective assignments: safe operational fields only, and
+        # the resolver's real heterogeneity is disclosed (doc-reviewer differs).
+        td_by_agent = {
+            a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
+        }
+        researcher = td_by_agent["vaultspec-researcher"]
+        assert researcher["provider_id"] == "claude"
+        assert researcher["model_name"]  # a concrete, stable name
+        assert researcher["role_id"] == "researcher"
+        assert "capability" in researcher
+        assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "zhipu"
+
+        # fast lowers the researcher to a low capability and attributes the change
+        # to the profile; the authoring roles fall through unchanged.
+        fast_by_agent = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
+        assert fast_by_agent["vaultspec-researcher"]["capability"] == "low"
+        assert fast_by_agent["vaultspec-researcher"]["source"] == "profile"
+        assert fast_by_agent["vaultspec-synthesist"]["source"] == "agent"
+
+        # Eligibility is reported honestly: the production acceptance gate is open,
+        # so every profile is unavailable with a safe reason (no secrets anywhere).
+        for profile in profiles.values():
+            assert profile["eligible"] is False
+            assert any("acceptance gate" in r for r in profile["unavailable_reasons"])
+
+        # No credential/token/env material appears anywhere in the served record.
+        raw = resp.text.lower()
+        for secret_marker in ("api_key", "oauth", "token", "secret", "password"):
+            assert secret_marker not in raw
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_presets_list_discloses_workspace_profile_origin(
+    session_factory, checkpointer, tmp_path
+) -> None:
+    """A workspace-local preset with a profile is served with origin=workspace."""
+    teams_dir = tmp_path / ".vaultspec" / "teams"
+    teams_dir.mkdir(parents=True)
+    (teams_dir / "ws-team.toml").write_text(
+        "\n".join(
+            [
+                "[team]",
+                'id = "ws-team"',
+                'display_name = "WS Team"',
+                "[team.defaults]",
+                'provider = "mock"',
+                "[team.topology]",
+                'type = "star"',
+                "[[team.workers]]",
+                'agent_id = "vaultspec-researcher"',
+                "[team.profiles.fast]",
+                'display_name = "Fast"',
+                "[team.profiles.fast.roles.vaultspec-researcher]",
+                'provider = "mock"',
+                'capability = "low"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
+        assert resp.status_code == 200
+        by_id = {p["id"]: p for p in resp.json()["presets"]}
+        ws_team = by_id["ws-team"]
+        assert ws_team["origin"] == "workspace"
+        profiles = {p["id"]: p for p in ws_team["profiles"]}
+        assert set(profiles) == {"team-defaults", "fast"}
+        # The mock-provider role is ready, so eligibility fails only on the open
+        # acceptance gate / engine reachability, never on a mock credential.
+        fast = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
+        assert fast["vaultspec-researcher"]["provider_id"] == "mock"
+        assert fast["vaultspec-researcher"]["provider_ready"] is True
+        assert fast["vaultspec-researcher"]["capability"] == "low"
 
 
 @pytest.mark.asyncio(loop_scope="function")
@@ -446,3 +595,88 @@ async def _read_event(
         raise AssertionError(f"stream ended before a {wanted!r} frame")
 
     return await asyncio.wait_for(_scan(), timeout=timeout)
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_freezes_and_discloses_profile(
+    session_factory, checkpointer
+) -> None:
+    """run-start freezes the default profile, threads it to dispatch, discloses it."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "go", "autonomous": True},
+        )
+        assert start.status_code == 201, start.text
+        body = start.json()
+        # The default profile is frozen and disclosed with its assignments.
+        assert body["profile_id"] == "team-defaults"
+        assert body["assignments"], "run-start must disclose effective assignments"
+        first = body["assignments"][0]
+        assert first["provider_id"]
+        assert "api_key" not in start.text.lower() and "token" not in start.text.lower()
+
+        # The dispatch carries the frozen assignment for the worker to compile against.
+        dispatched = worker.dispatches[-1]
+        assert dispatched["profile_id"] == "team-defaults"
+        assert dispatched["model_assignment"], "frozen assignment must reach dispatch"
+
+        # run-status reproduces the frozen profile + assignments from run metadata.
+        status = await client.get(f"/v1/runs/{body['run_id']}")
+        assert status.status_code == 200
+        sbody = status.json()
+        assert sbody["profile_id"] == "team-defaults"
+        assert sbody["assignments"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_rejects_unknown_profile(session_factory, checkpointer) -> None:
+    """An unknown profile is refused with a 422 and never dispatched."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "go", "profile_id": "ghost"},
+        )
+        assert resp.status_code == 422
+        assert "profile" in resp.json()["detail"].lower()
+        assert worker.dispatches == [], "an unknown profile must not dispatch"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_conflicts_on_profile_change_retry(
+    session_factory, checkpointer
+) -> None:
+    """A retry that changes the frozen profile is a 409, never a silent replay."""
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        payload = {
+            "team_preset": _PRESET,
+            "message": "go",
+            "run_id": "rid-conflict",
+        }
+        first = await client.post("/v1/runs", json=payload)
+        assert first.status_code == 201
+        assert first.json()["profile_id"] == "team-defaults"
+
+        # Same run id, different profile -> conflict, not a replay.
+        conflict = await client.post(
+            "/v1/runs", json={**payload, "profile_id": "other-profile"}
+        )
+        assert conflict.status_code == 409
+        assert "already started with profile" in conflict.json()["detail"]
+
+        # Same run id, same (default) profile -> idempotent replay returns the run.
+        replay = await client.post("/v1/runs", json=payload)
+        assert replay.status_code == 201
+        assert replay.json()["run_id"] == first.json()["run_id"]

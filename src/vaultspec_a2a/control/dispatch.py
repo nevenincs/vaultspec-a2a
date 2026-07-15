@@ -238,12 +238,34 @@ async def redispatch_reconciling_threads(
                             thread.id,
                             exc_info=True,
                         )
+                # model-profiles ADR: reuse the frozen effective assignment on
+                # restart so the run recompiles the exact launched models, never
+                # a re-resolution against possibly-drifted config.
+                frozen_record = meta.get("model_profile")
+                frozen_profile_id: str | None = None
+                frozen_map: dict[str, dict[str, Any]] = {}
+                if isinstance(frozen_record, dict):
+                    raw_profile = frozen_record.get("profile_id")
+                    frozen_profile_id = (
+                        raw_profile if isinstance(raw_profile, str) else None
+                    )
+                    roles = frozen_record.get("roles")
+                    if isinstance(roles, dict):
+                        for agent_id, role in roles.items():
+                            if isinstance(role, dict):
+                                frozen_map[agent_id] = {
+                                    "provider": role.get("provider"),
+                                    "capability": role.get("capability"),
+                                    "fallback": role.get("fallback", []),
+                                }
                 dispatch = DispatchRequest(
                     action=ControlActionType.INGEST,  # ty: ignore[invalid-argument-type]
                     thread_id=thread.id,
                     team_preset=thread.team_preset,
                     workspace_root=meta.get("workspace_root"),
                     recursion_limit=domain_config.graph_recursion_limit,
+                    profile_id=frozen_profile_id,
+                    model_assignment=frozen_map,
                 )
                 headers = trace_headers_fn() if trace_headers_fn else {}
                 try:

@@ -6,7 +6,7 @@ These types define the gateway-worker contract.  Neither ``api/`` nor
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -48,6 +48,13 @@ class DispatchRequest(BaseModel):
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
+    # model-profiles ADR: the selected profile id and the frozen effective per-role
+    # assignment the run was launched with. Compilation consumes this verbatim
+    # (never re-resolves) so restart/recovery reproduces the identical models even
+    # if team/agent config drifts. Each value is {"provider", "capability",
+    # "fallback"} keyed by worker agent_id. Never carries a credential.
+    profile_id: str | None = None
+    model_assignment: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # ADR R7: engine-provisioned per-role actor tokens forwarded from run-start.
     # The bundle's redacting repr keeps raw tokens out of any dispatch log line;
     # model_dump still emits them for the gateway->worker loopback transport. The

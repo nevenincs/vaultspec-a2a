@@ -24,8 +24,8 @@ Profile declarations in team TOML and the single resolution-and-eligibility serv
 
 Serve profiles and eligibility on the truthful discovery record; validate, freeze, and persist the selected profile through run-start and run-status.
 
-- [ ] `P02.S03` - Extend the truthful discovery record with preset origin, supported capabilities, profiles, default profile, per-profile effective role assignments, readiness, and eligibility - one invalid preset yields one unavailable record; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `P02.S04` - Integrate profiles into run-start and run-status: validate profile belongs to preset, reject unknown or ineligible profiles with typed responses, freeze and persist the effective assignment with digest in run metadata, reuse frozen assignment on restart, disclose profile and assignments in responses; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/control/, src/vaultspec_a2a/database/`.
+- [x] `P02.S03` - Extend the truthful discovery record with preset origin, supported capabilities, profiles, default profile, per-profile effective role assignments, readiness, and eligibility - one invalid preset yields one unavailable record; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
+- [x] `P02.S04` - Integrate profiles into run-start and run-status: validate profile belongs to preset, reject unknown or ineligible profiles with typed responses, freeze and persist the effective assignment with digest in run metadata, reuse frozen assignment on restart, disclose profile and assignments in responses; `src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/control/, src/vaultspec_a2a/database/`.
 
 ### Phase `P03` - Live evidence
 

@@ -6,6 +6,7 @@ existing service rather than reinventing it, so there is a single code path: the
 richer internal ``/api`` surface and these verbs call the same services beneath.
 """
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -51,6 +52,8 @@ from ..dependencies import (
 from ..schemas.gateway import (
     PresetsListResponse,
     PresetSummary,
+    ProfileSummary,
+    RoleAssignmentSummary,
     RoleState,
     RunCancelResponse,
     RunStartRequest,
@@ -101,11 +104,24 @@ async def run_start_endpoint(
     if body.run_id is not None:
         existing = await get_thread(db, body.run_id)
         if existing is not None:
+            existing_profile = _persisted_profile_id(existing.thread_metadata)
+            if existing_profile is not None and existing_profile != body.profile_id:
+                # A retry that changes the frozen profile is a conflict, not a
+                # dispatch-exactly-once replay - the run is already frozen.
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        f"Run {existing.id!r} was already started with profile "
+                        f"{existing_profile!r}; cannot re-start with "
+                        f"{body.profile_id!r}"
+                    ),
+                )
             return RunStartResponse(
                 run_id=existing.id,
                 status=existing.status,
                 nickname=existing.nickname,
                 eligible=True,
+                profile_id=existing_profile,
             )
     run_id = body.run_id or generate_thread_id()
 
@@ -134,6 +150,15 @@ async def run_start_endpoint(
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
+    # model-profiles ADR: validate the selected profile belongs to the preset and
+    # is runnable, then freeze its effective per-role assignment. The frozen record
+    # is threaded to the worker (compilation consumes it verbatim) and persisted in
+    # metadata so restart reproduces it. Never silently falls back to team-defaults.
+    frozen = _resolve_and_freeze_profile_or_refuse(
+        team_config, body.profile_id, ws_root
+    )
+    metadata_json = _persist_frozen(metadata_json, frozen)
+
     try:
         result = await create_and_dispatch_thread(
             db,
@@ -148,6 +173,8 @@ async def run_start_endpoint(
                 metadata_json=metadata_json,
                 workspace_root=ws_root,
                 actor_tokens=body.actor_tokens,
+                profile_id=frozen.profile_id,
+                model_assignment=frozen.compiler_map(),
             ),
             circuit_breaker=circuit_breaker,
             worker_spawner=worker_spawner,
@@ -166,7 +193,11 @@ async def run_start_endpoint(
     _raise_for_dispatch_failure(result.failure_type, result.error_detail)
 
     return RunStartResponse(
-        run_id=result.thread_id, status=result.status, nickname=result.nickname
+        run_id=result.thread_id,
+        status=result.status,
+        nickname=result.nickname,
+        profile_id=frozen.profile_id,
+        assignments=_frozen_disclosure(frozen),
     )
 
 
@@ -193,6 +224,103 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
             status_code=422,
             detail=f"Team preset {team_preset!r} failed to load: {exc}",
         ) from exc
+
+
+def _resolve_and_freeze_profile_or_refuse(
+    team_config: Any, profile_id: str, ws_root: Path | None
+) -> Any:
+    """Validate the selected profile and freeze its effective assignment, or 4xx.
+
+    Refuses an unknown profile (422) and a profile that is not runnable - a role
+    whose provider is not ready with no eligible fallback (422). Launch gates only
+    on provider readiness: the production acceptance gate and engine reachability
+    are discovery-certification signals surfaced by presets-list, not launch
+    blockers (enforcing them here would refuse every run). Never silently replaces
+    the selection with team-defaults.
+    """
+    from ...providers.model_profiles import (
+        evaluate_profile_eligibility,
+        freeze_assignment,
+        resolve_effective_assignment,
+    )
+
+    profiles = team_config.effective_profiles()
+    if profile_id not in profiles:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Unknown model profile {profile_id!r} for preset "
+                f"{team_config.id!r}; available: {sorted(profiles)!r}"
+            ),
+        )
+    assignment = resolve_effective_assignment(team_config, profile_id, ws_root)
+    eligibility = evaluate_profile_eligibility(
+        assignment, engine_reachable=True, acceptance_gate_passed=True
+    )
+    if not eligibility.eligible:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"Model profile {profile_id!r} is not runnable: "
+                + "; ".join(eligibility.reasons)
+            ),
+        )
+    return freeze_assignment(assignment)
+
+
+def _persist_frozen(metadata_json: str | None, frozen: Any) -> str:
+    """Embed the frozen profile record into the thread metadata JSON for restart."""
+    import json
+
+    data: dict[str, Any] = {}
+    if metadata_json:
+        try:
+            loaded = json.loads(metadata_json)
+        except (json.JSONDecodeError, TypeError):
+            loaded = {}
+        if isinstance(loaded, dict):
+            data = loaded
+    data["model_profile"] = frozen.to_record()
+    return json.dumps(data)
+
+
+def _read_persisted_frozen(metadata_json: str | None) -> Any:
+    """Rebuild the persisted :class:`FrozenAssignment` from thread metadata, or None."""
+    import json
+
+    from ...providers.model_profiles import frozen_from_record
+
+    if not metadata_json:
+        return None
+    try:
+        data = json.loads(metadata_json)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return frozen_from_record(data.get("model_profile"))
+
+
+def _persisted_profile_id(metadata_json: str | None) -> str | None:
+    """Read only the persisted profile id from thread metadata, or None."""
+    frozen = _read_persisted_frozen(metadata_json)
+    return frozen.profile_id if frozen is not None else None
+
+
+def _frozen_disclosure(frozen: Any) -> list[RoleAssignmentSummary]:
+    """Build the safe per-role disclosure from a frozen assignment record."""
+    return [
+        RoleAssignmentSummary(
+            role_id=str(role.get("role_id", "")),
+            agent_id=agent_id,
+            provider_id=str(role.get("provider", "")),
+            capability=role.get("capability"),
+            model_name=role.get("model_name") or None,
+            fallback_providers=list(role.get("fallback", [])),
+            source=str(role.get("source", "team_default")),
+        )
+        for agent_id, role in frozen.roles.items()
+    ]
 
 
 def _raise_for_dispatch_failure(
@@ -260,6 +388,11 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
+    # model-profiles ADR: disclose the run's frozen profile + effective assignment,
+    # reproduced verbatim from run metadata (never re-resolved).
+    frozen = _read_persisted_frozen(
+        thread.thread_metadata if thread is not None else None
+    )
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
@@ -290,6 +423,8 @@ async def run_status_endpoint(
         repair_status=snapshot.repair_status,
         execution_readiness=snapshot.execution_readiness,
         degraded_reasons=snapshot.degraded_reasons,
+        profile_id=frozen.profile_id if frozen is not None else None,
+        assignments=_frozen_disclosure(frozen) if frozen is not None else [],
     )
 
 
@@ -355,19 +490,43 @@ async def presets_list_endpoint(
     Resolution uses the requested workspace context so workspace-local presets
     are listed alongside the bundled set. A single preset that fails to load or
     validate is reported with ``loadable=False`` and a reason rather than
-    omitted or allowed to crash the whole listing.
+    omitted or allowed to crash the whole listing. Each loadable preset carries
+    its model profiles with per-role effective assignments (resolved by the same
+    shared resolver launch uses) and backend-computed eligibility. The whole
+    build - file I/O, provider readiness, and the engine reachability probe -
+    runs off the event loop.
     """
-    from ...team.team_config import discover_team_preset_ids
-
     ws_root = Path(workspace_root) if workspace_root else None
-    presets = [
-        _summarize_preset(preset_id, ws_root)
-        for preset_id in sorted(discover_team_preset_ids(ws_root))
-    ]
+    presets = await asyncio.to_thread(_build_preset_summaries, ws_root)
     return PresetsListResponse(presets=presets)
 
 
-def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
+def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
+    """Summarize every discoverable preset, probing engine reachability once."""
+    from ...providers.model_profiles import probe_engine_reachable
+    from ...team.team_config import discover_team_preset_ids
+
+    engine_reachable = probe_engine_reachable()
+    return [
+        _summarize_preset(preset_id, ws_root, engine_reachable)
+        for preset_id in sorted(discover_team_preset_ids(ws_root))
+    ]
+
+
+def _preset_origin(preset_id: str, ws_root: Path | None, *, is_mock: bool) -> str:
+    """Classify a preset's origin: test_mock, workspace, or bundled."""
+    if is_mock:
+        return "test_mock"
+    if ws_root is not None:
+        workspace_toml = ws_root / ".vaultspec" / "teams" / f"{preset_id}.toml"
+        if workspace_toml.is_file():
+            return "workspace"
+    return "bundled"
+
+
+def _summarize_preset(
+    preset_id: str, ws_root: Path | None, engine_reachable: bool
+) -> PresetSummary:
     """Load one preset and summarize it, capturing any load failure truthfully.
 
     Any load or validation error is caught and reported as an unloadable preset
@@ -378,6 +537,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         authoring_capability,
         is_mock_preset,
         load_team_config,
+        supported_capabilities,
     )
 
     is_mock = is_mock_preset(preset_id)
@@ -390,6 +550,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
             loadable=False,
             unavailable_reason=str(exc)[:500] or type(exc).__name__,
             is_mock=is_mock,
+            origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         )
     return PresetSummary(
         id=tc.id,
@@ -401,7 +562,74 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         required_roles=[w.agent_id for w in tc.workers],
         authoring_capability=authoring_capability(tc.topology.type),
         is_mock=is_mock,
+        origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+        supported_capabilities=supported_capabilities(tc.topology.type),
+        default_profile_id=tc.default_profile_id,
+        profiles=_summarize_profiles(tc, ws_root, engine_reachable),
     )
+
+
+def _summarize_profiles(
+    tc: Any, ws_root: Path | None, engine_reachable: bool
+) -> list[ProfileSummary]:
+    """Resolve and rate every profile of a loadable preset.
+
+    Uses the shared model-profile resolver + eligibility service so the served
+    assignments are the exact ones launch would freeze. Provider readiness is
+    probed once and shared across profiles; the acceptance gate stays open
+    (reported honestly as an unavailable reason) until P04.S10.
+    """
+    from ...graph.enums import Provider
+    from ...providers.model_profiles import (
+        ProviderReadiness,
+        evaluate_profile_eligibility,
+        probe_provider_readiness,
+        resolve_effective_assignment,
+    )
+
+    readiness: dict[Provider, ProviderReadiness] = {}
+
+    def _ready(provider: Provider) -> ProviderReadiness:
+        if provider not in readiness:
+            readiness[provider] = probe_provider_readiness(provider)
+        return readiness[provider]
+
+    summaries: list[ProfileSummary] = []
+    profiles = tc.effective_profiles()
+    for profile_id, profile in profiles.items():
+        assignment = resolve_effective_assignment(tc, profile_id, ws_root)
+        eligibility = evaluate_profile_eligibility(
+            assignment,
+            readiness=readiness,
+            engine_reachable=engine_reachable,
+            acceptance_gate_passed=False,
+        )
+        assignments = [
+            RoleAssignmentSummary(
+                role_id=role.role_id,
+                agent_id=role.agent_id,
+                provider_id=role.provider.value,
+                capability=role.capability.value if role.capability else None,
+                model_name=role.model_name or None,
+                fallback_providers=[p.value for p in role.fallback_providers],
+                provider_ready=_ready(role.provider).ready,
+                source=role.source.value,
+                resolution_error=role.resolution_error,
+            )
+            for role in assignment.roles
+        ]
+        summaries.append(
+            ProfileSummary(
+                id=profile_id,
+                display_name=profile.display_name,
+                description=profile.description,
+                is_default=profile_id == tc.default_profile_id,
+                eligible=eligibility.eligible,
+                unavailable_reasons=eligibility.reasons,
+                assignments=assignments,
+            )
+        )
+    return summaries
 
 
 # ---------------------------------------------------------------------------

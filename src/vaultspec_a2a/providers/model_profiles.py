@@ -26,10 +26,12 @@ one layer that is both graph-importable and owns provider readiness.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from ..control.config import settings
 from ..graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Model, Provider
@@ -49,6 +51,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "AssignmentSource",
+    "FrozenAssignment",
     "ProfileAssignment",
     "ProfileEligibility",
     "ProviderReadiness",
@@ -56,6 +59,8 @@ __all__ = [
     "RoleEligibility",
     "acceptance_gate_reason",
     "evaluate_profile_eligibility",
+    "freeze_assignment",
+    "frozen_from_record",
     "probe_engine_reachable",
     "probe_provider_readiness",
     "resolve_effective_assignment",
@@ -89,6 +94,16 @@ class AssignmentSource(StrEnum):
     TEAM_DEFAULT = "team_default"
 
 
+# Precedence rank (lower wins) for collapsing per-field sources to one coarse
+# source that reports the topmost layer influencing a role's assignment.
+_SOURCE_RANK: dict[AssignmentSource, int] = {
+    AssignmentSource.PROFILE: 0,
+    AssignmentSource.WORKER: 1,
+    AssignmentSource.AGENT: 2,
+    AssignmentSource.TEAM_DEFAULT: 3,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class RoleAssignment:
     """The resolved effective model assignment for one role, with attribution.
@@ -112,7 +127,15 @@ class RoleAssignment:
 
     @property
     def source(self) -> AssignmentSource:
-        """The coarse assignment source: where the provider decision came from."""
+        """The coarse assignment source: the topmost layer that shaped this role.
+
+        Collapses the per-field ``provider_source`` and ``capability_source`` to
+        the higher-precedence of the two, so a capability-only profile overlay is
+        reported as ``profile`` (it did change the effective model) rather than
+        hiding behind the provider's lower-layer source.
+        """
+        if _SOURCE_RANK[self.capability_source] < _SOURCE_RANK[self.provider_source]:
+            return self.capability_source
         return self.provider_source
 
 
@@ -460,3 +483,82 @@ def evaluate_profile_eligibility(
         reasons=reasons,
         roles=role_results,
     )
+
+
+# ---------------------------------------------------------------------------
+# Freezing and persistence (model-profiles ADR)
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True, slots=True)
+class FrozenAssignment:
+    """A run's frozen effective per-role assignment plus a content digest.
+
+    Persisted in run metadata at run-start and reproduced verbatim on restart so
+    a run's models are stable across config drift. ``roles`` maps worker agent id
+    to safe fields only ({role_id, provider, capability, model_name, fallback,
+    source}); ``digest`` is a stable hash of the profile id and assignment for
+    incompatible-change detection. Never carries a credential.
+    """
+
+    profile_id: str
+    digest: str
+    roles: dict[str, dict[str, Any]]
+
+    def compiler_map(self) -> dict[str, dict[str, Any]]:
+        """The provider/capability/fallback subset the compiler consumes."""
+        return {
+            agent_id: {
+                "provider": role["provider"],
+                "capability": role.get("capability"),
+                "fallback": role.get("fallback", []),
+            }
+            for agent_id, role in self.roles.items()
+        }
+
+    def to_record(self) -> dict[str, Any]:
+        """The JSON-safe record persisted in run metadata."""
+        return {
+            "profile_id": self.profile_id,
+            "digest": self.digest,
+            "roles": self.roles,
+        }
+
+
+def freeze_assignment(assignment: ProfileAssignment) -> FrozenAssignment:
+    """Freeze a resolved assignment into a safe, digest-stamped, persistable form."""
+    roles: dict[str, dict[str, Any]] = {}
+    for role in assignment.roles:
+        roles[role.agent_id] = {
+            "role_id": role.role_id,
+            "provider": role.provider.value,
+            "capability": role.capability.value if role.capability else None,
+            "model_name": role.model_name,
+            "fallback": [p.value for p in role.fallback_providers],
+            "source": role.source.value,
+        }
+    canonical = json.dumps(
+        {"profile_id": assignment.profile_id, "roles": roles},
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    return FrozenAssignment(
+        profile_id=assignment.profile_id, digest=digest, roles=roles
+    )
+
+
+def frozen_from_record(record: Any) -> FrozenAssignment | None:
+    """Rebuild a :class:`FrozenAssignment` from a persisted record, or ``None``."""
+    if not isinstance(record, dict):
+        return None
+    profile_id = record.get("profile_id")
+    digest = record.get("digest")
+    roles = record.get("roles")
+    if (
+        not isinstance(profile_id, str)
+        or not isinstance(digest, str)
+        or not isinstance(roles, dict)
+    ):
+        return None
+    return FrozenAssignment(profile_id=profile_id, digest=digest, roles=roles)

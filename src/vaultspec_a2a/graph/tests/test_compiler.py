@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..protocols import ProviderFactoryProtocol
 
 from vaultspec_a2a.team.team_config import (
+    TeamConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -44,6 +45,28 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 # Parametrized compilation (C7 rewrite)
 # ---------------------------------------------------------------------------
 
+
+def _make_team(
+    *,
+    topology: TopologyConfig,
+    worker_ids: list[str],
+    team_id: str = "inline-test-team",
+) -> TeamConfig:
+    """Build a TeamConfig inline from real models for topology coverage.
+
+    The multi-role coder presets that used to carry the star, pipeline, and
+    pipeline_loop topologies were retired; this constructs an equivalent config
+    directly so the real ``compile_team_graph`` paths for those topologies stay
+    exercised without depending on a bundled preset.
+    """
+    return TeamConfig(
+        id=team_id,
+        display_name=team_id,
+        topology=topology,
+        workers=[WorkerRef(agent_id=aid) for aid in worker_ids],
+    )
+
+
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     (
@@ -55,12 +78,6 @@ _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     (
         "vaultspec-structured-coder",
         "pipeline",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        False,
-    ),
-    (
-        "vaultspec-iterative-coder",
-        "pipeline_loop",
         {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
         False,
     ),
@@ -217,8 +234,16 @@ async def test_compile_pipeline_loop_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """vaultspec-iterative-coder (pipeline_loop) produces correct node set."""
-    team = load_team_config("vaultspec-iterative-coder")
+    """pipeline_loop topology produces the correct node set."""
+    team = _make_team(
+        topology=TopologyConfig(
+            type=TopologyType.PIPELINE_LOOP,
+            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+            loop_node="vaultspec-reviewer",
+            max_loops=3,
+        ),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(
@@ -240,17 +265,13 @@ async def test_compile_pipeline_loop_single_agent_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """pipeline_loop with only the loop_node raises ConfigError."""
-    team = load_team_config("vaultspec-iterative-coder")
     bad_topology = TopologyConfig(
         type=TopologyType.PIPELINE_LOOP,
         order=["vaultspec-reviewer"],
         loop_node="vaultspec-reviewer",
         max_loops=3,
     )
-    reviewer_ref = WorkerRef(agent_id="vaultspec-reviewer")
-    bad_team = team.model_copy(
-        update={"topology": bad_topology, "workers": [reviewer_ref]}
-    )
+    bad_team = _make_team(topology=bad_topology, worker_ids=["vaultspec-reviewer"])
     agent_configs = {"vaultspec-reviewer": load_agent_config("vaultspec-reviewer")}
     with pytest.raises(ConfigError, match="degenerate self-loop"):
         compile_team_graph(
@@ -307,7 +328,15 @@ async def test_loop_router_worker_can_signal_finish(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """_loop_router returns FINISH when state['next'] is set to 'FINISH'."""
-    team = load_team_config("vaultspec-iterative-coder")
+    team = _make_team(
+        topology=TopologyConfig(
+            type=TopologyType.PIPELINE_LOOP,
+            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+            loop_node="vaultspec-reviewer",
+            max_loops=3,
+        ),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(

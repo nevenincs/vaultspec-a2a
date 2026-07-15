@@ -54,7 +54,6 @@ _ALL_AGENT_IDS = [
 _ALL_TEAM_IDS = [
     "vaultspec-adaptive-coder",
     "vaultspec-structured-coder",
-    "vaultspec-iterative-coder",
     "vaultspec-solo-coder",
 ]
 
@@ -334,14 +333,6 @@ class TestTeamConfigFromToml:
             "vaultspec-coder",
             "vaultspec-reviewer",
         ]
-
-    def test_coding_loop_loop_node(self) -> None:
-        """vaultspec-iterative-coder has reviewer as the loop_node."""
-        expected_max_loops = 3
-        cfg = load_team_config("vaultspec-iterative-coder")
-        assert cfg.topology.type == TopologyType.PIPELINE_LOOP
-        assert cfg.topology.loop_node == "vaultspec-reviewer"
-        assert cfg.topology.max_loops == expected_max_loops
 
     def test_solo_coder_single_worker(self) -> None:
         """vaultspec-solo-coder has exactly one worker: the coder."""

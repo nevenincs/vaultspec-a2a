@@ -105,8 +105,8 @@ Accept the engine-provisioned per-role token bundle at run-start, thread tokens 
 
 run-start accepts the engine-provisioned per-role actor token bundle; each token lives only in its owning worker's runtime state, is never checkpointed or logged, and is dropped at run end.
 
-- [ ] `W04.P09.S22` - Accept the per-role actor token bundle on run-start, hold each token in worker-scoped runtime state only (never checkpointed, never logged, redacted from any payload logging), inject per worker, drop at run end; `src/vaultspec_a2a/api/, src/vaultspec_a2a/control/, src/vaultspec_a2a/worker/`.
-- [ ] `W04.P09.S23` - Write live tests proving token isolation per role, absence from checkpoints and logs, and disposal at run end; `src/vaultspec_a2a/worker/tests/, src/vaultspec_a2a/control/tests/`.
+- [x] `W04.P09.S22` - Accept the per-role actor token bundle on run-start, hold each token in worker-scoped runtime state only (never checkpointed, never logged, redacted from any payload logging), inject per worker, drop at run end; `src/vaultspec_a2a/api/, src/vaultspec_a2a/control/, src/vaultspec_a2a/worker/`.
+- [x] `W04.P09.S23` - Write live tests proving token isolation per role, absence from checkpoints and logs, and disposal at run end; `src/vaultspec_a2a/worker/tests/, src/vaultspec_a2a/control/tests/`.
 
 ### Phase `W04.P10` - Five-verb gateway surface
 

@@ -211,7 +211,10 @@ def test_malformed_and_unknown_frames_are_dropped() -> None:
 def test_changeset_status_verdict_maps_only_terminal_decisions() -> None:
     assert changeset_status_verdict("approved") == VERDICT_APPROVED
     assert changeset_status_verdict("rejected") == VERDICT_REJECTED
+    # An `applied` changeset was necessarily approved: an AUTO gate resolves and
+    # applies in one step, so a still-parked run is observed terminal as `applied`
+    # and must correlate to an approved verdict for recovery to resume it.
+    assert changeset_status_verdict("applied") == VERDICT_APPROVED
     # Non-terminal / non-verdict statuses carry no reviewer decision.
     assert changeset_status_verdict("needs_review") is None
     assert changeset_status_verdict("draft") is None
-    assert changeset_status_verdict("applied") is None

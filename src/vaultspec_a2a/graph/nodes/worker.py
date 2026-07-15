@@ -226,6 +226,13 @@ async def _apply_queue_tool_calls(
         response,
         *tool_messages,
     ]
+    # The queue mutation (mark_complete) is already durable at this point, but the
+    # returned state_patch (the current_task_id advance) only reaches the reducer
+    # if this node returns. If the follow-up ainvoke raises, worker_node wraps it
+    # as WorkerExecutionError and the patch is dropped with the failed turn -- not
+    # a durability bug: mark_complete is idempotent, so the retried turn replays it
+    # to the same next task and re-derives the same patch. Ordering is intentional:
+    # the model still needs the ToolMessage to produce its final response.
     final_response = await model.ainvoke(follow_up_messages)
     return final_response, state_patch
 

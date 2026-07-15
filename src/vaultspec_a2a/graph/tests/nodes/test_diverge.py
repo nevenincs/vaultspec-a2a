@@ -78,6 +78,30 @@ async def test_researcher_node_appends_single_finding() -> None:
 
 
 @pytest.mark.asyncio
+async def test_researcher_node_rejects_finding_missing_contract_key() -> None:
+    """A producer output missing a contract key fails fast at the branch."""
+
+    async def bad_producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+        return {"claim": "no locators or source_thread"}
+
+    node = create_researcher_node(_SPECS[0], bad_producer)
+    with pytest.raises(ValueError, match="missing required key"):
+        await node(_base_state())
+
+
+@pytest.mark.asyncio
+async def test_researcher_node_rejects_finding_wrong_type() -> None:
+    """A producer output with a wrong-typed field fails fast at the branch."""
+
+    async def bad_producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+        return {"claim": "c", "locators": "not-a-list", "source_thread": "t"}
+
+    node = create_researcher_node(_SPECS[0], bad_producer)
+    with pytest.raises(TypeError, match="locators"):
+        await node(_base_state())
+
+
+@pytest.mark.asyncio
 async def test_diverge_stage_accumulates_findings_and_joins() -> None:
     """All parallel branches accumulate into research_findings before synthesis.
 

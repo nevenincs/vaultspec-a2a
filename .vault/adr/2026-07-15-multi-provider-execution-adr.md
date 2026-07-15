@@ -14,11 +14,11 @@ related:
 
 # `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `accepted`)
 
-**Ratified 2026-07-15** (interactive owner decision): all decisions below are accepted as drafted, including the per-branch-diversity deferral and the mandatory cross-repo check in Constraints. Execution proceeds per `[[2026-07-15-multi-provider-execution-plan]]`, approved the same day with Phase 1 (Z.ai) and Phase 2 (Codex) authorized to run in parallel.
+**Ratified 2026-07-15** (interactive owner decision): all decisions below are accepted as drafted, including the per-branch-diversity deferral and the mandatory cross-repo check in Constraints. Execution proceeds per `2026-07-15-multi-provider-execution-plan`, approved the same day with Phase 1 (Z.ai) and Phase 2 (Codex) authorized to run in parallel.
 
 ## Problem Statement
 
-The research_adr graph topology (`[[adr-authoring-orchestration-adr]]`) and the model-profiles precedence chain (`[[model-profiles-adr]]`) currently run one provider family, LangChain-`BaseChatModel`-shaped, resolved per role. The owner's mission requires mixing Codex, Claude, and Z.ai (Z.ai routed through the existing Claude Code CLI) inside a single run, with per-role provider assignment (researcher=codex, synthesist=claude, adr-author=zai as a worked example) and clarity on what, if anything, becomes a cross-repo (dashboard/vaultspec-cli) contract event. Grounding: `[[2026-07-15-multi-provider-execution-research]]`, `[[2026-07-15-multi-provider-execution-reference]]`.
+The research_adr graph topology (`adr-authoring-orchestration-adr`) and the model-profiles precedence chain (`model-profiles-adr`) currently run one provider family, LangChain-`BaseChatModel`-shaped, resolved per role. The owner's mission requires mixing Codex, Claude, and Z.ai (Z.ai routed through the existing Claude Code CLI) inside a single run, with per-role provider assignment (researcher=codex, synthesist=claude, adr-author=zai as a worked example) and clarity on what, if anything, becomes a cross-repo (dashboard/vaultspec-cli) contract event. Grounding: `2026-07-15-multi-provider-execution-research`, `2026-07-15-multi-provider-execution-reference`.
 
 ## Considerations
 
@@ -46,7 +46,7 @@ The research_adr graph topology (`[[adr-authoring-orchestration-adr]]`) and the 
 
 ## Implementation
 
-High-level, elaborated by the plan (`[[2026-07-15-multi-provider-execution-plan]]`):
+High-level, elaborated by the plan (`2026-07-15-multi-provider-execution-plan`):
 
 - Add `Provider.ZAI`/`Provider.CODEX` to `graph/enums.py` with `MODEL_MAP`/`PROVIDER_DEFAULT_MODELS` entries.
 - Z.ai: `_build_zai_env` in `factory.py` (pattern: `_build_gemini_env`, `factory.py:41-66`), a `classify_provider_command`-compatible readiness check reusing `_classify_acp_command`, and a `factory.py` dispatch branch mirroring the Claude branch (`factory.py:353-393`) with Z.ai's `env_vars` swapped in.

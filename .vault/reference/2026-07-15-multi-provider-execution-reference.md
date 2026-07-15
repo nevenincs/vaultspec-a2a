@@ -10,7 +10,7 @@ related:
 
 # `multi-provider-execution` reference: `provider integration map: env vars, spawn paths, and config seams`
 
-A file:line map of the exact seams a Z.ai and a Codex provider integration touch, grounding `[[2026-07-15-multi-provider-execution-adr]]`. Companion to `[[2026-07-15-multi-provider-execution-research]]`; this document is the blueprint, the research document is the evidence trail.
+A file:line map of the exact seams a Z.ai and a Codex provider integration touch, grounding `2026-07-15-multi-provider-execution-adr`. Companion to `2026-07-15-multi-provider-execution-research`; this document is the blueprint, the research document is the evidence trail.
 
 ## Findings
 

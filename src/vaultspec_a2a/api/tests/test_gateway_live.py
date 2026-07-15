@@ -123,6 +123,46 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_presets_list_is_truthful_and_resilient(
+    session_factory, checkpointer, tmp_path
+) -> None:
+    """presets-list marks loadable/unloadable and survives one bad preset (P01.S02)."""
+    teams_dir = tmp_path / ".vaultspec" / "teams"
+    teams_dir.mkdir(parents=True)
+    # A malformed workspace preset: valid TOML, invalid schema (no [team]).
+    (teams_dir / "broken-preset.toml").write_text(
+        "not_a_team = true\n", encoding="utf-8"
+    )
+
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
+        assert resp.status_code == 200
+        body = resp.json()
+        by_id = {p["id"]: p for p in body["presets"]}
+
+        # The malformed workspace preset is listed as unloadable, not omitted.
+        assert "broken-preset" in by_id
+        assert by_id["broken-preset"]["loadable"] is False
+        assert by_id["broken-preset"]["unavailable_reason"]
+
+        # A bundled coder preset loads and is marked mock.
+        assert by_id[_PRESET]["loadable"] is True
+        assert by_id[_PRESET]["is_mock"] is True
+        assert by_id[_PRESET]["authoring_capability"] == "coding"
+
+        # The document-authoring preset reports its capability and roles.
+        authoring = by_id["vaultspec-adr-research"]
+        assert authoring["loadable"] is True
+        assert authoring["is_mock"] is False
+        assert authoring["authoring_capability"] == "document_authoring"
+        assert "vaultspec-researcher" in authoring["required_roles"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_refusals_over_live_socket(
     session_factory, checkpointer
 ) -> None:

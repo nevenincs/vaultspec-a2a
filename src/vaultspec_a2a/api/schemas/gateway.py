@@ -147,13 +147,25 @@ class RunCancelResponse(BaseModel):
 
 
 class PresetSummary(BaseModel):
-    """One available team preset."""
+    """One discovered team preset and whether it is actually runnable.
+
+    A preset whose TOML is missing or invalid is still listed with
+    ``loadable=False`` and an ``unavailable_reason`` so the Rust backend sees the
+    truthful set rather than a listing that omits or crashes on it. Descriptive
+    fields are populated only when the preset loaded.
+    """
 
     id: str
-    display_name: str
-    description: str
-    topology: str
-    worker_count: int
+    loadable: bool
+    unavailable_reason: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    topology: str | None = None
+    worker_count: int | None = None
+    required_roles: list[str] = Field(default_factory=list)
+    authoring_capability: str | None = None
+    # True for bundled mock/test presets so the product layer can exclude them.
+    is_mock: bool = False
 
 
 class PresetsListResponse(BaseModel):

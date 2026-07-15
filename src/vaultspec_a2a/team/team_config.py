@@ -57,8 +57,10 @@ __all__ = [
     "TopologyType",
     "WorkerOverrideConfig",
     "WorkerRef",
+    "authoring_capability",
     "discover_agent_preset_ids",
     "discover_team_preset_ids",
+    "is_mock_preset",
     "load_agent_config",
     "load_team_config",
 ]
@@ -93,16 +95,46 @@ def discover_agent_preset_ids() -> frozenset[str]:
     return frozenset()
 
 
-def discover_team_preset_ids() -> frozenset[str]:
-    """Discover available team preset IDs by globbing the bundled TOML directory.
+def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[str]:
+    """Discover team preset IDs from the workspace and the bundled directory.
 
-    Returns a frozenset of TOML file stems from
-    ``src/vaultspec_a2a/team/presets/teams/*.toml``.
-    If the directory does not exist or is empty, returns an empty frozenset.
+    Returns the union of TOML file stems from
+    ``{workspace_root}/.vaultspec/teams/*.toml`` (when a workspace is given and
+    the directory exists) and the bundled
+    ``src/vaultspec_a2a/team/presets/teams/*.toml``. Discovery is a superset of
+    what ``load_team_config`` can resolve, so a workspace-local preset is listed
+    even though it shadows or extends the bundled set. Returns an empty frozenset
+    when no directory exists.
     """
+    ids: set[str] = set()
+    if workspace_root is not None:
+        workspace_teams_dir = workspace_root / ".vaultspec" / "teams"
+        if workspace_teams_dir.is_dir():
+            ids.update(p.stem for p in workspace_teams_dir.glob("*.toml"))
     if _PRESET_TEAMS_DIR.is_dir():
-        return frozenset(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
-    return frozenset()
+        ids.update(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
+    return frozenset(ids)
+
+
+def is_mock_preset(preset_id: str) -> bool:
+    """Return True for bundled mock/test presets the product layer excludes.
+
+    Mock presets follow the ``mock-`` id convention; the marking lets the Rust
+    product layer filter test fixtures out of user-facing preset selection.
+    """
+    return preset_id.startswith("mock-")
+
+
+def authoring_capability(topology_type: TopologyType) -> str:
+    """Return the coarse authoring capability a topology delivers.
+
+    ``document_authoring`` for the research_adr document phase machine; ``coding``
+    for the coder topologies. This is diagnostic truth for the Rust backend, not
+    product curation text.
+    """
+    if topology_type == TopologyType.RESEARCH_ADR:
+        return "document_authoring"
+    return "coding"
 
 
 # ---------------------------------------------------------------------------

@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
-from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
@@ -319,28 +319,61 @@ async def run_cancel_endpoint(
 
 
 @router.get("/presets", response_model=PresetsListResponse)
-async def presets_list_endpoint() -> PresetsListResponse:
-    """List available team presets."""
-    from ...team.team_config import discover_team_preset_ids, load_team_config
-    from ...thread.errors import TeamConfigNotFoundError
+async def presets_list_endpoint(
+    workspace_root: str | None = Query(default=None, max_length=4096),
+) -> PresetsListResponse:
+    """List team presets truthfully, marking each loadable or unloadable.
 
-    presets: list[PresetSummary] = []
-    for preset_id in sorted(discover_team_preset_ids()):
-        try:
-            tc = load_team_config(preset_id)
-        except TeamConfigNotFoundError:
-            logger.warning("Bundled team preset not found: %s", preset_id)
-            continue
-        presets.append(
-            PresetSummary(
-                id=tc.id,
-                display_name=tc.display_name,
-                description=tc.description,
-                topology=tc.topology.type,
-                worker_count=len(tc.workers),
-            )
-        )
+    Resolution uses the requested workspace context so workspace-local presets
+    are listed alongside the bundled set. A single preset that fails to load or
+    validate is reported with ``loadable=False`` and a reason rather than
+    omitted or allowed to crash the whole listing.
+    """
+    from ...team.team_config import discover_team_preset_ids
+
+    ws_root = Path(workspace_root) if workspace_root else None
+    presets = [
+        _summarize_preset(preset_id, ws_root)
+        for preset_id in sorted(discover_team_preset_ids(ws_root))
+    ]
     return PresetsListResponse(presets=presets)
+
+
+def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
+    """Load one preset and summarize it, capturing any load failure truthfully.
+
+    Any load or validation error is caught and reported as an unloadable preset
+    so one bad TOML never crashes the whole listing (a parse this broad is the
+    point: the listing must survive an arbitrarily malformed preset).
+    """
+    from ...team.team_config import (
+        authoring_capability,
+        is_mock_preset,
+        load_team_config,
+    )
+
+    is_mock = is_mock_preset(preset_id)
+    try:
+        tc = load_team_config(preset_id, workspace_root=ws_root)
+    except Exception as exc:
+        logger.warning("Team preset %s failed to load: %s", preset_id, exc)
+        return PresetSummary(
+            id=preset_id,
+            loadable=False,
+            unavailable_reason=str(exc)[:500] or type(exc).__name__,
+            is_mock=is_mock,
+        )
+    return PresetSummary(
+        id=tc.id,
+        loadable=True,
+        display_name=tc.display_name,
+        description=tc.description,
+        topology=tc.topology.type,
+        worker_count=len(tc.workers),
+        required_roles=[w.agent_id for w in tc.workers],
+        authoring_capability=authoring_capability(tc.topology.type),
+        is_mock=is_mock,
+    )
 
 
 # ---------------------------------------------------------------------------

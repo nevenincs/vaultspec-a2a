@@ -292,7 +292,10 @@ class GraphLifecycleManager:
         reused safely across runs. The phase specs map each document phase to the
         graph writer node whose ``AIMessage.name`` carries the document
         (``synthesis``/``adr_author``, the ``_RA_*`` node names in the compiler)
-        and to the role whose actor token authors it.
+        and to the role whose actor token authors it. The role key is the worker
+        ``agent_id`` (``vaultspec-synthesist``/``vaultspec-adr-author``), matching
+        the actor-token bundle keying (ADR R7) the run-start eligibility policy
+        enforces — not the short persona role.
         """
         from ..authoring import (
             DocumentProposalSubmitter,
@@ -312,12 +315,12 @@ class GraphLifecycleManager:
             token_store=self._token_store,
             phases={
                 "research": PhaseAuthoringSpec(
-                    document_role="synthesist",
+                    document_role="vaultspec-synthesist",
                     writer_message_name="synthesis",
                     doc_type="research",
                 ),
                 "adr": PhaseAuthoringSpec(
-                    document_role="adr-author",
+                    document_role="vaultspec-adr-author",
                     writer_message_name="adr_author",
                     doc_type="adr",
                 ),

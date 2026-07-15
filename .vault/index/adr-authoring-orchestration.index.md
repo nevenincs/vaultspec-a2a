@@ -29,6 +29,7 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-plan]]'
   - '[[2026-07-14-adr-authoring-orchestration-research]]'
   - '[[2026-07-15-adr-authoring-orchestration-handover-reference]]'
+  - '[[2026-07-15-adr-authoring-orchestration-reference]]'
 ---
 
 # `adr-authoring-orchestration` feature index
@@ -73,6 +74,7 @@ Auto-generated index of all documents tagged with `#adr-authoring-orchestration`
 ### reference
 
 - `2026-07-15-adr-authoring-orchestration-handover-reference` - `adr-authoring-orchestration` reference: `dashboard handover requirements and verified reality for production wiring`
+- `2026-07-15-adr-authoring-orchestration-reference` - `adr-authoring-orchestration` reference: `PW7 acceptance-harness re-dispatch spec: dispatch brief for the standing acceptance driver`
 
 ### research
 

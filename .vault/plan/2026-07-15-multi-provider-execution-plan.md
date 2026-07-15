@@ -17,15 +17,15 @@ related:
 
 Land Z.ai as a config variant of the existing Claude ACP path: new provider enum member, env-injection helper, factory dispatch branch, readiness probe, and a live fidelity probe against the real endpoint that closes the ADR's Z.ai-fidelity constraint.
 
-**APPROVED for execution** (2026-07-15, interactive owner decision) against `[[2026-07-15-multi-provider-execution-adr]]` (status `accepted`). Phase 1 (Z.ai) and Phase 2 (Codex) are authorized to run in parallel; Phase 3 rides the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands.
+**APPROVED for execution** (2026-07-15, interactive owner decision) against `2026-07-15-multi-provider-execution-adr` (status `accepted`). Phase 1 (Z.ai) and Phase 2 (Codex) are authorized to run in parallel; Phase 3 rides the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands.
 
-- [ ] `P01.S01` - Add Provider.ZAI to the Provider enum with MODEL_MAP and PROVIDER_DEFAULT_MODELS entries; `src/vaultspec_a2a/graph/enums.py`.
-- [ ] `P01.S02` - Add zai_base_url/zai_auth_token settings fields and validate they never leak into logs; `src/vaultspec_a2a/control/config.py`.
-- [ ] `P01.S03` - Add _build_zai_env mirroring _build_gemini_env and a factory dispatch branch mirroring the Claude ACP branch, reusing AcpChatModel unchanged; `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P01.S04` - Confirm workspace/environment.py's scrub list does not strip ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN; add a regression test pinning that; `src/vaultspec_a2a/workspace/environment.py, src/vaultspec_a2a/workspace/tests/`.
-- [ ] `P01.S05` - Add a Provider.ZAI branch to probe_provider_readiness and classify_provider_command, never emitting a secret; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P01.S06` - Live-probe the real Z.ai endpoint for Anthropic Messages API fidelity (tool-calling schema, streaming chunk shape) through claude-agent-acp before marking any profile eligible; this closes the ADR's flagged Z.ai-fidelity unknown; `src/vaultspec_a2a/providers/tests/, src/vaultspec_a2a/service_tests/`.
-- [ ] `P01.S07` - Unit and live-probe tests for the Z.ai env-injection path, readiness branch, and factory dispatch; `src/vaultspec_a2a/providers/tests/test_factory.py, src/vaultspec_a2a/providers/tests/test_model_profiles.py`.
+- [x] `P01.S01` - Add Provider.ZAI to the Provider enum with MODEL_MAP and PROVIDER_DEFAULT_MODELS entries; `src/vaultspec_a2a/graph/enums.py`.
+- [x] `P01.S02` - Add zai_base_url/zai_auth_token settings fields and validate they never leak into logs; `src/vaultspec_a2a/control/config.py`.
+- [x] `P01.S03` - Add _build_zai_env mirroring _build_gemini_env and a factory dispatch branch mirroring the Claude ACP branch, reusing AcpChatModel unchanged; `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P01.S04` - Confirm workspace/environment.py's scrub list does not strip ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN; add a regression test pinning that; `src/vaultspec_a2a/workspace/environment.py, src/vaultspec_a2a/workspace/tests/`.
+- [x] `P01.S05` - Add a Provider.ZAI branch to probe_provider_readiness and classify_provider_command, never emitting a secret; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/providers/factory.py`.
+- [ ] `P01.S06` - Live-probe the real Z.ai endpoint for Anthropic Messages API fidelity (tool-calling schema, streaming chunk shape) through claude-agent-acp before marking any profile eligible. PARKED blocked-on-credentials: probe written (2 service-marked tests, deselected by default), lint/type clean; no Z.ai token in env. Evidence: step record P01-S06. Re-arm one command: ZAI_AUTH_TOKEN=<token> uv run --no-sync pytest -m service src/vaultspec_a2a/providers/tests/test_zai_fidelity.py (override gateway with ZAI_BASE_URL). On green set record Outcome PASS and check this row; no profile may mark Z.ai eligible until then; `src/vaultspec_a2a/providers/tests/test_zai_fidelity.py, src/vaultspec_a2a/service_tests/`.
+- [x] `P01.S07` - Unit and live-probe tests for the Z.ai env-injection path, readiness branch, and factory dispatch; `src/vaultspec_a2a/providers/tests/test_factory.py, src/vaultspec_a2a/providers/tests/test_model_profiles.py`.
 
 ### Phase `P02` - Codex provider
 
@@ -56,11 +56,11 @@ Check whether the dashboard/engine's own schema treats provider as an open strin
 
 ## Proposed Changes
 
-Adds two provider integrations (Z.ai routed through the existing Claude ACP path; Codex via a new non-ACP `BaseChatModel`) and proves per-role mixed-provider execution inside the `research_adr` topology, per `[[2026-07-15-multi-provider-execution-adr]]`. Grounded in `[[2026-07-15-multi-provider-execution-research]]` and `[[2026-07-15-multi-provider-execution-reference]]`; extends `[[2026-07-15-model-profiles-adr]]`'s precedence chain without modifying it.
+Adds two provider integrations (Z.ai routed through the existing Claude ACP path; Codex via a new non-ACP `BaseChatModel`) and proves per-role mixed-provider execution inside the `research_adr` topology, per `2026-07-15-multi-provider-execution-adr`. Grounded in `2026-07-15-multi-provider-execution-research` and `2026-07-15-multi-provider-execution-reference`; extends `2026-07-15-model-profiles-adr`'s precedence chain without modifying it.
 
 ## Description
 
-**Resumability state (2026-07-15 audit, updated live):** Executor-of-record P01 (Z.ai): executor-opus-5. Executor-of-record P02 (Codex): executor-opus-6. Both dispatched in parallel 2026-07-15 per owner approval; current frontier is uncommitted in-flight work on `src/vaultspec_a2a/control/config.py`, `graph/enums.py`, `providers/factory.py`, `providers/model_profiles.py`, `providers/codex_chat_model.py` (new), and both providers' test files. See `[[2026-07-15-multi-provider-execution-adr]]` Constraints for the current resolution state of each phase's flagged unknown (Codex auth: resolved; Z.ai fidelity: still open, blocked on credentials). No exec Step Records exist yet for P01/P02 — a cold resume should read the uncommitted diff (`git diff` against this commit) or, once committed, the Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P03 depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first (not yet built as of this audit).
+**Resumability state (2026-07-15 audit, updated live):** Executor-of-record P01 (Z.ai): executor-opus-5. Executor-of-record P02 (Codex): executor-opus-6. Both dispatched in parallel 2026-07-15 per owner approval; current frontier is uncommitted in-flight work on `src/vaultspec_a2a/control/config.py`, `graph/enums.py`, `providers/factory.py`, `providers/model_profiles.py`, `providers/codex_chat_model.py` (new), and both providers' test files. See `2026-07-15-multi-provider-execution-adr` Constraints for the current resolution state of each phase's flagged unknown (Codex auth: resolved; Z.ai fidelity: still open, blocked on credentials). No exec Step Records exist yet for P01/P02 — a cold resume should read the uncommitted diff (`git diff` against this commit) or, once committed, the Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P03 depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first (not yet built as of this audit).
 
 ## Steps
 

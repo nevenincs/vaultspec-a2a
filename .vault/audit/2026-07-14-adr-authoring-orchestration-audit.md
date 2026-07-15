@@ -44,3 +44,7 @@ S05 phase gate: safety PASS - only pre-interrupt side effect is the idempotent s
 New findings: MEDIUM (non-blocking, fails safe) - `_doc_review_router` matches the substring "REVISION" in the reviewer message, so prose like "no revision required" false-positives back to the writer; harden to the exact REVISION REQUIRED / PASS sentinel tokens before live model runs. LOW - inner quality loop is prose-only until engine ValidationFindings flow (P04.S10); research producer packs the whole response as one claim with empty locators; no bounded revision counter (stuck loops end via GraphRecursionError at recursion_limit 50 rather than gracefully).
 
 Carried open: HIGH-2 environmental (engine emits only session.created; P03 live verdict-to-resume verification stays open until proposal/approval outbox emission lands engine-side); MEDIUM-2 O(N) checkpoint scan per verdict (scale note). MEDIUM-3 resolved by S06's enum. Verdict: safe to merge, with the sentinel hardening recommended before P04.S10 live runs.
+
+### HIGH-2 re-verification against the final engine contract (2026-07-15, commit d84baa3)
+
+The live round-trip was re-run against a rebuilt a7ad6f3 engine binary: the test now pins the event kind per verdict (approve and request_changes on `approval.resolved`, reject on `proposal.rejected`), confirms `approval.requested` parking, and records the supersede-as-non-resolving note. All three service-marked live tests pass against the current contract; HIGH-2 is closed against both engine emission commits with zero decoder changes.

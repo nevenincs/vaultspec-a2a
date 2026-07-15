@@ -65,7 +65,7 @@ format --check`, and whole-tree `ty check src/vaultspec_a2a` all clean.
 | Unknown/unavailable profile rejected by run-start | `test_gateway_live.py::test_run_start_rejects_unknown_profile` (P02) | covered |
 | Selected profile + frozen assignment survive restart | `test_frozen_assignment_survives_real_gateway_restart` | S05 new |
 | Workspace default change after launch does not mutate run | `test_workspace_drift_after_launch_does_not_mutate_run` | S05 new |
-| Discovery and launch use the same resolution path | `test_discovery_and_launch_resolve_through_one_function` (identity + equal output) | S05 new |
+| Discovery and launch use the same resolution path | `test_discovery_and_launch_resolve_through_one_function` (byte-identical live output) + drift test | S05 new |
 | No secrets in responses/logs/checkpoints/DB rows | responses: P02 tests; DB row: `test_run_start_persists_no_secrets_in_db_row`; checkpoints: see Notes | partial |
 | A real Research -> ADR run on served assignments | P04.S10 (separate executor, own engine) | referenced |
 
@@ -82,7 +82,9 @@ format --check`, and whole-tree `ty check src/vaultspec_a2a` all clean.
   path is exercised by the P04.S10 acceptance run, which owns the real
   Research -> ADR execution on the served assignments; this record references that
   evidence rather than duplicating it.
-- The identity check asserts both gateway call sites bind to the single
-  module-level `resolve_effective_assignment`; a runtime call-count spy would
-  require monkeypatching (forbidden), so identity is evidenced structurally plus by
-  byte-identical disclosed assignments from the discovery and launch endpoints.
+- Discovery/launch single-source is evidenced behaviorally: the two live
+  endpoints disclose byte-identical per-role assignments for the same team and
+  profile, and the drift test confirms the launch side reads a frozen record. A
+  same-module identity assertion would be tautological and a runtime call-count spy
+  would require monkeypatching (forbidden), so the behavioral equality across the
+  live endpoints carries the claim rather than a structural line.

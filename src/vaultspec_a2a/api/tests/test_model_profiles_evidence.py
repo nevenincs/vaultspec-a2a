@@ -104,11 +104,13 @@ async def test_frozen_assignment_survives_real_gateway_restart(
 ) -> None:
     """A frozen assignment persists across a real gateway restart (P03.S05).
 
-    Evidence: restart reproduces the frozen effective assignment from the durable
-    run metadata rather than re-resolving. A first app freezes and persists the
-    ``fast`` profile; a SECOND app instance - fresh aggregator, circuit breaker,
-    and worker, but the same durable DB and checkpointer - serves run-status with
-    the identical profile and per-role assignment, and dispatches nothing.
+    Evidence: restart durably reproduces the frozen effective assignment and does
+    not re-dispatch. A first app freezes and persists the ``fast`` profile; a
+    SECOND app instance - fresh aggregator, circuit breaker, and worker, but the
+    same durable DB and checkpointer - serves run-status with the identical profile
+    and per-role assignment, and dispatches nothing. This scopes to durable
+    reproduction; that the run reads the frozen record rather than silently
+    re-resolving to changed config is the drift test's job.
     """
     _write_ws_team(tmp_path)
 
@@ -144,7 +146,7 @@ async def test_frozen_assignment_survives_real_gateway_restart(
         assert status.status_code == 200
         sbody = status.json()
         assert sbody["profile_id"] == "fast"
-        # The per-role assignment is reproduced verbatim, not re-resolved.
+        # The per-role assignment is reproduced verbatim from the durable record.
         assert sbody["assignments"] == first_assignments
         researcher = {a["agent_id"]: a for a in sbody["assignments"]}[
             "vaultspec-researcher"
@@ -205,21 +207,17 @@ async def test_workspace_drift_after_launch_does_not_mutate_run(
 async def test_discovery_and_launch_resolve_through_one_function(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """Discovery and launch bind to the same resolver and disclose equal output.
+    """Discovery and launch disclose byte-identical effective assignments (P03.S05).
 
-    Evidence (identity, not merely equal behaviour): the presets discovery path
-    and the run-start launch path both import the single module-level
-    ``resolve_effective_assignment`` object, and for the same team + profile they
-    disclose byte-identical per-role assignments (provider, capability, model,
-    source, fallbacks), so the picker's truth cannot drift from execution's.
+    Evidence that the picker's truth cannot drift from execution's: the presets
+    discovery path and the run-start launch path resolve the same team + profile
+    through the shared resolver and disclose byte-identical per-role assignments
+    (provider, capability, model, source, fallbacks). The two live endpoints
+    agreeing field-for-field is the observable constraint; a same-module identity
+    assertion would be tautological, so the behavioural equality carries the claim
+    (with the drift test proving the launch side reads a frozen record, not a
+    re-resolution).
     """
-    from ...providers import model_profiles
-
-    # Structural identity: there is exactly one canonical resolver object that
-    # both gateway call sites import by name.
-    resolver = model_profiles.resolve_effective_assignment
-    assert resolver is model_profiles.resolve_effective_assignment
-
     _write_ws_team(tmp_path)
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (

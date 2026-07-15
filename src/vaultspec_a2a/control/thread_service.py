@@ -60,6 +60,7 @@ if TYPE_CHECKING:
     import httpx
     from sqlalchemy.ext.asyncio import AsyncSession
 
+    from ..thread.actor_tokens import ActorTokenBundle
     from .circuit_breaker import WorkerCircuitBreaker
     from .worker_management import LazyWorkerSpawner
 
@@ -282,6 +283,7 @@ class ThreadCreationRequest:
     metadata: ThreadMetadata | None
     metadata_json: str | None
     workspace_root: Path | None
+    actor_tokens: ActorTokenBundle | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -445,6 +447,7 @@ async def create_and_dispatch_thread(
         pipeline_phase=None,
         vault_index=vault_index,
         validation_errors=[],
+        actor_tokens=req.actor_tokens,
     )
 
     logger.info(

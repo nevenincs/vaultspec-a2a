@@ -134,6 +134,12 @@ unfixable = ["B"]
 [tool.ruff.lint.isort]
 known-first-party = ["vaultspec_a2a"]
 
+[tool.ruff.lint.flake8-type-checking]
+# Pydantic resolves field annotations at class-build time, so imports used only
+# as model field types are runtime-required, not type-checking-only. Teaching
+# TCH this keeps such imports at module scope instead of a TYPE_CHECKING block.
+runtime-evaluated-base-classes = ["pydantic.BaseModel"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"

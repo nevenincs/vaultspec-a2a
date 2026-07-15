@@ -88,6 +88,7 @@ async def create_thread_endpoint(
             metadata=body.metadata,
             metadata_json=metadata_json,
             workspace_root=ws_root,
+            actor_tokens=body.actor_tokens,
         )
         result = await create_and_dispatch_thread(
             db,

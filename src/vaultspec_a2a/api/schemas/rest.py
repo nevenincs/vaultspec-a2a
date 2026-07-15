@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...graph.enums import Model, Provider
+from ...thread.actor_tokens import ActorTokenBundle
 from ...thread.enums import PermissionRequestStatus, ThreadStatus
 from .enums import AgentLifecycleState, PermissionOptionKind
 
@@ -49,6 +50,10 @@ class CreateThreadRequest(BaseModel):
     nickname: str | None = Field(default=None, max_length=64)
     # None = use team preset default (auto_approve); False = always supervised
     autonomous: bool | None = None
+    # ADR R7: engine-provisioned per-role actor token bundle. The engine mints
+    # one token per role at run-start and forwards it here; the gateway threads
+    # each token to its owning worker without logging or persisting it.
+    actor_tokens: ActorTokenBundle | None = None
 
     @field_validator("nickname")
     @classmethod

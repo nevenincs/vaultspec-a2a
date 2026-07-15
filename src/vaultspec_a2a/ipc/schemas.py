@@ -11,6 +11,7 @@ from uuid import uuid4
 
 from pydantic import BaseModel, Field
 
+from ..thread.actor_tokens import ActorTokenBundle
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 
 __all__ = [
@@ -47,6 +48,12 @@ class DispatchRequest(BaseModel):
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
+    # ADR R7: engine-provisioned per-role actor tokens forwarded from run-start.
+    # The bundle's redacting repr keeps raw tokens out of any dispatch log line;
+    # model_dump still emits them for the gateway->worker loopback transport. The
+    # worker holds them in worker-scoped runtime state only and drops them at run
+    # end — they are never checkpointed.
+    actor_tokens: ActorTokenBundle | None = None
 
 
 class DispatchResponse(BaseModel):

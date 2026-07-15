@@ -23,6 +23,7 @@ from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import ControlActionType, ThreadStatus
 from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
 from .state_projection import StateProjector
+from .token_store import RunTokenStore
 
 if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
@@ -56,6 +57,11 @@ class Executor:
         self._bridge = bridge
         self._aggregator = EventAggregator()
 
+        # ADR R7: worker-scoped holder of per-run actor tokens. Registered when a
+        # run's active window opens and dropped when it closes, so tokens live
+        # only inside the owning worker for the run and never touch a checkpoint.
+        self._token_store = RunTokenStore()
+
         # Delegates
         self._graph_lifecycle = GraphLifecycleManager(
             checkpointer=checkpointer,
@@ -86,6 +92,16 @@ class Executor:
     def aggregator(self) -> EventAggregator:
         """Return the event aggregator (for subscriber wiring, if needed)."""
         return self._aggregator
+
+    @property
+    def token_store(self) -> RunTokenStore:
+        """Return the worker-scoped actor token store (ADR R7).
+
+        The per-run authoring binding reads each worker's own token from here
+        when it assembles that worker's tool surface; the store holds a run's
+        tokens only for its active dispatch window.
+        """
+        return self._token_store
 
     @property
     def graph_count(self) -> int:
@@ -149,6 +165,9 @@ class Executor:
         async with self._ingest_lock:
             self._active_ingests.discard(thread_id)
             active_snapshot = set(self._active_ingests)
+        # ADR R7: the active window is closing — drop the run's actor tokens so
+        # they never outlive the worker turn that used them.
+        self._token_store.drop(thread_id)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -170,6 +189,8 @@ class Executor:
                         await self._handle_resume(req)
                     case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
+                        # ADR R7: cancellation ends the run — drop any held tokens.
+                        self._token_store.drop(req.thread_id)
                         self._aggregator.cancel_thread(req.thread_id)
                         # Emit terminal if no active ingest (TOCTOU safe:
                         # cancel flag set before check; DB rejects duplicates).
@@ -319,6 +340,8 @@ class Executor:
                 return
 
             self._bridge.track_thread(req.thread_id)
+            # ADR R7: hold the run's per-role tokens for this active window only.
+            self._token_store.register(req.thread_id, req.actor_tokens)
 
             graph_input = GraphLifecycleManager.build_graph_input(
                 req, is_first_ingest=is_first_ingest
@@ -418,6 +441,8 @@ class Executor:
                 return
 
             self._bridge.track_thread(req.thread_id)
+            # ADR R7: a resumed turn re-provisions the run's tokens for its window.
+            self._token_store.register(req.thread_id, req.actor_tokens)
 
             # Resolve recursion_limit: explicit request > team TOML > global default.
             cache_key = self._graph_lifecycle.thread_to_cache_key.get(req.thread_id)

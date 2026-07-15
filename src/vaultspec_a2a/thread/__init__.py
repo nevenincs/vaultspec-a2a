@@ -4,6 +4,9 @@ This is a Layer 1 leaf module with zero internal dependencies beyond
 standard-library and LangGraph/LangChain framework types.
 """
 
+from .actor_tokens import (
+    ActorTokenBundle as ActorTokenBundle,
+)
 from .constants import (
     DEFAULT_SUPERVISOR_ID as DEFAULT_SUPERVISOR_ID,
 )
@@ -132,6 +135,7 @@ from .state import TeamState as TeamState
 __all__ = [
     "DEFAULT_SUPERVISOR_ID",
     "PLAN_APPROVAL_PAUSE_CAUSES",
+    "ActorTokenBundle",
     "AgentConfigNotFoundError",
     "AgentProcessError",
     "ApprovalStatus",

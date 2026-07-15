@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from typing import TYPE_CHECKING, Any
 
 from ..authoring import (
@@ -69,6 +70,11 @@ logger = logging.getLogger(__name__)
 # TeamState reference fields that carry the engine ids a run produced.
 _STATE_ID_FIELDS = ("authoring_proposal_ids", "authoring_changeset_ids")
 
+# How often the steady-state loop re-checks still-parked runs against terminal-
+# verdict proposals (the AUTO submit-time race recovery). Bounded so a legitimately
+# parked HUMAN gate does not fetch a recovery snapshot every poll cycle.
+_PARKED_RECONCILE_INTERVAL_SECONDS = 10.0
+
 
 class VerdictSubscriber:
     """Consume engine authoring verdicts and resume the runs they belong to."""
@@ -103,6 +109,7 @@ class VerdictSubscriber:
         self._reconnect_max = reconnect_max_seconds
         self._checkpoint_timeout = checkpoint_timeout_seconds
         self._parked_thread_limit = parked_thread_limit
+        self._last_parked_reconcile = 0.0
 
     # ------------------------------------------------------------------
     # Supervised loop
@@ -141,11 +148,56 @@ class VerdictSubscriber:
                     continue
                 backoff = self._reconnect_base
                 if processed == 0:
-                    # Steady state: nothing new on this page, poll gently.
+                    # Steady state: nothing new on this page. Reconcile any run
+                    # left parked at a gate whose verdict was already consumed
+                    # before it finished parking (the AUTO submit-time race), then
+                    # poll gently.
+                    await self._reconcile_parked_runs(endpoint)
                     await asyncio.sleep(self._poll_interval)
         except asyncio.CancelledError:
             logger.info("Authoring verdict subscriber cancelled")
             raise
+
+    async def _reconcile_parked_runs(self, endpoint: EngineEndpoint) -> None:
+        """Resume any run left parked at a gate whose verdict was already consumed.
+
+        The AUTO race: the engine auto-approves+applies SYNCHRONOUSLY at submit and
+        emits the verdict frames immediately, so the subscriber can consume them -
+        and advance the forward-only cursor past them - BEFORE the run finishes the
+        submit-node -> gate-node transition and becomes ``INPUT_REQUIRED``. The
+        per-frame `_process_event` correlation then finds no parked thread and the
+        verdict is lost. This steady-state sweep re-checks the CURRENT terminal-
+        verdict proposals against still-parked runs and resumes the matches - the
+        same reconciliation `_handle_gap` runs, but on the normal idle path so no
+        stream gap is required. Idempotent and cheap: it no-ops when nothing is
+        parked, is throttled to :data:`_PARKED_RECONCILE_INTERVAL_SECONDS`, and
+        `_reconcile_recovery` resumes ONLY proposals in a terminal verdict status
+        (a run still awaiting a human verdict has a non-terminal proposal and is
+        skipped), so a legitimately parked HUMAN gate is never disturbed.
+        """
+        now = time.monotonic()
+        if now - self._last_parked_reconcile < _PARKED_RECONCILE_INTERVAL_SECONDS:
+            return
+        self._last_parked_reconcile = now
+        async with self._session_factory() as db:
+            parked, _ = await list_threads(
+                db,
+                status=ThreadStatus.INPUT_REQUIRED,
+                limit=self._parked_thread_limit,
+            )
+        if not parked:
+            return
+        try:
+            async with AuthoringClient(
+                endpoint.base_url, endpoint.bearer_token
+            ) as client:
+                snapshot = await client.recovery_snapshot(last_seq=0)
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.debug("Parked-run reconcile snapshot fetch failed", exc_info=True)
+            return
+        await self._reconcile_recovery(snapshot.data)
 
     # ------------------------------------------------------------------
     # Page consumption

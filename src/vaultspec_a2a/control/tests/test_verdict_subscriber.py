@@ -537,3 +537,36 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
         thread = await get_thread(session, "thread-recon-2")
         assert thread is not None
         assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+
+
+@pytest.mark.asyncio
+async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The steady-state parked-run reconcile is cheap and throttled.
+
+    The AUTO submit-time race recovery runs on every idle cycle, so it must no-op
+    when nothing is parked (returning BEFORE contacting the engine - an unreachable
+    endpoint would raise if it tried to fetch a snapshot) and must not re-run within
+    the throttle window.
+    """
+    from vaultspec_a2a.authoring import EngineEndpoint
+
+    checkpoints = tmp_path / "cp-parked-reconcile.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
+    ):
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        # An unreachable engine: reached only if the no-parked guard fails.
+        endpoint = EngineEndpoint(base_url="http://127.0.0.1:1", bearer_token="tok")
+
+        # Nothing parked -> returns before any engine contact, sets the throttle.
+        await subscriber._reconcile_parked_runs(endpoint)
+        first_stamp = subscriber._last_parked_reconcile
+        assert first_stamp > 0.0
+
+        # An immediate second call is throttled: the stamp does not advance and no
+        # engine fetch is attempted.
+        await subscriber._reconcile_parked_runs(endpoint)
+        assert subscriber._last_parked_reconcile == first_stamp

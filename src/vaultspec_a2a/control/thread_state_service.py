@@ -38,9 +38,57 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..streaming.aggregator import EventAggregator
 
-__all__ = ["build_thread_state"]
+__all__ = ["build_thread_state", "read_run_authoring_ids"]
 
 logger = logging.getLogger(__name__)
+
+# Checkpointed TeamState fields carrying the engine ids a run produced.
+_PROPOSAL_ID_FIELD = "authoring_proposal_ids"
+_CHANGESET_ID_FIELD = "authoring_changeset_ids"
+
+
+def _string_list(value: object) -> list[str]:
+    """Return the non-empty string items of *value* when it is a list."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, str) and item]
+
+
+async def read_run_authoring_ids(
+    checkpointer: Checkpointer,
+    thread_id: str,
+    *,
+    timeout: float = 2.0,
+) -> tuple[list[str], list[str]]:
+    """Read a run's produced ``(proposal_ids, changeset_ids)`` from its checkpoint.
+
+    Non-raising: a missing, timed-out, or unreadable checkpoint yields empty
+    lists so the recovery snapshot degrades to "no proposals recorded" rather
+    than failing the whole run-status read.
+    """
+    config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+    try:
+        checkpoint_tuple = await asyncio.wait_for(
+            checkpointer.aget_tuple(config), timeout=timeout
+        )
+    except TimeoutError:
+        logger.warning("Checkpoint read for authoring ids timed out: %s", thread_id)
+        return [], []
+    except Exception:
+        logger.warning(
+            "Checkpoint read for authoring ids failed: %s", thread_id, exc_info=True
+        )
+        return [], []
+    if checkpoint_tuple is None:
+        return [], []
+    checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
+    values = (
+        checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+    )
+    return (
+        _string_list(values.get(_PROPOSAL_ID_FIELD)),
+        _string_list(values.get(_CHANGESET_ID_FIELD)),
+    )
 
 
 async def build_thread_state(

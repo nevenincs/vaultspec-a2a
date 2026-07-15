@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#react-tailwind-figma-migration'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-02-28-react-tailwind-figma-migration-adr]]'
 ---
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#react-tailwind-figma-migrati
 
 ### adr
 
-- `2026-02-28-react-tailwind-figma-migration-adr` - `react-tailwind-figma-migration` adr: `adr-018` | (**status:** `proposed`)
+- `2026-02-28-react-tailwind-figma-migration-adr` - `react-tailwind-figma-migration` adr: `adr-018` | (**status:** `superseded`)

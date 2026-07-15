@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#entry-point-layer'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-24-api-module-research]]'
   - '[[2026-03-24-cross-import-dependency-map-research]]'
@@ -58,7 +58,7 @@ Auto-generated index of all documents tagged with `#entry-point-layer`.
 
 ### adr
 
-- `2026-03-24-entry-point-decomposition-adr` - `entry-point-layer` adr: `layer-2-entry-point-decomposition` | (**status:** `implemented`)
+- `2026-03-24-entry-point-decomposition-adr` - `entry-point-layer` adr: `layer-2-entry-point-decomposition` | (**status:** `accepted`)
 
 ### audit
 

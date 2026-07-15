@@ -60,6 +60,8 @@ Adds two provider integrations (Z.ai routed through the existing Claude ACP path
 
 ## Description
 
+**Resumability state (2026-07-15 audit, updated live):** Executor-of-record P01 (Z.ai): executor-opus-5. Executor-of-record P02 (Codex): executor-opus-6. Both dispatched in parallel 2026-07-15 per owner approval; current frontier is uncommitted in-flight work on `src/vaultspec_a2a/control/config.py`, `graph/enums.py`, `providers/factory.py`, `providers/model_profiles.py`, `providers/codex_chat_model.py` (new), and both providers' test files. See `[[2026-07-15-multi-provider-execution-adr]]` Constraints for the current resolution state of each phase's flagged unknown (Codex auth: resolved; Z.ai fidelity: still open, blocked on credentials). No exec Step Records exist yet for P01/P02 — a cold resume should read the uncommitted diff (`git diff` against this commit) or, once committed, the Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P03 depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first (not yet built as of this audit).
+
 ## Steps
 
 ## Parallelization

@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#control-layer-cli-justfile-separation'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-19-control-layer-cli-justfile-separation-adr]]'
 ---

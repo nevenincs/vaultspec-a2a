@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#frontend-backend-contract'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-02-26-frontend-backend-contract-adr]]'
 ---
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#frontend-backend-contract`.
 
 ### adr
 
-- `2026-02-26-frontend-backend-contract-adr` - `frontend-backend-contract` adr: `adr-9` | (**status:** `proposed`)
+- `2026-02-26-frontend-backend-contract-adr` - `frontend-backend-contract` adr: `adr-9` | (**status:** `superseded`)

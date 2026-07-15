@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#vowel-counter'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-26-vowel-counter-adr]]'
   - '[[2026-03-26-vowel-counter-implementation-create-file-exec]]'

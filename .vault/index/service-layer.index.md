@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#service-layer'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-30-service-layer-adr]]'
   - '[[2026-03-30-service-layer-plan]]'

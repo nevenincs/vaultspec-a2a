@@ -87,14 +87,14 @@ Build src/vaultspec_a2a/authoring: loopback httpx client, envelope and tiers dec
 
 Fetch and snapshot /v1/agent-tools per run and bridge the catalog into the agent session through the protocols/mcp server, executing via the engine under the calling role's token.
 
-- [ ] `W03.P07.S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/protocols/mcp/tools/`.
+- [ ] `W03.P07.S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token. RESUMPTION STATE (2026-07-15 audit): the mechanism is BUILT and PROVEN at the protocol layer (S19 is checked; the audit's s20-deferral-ruling records the stdio bridge as operational in real headless CLI sessions - spawned, all seven catalog tools served, both registration channels, both transports). This checkbox stays open on SUBSTANCE, not code: the pinned CLI (2.1.210, adapter 0.23.1) never surfaces non-user-global MCP servers to the model (matches upstream issues 40314, 57033), so an agent never actually sees the bridged tools in production. Re-arm criterion: re-run the S20 matrix probe on each CLI/adapter release; close S18/S20 together when surfacing lands. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/authoring/, src/vaultspec_a2a/protocols/mcp/tools/`.
 - [x] `W03.P07.S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess; `src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/nodes/worker.py`.
 
 ### Phase `W03.P08` - Solo-coder end-to-end proof
 
 A vaultspec-solo-coder run produces a research document as a proposed changeset: propose, submit, human-visible in the dashboard review lane, with zero .vault/ writes anywhere in the run.
 
-- [ ] `W03.P08.S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state; `src/vaultspec_a2a/team/presets/teams/, src/vaultspec_a2a/service_tests/`.
+- [ ] `W03.P08.S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state. RESUMPTION STATE (2026-07-15 audit): blocked on the same upstream CLI tool-search surfacing gap as S18 (dashboard-observed proposal proof needs the agent to actually reach the bridged propose tool, which the pinned CLI does not currently surface). The audit ruled this open correctly, not a missed step - two named backstops: (1) re-arm and re-probe on every CLI/adapter release; (2) W05.P14 (S31) cannot pass without this proof, so the PROGRAM does not close until resolved. Evidence: `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md` (s20-deferral-ruling finding).; `src/vaultspec_a2a/team/presets/teams/, src/vaultspec_a2a/service_tests/`.
 - [x] `W03.P08.S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record; `src/vaultspec_a2a/service_tests/`.
 
 ## Wave `W04` - Actor tokens and the five-verb gateway
@@ -143,7 +143,7 @@ Ratify the supersession map through the owning ADR verbs, amend preserved record
 
 Run a multi-role team preset through the engine pass-through and verify every acceptance criterion; flag the dashboard multiagent-composition re-arm as a cross-repo event.
 
-- [ ] `W05.P14.S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/team/`.
+- [ ] `W05.P14.S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence. RESUMPTION STATE (2026-07-15 audit): HARD-BLOCKED on S20 per the audit's own ruling ("W05.P14 cannot pass without the dashboard-observed proposal proof") - do not attempt this step until S18/S20's upstream CLI surfacing gap closes. Not an independent gap; resolving S20 is the unblock.; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/team/`.
 - [x] `W05.P14.S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence; `.vault/exec/`.
 
 ## Description
@@ -173,6 +173,8 @@ approval: the parked runtime-state directory is discarded, not restored
 (S05); a live loopback dashboard engine will be available for W03 and
 later; W01 honors the S05-before-S01 sequencing caveat from
 Parallelization.
+
+**Resumability state (2026-07-15 audit):** Executor-of-record: unassigned (W01-W04 and most of W05 are committed and complete). Current frontier: W03.P08.S20 (dashboard-observed solo-coder proposal proof), hard-blocked upstream on the pinned CLI's MCP tool-search surfacing gap (issues 40314, 57033) per `.vault/audit/2026-07-15-a2a-edge-conformance-w03-review-audit.md`'s s20-deferral-ruling; W05.P14.S31 is transitively blocked on S20. A cold resume should re-run the S20 matrix probe against the current CLI/adapter release before attempting either step - do not re-derive the blocker from scratch, it is fully recorded in S18/S20/S31's own row text and the cited audit.
 
 ## Parallelization
 

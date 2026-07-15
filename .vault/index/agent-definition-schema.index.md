@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#agent-definition-schema'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-02-27-agent-definition-schema-adr]]'
 ---

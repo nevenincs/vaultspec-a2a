@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#plan-approval-interrupt'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-03-plan-approval-interrupt-adr]]'
 ---
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#plan-approval-interrupt`.
 
 ### adr
 
-- `2026-03-03-plan-approval-interrupt-adr` - `plan-approval-interrupt` adr: `adr-20` | (**status:** `revised`)
+- `2026-03-03-plan-approval-interrupt-adr` - `plan-approval-interrupt` adr: `adr-20` | (**status:** `accepted`)

@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#observability-telemetry-integration'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-02-26-observability-telemetry-integration-adr]]'
 ---

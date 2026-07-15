@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#persistent-task-queue-schema'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-03-persistent-task-queue-schema-adr]]'
 ---
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#persistent-task-queue-schema
 
 ### adr
 
-- `2026-03-03-persistent-task-queue-schema-adr` - `persistent-task-queue-schema` adr: `adr-17` | (**status:** `revised`)
+- `2026-03-03-persistent-task-queue-schema-adr` - `persistent-task-queue-schema` adr: `adr-17` | (**status:** `accepted`)

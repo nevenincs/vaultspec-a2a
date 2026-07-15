@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#phase-artifact-gates'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-03-phase-artifact-gates-adr]]'
 ---
@@ -17,4 +17,4 @@ Auto-generated index of all documents tagged with `#phase-artifact-gates`.
 
 ### adr
 
-- `2026-03-03-phase-artifact-gates-adr` - `phase-artifact-gates` adr: `adr-19` | (**status:** `implemented`)
+- `2026-03-03-phase-artifact-gates-adr` - `phase-artifact-gates` adr: `adr-19` | (**status:** `accepted`)

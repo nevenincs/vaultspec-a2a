@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#contract-validation'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-04-05-contract-validation-adr]]'
   - '[[2026-04-05-contract-validation-plan]]'
@@ -19,7 +19,7 @@ Auto-generated index of all documents tagged with `#contract-validation`.
 
 ### adr
 
-- `2026-04-05-contract-validation-adr` - `contract-validation` adr: ci contract gate with custom ws codegen | (**status:** `accepted`)
+- `2026-04-05-contract-validation-adr` - `contract-validation` adr: ci contract gate with custom ws codegen | (**status:** `superseded`)
 
 ### plan
 

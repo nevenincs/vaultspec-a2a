@@ -19,7 +19,7 @@ Auto-generated index of all documents tagged with `#dev-process-registry`.
 
 ### adr
 
-- `2026-07-15-dev-process-registry-adr` - `dev-process-registry` adr: `machine-global dev-process registry with strict port bands and lifecycle verbs` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
+- `2026-07-15-dev-process-registry-adr` - `dev-process-registry` adr: `machine-global dev-process registry with strict port bands and lifecycle verbs` | (**status:** `accepted`)
 
 ### plan
 

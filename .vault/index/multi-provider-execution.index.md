@@ -20,7 +20,7 @@ Auto-generated index of all documents tagged with `#multi-provider-execution`.
 
 ### adr
 
-- `2026-07-15-multi-provider-execution-adr` - `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
+- `2026-07-15-multi-provider-execution-adr` - `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `accepted`)
 
 ### plan
 

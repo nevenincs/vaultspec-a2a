@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#ide-mcp-setup'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-03-31-ide-mcp-server-setup-reference]]'
 ---

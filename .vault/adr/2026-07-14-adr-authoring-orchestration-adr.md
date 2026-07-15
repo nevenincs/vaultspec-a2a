@@ -47,6 +47,15 @@ Five layers, all in the graph/team/control packages:
 - **Verdict subscriber**: a control-layer consumer of the engine's `/authoring/v1/events` SSE (recovery-snapshot fallback) that correlates lifecycle events to parked threads via `authoring_proposal_ids` and issues `Command(resume=verdict)`; cursor persisted in the a2a database.
 - **Personas and team**: researcher, synthesist, adr-author, doc-reviewer TOML personas (read+web for researchers; propose/validate for writers; never request_apply), a `vaultspec-adr-research` team preset on the new topology, and the writer sentinel pattern for machine-checkable stage completion. Coder-shaped presets are left untouched but are no longer the mission surface.
 
+Refinement (2026-07-15, owner directive after the first S10 materialization): agent execution context MUST carry the vaultspec framework, not merely persona prompt fragments. The first live run produced structurally-valid but non-conformant documents (unfilled template enums, no grounding references, annotation residue) because the agents authored blind in a minimal workspace. Binding requirements for every document-authoring run:
+
+- The run workspace is FULLY PROVISIONED with the vaultspec framework before dispatch - `.vaultspec/` rules, templates, and agent personas present (vaultspec-core install/sync into the workspace), so agents can read the canonical templates and the rule corpus through their filesystem-read capability.
+- The vaultspec-core CLI is available to agents for read-only self-validation (template reading, `vault check` against draft content staged OUTSIDE `.vault/`) - the write seam stays closed; validation access is not write access.
+- Internet access is an eligibility term for researcher roles: a provider/agent runtime without live web tooling cannot ground references and is ineligible for research authoring (the OpenAI ChatOpenAI path has no tools and demonstrated exactly this failure).
+- Persona and team directives must instruct reading the phase template and rule corpus before authoring; the doc-reviewer gate enforces template conformance as a REVISION criterion, not a style suggestion.
+
+The engine-vs-vault-check strictness divergence (engine validate/apply accepted what vault check rejects) is tracked as a separate cross-repo finding; agent-side conformance is the first line regardless.
+
 ## Rationale
 
 Every load-bearing claim is verified rather than assumed: the replay rule and Send are framework-documented; the engine's verdict stream and idempotency reservation were read from engine source; the gate pattern is already committed and tested. Composing reusable primitives (fan-out, gate, subscriber) wins over a bespoke chain because the very next workload (vault curation) is the same primitives minus synthesis - the knockout criterion is reuse across the document-authoring family. Structural gates over prompt convention is the direct lesson of the audited ADR-023/024 drift.

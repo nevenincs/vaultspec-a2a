@@ -67,11 +67,17 @@ class RunStartResponse(BaseModel):
 
 
 class TopologyPosition(BaseModel):
-    """Where a run sits in its team topology (recovery snapshot, ADR R6)."""
+    """Where a run sits in its team topology (recovery snapshot, ADR R6).
+
+    Product-facing status speaks role vocabulary only (PW4): ``active_agent`` is
+    the role currently working, never an internal LangGraph node name. The raw
+    next-node projection lives in the internal recovery snapshot
+    (``thread/snapshots.py``), not this contract — see the S15 record for why
+    ``next_nodes`` was dropped from the v1 surface.
+    """
 
     team_preset: str | None = None
     active_agent: str | None = None
-    next_nodes: list[str] = Field(default_factory=list)
     pause_cause: str | None = None
 
 

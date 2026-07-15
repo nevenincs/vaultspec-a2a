@@ -141,15 +141,22 @@ def _raise_for_dispatch_failure(
 # ---------------------------------------------------------------------------
 
 
-def _active_agent(next_nodes: list[str]) -> str | None:
-    """Best-effort active agent from the checkpoint's next nodes.
+def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
+    """Active position in product ROLE vocabulary, never a node name (PW4).
 
-    Strips the ADR-020 ``mount_`` prefix so the position names the worker, not
-    its mount stage; the supervisor and gate nodes pass through unchanged.
+    Maps the checkpoint's active node to the role of the matching agent (its
+    node is named by its agent id, minus the ADR-020 ``mount_`` prefix). Internal
+    orchestration and gate nodes have no matching agent, so they surface as
+    ``None`` rather than leaking an internal LangGraph node name into the product
+    status contract; per-role ``state`` and ``pause_cause`` carry the rest.
     """
+    role_by_id = {agent.agent_id: agent.role for agent in agents}
     for node in next_nodes:
-        if node and node != "__end__":
-            return node.removeprefix("mount_")
+        if not node or node == "__end__":
+            continue
+        role = role_by_id.get(node.removeprefix("mount_"))
+        if role:
+            return role
     return None
 
 
@@ -176,8 +183,7 @@ async def run_status_endpoint(
         status=ThreadStatus(snapshot.status),
         topology=TopologyPosition(
             team_preset=team_preset,
-            active_agent=_active_agent(snapshot.next_nodes),
-            next_nodes=snapshot.next_nodes,
+            active_agent=_active_role(snapshot.next_nodes, snapshot.agents),
             pause_cause=snapshot.pause_cause,
         ),
         roles=[

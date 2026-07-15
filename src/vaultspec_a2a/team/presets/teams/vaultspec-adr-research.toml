@@ -78,7 +78,7 @@ a five-stage pipeline: Ground -> Diverge -> Synthesize -> Gate -> Decide.
 """
 
 [team.graph]
-step_timeout_seconds = 600
+step_timeout_seconds = 1800
 recursion_limit      = 50
 
 [[team.workers]]

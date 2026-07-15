@@ -92,6 +92,16 @@ _MODE_AUTONOMOUS = "autonomous"
 _DECISION_APPROVE = "approve"
 _DECISION_EDIT = "edit"
 
+# The command-envelope discriminator (engine `CommandKind`) the
+# `/v1/reviews/{approval_id}/decisions` route requires. The route is registered
+# under a SINGLE CommandKind — `Approve` (engine `api/mod.rs` RouteFixture,
+# `path_template: ".../decisions"`, `command: Some(CommandKind::Approve)`);
+# approve / reject / edit are distinguished by the `decision` field in the
+# ReviewDecisionRequest payload, NOT by the envelope command. (There is no
+# `submit_review_decision` CommandKind — that is the handler fn name, not a
+# wire command.)
+_REVIEW_DECISION_COMMAND = "approve"
+
 # The system auto-approval actor id + policy id the operation-modes machinery
 # stamps on a `SystemPolicyApprovalRecord` (engine `modes.rs`
 # `SYSTEM_AUTO_APPROVER_ID` / `MODE_POLICY_ID`). The AUTO lane asserts these
@@ -392,7 +402,7 @@ class AcceptanceHarness:
         )
         result = await ec.post_command(
             f"/v1/reviews/{approval_id}/decisions",
-            "submit_review_decision",
+            _REVIEW_DECISION_COMMAND,
             {
                 "proposal_id": proposal_id,
                 "approval_id": approval_id,
@@ -429,7 +439,7 @@ class AcceptanceHarness:
         with pytest.raises(AuthoringTransportError) as excinfo:
             await ec.post_command(
                 f"/v1/reviews/{approval_id}/decisions",
-                "submit_review_decision",
+                _REVIEW_DECISION_COMMAND,
                 {
                     "proposal_id": proposal_id,
                     "approval_id": approval_id,

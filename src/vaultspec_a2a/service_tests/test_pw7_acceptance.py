@@ -93,14 +93,18 @@ _DECISION_APPROVE = "approve"
 _DECISION_EDIT = "edit"
 
 # The command-envelope discriminator (engine `CommandKind`) the
-# `/v1/reviews/{approval_id}/decisions` route requires. The route is registered
-# under a SINGLE CommandKind — `Approve` (engine `api/mod.rs` RouteFixture,
-# `path_template: ".../decisions"`, `command: Some(CommandKind::Approve)`);
-# approve / reject / edit are distinguished by the `decision` field in the
-# ReviewDecisionRequest payload, NOT by the envelope command. (There is no
-# `submit_review_decision` CommandKind — that is the handler fn name, not a
-# wire command.)
-_REVIEW_DECISION_COMMAND = "approve"
+# `/v1/reviews/{approval_id}/decisions` route requires, keyed by the decision.
+# The envelope command must be a real CommandKind the reviewer is authorized for
+# (the `ResolvedCommand` extractor deserializes it and runs `run_authorization`
+# on it, engine `http/mod.rs:283`); the engine maps `ApprovalDecision` →
+# `CommandKind` as Approve→`approve`, Reject→`reject`, RequestChanges(edit)→
+# `edit_proposal`. There is NO `submit_review_decision` CommandKind — that is the
+# handler fn name, not a wire command (posting it fails 400 unknown-variant).
+_DECISION_COMMAND: dict[str, str] = {
+    _DECISION_APPROVE: "approve",
+    _DECISION_EDIT: "edit_proposal",
+    "reject": "reject",
+}
 
 # The system auto-approval actor id + policy id the operation-modes machinery
 # stamps on a `SystemPolicyApprovalRecord` (engine `modes.rs`
@@ -402,7 +406,7 @@ class AcceptanceHarness:
         )
         result = await ec.post_command(
             f"/v1/reviews/{approval_id}/decisions",
-            _REVIEW_DECISION_COMMAND,
+            _DECISION_COMMAND[decision],
             {
                 "proposal_id": proposal_id,
                 "approval_id": approval_id,
@@ -439,7 +443,7 @@ class AcceptanceHarness:
         with pytest.raises(AuthoringTransportError) as excinfo:
             await ec.post_command(
                 f"/v1/reviews/{approval_id}/decisions",
-                _REVIEW_DECISION_COMMAND,
+                _DECISION_COMMAND[_DECISION_APPROVE],
                 {
                     "proposal_id": proposal_id,
                     "approval_id": approval_id,

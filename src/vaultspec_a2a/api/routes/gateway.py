@@ -7,6 +7,7 @@ richer internal ``/api`` surface and these verbs call the same services beneath.
 """
 
 import logging
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -16,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
 from ...control.health import assemble_health_status
+from ...control.run_start_policy import evaluate_run_start_eligibility
 from ...control.thread_service import (
     ThreadCreationRequest,
     create_and_dispatch_thread,
@@ -71,16 +73,53 @@ async def run_start_endpoint(
     circuit_breaker: Any = Depends(get_circuit_breaker),
     worker_spawner: Any = Depends(get_worker_spawner),
 ) -> RunStartResponse:
-    """Start a run: reshaped thread-create + first message, accepting tokens."""
+    """Start a run: reshaped thread-create + first message, accepting tokens.
+
+    Unlike the internal ``/api`` surface, the v1 verb refuses before dispatch
+    rather than creating a non-running draft: an unloadable preset, a
+    document-authoring preset with no target feature, or an actor-token bundle
+    that does not cover the preset's roles all return a 4xx. A client-supplied
+    ``run_id`` makes the verb dispatch-exactly-once under retry.
+    """
     db, _aggregator, _checkpointer, worker_client = services
-    run_id = generate_thread_id()
+
+    # Client idempotency: a retry with the same stable run id returns the
+    # existing run rather than starting a second one (dispatch-exactly-once).
+    if body.run_id is not None:
+        existing = await get_thread(db, body.run_id)
+        if existing is not None:
+            return RunStartResponse(
+                run_id=existing.id,
+                status=existing.status,
+                nickname=existing.nickname,
+                eligible=True,
+            )
+    run_id = body.run_id or generate_thread_id()
+
+    # Thread the target feature onto the metadata so it reaches dispatch and the
+    # vault index; the top-level field is authoritative when both are present.
+    metadata = body.metadata
+    if body.feature_tag and metadata is not None:
+        metadata = metadata.model_copy(update={"feature_tag": body.feature_tag})
 
     try:
         ws_root, nickname, metadata_json = process_metadata(
-            body.metadata, run_id, body.team_preset
+            metadata, run_id, body.team_preset
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    team_config = _load_preset_or_refuse(body.team_preset, ws_root)
+    effective_feature = body.feature_tag or (
+        metadata.feature_tag if metadata is not None else None
+    )
+    eligibility = evaluate_run_start_eligibility(
+        team_config,
+        feature_tag=effective_feature or None,
+        actor_tokens=body.actor_tokens,
+    )
+    if not eligibility.eligible:
+        raise HTTPException(status_code=422, detail=eligibility.reason)
 
     try:
         result = await create_and_dispatch_thread(
@@ -92,7 +131,7 @@ async def run_start_endpoint(
                 team_preset=body.team_preset,
                 autonomous=body.autonomous,
                 nickname=nickname,
-                metadata=body.metadata,
+                metadata=metadata,
                 metadata_json=metadata_json,
                 workspace_root=ws_root,
                 actor_tokens=body.actor_tokens,
@@ -116,6 +155,31 @@ async def run_start_endpoint(
     return RunStartResponse(
         run_id=result.thread_id, status=result.status, nickname=result.nickname
     )
+
+
+def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
+    """Load the preset with the run's workspace context or refuse with a 422.
+
+    The v1 verb never silently drafts a run for a missing or unparseable preset:
+    a load or validation failure is a client error, returned as a 422 with a safe
+    reason rather than a non-running draft.
+    """
+    from pydantic import ValidationError
+
+    from ...team.team_config import load_team_config
+    from ...thread.errors import ConfigError, TeamConfigNotFoundError
+
+    try:
+        return load_team_config(team_preset, workspace_root=ws_root)
+    except TeamConfigNotFoundError as exc:
+        raise HTTPException(
+            status_code=422, detail=f"Unknown team preset: {team_preset!r}"
+        ) from exc
+    except (ConfigError, ValidationError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Team preset {team_preset!r} failed to load: {exc}",
+        ) from exc
 
 
 def _raise_for_dispatch_failure(

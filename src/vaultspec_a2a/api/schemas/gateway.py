@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
@@ -47,7 +47,9 @@ class RunStartRequest(BaseModel):
     dispatch path the internal thread-create flow uses — no second code path.
     """
 
-    team_preset: str = Field(max_length=64)
+    # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
+    # never creates the internal surface's non-dispatched draft.
+    team_preset: str = Field(min_length=1, max_length=64)
     # 64 KB cap bounds LLM token consumption and keeps the run-start payload safe
     # to wrap under the engine pass-through caps.
     message: str = Field(max_length=65536)
@@ -55,15 +57,37 @@ class RunStartRequest(BaseModel):
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None
     title: str | None = Field(default=None, max_length=200)
+    # Target feature tag for document-authoring runs. Bounded; the eligibility
+    # policy requires it for document-authoring presets. Falls back to
+    # metadata.feature_tag when the field is omitted.
+    feature_tag: str | None = Field(default=None, max_length=128)
+    # Client-supplied stable run/idempotency id. When present the verb is
+    # dispatch-exactly-once: a retry with the same id returns the existing run
+    # instead of starting a second. Absent, the gateway mints a server-side id.
+    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("message")
+    @classmethod
+    def _message_must_be_non_empty(cls, value: str) -> str:
+        """Reject an empty or whitespace-only prompt before dispatch."""
+        if not value.strip():
+            raise ValueError("message must not be empty")
+        return value
 
 
 class RunStartResponse(BaseModel):
-    """Acknowledge a started run."""
+    """Acknowledge a started run, with its initial semantic status."""
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: str
     status: str
     nickname: str | None = None
+    # Initial product-safe semantic status; the full phase projection is served
+    # by run-status. "starting" for a freshly dispatched run.
+    semantic_status: str = "starting"
+    # Whether the run was accepted as eligible to dispatch (always True on a 201;
+    # ineligible requests are refused with a 4xx before reaching this response).
+    eligible: bool = True
 
 
 class TopologyPosition(BaseModel):

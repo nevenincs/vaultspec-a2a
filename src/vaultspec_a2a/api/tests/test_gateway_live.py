@@ -123,6 +123,84 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_refusals_over_live_socket(
+    session_factory, checkpointer
+) -> None:
+    """The v1 run-start refuses invalid requests before dispatch (P01.S01)."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        # Empty prompt -> 422, no dispatch.
+        empty = await client.post(
+            "/v1/runs", json={"team_preset": _PRESET, "message": "   "}
+        )
+        assert empty.status_code == 422
+
+        # Unknown / unloadable preset -> 422, no silent draft.
+        unknown = await client.post(
+            "/v1/runs", json={"team_preset": "no-such-preset", "message": "go"}
+        )
+        assert unknown.status_code == 422
+
+        # Document-authoring preset without a target feature -> 422.
+        no_feature = await client.post(
+            "/v1/runs",
+            json={"team_preset": "vaultspec-adr-research", "message": "research it"},
+        )
+        assert no_feature.status_code == 422
+        assert "feature" in no_feature.json()["detail"]
+
+        # Document-authoring preset with an incomplete token bundle -> 422.
+        thin_bundle = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": "vaultspec-adr-research",
+                "message": "research it",
+                "feature_tag": "edge-feature",
+                "actor_tokens": {
+                    "tokens": {"vaultspec-researcher": "tok-r"},
+                    "engine_bearer": "bearer",
+                },
+            },
+        )
+        assert thin_bundle.status_code == 422
+        assert "token" in thin_bundle.json()["detail"]
+
+        # None of the refusals reached the worker.
+        assert worker.dispatches == []
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_client_id_is_dispatch_exactly_once(
+    session_factory, checkpointer
+) -> None:
+    """A retry with the same client run id returns the same run, dispatched once."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        payload = {
+            "team_preset": _PRESET,
+            "message": "build it",
+            "autonomous": True,
+            "run_id": "client-run-0001",
+        }
+        first = await client.post("/v1/runs", json=payload)
+        assert first.status_code == 201
+        assert first.json()["run_id"] == "client-run-0001"
+
+        second = await client.post("/v1/runs", json=payload)
+        assert second.status_code == 201
+        assert second.json()["run_id"] == "client-run-0001"
+
+        # Dispatched exactly once despite the retry.
+        assert len(worker.dispatches) == 1
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_sse_stream_delivers_versioned_event_mid_stream(
     session_factory, checkpointer
 ) -> None:

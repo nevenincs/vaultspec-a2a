@@ -9,6 +9,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-plan]]'
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-14-adr-authoring-orchestration-research]]'
+  - '[[2026-07-15-adr-authoring-orchestration-handover-reference]]'
 ---
 
 # `adr-authoring-orchestration` plan
@@ -43,10 +44,67 @@ Author the document-authoring persona set and team preset, and prove the researc
 - [x] `P04.S09` - Author the researcher, synthesist, adr-author, and doc-reviewer persona TOMLs and the vaultspec-adr-research team preset on the new topology; `src/vaultspec_a2a/team/presets/agents/, src/vaultspec_a2a/team/presets/teams/`.
 - [ ] `P04.S10` - Drive a research-to-ADR run end to end producing research and ADR proposals visible in the dashboard review lane with zero vault writes; `src/vaultspec_a2a/service_tests/`.
 
+### Phase `P05` - Production wiring (dashboard handover)
+
+Close the verified gaps from the handover reference: production DocumentProposalSubmitter, worker-lifecycle construction site, tool-binding site reconciliation, fail-closed taxonomy, and state discipline - then P04.S10 becomes executable. Every step is rag-first: lead discovery with vaultspec-rag semantic search (--type code for source, --type vault for decisions), grep only for exact-symbol confirmation.
+
+- [ ] `P05.S11` - Implement the production DocumentProposalSubmitter in the authoring package with rag-first discovery of every touched seam, conforming to the phase-gate Protocol (async call of state and phase returning the proposal id) and backed by AuthoringSession: create-or-resume session, whole-document create/populate/validate/submit, idempotency keys from thread id plus phase plus document kind plus revision cycle, denials as values, role token read from RunTokenStore at call time; `src/vaultspec_a2a/authoring/submitter.py`.
+- [ ] `P05.S12` - Prove the submitter live and mock-free against the loopback engine: session reuse across calls, idempotent replay returning the deduplicated receipt, denial handling, and revision-cycle key advancement; `src/vaultspec_a2a/authoring/tests/`.
+- [ ] `P05.S13` - Make graph_lifecycle the single construction site with rag-first discovery before editing: build the AuthoringSession factory and production submitter from run-start facts (engine origin via discovery or explicit config, run id, RunTokenStore) and pass proposal_submitter into compile_team_graph for research_adr presets, raising typed fail-closed construction errors (engine unavailable, identity missing, submitter unconfigured, role config invalid, credentials missing) surfaced as truthful run failure; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/authoring/`.
+- [ ] `P05.S14` - Reconcile the AuthoringToolBinding production construction site honestly: rag-first locate what W03 S19 actually landed versus the S20-deferred binding assembly, construct what production needs (or record precisely why the document topology needs none), and correct the W03 records only on source evidence; `src/vaultspec_a2a/worker/graph_lifecycle.py, src/vaultspec_a2a/authoring/, .vault/exec/2026-07-14-a2a-edge-conformance/`.
+- [ ] `P05.S15` - Enforce state and status discipline with live tests and a rag-first sweep for violations: LangGraph state carries only Rust-backend identifiers for authoring (session, changeset, proposal ids), never content or tokens, and product-facing status speaks role and phase vocabulary rather than internal node names; `src/vaultspec_a2a/thread/state.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/worker/tests/`.
+
 ## Description
 
-## Steps
+Build the document phase machine for research-to-ADR authoring (P01-P04,
+executed by the founding session), then complete its PRODUCTION wiring per
+the dashboard team's handover (P05, added 2026-07-15): the concrete
+DocumentProposalSubmitter, the worker-lifecycle construction site, the
+tool-binding reconciliation, and the fail-closed and state disciplines -
+after which P04.S10, the single remaining founding step, becomes
+executable as the live end-to-end proof. Requirements and verified
+reality live in the handover reference in this plan's related chain; the
+production-wiring decisions are the topology ADR's 2026-07-15 amendment
+(PW1-PW6). Working method for every step: vaultspec-rag semantic search
+leads all discovery (code and decisions); grep confirms exact symbols
+only.
+
+P05 approved for execution by the owner gates all of P05 and the P04.S10
+finale; nothing in P05 executes before that approval.
 
 ## Parallelization
 
+P05.S11+S12 (submitter and its live tests) precede S13 (construction
+site), which precedes P04.S10. S14 (binding reconciliation) and S15
+(state/status discipline) can run alongside S13 - disjoint files except
+graph_lifecycle, where S13 owns the edit and S14 reads. P04.S10 runs
+strictly last, after every P05 step, since it exercises the whole wired
+stack. One executor for S11-S13 is the sensible dispatch; S14/S15 may go
+to a second.
+
 ## Verification
+
+The dashboard handover's verification requirements apply verbatim, and
+no completion may be claimed from a stub submitter or a graph-shape-only
+test. Live evidence must cover: the bundled vaultspec-adr-research
+preset loads; the production graph compiles with all required roles;
+research content becomes a REAL engine proposal; the run parks DURABLY
+at the research gate; a REAL engine approval verdict resumes the parked
+run; ADR content becomes a second real proposal; restart and recovery
+preserve proposal correlation and resume correctly; replaying a gate
+creates no duplicate sessions, changesets, or proposals; no .vault
+filesystem mutation occurs outside the engine (watcher-observed); and
+missing engine, identity, credentials, or proposal wiring produces a
+truthful typed unavailable or failure state with no token leakage.
+Revision routing (reject and request-changes verdicts re-entering the
+writer with reviewer notes) must be exercised live at both gates.
+
+Honesty limits: all evidence runs against the loopback engine and native
+probes (Docker unavailable, standing precedent); the docker-compose
+suite runs when infrastructure allows. Testing rules are absolute: no
+fakes, mocks, stubs, monkeypatching, or skipped tests - production code
+against the live loopback authoring surface. Completing P04.S10 with
+dashboard-observed proposals also triggers the conformance program's
+gate-narrowing ruling (recorded on both ADRs) for owner ratification.
+Out of scope as separate issue domains: five-verb gateway extensions,
+model-profile selection, product discovery.

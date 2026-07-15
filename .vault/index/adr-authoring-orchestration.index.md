@@ -13,6 +13,7 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-P02-S04]]'
   - '[[2026-07-14-adr-authoring-orchestration-P02-S05]]'
   - '[[2026-07-14-adr-authoring-orchestration-P02-S06]]'
+  - '[[2026-07-14-adr-authoring-orchestration-P02-summary]]'
   - '[[2026-07-14-adr-authoring-orchestration-P03-S07]]'
   - '[[2026-07-14-adr-authoring-orchestration-P03-S08]]'
   - '[[2026-07-14-adr-authoring-orchestration-P03-summary]]'
@@ -21,6 +22,7 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-audit]]'
   - '[[2026-07-14-adr-authoring-orchestration-plan]]'
   - '[[2026-07-14-adr-authoring-orchestration-research]]'
+  - '[[2026-07-15-adr-authoring-orchestration-handover-reference]]'
 ---
 
 # `adr-authoring-orchestration` feature index
@@ -50,10 +52,15 @@ Auto-generated index of all documents tagged with `#adr-authoring-orchestration`
 - `2026-07-14-adr-authoring-orchestration-P03-S08` - Prove the subscriber live against the loopback engine: approve and reject verdicts resume a parked run correctly across a gateway restart
 - `2026-07-14-adr-authoring-orchestration-P03-summary` - `adr-authoring-orchestration` `P03` summary
 - `2026-07-14-adr-authoring-orchestration-P04-S09` - Author the researcher, synthesist, adr-author, and doc-reviewer persona TOMLs and the vaultspec-adr-research team preset on the new topology
+- `2026-07-14-adr-authoring-orchestration-P02-summary` - `adr-authoring-orchestration` `P02` summary
 
 ### plan
 
 - `2026-07-14-adr-authoring-orchestration-plan` - `adr-authoring-orchestration` plan
+
+### reference
+
+- `2026-07-15-adr-authoring-orchestration-handover-reference` - `adr-authoring-orchestration` reference: `dashboard handover requirements and verified reality for production wiring`
 
 ### research
 

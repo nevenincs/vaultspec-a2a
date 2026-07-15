@@ -57,3 +57,73 @@ Every load-bearing claim is verified rather than assumed: the replay rule and Se
 - Difficulties: Send introduces parallel-branch checkpoint semantics new to this codebase (multiple interrupts per superstep need id-keyed resume maps); subscriber correctness across gateway restarts rests on cursor persistence + recovery reconciliation; reviewer-note quality directly bounds revise-loop convergence.
 - Opens: plan-document authoring as a third phase later; per-phase tool-policy narrowing via the served catalog; retirement path for coding presets.
 - Supersession posture: this record governs document-authoring orchestration going forward; ADR-012/013 (agent schema, team composition) remain governing for config mechanics and will be amended, not superseded, when the persona set lands.
+
+## Amendment - production wiring (2026-07-15)
+
+Concretizes this record for the dashboard team's production handover
+(requirements and verified reality:
+`2026-07-15-adr-authoring-orchestration-handover-reference`). The topology
+decisions above are unchanged; this amendment decides the production
+construction layer. Rag-led grounding confirmed the seams: the gate
+consumes an injected submitter Protocol (`graph/nodes/phase_gate.py:53`),
+`compile_team_graph` already accepts `proposal_submitter`
+(`graph/compiler.py:303`), and the worker lifecycle call site
+(`worker/graph_lifecycle.py:251-263`) never passes it - the topology is
+correctly fail-closed dead code until this amendment's work lands.
+
+- **PW1 - Production submitter lives in the authoring package.** A
+  concrete `authoring/submitter.py` class implements the Protocol
+  (async call taking state and phase, returning the proposal id) backed
+  by `AuthoringSession`: create-or-resume the run's session,
+  whole-document create/populate operations, validate, submit. Every
+  mutating call derives its idempotency key from stable run-local
+  material - thread id, phase, document kind, revision cycle - never
+  timestamps; denials decode as values. The submitter reads the calling
+  role's token from `RunTokenStore` at call time and holds no token
+  itself, so restart-resumed runs re-resolve identity correctly (the
+  conformance R7 lifecycle intact).
+- **PW2 - The worker lifecycle is the single construction site.**
+  `worker/graph_lifecycle.py` builds the `AuthoringSession` factory, the
+  production submitter, and any `AuthoringToolBinding` from run-start
+  facts (engine origin via discovery or explicit config, run id, token
+  bundle) and passes `proposal_submitter=` into `compile_team_graph` for
+  `research_adr` presets. Construction with missing prerequisites fails
+  closed at build time with typed errors; a run that cannot author never
+  starts vague.
+- **PW3 - Two tool-exposure mechanisms, deliberately split.** The
+  GRAPH-SUBMITTER path (in-process `AuthoringSession` calls from gate
+  nodes) is the production mechanism for document topologies - it is
+  deterministic, replay-exact, and NOT blocked by the upstream CLI
+  MCP-surfacing limitation. The MCP BRIDGE (conformance R4) remains the
+  agent-initiated tool path for CLI-coder presets and stays behind the
+  upstream re-arm watch. Routing gate submits through the bridge is
+  rejected: a subprocess hop on a path that must be deterministic and
+  idempotent before `interrupt()`.
+- **PW4 - Fail-closed taxonomy and state discipline.** One typed error
+  family in the authoring package - engine unavailable, actor identity
+  missing, submitter unconfigured, role configuration invalid,
+  credentials missing - each actionable, surfaced as a truthful run
+  failure state, never a silent skip. LangGraph state carries ONLY
+  Rust-backend identifiers (authoring session id, changeset ids,
+  proposal ids in the existing correlation fields); no document content,
+  no tokens; product-facing status speaks role/phase vocabulary, never
+  internal node names.
+- **PW5 - Verification standard and documentation integrity.** The
+  handover's verification requirements are the plan extension's
+  Verification verbatim (no stub submitter, no graph-shape-only tests;
+  live loopback engine; park durability, verdict resume including
+  revision routing, restart correlation, replay-without-duplicates,
+  zero vault writes, truthful unavailability). The S06 record is
+  confirmed honest (structural spine, live proof deferred to P04.S10);
+  the W03 S19/S20 binding-assembly deferral is reconciled in the plan
+  rather than re-claimed. The five-verb gateway, model-profile
+  selection, and product discovery remain separate issue domains.
+- **PW6 - Effect on the conformance program's open gate.** Completing
+  P04.S10 with a dashboard-observed research and ADR proposal closes
+  the SUBSTANCE of the conformance brief's first acceptance criterion
+  (documents appear only as reviewable proposals, attributed to
+  per-role actors, zero vault writes) through the contract-blessed
+  graph-submitter mechanism. The MCP-bridge-specific solo-coder proof
+  (S20) stays open as a watch item on the upstream limitation, no
+  longer program-blocking. This ruling is recorded on the conformance
+  ADR as well and is subject to owner ratification at plan approval.

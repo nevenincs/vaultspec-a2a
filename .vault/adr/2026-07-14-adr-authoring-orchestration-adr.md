@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-07-15'
+modified: '2026-07-16'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
@@ -55,6 +55,8 @@ Refinement (2026-07-15, owner directive after the first S10 materialization): ag
 - Persona and team directives must instruct reading the phase template and rule corpus before authoring; the doc-reviewer gate enforces template conformance as a REVISION criterion, not a style suggestion.
 
 The engine-vs-vault-check strictness divergence (engine validate/apply accepted what vault check rejects) is tracked as a separate cross-repo finding; agent-side conformance is the first line regardless.
+
+Refinement (2026-07-16, S10 reject-revise materialization): the engine's CreateDocument apply-preflight path-collision gate must not block on a sibling changeset that cannot currently land. Root cause: the a2a submitter mints a per-revision changeset per phase (id `<phase>-r<N>`) for replay-safety (PW1), while the engine's reject model returns the rejected changeset to draft (non-terminal); after reject->revise, the abandoned rejected changeset lingers predicting the same create path as the approved revision, and the collision detector (which skips only terminal siblings) refuses the approved apply. Decision: the apply-time collision check treats only Approved/Applying siblings as genuine competitors for the create path; a draft/needs_review sibling cannot land without re-review and is not a competitor at apply time. Submit-time collision detection is unchanged, and the separate document-already-exists-at-path branch still catches a revived dead sibling, so the relaxation is safe. This is an engine-correctness fix (dashboard repo, authoring/conflicts) robust to any client using per-revision changesets, not an a2a workaround. Follow-up hygiene (a2a, non-blocking): the submitter should retire an abandoned revision changeset (cancel/supersede to terminal) so dead per-revision changesets do not accumulate in the engine store. Also fixed a2a-side: authoring/_envelope.extract_denial now reads a flat data.reason (eligibility denials emit fields flat under data, not nested), which had masked this denial as unknown/None.
 
 ## Rationale
 
@@ -196,3 +198,52 @@ correctly fail-closed dead code until this amendment's work lands.
   plan-2 evidence battery (its P03.S06) covers gateway behaviour and
   composes with this harness; the document-materialization loop
   assertion lives HERE.
+
+- Grounding-reference threading (refinement, 2026-07-16 acceptance).
+  The P04.S10 live lane materialized a substantively well-authored ADR
+  that nonetheless FAILED vaultspec-core conformance: `vault check all`
+  raised a BLOCKING `schema` error - "ADR has no grounding references
+  (research, reference, or audit documents)" - because the ADR frontmatter
+  carried `related: []`. Root cause, traced not hypothesized: the A2A
+  submitter's whole-document create op (`authoring/submitter.py::
+  _whole_document_op`) sets doc_type/feature/title/collision_status but
+  NO `related`, so the engine's `DirectWriteCreateParams.related`
+  defaults empty and `vault add` scaffolds an ungrounded ADR; the
+  two-step CreateDocument apply then runs `vault set-body`, which
+  PRESERVES the scaffold frontmatter byte-for-byte and STRIPS the
+  agent-authored frontmatter (engine `authoring/apply/mod.rs`), so any
+  `related` the writer put in its own frontmatter is discarded. The
+  author cannot compensate: the ADR body cited the research as
+  `2026-07-16-...-research` (today's date) while the applied research
+  doc is really dated `2026-07-15` - the writer GUESSED the stem date
+  because it has no way to know the applied research doc's create date.
+  DECISION: grounding is PIPELINE-owned by A2A, not writer-authored and
+  not engine-inferred. The ADR proposal MUST carry
+  `related: [<applied research stem>]` on its create op, resolved from
+  GROUND TRUTH - the research phase's actually-materialized canonical
+  stem - never a derived or guessed date. Chosen mechanism:
+  resolve-at-submit - at the ADR submit node the submitter queries the
+  engine document surface (`list_documents`, exposed to A2A over the
+  authoring HTTP API) for the feature's applied `research`/`reference`
+  docs and passes their stems as `related`. Considered and rejected as
+  primary: (A) thread the applied stem forward through checkpointed
+  `TeamState` captured at research-apply - rejected because the research
+  gate applies out-of-band of the worker (AUTO gate / verdict
+  subscriber), so the stem is not reliably in worker state at ADR submit,
+  and a captured-then-replayed value is more fragile than reading ground
+  truth; (B) engine auto-resolves the feature's research at ADR scaffold
+  and injects `related` - rejected as primary because grounding sequence
+  is A2A's pipeline knowledge and the engine must stay a faithful
+  applier, though retained as the fallback if the document query proves
+  unavailable to A2A. Secondary conformance requirements folded in here:
+  (i) the ADR status must be authored in the canonical H1 token form
+  `(**status:** \`accepted\`)`, not a legacy `## Status` section (the
+  engine `adr-status` check warns on the latter); (ii) the submit-node
+  conformance guard (`authoring/submitter.py::_conformance_notes`) gains
+  two checks that mirror what the engine would flag - an ADR proposal
+  with no grounding `related` and an ADR body carrying a legacy
+  `## Status` section are REFUSED to the phase revision loop BEFORE
+  proposing, so a non-conformant ADR is never materialized. Acceptance
+  bar unchanged and RE-ARMED: S10 does not close until a fresh live-lane
+  ADR passes `vault check all` with ZERO errors AND the lead's manual
+  read confirms grounded `related` and canonical status.

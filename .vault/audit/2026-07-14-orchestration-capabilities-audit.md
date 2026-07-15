@@ -70,6 +70,21 @@ graph-domain restructuring (breaking the supervisor-to-context back-edge
 or extracting the shared surface) and is successor-plan work alongside
 the execution-mode axis split and the `control/` coverage cliff above.
 
+### Legacy topologies lose their production users (appended 2026-07-15, dead-code campaign finding)
+
+After the coder-preset retirement, the `star`, `pipeline_loop`, and
+multi-node `pipeline` compiler topologies retain no production preset
+user - only mock presets and inline-constructed test configs exercise
+them. They STAY for now: the frozen edge names the graph compiler
+preserved core (dashboard D7e) and topology choice is this repo's own
+state (D5). Whether they remain preserved capability or become deletion
+candidates is a future architecture decision to be made on the coverage
+evidence the dead-code campaign audit records - a successor-plan item
+alongside the execution-mode axis, the import cycle, and the `control/`
+coverage cliff. Any removal would be an ADR-level decision (it amends
+the topology enum and the compiler's public surface), never campaign
+cleanup.
+
 ## Recommendations
 
 - **Introduce an explicit execution-mode axis** (vendor x mechanism) in the provider config model before adding any new provider: split `Provider` into vendor identity plus `execution_mode: cli|api`, thread through AgentConfig/TOML, and add `langchain_anthropic`-style direct-API branches for Claude/Gemini in the factory. This is the single highest-leverage refactor for the stated mandate.

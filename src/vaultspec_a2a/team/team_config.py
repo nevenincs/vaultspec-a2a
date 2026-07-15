@@ -39,6 +39,9 @@ _SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
 
 
 __all__ = [
+    "DEFAULT_PROFILE_DESCRIPTION",
+    "DEFAULT_PROFILE_DISPLAY_NAME",
+    "DEFAULT_PROFILE_ID",
     "AgentCapabilitiesConfig",
     "AgentConfig",
     "AgentConfigNotFoundError",
@@ -53,15 +56,28 @@ __all__ = [
     "TeamGraphConfig",
     "TeamPermissionsConfig",
     "TeamPersonaConfig",
+    "TeamProfileConfig",
+    "TeamProfileRoleConfig",
     "TopologyConfig",
     "TopologyType",
     "WorkerOverrideConfig",
     "WorkerRef",
+    "authoring_capability",
     "discover_agent_preset_ids",
     "discover_team_preset_ids",
+    "is_mock_preset",
     "load_agent_config",
     "load_team_config",
 ]
+
+# The implicit, always-present profile: the empty overlay that runs the team's
+# normal ADR-013 resolution chain with no profile layer. It is every team's
+# default profile (model-profiles ADR).
+DEFAULT_PROFILE_ID = "team-defaults"
+DEFAULT_PROFILE_DISPLAY_NAME = "Team defaults"
+DEFAULT_PROFILE_DESCRIPTION = (
+    "Use the team's normal model resolution chain with no profile overlays."
+)
 
 
 class TopologyType(StrEnum):
@@ -93,16 +109,46 @@ def discover_agent_preset_ids() -> frozenset[str]:
     return frozenset()
 
 
-def discover_team_preset_ids() -> frozenset[str]:
-    """Discover available team preset IDs by globbing the bundled TOML directory.
+def discover_team_preset_ids(workspace_root: Path | None = None) -> frozenset[str]:
+    """Discover team preset IDs from the workspace and the bundled directory.
 
-    Returns a frozenset of TOML file stems from
-    ``src/vaultspec_a2a/team/presets/teams/*.toml``.
-    If the directory does not exist or is empty, returns an empty frozenset.
+    Returns the union of TOML file stems from
+    ``{workspace_root}/.vaultspec/teams/*.toml`` (when a workspace is given and
+    the directory exists) and the bundled
+    ``src/vaultspec_a2a/team/presets/teams/*.toml``. Discovery is a superset of
+    what ``load_team_config`` can resolve, so a workspace-local preset is listed
+    even though it shadows or extends the bundled set. Returns an empty frozenset
+    when no directory exists.
     """
+    ids: set[str] = set()
+    if workspace_root is not None:
+        workspace_teams_dir = workspace_root / ".vaultspec" / "teams"
+        if workspace_teams_dir.is_dir():
+            ids.update(p.stem for p in workspace_teams_dir.glob("*.toml"))
     if _PRESET_TEAMS_DIR.is_dir():
-        return frozenset(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
-    return frozenset()
+        ids.update(p.stem for p in _PRESET_TEAMS_DIR.glob("*.toml"))
+    return frozenset(ids)
+
+
+def is_mock_preset(preset_id: str) -> bool:
+    """Return True for bundled mock/test presets the product layer excludes.
+
+    Mock presets follow the ``mock-`` id convention; the marking lets the Rust
+    product layer filter test fixtures out of user-facing preset selection.
+    """
+    return preset_id.startswith("mock-")
+
+
+def authoring_capability(topology_type: TopologyType) -> str:
+    """Return the coarse authoring capability a topology delivers.
+
+    ``document_authoring`` for the research_adr document phase machine; ``coding``
+    for the coder topologies. This is diagnostic truth for the Rust backend, not
+    product curation text.
+    """
+    if topology_type == TopologyType.RESEARCH_ADR:
+        return "document_authoring"
+    return "coding"
 
 
 # ---------------------------------------------------------------------------
@@ -227,6 +273,35 @@ class WorkerRef(BaseModel):
     model: WorkerOverrideConfig = Field(default_factory=WorkerOverrideConfig)
 
 
+class TeamProfileRoleConfig(BaseModel):
+    """Per-role assignment overlay inside a model profile (model-profiles ADR).
+
+    Keyed by worker ``agent_id`` in the profile's ``roles`` map; carries the same
+    provider/capability/fallback overlay shape as a ``[[team.workers]]`` override.
+    A field left unset falls through the ADR-013 S2.3 precedence chain unchanged,
+    so a partial overlay only redirects the fields it names.
+    """
+
+    provider: Provider | None = None
+    capability: Model | None = None
+    provider_fallback: list[Provider] = Field(default_factory=list)
+
+
+class TeamProfileConfig(BaseModel):
+    """A named whole-team model profile (model-profiles ADR).
+
+    Declared as ``[team.profiles.<id>]`` in team TOML. ``roles`` maps a worker
+    ``agent_id`` to its overlay; roles absent from the profile fall through the
+    normal precedence chain unchanged, so an empty ``roles`` map is exactly the
+    implicit ``team-defaults`` profile. A selected profile is the topmost
+    precedence layer (profile > worker override > agent TOML > team defaults).
+    """
+
+    display_name: str = ""
+    description: str = ""
+    roles: dict[str, TeamProfileRoleConfig] = Field(default_factory=dict)
+
+
 class ResearchThreadSpec(BaseModel):
     """A single research thread for the ``research_adr`` diverge stage.
 
@@ -338,6 +413,7 @@ class TeamConfig(BaseModel):
     permissions: TeamPermissionsConfig = Field(default_factory=TeamPermissionsConfig)
     persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
     graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
+    profiles: dict[str, TeamProfileConfig] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def validate_topology_order_subset(self) -> "TeamConfig":
@@ -350,6 +426,59 @@ class TeamConfig(BaseModel):
                     f"in [[team.workers]]: {sorted(worker_ids)!r}"
                 )
         return self
+
+    @model_validator(mode="after")
+    def validate_profiles(self) -> "TeamConfig":
+        """Eagerly validate profile ids and per-role overlay keys.
+
+        Raises ``ConfigError`` (not a plain ``ValueError``) so an unknown role
+        in a profile is a first-class configuration failure at load time: every
+        overlay key must name a declared ``[[team.workers]]`` agent id, profile
+        ids must be safe slugs, and the reserved ``team-defaults`` id may not
+        carry role overlays (it is the implicit empty overlay).
+        """
+        worker_ids = {w.agent_id for w in self.workers}
+        for profile_id, profile in self.profiles.items():
+            if not _SAFE_AGENT_ID_RE.match(profile_id):
+                raise ConfigError(
+                    f"Invalid profile id {profile_id!r} in team {self.id!r}: must "
+                    f"match pattern {_SAFE_AGENT_ID_RE.pattern!r}."
+                )
+            if profile_id == DEFAULT_PROFILE_ID and profile.roles:
+                raise ConfigError(
+                    f"The reserved {DEFAULT_PROFILE_ID!r} profile in team "
+                    f"{self.id!r} must not declare role overlays; it is the "
+                    "implicit empty overlay."
+                )
+            for role_key in profile.roles:
+                if role_key not in worker_ids:
+                    raise ConfigError(
+                        f"Profile {profile_id!r} in team {self.id!r} overlays "
+                        f"unknown role {role_key!r}; declared team workers are "
+                        f"{sorted(worker_ids)!r}."
+                    )
+        return self
+
+    @property
+    def default_profile_id(self) -> str:
+        """The default model profile id (always the implicit team-defaults)."""
+        return DEFAULT_PROFILE_ID
+
+    def effective_profiles(self) -> dict[str, TeamProfileConfig]:
+        """Return declared profiles plus the implicit ``team-defaults`` profile.
+
+        The implicit team-defaults profile is always present as the empty
+        overlay; a team that declares its own ``team-defaults`` block (for a
+        custom display name or description) overrides the injected default.
+        """
+        profiles: dict[str, TeamProfileConfig] = {
+            DEFAULT_PROFILE_ID: TeamProfileConfig(
+                display_name=DEFAULT_PROFILE_DISPLAY_NAME,
+                description=DEFAULT_PROFILE_DESCRIPTION,
+            )
+        }
+        profiles.update(self.profiles)
+        return profiles
 
     @classmethod
     def from_toml(cls, path: Path) -> "TeamConfig":

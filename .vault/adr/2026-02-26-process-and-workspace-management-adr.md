@@ -3,7 +3,7 @@ tags:
 - '#adr'
 - '#process-and-workspace-management'
 date: 2026-02-26
-modified: '2026-02-26'
+modified: '2026-07-15'
 related:
 - '[[2026-03-31-docs-vault-migration-research]]'
 ---

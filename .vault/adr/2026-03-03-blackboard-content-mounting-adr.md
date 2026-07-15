@@ -3,7 +3,7 @@ tags:
 - '#adr'
 - '#blackboard-content-mounting'
 date: 2026-03-03
-modified: '2026-03-03'
+modified: '2026-07-15'
 related:
 - '[[2026-02-28-thread-metadata-context-injection-adr]]'
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'

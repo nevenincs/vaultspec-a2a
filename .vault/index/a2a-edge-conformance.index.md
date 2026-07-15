@@ -51,7 +51,11 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-w01-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-w02-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-P01-S01]]'
+  - '[[2026-07-15-a2a-edge-conformance-P01-S02]]'
+  - '[[2026-07-15-a2a-edge-conformance-P01-S03]]'
   - '[[2026-07-15-a2a-edge-conformance-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-plan]]'
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w05-review-audit]]'
@@ -115,10 +119,14 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W05-P13-S30` - Rewrite README and project documentation to the headless orchestration-sibling mission, removing every UI and Google-A2A claim
 - `2026-07-14-a2a-edge-conformance-W05-P14-S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence
 - `2026-07-14-a2a-edge-conformance-W05-P14-S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence
+- `2026-07-15-a2a-edge-conformance-P01-S01` - Harden run-start: client-supplied stable run id or idempotency key with dispatch-exactly-once under retry, reject empty prompt, reject missing or unloadable preset (no silent draft on the v1 verb), require target feature for document-authoring presets, validate the token bundle covers the preset's required roles, and return initial semantic status plus eligibility
+- `2026-07-15-a2a-edge-conformance-P01-S02` - Make presets-list truthful: loadable/unloadable status with unavailable_reason, resilience to any single preset load or validation failure, required roles and authoring capability, mock/test marking, and workspace-context-aware resolution
+- `2026-07-15-a2a-edge-conformance-P01-S03` - Deepen service-state: truthful ready/degraded/unavailable status, service and API versions, gateway pid, provider and engine-authoring-backend reachability, active-run capacity, discovery freshness, and the alive versus can-accept-run versus preset-eligible distinction
 
 ### plan
 
 - `2026-07-14-a2a-edge-conformance-plan` - `a2a-edge-conformance` plan
+- `2026-07-15-a2a-edge-conformance-plan` - `a2a-edge-conformance` plan
 
 ### reference
 

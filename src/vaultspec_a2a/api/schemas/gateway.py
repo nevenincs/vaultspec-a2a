@@ -18,7 +18,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from ...context.metadata import ThreadMetadata
 from ...thread.actor_tokens import ActorTokenBundle
@@ -47,7 +47,9 @@ class RunStartRequest(BaseModel):
     dispatch path the internal thread-create flow uses — no second code path.
     """
 
-    team_preset: str = Field(max_length=64)
+    # A non-empty preset is mandatory on the v1 verb: the engine-facing contract
+    # never creates the internal surface's non-dispatched draft.
+    team_preset: str = Field(min_length=1, max_length=64)
     # 64 KB cap bounds LLM token consumption and keeps the run-start payload safe
     # to wrap under the engine pass-through caps.
     message: str = Field(max_length=65536)
@@ -55,15 +57,37 @@ class RunStartRequest(BaseModel):
     metadata: ThreadMetadata | None = None
     autonomous: bool | None = None
     title: str | None = Field(default=None, max_length=200)
+    # Target feature tag for document-authoring runs. Bounded; the eligibility
+    # policy requires it for document-authoring presets. Falls back to
+    # metadata.feature_tag when the field is omitted.
+    feature_tag: str | None = Field(default=None, max_length=128)
+    # Client-supplied stable run/idempotency id. When present the verb is
+    # dispatch-exactly-once: a retry with the same id returns the existing run
+    # instead of starting a second. Absent, the gateway mints a server-side id.
+    run_id: str | None = Field(default=None, min_length=1, max_length=128)
+
+    @field_validator("message")
+    @classmethod
+    def _message_must_be_non_empty(cls, value: str) -> str:
+        """Reject an empty or whitespace-only prompt before dispatch."""
+        if not value.strip():
+            raise ValueError("message must not be empty")
+        return value
 
 
 class RunStartResponse(BaseModel):
-    """Acknowledge a started run."""
+    """Acknowledge a started run, with its initial semantic status."""
 
     api_version: Literal["v1"] = _API_VERSION
     run_id: str
     status: str
     nickname: str | None = None
+    # Initial product-safe semantic status; the full phase projection is served
+    # by run-status. "starting" for a freshly dispatched run.
+    semantic_status: str = "starting"
+    # Whether the run was accepted as eligible to dispatch (always True on a 201;
+    # ineligible requests are refused with a 4xx before reaching this response).
+    eligible: bool = True
 
 
 class TopologyPosition(BaseModel):
@@ -102,6 +126,13 @@ class RunStatusResponse(BaseModel):
     api_version: Literal["v1"] = _API_VERSION
     run_id: str
     status: ThreadStatus
+    # Product-safe semantic authoring phase projected from topology position and
+    # gate state, so the Rust backend never interprets LangGraph node names.
+    semantic_phase: str
+    # The run's target feature tag and the Rust-backend authoring session id it
+    # produced, read from the checkpoint (None until produced / for non-authoring).
+    feature_tag: str | None = None
+    authoring_session_id: str | None = None
     topology: TopologyPosition
     roles: list[RoleState] = Field(default_factory=list)
     proposal_ids: list[str] = Field(default_factory=list)
@@ -129,13 +160,25 @@ class RunCancelResponse(BaseModel):
 
 
 class PresetSummary(BaseModel):
-    """One available team preset."""
+    """One discovered team preset and whether it is actually runnable.
+
+    A preset whose TOML is missing or invalid is still listed with
+    ``loadable=False`` and an ``unavailable_reason`` so the Rust backend sees the
+    truthful set rather than a listing that omits or crashes on it. Descriptive
+    fields are populated only when the preset loaded.
+    """
 
     id: str
-    display_name: str
-    description: str
-    topology: str
-    worker_count: int
+    loadable: bool
+    unavailable_reason: str | None = None
+    display_name: str | None = None
+    description: str | None = None
+    topology: str | None = None
+    worker_count: int | None = None
+    required_roles: list[str] = Field(default_factory=list)
+    authoring_capability: str | None = None
+    # True for bundled mock/test presets so the product layer can exclude them.
+    is_mock: bool = False
 
 
 class PresetsListResponse(BaseModel):
@@ -146,13 +189,37 @@ class PresetsListResponse(BaseModel):
 
 
 class ServiceStateResponse(BaseModel):
-    """Health/doctor rollup for the resident gateway (service-state verb)."""
+    """Backend-served readiness for the A2A service (service-state verb).
+
+    Distinguishes three truths the Rust backend must not conflate: the process is
+    ``alive`` (it answered), the service ``can_accept_run`` (dependencies are
+    ready), and - separately, via presets-list eligibility - whether a chosen
+    authoring preset is runnable. A live HTTP process is not evidence that a run
+    can start, so ``status`` is derived from real dependency probes rather than
+    hardcoded.
+    """
 
     api_version: Literal["v1"] = _API_VERSION
+    service_version: str
+    # "ready" (can accept a run), "degraded" (alive but a dependency is unready),
+    # or "unavailable" (a hard dependency such as the database is down).
     status: str
+    alive: bool = True
     ready: bool
+    can_accept_run: bool
+    gateway_pid: int
     worker_status: str | None = None
     worker_connected: bool | None = None
     circuit_breaker: str | None = None
     database_backend: str | None = None
     checkpoint_backend: str | None = None
+    database_ready: bool | None = None
+    checkpoint_ready: bool | None = None
+    worker_ready: bool | None = None
+    # Engine authoring-backend discovery freshness (non-blocking, file+heartbeat):
+    # True when a fresh valid discovery record exists, False when present but
+    # stale/malformed, None when no engine is configured for this process.
+    authoring_backend_reachable: bool | None = None
+    # Configured maximum concurrent runs this gateway admits.
+    active_run_capacity: int | None = None
+    degraded_reasons: list[str] = Field(default_factory=list)

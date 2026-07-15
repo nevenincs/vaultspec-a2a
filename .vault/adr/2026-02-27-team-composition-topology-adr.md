@@ -3,13 +3,14 @@ tags:
 - '#adr'
 - '#team-composition-topology'
 date: 2026-02-27
-modified: '2026-02-27'
+modified: '2026-07-15'
 related:
-- '[[2026-02-26-orchestration-topology-pipeline-adr]]'
-- '[[2026-02-26-approved-module-hierarchy-adr]]'
-- '[[2026-02-26-frontend-backend-contract-adr]]'
-- '[[2026-02-27-agent-definition-schema-adr]]'
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-02-26-orchestration-topology-pipeline-adr]]'
+  - '[[2026-02-26-approved-module-hierarchy-adr]]'
+  - '[[2026-02-26-frontend-backend-contract-adr]]'
+  - '[[2026-02-27-agent-definition-schema-adr]]'
+  - '[[2026-07-15-model-profiles-adr]]'
 ---
 
 # `team-composition-topology` adr: `adr-11` | (**status:** `proposed`)

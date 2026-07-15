@@ -63,7 +63,6 @@ from ..telemetry.aggregator_hook import OTelAggregatorHook
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ._utils import trace_headers
 from .internal import internal_router
-from .middleware import CacheControlMiddleware
 from .routes import register_routes
 from .websocket import ConnectionManager
 from .ws_dispatch import (
@@ -368,7 +367,6 @@ def create_app(
     )
 
     app.add_middleware(cast("Any", TelemetryMiddleware))
-    app.add_middleware(cast("Any", CacheControlMiddleware))
 
     register_routes(app)
     app.include_router(internal_router)

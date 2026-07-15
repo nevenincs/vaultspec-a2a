@@ -36,9 +36,48 @@ __all__ = [
     "assemble_health_status",
     "build_full_health",
     "build_sqlite_fallback_diagnostics",
+    "probe_engine_discovery_freshness",
 ]
 
 logger = logging.getLogger(__name__)
+
+
+def probe_engine_discovery_freshness() -> bool | None:
+    """Return engine authoring-backend discovery freshness without an HTTP probe.
+
+    Reads the engine service.json candidates (the env override then the
+    machine-global path) and classifies them by heartbeat only - never a live
+    ``/health`` call - so the service-state path stays non-blocking. Returns True
+    when a fresh, well-formed record is present, False when a record is present
+    but stale or malformed, and None when no engine discovery file is configured
+    for this process (authoring is simply not wired here).
+    """
+    import os
+    import time
+    from pathlib import Path
+
+    from ..authoring.discovery import (
+        SERVICE_JSON_ENV,
+        heartbeat_is_fresh,
+        read_service_json,
+    )
+
+    candidates: list[Path] = []
+    env_path = os.environ.get(SERVICE_JSON_ENV)
+    if env_path:
+        candidates.append(Path(env_path))
+    candidates.append(Path.home() / ".vaultspec" / "service.json")
+
+    now_ms = int(time.time() * 1000)
+    any_present = False
+    for path in candidates:
+        info = read_service_json(path)
+        if info is None:
+            continue
+        any_present = True
+        if heartbeat_is_fresh(info, now_ms) and isinstance(info.get("port"), int):
+            return True
+    return False if any_present else None
 
 
 def build_sqlite_fallback_diagnostics(

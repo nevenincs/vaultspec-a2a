@@ -24,10 +24,12 @@ from ..thread.errors import AgentConfigNotFoundError, TeamConfigNotFoundError
 if TYPE_CHECKING:
     from langgraph.graph.state import CompiledStateGraph
 
+    from ..authoring import DocumentProposalSubmitter
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator, StreamableGraph
     from .ipc import WorkerBridge
+    from .token_store import RunTokenStore
 
 __all__ = ["GraphCompilationError", "GraphLifecycleManager"]
 
@@ -60,6 +62,7 @@ class GraphLifecycleManager:
         checkpointer: Checkpointer,
         bridge: WorkerBridge,
         aggregator: EventAggregator,
+        token_store: RunTokenStore,
     ) -> None:
         from vaultspec_a2a.providers.factory import ProviderFactory
 
@@ -69,6 +72,9 @@ class GraphLifecycleManager:
         self._checkpointer = checkpointer
         self._bridge = bridge
         self._aggregator = aggregator
+        # ADR PW2: the worker lifecycle is the single site that constructs the
+        # production authoring submitter, fed the run's per-role tokens from here.
+        self._token_store = token_store
         self._provider_factory = ProviderFactory()
         # ADR R5: the worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
@@ -248,6 +254,13 @@ class GraphLifecycleManager:
                     },
                 )
 
+        # ADR PW2: document-phase topologies author through the engine; build the
+        # production submitter here, the single construction site, and fail closed
+        # at build time when the run cannot author (so it never starts vague).
+        proposal_submitter = None
+        if team_config.topology.type == "research_adr":
+            proposal_submitter = self._build_proposal_submitter()
+
         return compile_team_graph(
             team_config=team_config,
             agent_configs=agent_configs,
@@ -261,6 +274,51 @@ class GraphLifecycleManager:
             feature_tag=req.active_feature,
             task_queue_port=self._task_queue_port,
             provider_factory=self._provider_factory,
+            proposal_submitter=proposal_submitter,
+        )
+
+    def _build_proposal_submitter(self) -> DocumentProposalSubmitter:
+        """Construct the production authoring submitter for a research_adr run (PW2).
+
+        Fails closed at build time: a research_adr run whose engine origin cannot
+        be resolved never starts vaguely — the typed error propagates as a
+        ``GraphCompilationError`` and a truthful run failure. The per-role tokens
+        the submitter reads at call time come from this worker's
+        :class:`RunTokenStore`; the engine bearer and the writer document body are
+        resolved per run from the store and graph state, so the cached graph is
+        reused safely across runs. The phase specs map each document phase to the
+        graph writer node whose ``AIMessage.name`` carries the document
+        (``synthesis``/``adr_author``, the ``_RA_*`` node names in the compiler)
+        and to the role whose actor token authors it.
+        """
+        from ..authoring import (
+            DocumentProposalSubmitter,
+            EngineUnavailableError,
+            PhaseAuthoringSpec,
+            resolve_engine,
+        )
+
+        engine = resolve_engine()
+        if engine is None:
+            raise EngineUnavailableError(
+                "research_adr run requires a reachable authoring engine to submit "
+                "document proposals; none was discoverable at run start"
+            )
+        return DocumentProposalSubmitter(
+            engine_base_url=engine.base_url,
+            token_store=self._token_store,
+            phases={
+                "research": PhaseAuthoringSpec(
+                    document_role="synthesist",
+                    writer_message_name="synthesis",
+                    doc_type="research",
+                ),
+                "adr": PhaseAuthoringSpec(
+                    document_role="adr-author",
+                    writer_message_name="adr_author",
+                    doc_type="adr",
+                ),
+            },
         )
 
     # ------------------------------------------------------------------

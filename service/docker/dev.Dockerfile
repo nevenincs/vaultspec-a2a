@@ -1,5 +1,5 @@
-# Lightweight dev images for the docker compose dev workflow.
-# Two independent targets: python-base (backend dev) and node-base (vite dev).
+# Lightweight dev image for the docker compose dev workflow.
+# Single target: python-base (backend dev with hot-reload).
 
 # ── Python base: backend dev with hot-reload ─────────────────────────────────
 FROM python:3.13-slim-bookworm AS python-base
@@ -21,12 +21,3 @@ RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-editable
 
 EXPOSE 8000
-
-# ── Node base: vite dev server with HMR ──────────────────────────────────────
-FROM node:22-alpine AS node-base
-
-WORKDIR /app/src/ui
-COPY src/ui/package*.json ./
-RUN npm ci
-
-EXPOSE 5173

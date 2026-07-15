@@ -41,6 +41,14 @@ from .lifecycle import parse_sse_frame as parse_sse_frame
 from .lifecycle import verdict_from_event as verdict_from_event
 from .session import AuthoringSession as AuthoringSession
 from .session import mint_actor_token as mint_actor_token
+from .submitter import CredentialsMissingError as CredentialsMissingError
+from .submitter import DocumentProposalSubmitter as DocumentProposalSubmitter
+from .submitter import DocumentUnavailableError as DocumentUnavailableError
+from .submitter import EngineUnavailableError as EngineUnavailableError
+from .submitter import PhaseAuthoringSpec as PhaseAuthoringSpec
+from .submitter import ProposalDeniedError as ProposalDeniedError
+from .submitter import RoleConfigInvalidError as RoleConfigInvalidError
+from .submitter import SubmitterError as SubmitterError
 
 __all__ = [
     "ACTOR_TOKEN_HEADER",
@@ -59,12 +67,20 @@ __all__ = [
     "AuthoringTransportError",
     "CatalogSnapshot",
     "CommandEnvelope",
+    "CredentialsMissingError",
     "Denial",
+    "DocumentProposalSubmitter",
+    "DocumentUnavailableError",
     "EngineEndpoint",
+    "EngineUnavailableError",
     "GapSignal",
     "LifecycleEvent",
+    "PhaseAuthoringSpec",
+    "ProposalDeniedError",
+    "RoleConfigInvalidError",
     "SseFrame",
     "StreamError",
+    "SubmitterError",
     "changeset_status_verdict",
     "derive_idempotency_key",
     "execute_agent_tool",

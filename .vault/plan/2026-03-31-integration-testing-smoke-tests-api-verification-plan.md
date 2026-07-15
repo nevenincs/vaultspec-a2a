@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#integration-testing-smoke-tests-api-verification'
 date: '2026-03-31'
-modified: '2026-03-31'
+modified: '2026-07-15'
 related:
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-adr]]'
   - '[[2026-03-31-integration-testing-smoke-tests-api-verification-research]]'

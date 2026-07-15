@@ -3,7 +3,7 @@ tags:
 - '#adr'
 - '#phase-artifact-gates'
 date: 2026-03-03
-modified: '2026-03-03'
+modified: '2026-07-15'
 related:
 - '[[2026-03-03-teamstate-enrichment-sdd-blackboard-adr]]'
 - '[[2026-03-03-contextual-anchoring-graph-lifecycle-adr]]'

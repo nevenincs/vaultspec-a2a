@@ -903,3 +903,118 @@ class TestAdrResearchTeamPreset:
         assert cfg.id == "vaultspec-adr-research"
         assert cfg.topology.type == TopologyType.RESEARCH_ADR  # type: ignore[attr-defined]
         assert len(cfg.workers) == 4
+
+
+class TestModelProfiles:
+    """team.profiles schema, validation, and the implicit team-defaults profile.
+
+    Real TOML only: bundled preset plus in-memory ``model_validate`` over dicts
+    (config, not a mock).
+    """
+
+    def test_bundled_adr_research_exposes_fast_profile(self) -> None:
+        """The reference `fast` profile lowers the two high-volume roles only."""
+        cfg = load_team_config("vaultspec-adr-research")
+        assert "fast" in cfg.profiles
+        fast = cfg.profiles["fast"]
+        assert fast.display_name == "Fast"
+        assert set(fast.roles) == {"vaultspec-researcher", "vaultspec-doc-reviewer"}
+        assert fast.roles["vaultspec-researcher"].capability == Model.LOW
+        assert fast.roles["vaultspec-doc-reviewer"].capability == Model.LOW
+        # A partial overlay leaves the two authoring roles untouched (fall-through).
+        assert "vaultspec-synthesist" not in fast.roles
+        assert "vaultspec-adr-author" not in fast.roles
+
+    def test_effective_profiles_injects_implicit_team_defaults(self) -> None:
+        cfg = load_team_config("vaultspec-adr-research")
+        effective = cfg.effective_profiles()
+        assert "team-defaults" in effective
+        assert cfg.default_profile_id == "team-defaults"
+        assert effective["team-defaults"].display_name == "Team defaults"
+        assert effective["team-defaults"].roles == {}
+        # Declared profiles ride alongside the implicit default.
+        assert "fast" in effective
+
+    def _team_dict(self, profiles: dict[str, object]) -> dict[str, object]:
+        return {
+            "id": "sample-team",
+            "display_name": "Sample",
+            "topology": {"type": "star"},
+            "workers": [{"agent_id": "role_a"}, {"agent_id": "role_b"}],
+            "profiles": profiles,
+        }
+
+    def test_unknown_role_in_profile_raises_config_error(self) -> None:
+        with pytest.raises(ConfigError, match="overlays unknown role 'ghost'"):
+            TeamConfig.model_validate(
+                self._team_dict({"p": {"roles": {"ghost": {"capability": "low"}}}})
+            )
+
+    def test_reserved_team_defaults_with_roles_raises_config_error(self) -> None:
+        with pytest.raises(ConfigError, match="reserved 'team-defaults'"):
+            TeamConfig.model_validate(
+                self._team_dict(
+                    {"team-defaults": {"roles": {"role_a": {"capability": "low"}}}}
+                )
+            )
+
+    def test_declared_team_defaults_display_override_wins(self) -> None:
+        """A team may relabel team-defaults (empty overlay) in effective_profiles."""
+        cfg = TeamConfig.model_validate(
+            self._team_dict({"team-defaults": {"display_name": "House defaults"}})
+        )
+        assert cfg.effective_profiles()["team-defaults"].display_name == (
+            "House defaults"
+        )
+
+    def test_profile_can_set_provider_and_fallback(self) -> None:
+        cfg = TeamConfig.model_validate(
+            self._team_dict(
+                {
+                    "balanced": {
+                        "roles": {
+                            "role_a": {
+                                "provider": "gemini",
+                                "capability": "high",
+                                "provider_fallback": ["claude"],
+                            }
+                        }
+                    }
+                }
+            )
+        )
+        overlay = cfg.profiles["balanced"].roles["role_a"]
+        assert overlay.provider == Provider.GEMINI
+        assert overlay.capability == Model.HIGH
+        assert overlay.provider_fallback == [Provider.CLAUDE]
+
+    def test_no_profiles_still_has_implicit_default(self) -> None:
+        cfg = TeamConfig.model_validate(self._team_dict({}))
+        assert cfg.profiles == {}
+        assert list(cfg.effective_profiles()) == ["team-defaults"]
+
+    def test_workspace_team_toml_profile_loads(self, tmp_path: Path) -> None:
+        """A workspace-local team TOML with a profile loads via the config order."""
+        teams_dir = tmp_path / ".vaultspec" / "teams"
+        teams_dir.mkdir(parents=True)
+        (teams_dir / "ws-team.toml").write_text(
+            "\n".join(
+                [
+                    "[team]",
+                    'id = "ws-team"',
+                    'display_name = "WS Team"',
+                    "[team.topology]",
+                    'type = "star"',
+                    "[[team.workers]]",
+                    'agent_id = "role_a"',
+                    "[team.profiles.fast]",
+                    'display_name = "Fast"',
+                    "[team.profiles.fast.roles.role_a]",
+                    'capability = "low"',
+                ]
+            ),
+            encoding="utf-8",
+        )
+        cfg = load_team_config("ws-team", workspace_root=tmp_path)
+        assert cfg.profiles["fast"].roles["role_a"].capability == Model.LOW
+        assert "team-defaults" in cfg.effective_profiles()

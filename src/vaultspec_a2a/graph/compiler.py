@@ -164,33 +164,19 @@ def _resolve_worker_model_preferences(
 ) -> tuple[Provider, Model | None, list[Provider]]:
     """Resolve provider + capability following ADR-013 S2.3 precedence.
 
-    Priority (highest to lowest):
-    1. [[team.workers]] model.* override
-    2. agent TOML [agent.model].*
-    3. [team.defaults].*
-
-    If the primary provider fails, the provider_fallback chain is tried in
-    order (TOML-05 Scope 2).  provider_fallback is resolved with the same
-    priority as the primary provider.
+    Delegates to the shared model-profile resolver (the single source discovery,
+    launch, and compilation all consume) with no profile overlay selected, which
+    is byte-identical to the historical chain: [[team.workers]] override > agent
+    TOML [agent.model] > [team.defaults], with provider_fallback resolved at the
+    same priority. A run-selected profile becomes the topmost layer without
+    changing this call site (the frozen assignment is threaded in at run-start).
     """
-    primary_provider: Provider = (
-        worker_ref.model.provider
-        or agent_config.model.provider
-        or team_config.defaults.provider
-        or Provider.CLAUDE
+    from ..providers.model_profiles import resolve_role_assignment
+
+    assignment = resolve_role_assignment(
+        worker_ref, agent_config, team_config, profile_overlay=None
     )
-    capability: Model | None = (
-        worker_ref.model.capability
-        or agent_config.model.capability
-        or team_config.defaults.capability
-    )
-    fallback_chain: list[Provider] = (
-        worker_ref.model.provider_fallback
-        or agent_config.model.provider_fallback
-        or team_config.defaults.provider_fallback
-        or []
-    )
-    return primary_provider, capability, fallback_chain
+    return assignment.provider, assignment.capability, assignment.fallback_providers
 
 
 def _resolve_supervisor_model(

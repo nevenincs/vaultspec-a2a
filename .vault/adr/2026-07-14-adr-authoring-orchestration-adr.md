@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#adr-authoring-orchestration'
 date: '2026-07-14'
-modified: '2026-07-14'
+modified: '2026-07-15'
 related:
   - "[[2026-07-14-document-authoring-orchestration-audit]]"
   - "[[2026-07-14-a2a-edge-conformance-adr]]"

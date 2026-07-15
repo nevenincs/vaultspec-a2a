@@ -246,7 +246,6 @@ class ServiceStack:
                 "VAULTSPEC_INTERNAL_TOKEN": "vaultspec-integration-token",
                 "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
                 "VAULTSPEC_PROJECT_ROOT": str(REPO_ROOT),
-                "VAULTSPEC_UI_BUILD_DIR": str(REPO_ROOT / "src" / "ui" / "dist"),
                 "MOCK_API_BASE": self.vidaimock_url,
                 "OTEL_EXPORTER_OTLP_ENDPOINT": (
                     f"http://127.0.0.1:{self.ports['jaeger_otlp']}"

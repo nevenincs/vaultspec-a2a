@@ -92,3 +92,23 @@ agent_id = "vaultspec-adr-author"
 
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
+
+# Model profiles. `team-defaults` is implicit (the empty overlay) and is the
+# default profile; it is not declared here. `fast` drops the two high-volume
+# roles (parallel research fan-out and the inner review loop) to the low
+# capability level while the two authoring roles keep the team default (mid),
+# where document quality matters. Roles absent from a profile fall through the
+# normal precedence chain unchanged.
+[team.profiles.fast]
+display_name = "Fast"
+description  = """
+Lower-latency research and review: the researcher fan-out and the doc-reviewer
+run at the low capability level; the synthesist and adr-author keep the team
+default so authored documents retain full capability.
+"""
+
+[team.profiles.fast.roles.vaultspec-researcher]
+capability = "low"
+
+[team.profiles.fast.roles.vaultspec-doc-reviewer]
+capability = "low"

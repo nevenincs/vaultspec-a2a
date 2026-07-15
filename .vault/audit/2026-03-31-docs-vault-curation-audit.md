@@ -3,7 +3,7 @@ tags:
   - "#audit"
   - "#docs-vault-migration"
 date: 2026-03-31
-modified: '2026-03-31'
+modified: '2026-07-15'
 related:
   - "[[2026-03-31-docs-vault-migration-research]]"
   - "[[2026-03-31-docs-vault-authority-retention-adr]]"

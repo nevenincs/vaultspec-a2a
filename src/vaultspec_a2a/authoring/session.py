@@ -116,6 +116,22 @@ class AuthoringSession:
         self._seq += 1
         return key
 
+    def _resolve_key(self, command: str, explicit: str | None) -> str:
+        """Use an explicit run-local idempotency key when given, else the sequence.
+
+        An explicit key lets a caller anchor idempotency in DURABLE material
+        (e.g. run id + phase + revision) so a restarted worker that rebuilds the
+        session reproduces byte-identical keys — the engine dedupes and no second
+        session, changeset, or proposal is created. When omitted, the session
+        falls back to its per-command sequence (the in-dispatch replay model).
+        The advancing sequence is preserved either way so mixed explicit/implicit
+        use never collides.
+        """
+        self._seq += 1
+        if explicit is not None:
+            return validate_id(explicit, field="idempotency_key")
+        return derive_idempotency_key(self._run_id, command, str(self._seq - 1))
+
     def _record_changeset(self, changeset_id: str) -> None:
         if changeset_id not in self._changeset_ids:
             self._changeset_ids.append(changeset_id)
@@ -125,18 +141,20 @@ class AuthoringSession:
     # ------------------------------------------------------------------
 
     async def create_session(
-        self, *, scope: str, title: str
+        self, *, scope: str, title: str, idempotency_key: str | None = None
     ) -> AuthoringResponse | Denial:
         """Open the authoring session for this run (``create_session``).
 
         The engine generates the ``session_id`` and returns it in the receipt
         (``data.session_id``); the payload carries only ``scope`` and ``title``.
+        A stable ``idempotency_key`` makes this a create-or-resume: a repeat call
+        for the same run returns the same session (the engine dedupes).
         """
         result = await self._client.post_command(
             "/v1/sessions",
             command="create_session",
             payload={"scope": scope, "title": title},
-            idempotency_key=self._next_key("create_session"),
+            idempotency_key=self._resolve_key("create_session", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
             session_id = result.data.get("session_id")
@@ -145,7 +163,11 @@ class AuthoringSession:
         return result
 
     async def start_turn(
-        self, *, prompt: str, summary: str | None = None
+        self,
+        *,
+        prompt: str,
+        summary: str | None = None,
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Start a prompt turn within the session (``start_prompt_turn``)."""
         if self._session_id is None:
@@ -157,7 +179,7 @@ class AuthoringSession:
             f"/v1/sessions/{self._session_id}/turns",
             command="start_prompt_turn",
             payload=payload,
-            idempotency_key=self._next_key("start_prompt_turn"),
+            idempotency_key=self._resolve_key("start_prompt_turn", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
             run_id = result.data.get("run_id")
@@ -175,6 +197,7 @@ class AuthoringSession:
         changeset_id: str,
         summary: str,
         operations: list[dict[str, Any]],
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Create a proposal changeset (``create_proposal``)."""
         if self._session_id is None:
@@ -189,7 +212,7 @@ class AuthoringSession:
                 "summary": summary,
                 "operations": operations,
             },
-            idempotency_key=self._next_key("create_proposal"),
+            idempotency_key=self._resolve_key("create_proposal", idempotency_key),
         )
         self._record_changeset(changeset_id)
         return result
@@ -201,10 +224,12 @@ class AuthoringSession:
         expected_revision: str,
         summary: str,
         operations: list[dict[str, Any]],
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Append operations to an existing draft (``append_draft``)."""
         return await self._draft_mutation(
-            "append", changeset_id, expected_revision, summary, operations
+            "append", changeset_id, expected_revision, summary, operations,
+            idempotency_key,
         )
 
     async def replace_draft(
@@ -214,10 +239,12 @@ class AuthoringSession:
         expected_revision: str,
         summary: str,
         operations: list[dict[str, Any]],
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Replace a draft's operations (``replace_draft``)."""
         return await self._draft_mutation(
-            "replace", changeset_id, expected_revision, summary, operations
+            "replace", changeset_id, expected_revision, summary, operations,
+            idempotency_key,
         )
 
     async def _draft_mutation(
@@ -227,6 +254,7 @@ class AuthoringSession:
         expected_revision: str,
         summary: str,
         operations: list[dict[str, Any]],
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         validate_id(changeset_id, field="changeset_id")
         validate_id(expected_revision, field="expected_revision")
@@ -240,7 +268,7 @@ class AuthoringSession:
                 "summary": summary,
                 "operations": operations,
             },
-            idempotency_key=self._next_key(command),
+            idempotency_key=self._resolve_key(command, idempotency_key),
         )
 
     async def submit(
@@ -249,6 +277,7 @@ class AuthoringSession:
         changeset_id: str,
         expected_revision: str,
         summary: str,
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Submit a proposal into human review (``submit_for_review``).
 
@@ -263,7 +292,7 @@ class AuthoringSession:
             f"/v1/proposals/{changeset_id}/submit",
             command="submit_for_review",
             payload={"expected_revision": expected_revision, "summary": summary},
-            idempotency_key=self._next_key("submit_for_review"),
+            idempotency_key=self._resolve_key("submit_for_review", idempotency_key),
         )
         if isinstance(result, AuthoringResponse) and isinstance(result.data, dict):
             proposal_id = result.data.get("proposal_id")
@@ -277,6 +306,7 @@ class AuthoringSession:
         changeset_id: str,
         expected_revision: str,
         summary: str,
+        idempotency_key: str | None = None,
     ) -> AuthoringResponse | Denial:
         """Rebase a proposal onto the latest base revision (``rebase``)."""
         validate_id(changeset_id, field="changeset_id")
@@ -289,7 +319,7 @@ class AuthoringSession:
                 "expected_revision": expected_revision,
                 "summary": summary,
             },
-            idempotency_key=self._next_key("rebase"),
+            idempotency_key=self._resolve_key("rebase", idempotency_key),
         )
 
     # ------------------------------------------------------------------

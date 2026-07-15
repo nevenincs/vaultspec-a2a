@@ -57,13 +57,6 @@ _DECISION_TO_VERDICT: dict[str, str] = {
 # not recoverable from a status snapshot - only from the live decision event.
 _STATUS_TO_VERDICT: dict[str, str] = {
     "approved": VERDICT_APPROVED,
-    # An AUTO gate resolves approved AND materializes in one synchronous step, so
-    # a still-parked run's proposal is observed terminal as `applied`, never as
-    # the transient `approved`. `applied` implies the gate was approved (a
-    # changeset cannot apply unresolved), so recovery correlates it to an approved
-    # verdict - resuming ONLY still-parked runs, so it is idempotent for a run that
-    # already advanced past its gate.
-    "applied": VERDICT_APPROVED,
     "rejected": VERDICT_REJECTED,
 }
 
@@ -225,11 +218,7 @@ def verdict_from_event(event: LifecycleEvent) -> tuple[str, str | None] | None:
 def changeset_status_verdict(status: str) -> str | None:
     """Map a terminal changeset status to a verdict for recovery catch-up.
 
-    ``approved`` and ``applied`` both map to an approved verdict (an ``applied``
-    changeset was necessarily approved - the AUTO gate resolves-and-applies in one
-    step, so a still-parked run is observed terminal as ``applied``); ``rejected``
-    maps to a rejected verdict. Returns ``None`` for non-terminal or non-verdict
-    statuses (draft, generating, needs_review, ...), which carry no reviewer
-    decision to resume on.
+    Returns ``None`` for non-terminal or non-verdict statuses (draft, generating,
+    needs_review, applied, ...), which carry no reviewer decision to resume on.
     """
     return _STATUS_TO_VERDICT.get(status)

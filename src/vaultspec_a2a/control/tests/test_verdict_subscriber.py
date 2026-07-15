@@ -30,6 +30,7 @@ from vaultspec_a2a.authoring import AuthoringClient, LifecycleEvent, StreamError
 from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
 from vaultspec_a2a.control.verdict_subscriber import (
     VerdictSubscriber,
+    _gate_resume_verdict,
     _iter_recovery_proposals,
     _recovery_high_water,
     _StreamInterruptedError,
@@ -88,6 +89,7 @@ async def _seed_parked_thread(
     thread_id: str,
     proposal_ids: list[str],
     changeset_ids: list[str],
+    gate_pending: str | None = None,
 ) -> None:
     """Create an INPUT_REQUIRED thread with a checkpoint carrying authoring ids."""
     await checkpointer.setup()
@@ -95,6 +97,8 @@ async def _seed_parked_thread(
     checkpoint["id"] = f"cp-{thread_id}"
     checkpoint["channel_values"]["authoring_proposal_ids"] = proposal_ids
     checkpoint["channel_values"]["authoring_changeset_ids"] = changeset_ids
+    if gate_pending is not None:
+        checkpoint["channel_values"]["gate_pending_proposal_id"] = gate_pending
     await checkpointer.aput(
         {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
         checkpoint,
@@ -537,6 +541,50 @@ async def test_reconcile_recovery_terminal_verdict_dispatches_without_crash(
         thread = await get_thread(session, "thread-recon-2")
         assert thread is not None
         assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+
+
+def test_gate_resume_verdict_maps_applied_as_approved() -> None:
+    from vaultspec_a2a.authoring import VERDICT_APPROVED, VERDICT_REJECTED
+
+    # An AUTO gate resolves-and-applies in one step, so a still-parked run's own
+    # proposal reads `applied`; it (and the transient `approved`) resume approved.
+    assert _gate_resume_verdict("applied") == VERDICT_APPROVED
+    assert _gate_resume_verdict("approved") == VERDICT_APPROVED
+    assert _gate_resume_verdict("rejected") == VERDICT_REJECTED
+    # A gate still awaiting its verdict carries no decision.
+    assert _gate_resume_verdict("needs_review") is None
+    assert _gate_resume_verdict("draft") is None
+
+
+@pytest.mark.asyncio
+async def test_pending_gate_proposal_is_the_current_gate_not_a_stale_one(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """The reconcile keys on the CURRENT gate proposal, never a stale earlier one.
+
+    A run accumulates its authoring ids across gates: at the ADR gate its
+    authoring_proposal_ids still lists the (applied) research proposal. Correlating
+    by any accumulated id would resume the ADR gate on the research verdict and
+    complete the run with the ADR unreviewed. The reconcile instead reads
+    ``gate_pending_proposal_id`` - the ONE proposal the run is awaiting - so it
+    resolves to the ADR proposal, not the stale research one.
+    """
+    checkpoints = tmp_path / "cp-current-gate.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(base_url="http://127.0.0.1:1") as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id="thread-adr-gate",
+            proposal_ids=["proposal:research", "proposal:adr"],
+            changeset_ids=["cs:research", "cs:adr"],
+            gate_pending="proposal:adr",
+        )
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        pending = await subscriber._thread_pending_gate_proposal("thread-adr-gate")
+        assert pending == "proposal:adr"
 
 
 @pytest.mark.asyncio

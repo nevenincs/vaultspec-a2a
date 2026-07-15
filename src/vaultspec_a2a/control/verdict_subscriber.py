@@ -30,6 +30,8 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from ..authoring import (
+    VERDICT_APPROVED,
+    VERDICT_REJECTED,
     AuthoringClient,
     GapSignal,
     LifecycleEvent,
@@ -70,10 +72,33 @@ logger = logging.getLogger(__name__)
 # TeamState reference fields that carry the engine ids a run produced.
 _STATE_ID_FIELDS = ("authoring_proposal_ids", "authoring_changeset_ids")
 
+# The TeamState field carrying the proposal id of the gate a run is CURRENTLY
+# parked at (committed by the submit node before the gate interrupt).
+_GATE_PENDING_PROPOSAL_FIELD = "gate_pending_proposal_id"
+
 # How often the steady-state loop re-checks still-parked runs against terminal-
 # verdict proposals (the AUTO submit-time race recovery). Bounded so a legitimately
 # parked HUMAN gate does not fetch a recovery snapshot every poll cycle.
 _PARKED_RECONCILE_INTERVAL_SECONDS = 10.0
+
+
+def _gate_resume_verdict(status: str) -> str | None:
+    """The verdict to resume a run parked at a gate whose OWN proposal reached
+    ``status``.
+
+    ``applied``/``approved`` resume the gate as approved (a changeset cannot apply
+    unresolved; an AUTO gate resolves-and-applies in one synchronous step, so a
+    still-parked run's proposal is observed terminal as ``applied``), ``rejected``
+    resumes as rejected. A non-terminal status (``needs_review``/``draft``/...)
+    carries no decision yet. This is the parked-run reconcile's LOCAL mapping - it
+    admits ``applied`` where the shared `changeset_status_verdict` (gap path) does
+    not, so the gap path's narrower semantics are unchanged.
+    """
+    if status in ("applied", "approved"):
+        return VERDICT_APPROVED
+    if status == "rejected":
+        return VERDICT_REJECTED
+    return None
 
 
 class VerdictSubscriber:
@@ -166,14 +191,22 @@ class VerdictSubscriber:
         and advance the forward-only cursor past them - BEFORE the run finishes the
         submit-node -> gate-node transition and becomes ``INPUT_REQUIRED``. The
         per-frame `_process_event` correlation then finds no parked thread and the
-        verdict is lost. This steady-state sweep re-checks the CURRENT terminal-
-        verdict proposals against still-parked runs and resumes the matches - the
-        same reconciliation `_handle_gap` runs, but on the normal idle path so no
-        stream gap is required. Idempotent and cheap: it no-ops when nothing is
-        parked, is throttled to :data:`_PARKED_RECONCILE_INTERVAL_SECONDS`, and
-        `_reconcile_recovery` resumes ONLY proposals in a terminal verdict status
-        (a run still awaiting a human verdict has a non-terminal proposal and is
-        skipped), so a legitimately parked HUMAN gate is never disturbed.
+        verdict is lost. This steady-state sweep resumes each still-parked run on
+        the terminal verdict of the gate it is CURRENTLY parked at.
+
+        GATE-PRECISE by construction: a run accumulates its authoring ids across
+        gates, so correlating by ANY id (as the per-event/gap path does) would let a
+        LATER gate be resumed by an EARLIER gate's already-terminal verdict - e.g.
+        the ADR gate spuriously resumed by the applied research verdict, completing
+        the run with the ADR unreviewed. So this path keys on the run's
+        ``gate_pending_proposal_id`` (the ONE proposal it is awaiting a verdict for)
+        and resumes only when THAT proposal is terminal. ``applied`` counts as
+        approved HERE (a changeset cannot apply unresolved; an AUTO gate resolves-
+        and-applies in one step, so a still-parked run's proposal reads ``applied``,
+        not the transient ``approved``) - handled locally so the shared
+        `changeset_status_verdict`/gap path keeps its narrower semantics. Idempotent
+        (only INPUT_REQUIRED runs), throttled, and a run still awaiting a human
+        verdict has a non-terminal current proposal and is never disturbed.
         """
         now = time.monotonic()
         if now - self._last_parked_reconcile < _PARKED_RECONCILE_INTERVAL_SECONDS:
@@ -197,7 +230,55 @@ class VerdictSubscriber:
         except Exception:
             logger.debug("Parked-run reconcile snapshot fetch failed", exc_info=True)
             return
-        await self._reconcile_recovery(snapshot.data)
+        # Map every terminal-verdict proposal id (proposal + changeset) to its gate
+        # verdict, so a run can be matched by its CURRENT gate proposal alone.
+        verdict_by_id: dict[str, str] = {}
+        for proposal in _iter_recovery_proposals(snapshot.data):
+            verdict = _gate_resume_verdict(proposal["status"])
+            if verdict is None:
+                continue
+            for pid in proposal["ids"]:
+                verdict_by_id.setdefault(pid, verdict)
+        if not verdict_by_id:
+            return
+        for thread in parked:
+            pending = await self._thread_pending_gate_proposal(thread.id)
+            if pending is None:
+                continue
+            verdict = verdict_by_id.get(pending)
+            if verdict is not None:
+                await self._resume_with_verdict(thread.id, verdict, None)
+
+    async def _thread_pending_gate_proposal(self, thread_id: str) -> str | None:
+        """The proposal id of the gate a run is CURRENTLY parked at.
+
+        Read from the latest checkpoint's ``gate_pending_proposal_id`` (committed by
+        the submit node before the gate parks). ``None`` when unreadable or absent -
+        the run is not parked at a document gate, so the parked-run reconcile skips
+        it rather than correlating a stale earlier gate's proposal.
+        """
+        config: RunnableConfig = {"configurable": {"thread_id": thread_id}}
+        try:
+            checkpoint_tuple = await asyncio.wait_for(
+                self._checkpointer.aget_tuple(config),
+                timeout=self._checkpoint_timeout,
+            )
+        except TimeoutError:
+            logger.warning("Checkpoint read timed out for thread %s", thread_id)
+            return None
+        except Exception:
+            logger.warning(
+                "Checkpoint read failed for thread %s", thread_id, exc_info=True
+            )
+            return None
+        if checkpoint_tuple is None:
+            return None
+        checkpoint = getattr(checkpoint_tuple, "checkpoint", None)
+        values: dict[str, Any] = (
+            checkpoint.get("channel_values", {}) if isinstance(checkpoint, dict) else {}
+        )
+        pending = values.get(_GATE_PENDING_PROPOSAL_FIELD)
+        return pending if isinstance(pending, str) and pending else None
 
     # ------------------------------------------------------------------
     # Page consumption

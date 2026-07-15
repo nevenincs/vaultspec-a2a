@@ -257,7 +257,6 @@ _dev-code-check-lint:
 _dev-code-check-type:
     uv run ty check
 
-# Run frontend type/lint checks
 # Run all code quality checks: lint + type
 _dev-code-check-all:
     just _dev-code-check-lint

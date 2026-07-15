@@ -73,7 +73,7 @@ class TestCreateThread:
                 "/api/threads",
                 json={
                     "initial_message": "Hello",
-                    "team_preset": "vaultspec-structured-coder",
+                    "team_preset": "vaultspec-solo-coder",
                 },
             )
         assert resp.status_code == 201
@@ -84,7 +84,7 @@ class TestCreateThread:
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
         assert dispatch["thread_id"] == thread_id
-        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["team_preset"] == "vaultspec-solo-coder"
         assert dispatch["content"] == "Hello"
 
     def test_dispatch_includes_internal_token_when_configured(
@@ -100,7 +100,7 @@ class TestCreateThread:
                     "/api/threads",
                     json={
                         "initial_message": "Hello",
-                        "team_preset": "vaultspec-structured-coder",
+                        "team_preset": "vaultspec-solo-coder",
                     },
                 )
             assert resp.status_code == 201
@@ -1428,7 +1428,7 @@ class TestSendMessage:
                 "/api/threads",
                 json={
                     "initial_message": "Hello",
-                    "team_preset": "vaultspec-structured-coder",
+                    "team_preset": "vaultspec-solo-coder",
                 },
             )
             assert create_resp.status_code == 201
@@ -1444,7 +1444,7 @@ class TestSendMessage:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["team_preset"] == "vaultspec-solo-coder"
 
     def test_content_length_limit(self, session_factory, checkpointer) -> None:
         """content exceeding 64KB is rejected with 422."""
@@ -1546,7 +1546,7 @@ class TestListTeamPresets:
         assert "presets" in data
         preset_ids = [p["id"] for p in data["presets"]]
         # At minimum the bundled pipeline preset should be present
-        assert "vaultspec-structured-coder" in preset_ids
+        assert "vaultspec-solo-coder" in preset_ids
 
     def test_preset_has_required_fields(self, session_factory, checkpointer) -> None:
         """Each preset has id, display_name, description, topology, worker_count."""
@@ -1962,7 +1962,7 @@ class TestPermissionRespond:
                 "/api/threads",
                 json={
                     "initial_message": "Hello",
-                    "team_preset": "vaultspec-structured-coder",
+                    "team_preset": "vaultspec-solo-coder",
                 },
             )
             assert create_resp.status_code == 201
@@ -1986,7 +1986,7 @@ class TestPermissionRespond:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "resume"
-        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["team_preset"] == "vaultspec-solo-coder"
 
     def test_responds_without_thread_id_returns_not_accepted(
         self, session_factory, checkpointer
@@ -2843,7 +2843,7 @@ class TestCreateThreadAutonomous:
                 "/api/threads",
                 json={
                     "initial_message": "Run autonomously",
-                    "team_preset": "vaultspec-structured-coder",
+                    "team_preset": "vaultspec-solo-coder",
                     "autonomous": True,
                 },
             )
@@ -2853,7 +2853,7 @@ class TestCreateThreadAutonomous:
         assert len(worker.dispatches) == 1
         dispatch = worker.dispatches[0]
         assert dispatch["action"] == "ingest"
-        assert dispatch["team_preset"] == "vaultspec-structured-coder"
+        assert dispatch["team_preset"] == "vaultspec-solo-coder"
         assert dispatch["autonomous"] is True
 
     def test_create_thread_autonomous_inherits_team_auto_approve(

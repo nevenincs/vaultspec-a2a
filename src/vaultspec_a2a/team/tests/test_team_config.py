@@ -53,7 +53,6 @@ _ALL_AGENT_IDS = [
 ]
 _ALL_TEAM_IDS = [
     "vaultspec-adaptive-coder",
-    "vaultspec-structured-coder",
     "vaultspec-solo-coder",
 ]
 
@@ -323,16 +322,6 @@ class TestTeamConfigFromToml:
         """vaultspec-adaptive-coder uses star topology."""
         cfg = load_team_config("vaultspec-adaptive-coder")
         assert cfg.topology.type == TopologyType.STAR
-
-    def test_coding_pipeline_order(self) -> None:
-        """vaultspec-structured-coder has planner -> coder -> reviewer order."""
-        cfg = load_team_config("vaultspec-structured-coder")
-        assert cfg.topology.type == TopologyType.PIPELINE
-        assert cfg.topology.order == [
-            "vaultspec-planner",
-            "vaultspec-coder",
-            "vaultspec-reviewer",
-        ]
 
     def test_solo_coder_single_worker(self) -> None:
         """vaultspec-solo-coder has exactly one worker: the coder."""

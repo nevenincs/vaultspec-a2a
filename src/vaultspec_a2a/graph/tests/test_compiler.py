@@ -67,6 +67,15 @@ def _make_team(
     )
 
 
+def _pipeline_team() -> TeamConfig:
+    """A standard three-role pipeline team (planner -> coder -> reviewer)."""
+    roles = ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
+    return _make_team(
+        topology=TopologyConfig(type=TopologyType.PIPELINE, order=roles),
+        worker_ids=roles,
+    )
+
+
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
     (
@@ -74,12 +83,6 @@ _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
         "star",
         {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
         True,
-    ),
-    (
-        "vaultspec-structured-coder",
-        "pipeline",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        False,
     ),
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
 ]
@@ -181,7 +184,7 @@ async def test_compile_interrupt_before_always_empty(
     autonomous: bool,
 ) -> None:
     """interrupt_before is [] in both supervised and autonomous modes."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(
@@ -210,7 +213,7 @@ async def test_compile_unknown_topology_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """An unknown topology type raises ValueError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     bad_topology = team.topology.model_copy(update={"type": "unknown_topology"})
@@ -288,7 +291,7 @@ async def test_compile_pipeline_missing_agent_config_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """Referencing an agent_id not in agent_configs raises ConfigError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {
         w.agent_id: load_agent_config(w.agent_id)
         for w in team.workers
@@ -309,7 +312,7 @@ async def test_compile_pipeline_empty_order_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """Empty pipeline_order raises ConfigError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     bad_topology = team.topology.model_copy(update={"order": []})
     bad_team = team.model_copy(update={"topology": bad_topology})
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}

@@ -53,6 +53,7 @@ from vaultspec_a2a.authoring import (
     AuthoringClient,
     AuthoringResponse,
     AuthoringSession,
+    EngineEndpoint,
     LifecycleEvent,
     mint_actor_token,
     resolve_engine,
@@ -61,9 +62,15 @@ from vaultspec_a2a.authoring import (
 from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
 from vaultspec_a2a.control.verdict_subscriber import VerdictSubscriber
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
-from vaultspec_a2a.database import create_thread, update_thread_status
+from vaultspec_a2a.database import (
+    create_thread,
+    get_permission_request,
+    get_thread,
+    record_permission_request,
+    update_thread_status,
+)
 from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import ThreadStatus
+from vaultspec_a2a.thread.enums import PermissionRequestStatus, ThreadStatus
 
 
 @pytest.fixture(scope="module")
@@ -374,5 +381,181 @@ async def test_live_verdict_round_trip_parks_and_resumes(
             await subscriber._process_event(frame)
 
         assert set(matched) == {"approved", "rejected", "request_changes"}
+
+    await db_engine.dispose()
+
+
+async def _seed_parked_gate(
+    session_factory: async_sessionmaker[AsyncSession],
+    checkpointer: AsyncSqliteSaver,
+    *,
+    thread_id: str,
+    proposal_id: str,
+    changeset_id: str,
+) -> None:
+    """Seed an INPUT_REQUIRED run parked at ``proposal_id``'s gate (with its row).
+
+    Mirrors what the phase submit node commits before the gate parks:
+    ``gate_pending_proposal_id`` is the ONE proposal the run awaits a verdict for,
+    and a durable ``document_approval_request`` permission row records the pause.
+    """
+    checkpoint = empty_checkpoint()
+    checkpoint["id"] = f"cp-{thread_id}"
+    checkpoint["channel_values"]["authoring_proposal_ids"] = [proposal_id]
+    checkpoint["channel_values"]["authoring_changeset_ids"] = [changeset_id]
+    checkpoint["channel_values"]["gate_pending_proposal_id"] = proposal_id
+    await checkpointer.aput(
+        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        checkpoint,
+        {"source": "loop", "step": 1, "parents": {}},
+        {},
+    )
+    async with session_factory() as session:
+        await create_thread(session, thread_id=thread_id)
+        await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
+        await record_permission_request(
+            session,
+            request_id=f"{thread_id}:adr-gate",
+            thread_id=thread_id,
+            pause_reason_type="document_approval_request",
+            description="Approve the ADR document",
+            allowed_options=[
+                {"option_id": "approve", "name": "Approve", "kind": "allow_once"}
+            ],
+        )
+        await session.commit()
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_live_missed_reject_is_recovered_by_parked_reconcile(
+    client: AuthoringClient, engine: tuple[str, str], tmp_path
+) -> None:
+    """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
+
+    The P04.S10 stall reproduced end to end with no mocks: a real proposal is
+    submitted and a human ``edit`` (request_changes) decision is applied, which
+    returns the changeset to ``draft`` - so the changeset status carries no verdict
+    and only the resolved approval record holds ``decision=request_changes``. The
+    reject event is NEVER fed through the per-event path (modelling the submit-time
+    race that consumed it before the run became INPUT_REQUIRED). The steady-state
+    parked-run reconcile must then read the approval decision off the real engine
+    recovery snapshot, correlate it to the parked run by its
+    ``gate_pending_proposal_id``, and re-dispatch a ``resume`` carrying
+    ``verdict=request_changes`` to the worker - routing the run back into its
+    revision loop instead of stalling forever.
+
+    The worker is a REAL loopback Starlette app (real ASGI over httpx, no double)
+    that records the dispatch and returns success, so the resume lands: the answered
+    gate's durable row is resolved and the thread returns to RUNNING.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    base_url, bearer = engine
+
+    # --- engine side: agent proposes, human rejects via edit (request_changes) ---
+    run_id = f"mr-{uuid.uuid4().hex[:8]}"
+    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
+    assert isinstance(minted, AuthoringResponse)
+    client._actor_token = minted.data["raw_token"]
+
+    session = AuthoringSession(client, run_id)
+    await session.create_session(scope="repo", title=run_id)
+    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
+    assert isinstance(reviewer, AuthoringResponse)
+    reviewer_token = reviewer.data["raw_token"]
+
+    info = await _submit_proposal(session, run_id, "adr")
+    await _decide(
+        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
+    )
+
+    # The reject leaves the changeset non-terminal (draft) with a resolved,
+    # non-stale approval decision - the exact recovery signal the reconcile reads.
+    snapshot = await client.recovery_snapshot(last_seq=0)
+    assert isinstance(snapshot.data, dict)
+    proposals = snapshot.data["snapshot"]["proposals"]["items"]
+    mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
+    assert mine, "submitted changeset absent from the recovery snapshot"
+    rejected = mine[0]
+    assert rejected["status"] == "draft"
+    assert rejected["approval"]["decision"] == "request_changes"
+    assert rejected["approval"]["stale"] is False
+
+    # --- a2a side: seed the parked run, NEVER processing the reject event ---
+    db_file = tmp_path / "mr.db"
+    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    checkpoints = tmp_path / "mr-cp.db"
+    thread_id = f"thread-{run_id}"
+
+    recorded: list[dict[str, Any]] = []
+
+    async def _accept_dispatch(request: Any) -> JSONResponse:
+        recorded.append(await request.json())
+        return JSONResponse({"status": "dispatched"})
+
+    worker_app = Starlette(
+        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
+    )
+
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=worker_app),
+            base_url="http://worker",
+        ) as worker_client,
+    ):
+        await checkpointer.setup()
+        await _seed_parked_gate(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+        )
+
+        subscriber = VerdictSubscriber(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://worker", worker_port=1, auto_spawn=False
+            ),
+            endpoint_provider=lambda: EngineEndpoint(
+                base_url=base_url, bearer_token=bearer
+            ),
+            recursion_limit=25,
+        )
+
+        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
+        await subscriber._reconcile_parked_runs(endpoint)
+
+        # The reconcile recovered the missed reject and re-dispatched exactly one
+        # resume carrying request_changes to the (real, recording) worker.
+        assert len(recorded) == 1, f"expected one resume dispatch, got {recorded}"
+        dispatch = recorded[0]
+        assert dispatch["action"] == "resume"
+        assert dispatch["thread_id"] == thread_id
+        assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
+
+        # The resume landed: the answered gate row is resolved (GAP D) and the run
+        # left INPUT_REQUIRED for RUNNING, back into its revision loop.
+        async with session_factory() as db:
+            gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
+            assert gate_row is not None
+            assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
+            thread = await get_thread(db, thread_id)
+            assert thread is not None
+            assert thread.status == ThreadStatus.RUNNING.value
 
     await db_engine.dispose()

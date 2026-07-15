@@ -32,6 +32,7 @@ from vaultspec_a2a.control.verdict_subscriber import (
     VerdictSubscriber,
     _gate_resume_verdict,
     _iter_recovery_proposals,
+    _proposal_reconcile_verdict,
     _recovery_high_water,
     _StreamInterruptedError,
 )
@@ -329,8 +330,12 @@ def test_iter_recovery_proposals_extracts_status_and_ids() -> None:
     )
     extracted = _iter_recovery_proposals(data)
     assert extracted == [
-        {"status": "approved", "ids": {"cs_1", "prop_1"}},
-        {"status": "draft", "ids": {"cs_2"}},
+        {
+            "status": "approved",
+            "ids": {"cs_1", "prop_1"},
+            "approval": {"proposal_id": "prop_1"},
+        },
+        {"status": "draft", "ids": {"cs_2"}, "approval": None},
     ]
 
 
@@ -345,7 +350,9 @@ def test_iter_recovery_proposals_accepts_bare_list_and_skips_malformed() -> None
             ]
         }
     }
-    assert _iter_recovery_proposals(data) == [{"status": "rejected", "ids": {"cs_ok"}}]
+    assert _iter_recovery_proposals(data) == [
+        {"status": "rejected", "ids": {"cs_ok"}, "approval": None}
+    ]
 
 
 def test_iter_recovery_proposals_tolerates_missing_structure() -> None:
@@ -554,6 +561,98 @@ def test_gate_resume_verdict_maps_applied_as_approved() -> None:
     # A gate still awaiting its verdict carries no decision.
     assert _gate_resume_verdict("needs_review") is None
     assert _gate_resume_verdict("draft") is None
+
+
+def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
+    """A rejected (request_changes'd) proposal is recovered from its approval.
+
+    The exact P04.S10 stall shape (captured live from the engine recovery
+    snapshot): a HUMAN edit-proposal reject returns the changeset to ``draft`` -
+    the changeset status carries no verdict - but the resolved approval record
+    holds ``decision=request_changes``. The reconcile verdict resolver must read
+    that approval decision so the parked run resumes into its revision loop rather
+    than stalling forever. The prior code (changeset status only) returned ``None``
+    here, which was the defect.
+    """
+    from vaultspec_a2a.authoring import (
+        VERDICT_APPROVED,
+        VERDICT_REJECTED,
+        VERDICT_REQUEST_CHANGES,
+    )
+
+    # Missed request_changes: draft changeset + resolved, non-stale approval.
+    assert (
+        _proposal_reconcile_verdict(
+            {
+                "status": "draft",
+                "ids": {"proposal:adr"},
+                "approval": {
+                    "decision": "request_changes",
+                    "present": True,
+                    "stale": False,
+                },
+            }
+        )
+        == VERDICT_REQUEST_CHANGES
+    )
+    # An edit-proposal reject that lands as a hard `rejected` changeset resolves
+    # from the status alone; and an approval `reject` decision maps to rejected.
+    assert (
+        _proposal_reconcile_verdict(
+            {"status": "rejected", "ids": {"proposal:x"}, "approval": None}
+        )
+        == VERDICT_REJECTED
+    )
+    assert (
+        _proposal_reconcile_verdict(
+            {
+                "status": "draft",
+                "ids": {"proposal:y"},
+                "approval": {"decision": "reject", "present": True, "stale": False},
+            }
+        )
+        == VERDICT_REJECTED
+    )
+    # Terminal changeset status wins first: an applied AUTO gate resumes approved.
+    assert (
+        _proposal_reconcile_verdict(
+            {"status": "applied", "ids": {"proposal:z"}, "approval": None}
+        )
+        == VERDICT_APPROVED
+    )
+    # A run genuinely awaiting a human verdict is NOT disturbed: no terminal status
+    # and no resolved approval decision.
+    assert (
+        _proposal_reconcile_verdict(
+            {
+                "status": "needs_review",
+                "ids": {"proposal:pending"},
+                "approval": {"present": False},
+            }
+        )
+        is None
+    )
+    assert (
+        _proposal_reconcile_verdict(
+            {"status": "draft", "ids": {"proposal:none"}, "approval": None}
+        )
+        is None
+    )
+    # A STALE decision (made against a superseded revision) is not acted on.
+    assert (
+        _proposal_reconcile_verdict(
+            {
+                "status": "draft",
+                "ids": {"proposal:stale"},
+                "approval": {
+                    "decision": "request_changes",
+                    "present": True,
+                    "stale": True,
+                },
+            }
+        )
+        is None
+    )
 
 
 @pytest.mark.asyncio

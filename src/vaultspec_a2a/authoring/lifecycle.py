@@ -34,6 +34,7 @@ __all__ = [
     "LifecycleEvent",
     "SseFrame",
     "StreamError",
+    "approval_decision_verdict",
     "changeset_status_verdict",
     "parse_sse_frame",
     "verdict_from_event",
@@ -222,3 +223,15 @@ def changeset_status_verdict(status: str) -> str | None:
     needs_review, applied, ...), which carry no reviewer decision to resume on.
     """
     return _STATUS_TO_VERDICT.get(status)
+
+
+def approval_decision_verdict(decision: str) -> str | None:
+    """Map an engine approval ``decision`` string onto a verdict.
+
+    The recovery-snapshot catch-up for a MISSED ``request_changes`` reads this: a
+    ``request_changes`` (or an edit-proposal reject) returns its changeset to
+    ``draft``, so `changeset_status_verdict` surfaces nothing, but the resolved
+    approval record still carries ``decision``. Returns ``None`` for an unknown
+    decision so a malformed snapshot never resumes a run on a phantom verdict.
+    """
+    return _DECISION_TO_VERDICT.get(decision)

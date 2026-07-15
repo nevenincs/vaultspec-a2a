@@ -37,6 +37,7 @@ from ..authoring import (
     LifecycleEvent,
     SseFrame,
     StreamError,
+    approval_decision_verdict,
     changeset_status_verdict,
     verdict_from_event,
 )
@@ -98,6 +99,37 @@ def _gate_resume_verdict(status: str) -> str | None:
         return VERDICT_APPROVED
     if status == "rejected":
         return VERDICT_REJECTED
+    return None
+
+
+def _proposal_reconcile_verdict(proposal: dict[str, Any]) -> str | None:
+    """The verdict to resume a run parked at ``proposal``'s gate, if any is decided.
+
+    Two decision signals, in precedence order:
+
+    1. The changeset ``status`` (`_gate_resume_verdict`): recovers a missed APPROVE
+       (``applied``/``approved``) or a hard ``rejected``.
+    2. The resolved APPROVAL ``decision``: recovers a missed ``request_changes`` (or
+       an edit-proposal reject), which returns its changeset to ``draft`` and so
+       surfaces NO terminal changeset status - the reviewer decision survives only
+       on the approval record. Read only when the approval is ``present`` and not
+       ``stale`` (a stale decision was made against a superseded revision and must
+       not resume the current gate).
+
+    Returns ``None`` when neither signal carries a decision - the run is still
+    genuinely awaiting a verdict and must stay parked, undisturbed.
+    """
+    verdict = _gate_resume_verdict(proposal["status"])
+    if verdict is not None:
+        return verdict
+    approval = proposal.get("approval")
+    if not isinstance(approval, dict):
+        return None
+    if not approval.get("present") or approval.get("stale"):
+        return None
+    decision = approval.get("decision")
+    if isinstance(decision, str):
+        return approval_decision_verdict(decision)
     return None
 
 
@@ -200,13 +232,22 @@ class VerdictSubscriber:
         the ADR gate spuriously resumed by the applied research verdict, completing
         the run with the ADR unreviewed. So this path keys on the run's
         ``gate_pending_proposal_id`` (the ONE proposal it is awaiting a verdict for)
-        and resumes only when THAT proposal is terminal. ``applied`` counts as
+        and resumes only when THAT proposal is decided. ``applied`` counts as
         approved HERE (a changeset cannot apply unresolved; an AUTO gate resolves-
         and-applies in one step, so a still-parked run's proposal reads ``applied``,
         not the transient ``approved``) - handled locally so the shared
-        `changeset_status_verdict`/gap path keeps its narrower semantics. Idempotent
-        (only INPUT_REQUIRED runs), throttled, and a run still awaiting a human
-        verdict has a non-terminal current proposal and is never disturbed.
+        `changeset_status_verdict`/gap path keeps its narrower semantics.
+
+        Reject recovery (P04.S10): a HUMAN ``request_changes`` (or edit-proposal
+        reject) returns its changeset to ``draft``, so the changeset status carries
+        NO verdict - the reviewer decision survives only on the resolved approval
+        record. `_proposal_reconcile_verdict` therefore falls back to the approval
+        ``decision`` (present, non-stale) to recover a missed request_changes and
+        resume the parked run back into its writer's revision loop.
+
+        Idempotent (only INPUT_REQUIRED runs), throttled, and a run still awaiting a
+        human verdict has an undecided current proposal (no terminal status, no
+        resolved approval) and is never disturbed.
         """
         now = time.monotonic()
         if now - self._last_parked_reconcile < _PARKED_RECONCILE_INTERVAL_SECONDS:
@@ -230,11 +271,13 @@ class VerdictSubscriber:
         except Exception:
             logger.debug("Parked-run reconcile snapshot fetch failed", exc_info=True)
             return
-        # Map every terminal-verdict proposal id (proposal + changeset) to its gate
-        # verdict, so a run can be matched by its CURRENT gate proposal alone.
+        # Map every decided proposal id (proposal + changeset) to its gate verdict,
+        # so a run can be matched by its CURRENT gate proposal alone. The verdict is
+        # drawn from the changeset status OR - for a missed request_changes, which
+        # leaves the changeset in draft - the resolved approval decision.
         verdict_by_id: dict[str, str] = {}
         for proposal in _iter_recovery_proposals(snapshot.data):
-            verdict = _gate_resume_verdict(proposal["status"])
+            verdict = _proposal_reconcile_verdict(proposal)
             if verdict is None:
                 continue
             for pid in proposal["ids"]:
@@ -536,11 +579,15 @@ def _workspace_root(thread_metadata: str | None) -> str | None:
 
 
 def _iter_recovery_proposals(data: Any) -> list[dict[str, Any]]:
-    """Extract ``{status, ids}`` per proposal from a recovery-snapshot payload.
+    """Extract ``{status, ids, approval}`` per proposal from a recovery snapshot.
 
     Defensive against the engine's evolving projection shape: only the
-    ``changeset_id``, ``status``, and nested ``approval.proposal_id`` fields are
-    read, and anything malformed is skipped rather than raised on.
+    ``changeset_id``, ``status``, and nested ``approval`` object (its
+    ``proposal_id`` for correlation, plus ``decision``/``present``/``stale`` for the
+    missed-request_changes recovery) are read, and anything malformed is skipped
+    rather than raised on. ``approval`` is carried through verbatim (``None`` when
+    absent) for `_proposal_reconcile_verdict` to read the reviewer decision the
+    changeset status alone does not surface.
     """
     out: list[dict[str, Any]] = []
     if not isinstance(data, dict):
@@ -567,12 +614,13 @@ def _iter_recovery_proposals(data: Any) -> list[dict[str, Any]]:
         if isinstance(changeset_id, str) and changeset_id:
             ids.add(changeset_id)
         approval = item.get("approval")
-        if isinstance(approval, dict):
-            proposal_id = approval.get("proposal_id")
+        approval_obj = approval if isinstance(approval, dict) else None
+        if approval_obj is not None:
+            proposal_id = approval_obj.get("proposal_id")
             if isinstance(proposal_id, str) and proposal_id:
                 ids.add(proposal_id)
         if ids:
-            out.append({"status": status, "ids": ids})
+            out.append({"status": status, "ids": ids, "approval": approval_obj})
     return out
 
 

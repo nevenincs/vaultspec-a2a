@@ -36,6 +36,7 @@ from .lifecycle import GapSignal as GapSignal
 from .lifecycle import LifecycleEvent as LifecycleEvent
 from .lifecycle import SseFrame as SseFrame
 from .lifecycle import StreamError as StreamError
+from .lifecycle import approval_decision_verdict as approval_decision_verdict
 from .lifecycle import changeset_status_verdict as changeset_status_verdict
 from .lifecycle import parse_sse_frame as parse_sse_frame
 from .lifecycle import verdict_from_event as verdict_from_event
@@ -83,6 +84,7 @@ __all__ = [
     "SseFrame",
     "StreamError",
     "SubmitterError",
+    "approval_decision_verdict",
     "changeset_status_verdict",
     "derive_idempotency_key",
     "execute_agent_tool",

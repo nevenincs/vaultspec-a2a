@@ -117,6 +117,33 @@ The `workspace`, `ipc`, and `protocols/mcp` tool modules and the remaining
 `team/presets` beyond the ruled preset deletions were swept and found clean; no
 dead code was present in these areas.
 
+### coder-preset-retirement | low | multi-role coder presets retired, topology coverage preserved
+
+The three multi-role coding presets were retired as mission-superseded by the
+headless pivot: `vaultspec-iterative-coder`, `vaultspec-structured-coder`, and
+`vaultspec-adaptive-coder`. Their compiler topologies stay live under dashboard
+contract D7e (preserved core) and D5 (topology choice remains ours), so per the
+adopted OPTION A ruling the topology-behavior tests were repointed to
+inline-constructed TeamConfigs (real models, real `compile_team_graph`, no
+mocks); only the preset-only assertion tests were deleted. Incidental
+"valid preset" fixtures across the executor, endpoint, discovery, and server
+tests were repointed to the retained `vaultspec-solo-coder`. The MCP
+`start_thread` no-arg default was repointed from adaptive to solo-coder before
+deletion and proven end-to-end against the real in-process app. Ledger evidence
+for the future keep-or-remove-topologies decision: each affected topology still
+retains a bundled MOCK-preset that instantiates it in addition to the new inline
+fixtures, so none is inline-test-only — `pipeline_loop` via `mock-autonomous`,
+`star` via `mock-supervisor-human-in-loop`, and multi-node `pipeline` via
+`mock-success-multi`.
+
+### solo-coder-retained | low | solo-coder retained as the S20 re-arm vehicle
+
+`vaultspec-solo-coder` is deliberately retained (alongside the non-coding
+`vaultspec-adr-research`) as the sole single-role coding preset and is the
+default. Watch note: it is the re-arm vehicle for the S20 solo-coder
+propose-to-submit proof, which remains the standing acceptance path for the
+authoring-run criterion; retiring or renaming it would break that proof.
+
 ## Recommendations
 
 Adopt a serialized-commit or isolated-worktree model for multi-writer campaigns
@@ -125,11 +152,14 @@ on a shared git index. Both race artifacts above stem from non-pathspec
 or per-agent worktrees prevents the class entirely.
 
 The retirement of the multi-role coding presets (iterative, structured, adaptive)
-leaves the `star`, `pipeline_loop`, and multi-node `pipeline` compiler topologies
-without any preset that instantiates them, while the compiler still supports them.
-A follow-on decision must rule whether those topologies are retained (in which
-case their coverage moves to inline fixtures) or removed as now-dead code; that
-decision is out of scope for this cleanup and is not recorded here.
+left the `star`, `pipeline_loop`, and multi-node `pipeline` compiler topologies
+without a bundled coder preset, while the compiler still supports them. Under the
+adopted OPTION A ruling their topology-behavior coverage was preserved via inline
+fixtures rather than dropped. Whether to eventually remove those topologies as
+now-dead code is a contract-adjacent architecture decision (they are named
+preserved core by dashboard contract D7e), deliberately left to the architect
+successor ledger and not decided here; the mock-preset-plus-inline coverage noted
+above is the evidence for that future decision.
 
 Upstream tooling gap: `vault add audit` offers no topic-infix flag, so a second
 same-day audit for one feature collides on filename and requires a

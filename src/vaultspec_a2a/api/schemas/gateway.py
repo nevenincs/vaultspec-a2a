@@ -27,6 +27,8 @@ from ...thread.enums import ThreadStatus
 __all__ = [
     "PresetSummary",
     "PresetsListResponse",
+    "ProfileSummary",
+    "RoleAssignmentSummary",
     "RoleState",
     "RunCancelResponse",
     "RunStartRequest",
@@ -153,6 +155,44 @@ class RunCancelResponse(BaseModel):
     idempotency_key: str | None = None
 
 
+class RoleAssignmentSummary(BaseModel):
+    """Effective per-role model assignment under a profile (model-profiles ADR).
+
+    Only safe operational metadata: role id, agent id, provider id, capability,
+    the stable concrete model name, ordered fallbacks, current provider readiness,
+    and which precedence layer the assignment came from. Never a credential, env
+    value, token, or private path.
+    """
+
+    role_id: str
+    agent_id: str
+    provider_id: str
+    capability: str | None = None
+    model_name: str | None = None
+    fallback_providers: list[str] = Field(default_factory=list)
+    provider_ready: bool = False
+    source: str = "team_default"
+    resolution_error: str | None = None
+
+
+class ProfileSummary(BaseModel):
+    """One selectable model profile for a preset (model-profiles ADR).
+
+    Carries the profile's identity, whether it is the default, its per-role
+    effective assignments (resolved by the same shared resolver launch uses, so
+    picker truth cannot drift from execution truth), and backend-computed
+    eligibility with safe reasons.
+    """
+
+    id: str
+    display_name: str = ""
+    description: str = ""
+    is_default: bool = False
+    eligible: bool = False
+    unavailable_reasons: list[str] = Field(default_factory=list)
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
+
+
 class PresetSummary(BaseModel):
     """One discovered team preset and whether it is actually runnable.
 
@@ -173,6 +213,14 @@ class PresetSummary(BaseModel):
     authoring_capability: str | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
+    # model-profiles ADR additions (additive v1 fields, absent-safe):
+    # preset origin (bundled | workspace | test_mock), the document outputs the
+    # topology delivers, the selectable profiles with effective assignments and
+    # eligibility, and the default profile id.
+    origin: str | None = None
+    supported_capabilities: list[str] = Field(default_factory=list)
+    profiles: list[ProfileSummary] = Field(default_factory=list)
+    default_profile_id: str | None = None
 
 
 class PresetsListResponse(BaseModel):

@@ -265,6 +265,95 @@ async def test_presets_list_is_truthful_and_resilient(
         assert authoring["authoring_capability"] == "document_authoring"
         assert "vaultspec-researcher" in authoring["required_roles"]
 
+        # model-profiles: origin, supported outputs, and the profile set.
+        assert authoring["origin"] == "bundled"
+        assert authoring["supported_capabilities"] == [
+            "research_document",
+            "architecture_decision",
+        ]
+        assert authoring["default_profile_id"] == "team-defaults"
+        profiles = {p["id"]: p for p in authoring["profiles"]}
+        assert set(profiles) == {"team-defaults", "fast"}
+        assert profiles["team-defaults"]["is_default"] is True
+
+        # team-defaults effective assignments: safe operational fields only, and
+        # the resolver's real heterogeneity is disclosed (doc-reviewer differs).
+        td_by_agent = {
+            a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
+        }
+        researcher = td_by_agent["vaultspec-researcher"]
+        assert researcher["provider_id"] == "claude"
+        assert researcher["model_name"]  # a concrete, stable name
+        assert researcher["role_id"] == "researcher"
+        assert "capability" in researcher
+        assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "zhipu"
+
+        # fast lowers the researcher to a low capability and attributes the change
+        # to the profile; the authoring roles fall through unchanged.
+        fast_by_agent = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
+        assert fast_by_agent["vaultspec-researcher"]["capability"] == "low"
+        assert fast_by_agent["vaultspec-researcher"]["source"] == "profile"
+        assert fast_by_agent["vaultspec-synthesist"]["source"] == "agent"
+
+        # Eligibility is reported honestly: the production acceptance gate is open,
+        # so every profile is unavailable with a safe reason (no secrets anywhere).
+        for profile in profiles.values():
+            assert profile["eligible"] is False
+            assert any("acceptance gate" in r for r in profile["unavailable_reasons"])
+
+        # No credential/token/env material appears anywhere in the served record.
+        raw = resp.text.lower()
+        for secret_marker in ("api_key", "oauth", "token", "secret", "password"):
+            assert secret_marker not in raw
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_presets_list_discloses_workspace_profile_origin(
+    session_factory, checkpointer, tmp_path
+) -> None:
+    """A workspace-local preset with a profile is served with origin=workspace."""
+    teams_dir = tmp_path / ".vaultspec" / "teams"
+    teams_dir.mkdir(parents=True)
+    (teams_dir / "ws-team.toml").write_text(
+        "\n".join(
+            [
+                "[team]",
+                'id = "ws-team"',
+                'display_name = "WS Team"',
+                "[team.defaults]",
+                'provider = "mock"',
+                "[team.topology]",
+                'type = "star"',
+                "[[team.workers]]",
+                'agent_id = "vaultspec-researcher"',
+                "[team.profiles.fast]",
+                'display_name = "Fast"',
+                "[team.profiles.fast.roles.vaultspec-researcher]",
+                'provider = "mock"',
+                'capability = "low"',
+            ]
+        ),
+        encoding="utf-8",
+    )
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/presets", params={"workspace_root": str(tmp_path)})
+        assert resp.status_code == 200
+        by_id = {p["id"]: p for p in resp.json()["presets"]}
+        ws_team = by_id["ws-team"]
+        assert ws_team["origin"] == "workspace"
+        profiles = {p["id"]: p for p in ws_team["profiles"]}
+        assert set(profiles) == {"team-defaults", "fast"}
+        # The mock-provider role is ready, so eligibility fails only on the open
+        # acceptance gate / engine reachability, never on a mock credential.
+        fast = {a["agent_id"]: a for a in profiles["fast"]["assignments"]}
+        assert fast["vaultspec-researcher"]["provider_id"] == "mock"
+        assert fast["vaultspec-researcher"]["provider_ready"] is True
+        assert fast["vaultspec-researcher"]["capability"] == "low"
+
 
 @pytest.mark.asyncio(loop_scope="function")
 async def test_run_start_refusals_over_live_socket(

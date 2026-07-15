@@ -68,6 +68,7 @@ __all__ = [
     "is_mock_preset",
     "load_agent_config",
     "load_team_config",
+    "supported_capabilities",
 ]
 
 # The implicit, always-present profile: the empty overlay that runs the team's
@@ -149,6 +150,19 @@ def authoring_capability(topology_type: TopologyType) -> str:
     if topology_type == TopologyType.RESEARCH_ADR:
         return "document_authoring"
     return "coding"
+
+
+def supported_capabilities(topology_type: TopologyType) -> list[str]:
+    """Return the concrete document outputs a topology can produce.
+
+    The research_adr phase machine authors a research document and an
+    architecture decision; coder topologies produce no vault-document capability
+    under this mission surface. Diagnostic truth for the Rust backend, not
+    product curation text.
+    """
+    if topology_type == TopologyType.RESEARCH_ADR:
+        return ["research_document", "architecture_decision"]
+    return []
 
 
 # ---------------------------------------------------------------------------

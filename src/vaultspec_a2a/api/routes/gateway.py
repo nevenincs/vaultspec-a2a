@@ -6,6 +6,7 @@ existing service rather than reinventing it, so there is a single code path: the
 richer internal ``/api`` surface and these verbs call the same services beneath.
 """
 
+import asyncio
 import logging
 import os
 from pathlib import Path
@@ -51,6 +52,8 @@ from ..dependencies import (
 from ..schemas.gateway import (
     PresetsListResponse,
     PresetSummary,
+    ProfileSummary,
+    RoleAssignmentSummary,
     RoleState,
     RunCancelResponse,
     RunStartRequest,
@@ -349,19 +352,43 @@ async def presets_list_endpoint(
     Resolution uses the requested workspace context so workspace-local presets
     are listed alongside the bundled set. A single preset that fails to load or
     validate is reported with ``loadable=False`` and a reason rather than
-    omitted or allowed to crash the whole listing.
+    omitted or allowed to crash the whole listing. Each loadable preset carries
+    its model profiles with per-role effective assignments (resolved by the same
+    shared resolver launch uses) and backend-computed eligibility. The whole
+    build - file I/O, provider readiness, and the engine reachability probe -
+    runs off the event loop.
     """
-    from ...team.team_config import discover_team_preset_ids
-
     ws_root = Path(workspace_root) if workspace_root else None
-    presets = [
-        _summarize_preset(preset_id, ws_root)
-        for preset_id in sorted(discover_team_preset_ids(ws_root))
-    ]
+    presets = await asyncio.to_thread(_build_preset_summaries, ws_root)
     return PresetsListResponse(presets=presets)
 
 
-def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
+def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
+    """Summarize every discoverable preset, probing engine reachability once."""
+    from ...providers.model_profiles import probe_engine_reachable
+    from ...team.team_config import discover_team_preset_ids
+
+    engine_reachable = probe_engine_reachable()
+    return [
+        _summarize_preset(preset_id, ws_root, engine_reachable)
+        for preset_id in sorted(discover_team_preset_ids(ws_root))
+    ]
+
+
+def _preset_origin(preset_id: str, ws_root: Path | None, *, is_mock: bool) -> str:
+    """Classify a preset's origin: test_mock, workspace, or bundled."""
+    if is_mock:
+        return "test_mock"
+    if ws_root is not None:
+        workspace_toml = ws_root / ".vaultspec" / "teams" / f"{preset_id}.toml"
+        if workspace_toml.is_file():
+            return "workspace"
+    return "bundled"
+
+
+def _summarize_preset(
+    preset_id: str, ws_root: Path | None, engine_reachable: bool
+) -> PresetSummary:
     """Load one preset and summarize it, capturing any load failure truthfully.
 
     Any load or validation error is caught and reported as an unloadable preset
@@ -372,6 +399,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         authoring_capability,
         is_mock_preset,
         load_team_config,
+        supported_capabilities,
     )
 
     is_mock = is_mock_preset(preset_id)
@@ -384,6 +412,7 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
             loadable=False,
             unavailable_reason=str(exc)[:500] or type(exc).__name__,
             is_mock=is_mock,
+            origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         )
     return PresetSummary(
         id=tc.id,
@@ -395,7 +424,74 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
         required_roles=[w.agent_id for w in tc.workers],
         authoring_capability=authoring_capability(tc.topology.type),
         is_mock=is_mock,
+        origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
+        supported_capabilities=supported_capabilities(tc.topology.type),
+        default_profile_id=tc.default_profile_id,
+        profiles=_summarize_profiles(tc, ws_root, engine_reachable),
     )
+
+
+def _summarize_profiles(
+    tc: Any, ws_root: Path | None, engine_reachable: bool
+) -> list[ProfileSummary]:
+    """Resolve and rate every profile of a loadable preset.
+
+    Uses the shared model-profile resolver + eligibility service so the served
+    assignments are the exact ones launch would freeze. Provider readiness is
+    probed once and shared across profiles; the acceptance gate stays open
+    (reported honestly as an unavailable reason) until P04.S10.
+    """
+    from ...graph.enums import Provider
+    from ...providers.model_profiles import (
+        ProviderReadiness,
+        evaluate_profile_eligibility,
+        probe_provider_readiness,
+        resolve_effective_assignment,
+    )
+
+    readiness: dict[Provider, ProviderReadiness] = {}
+
+    def _ready(provider: Provider) -> ProviderReadiness:
+        if provider not in readiness:
+            readiness[provider] = probe_provider_readiness(provider)
+        return readiness[provider]
+
+    summaries: list[ProfileSummary] = []
+    profiles = tc.effective_profiles()
+    for profile_id, profile in profiles.items():
+        assignment = resolve_effective_assignment(tc, profile_id, ws_root)
+        eligibility = evaluate_profile_eligibility(
+            assignment,
+            readiness=readiness,
+            engine_reachable=engine_reachable,
+            acceptance_gate_passed=False,
+        )
+        assignments = [
+            RoleAssignmentSummary(
+                role_id=role.role_id,
+                agent_id=role.agent_id,
+                provider_id=role.provider.value,
+                capability=role.capability.value if role.capability else None,
+                model_name=role.model_name or None,
+                fallback_providers=[p.value for p in role.fallback_providers],
+                provider_ready=_ready(role.provider).ready,
+                source=role.source.value,
+                resolution_error=role.resolution_error,
+            )
+            for role in assignment.roles
+        ]
+        summaries.append(
+            ProfileSummary(
+                id=profile_id,
+                display_name=profile.display_name,
+                description=profile.description,
+                is_default=profile_id == tc.default_profile_id,
+                eligible=eligibility.eligible,
+                unavailable_reasons=eligibility.reasons,
+                assignments=assignments,
+            )
+        )
+    return summaries
 
 
 # ---------------------------------------------------------------------------

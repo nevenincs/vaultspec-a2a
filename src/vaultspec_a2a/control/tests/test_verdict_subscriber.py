@@ -38,11 +38,13 @@ from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 from vaultspec_a2a.database import (
     create_thread,
     get_authoring_cursor,
+    get_permission_request,
     get_thread,
+    record_permission_request,
     update_thread_status,
 )
 from vaultspec_a2a.database.models import Base
-from vaultspec_a2a.thread.enums import ThreadStatus
+from vaultspec_a2a.thread.enums import PermissionRequestStatus, ThreadStatus
 
 
 @pytest_asyncio.fixture
@@ -103,6 +105,86 @@ async def _seed_parked_thread(
         await create_thread(session, thread_id=thread_id)
         await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
         await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_resume_resolves_the_answered_document_gate_permission_row(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A subscriber-driven resume resolves the answered gate's durable row (GAP D).
+
+    The document gate parks with a durable ``document_approval_request`` permission
+    row; the verdict subscriber resumes the run past it via ``Command(resume)``,
+    bypassing the permission-response FSM. If the row were left pending it would be
+    stranded once the checkpoint interrupt it belonged to is gone, and run-status -
+    the authoritative recovery read - would assert ``recovery_required`` and mask
+    the real ``awaiting_adr_decision`` phase. On a successful resume the row is
+    marked applied; a co-resident tool-permission row (a different pause reason) is
+    left untouched, and the thread returns to RUNNING.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    async def _accept_dispatch(_request: object) -> JSONResponse:
+        return JSONResponse({"status": "dispatched"})
+
+    worker_app = Starlette(
+        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
+    )
+    thread_id = "gate-resume"
+    checkpoints = tmp_path / "cp-resume.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=worker_app),
+            base_url="http://worker",
+        ) as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_ids=["proposal:research"],
+            changeset_ids=["cs:research"],
+        )
+        async with session_factory() as session:
+            await record_permission_request(
+                session,
+                request_id=f"{thread_id}:research-gate",
+                thread_id=thread_id,
+                pause_reason_type="document_approval_request",
+                description="Approve the research document",
+                allowed_options=[
+                    {"option_id": "approve", "name": "Approve", "kind": "allow_once"}
+                ],
+            )
+            await record_permission_request(
+                session,
+                request_id=f"{thread_id}:tool",
+                thread_id=thread_id,
+                pause_reason_type="Bash",
+                description="Run a command",
+                allowed_options=[],
+            )
+            await session.commit()
+
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(thread_id, "approved", None)
+
+        async with session_factory() as session:
+            gate_row = await get_permission_request(
+                session, f"{thread_id}:research-gate"
+            )
+            tool_row = await get_permission_request(session, f"{thread_id}:tool")
+            assert gate_row is not None
+            assert gate_row.request_status == PermissionRequestStatus.APPLIED.value
+            # A non-document permission is not touched by the gate resolution.
+            assert tool_row is not None
+            assert tool_row.request_status == PermissionRequestStatus.PENDING.value
+            thread = await get_thread(session, thread_id)
+            assert thread is not None
+            assert thread.status == ThreadStatus.RUNNING.value
 
 
 @pytest.mark.asyncio

@@ -27,7 +27,7 @@ Close the run-start, presets-list, and service-state deltas from the dashboard h
 Serve product-safe semantic authoring phases instead of LangGraph node names, in run-status and the progress SSE.
 
 - [x] `P02.S04` - Project semantic authoring phases (starting, researching, synthesizing_research, reviewing_research, awaiting_research_decision, writing_adr, reviewing_adr, awaiting_adr_decision, completed, failed, cancelled, recovery_required) from research_adr topology position and gate state into run-status, plus target feature and authoring session id fields; `src/vaultspec_a2a/control/thread_state_service.py, src/vaultspec_a2a/api/routes/gateway.py, src/vaultspec_a2a/api/schemas/gateway.py`.
-- [ ] `P02.S05` - Carry the semantic phase in versioned SSE progress frames and audit frame content against the handover exclusions: no secrets, prompts, document bodies, tokens, or raw provider payloads; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S05` - Carry the semantic phase in versioned SSE progress frames and audit frame content against the handover exclusions: no secrets, prompts, document bodies, tokens, or raw provider payloads; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P03` - Handover evidence battery
 

@@ -31,6 +31,11 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W03-P07-S19]]'
   - '[[2026-07-14-a2a-edge-conformance-W03-P08-S20]]'
   - '[[2026-07-14-a2a-edge-conformance-W03-P08-S21]]'
+  - '[[2026-07-14-a2a-edge-conformance-W04-P09-S22]]'
+  - '[[2026-07-14-a2a-edge-conformance-W04-P09-S23]]'
+  - '[[2026-07-14-a2a-edge-conformance-W04-P10-S24]]'
+  - '[[2026-07-14-a2a-edge-conformance-W04-P10-S25]]'
+  - '[[2026-07-14-a2a-edge-conformance-W04-P11-S26]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -41,6 +46,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-w02-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -59,6 +65,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-w02-review-audit` - `a2a-edge-conformance` audit: `W02 code review: deletion mandates and write-seam closure`
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
 - `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
+- `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
 
 ### exec
 
@@ -87,6 +94,11 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W03-P07-S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess
 - `2026-07-14-a2a-edge-conformance-W03-P08-S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state
 - `2026-07-14-a2a-edge-conformance-W03-P08-S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record
+- `2026-07-14-a2a-edge-conformance-W04-P09-S22` - Accept the per-role actor token bundle on run-start, hold each token in worker-scoped runtime state only (never checkpointed, never logged, redacted from any payload logging), inject per worker, drop at run end
+- `2026-07-14-a2a-edge-conformance-W04-P09-S23` - Write live tests proving token isolation per role, absence from checkpoints and logs, and disposal at run end
+- `2026-07-14-a2a-edge-conformance-W04-P10-S24` - Reshape the gateway into the five versioned verbs (run-start, run-status, run-cancel, presets-list, service-state), designing run-status as the authoritative recovery snapshot with topology position, per-role state, and produced proposal ids
+- `2026-07-14-a2a-edge-conformance-W04-P10-S25` - Version and bound the SSE progress frames (droppable, non-authoritative) and cover the five verbs plus stream with live gateway tests replacing the deleted UI contract coverage
+- `2026-07-14-a2a-edge-conformance-W04-P11-S26` - Restore the vaultspec-a2a operator CLI as a thin client of the five-verb surface (serve, doctor, presets, run start/status/cancel) with a console-script entrypoint and live tests
 
 ### plan
 

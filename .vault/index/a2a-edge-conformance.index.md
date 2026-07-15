@@ -36,6 +36,12 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W04-P10-S24]]'
   - '[[2026-07-14-a2a-edge-conformance-W04-P10-S25]]'
   - '[[2026-07-14-a2a-edge-conformance-W04-P11-S26]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P12-S27]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P12-S28]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P13-S29]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P13-S30]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P14-S31]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P14-S32]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -47,6 +53,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-w05-review-audit]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -66,6 +73,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
 - `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
 - `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
+- `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`
 
 ### exec
 
@@ -99,6 +107,12 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W04-P10-S24` - Reshape the gateway into the five versioned verbs (run-start, run-status, run-cancel, presets-list, service-state), designing run-status as the authoritative recovery snapshot with topology position, per-role state, and produced proposal ids
 - `2026-07-14-a2a-edge-conformance-W04-P10-S25` - Version and bound the SSE progress frames (droppable, non-authoritative) and cover the five verbs plus stream with live gateway tests replacing the deleted UI contract coverage
 - `2026-07-14-a2a-edge-conformance-W04-P11-S26` - Restore the vaultspec-a2a operator CLI as a thin client of the five-verb surface (serve, doctor, presets, run start/status/cancel) with a console-script entrypoint and live tests
+- `2026-07-14-a2a-edge-conformance-W05-P12-S27` - Publish and heartbeat the machine-global service discovery file with pid and port from the resident gateway, expose the ungated health endpoint reporting ready plus live pid, and amend service lifecycle handling for attach-never-own
+- `2026-07-14-a2a-edge-conformance-W05-P12-S28` - Write live tests for discovery freshness, stale-pid detection, single-resident-service semantics, and health-while-degraded
+- `2026-07-14-a2a-edge-conformance-W05-P13-S29` - Ratify local ADR dispositions through the owning ADR verbs (supersede UI-serving records, amend protocol, queue, gating, and module-hierarchy records) per the conformance ADR supersession map
+- `2026-07-14-a2a-edge-conformance-W05-P13-S30` - Rewrite README and project documentation to the headless orchestration-sibling mission, removing every UI and Google-A2A claim
+- `2026-07-14-a2a-edge-conformance-W05-P14-S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence
+- `2026-07-14-a2a-edge-conformance-W05-P14-S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence
 
 ### plan
 

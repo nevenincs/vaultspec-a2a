@@ -20,6 +20,10 @@ from .._http import (
 )
 from ..server import mcp
 
+# Default team preset when the caller omits one. Solo-coder is the retained
+# single-role coding preset after the multi-role coder presets were retired.
+_DEFAULT_TEAM_PRESET = "vaultspec-solo-coder"
+
 
 @mcp.tool()
 async def start_thread(
@@ -40,7 +44,7 @@ async def start_thread(
                 " Use list_team_presets to discover"
                 " all available presets."
                 " Defaults to"
-                " 'vaultspec-adaptive-coder'."
+                " 'vaultspec-solo-coder'."
             )
         ),
     ] = None,
@@ -92,10 +96,10 @@ async def start_thread(
                          'Refactor the auth module to use JWT tokens'. Maximum
                          32,000 characters.
         team_preset:     Team configuration preset ID. Built-in presets:
-                         'vaultspec-adaptive-coder', 'vaultspec-solo-coder'.
+                         'vaultspec-solo-coder', 'vaultspec-adr-research'.
                          Use ``list_team_presets``
                          to discover all available presets at runtime.
-                         If omitted, defaults to 'vaultspec-adaptive-coder'.
+                         If omitted, defaults to 'vaultspec-solo-coder'.
         autonomous:      If True (default), agents auto-approve all tool calls
                          without human review. Set to False to require manual
                          approval — you will then need ``get_pending_permissions``
@@ -112,7 +116,7 @@ async def start_thread(
             f"initial_message too long ({len(initial_message)} chars). "
             f"Maximum allowed: {settings.mcp_max_initial_message_chars} chars."
         )
-    preset = team_preset or "vaultspec-adaptive-coder"
+    preset = team_preset or _DEFAULT_TEAM_PRESET
     known = await _get_known_presets()
     if known and preset not in known:
         raise ToolError(f"Unknown preset {preset!r}. Valid: {', '.join(sorted(known))}")

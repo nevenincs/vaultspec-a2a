@@ -78,12 +78,6 @@ def _pipeline_team() -> TeamConfig:
 
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
-    (
-        "vaultspec-adaptive-coder",
-        "star",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        True,
-    ),
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
 ]
 
@@ -141,7 +135,10 @@ async def test_compile_team_graph_accepts_workspace_root(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """compile_team_graph accepts workspace_root and produces a valid graph."""
-    team = load_team_config("vaultspec-adaptive-coder")
+    team = _make_team(
+        topology=TopologyConfig(type=TopologyType.STAR),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")
 
@@ -441,7 +438,7 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
     """compile_team_graph sets step_timeout on the compiled Pregel graph."""
-    team = load_team_config("vaultspec-adaptive-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
@@ -460,8 +457,8 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
-    team = load_team_config("vaultspec-adaptive-coder")
-    assert team.graph.step_timeout_seconds == 300
+    team = load_team_config("vaultspec-solo-coder")
+    assert team.graph.step_timeout_seconds == 120
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
@@ -472,7 +469,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
             step_timeout=None,
             provider_factory=pf,
         )
-    assert graph.step_timeout == 300.0
+    assert graph.step_timeout == 120.0
 
 
 # ---------------------------------------------------------------------------

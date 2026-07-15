@@ -231,7 +231,7 @@ async def test_start_thread_unknown_preset_raises() -> None:
 
 @pytest.mark.asyncio
 async def test_start_thread_default_preset_not_unknown() -> None:
-    """start_thread with team_preset=None uses 'vaultspec-adaptive-coder'
+    """start_thread with team_preset=None uses 'vaultspec-solo-coder'
     -- not unknown.
     """
     # With no server running this hits a connection error -- but must NOT raise
@@ -239,6 +239,38 @@ async def test_start_thread_default_preset_not_unknown() -> None:
     with pytest.raises(ToolError) as exc_info:
         await start_thread(initial_message="test", team_preset=None)
     assert "Unknown preset" not in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_start_thread_no_preset_defaults_to_solo_coder_live(
+    session_factory, checkpointer
+) -> None:
+    """No-arg start_thread resolves the default preset to solo-coder end-to-end.
+
+    Drives the real MCP start_thread tool against the in-process FastAPI app
+    (real routes, real DB, real known-presets fetch) with team_preset=None and
+    asserts the created thread is dispatched under vaultspec-solo-coder -- the
+    retained default after the adaptive-coder preset was retired.
+    """
+    with _make_test_client(session_factory, checkpointer) as client:
+        original_gateway_url = settings.gateway_url
+        original_client = mcp_http._shared_client
+        _reset_known_presets()
+        try:
+            settings.gateway_url = "http://testserver"
+            mcp_http._shared_client = httpx.AsyncClient(
+                transport=ASGITransport(app=client.app),
+                base_url="http://testserver",
+            )
+            output = await start_thread(initial_message="ship it", team_preset=None)
+        finally:
+            if mcp_http._shared_client is not None:
+                await mcp_http._shared_client.aclose()
+            mcp_http._shared_client = original_client
+            _reset_known_presets()
+            settings.gateway_url = original_gateway_url
+
+    assert "Preset: vaultspec-solo-coder" in output
 
 
 # ---------------------------------------------------------------------------
@@ -430,7 +462,7 @@ async def test_start_thread_raises_when_server_unavailable() -> None:
     with pytest.raises(ToolError) as exc_info:
         await start_thread(
             initial_message="do something",
-            team_preset="vaultspec-adaptive-coder",
+            team_preset="vaultspec-solo-coder",
         )
     msg = str(exc_info.value).lower()
     _expected_keywords = (

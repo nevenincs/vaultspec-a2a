@@ -129,8 +129,8 @@ Publish the machine-global discovery and heartbeat contract, ratify local ADR su
 
 Publish machine-global service.json with pid, port, and heartbeat plus the ungated health endpoint reporting ready and live pid, satisfying the engine's attach-never-own predicate.
 
-- [ ] `W05.P12.S27` - Publish and heartbeat the machine-global service discovery file with pid and port from the resident gateway, expose the ungated health endpoint reporting ready plus live pid, and amend service lifecycle handling for attach-never-own; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/api/`.
-- [ ] `W05.P12.S28` - Write live tests for discovery freshness, stale-pid detection, single-resident-service semantics, and health-while-degraded; `src/vaultspec_a2a/lifecycle/tests/`.
+- [x] `W05.P12.S27` - Publish and heartbeat the machine-global service discovery file with pid and port from the resident gateway, expose the ungated health endpoint reporting ready plus live pid, and amend service lifecycle handling for attach-never-own; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/api/`.
+- [x] `W05.P12.S28` - Write live tests for discovery freshness, stale-pid detection, single-resident-service semantics, and health-while-degraded; `src/vaultspec_a2a/lifecycle/tests/`.
 
 ### Phase `W05.P13` - Local ADR dispositions and documentation
 

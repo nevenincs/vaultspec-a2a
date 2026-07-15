@@ -136,8 +136,8 @@ Publish machine-global service.json with pid, port, and heartbeat plus the ungat
 
 Ratify the supersession map through the owning ADR verbs, amend preserved records, and rewrite the README and project docs to the headless mission.
 
-- [ ] `W05.P13.S29` - Ratify local ADR dispositions through the owning ADR verbs (supersede UI-serving records, amend protocol, queue, gating, and module-hierarchy records) per the conformance ADR supersession map; `.vault/adr/`.
-- [ ] `W05.P13.S30` - Rewrite README and project documentation to the headless orchestration-sibling mission, removing every UI and Google-A2A claim; `README.md, docs/`.
+- [x] `W05.P13.S29` - Ratify local ADR dispositions through the owning ADR verbs (supersede UI-serving records, amend protocol, queue, gating, and module-hierarchy records) per the conformance ADR supersession map; `.vault/adr/`.
+- [x] `W05.P13.S30` - Rewrite README and project documentation to the headless orchestration-sibling mission, removing every UI and Google-A2A claim; `README.md, docs/`.
 
 ### Phase `W05.P14` - Full-team run and acceptance verification
 

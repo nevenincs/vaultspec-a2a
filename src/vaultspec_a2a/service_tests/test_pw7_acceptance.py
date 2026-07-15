@@ -67,6 +67,7 @@ import pytest
 
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
+from ..authoring._errors import AuthoringTransportError
 from ..authoring.discovery import resolve_engine
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
@@ -389,6 +390,42 @@ class AcceptanceHarness:
             f"{gate} {decision} unexpected status: {result.data}"
         )
 
+    async def _assert_reviewed_revision_fence(
+        self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
+    ) -> None:
+        """A decision attesting a STALE reviewed_revision must be a typed 409.
+
+        The reviewed_revision is the edge contract's revision fence: the reviewer
+        attests the exact revision the approval was opened against, and the engine
+        raises `authoring_stale_review` (HTTP 409, `handlers2.rs:543`) on any
+        mismatch rather than silently deciding a superseded revision. Probe it with
+        a grammar-valid but wrong token; the real decision below uses the true one.
+        The queued approval is untouched (the fence fires before any decision).
+        """
+        proposal_id = _dig(item, "proposal_id")
+        approval_id = _dig(item, "approval_id")
+        assert proposal_id and approval_id
+        with pytest.raises(AuthoringTransportError) as excinfo:
+            await ec.post_command(
+                f"/v1/reviews/{approval_id}/decisions",
+                "submit_review_decision",
+                {
+                    "proposal_id": proposal_id,
+                    "approval_id": approval_id,
+                    "decision": _DECISION_APPROVE,
+                    "reviewed_revision": "blob:pw7stalefence0000",
+                    "comment": f"{gate} stale-revision fence probe (PW7 harness)",
+                },
+                idempotency_key=self._idk(f"fence-{gate}"),
+                actor_token=reviewer_token,
+            )
+        assert excinfo.value.status_code == 409, (
+            f"{gate} stale reviewed_revision was not a 409: {excinfo.value.status_code}"
+        )
+        assert excinfo.value.error_kind == "authoring_stale_review", (
+            f"{gate} stale fence wrong error_kind: {excinfo.value.error_kind}"
+        )
+
     async def _apply(
         self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
     ) -> Materialization:
@@ -444,12 +481,17 @@ class AcceptanceHarness:
         )
         rejected_proposal = _dig(first, "proposal_id")
         assert rejected_proposal
-        # 2. Reject with notes (request-changes): back to the writer, approval staled.
+        # 2. The revision fence: a stale reviewed_revision is a typed 409, never a
+        # silently-decided superseded revision (edge contract).
+        await self._assert_reviewed_revision_fence(
+            ec, first, reviewer_token=reviewer_token, gate=gate
+        )
+        # 3. Reject with notes (request-changes): back to the writer, approval staled.
         await self._decide(
             ec, first, decision=_DECISION_EDIT, reviewer_token=reviewer_token, gate=gate
         )
         handled.add(rejected_proposal)
-        # 3. The run must re-author and re-submit - the revision loop, not a dead end.
+        # 4. The run must re-author and re-submit - the revision loop, not a dead end.
         revised = await self._await(
             lambda: self._find_queue_item(ec, handled),
             hc,
@@ -461,7 +503,7 @@ class AcceptanceHarness:
         assert revised_proposal and revised_proposal != rejected_proposal, (
             "request-changes did not route back to a fresh proposal"
         )
-        # 4. Approve unparks the run; 5. apply materializes.
+        # 5. Approve unparks the run; 6. apply materializes.
         await self._decide(
             ec,
             revised,

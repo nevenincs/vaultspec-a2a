@@ -67,6 +67,7 @@ class Executor:
             checkpointer=checkpointer,
             bridge=bridge,
             aggregator=self._aggregator,
+            token_store=self._token_store,
         )
         self._state_projector = StateProjector(
             checkpointer=checkpointer,

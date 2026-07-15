@@ -20,7 +20,7 @@ from ..streaming.aggregator import EventAggregator, SequencedEvent, StreamableGr
 from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
-from ..thread.enums import ControlActionType, ThreadStatus
+from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
 from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
 from .state_projection import StateProjector
 from .token_store import RunTokenStore
@@ -161,14 +161,24 @@ class Executor:
             self._active_ingests.add(thread_id)
             return True
 
-    async def _mark_ingest_done(self, thread_id: str) -> None:
-        """Release the ingest slot, untrack thread, prune aggregator (WRK-K02)."""
+    async def _mark_ingest_done(self, thread_id: str, outcome: str) -> None:
+        """Release the ingest slot, untrack thread, prune aggregator (WRK-K02).
+
+        Drops the run's actor tokens only on a TERMINAL *outcome*. An
+        ``"interrupted"`` ingest means the run parked at a gate and will resume -
+        a later document gate (the ADR gate) authors again through the submitter,
+        which reads the run's bearer/actor tokens from the store at call time - so
+        the tokens must survive park->resume and are dropped only when the run
+        truly terminates (P04.S10; ADR R7 window closes at termination, not at an
+        interrupt-park).
+        """
         async with self._ingest_lock:
             self._active_ingests.discard(thread_id)
             active_snapshot = set(self._active_ingests)
-        # ADR R7: the active window is closing — drop the run's actor tokens so
-        # they never outlive the worker turn that used them.
-        self._token_store.drop(thread_id)
+        # ADR R7: drop the run's actor tokens when its active window truly closes,
+        # i.e. a terminal outcome - never on an interrupt-park that will resume.
+        if outcome in TERMINAL_STATUSES:
+            self._token_store.drop(thread_id)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -385,7 +395,7 @@ class Executor:
                     config,
                 )
                 await self._state_projector.emit_terminal_status(req.thread_id, outcome)
-                await self._mark_ingest_done(req.thread_id)
+                await self._mark_ingest_done(req.thread_id, outcome)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
@@ -510,7 +520,7 @@ class Executor:
                     config,
                 )
                 await self._state_projector.emit_terminal_status(req.thread_id, outcome)
-                await self._mark_ingest_done(req.thread_id)
+                await self._mark_ingest_done(req.thread_id, outcome)
 
     async def shutdown(self) -> None:
         """Release held resources (aggregator debounce tasks, etc.)."""

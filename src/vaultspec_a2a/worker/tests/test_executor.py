@@ -22,6 +22,8 @@ from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 from pydantic import ValidationError
 
 from ...ipc.schemas import DispatchRequest
+from ...thread.actor_tokens import ActorTokenBundle
+from ...thread.enums import ThreadStatus
 from ..executor import Executor
 from ..graph_lifecycle import GraphLifecycleManager
 from ..ipc import WorkerBridge
@@ -128,7 +130,7 @@ class TestIngestGating:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 await executor._mark_ingest_active("t-1")
-                await executor._mark_ingest_done("t-1")
+                await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED)
                 # Slot is now free -- can re-acquire
                 result = await executor._mark_ingest_active("t-1")
                 assert result is True
@@ -147,7 +149,7 @@ class TestIngestGating:
                 bridge.track_thread("t-1")
                 assert "t-1" in bridge.active_threads
 
-                await executor._mark_ingest_done("t-1")
+                await executor._mark_ingest_done("t-1", ThreadStatus.COMPLETED)
                 assert "t-1" not in bridge.active_threads
             finally:
                 await bridge.close()
@@ -160,7 +162,41 @@ class TestIngestGating:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 # Should not raise -- discard on empty set
-                await executor._mark_ingest_done("nonexistent")
+                await executor._mark_ingest_done("nonexistent", ThreadStatus.COMPLETED)
+            finally:
+                await bridge.close()
+
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_mark_done_keeps_tokens_on_interrupt_drops_on_terminal(self) -> None:
+        """Actor tokens survive an interrupt-park and drop only on termination.
+
+        A document run parks at its first gate (``"interrupted"``) and later
+        resumes to author the ADR document, which needs the run's tokens; the
+        active-window close that drops them is the run's TERMINAL outcome, not the
+        interrupt-park (P04.S10, ADR R7).
+        """
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                executor.token_store.register(
+                    "t-doc",
+                    ActorTokenBundle(
+                        tokens={"vaultspec-synthesist": "tok-s"},
+                        engine_bearer="bearer-x",
+                    ),
+                )
+                # Parked at a gate: tokens must persist for the resume.
+                await executor._mark_ingest_done("t-doc", "interrupted")
+                assert executor.token_store.engine_bearer("t-doc") == "bearer-x"
+                assert (
+                    executor.token_store.actor_token("t-doc", "vaultspec-synthesist")
+                    == "tok-s"
+                )
+                # Terminal: the active window closes and tokens are dropped.
+                await executor._mark_ingest_done("t-doc", ThreadStatus.COMPLETED)
+                assert executor.token_store.engine_bearer("t-doc") is None
             finally:
                 await bridge.close()
 

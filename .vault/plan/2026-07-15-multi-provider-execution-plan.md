@@ -31,13 +31,13 @@ Land Z.ai as a config variant of the existing Claude ACP path: new provider enum
 
 Land Codex as a new non-ACP subprocess chat model: resolve its headless auth model, implement the JSON-RPC app-server driver, wire readiness and factory dispatch.
 
-- [ ] `P02.S08` - Resolve Codex's non-interactive/headless authentication model against the real Codex CLI (API key vs. ChatGPT-session vs. local device auth) — this closes the ADR's flagged Codex auth-model unknown before any settings field is designed; `src/vaultspec_a2a/control/config.py`.
-- [ ] `P02.S09` - Add Provider.CODEX to the Provider enum with model-map entries; `src/vaultspec_a2a/graph/enums.py`.
-- [ ] `P02.S10` - Implement CodexChatModel(BaseChatModel) driving codex app-server's JSON-RPC-over-stdio surface directly, following the mock_chat_model.py non-ACP precedent; `src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `P02.S11` - Reuse _subprocess.py's protocol-agnostic process lifecycle helpers (spawn/kill-tree) for Codex subprocess management; `src/vaultspec_a2a/providers/_subprocess.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
-- [ ] `P02.S12` - Add a classify_codex_command-style readiness check and a Provider.CODEX branch in probe_provider_readiness, never emitting a secret; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/model_profiles.py`.
-- [ ] `P02.S13` - Add a factory.py dispatch branch for Provider.CODEX; `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P02.S14` - Unit tests for CodexChatModel's JSON-RPC framing and subprocess lifecycle, plus a live probe against the real codex app-server once the auth model is resolved; `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py, src/vaultspec_a2a/service_tests/`.
+- [x] `P02.S08` - Resolve Codex's non-interactive/headless authentication model against the real Codex CLI (API key vs. ChatGPT-session vs. local device auth) — this closes the ADR's flagged Codex auth-model unknown before any settings field is designed. Landed: dc3dd25, 76fc83b; `src/vaultspec_a2a/control/config.py`.
+- [x] `P02.S09` - Add Provider.CODEX to the Provider enum with model-map entries. Landed: dc3dd25, 76fc83b; `src/vaultspec_a2a/graph/enums.py`.
+- [x] `P02.S10` - Implement CodexChatModel(BaseChatModel) driving codex app-server's JSON-RPC-over-stdio surface directly, following the mock_chat_model.py non-ACP precedent. Landed: 15e1266; `src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `P02.S11` - Reuse _subprocess.py's protocol-agnostic process lifecycle helpers (spawn/kill-tree) for Codex subprocess management. Landed: 15e1266; `src/vaultspec_a2a/providers/_subprocess.py, src/vaultspec_a2a/providers/codex_chat_model.py`.
+- [x] `P02.S12` - Add a classify_codex_command-style readiness check and a Provider.CODEX branch in probe_provider_readiness, never emitting a secret. Landed: dc3dd25, 76fc83b; `src/vaultspec_a2a/providers/factory.py, src/vaultspec_a2a/providers/model_profiles.py`.
+- [x] `P02.S13` - Add a factory.py dispatch branch for Provider.CODEX. Landed: dc3dd25, 76fc83b; `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P02.S14` - Unit tests for CodexChatModel's JSON-RPC framing and subprocess lifecycle, plus a live probe against the real codex app-server once the auth model is resolved. Landed: 15e1266, service-marked live turn verified against codex-cli 0.144.4; `src/vaultspec_a2a/providers/tests/test_codex_chat_model.py, src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P03` - Per-role mixed-provider proof
 
@@ -60,7 +60,7 @@ Adds two provider integrations (Z.ai routed through the existing Claude ACP path
 
 ## Description
 
-**Resumability state (2026-07-15 audit, updated live):** Executor-of-record P01 (Z.ai): executor-opus-5. Executor-of-record P02 (Codex): executor-opus-6. Both dispatched in parallel 2026-07-15 per owner approval; current frontier is uncommitted in-flight work on `src/vaultspec_a2a/control/config.py`, `graph/enums.py`, `providers/factory.py`, `providers/model_profiles.py`, `providers/codex_chat_model.py` (new), and both providers' test files. See `2026-07-15-multi-provider-execution-adr` Constraints for the current resolution state of each phase's flagged unknown (Codex auth: resolved; Z.ai fidelity: still open, blocked on credentials). No exec Step Records exist yet for P01/P02 — a cold resume should read the uncommitted diff (`git diff` against this commit) or, once committed, the Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P03 depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first (not yet built as of this audit).
+**Resumability state (2026-07-15, updated live):** P01 (Z.ai, executor-opus-5) and P02 (Codex, executor-opus-6) are both landed on main — see each step row for its exact commit SHA(s) and the corresponding Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P01.S06 (the Z.ai live fidelity probe) stays open, blocked on a Z.ai credential; see its row for the exact re-arm command. Current frontier: P03 (per-role mixed-provider proof), which depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first — that harness now has a full re-dispatch spec (`2026-07-15-adr-authoring-orchestration-reference`) but is not yet built. P04 (cross-repo verification) can start independently at any time.
 
 **Tracked hardening follow-up (out of P01/P02 scope):** `AcpChatModel.env_vars` has no repr redaction — the Z.ai auth token and Claude's OAuth token both sit in that plain dict unredacted. Residual risk is scoped to a direct `repr(model)` call, not present in any current code path. Cross-cutting across every ACP-path provider; not picked up by this plan.
 

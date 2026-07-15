@@ -112,8 +112,8 @@ run-start accepts the engine-provisioned per-role actor token bundle; each token
 
 Reshape the existing /api surface into versioned run-start, run-status, run-cancel, presets-list, and service-state endpoints; SSE frames become versioned, bounded, droppable; run-status is the recovery read.
 
-- [ ] `W04.P10.S24` - Reshape the gateway into the five versioned verbs (run-start, run-status, run-cancel, presets-list, service-state), designing run-status as the authoritative recovery snapshot with topology position, per-role state, and produced proposal ids; `src/vaultspec_a2a/api/`.
-- [ ] `W04.P10.S25` - Version and bound the SSE progress frames (droppable, non-authoritative) and cover the five verbs plus stream with live gateway tests replacing the deleted UI contract coverage; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
+- [x] `W04.P10.S24` - Reshape the gateway into the five versioned verbs (run-start, run-status, run-cancel, presets-list, service-state), designing run-status as the authoritative recovery snapshot with topology position, per-role state, and produced proposal ids; `src/vaultspec_a2a/api/`.
+- [x] `W04.P10.S25` - Version and bound the SSE progress frames (droppable, non-authoritative) and cover the five verbs plus stream with live gateway tests replacing the deleted UI contract coverage; `src/vaultspec_a2a/streaming/, src/vaultspec_a2a/api/tests/`.
 
 ### Phase `W04.P11` - Operator CLI restoration
 

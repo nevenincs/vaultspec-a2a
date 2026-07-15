@@ -12,11 +12,14 @@ from ...thread.errors import ConfigError
 from ..acp_chat_model import AcpChatModel
 from ..factory import (
     _BIN_PATH,
+    _CLAUDE_ACP_JS,
     ProviderFactory,
     _build_acp_command,
     _build_gemini_command,
     _build_gemini_env,
+    _build_zai_env,
     _classify_gemini_command,
+    classify_provider_command,
 )
 
 
@@ -179,6 +182,85 @@ def test_build_gemini_env_ignores_blank_values() -> None:
     """Blank Gemini auth settings must not produce empty subprocess env vars."""
     env = _build_gemini_env(" ", "", " ", "")
     assert env == {}
+
+
+# ---------------------------------------------------------------------------
+# Z.ai: config variant of the Claude ACP path
+# ---------------------------------------------------------------------------
+
+
+def test_build_zai_env_injects_base_url_and_token() -> None:
+    """Z.ai env builder maps configured settings to the Anthropic gateway vars."""
+    env = _build_zai_env(
+        zai_base_url="https://api.z.ai/api/anthropic",
+        zai_auth_token="zai-secret",
+    )
+    assert env == {
+        "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+        "ANTHROPIC_AUTH_TOKEN": "zai-secret",
+    }
+
+
+def test_build_zai_env_without_token_returns_empty() -> None:
+    """No token means no auth env — the base URL alone is not injected."""
+    assert _build_zai_env("https://api.z.ai/api/anthropic", None) == {}
+
+
+def test_build_zai_env_ignores_blank_token() -> None:
+    """A whitespace-only token must not produce an ANTHROPIC_AUTH_TOKEN var."""
+    assert _build_zai_env("https://api.z.ai/api/anthropic", "  ") == {}
+
+
+def test_build_zai_env_omits_blank_base_url() -> None:
+    """A blank base URL is dropped while a real token still authenticates."""
+    env = _build_zai_env(" ", "zai-secret")
+    assert env == {"ANTHROPIC_AUTH_TOKEN": "zai-secret"}
+
+
+def test_provider_factory_zai_creates_acp_via_claude_wrapper() -> None:
+    """Z.ai rides the claude-agent-acp wrapper: same command as the Claude path."""
+    if not _CLAUDE_ACP_JS.exists():
+        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
+            ProviderFactory().create(Provider.ZAI)
+        return
+    model = ProviderFactory().create(Provider.ZAI)
+    assert isinstance(model, AcpChatModel)
+    assert model.command == ["node", str(_CLAUDE_ACP_JS)]
+    assert model.provider == Provider.ZAI.value
+    assert model.acp_backend == "node"
+    assert model.use_exec is False
+    assert model.auth_mode in {"zai_auth_token", "none_detected"}
+
+
+def test_provider_factory_zai_injects_configured_token() -> None:
+    """When a Z.ai token is configured, both Anthropic gateway vars are injected."""
+    from ..factory import settings as factory_settings
+
+    if not _CLAUDE_ACP_JS.exists():
+        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
+            ProviderFactory().create(Provider.ZAI)
+        return
+    model = ProviderFactory().create(Provider.ZAI)
+    assert isinstance(model, AcpChatModel)
+    if factory_settings.zai_auth_token and factory_settings.zai_auth_token.strip():
+        assert model.env_vars["ANTHROPIC_AUTH_TOKEN"] == factory_settings.zai_auth_token
+        assert model.env_vars["ANTHROPIC_BASE_URL"] == factory_settings.zai_base_url
+        assert model.auth_mode == "zai_auth_token"
+    else:
+        assert "ANTHROPIC_AUTH_TOKEN" not in model.env_vars
+        assert model.auth_mode == "none_detected"
+
+
+def test_classify_provider_command_zai_returns_acp_meta() -> None:
+    """Z.ai classifies to the same ACP wrapper command metadata as Claude."""
+    if not _CLAUDE_ACP_JS.exists():
+        with pytest.raises(ConfigError, match="Claude ACP entry point not found"):
+            classify_provider_command(Provider.ZAI)
+        return
+    meta = classify_provider_command(Provider.ZAI)
+    assert meta["command_kind"] == "node_entry"
+    assert meta["acp_backend"] == "node"
+    assert meta["command_executable"] == "node"
 
 
 def test_provider_factory_explicit_string_model() -> None:

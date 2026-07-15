@@ -354,6 +354,21 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
             )
         return ProviderReadiness(provider=provider, ready=True)
 
+    if provider == Provider.CODEX:
+        # Codex auth is a file-based persisted session in the Codex home, not a
+        # configured secret, so readiness is command resolvability only — the
+        # probe never spawns the CLI or reads the session file.
+        return _command_readiness(provider)
+
+    if provider == Provider.ZAI:
+        if not _has_text(settings.zai_auth_token):
+            return ProviderReadiness(
+                provider=provider,
+                ready=False,
+                reason="no Z.ai auth token configured",
+            )
+        return _command_readiness(provider)
+
     if provider == Provider.ZHIPU:
         if not _has_text(settings.zhipu_api_key):
             return ProviderReadiness(

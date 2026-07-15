@@ -164,6 +164,26 @@ class InfraConfig(BaseSettings):
         default=None,
         validation_alias="CLAUDE_CODE_OAUTH_TOKEN",
     )
+    # Z.ai routes through the Claude ACP path against an Anthropic-Messages-
+    # compatible endpoint (multi-provider-execution ADR). The base URL defaults to
+    # Z.ai's documented Anthropic gateway; only the auth token must be supplied.
+    zai_base_url: str = Field(
+        default="https://api.z.ai/api/anthropic",
+        validation_alias=AliasChoices("ZAI_BASE_URL", "ZAI_ANTHROPIC_BASE_URL"),
+        description="Base URL for the Z.ai Anthropic-compatible endpoint.",
+    )
+    zai_auth_token: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("ZAI_AUTH_TOKEN", "ZAI_API_KEY"),
+    )
+    # Codex `app-server` authenticates from a persisted local session in its Codex
+    # home (~/.codex by default). This non-secret override points the subprocess at
+    # an alternate home for headless/container use; no API key is involved (the
+    # ChatGPT-session auth mode is file-based). Mirrors gemini_cli_home.
+    codex_home: str | None = Field(
+        default=None,
+        validation_alias="CODEX_HOME",
+    )
 
     host: str = Field(
         default="0.0.0.0",

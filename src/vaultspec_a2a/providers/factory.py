@@ -66,6 +66,28 @@ def _build_gemini_env(
     return env_vars
 
 
+def _build_zai_env(
+    zai_base_url: str | None = None,
+    zai_auth_token: str | None = None,
+) -> dict[str, str]:
+    """Return explicit Z.ai auth env vars for the Claude ACP subprocess.
+
+    Z.ai rides the Claude ACP path (multi-provider-execution ADR): the wrapper's
+    Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
+    retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
+    is scrubbed of ``ANTHROPIC_API_KEY`` (workspace/environment.py) but leaves both
+    of these names untouched, so the provider layer supplies them here. The token
+    is a secret: it is placed in the returned dict but never logged.
+    """
+    env_vars: dict[str, str] = {}
+    if not (zai_auth_token and zai_auth_token.strip()):
+        return env_vars
+    if zai_base_url and zai_base_url.strip():
+        env_vars["ANTHROPIC_BASE_URL"] = zai_base_url
+    env_vars["ANTHROPIC_AUTH_TOKEN"] = zai_auth_token
+    return env_vars
+
+
 def _classify_gemini_command(
     model_name: str,
     *,
@@ -232,6 +254,32 @@ def _build_acp_command(backend: str) -> list[str]:
     return command
 
 
+def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
+    """Return the ``codex app-server`` command plus bounded runtime metadata.
+
+    Codex is a non-ACP JSON-RPC subprocess. Resolution prefers the codex
+    executable on PATH; the bare-name ``fallback_cli_name`` origin (no resolved
+    path) is what ``classify_provider_command`` treats as unresolvable, matching
+    the Gemini classifier's convention.
+    """
+    system_codex = shutil.which("codex")
+    if system_codex:
+        return [system_codex, "app-server"], {
+            "runtime_authority": "system_cli",
+            "command_origin": "system_path_executable",
+            "command_kind": "codex_cli",
+            "command_executable": Path(system_codex).name,
+            "command_target": system_codex,
+        }
+    return ["codex", "app-server"], {
+        "runtime_authority": "system_cli",
+        "command_origin": "fallback_cli_name",
+        "command_kind": "codex_cli",
+        "command_executable": "codex",
+        "command_target": "codex",
+    }
+
+
 def classify_provider_command(
     provider: Provider, *, backend: str | None = None
 ) -> dict[str, str]:
@@ -249,7 +297,9 @@ def classify_provider_command(
             not resolvable on this host.
         ConfigError: The Claude ACP entry point/binary does not exist.
     """
-    if provider == Provider.CLAUDE:
+    if provider in (Provider.CLAUDE, Provider.ZAI):
+        # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
+        # injected auth env differs (multi-provider-execution ADR).
         resolved_backend = backend if backend is not None else settings.acp_backend
         _, meta = _classify_acp_command(resolved_backend)
         return meta
@@ -263,6 +313,11 @@ def classify_provider_command(
                 "Gemini CLI not resolvable: not found in node_modules, the docker "
                 "entry, or on PATH."
             )
+        return meta
+    if provider == Provider.CODEX:
+        _, meta = _classify_codex_command()
+        if meta.get("command_origin") == "fallback_cli_name":
+            raise ValueError("Codex CLI not resolvable: 'codex' not found on PATH.")
         return meta
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
@@ -302,8 +357,10 @@ class ProviderFactory:
         # (PROVIDER_DEFAULT_MODELS lookup raises KeyError for unknown providers).
         supported = {
             Provider.CLAUDE,
+            Provider.CODEX,
             Provider.GEMINI,
             Provider.MOCK,
+            Provider.ZAI,
             Provider.ZHIPU,
             Provider.OPENAI,
         }
@@ -350,6 +407,28 @@ class ProviderFactory:
 
             return MockChatModel(agent_config=agent_config)
 
+        if provider == Provider.CODEX:
+            from .codex_chat_model import CodexChatModel
+
+            command, command_meta = _classify_codex_command()
+            # Codex auth is file-based (persisted local session in the Codex home);
+            # no secret env is injected. A raw model string bypasses MODEL_MAP, so
+            # pass the resolved name through; None falls back to the account default.
+            return CodexChatModel(
+                command=command,
+                model_name=model_name,
+                agent_config=agent_config,
+                workspace_root=str(workspace_root) if workspace_root else None,
+                codex_home=settings.codex_home,
+                timeout=float(timeout),
+                provider=str(provider.value),
+                runtime_authority=command_meta["runtime_authority"],
+                command_origin=command_meta["command_origin"],
+                command_kind=command_meta["command_kind"],
+                command_executable=command_meta["command_executable"],
+                command_target=command_meta["command_target"],
+            )
+
         if provider == Provider.CLAUDE:
             oauth_token = settings.claude_code_oauth_token
             backend = backend if backend is not None else settings.acp_backend
@@ -390,6 +469,50 @@ class ProviderFactory:
                 command_target=command_meta["command_target"],
                 acp_backend=command_meta["acp_backend"],
                 auth_mode="oauth_token" if env_vars else "none_detected",
+            )
+
+        if provider == Provider.ZAI:
+            # Z.ai is a config variant of the Claude ACP path: same wrapper
+            # command, Anthropic base URL + auth token injected instead of the
+            # Claude OAuth token (multi-provider-execution ADR). ENABLE_TOOL_SEARCH
+            # and the other Claude-CLI behaviours in AcpChatModel._astream are
+            # inherited unchanged.
+            backend = backend if backend is not None else settings.acp_backend
+            auth_token = settings.zai_auth_token
+            logger.debug(
+                "[%s] Instantiating ACP Wrapper. Auth token present: %s, backend=%s",
+                provider,
+                bool(auth_token and auth_token.strip()),
+                backend,
+            )
+
+            command, command_meta = _classify_acp_command(backend)
+
+            env_vars = _build_zai_env(
+                zai_base_url=settings.zai_base_url,
+                zai_auth_token=auth_token,
+            )
+            if backend == "binary":
+                env_vars["CLAUDE_AGENT_ACP_IS_SINGLE_FILE_BUN"] = "1"
+
+            return AcpChatModel(
+                command=command,
+                env_vars=env_vars,
+                agent_config=agent_config,
+                workspace_root=str(workspace_root) if workspace_root else None,
+                use_exec=(backend == "binary"),
+                provider=str(provider.value),
+                runtime_authority=command_meta["runtime_authority"],
+                command_origin=command_meta["command_origin"],
+                command_kind=command_meta["command_kind"],
+                command_executable=command_meta["command_executable"],
+                command_target=command_meta["command_target"],
+                acp_backend=command_meta["acp_backend"],
+                auth_mode=(
+                    "zai_auth_token"
+                    if "ANTHROPIC_AUTH_TOKEN" in env_vars
+                    else "none_detected"
+                ),
             )
 
         if provider == Provider.GEMINI:

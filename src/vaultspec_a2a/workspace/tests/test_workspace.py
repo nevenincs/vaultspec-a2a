@@ -422,6 +422,24 @@ class TestCredentialScrubbing:
         assert env.get("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY") == "1"
         assert env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC") == "1"
 
+    def test_zai_gateway_env_vars_are_preserved(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The Z.ai path depends on ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN surviving.
+
+        multi-provider-execution ADR: Z.ai rides the Claude ACP path by injecting
+        these two vars. The provider layer sets them in ``env_vars`` after the base
+        scrub, but the base scrub must not strip them if they are already present in
+        the process environment — this pins that invariant so a future addition to
+        ``scrub_keys`` cannot silently break Z.ai auth. ``ANTHROPIC_API_KEY`` (a
+        distinct name) remains scrubbed; these two are not secrets-by-name here.
+        """
+        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
+        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-token-value")
+        env = resolve_env_vars(tmp_path)
+        assert env.get("ANTHROPIC_BASE_URL") == "https://api.z.ai/api/anthropic"
+        assert env.get("ANTHROPIC_AUTH_TOKEN") == "zai-token-value"
+
 
 # ---------------------------------------------------------------------------
 # Input validation — WS-H6

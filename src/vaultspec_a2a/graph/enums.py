@@ -129,9 +129,11 @@ class Provider(StrEnum):
     """Supported LLM providers."""
 
     CLAUDE = "claude"
+    CODEX = "codex"
     GEMINI = "gemini"
     MOCK = "mock"
     OPENAI = "openai"
+    ZAI = "zai"
     ZHIPU = "zhipu"
 
 
@@ -167,6 +169,15 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "gpt-5.3-codex",
         Model.MAX: "gpt-5.3-codex",
     },
+    # Codex drives `codex app-server`'s JSON-RPC surface directly (non-ACP); the
+    # names are real Codex model ids verified against `model/list` on codex-cli
+    # 0.144.4 (an unknown id fails the turn). gpt-5.6-sol is the account default.
+    Provider.CODEX: {
+        Model.LOW: "gpt-5.4-mini",
+        Model.MID: "gpt-5.5",
+        Model.HIGH: "gpt-5.6-sol",
+        Model.MAX: "gpt-5.6-sol",
+    },
     Provider.MOCK: {
         Model.LOW: "mock-low",
         Model.MID: "mock-mid",
@@ -179,15 +190,26 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "glm-5",
         Model.MAX: "glm-5",
     },
+    # Z.ai serves the same GLM family over an Anthropic-Messages-compatible
+    # endpoint consumed through the Claude ACP path (see multi-provider-execution
+    # ADR); the model names mirror Provider.ZHIPU.
+    Provider.ZAI: {
+        Model.LOW: "glm-4.7-flash",
+        Model.MID: "glm-4.7-flagship",
+        Model.HIGH: "glm-5",
+        Model.MAX: "glm-5",
+    },
 }
 
 
 # Default model mapping (capability level per provider)
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.CLAUDE: Model.MID,
+    Provider.CODEX: Model.HIGH,
     Provider.GEMINI: Model.MID,
     Provider.MOCK: Model.MID,
     Provider.OPENAI: Model.HIGH,
+    Provider.ZAI: Model.MID,
     Provider.ZHIPU: Model.HIGH,
 }
 

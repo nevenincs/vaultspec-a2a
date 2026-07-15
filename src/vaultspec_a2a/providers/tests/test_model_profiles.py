@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.graph.enums import MODEL_MAP, Model, Provider
 from vaultspec_a2a.team.team_config import (
     AgentConfig,
@@ -166,6 +167,22 @@ class TestReadiness:
             # A not-ready verdict always carries a safe, non-empty reason.
             if not r.ready:
                 assert r.reason
+
+    def test_zai_readiness_reason_is_safe_and_credential_gated(self) -> None:
+        """Z.ai readiness gates on the auth token and never leaks it.
+
+        With no token configured the verdict is not-ready with the safe,
+        secret-free reason; with a token it proceeds to command resolvability.
+        Either way the reason is credential-free (multi-provider-execution ADR).
+        """
+        token = (settings.zai_auth_token or "").strip()
+        r = probe_provider_readiness(Provider.ZAI)
+        assert r.provider == Provider.ZAI
+        if not token:
+            assert r.ready is False
+            assert r.reason == "no Z.ai auth token configured"
+        elif r.reason is not None:
+            assert token not in r.reason
 
 
 def _mock_assignment() -> ProfileAssignment:

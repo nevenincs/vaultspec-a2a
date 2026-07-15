@@ -110,7 +110,6 @@ def _submitter(base_url: str, store: RunTokenStore) -> DocumentProposalSubmitter
     return DocumentProposalSubmitter(
         engine_base_url=base_url,
         token_store=store,
-        feature="p05s12",
         phases={
             "research": PhaseAuthoringSpec(
                 document_role=_RESEARCH_ROLE,
@@ -125,7 +124,10 @@ def _state(thread_id: str, *bodies: str) -> TeamState:
     messages: list[BaseMessage] = [HumanMessage(content="ground the feature")]
     for body in bodies:
         messages.append(AIMessage(content=body, name=_RESEARCH_WRITER))
-    return cast("TeamState", {"thread_id": thread_id, "messages": messages})
+    return cast(
+        "TeamState",
+        {"thread_id": thread_id, "active_feature": "p05s12", "messages": messages},
+    )
 
 
 @pytest.mark.service

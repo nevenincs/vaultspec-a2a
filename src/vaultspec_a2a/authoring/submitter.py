@@ -157,7 +157,6 @@ class DocumentProposalSubmitter:
         *,
         engine_base_url: str,
         token_store: RunTokenStore,
-        feature: str,
         phases: Mapping[str, PhaseAuthoringSpec],
     ) -> None:
         if not engine_base_url:
@@ -166,7 +165,6 @@ class DocumentProposalSubmitter:
             )
         self._engine_base_url = engine_base_url.rstrip("/")
         self._token_store = token_store
-        self._feature = feature
         self._phases = dict(phases)
 
     async def __call__(self, state: TeamState, phase: str) -> str:
@@ -175,6 +173,13 @@ class DocumentProposalSubmitter:
         if not isinstance(thread_id, str) or not thread_id:
             raise EngineUnavailableError(
                 "run state carries no thread_id; cannot resolve run identity"
+            )
+        # The compiled graph is cached across runs of a preset, so the feature is
+        # a per-run fact read from state, not construction config.
+        feature = state.get("active_feature")
+        if not isinstance(feature, str) or not feature:
+            raise RoleConfigInvalidError(
+                "run state carries no active_feature; cannot scope the proposal"
             )
         spec = self._phases.get(phase)
         if spec is None:
@@ -198,6 +203,7 @@ class DocumentProposalSubmitter:
         body, revision_cycle = _latest_document(state, spec.writer_message_name)
         return await self._propose_and_submit(
             thread_id=thread_id,
+            feature=feature,
             phase=phase,
             spec=spec,
             body=body,
@@ -210,6 +216,7 @@ class DocumentProposalSubmitter:
         self,
         *,
         thread_id: str,
+        feature: str,
         phase: str,
         spec: PhaseAuthoringSpec,
         body: str,
@@ -230,7 +237,7 @@ class DocumentProposalSubmitter:
             session = AuthoringSession(client, thread_id)
             created_session = await session.create_session(
                 scope="repo",
-                title=f"{self._feature} authoring",
+                title=f"{feature} authoring",
                 idempotency_key=derive_idempotency_key(thread_id, "create_session"),
             )
             self._reject_denial("create_session", created_session)
@@ -238,8 +245,10 @@ class DocumentProposalSubmitter:
             changeset_id = session.new_changeset_id(f"{phase}-r{revision_cycle}")
             created = await session.create_proposal(
                 changeset_id=changeset_id,
-                summary=f"{self._feature} {phase} document (r{rev})",
-                operations=[self._whole_document_op(thread_id, phase, rev, spec, body)],
+                summary=f"{feature} {phase} document (r{rev})",
+                operations=[
+                    self._whole_document_op(thread_id, feature, phase, rev, spec, body)
+                ],
                 idempotency_key=derive_idempotency_key(
                     thread_id, phase, "create_proposal", rev
                 ),
@@ -250,7 +259,7 @@ class DocumentProposalSubmitter:
             submitted = await session.submit(
                 changeset_id=changeset_id,
                 expected_revision=revision,
-                summary=f"submit {self._feature} {phase} (r{rev})",
+                summary=f"submit {feature} {phase} (r{rev})",
                 idempotency_key=derive_idempotency_key(
                     thread_id, phase, "submit", rev
                 ),
@@ -261,6 +270,7 @@ class DocumentProposalSubmitter:
     def _whole_document_op(
         self,
         thread_id: str,
+        feature: str,
         phase: str,
         rev: str,
         spec: PhaseAuthoringSpec,
@@ -274,15 +284,15 @@ class DocumentProposalSubmitter:
         byte-identical, deduped no-op.
         """
         return {
-            "child_key": f"{spec.doc_type}/{self._feature}-{phase}.md",
+            "child_key": f"{spec.doc_type}/{feature}-{phase}.md",
             "operation": "create_document",
             "target": {
                 "document": {
                     "kind": "provisional_create",
                     "provisional_doc_id": f"prov:{thread_id}:{phase}:r{rev}",
                     "doc_type": spec.doc_type,
-                    "feature": self._feature,
-                    "title": f"{self._feature} {phase}",
+                    "feature": feature,
+                    "title": f"{feature} {phase}",
                     "collision_status": "available",
                 }
             },

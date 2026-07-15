@@ -74,21 +74,28 @@ class _FakeSubmitter:
         return f"prop-{phase}"
 
 
-class _ThreadCapturingSubmitter:
-    """Records the ``state['thread_id']`` observed at each submit call.
+class _StateCapturingSubmitter:
+    """Records the ``thread_id`` and message names the submit node observes.
 
-    The production submitter keys the run's engine session, changeset, and
-    proposal on ``state['thread_id']`` (``AuthoringSession(client, thread_id)``),
-    so that value MUST be the run's own id — never a branch-scoped id leaked out
-    of the Send fan-out or the synthesis join. This submitter captures what the
-    gate actually saw so a regression can assert the invariant.
+    The production submitter both keys the run on ``state['thread_id']`` and
+    sources the document body from the writer's ``synthesis``-named message
+    (``_latest_document(state, "synthesis")``). Two invariants must hold at the
+    submit node after the Send diverge / synthesis join: the thread id is the
+    run's own (never a branch-scoped id), and the synthesis message actually
+    reached the joined state (a checkpoint that carried only the seed messages
+    with no synthesis message was the loose thread behind the empty-scaffold
+    materialization). This submitter captures both so a regression can assert
+    them.
     """
 
     def __init__(self) -> None:
         self.seen_thread_ids: list[str | None] = []
+        self.seen_message_names: list[list[str]] = []
 
     async def __call__(self, state: Any, phase: str) -> str:
         self.seen_thread_ids.append(state.get("thread_id"))
+        names = [getattr(m, "name", None) or "" for m in state.get("messages", [])]
+        self.seen_message_names.append(names)
         return f"prop-{phase}"
 
 
@@ -232,22 +239,31 @@ async def test_research_adr_runs_to_first_document_gate(
 
 
 @pytest.mark.asyncio
-async def test_research_gate_submit_sees_run_thread_id(
+async def test_research_gate_submit_sees_run_state_and_synthesis_body(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """The gate submit must observe the RUN's thread id, never a branch id.
+    """The gate submit sees the run thread id AND the synthesis message body.
 
-    Regression for the diverge/synthesis provenance defect: the dispatch node
-    fans the full state out to each researcher branch via ``Send`` and the
-    branches join at synthesis, all under the same checkpointer thread. The
-    production submitter derives the engine session/changeset/proposal ids from
-    ``state['thread_id']``, so a branch-scoped id leaking back into the joined
-    state would key the proposal under the wrong thread and strand the parked
-    run. Drive the topology over a real checkpointer with per-thread research
-    branches and assert the submit node saw exactly the seeded run id.
+    Regression for the diverge/synthesis state defect: the dispatch node fans
+    the full state out to each researcher branch via ``Send`` and the branches
+    join at synthesis, all under the same checkpointer thread. Two invariants
+    must hold when ``research_submit`` runs:
+
+    * ``state['thread_id']`` is the run's own id — the production submitter keys
+      the engine session/changeset/proposal on it, so a branch-scoped id leaking
+      back through the join would strand the parked run;
+    * the synthesis-named message is present in the joined ``messages`` — the
+      submitter sources the document body from it
+      (``_latest_document(state, "synthesis")``), so if the Send/join dropped it
+      the submit node would have no real body to propose (the empty-scaffold
+      loose thread: a checkpoint carrying only the seed messages with no
+      synthesis message).
+
+    Drive the topology over a real checkpointer with per-thread research branches
+    and assert both at the submit node.
     """
-    submitter = _ThreadCapturingSubmitter()
+    submitter = _StateCapturingSubmitter()
     team = _research_adr_team(
         [
             ResearchThreadSpec(thread_id="codebase"),
@@ -281,5 +297,12 @@ async def test_research_gate_submit_sees_run_thread_id(
     # The submit node ran exactly once, and it saw the run's own thread id —
     # not "codebase"/"prior-art" (the research branch ids) nor any synthesis id.
     assert submitter.seen_thread_ids == [run_thread_id]
+    # The synthesis writer's message reached the joined state the submit node
+    # reads — the diverge/join did not drop it.
+    assert submitter.seen_message_names, "submit node never ran"
+    assert "synthesis" in submitter.seen_message_names[0], (
+        "submit node did not see the synthesis message body in joined state; "
+        f"names were {submitter.seen_message_names[0]}"
+    )
     # The parked state still carries the run id verbatim.
     assert result["thread_id"] == run_thread_id

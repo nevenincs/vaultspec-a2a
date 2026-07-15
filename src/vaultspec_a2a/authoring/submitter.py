@@ -54,8 +54,20 @@ __all__ = [
     "PhaseAuthoringSpec",
     "ProposalDeniedError",
     "RoleConfigInvalidError",
+    "ScaffoldEchoError",
     "SubmitterError",
 ]
+
+#: Literal template placeholders whose presence in a finished body proves the
+#: writer echoed the scaffold instead of authoring content. Kept tight (the
+#: narrative heading placeholders the shipped research/adr templates carry) so a
+#: real document mentioning ``{}`` in a code snippet never false-positives.
+_TEMPLATE_PLACEHOLDERS: tuple[str, ...] = ("{topic}", "{title}", "{phase}")
+
+#: The HTML-comment marker the vault templates use for their guidance blocks. A
+#: materialized vault document never carries these; their presence is the
+#: strongest signal the writer reproduced the template verbatim.
+_TEMPLATE_ANNOTATION = "<!--"
 
 
 class SubmitterError(AuthoringError):
@@ -80,6 +92,17 @@ class RoleConfigInvalidError(SubmitterError):
 
 class DocumentUnavailableError(SubmitterError):
     """The phase produced no document body to submit."""
+
+
+class ScaffoldEchoError(SubmitterError):
+    """The writer echoed the template scaffold instead of authoring content.
+
+    The body still carries template annotation comments or unfilled narrative
+    placeholders, so proposing it would materialize a hollow document. Refused at
+    the submit node (cheap, local) rather than surfacing as a passing run that
+    materialized an empty scaffold (P04.S10 finding: an AUTO gate applied exactly
+    such a draft).
+    """
 
 
 class ProposalDeniedError(SubmitterError):
@@ -180,7 +203,33 @@ def _latest_document(
             f"sentinel with no document body; the run cannot propose an empty "
             f"document"
         )
+    _reject_scaffold_echo(body, writer_message_name)
     return body, len(bodies)
+
+
+def _reject_scaffold_echo(body: str, writer_message_name: str) -> None:
+    """Refuse a body that is the template scaffold echoed back, not authored content.
+
+    A finished vault document carries neither the template's guidance annotation
+    comments nor its unfilled narrative placeholders. Their presence means the
+    writer reproduced the scaffold (the read-and-echo failure), which would
+    materialize a hollow document; refuse it here with an actionable error rather
+    than proposing it.
+    """
+    if _TEMPLATE_ANNOTATION in body:
+        raise ScaffoldEchoError(
+            f"phase author {writer_message_name!r} left template annotation "
+            f"comments ({_TEMPLATE_ANNOTATION}...) in the document body; author "
+            f"real content following the template's structure, do not reproduce "
+            f"the template"
+        )
+    present = [ph for ph in _TEMPLATE_PLACEHOLDERS if ph in body]
+    if present:
+        raise ScaffoldEchoError(
+            f"phase author {writer_message_name!r} left unfilled template "
+            f"placeholder(s) {present} in the document body; fill every section "
+            f"with authored content before the document can be proposed"
+        )
 
 
 class DocumentProposalSubmitter:

@@ -48,6 +48,7 @@ from .submitter import EngineUnavailableError as EngineUnavailableError
 from .submitter import PhaseAuthoringSpec as PhaseAuthoringSpec
 from .submitter import ProposalDeniedError as ProposalDeniedError
 from .submitter import RoleConfigInvalidError as RoleConfigInvalidError
+from .submitter import ScaffoldEchoError as ScaffoldEchoError
 from .submitter import SubmitterError as SubmitterError
 
 __all__ = [
@@ -78,6 +79,7 @@ __all__ = [
     "PhaseAuthoringSpec",
     "ProposalDeniedError",
     "RoleConfigInvalidError",
+    "ScaffoldEchoError",
     "SseFrame",
     "StreamError",
     "SubmitterError",

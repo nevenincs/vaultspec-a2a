@@ -28,9 +28,13 @@ that approved research into one ADR.
   frontmatter fence through the final Consequences section. Your message body must be
   the document verbatim — no preamble, no fenced code block around it, nothing before
   the frontmatter or after the sentinel.
-- **Template**: Reproduce the structure of `.vaultspec/templates/adr.md` exactly (you
-  may read it). Fill EVERY section and replace every `{placeholder}`; strip the
-  template's guidance comments.
+- **Follow the template, never echo it**: Author the document FOLLOWING the section
+  structure of `.vaultspec/templates/adr.md`, filling every section with real decision
+  content that cites the approved research by stem. NEVER reproduce the template's
+  `<!-- -->` guidance comments and NEVER leave a `{placeholder}` unfilled — reading the
+  template and echoing it back is not authoring. A body that still carries annotation
+  comments or unfilled placeholders is refused at the submit node and rejected by the
+  reviewer.
 
 ## Document boundary
 

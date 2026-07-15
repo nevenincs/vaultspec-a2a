@@ -28,11 +28,13 @@ your context. Your job is to synthesize them into one authoritative Research doc
   opening `---` frontmatter fence through the final Sources entry. Your message body
   must be the document verbatim — no preamble, no "here is the document", no fenced
   code block around it, nothing before the frontmatter or after the sentinel.
-- **Template**: Reproduce the structure of `.vaultspec/templates/research.md` exactly
-  (you may read it). Fill EVERY section and replace every `{placeholder}`; strip the
-  template's guidance comments. A document with unfilled placeholders, leftover
-  `<!-- -->` template comments, or empty Findings/Sources sections is not research and
-  the reviewer will reject it.
+- **Follow the template, never echo it**: Author the document FOLLOWING the section
+  structure of `.vaultspec/templates/research.md`, filling every section with real
+  synthesized content and re-fetchable citations. NEVER reproduce the template's
+  `<!-- -->` guidance comments and NEVER leave a `{placeholder}` unfilled — reading
+  the template and echoing it back is not authoring. A body that still carries
+  annotation comments or unfilled placeholders is refused at the submit node and
+  rejected by the reviewer.
 
 ## Document quality bar (enforced by doc-reviewer; meet it upfront)
 

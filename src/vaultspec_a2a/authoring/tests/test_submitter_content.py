@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, HumanMessage
 
 from ..submitter import (
     DocumentUnavailableError,
+    ScaffoldEchoError,
     _latest_document,
     _strip_completion_sentinel,
 )
@@ -91,3 +92,39 @@ class TestLatestDocument:
     def test_no_writer_message_is_unavailable(self) -> None:
         with pytest.raises(DocumentUnavailableError):
             _latest_document(_state(), _WRITER, _SENTINEL)
+
+
+_SCAFFOLD = """---
+tags:
+  - '#research'
+  - '#sse-reconnection'
+---
+
+<!-- FRONTMATTER RULES:
+     tags: one directory tag and one feature tag. -->
+
+# `sse-reconnection` research: `{topic}`
+
+## Findings
+
+## Sources"""
+
+
+class TestRejectScaffoldEcho:
+    """The submit node refuses a template scaffold echoed back as the body."""
+
+    def test_template_annotation_comment_is_refused(self) -> None:
+        # The verbatim scaffold (annotation comments + unfilled {topic}) — the
+        # exact P04.S10 empty-scaffold specimen — must not reach the engine.
+        with pytest.raises(ScaffoldEchoError, match="annotation"):
+            _latest_document(_state(_SCAFFOLD), _WRITER, _SENTINEL)
+
+    def test_unfilled_placeholder_is_refused(self) -> None:
+        body = _DOC.replace("cursor persistence", "{title}")
+        with pytest.raises(ScaffoldEchoError, match="placeholder"):
+            _latest_document(_state(body), _WRITER, _SENTINEL)
+
+    def test_authored_document_passes_the_guard(self) -> None:
+        # The real authored document (no comments, no placeholders) is accepted.
+        body, _ = _latest_document(_state(f"{_DOC}\n\n{_SENTINEL}"), _WRITER, _SENTINEL)
+        assert body == _DOC

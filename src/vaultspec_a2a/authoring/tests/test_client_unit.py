@@ -117,6 +117,28 @@ class TestEnvelopeDecoding:
         assert denial.denial_kind == "forbidden_actor"
         assert denial.reason == "agents must propose changesets"
 
+    def test_extract_denial_reads_flat_top_level_reason(self) -> None:
+        # An eligibility denial (`denial_value`) emits its fields FLAT under `data`
+        # (`{status, command, allowed, reason}`) with no `eligibility` sub-object.
+        # The reason must be read from the top level, not dropped to None.
+        denial = extract_denial(
+            {
+                "data": {
+                    "status": "denied",
+                    "command": "request_apply",
+                    "allowed": False,
+                    "reason": (
+                        "a different live proposal's create predicts the SAME "
+                        "path `.vault/adr/x-adr.md`; only one can land"
+                    ),
+                },
+                "tiers": {"declared": {"available": True}},
+            }
+        )
+        assert isinstance(denial, Denial)
+        assert denial.reason is not None
+        assert "only one can land" in denial.reason
+
     def test_extract_denial_negative_on_success(self) -> None:
         assert extract_denial({"data": {"receipt": "ok"}, "tiers": {}}) is None
 

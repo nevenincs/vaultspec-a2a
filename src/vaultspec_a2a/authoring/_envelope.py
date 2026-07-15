@@ -86,10 +86,18 @@ def extract_denial(body: dict[str, Any]) -> Denial | None:
     if not isinstance(data, dict) or data.get("status") != "denied":
         return None
     eligibility = data.get("eligibility")
+    # The reason lives at the DATA top level for an eligibility denial
+    # (`denial_value` emits `{status, command, allowed, reason}` flat), and only
+    # nested under `eligibility` for the shapes that carry a sub-object. Prefer the
+    # top-level field so a flat eligibility denial's reason is not dropped to None
+    # (which masked the real apply-conflict reason as an opaque "unknown: None").
     reason: str | None = None
-    if isinstance(eligibility, dict):
-        raw_reason = eligibility.get("reason")
-        reason = raw_reason if isinstance(raw_reason, str) else None
+    raw_reason = data.get("reason")
+    if isinstance(raw_reason, str):
+        reason = raw_reason
+    elif isinstance(eligibility, dict):
+        nested_reason = eligibility.get("reason")
+        reason = nested_reason if isinstance(nested_reason, str) else None
     denial_kind = data.get("denial_kind")
     tiers = body.get("tiers")
     return Denial(

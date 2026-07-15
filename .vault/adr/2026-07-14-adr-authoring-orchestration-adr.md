@@ -126,4 +126,5 @@ correctly fail-closed dead code until this amendment's work lands.
   graph-submitter mechanism. The MCP-bridge-specific solo-coder proof
   (S20) stays open as a watch item on the upstream limitation, no
   longer program-blocking. This ruling is recorded on the conformance
-  ADR as well and is subject to owner ratification at plan approval.
+  ADR as well and was RATIFIED by the owner on 2026-07-15 at the
+  production-wiring plan approval.

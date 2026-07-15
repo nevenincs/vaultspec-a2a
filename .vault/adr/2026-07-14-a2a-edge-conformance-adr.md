@@ -202,8 +202,8 @@ restated):
   authoritative human gate, and the R2 deny policy independently protects
   the vault under ANY permission mode. The W03 review verifies the
   implementation against these constraints. Gate-narrowing ruling
-  (2026-07-15, subject to owner ratification at the production-wiring
-  plan approval): the graph-submitter mechanism (the
+  (2026-07-15, RATIFIED by the owner the same day at the
+  production-wiring plan approval): the graph-submitter mechanism (the
   adr-authoring-orchestration amendment, PW3/PW6) delivers
   dashboard-observed, per-role-attributed proposals WITHOUT the CLI tool
   path, so a completed production research-to-ADR run closes the

@@ -595,3 +595,88 @@ async def _read_event(
         raise AssertionError(f"stream ended before a {wanted!r} frame")
 
     return await asyncio.wait_for(_scan(), timeout=timeout)
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_freezes_and_discloses_profile(
+    session_factory, checkpointer
+) -> None:
+    """run-start freezes the default profile, threads it to dispatch, discloses it."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        start = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "go", "autonomous": True},
+        )
+        assert start.status_code == 201, start.text
+        body = start.json()
+        # The default profile is frozen and disclosed with its assignments.
+        assert body["profile_id"] == "team-defaults"
+        assert body["assignments"], "run-start must disclose effective assignments"
+        first = body["assignments"][0]
+        assert first["provider_id"]
+        assert "api_key" not in start.text.lower() and "token" not in start.text.lower()
+
+        # The dispatch carries the frozen assignment for the worker to compile against.
+        dispatched = worker.dispatches[-1]
+        assert dispatched["profile_id"] == "team-defaults"
+        assert dispatched["model_assignment"], "frozen assignment must reach dispatch"
+
+        # run-status reproduces the frozen profile + assignments from run metadata.
+        status = await client.get(f"/v1/runs/{body['run_id']}")
+        assert status.status_code == 200
+        sbody = status.json()
+        assert sbody["profile_id"] == "team-defaults"
+        assert sbody["assignments"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_rejects_unknown_profile(session_factory, checkpointer) -> None:
+    """An unknown profile is refused with a 422 and never dispatched."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.post(
+            "/v1/runs",
+            json={"team_preset": _PRESET, "message": "go", "profile_id": "ghost"},
+        )
+        assert resp.status_code == 422
+        assert "profile" in resp.json()["detail"].lower()
+        assert worker.dispatches == [], "an unknown profile must not dispatch"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_conflicts_on_profile_change_retry(
+    session_factory, checkpointer
+) -> None:
+    """A retry that changes the frozen profile is a 409, never a silent replay."""
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        payload = {
+            "team_preset": _PRESET,
+            "message": "go",
+            "run_id": "rid-conflict",
+        }
+        first = await client.post("/v1/runs", json=payload)
+        assert first.status_code == 201
+        assert first.json()["profile_id"] == "team-defaults"
+
+        # Same run id, different profile -> conflict, not a replay.
+        conflict = await client.post(
+            "/v1/runs", json={**payload, "profile_id": "other-profile"}
+        )
+        assert conflict.status_code == 409
+        assert "already started with profile" in conflict.json()["detail"]
+
+        # Same run id, same (default) profile -> idempotent replay returns the run.
+        replay = await client.post("/v1/runs", json=payload)
+        assert replay.status_code == 201
+        assert replay.json()["run_id"] == first.json()["run_id"]

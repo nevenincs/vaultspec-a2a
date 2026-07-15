@@ -571,6 +571,44 @@ def test_resolve_worker_model_preferences_honors_worker_override_precedence() ->
     assert fallback_chain == [Provider.OPENAI, Provider.ZHIPU]
 
 
+def test_resolve_worker_model_preferences_consumes_frozen_assignment() -> None:
+    """A frozen assignment wins outright and is applied verbatim (restart reuse)."""
+    from vaultspec_a2a.graph.enums import Model, Provider
+
+    team = load_team_config("vaultspec-solo-coder")
+    agent_cfg = load_agent_config("vaultspec-coder")
+    worker_ref = team.workers[0]
+
+    # The frozen record forces mock/low with an openai fallback, overriding both
+    # the worker override and the agent config that would otherwise resolve.
+    frozen = {
+        worker_ref.agent_id: {
+            "provider": "mock",
+            "capability": "low",
+            "fallback": ["openai"],
+        }
+    }
+    provider, capability, fallback_chain = _resolve_worker_model_preferences(
+        worker_ref, agent_cfg, team, frozen_assignment=frozen
+    )
+    assert provider == Provider.MOCK
+    assert capability == Model.LOW
+    assert fallback_chain == [Provider.OPENAI]
+
+
+def test_frozen_assignment_absent_worker_falls_through_to_resolution() -> None:
+    """A frozen map that does not name this worker leaves resolution unchanged."""
+    team = load_team_config("vaultspec-solo-coder")
+    agent_cfg = load_agent_config("vaultspec-coder")
+    worker_ref = team.workers[0]
+
+    with_frozen = _resolve_worker_model_preferences(
+        worker_ref, agent_cfg, team, frozen_assignment={"someone-else": {}}
+    )
+    without_frozen = _resolve_worker_model_preferences(worker_ref, agent_cfg, team)
+    assert with_frozen == without_frozen
+
+
 # ---------------------------------------------------------------------------
 # T15 -- GraphRecursionError excluded from retry
 # ---------------------------------------------------------------------------

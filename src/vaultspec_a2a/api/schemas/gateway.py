@@ -67,6 +67,10 @@ class RunStartRequest(BaseModel):
     # dispatch-exactly-once: a retry with the same id returns the existing run
     # instead of starting a second. Absent, the gateway mints a server-side id.
     run_id: str | None = Field(default=None, min_length=1, max_length=128)
+    # model-profiles ADR: the selected model profile id. Defaults to the implicit
+    # team-defaults profile (the team's normal resolution). An unknown or
+    # ineligible profile is refused before dispatch - never silently replaced.
+    profile_id: str = Field(default="team-defaults", min_length=1, max_length=64)
 
     @field_validator("message")
     @classmethod
@@ -90,6 +94,11 @@ class RunStartResponse(BaseModel):
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
+    # model-profiles ADR: the profile the run was frozen with and its effective
+    # per-role assignment (additive v1). Absent on the idempotent-replay short
+    # path where the response is reconstructed from the existing run row.
+    profile_id: str | None = None
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
 
 
 class TopologyPosition(BaseModel):
@@ -140,6 +149,11 @@ class RunStatusResponse(BaseModel):
     repair_status: str | None = None
     execution_readiness: str | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
+    # model-profiles ADR: the frozen profile the run launched with and its
+    # effective per-role assignment, reproduced verbatim from run metadata across
+    # restarts (additive v1; absent for runs started before profiles landed).
+    profile_id: str | None = None
+    assignments: list[RoleAssignmentSummary] = Field(default_factory=list)
 
 
 class RunCancelResponse(BaseModel):

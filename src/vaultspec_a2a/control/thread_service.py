@@ -13,7 +13,7 @@ import contextlib
 import json
 import logging
 import pathlib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 from uuid import uuid4
 
@@ -284,6 +284,11 @@ class ThreadCreationRequest:
     metadata_json: str | None
     workspace_root: Path | None
     actor_tokens: ActorTokenBundle | None = None
+    # model-profiles ADR: the selected profile id and its frozen effective
+    # per-role assignment (agent_id -> {provider, capability, fallback}), threaded
+    # to the worker so compilation reproduces the launched models verbatim.
+    profile_id: str | None = None
+    model_assignment: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -448,6 +453,8 @@ async def create_and_dispatch_thread(
         vault_index=vault_index,
         validation_errors=[],
         actor_tokens=req.actor_tokens,
+        profile_id=req.profile_id,
+        model_assignment=req.model_assignment,
     )
 
     logger.info(

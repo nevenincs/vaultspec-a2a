@@ -84,6 +84,12 @@ class AcpChatModel(BaseChatModel):
     env_vars: dict[str, str] = Field(
         default_factory=dict,
         description="Environment variables to inject (e.g., OAuth tokens).",
+        # Carries provider auth tokens (CLAUDE_CODE_OAUTH_TOKEN,
+        # ANTHROPIC_AUTH_TOKEN). Keep it out of repr and model_dump so a token
+        # value can never reach a log, checkpoint, or traceback via serialization
+        # (multi-provider-execution env_vars redaction audit).
+        repr=False,
+        exclude=True,
     )
     session_id: str | None = Field(
         default=None,

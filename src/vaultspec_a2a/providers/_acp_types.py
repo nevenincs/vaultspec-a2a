@@ -33,7 +33,9 @@ class _AcpModelConfig:
     workspace_root: str | None
     cwd: str | None
     command: list[str]
-    env_vars: dict[str, str]
+    # repr=False keeps injected auth tokens out of the frozen config's default
+    # dataclass repr (multi-provider-execution env_vars redaction audit).
+    env_vars: dict[str, str] = field(repr=False)
     session_id: str | None
     mcp_servers: list[dict[str, Any]]
     use_exec: bool

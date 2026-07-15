@@ -11,7 +11,9 @@ related:
   - '[[2026-07-15-model-profiles-P01-summary]]'
   - '[[2026-07-15-model-profiles-P02-S03]]'
   - '[[2026-07-15-model-profiles-P02-S04]]'
+  - '[[2026-07-15-model-profiles-P02-summary]]'
   - '[[2026-07-15-model-profiles-P03-S05]]'
+  - '[[2026-07-15-model-profiles-P03-summary]]'
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-model-profiles-plan]]'
   - '[[2026-07-15-model-profiles-research]]'
@@ -34,7 +36,9 @@ Auto-generated index of all documents tagged with `#model-profiles`.
 - `2026-07-15-model-profiles-P01-summary` - `model-profiles` `P01` summary
 - `2026-07-15-model-profiles-P02-S03` - Extend the truthful discovery record with preset origin, supported capabilities, profiles, default profile, per-profile effective role assignments, readiness, and eligibility - one invalid preset yields one unavailable record
 - `2026-07-15-model-profiles-P02-S04` - Integrate profiles into run-start and run-status: validate profile belongs to preset, reject unknown or ineligible profiles with typed responses, freeze and persist the effective assignment with digest in run metadata, reuse frozen assignment on restart, disclose profile and assignments in responses
+- `2026-07-15-model-profiles-P02-summary` - `model-profiles` `P02` summary
 - `2026-07-15-model-profiles-P03-S05` - Run the handover evidence battery live: bundled plus workspace discovery, mock marking, invalid-preset isolation, heterogeneous team-defaults disclosure, missing-credential unavailable profile, fallback eligibility, unknown-profile rejection, frozen assignment surviving restart and config drift, no secrets anywhere, and a real research-to-ADR run on the served assignments
+- `2026-07-15-model-profiles-P03-summary` - `model-profiles` `P03` summary
 
 ### plan
 

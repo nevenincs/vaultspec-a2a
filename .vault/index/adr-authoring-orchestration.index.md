@@ -21,6 +21,8 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-P05-S11]]'
   - '[[2026-07-14-adr-authoring-orchestration-P05-S12]]'
   - '[[2026-07-14-adr-authoring-orchestration-P05-S13]]'
+  - '[[2026-07-14-adr-authoring-orchestration-P05-S14]]'
+  - '[[2026-07-14-adr-authoring-orchestration-P05-S15]]'
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-14-adr-authoring-orchestration-audit]]'
   - '[[2026-07-14-adr-authoring-orchestration-plan]]'
@@ -59,6 +61,8 @@ Auto-generated index of all documents tagged with `#adr-authoring-orchestration`
 - `2026-07-14-adr-authoring-orchestration-P05-S11` - Implement the production DocumentProposalSubmitter in the authoring package with rag-first discovery of every touched seam, conforming to the phase-gate Protocol (async call of state and phase returning the proposal id) and backed by AuthoringSession: create-or-resume session, whole-document create/populate/validate/submit, idempotency keys from thread id plus phase plus document kind plus revision cycle, denials as values, role token read from RunTokenStore at call time
 - `2026-07-14-adr-authoring-orchestration-P05-S12` - Prove the submitter live and mock-free against the loopback engine: session reuse across calls, idempotent replay returning the deduplicated receipt, denial handling, and revision-cycle key advancement
 - `2026-07-14-adr-authoring-orchestration-P05-S13` - Make graph_lifecycle the single construction site with rag-first discovery before editing: build the AuthoringSession factory and production submitter from run-start facts (engine origin via discovery or explicit config, run id, RunTokenStore) and pass proposal_submitter into compile_team_graph for research_adr presets, raising typed fail-closed construction errors (engine unavailable, identity missing, submitter unconfigured, role config invalid, credentials missing) surfaced as truthful run failure
+- `2026-07-14-adr-authoring-orchestration-P05-S14` - Reconcile the AuthoringToolBinding production construction site honestly: rag-first locate what W03 S19 actually landed versus the S20-deferred binding assembly, construct what production needs (or record precisely why the document topology needs none), and correct the W03 records only on source evidence
+- `2026-07-14-adr-authoring-orchestration-P05-S15` - Enforce state and status discipline with live tests and a rag-first sweep for violations: LangGraph state carries only Rust-backend identifiers for authoring (session, changeset, proposal ids), never content or tokens, and product-facing status speaks role and phase vocabulary rather than internal node names
 
 ### plan
 

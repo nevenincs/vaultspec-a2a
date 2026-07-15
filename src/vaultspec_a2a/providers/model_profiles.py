@@ -89,6 +89,16 @@ class AssignmentSource(StrEnum):
     TEAM_DEFAULT = "team_default"
 
 
+# Precedence rank (lower wins) for collapsing per-field sources to one coarse
+# source that reports the topmost layer influencing a role's assignment.
+_SOURCE_RANK: dict[AssignmentSource, int] = {
+    AssignmentSource.PROFILE: 0,
+    AssignmentSource.WORKER: 1,
+    AssignmentSource.AGENT: 2,
+    AssignmentSource.TEAM_DEFAULT: 3,
+}
+
+
 @dataclass(frozen=True, slots=True)
 class RoleAssignment:
     """The resolved effective model assignment for one role, with attribution.
@@ -112,7 +122,15 @@ class RoleAssignment:
 
     @property
     def source(self) -> AssignmentSource:
-        """The coarse assignment source: where the provider decision came from."""
+        """The coarse assignment source: the topmost layer that shaped this role.
+
+        Collapses the per-field ``provider_source`` and ``capability_source`` to
+        the higher-precedence of the two, so a capability-only profile overlay is
+        reported as ``profile`` (it did change the effective model) rather than
+        hiding behind the provider's lower-layer source.
+        """
+        if _SOURCE_RANK[self.capability_source] < _SOURCE_RANK[self.provider_source]:
+            return self.capability_source
         return self.provider_source
 
 

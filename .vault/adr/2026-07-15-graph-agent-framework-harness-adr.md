@@ -11,7 +11,7 @@ related:
   - "[[2026-07-15-multi-provider-execution-adr]]"
 ---
 
-# `graph-agent-framework-harness` adr: `closing the framework-harness gap for graph-executed document-authoring agents` | (**status:** `proposed`)
+# `graph-agent-framework-harness` adr: `closing the framework-harness gap for graph-executed document-authoring agents` | (**status:** `accepted`)
 
 ## Problem Statement
 
@@ -27,11 +27,12 @@ Graph-executed research_adr agents (researcher, synthesist, adr-author, doc-revi
 - All four research_adr document personas declare `terminal=false`, yet at least three of their own prompts instruct `vaultspec-core`/`vaultspec-rag` CLI invocations (`adr-author`'s mandatory amend-vs-supersede rag search; `synthesist`'s and `adr-author`'s document-scaffold CLI calls; `researcher`'s discovery rag calls) — structurally impossible given `terminal=false` and the already-documented S20 MCP non-surfacing limitation (research). This is the sharpest, most concrete finding: prompts instruct actions the runtime cannot perform.
 - The engine already scaffolds and validates frontmatter/filenames/templates server-side at propose/apply time (`a2a-edge-conformance-reference`, pre-existing decision, not revisited here) — the gap this ADR addresses is concentrated in body-prose conventions the engine's shallow in-process validation does not reach (research, citing the already-committed `document-authoring-orchestration-audit`).
 - No dedicated vault artifact from the parallel session documenting this exact finding was found; this ADR and its grounding research are net-new, built from direct code verification, not a retrieved prior analysis (research, discovery-provenance note).
+- **Ratification note (2026-07-15):** the parallel session's `agent-harness-provisioning` ADR (accepted, broader system-wide harness contract across all agent types) was found complementary, not competing, to this ADR: it does not name the `include_builtin=False` exclusion or the persona-prompt CLI-invocation impossibility this ADR surfaces. The owner ratified this ADR as its own accepted decision, not folded into the other; the two remain related, cross-linked companions. This ADR's implementation plan proceeds after the PW7 harness build (not prioritized ahead of it, per owner/team-lead sequencing).
 
 ## Constraints
 
 - Whether `.vaultspec/rules/rules/` is populated in the engine's actual provisioned run workspace (as opposed to this static repo) is unverified — any fix must be proven against a live run, not assumed from the repo's current empty state.
-- The two candidate readings of the persona-prompt CLI instructions (vestigial vs. aspirationally-correct-but-unimplemented) are NOT distinguished by the grounding research; this ADR's decision must not assume one reading without owner/prior-session input, since the correct fix differs (strip the instructions vs. build the missing invocation path).
+- The two candidate readings of the persona-prompt CLI instructions (vestigial vs. aspirationally-correct-but-unimplemented) are NOT distinguished by the grounding research; this ADR's decision must not assume one reading without owner/prior-session input, since the correct fix differs (strip the instructions vs. build the missing invocation path). **The implementation plan must resolve this with evidence (a small probe), not assumption.**
 - Any propagation-scope change (e.g. `include_builtin=True`, role-targeted rule sets) must weigh the token-inflation and cross-role-noise risk ADR-028 already named — this is not a cost-free toggle.
 - This ADR does not revisit the engine-side scaffolding/validation boundary (frontmatter, filenames, templates) — that is settled prior architecture (`a2a-edge-conformance-reference`) and out of scope here.
 - Per team-lead's directive, this ADR must NOT block `executor-opus-7`'s PW7 acceptance-harness build: the harness's deterministic (Option A) lane uses fixed, pre-written document content unaffected by this gap, and the harness's own assertions are wire-level (materialization, gate mechanics), not content-quality. The harness's Option C (real-provider) content-quality claims are QUALIFIED by this ADR until the framework harness actually reaches graph-executed agents — a live Option C run proves the WIRE contract, not document conformance to vaultspec conventions, until this gap closes.

@@ -5,10 +5,11 @@ tags:
 date: 2026-03-31
 modified: '2026-07-15'
 related:
-- '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-03-31-docs-vault-migration-research]]'
+  - '[[2026-07-15-graph-agent-framework-harness-adr]]'
 ---
 
-# `universal-rule-propagation` adr: `adr-028` | (**status:** `proposed`)
+# `universal-rule-propagation` adr: `adr-028` | (**status:** `accepted`)
 
 ## Migration Note
 
@@ -17,6 +18,10 @@ This ADR was migrated from the legacy pre-pipeline documentation tree during the
 - Original ADR number: `ADR-028`
 - Original title: `ADR 028: Universal Rule Propagation`
 - Legacy status at migration time: `Proposed`
+
+## Reconciliation Note (2026-07-15)
+
+Status flipped `proposed` -> `accepted`: the `RuleManager` mechanism this ADR proposed was independently verified as fully implemented and wired into both `src/vaultspec_a2a/graph/nodes/worker.py:60` and `supervisor.py:310` (discovery, `@include` resolution, mtime caching, `SystemMessage` injection immediately after the persona system prompt) - the decision was executed, not merely drafted. The remaining gaps this ADR's "outstanding question" left open - what to do about builtin rules, and whether the propagated payload actually reaches document-authoring agents in a form they can act on - are picked up by `2026-07-15-graph-agent-framework-harness-adr` (accepted), which found: `include_builtin=False` at both call sites excludes exactly the mechanical builtin guidance (CLI reference, rag syntax, discovery sequence, core mandates); `.vaultspec/rules/rules/` is empty in this repo so there is nothing non-builtin to propagate today; and the four research_adr document personas' own prompts instruct CLI/rag invocations their `terminal=false` capability cannot execute. That ADR and its implementation plan are the live continuation of this one; this ADR is not superseded, its proposed mechanism was built and its unresolved question is now answered and tracked forward.
 
 ## Original ADR
 

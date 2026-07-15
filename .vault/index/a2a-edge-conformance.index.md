@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#a2a-edge-conformance'
-date: '2026-07-14'
-modified: '2026-07-14'
+date: '2026-07-15'
+modified: '2026-07-15'
 related:
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S01]]'
   - '[[2026-07-14-a2a-edge-conformance-W01-P01-S02]]'
@@ -29,6 +29,8 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W03-P06-S17]]'
   - '[[2026-07-14-a2a-edge-conformance-W03-P07-S18]]'
   - '[[2026-07-14-a2a-edge-conformance-W03-P07-S19]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P08-S20]]'
+  - '[[2026-07-14-a2a-edge-conformance-W03-P08-S21]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -38,6 +40,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-w01-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-w02-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -55,6 +58,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-w01-review-audit` - `a2a-edge-conformance` audit: `W01 code review: salvage verification and hygiene`
 - `2026-07-14-a2a-edge-conformance-w02-review-audit` - `a2a-edge-conformance` audit: `W02 code review: deletion mandates and write-seam closure`
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
+- `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
 
 ### exec
 
@@ -81,6 +85,8 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-W03-P06-S17` - Write live mock-free integration tests against a loopback dashboard engine covering the envelope, denials, idempotent replay, and whole-document proposal shapes
 - `2026-07-14-a2a-edge-conformance-W03-P07-S18` - Fetch and snapshot the engine /v1/agent-tools catalog at run start and bridge it into the agent session as MCP tools, routing execution through the engine execute endpoint under the calling role's token
 - `2026-07-14-a2a-edge-conformance-W03-P07-S19` - Wire the bridged tools into the ACP subprocess session and the worker node so spawned CLI agents see propose and read tools but no vault write path, proven by live tests against the engine and a real subprocess
+- `2026-07-14-a2a-edge-conformance-W03-P08-S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state
+- `2026-07-14-a2a-edge-conformance-W03-P08-S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record
 
 ### plan
 

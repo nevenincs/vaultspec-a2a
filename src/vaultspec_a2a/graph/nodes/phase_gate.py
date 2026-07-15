@@ -51,6 +51,7 @@ __all__ = [
     "VERDICT_REJECTED",
     "VERDICT_REQUEST_CHANGES",
     "DocumentProposalSubmitter",
+    "ProposalRevisionRequiredError",
     "create_phase_gate_node",
     "create_phase_submit_node",
 ]
@@ -60,6 +61,23 @@ VERDICT_REJECTED = "rejected"
 VERDICT_REQUEST_CHANGES = "request_changes"
 
 _REVISION_VERDICTS = frozenset({VERDICT_REJECTED, VERDICT_REQUEST_CHANGES})
+
+
+class ProposalRevisionRequiredError(Exception):
+    """A submitter refusal that must route back to the writer, not fail the run.
+
+    Part of the :class:`DocumentProposalSubmitter` seam contract: a submitter
+    raises this (or a subclass) BEFORE proposing when the writer's body fails a
+    vault conformance rule the engine would reject at materialization. It carries
+    one actionable note per violation in :attr:`revision_notes`; the submit node
+    routes those into the phase's inner revision loop as the writer's revise
+    signal. Defined here (with the Protocol) so the gate catches the refusal
+    without importing the concrete authoring package.
+    """
+
+    def __init__(self, revision_notes: list[str]) -> None:
+        self.revision_notes = revision_notes
+        super().__init__("; ".join(revision_notes))
 
 
 class DocumentProposalSubmitter(Protocol):
@@ -93,6 +111,7 @@ def create_phase_submit_node(
     submitter: DocumentProposalSubmitter,
     *,
     gate_target: str,
+    revision_target: str,
 ) -> WorkerNode:
     """Create the deterministic pre-interrupt propose-and-submit node.
 
@@ -103,22 +122,49 @@ def create_phase_submit_node(
     verdict subscriber needs those committed ids to correlate an out-of-run
     verdict to the parked run.
 
+    Conformance backstop: the submitter refuses a body that would fail vault
+    conformance at materialization (leftover template annotations/placeholders, a
+    wiki-/markdown-link in body prose, or a document that does not begin at its
+    frontmatter fence) by raising an exception carrying non-empty
+    ``revision_notes``. Rather than fail the run, this node routes that back into
+    the phase's inner revision loop as REVISION REQUIRED with the notes appended to
+    ``validation_errors`` - the SAME concrete revise signal the gate node emits on a
+    human ``request_changes`` - so the writer gets a targeted second chance and a
+    malformed body never reaches the gate or apply. Detection is by the
+    ``revision_notes`` attribute (a duck-typed contract), so the gate module stays
+    decoupled from the authoring package.
+
     Args:
-        phase:       The document phase this gate guards (e.g. ``research``,
-                     ``adr``); recorded in ``gate_phase`` and carried to the gate.
-        submitter:   Deterministic, idempotent propose-and-submit callable;
-                     returns the proposal id.
-        gate_target: The pure gate node to route into after the submit commits.
+        phase:           The document phase this gate guards (e.g. ``research``,
+                         ``adr``); recorded in ``gate_phase`` and carried to the gate.
+        submitter:       Deterministic, idempotent propose-and-submit callable;
+                         returns the proposal id.
+        gate_target:     The pure gate node to route into after the submit commits.
+        revision_target: The phase's writer, routed to when the submitter refuses a
+                         non-conformant body (the SAME target the gate uses on
+                         ``request_changes``).
 
     Returns:
         An async node that proposes+submits and routes via ``Command.goto`` into
         the gate, committing ``authoring_proposal_ids`` / ``gate_phase`` /
-        ``gate_pending_proposal_id``.
+        ``gate_pending_proposal_id`` - or, on a conformance refusal, routes to the
+        writer with the specific check notes.
     """
 
     async def phase_submit_node(state: TeamState) -> Command:
         """Propose+submit (idempotent), commit the ids, route into the gate."""
-        proposal_id = await submitter(state, phase)
+        try:
+            proposal_id = await submitter(state, phase)
+        except ProposalRevisionRequiredError as exc:
+            return Command(
+                goto=revision_target,
+                update={
+                    "next": revision_target,
+                    "gate_phase": phase,
+                    "gate_verdict": VERDICT_REQUEST_CHANGES,
+                    "validation_errors": list(exc.revision_notes),
+                },
+            )
         return Command(
             goto=gate_target,
             update={

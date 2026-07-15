@@ -15,8 +15,8 @@ import pytest
 from langchain_core.messages import AIMessage, HumanMessage
 
 from ..submitter import (
+    DocumentConformanceError,
     DocumentUnavailableError,
-    ScaffoldEchoError,
     _latest_document,
     _strip_completion_sentinel,
 )
@@ -110,19 +110,66 @@ tags:
 ## Sources"""
 
 
-class TestRejectScaffoldEcho:
-    """The submit node refuses a template scaffold echoed back as the body."""
+class TestConformanceGuard:
+    """The submit node refuses a body that would fail vault conformance at apply."""
 
     def test_template_annotation_comment_is_refused(self) -> None:
         # The verbatim scaffold (annotation comments + unfilled {topic}) — the
         # exact P04.S10 empty-scaffold specimen — must not reach the engine.
-        with pytest.raises(ScaffoldEchoError, match="annotation"):
+        with pytest.raises(DocumentConformanceError) as excinfo:
             _latest_document(_state(_SCAFFOLD), _WRITER, _SENTINEL)
+        assert any("annotation" in note for note in excinfo.value.revision_notes)
 
     def test_unfilled_placeholder_is_refused(self) -> None:
         body = _DOC.replace("cursor persistence", "{title}")
-        with pytest.raises(ScaffoldEchoError, match="placeholder"):
+        with pytest.raises(DocumentConformanceError) as excinfo:
             _latest_document(_state(body), _WRITER, _SENTINEL)
+        assert any("placeholder" in note for note in excinfo.value.revision_notes)
+
+    def test_in_body_wiki_link_is_refused_with_specific_note(self) -> None:
+        # A wiki-link in body prose (legal only in related: frontmatter) is what
+        # `vault set-body --check` refuses at apply; refuse it here to revision.
+        body = _DOC.replace(
+            "The durable cursor pattern is already shipped at `src/x.py:10`.",
+            "See [[2026-07-15-sse-reconnection-adr]] for the decision.",
+        )
+        with pytest.raises(DocumentConformanceError) as excinfo:
+            _latest_document(_state(body), _WRITER, _SENTINEL)
+        notes = excinfo.value.revision_notes
+        assert any("[[2026-07-15-sse-reconnection-adr]]" in note for note in notes)
+        assert any("wiki-link in body" in note for note in notes)
+
+    def test_leading_preamble_is_stripped_and_the_document_passes(self) -> None:
+        # A writer that prefixes orientation narration before the frontmatter
+        # (the P04.S10 live failure) has the preamble stripped; the document proper
+        # — whose related: wiki-link is legal frontmatter — then passes cleanly.
+        doc_with_related = _DOC.replace(
+            "  - '#sse-reconnection'\n---",
+            "  - '#sse-reconnection'\nrelated:\n"
+            "  - '[[2026-07-15-sse-reconnection-adr]]'\n---",
+        )
+        preambled = (
+            "I'll orient first: read the template and scan the workspace."
+            + doc_with_related
+        )
+        body, _ = _latest_document(
+            _state(f"{preambled}\n\n{_SENTINEL}"), _WRITER, _SENTINEL
+        )
+        # The submitted body begins at the frontmatter fence, preamble gone, and
+        # the related: wiki-link is preserved (it is legal frontmatter, not a body
+        # link), so nothing is refused.
+        assert body.startswith("---\n")
+        assert "I'll orient first" not in body
+        assert "[[2026-07-15-sse-reconnection-adr]]" in body
+
+    def test_missing_frontmatter_is_refused(self) -> None:
+        with pytest.raises(DocumentConformanceError) as excinfo:
+            _latest_document(
+                _state(f"# heading\n\njust prose, no frontmatter\n\n{_SENTINEL}"),
+                _WRITER,
+                _SENTINEL,
+            )
+        assert any("frontmatter fence" in note for note in excinfo.value.revision_notes)
 
     def test_authored_document_passes_the_guard(self) -> None:
         # The real authored document (no comments, no placeholders) is accepted.

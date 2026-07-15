@@ -31,9 +31,11 @@ subclasses) surfaced as a truthful run failure — never a silent skip.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
@@ -48,13 +50,13 @@ if TYPE_CHECKING:
 
 __all__ = [
     "CredentialsMissingError",
+    "DocumentConformanceError",
     "DocumentProposalSubmitter",
     "DocumentUnavailableError",
     "EngineUnavailableError",
     "PhaseAuthoringSpec",
     "ProposalDeniedError",
     "RoleConfigInvalidError",
-    "ScaffoldEchoError",
     "SubmitterError",
 ]
 
@@ -68,6 +70,32 @@ _TEMPLATE_PLACEHOLDERS: tuple[str, ...] = ("{topic}", "{title}", "{phase}")
 #: materialized vault document never carries these; their presence is the
 #: strongest signal the writer reproduced the template verbatim.
 _TEMPLATE_ANNOTATION = "<!--"
+
+#: The opening frontmatter fence, possibly GLUED to leading preamble narration on
+#: the same line (a capable writer sometimes prefixes orientation prose before the
+#: document — observed live in P04.S10). Matched as a ``---`` immediately followed
+#: by a newline and a YAML key line (``tags:`` etc.), which distinguishes the true
+#: frontmatter opening from an incidental ``---`` in prose. Everything before it is
+#: preamble and is stripped so the submitted body begins at the frontmatter.
+_FRONTMATTER_OPEN_RE = re.compile(r"---\r?\n(?=[A-Za-z_][\w-]*[ \t]*:)")
+
+#: The leading frontmatter block (both fences), for splitting a whole document into
+#: ``(frontmatter, body)`` so body conformance checks scan only the prose.
+_FRONTMATTER_BLOCK_RE = re.compile(r"\A---\r?\n.*?\r?\n---[ \t]*\r?\n?", re.DOTALL)
+
+# Body-link detection MIRRORS vaultspec-core's ``body-links`` check
+# (``vaultcore/checks/body_links.py``) so the submit-node guard refuses exactly
+# what ``vault set-body --check`` would refuse at materialization: wiki-links and
+# non-URL markdown links belong in ``related:`` frontmatter or a backtick span,
+# never in body prose. Code fences, inline code, and HTML comments are stripped
+# before scanning so a legitimately-quoted ``[[x]]`` in a code span is not flagged.
+_WIKI_LINK_RE = re.compile(r"\[\[([^\]|]+)(?:\|[^\]]+)?\]\]")
+_MD_LINK_RE = re.compile(r"\[([^\]]+)\]\((?!https?://|#|mailto:)([^)]+)\)")
+_CODE_FENCE_RE = re.compile(
+    r"^(?:```|~~~)[^\n]*\n.*?^(?:```|~~~)\s*$", re.MULTILINE | re.DOTALL
+)
+_INLINE_CODE_RE = re.compile(r"`[^`]+`")
+_HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 
 
 class SubmitterError(AuthoringError):
@@ -94,14 +122,21 @@ class DocumentUnavailableError(SubmitterError):
     """The phase produced no document body to submit."""
 
 
-class ScaffoldEchoError(SubmitterError):
-    """The writer echoed the template scaffold instead of authoring content.
+class DocumentConformanceError(ProposalRevisionRequiredError):
+    """The writer's body fails a vault conformance rule that materialization enforces.
 
-    The body still carries template annotation comments or unfilled narrative
-    placeholders, so proposing it would materialize a hollow document. Refused at
-    the submit node (cheap, local) rather than surfacing as a passing run that
-    materialized an empty scaffold (P04.S10 finding: an AUTO gate applied exactly
-    such a draft).
+    Carries one actionable note per violation (``revision_notes``) — leftover
+    template annotation comments or placeholders, a wiki-/markdown-link in body
+    prose (which ``vault set-body --check`` refuses at apply), or a document that
+    does not begin at its frontmatter fence. Refused at the submit node (cheap,
+    local) BEFORE proposing.
+
+    It is a :class:`ProposalRevisionRequiredError` (the phase-gate seam signal), NOT a
+    fatal :class:`SubmitterError`: the submit node routes it back into the phase's
+    inner revision loop as REVISION REQUIRED with these notes as the reviewer
+    signal, rather than failing the run or proposing a body the engine would reject
+    at materialization (P04.S10 finding: an AUTO gate applied an empty scaffold; the
+    fixed engine now fails such a body closed, so it must never be proposed).
     """
 
 
@@ -203,33 +238,91 @@ def _latest_document(
             f"sentinel with no document body; the run cannot propose an empty "
             f"document"
         )
-    _reject_scaffold_echo(body, writer_message_name)
+    # Strip any leading preamble narration so the submitted body BEGINS at its
+    # frontmatter fence (the document proper), then refuse — routing to the
+    # revision loop — anything the engine's set-body conformance check would
+    # reject at materialization.
+    body = _strip_leading_preamble(body)
+    notes = _conformance_notes(body)
+    if notes:
+        raise DocumentConformanceError(notes)
     return body, len(bodies)
 
 
-def _reject_scaffold_echo(body: str, writer_message_name: str) -> None:
-    """Refuse a body that is the template scaffold echoed back, not authored content.
+def _strip_leading_preamble(body: str) -> str:
+    """Drop any narration before the document's opening frontmatter fence.
 
-    A finished vault document carries neither the template's guidance annotation
-    comments nor its unfilled narrative placeholders. Their presence means the
-    writer reproduced the scaffold (the read-and-echo failure), which would
-    materialize a hollow document; refuse it here with an actionable error rather
-    than proposing it.
+    A conformant vault document begins at its ``---`` frontmatter fence. A capable
+    writer sometimes prefixes orientation prose ("I'll orient first…") before it,
+    and that preamble displaces the opening fence so the whole document misparses
+    (its ``related:`` wiki-links are then read as body links — the P04.S10 live
+    failure). When the frontmatter opening is located (on its own line or glued to
+    the end of the preamble), everything before it is dropped; a body with no
+    locatable frontmatter opening is returned unchanged for :func:`_conformance_notes`
+    to flag.
     """
+    match = _FRONTMATTER_OPEN_RE.search(body)
+    if match is None:
+        return body
+    return body[match.start() :]
+
+
+def _split_frontmatter_body(text: str) -> tuple[str, str]:
+    """Split a whole document into ``(frontmatter_block, body)``.
+
+    The frontmatter block retains both ``---`` fences; a document with no leading
+    frontmatter yields ``("", text)``. Mirrors vaultspec-core's own split so the
+    body-link scan sees exactly the prose the engine's ``body-links`` check does.
+    """
+    match = _FRONTMATTER_BLOCK_RE.match(text)
+    if match is None:
+        return "", text
+    return text[: match.end()], text[match.end() :]
+
+
+def _conformance_notes(body: str) -> list[str]:
+    """Collect actionable revision notes for every vault-conformance violation.
+
+    Returns one note per violation (empty when the body is clean), so the writer
+    gets EVERY problem in a single revision pass. The checks mirror what
+    ``vault set-body --check`` enforces at materialization: a document must begin
+    at its frontmatter fence, carry no leftover template annotations or unfilled
+    placeholders, and place no wiki-/markdown-link in body prose.
+    """
+    notes: list[str] = []
+    frontmatter, prose_region = _split_frontmatter_body(body)
+    if not frontmatter:
+        notes.append(
+            "document must begin with a `---` frontmatter fence; the body carries "
+            "no frontmatter block (remove any preamble before the document)"
+        )
     if _TEMPLATE_ANNOTATION in body:
-        raise ScaffoldEchoError(
-            f"phase author {writer_message_name!r} left template annotation "
-            f"comments ({_TEMPLATE_ANNOTATION}...) in the document body; author "
-            f"real content following the template's structure, do not reproduce "
-            f"the template"
+        notes.append(
+            "template annotation comments (`<!-- ... -->`) remain in the document; "
+            "remove them and author real content following the template structure"
         )
     present = [ph for ph in _TEMPLATE_PLACEHOLDERS if ph in body]
     if present:
-        raise ScaffoldEchoError(
-            f"phase author {writer_message_name!r} left unfilled template "
-            f"placeholder(s) {present} in the document body; fill every section "
-            f"with authored content before the document can be proposed"
+        notes.append(
+            f"unfilled template placeholder(s) {present} remain; fill every section "
+            "with authored content"
         )
+    # Body-links: scan ONLY the prose after the frontmatter (wiki-links are legal
+    # in `related:` frontmatter), with code/comments stripped, exactly like core.
+    prose = _INLINE_CODE_RE.sub(
+        "", _HTML_COMMENT_RE.sub("", _CODE_FENCE_RE.sub("", prose_region))
+    )
+    for match in _WIKI_LINK_RE.finditer(prose):
+        notes.append(
+            f"wiki-link in body text: [[{match.group(1)}]] - move to related: "
+            "frontmatter or use a backtick code span"
+        )
+    for match in _MD_LINK_RE.finditer(prose):
+        notes.append(
+            f"markdown link in body text: [{match.group(1)}]({match.group(2)}) - "
+            "use a backtick code span for file references"
+        )
+    return notes
 
 
 class DocumentProposalSubmitter:

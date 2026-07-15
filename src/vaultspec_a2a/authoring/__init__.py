@@ -42,13 +42,13 @@ from .lifecycle import verdict_from_event as verdict_from_event
 from .session import AuthoringSession as AuthoringSession
 from .session import mint_actor_token as mint_actor_token
 from .submitter import CredentialsMissingError as CredentialsMissingError
+from .submitter import DocumentConformanceError as DocumentConformanceError
 from .submitter import DocumentProposalSubmitter as DocumentProposalSubmitter
 from .submitter import DocumentUnavailableError as DocumentUnavailableError
 from .submitter import EngineUnavailableError as EngineUnavailableError
 from .submitter import PhaseAuthoringSpec as PhaseAuthoringSpec
 from .submitter import ProposalDeniedError as ProposalDeniedError
 from .submitter import RoleConfigInvalidError as RoleConfigInvalidError
-from .submitter import ScaffoldEchoError as ScaffoldEchoError
 from .submitter import SubmitterError as SubmitterError
 
 __all__ = [
@@ -70,6 +70,7 @@ __all__ = [
     "CommandEnvelope",
     "CredentialsMissingError",
     "Denial",
+    "DocumentConformanceError",
     "DocumentProposalSubmitter",
     "DocumentUnavailableError",
     "EngineEndpoint",
@@ -79,7 +80,6 @@ __all__ = [
     "PhaseAuthoringSpec",
     "ProposalDeniedError",
     "RoleConfigInvalidError",
-    "ScaffoldEchoError",
     "SseFrame",
     "StreamError",
     "SubmitterError",

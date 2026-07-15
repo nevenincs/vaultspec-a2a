@@ -17,10 +17,24 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from vaultspec_a2a.graph.nodes.phase_gate import (
+    DocumentProposalSubmitter,
+    ProposalRevisionRequiredError,
     create_phase_gate_node,
     create_phase_submit_node,
 )
 from vaultspec_a2a.thread.state import TeamState
+
+
+class _RefusingSubmitter:
+    """A submitter that refuses the body with a conformance revision signal."""
+
+    def __init__(self, notes: list[str]) -> None:
+        self.notes = notes
+        self.calls: list[str] = []
+
+    async def __call__(self, state: TeamState, phase: str) -> str:
+        self.calls.append(phase)
+        raise ProposalRevisionRequiredError(self.notes)
 
 
 class _CountingSubmitter:
@@ -52,7 +66,7 @@ def _base_state() -> TeamState:
     }
 
 
-def _gate_graph(submitter: _CountingSubmitter) -> Any:
+def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
     """Build START -> submit -> gate -> {approved_end | revise_end} -> END.
 
     The gate is split (P04.S10): a submit node commits the proposal id before the
@@ -67,7 +81,9 @@ def _gate_graph(submitter: _CountingSubmitter) -> Any:
     async def revise_end(state: TeamState) -> dict[str, Any]:
         return {}
 
-    submit = create_phase_submit_node("research", submitter, gate_target="gate")
+    submit = create_phase_submit_node(
+        "research", submitter, gate_target="gate", revision_target="revise_end"
+    )
     gate = create_phase_gate_node(
         "research",
         approved_target="approved_end",
@@ -118,6 +134,33 @@ async def test_gate_approved_advances_and_records_verdict() -> None:
     assert resumed["authoring_proposal_ids"] == ["prop-approve"]
     # No revise signal on approval.
     assert not resumed.get("validation_errors")
+
+
+@pytest.mark.asyncio
+async def test_submit_conformance_refusal_routes_to_writer_without_parking() -> None:
+    # A submitter that refuses a non-conformant body (raising
+    # ProposalRevisionRequiredError BEFORE proposing) must route to the writer as
+    # REVISION REQUIRED with the check notes — never park the gate on a proposal
+    # that was never submitted.
+    notes = [
+        "wiki-link in body text: [[some-adr]] - move to related: frontmatter",
+        "document must begin with a `---` frontmatter fence",
+    ]
+    submitter = _RefusingSubmitter(notes)
+    graph = _gate_graph(submitter)
+    config = {"configurable": {"thread_id": "gate-conformance"}}
+
+    result = await graph.ainvoke(_base_state(), config=config)
+
+    # The run flowed straight through to the writer target (no interrupt), so the
+    # invoke returns terminal state rather than an interrupt payload.
+    assert result["next"] == "revise_end"
+    assert result["gate_verdict"] == "request_changes"
+    assert result["validation_errors"] == notes
+    # Nothing was committed as a pending proposal — the body never reached submit.
+    assert not result.get("gate_pending_proposal_id")
+    assert not result.get("authoring_proposal_ids")
+    assert submitter.calls == ["research"]
 
 
 @pytest.mark.asyncio

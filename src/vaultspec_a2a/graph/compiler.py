@@ -1171,6 +1171,7 @@ def _compile_research_adr(
             PipelinePhase.RESEARCH,
             proposal_submitter,
             gate_target=_RA_RESEARCH_GATE,
+            revision_target=_RA_SYNTHESIS,
         ),
     )
     builder.add_node(
@@ -1187,6 +1188,7 @@ def _compile_research_adr(
             PipelinePhase.ADR,
             proposal_submitter,
             gate_target=_RA_ADR_GATE,
+            revision_target=_RA_ADR_AUTHOR,
         ),
     )
     builder.add_node(

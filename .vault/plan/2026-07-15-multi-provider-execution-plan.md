@@ -51,8 +51,8 @@ Prove researcher=codex, synthesist=claude, adr-author=zai end to end on the vaul
 
 Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum; file the required cross-repo contract event rather than assuming compatibility.
 
-- [ ] `P04.S18` - Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum — if closed, file the required cross-repo contract event with the dashboard team rather than proceeding unilaterally; `cross-repo (dashboard/engine, no A2A code change assumed)`.
-- [ ] `P04.S19` - Document the outcome in a phase summary — do not mark this plan's cross-repo concern closed without that confirmation; `.vault/exec/2026-07-15-multi-provider-execution/`.
+- [x] `P04.S18` - Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum. CLOSED (2026-07-15, executor-opus-5): swept the dashboard repo's Rust engine and TS frontend, no provider field anywhere on the run-start/run-status/review/authoring pipeline; `the authoring proposal ingestion structs are deny_unknown_fields with no provider field; the only provider reference anywhere is an open String in the CLI provisioning scaffolder, whose value list already includes codex and would accept zai verbatim. No dashboard-side change or cross-repo contract event needed. See step record for full citations.; `cross-repo (dashboard/engine, no A2A code change assumed)`.
+- [x] `P04.S19` - Document the outcome in a phase summary. CLOSED (2026-07-15, executor-opus-5): the plan's cross-repo concern is closed with cited evidence, not assumption — provider is open on the dashboard side, so reporting provider=zai/codex needs no dashboard change. One a2a-side invariant carries forward: never inject a provider key into engine-bound authoring payloads (deny_unknown_fields would reject the whole request).; `.vault/exec/2026-07-15-multi-provider-execution/`.
 
 ## Proposed Changes
 

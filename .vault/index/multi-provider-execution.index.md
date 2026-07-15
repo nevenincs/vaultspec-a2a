@@ -20,6 +20,8 @@ related:
   - '[[2026-07-15-multi-provider-execution-P02-S12]]'
   - '[[2026-07-15-multi-provider-execution-P02-S13]]'
   - '[[2026-07-15-multi-provider-execution-P02-S14]]'
+  - '[[2026-07-15-multi-provider-execution-P04-S18]]'
+  - '[[2026-07-15-multi-provider-execution-P04-S19]]'
   - '[[2026-07-15-multi-provider-execution-adr]]'
   - '[[2026-07-15-multi-provider-execution-plan]]'
   - '[[2026-07-15-multi-provider-execution-reference]]'
@@ -52,6 +54,8 @@ Auto-generated index of all documents tagged with `#multi-provider-execution`.
 - `2026-07-15-multi-provider-execution-P02-S12` - Add a classify_codex_command-style readiness check and a Provider.CODEX branch in probe_provider_readiness, never emitting a secret
 - `2026-07-15-multi-provider-execution-P02-S13` - Add a factory.py dispatch branch for Provider.CODEX
 - `2026-07-15-multi-provider-execution-P02-S14` - Unit tests for CodexChatModel's JSON-RPC framing and subprocess lifecycle, plus a live probe against the real codex app-server once the auth model is resolved
+- `2026-07-15-multi-provider-execution-P04-S18` - Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum
+- `2026-07-15-multi-provider-execution-P04-S19` - Document the outcome in a phase summary
 
 ### plan
 

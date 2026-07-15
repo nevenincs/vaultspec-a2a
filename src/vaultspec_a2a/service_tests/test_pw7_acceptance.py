@@ -98,6 +98,14 @@ _DECISION_EDIT = "edit"
 _SYSTEM_AUTO_APPROVER_ID = "system:operation-modes"
 _MODE_POLICY_ID = "authoring.operation_modes"
 
+# The two research_adr driver presets. DETERMINISTIC is opus-6's in-process
+# Provider.DETERMINISTIC device (commits 4a66cb2 + 49772bc): the fast,
+# provider-agnostic Option A lane run on every dispatch. LIVE is the parallel
+# session's original real-Claude preset (6deb9a8): the Option C real-provider
+# proof, run once after the Option A lanes are green, select it with `-k live`.
+_PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
+_PRESET_LIVE = "vaultspec-adr-research"
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCase:
@@ -129,11 +137,15 @@ class AcceptanceCase:
 
 
 def _research_adr_case(
-    label: str, feature: str, gate_policy: dict[str, str]
+    label: str,
+    feature: str,
+    gate_policy: dict[str, str],
+    *,
+    preset: str = _PRESET_DETERMINISTIC,
 ) -> AcceptanceCase:
     return AcceptanceCase(
         label=label,
-        preset="vaultspec-adr-research",
+        preset=preset,
         feature=feature,
         prompt=(
             "research and decide an SSE reconnection and cursor-persistence "
@@ -145,8 +157,12 @@ def _research_adr_case(
     )
 
 
-# The three lanes, each a distinct claim (re-dispatch reference "exercise all
-# three, not just one"). MIXED is the per-gate-granularity proof.
+# The lane matrix. The three deterministic (Option A) lanes are the fast,
+# provider-agnostic default run on every dispatch; each is a distinct claim
+# (re-dispatch reference "exercise all three, not just one"), MIXED being the
+# per-gate-granularity proof. The `live` case is the same MIXED shape against the
+# real-Claude preset - the Option C real-provider proof - carrying `live` in its
+# id so `-k "not live"` runs the fast lanes and `-k live` runs Option C alone.
 CASE_AUTO = _research_adr_case(
     "auto", "sse-reconnection-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
 )
@@ -156,8 +172,14 @@ CASE_HUMAN = _research_adr_case(
 CASE_MIXED = _research_adr_case(
     "mixed", "sse-reconnection-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
 )
+CASE_LIVE_MIXED = _research_adr_case(
+    "live-mixed",
+    "sse-reconnection-live",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+)
 
-_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED)
+_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED)
 
 
 def _dig(item: dict, field_name: str) -> str | None:

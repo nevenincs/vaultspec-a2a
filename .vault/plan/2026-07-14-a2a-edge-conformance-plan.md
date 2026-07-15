@@ -144,7 +144,7 @@ Ratify the supersession map through the owning ADR verbs, amend preserved record
 Run a multi-role team preset through the engine pass-through and verify every acceptance criterion; flag the dashboard multiagent-composition re-arm as a cross-repo event.
 
 - [ ] `W05.P14.S31` - Run a full multi-role team preset through the engine pass-through, verify each brief acceptance criterion including mid-run kill honesty and restart recovery from run-status, and record evidence; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/team/`.
-- [ ] `W05.P14.S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence; `.vault/exec/`.
+- [x] `W05.P14.S32` - Raise the dashboard multiagent-composition re-arm as a cross-repo contract event with the first composing two-agent run as evidence; `.vault/exec/`.
 
 ## Description
 

@@ -358,6 +358,7 @@ class ProviderFactory:
         supported = {
             Provider.CLAUDE,
             Provider.CODEX,
+            Provider.DETERMINISTIC,
             Provider.GEMINI,
             Provider.MOCK,
             Provider.ZAI,
@@ -406,6 +407,18 @@ class ProviderFactory:
             from .mock_chat_model import MockChatModel
 
             return MockChatModel(agent_config=agent_config)
+
+        if provider == Provider.DETERMINISTIC:
+            from .deterministic_chat_model import DeterministicResearchAdrChatModel
+
+            # In-process, role-keyed content; no network, no model resolution. Any
+            # feature_tag/topic overrides ride in kwargs from the harness.
+            det_kwargs = {
+                key: kwargs[key] for key in ("feature_tag", "topic") if key in kwargs
+            }
+            return DeterministicResearchAdrChatModel(
+                agent_config=agent_config, **det_kwargs
+            )
 
         if provider == Provider.CODEX:
             from .codex_chat_model import CodexChatModel

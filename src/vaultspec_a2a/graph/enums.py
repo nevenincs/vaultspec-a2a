@@ -130,6 +130,7 @@ class Provider(StrEnum):
 
     CLAUDE = "claude"
     CODEX = "codex"
+    DETERMINISTIC = "deterministic"
     GEMINI = "gemini"
     MOCK = "mock"
     OPENAI = "openai"
@@ -178,6 +179,15 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "gpt-5.6-sol",
         Model.MAX: "gpt-5.6-sol",
     },
+    # Deterministic in-process acceptance provider (PW7 harness): content is
+    # role-keyed, not model-keyed, so these names are inert selectors kept only to
+    # satisfy the MODEL_MAP contract.
+    Provider.DETERMINISTIC: {
+        Model.LOW: "deterministic",
+        Model.MID: "deterministic",
+        Model.HIGH: "deterministic",
+        Model.MAX: "deterministic",
+    },
     Provider.MOCK: {
         Model.LOW: "mock-low",
         Model.MID: "mock-mid",
@@ -206,6 +216,7 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
 PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.CLAUDE: Model.MID,
     Provider.CODEX: Model.HIGH,
+    Provider.DETERMINISTIC: Model.MID,
     Provider.GEMINI: Model.MID,
     Provider.MOCK: Model.MID,
     Provider.OPENAI: Model.HIGH,

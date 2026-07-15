@@ -64,7 +64,16 @@ class TestProvider:
 
     def test_members(self) -> None:
         """All providers are present."""
-        expected = {"claude", "codex", "gemini", "mock", "openai", "zai", "zhipu"}
+        expected = {
+            "claude",
+            "codex",
+            "deterministic",
+            "gemini",
+            "mock",
+            "openai",
+            "zai",
+            "zhipu",
+        }
         assert {m.value for m in Provider} == expected
 
     def test_string_comparison(self) -> None:

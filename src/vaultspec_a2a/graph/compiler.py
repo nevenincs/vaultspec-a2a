@@ -977,19 +977,27 @@ def _make_research_producer(
     return producer
 
 
+#: Standalone verdict sentinels the vaultspec-doc-reviewer persona emits.
+_DOC_REVIEW_REVISION_SENTINEL = "REVISION REQUIRED"
+
+
 def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
     """Return the inner-quality-loop router for a document phase.
 
-    Reads the doc-reviewer's last message: a ``REVISION`` sentinel routes back to
-    the phase writer to revise, anything else (the ``PASS`` sentinel) advances to
-    the phase gate. Absent an explicit revision signal the loop advances, so the
-    human gate remains the backstop rather than an inner loop that never exits.
+    Reads the doc-reviewer's last message for the persona's standalone verdict
+    sentinel: a whole line equal to ``REVISION REQUIRED`` routes back to the phase
+    writer to revise; anything else (the ``PASS`` verdict) advances to the phase
+    gate. The match is an anchored whole-line check, not a substring, so reviewer
+    prose such as "no revision required" does not false-positive back to the
+    writer. Absent an explicit revision verdict the loop advances, so the human
+    gate remains the backstop rather than an inner loop that never exits.
     """
 
     def router(state: TeamState) -> str:
         messages = state.get("messages") or []
         last_content = str(getattr(messages[-1], "content", "")) if messages else ""
-        if "REVISION" in last_content.upper():
+        lines = {line.strip().upper() for line in last_content.splitlines()}
+        if _DOC_REVIEW_REVISION_SENTINEL in lines:
             return writer_target
         return gate_target
 

@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 
     from ..protocols import ProviderFactoryProtocol
 
+from langchain_core.messages import AIMessage
+
 from vaultspec_a2a.team.team_config import (
     ResearchThreadSpec,
     load_agent_config,
@@ -28,7 +30,37 @@ from vaultspec_a2a.team.team_config import (
 )
 from vaultspec_a2a.thread.errors import ConfigError
 
-from ..compiler import compile_team_graph
+from ..compiler import _doc_review_router, compile_team_graph
+
+
+def _review_state(review_text: str) -> dict[str, Any]:
+    return {
+        "active_agent": "review",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [AIMessage(content=review_text, name="doc-reviewer")],
+        "next": "",
+        "thread_id": "review-thread",
+        "token_usage": {},
+    }
+
+
+def test_doc_review_router_revises_on_exact_sentinel() -> None:
+    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    text = "REVISION REQUIRED\n1. Frontmatter missing a date locator."
+    assert router(_review_state(text)) == "writer"
+
+
+def test_doc_review_router_advances_on_pass() -> None:
+    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    assert router(_review_state("PASS")) == "gate"
+
+
+def test_doc_review_router_no_false_positive_on_negated_prose() -> None:
+    """Prose containing the word 'revision' must not route back to the writer."""
+    router = _doc_review_router(writer_target="writer", gate_target="gate")
+    text = "PASS\nThe locators are re-fetchable and no revision required is needed."
+    assert router(_review_state(text)) == "gate"
 
 
 class _FakeSubmitter:

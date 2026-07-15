@@ -7,24 +7,43 @@ end to end against the live loopback stack and asserts that N markdown documents
 materialize under ``.vault/`` - the PW7 contract's document-materialization
 assertion single-homed here.
 
-The loop it exercises, all live and mock-free:
+The loop it exercises, all live and mock-free, across three verdict lanes:
 
-* mint one Agent-kind actor token per preset role plus a system-class and a
-  human-class reviewer token against the engine authoring API;
+* mint one Agent-kind actor token per preset role plus a human-class reviewer
+  token (also the operation-mode policy setter) against the engine authoring API;
 * assert the hardened v1 ``run-start`` refusals (422: missing target feature;
   422: an actor-token bundle not covering every required role);
 * ``run-start`` the preset with the token bundle and a target feature;
-* drive each gate's verdict PROGRAMMATICALLY over the engine review surface
-  (review-queue -> decision -> apply) under the per-gate verdict policy - AUTO
-  approves immediately with a system-class actor, HUMAN with a human-class actor
-  (both are normal review-lane flow; the self-approval ban is origin-keyed);
+* drive each gate's verdict per its per-gate policy PROGRAMMATICALLY over the
+  engine surface:
+  - **HUMAN** gate: reject-with-notes first (``decision=edit`` == request-changes,
+    which returns the changeset to Draft and stales the approval), assert the run
+    re-authors and re-submits (the revision loop, not a dead end), then approve and
+    apply, asserting the materialization receipt;
+  - **AUTO** gate: set the worktree operation mode to ``autonomous`` BEFORE the
+    gate's submit, so the engine's ``submit_for_review`` system-auto-approves under
+    the ``system:operation-modes`` actor (recording a ``SystemPolicyApprovalRecord``,
+    a record class DISTINCT from a human ``ReviewDecisionRecord``) and auto-applies.
+    The harness asserts that system marker, never a human decision - the ADR's own
+    anti-bypass invariant, not merely "the run completed fast";
+* MIXED = a genuinely different policy per gate in ONE run (AUTO at research, HUMAN
+  at ADR), sequenced by a timed mode transition, proving the per-gate (not per-run)
+  granularity the ADR promises;
 * the verdict subscriber resumes the parked run across gates;
 * assert the expected documents materialized on disk with the expected stems.
 
-Gate detection keys on the ENGINE review-queue (a queued proposal scoped to this
-run's changeset id), not the a2a semantic phase, so it is robust to the reconciler
-masking ``awaiting_adr_decision`` as ``recovery_required`` after a subscriber
-resume (P04.S10 GAP D).
+Gate detection keys on the ENGINE surface (a queued proposal / an applied-under-
+policy marker scoped to this run's changeset id ``cs:<run_id>:<phase>-r<cycle>``),
+not the a2a semantic phase, so it is robust to the reconciler masking the semantic
+phase after a subscriber resume (P04.S10 GAP D).
+
+Wire shapes are grounded in the engine Rust source (read-only), not this brief's
+prose: ``ReviewDecisionRequest`` (``decision`` enum ``approve|reject|edit|respond``,
+load-bearing ``reviewed_revision``), ``ApplyRequest`` (``changeset_id`` +
+``approval_id``), ``SetOperationModeRequest`` (``mode`` enum
+``manual|assisted|autonomous``, human/system actor only), the apply receipt's
+``child.{document_path,result_stem,outcome}``, and the ``applied_under_policy``
+projection lane carrying ``system_actor`` / ``mode`` / ``policy_id``.
 
 Infrastructure gate, not a masked failure: the test skips with a runbook pointer
 when no loopback engine is reachable (resolved through the discovery contract) or
@@ -36,6 +55,7 @@ local ``vaultspec serve --no-seat`` engine plus the a2a gateway/worker with
 from __future__ import annotations
 
 import asyncio
+import itertools
 import json
 import os
 import time
@@ -57,6 +77,27 @@ _RESEARCH_ADR_ROLES = (
     "vaultspec-doc-reviewer",
 )
 
+# Per-gate verdict policies (the lane axis).
+POLICY_AUTO = "AUTO"
+POLICY_HUMAN = "HUMAN"
+
+# Operation-mode wire values (engine `OperationMode`, snake_case).
+_MODE_MANUAL = "manual"
+_MODE_AUTONOMOUS = "autonomous"
+
+# Review-decision wire values (engine `ReviewDecisionKind`, snake_case). `edit`
+# is the request-changes / reject-with-notes device: it returns the changeset to
+# Draft and stales the approval, routing the a2a run back to the phase writer.
+_DECISION_APPROVE = "approve"
+_DECISION_EDIT = "edit"
+
+# The system auto-approval actor id + policy id the operation-modes machinery
+# stamps on a `SystemPolicyApprovalRecord` (engine `modes.rs`
+# `SYSTEM_AUTO_APPROVER_ID` / `MODE_POLICY_ID`). The AUTO lane asserts these
+# exactly - the anti-bypass invariant - never a human decision record.
+_SYSTEM_AUTO_APPROVER_ID = "system:operation-modes"
+_MODE_POLICY_ID = "authoring.operation_modes"
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCase:
@@ -64,6 +105,7 @@ class AcceptanceCase:
 
     Parameters
     ----------
+    label:             A short, stable id for the parametrization.
     preset:            The document-authoring team preset to run.
     feature:           The target feature tag the documents are authored for.
     prompt:            The run's opening research prompt.
@@ -71,10 +113,13 @@ class AcceptanceCase:
     expected_doc_kinds:
         The ``.vault`` subdirectories a materialized document is expected under,
         in gate order (e.g. ``("research", "adr")``).
-    gate_policy:       Per-gate verdict policy - ``"AUTO"`` (system actor) or
-                       ``"HUMAN"`` (human actor) - keyed by gate ordinal name.
+    gate_policy:       Per-gate verdict policy - :data:`POLICY_AUTO` (system
+                       operation-modes auto-approval) or :data:`POLICY_HUMAN`
+                       (human reject-with-notes -> revision -> approve -> apply) -
+                       keyed by gate ordinal name, in gate order.
     """
 
+    label: str
     preset: str
     feature: str
     prompt: str
@@ -83,17 +128,36 @@ class AcceptanceCase:
     gate_policy: dict[str, str] = field(default_factory=dict)
 
 
-RESEARCH_ADR_CASE = AcceptanceCase(
-    preset="vaultspec-adr-research",
-    feature="sse-reconnection",
-    prompt=(
-        "research and decide an SSE reconnection and cursor-persistence strategy "
-        "for long-lived dashboard event streams"
-    ),
-    roles=_RESEARCH_ADR_ROLES,
-    expected_doc_kinds=("research", "adr"),
-    gate_policy={"research": "AUTO", "adr": "HUMAN"},
+def _research_adr_case(
+    label: str, feature: str, gate_policy: dict[str, str]
+) -> AcceptanceCase:
+    return AcceptanceCase(
+        label=label,
+        preset="vaultspec-adr-research",
+        feature=feature,
+        prompt=(
+            "research and decide an SSE reconnection and cursor-persistence "
+            "strategy for long-lived dashboard event streams"
+        ),
+        roles=_RESEARCH_ADR_ROLES,
+        expected_doc_kinds=("research", "adr"),
+        gate_policy=gate_policy,
+    )
+
+
+# The three lanes, each a distinct claim (re-dispatch reference "exercise all
+# three, not just one"). MIXED is the per-gate-granularity proof.
+CASE_AUTO = _research_adr_case(
+    "auto", "sse-reconnection-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
 )
+CASE_HUMAN = _research_adr_case(
+    "human", "sse-reconnection-human", {"research": POLICY_HUMAN, "adr": POLICY_HUMAN}
+)
+CASE_MIXED = _research_adr_case(
+    "mixed", "sse-reconnection-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
+)
+
+_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED)
 
 
 def _dig(item: dict, field_name: str) -> str | None:
@@ -109,9 +173,22 @@ def _dig(item: dict, field_name: str) -> str | None:
     return None
 
 
-def _queue_items(data: dict) -> list[dict]:
+def _items(data: object) -> list[dict]:
+    if not isinstance(data, dict):
+        return []
     items = data.get("items")
     return [x for x in items if isinstance(x, dict)] if isinstance(items, list) else []
+
+
+@dataclass(slots=True)
+class Materialization:
+    """One materialized document's evidence, per gate."""
+
+    gate: str
+    source: str  # "auto" | "human"
+    changeset_id: str
+    document_path: str | None = None
+    result_stem: str | None = None
 
 
 @dataclass(slots=True)
@@ -125,6 +202,17 @@ class AcceptanceHarness:
     gateway_url: str = _GATEWAY_URL
     run_id: str = field(default_factory=lambda: f"pw7-{int(time.time())}")
     phases_seen: list[str] = field(default_factory=list)
+    materializations: list[Materialization] = field(default_factory=list)
+    _idk_counter: itertools.count = field(default_factory=lambda: itertools.count())
+    _current_mode: str | None = None
+
+    def _idk(self, tag: str) -> str:
+        """A grammar-valid, unique-per-call idempotency key for this run."""
+        return f"idk-{tag}-{self.run_id}-{next(self._idk_counter)}"
+
+    # ------------------------------------------------------------------
+    # Token + run-start
+    # ------------------------------------------------------------------
 
     async def _mint(self, ec: AuthoringClient, actor_id: str, kind: str) -> str:
         minted = await mint_actor_token(ec, actor_id=actor_id, kind=kind)
@@ -161,68 +249,295 @@ class AcceptanceHarness:
         )
         return resp
 
+    async def _run_status(self, hc: httpx.AsyncClient) -> dict:
+        resp = await hc.get(f"{self.gateway_url}/v1/runs/{self.run_id}", timeout=30.0)
+        resp.raise_for_status()
+        return resp.json()
+
+    async def _assert_not_terminal(self, hc: httpx.AsyncClient) -> None:
+        status = await self._run_status(hc)
+        phase = status.get("semantic_phase")
+        if phase and (not self.phases_seen or self.phases_seen[-1] != phase):
+            self.phases_seen.append(phase)
+        if status.get("status") in {"failed", "cancelled"}:
+            raise AssertionError(f"run terminal failure: {json.dumps(status)[:800]}")
+
+    # ------------------------------------------------------------------
+    # Operation mode (the AUTO lane device)
+    # ------------------------------------------------------------------
+
+    async def _set_mode(
+        self, ec: AuthoringClient, mode: str, *, setter_token: str
+    ) -> None:
+        """Set the worktree operation mode; the scope is backend-derived."""
+        result = await ec.post_command(
+            "/v1/mode",
+            "set_operation_mode",
+            {"mode": mode},
+            idempotency_key=self._idk(f"mode-{mode}"),
+            actor_token=setter_token,
+        )
+        if isinstance(result, Denial):
+            raise AssertionError(
+                f"set mode {mode} denied ({result.denial_kind}): {result.reason}"
+            )
+        assert result.data.get("status") in {"recorded", "replayed"}, (
+            f"unexpected mode-set status: {result.data}"
+        )
+        assert result.data.get("mode") == mode, f"mode not applied: {result.data}"
+        self._current_mode = mode
+
+    async def _ensure_mode(
+        self, ec: AuthoringClient, mode: str, *, setter_token: str
+    ) -> None:
+        if self._current_mode != mode:
+            await self._set_mode(ec, mode, setter_token=setter_token)
+
+    @staticmethod
+    def _mode_for(policy: str) -> str:
+        return _MODE_AUTONOMOUS if policy == POLICY_AUTO else _MODE_MANUAL
+
+    # ------------------------------------------------------------------
+    # Gate discovery
+    # ------------------------------------------------------------------
+
     async def _find_queue_item(
         self, ec: AuthoringClient, handled: set[str]
     ) -> dict | None:
+        """A needs-review queue item for this run whose proposal is unhandled."""
         resp = await ec.get("/v1/review-queue", with_actor=False)
-        data = resp.data if isinstance(resp, AuthoringResponse) else {}
-        for item in _queue_items(data):
+        for item in _items(resp.data):
             changeset = _dig(item, "changeset_id") or ""
             proposal = _dig(item, "proposal_id")
-            if self.run_id in changeset and proposal not in handled:
+            if self.run_id in changeset and proposal and proposal not in handled:
                 return item
         return None
 
-    async def _decide_and_apply(
-        self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
+    async def _find_policy_marker(
+        self, ec: AuthoringClient, handled: set[str]
+    ) -> dict | None:
+        """An applied-under-policy (system-auto-approved) marker for this run."""
+        resp = await ec.get("/v1/proposals", with_actor=False)
+        data = resp.data if isinstance(resp.data, dict) else {}
+        lane = data.get("applied_under_policy")
+        for item in _items(lane):
+            changeset = _dig(item, "changeset_id") or ""
+            if self.run_id in changeset and changeset not in handled:
+                return item
+        return None
+
+    # ------------------------------------------------------------------
+    # Verdict choreography
+    # ------------------------------------------------------------------
+
+    async def _decide(
+        self,
+        ec: AuthoringClient,
+        item: dict,
+        *,
+        decision: str,
+        reviewer_token: str,
+        gate: str,
     ) -> None:
+        """POST one review decision (approve / edit) over the engine surface."""
         proposal_id = _dig(item, "proposal_id")
         approval_id = _dig(item, "approval_id")
-        changeset_id = _dig(item, "changeset_id")
-        reviewed_revision = _dig(item, "reviewed_proposal_revision") or _dig(
-            item, "changeset_revision"
+        reviewed_revision = _dig(item, "reviewed_proposal_revision")
+        assert proposal_id and approval_id and reviewed_revision, (
+            f"review item missing decision ids: {json.dumps(item)[:600]}"
         )
-        policy = self.case.gate_policy.get(gate, "AUTO")
-        decision = await ec.post_command(
+        result = await ec.post_command(
             f"/v1/reviews/{approval_id}/decisions",
-            "approve",
+            "submit_review_decision",
             {
                 "proposal_id": proposal_id,
                 "approval_id": approval_id,
-                "decision": "approve",
+                "decision": decision,
                 "reviewed_revision": reviewed_revision,
-                "comment": f"{gate} gate {policy} approval (PW7 harness)",
+                "comment": f"{gate} gate {decision} (PW7 harness)",
             },
-            idempotency_key=f"idk-decide-{gate}-{self.run_id}",
+            idempotency_key=self._idk(f"decide-{gate}-{decision}"),
             actor_token=reviewer_token,
         )
-        assert isinstance(decision, AuthoringResponse), f"decision denied: {decision}"
-        assert decision.data.get("status") in {"decided", "replayed"}
-        applied = await ec.post_command(
+        if isinstance(result, Denial):
+            raise AssertionError(
+                f"{gate} {decision} denied ({result.denial_kind}): {result.reason}"
+            )
+        assert result.data.get("status") in {"decided", "replayed"}, (
+            f"{gate} {decision} unexpected status: {result.data}"
+        )
+
+    async def _apply(
+        self, ec: AuthoringClient, item: dict, *, reviewer_token: str, gate: str
+    ) -> Materialization:
+        """Apply an approved changeset and return its materialization receipt."""
+        changeset_id = _dig(item, "changeset_id")
+        approval_id = _dig(item, "approval_id")
+        assert changeset_id and approval_id
+        result = await ec.post_command(
             "/v1/apply-requests",
             "request_apply",
             {"changeset_id": changeset_id, "approval_id": approval_id},
-            idempotency_key=f"idk-apply-{gate}-{self.run_id}",
+            idempotency_key=self._idk(f"apply-{gate}"),
             actor_token=reviewer_token,
         )
-        if isinstance(applied, Denial):
+        if isinstance(result, Denial):
             raise AssertionError(
-                f"{gate} apply denied ({applied.denial_kind}): {applied.reason}"
+                f"{gate} apply denied ({result.denial_kind}): {result.reason}"
             )
-        assert applied.data.get("status") == "recorded"
+        assert result.data.get("status") in {"recorded", "replayed"}, (
+            f"{gate} apply unexpected status: {result.data}"
+        )
+        assert result.data.get("child_outcome") == "applied", (
+            f"{gate} apply did not materialize: {result.data}"
+        )
+        child = ((result.data.get("receipt") or {}).get("child")) or {}
+        return Materialization(
+            gate=gate,
+            source="human",
+            changeset_id=changeset_id,
+            document_path=child.get("document_path"),
+            result_stem=child.get("result_stem"),
+        )
 
-    async def run(self, *, timeout_seconds: float = 2400.0) -> list[str]:
+    async def _drive_human_gate(
+        self,
+        ec: AuthoringClient,
+        hc: httpx.AsyncClient,
+        *,
+        gate: str,
+        reviewer_token: str,
+        handled: set[str],
+        poll_seconds: float,
+        deadline: float,
+    ) -> None:
+        """Reject-with-notes -> revision -> approve -> apply for one human gate."""
+        # 1. Park at the gate.
+        first = await self._await(
+            lambda: self._find_queue_item(ec, handled),
+            hc,
+            deadline,
+            poll_seconds,
+            what=f"{gate} gate to park for human review",
+        )
+        rejected_proposal = _dig(first, "proposal_id")
+        assert rejected_proposal
+        # 2. Reject with notes (request-changes): back to the writer, approval staled.
+        await self._decide(
+            ec, first, decision=_DECISION_EDIT, reviewer_token=reviewer_token, gate=gate
+        )
+        handled.add(rejected_proposal)
+        # 3. The run must re-author and re-submit - the revision loop, not a dead end.
+        revised = await self._await(
+            lambda: self._find_queue_item(ec, handled),
+            hc,
+            deadline,
+            poll_seconds,
+            what=f"{gate} gate to re-submit after request-changes (revision routing)",
+        )
+        revised_proposal = _dig(revised, "proposal_id")
+        assert revised_proposal and revised_proposal != rejected_proposal, (
+            "request-changes did not route back to a fresh proposal"
+        )
+        # 4. Approve unparks the run; 5. apply materializes.
+        await self._decide(
+            ec,
+            revised,
+            decision=_DECISION_APPROVE,
+            reviewer_token=reviewer_token,
+            gate=gate,
+        )
+        materialization = await self._apply(
+            ec, revised, reviewer_token=reviewer_token, gate=gate
+        )
+        handled.add(revised_proposal)
+        self.materializations.append(materialization)
+
+    async def _drive_auto_gate(
+        self,
+        ec: AuthoringClient,
+        hc: httpx.AsyncClient,
+        *,
+        gate: str,
+        handled_changesets: set[str],
+        poll_seconds: float,
+        deadline: float,
+    ) -> None:
+        """Assert the system operation-modes auto-approval + materialization."""
+        marker = await self._await(
+            lambda: self._find_policy_marker(ec, handled_changesets),
+            hc,
+            deadline,
+            poll_seconds,
+            what=f"{gate} gate to system-auto-approve under operation modes",
+        )
+        # The anti-bypass invariant: a SystemPolicyApprovalRecord under the
+        # system:operation-modes actor, DISTINCT from any human decision record -
+        # never merely "the run finished".
+        system_actor = marker.get("system_actor")
+        assert isinstance(system_actor, dict), f"marker has no system_actor: {marker}"
+        assert system_actor.get("id") == _SYSTEM_AUTO_APPROVER_ID, (
+            f"{gate} auto-approval was not the operation-modes actor: {system_actor}"
+        )
+        assert system_actor.get("kind") == "system", (
+            f"{gate} auto-approver is not system-kind: {system_actor}"
+        )
+        assert marker.get("mode") == _MODE_AUTONOMOUS, (
+            f"{gate} marker mode is not autonomous: {marker.get('mode')}"
+        )
+        assert marker.get("policy_id") == _MODE_POLICY_ID, (
+            f"{gate} marker policy id mismatch: {marker.get('policy_id')}"
+        )
+        proposal = marker.get("proposal")
+        assert isinstance(proposal, dict) and proposal.get("status") == "applied", (
+            f"{gate} system-approved proposal did not apply: {proposal}"
+        )
+        changeset_id = _dig(marker, "changeset_id") or ""
+        handled_changesets.add(changeset_id)
+        self.materializations.append(
+            Materialization(gate=gate, source="auto", changeset_id=changeset_id)
+        )
+
+    async def _await(
+        self,
+        find,
+        hc: httpx.AsyncClient,
+        deadline: float,
+        poll_seconds: float,
+        *,
+        what: str,
+    ) -> dict:
+        """Poll *find* until it yields an item, watching for a terminal run."""
+        while time.monotonic() < deadline:
+            await self._assert_not_terminal(hc)
+            found = await find()
+            if found is not None:
+                return found
+            await asyncio.sleep(poll_seconds)
+        raise AssertionError(f"timed out waiting for {what}; phases={self.phases_seen}")
+
+    # ------------------------------------------------------------------
+    # Orchestration
+    # ------------------------------------------------------------------
+
+    async def run(
+        self, *, timeout_seconds: float = 2400.0, poll_seconds: float = 5.0
+    ) -> list[str]:
         """Drive the full loop; return the ordered list of gates driven."""
+        gate_names = list(self.case.gate_policy) or ["gate"]
+        deadline = time.monotonic() + timeout_seconds
         async with AuthoringClient(self.engine_base_url, self.engine_bearer) as ec:
             tokens = {
                 role: await self._mint(ec, f"agent:{self.run_id}:{role}", "agent")
                 for role in self.case.roles
             }
-            reviewer_system = await self._mint(ec, f"rev-sys:{self.run_id}", "system")
+            # One human principal is both the reviewer AND the operation-mode
+            # policy setter (mode-set requires a human/system actor; a human
+            # reviewer distinct from the agent author clears the self-approval ban).
             reviewer_human = await self._mint(ec, f"rev-human:{self.run_id}", "human")
-            reviewer_for = {"AUTO": reviewer_system, "HUMAN": reviewer_human}
 
             async with httpx.AsyncClient() as hc:
+                # Hardened run-start refusals (pure eligibility, no submit).
                 await self._run_start(
                     hc,
                     run_id=f"{self.run_id}-no-feature",
@@ -238,6 +553,13 @@ class AcceptanceHarness:
                     feature=self.case.feature,
                     expect=422,
                 )
+
+                # The first gate's mode must be live BEFORE the run submits it.
+                await self._ensure_mode(
+                    ec,
+                    self._mode_for(self.case.gate_policy[gate_names[0]]),
+                    setter_token=reviewer_human,
+                )
                 await self._run_start(
                     hc,
                     run_id=self.run_id,
@@ -246,54 +568,58 @@ class AcceptanceHarness:
                     expect=201,
                 )
 
+                handled_proposals: set[str] = set()
+                handled_changesets: set[str] = set()
                 gates_done: list[str] = []
-                handled: set[str] = set()
-                gate_names = list(self.case.gate_policy) or ["gate"]
-                deadline = time.monotonic() + timeout_seconds
-                while time.monotonic() < deadline:
-                    status = await self._run_status(hc)
-                    phase = status.get("semantic_phase")
-                    if phase and (
-                        not self.phases_seen or self.phases_seen[-1] != phase
-                    ):
-                        self.phases_seen.append(phase)
-                    if status.get("status") in {"failed", "cancelled"}:
-                        raise AssertionError(
-                            f"run terminal failure: {json.dumps(status)[:800]}"
-                        )
-                    item = await self._find_queue_item(ec, handled)
-                    if item is not None:
-                        gate = gate_names[min(len(gates_done), len(gate_names) - 1)]
-                        await self._decide_and_apply(
+                for index, gate in enumerate(gate_names):
+                    policy = self.case.gate_policy[gate]
+                    if policy == POLICY_AUTO:
+                        await self._drive_auto_gate(
                             ec,
-                            item,
-                            reviewer_token=reviewer_for[
-                                self.case.gate_policy.get(gate, "AUTO")
-                            ],
+                            hc,
                             gate=gate,
+                            handled_changesets=handled_changesets,
+                            poll_seconds=poll_seconds,
+                            deadline=deadline,
                         )
-                        proposal = _dig(item, "proposal_id")
-                        if proposal:
-                            handled.add(proposal)
-                        gates_done.append(gate)
-                    if len(gates_done) >= len(self.case.expected_doc_kinds):
-                        return gates_done
-                    await asyncio.sleep(5)
-                raise AssertionError(
-                    f"timed out; gates_done={gates_done} phases={self.phases_seen}"
-                )
-
-    async def _run_status(self, hc: httpx.AsyncClient) -> dict:
-        resp = await hc.get(f"{self.gateway_url}/v1/runs/{self.run_id}", timeout=30.0)
-        resp.raise_for_status()
-        return resp.json()
+                    else:
+                        await self._drive_human_gate(
+                            ec,
+                            hc,
+                            gate=gate,
+                            reviewer_token=reviewer_human,
+                            handled=handled_proposals,
+                            poll_seconds=poll_seconds,
+                            deadline=deadline,
+                        )
+                    gates_done.append(gate)
+                    # Switch the mode for the NEXT gate before the run submits it.
+                    # The AUTO marker is written synchronously at submit time, so this
+                    # switch lands before the resumed run authors the next document.
+                    if index + 1 < len(gate_names):
+                        next_policy = self.case.gate_policy[gate_names[index + 1]]
+                        await self._ensure_mode(
+                            ec,
+                            self._mode_for(next_policy),
+                            setter_token=reviewer_human,
+                        )
+                return gates_done
 
     def materialized(self) -> dict[str, list[Path]]:
-        """Return the materialized markdown documents per expected doc kind."""
+        """Return the materialized markdown documents per expected doc kind.
+
+        Filtered to this run's feature so a leftover document from another run is
+        never counted as this run's materialization.
+        """
         out: dict[str, list[Path]] = {}
         for kind in self.case.expected_doc_kinds:
             directory = self.vault_root / kind
-            out[kind] = sorted(directory.glob("*.md")) if directory.is_dir() else []
+            files = (
+                sorted(directory.glob(f"*{self.case.feature}*.md"))
+                if directory.is_dir()
+                else []
+            )
+            out[kind] = files
         return out
 
 
@@ -317,14 +643,18 @@ def _reachable_stack() -> tuple[str, str, Path] | None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-async def test_pw7_research_adr_materializes_two_documents() -> None:
+@pytest.mark.parametrize("case", _ALL_CASES, ids=[c.label for c in _ALL_CASES])
+async def test_pw7_research_adr_materializes_two_documents(
+    case: AcceptanceCase,
+) -> None:
     """The research_adr loop materializes exactly the expected document set.
 
     Drives the standing PW7 acceptance case end to end and asserts a research and
     an ADR document materialize under the engine workspace ``.vault/`` - the PW7
-    document-materialization contract for ``research_adr`` (N = 2). Verdicts are
-    driven programmatically over the engine review surface with a mixed per-gate
-    policy (research AUTO/system-actor, adr HUMAN/human-actor).
+    document-materialization contract for ``research_adr`` (N = 2) - across the
+    three verdict lanes (HUMAN reject-with-notes -> revision -> approve; AUTO
+    operation-modes system approval; MIXED per-gate). Verdicts are driven
+    programmatically over the engine surface.
     """
     stack = _reachable_stack()
     if stack is None:
@@ -336,7 +666,7 @@ async def test_pw7_research_adr_materializes_two_documents() -> None:
         )
     engine_base_url, engine_bearer, vault_root = stack
     harness = AcceptanceHarness(
-        case=RESEARCH_ADR_CASE,
+        case=case,
         engine_base_url=engine_base_url,
         engine_bearer=engine_bearer,
         vault_root=vault_root,
@@ -344,7 +674,16 @@ async def test_pw7_research_adr_materializes_two_documents() -> None:
 
     gates_driven = await harness.run()
 
-    assert gates_driven == ["research", "adr"]
+    assert gates_driven == list(case.expected_doc_kinds)
+    assert len(harness.materializations) == len(case.expected_doc_kinds)
     materialized = harness.materialized()
-    assert materialized["research"], "no research document materialized on disk"
-    assert materialized["adr"], "no ADR document materialized on disk"
+    for kind in case.expected_doc_kinds:
+        assert materialized[kind], (
+            f"no {kind} document materialized on disk for {case.label}"
+        )
+    # Every human-gate apply receipt names a real materialized path on disk.
+    for record in harness.materializations:
+        if record.document_path is not None:
+            assert Path(record.document_path).name, (
+                "apply receipt carried an empty document path"
+            )

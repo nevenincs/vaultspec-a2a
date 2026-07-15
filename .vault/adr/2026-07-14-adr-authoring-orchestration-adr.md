@@ -107,7 +107,20 @@ correctly fail-closed dead code until this amendment's work lands.
   Rust-backend identifiers (authoring session id, changeset ids,
   proposal ids in the existing correlation fields); no document content,
   no tokens; product-facing status speaks role/phase vocabulary, never
-  internal node names.
+  internal node names. In-flight reconciliation (2026-07-15): the
+  product vocabulary is CONCRETIZED by the edge plan-2 semantic
+  authoring-phase projection (starting, researching,
+  synthesizing_research, reviewing_research, awaiting_research_decision,
+  writing_adr, reviewing_adr, awaiting_adr_decision, completed, failed,
+  cancelled, recovery_required) - single-homed there; this record does
+  not define a second enum. The fail-closed posture is two composed
+  layers decided independently and deliberately kept: the gateway's
+  pre-dispatch run-start eligibility refusals (missing/unloadable
+  preset, empty prompt, absent target feature for document presets,
+  token bundle not covering the preset's required roles - typed 422s)
+  refuse BEFORE dispatch, and PW2's construction-site errors fail
+  closed AFTER dispatch for anything that slips past or degrades
+  mid-lifecycle; neither replaces the other.
 - **PW5 - Verification standard and documentation integrity.** The
   handover's verification requirements are the plan extension's
   Verification verbatim (no stub submitter, no graph-shape-only tests;

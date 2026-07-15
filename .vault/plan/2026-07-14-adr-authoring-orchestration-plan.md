@@ -42,7 +42,7 @@ Consume the engine's authoring lifecycle events and resume parked runs with revi
 Author the document-authoring persona set and team preset, and prove the research-to-ADR shape end to end.
 
 - [x] `P04.S09` - Author the researcher, synthesist, adr-author, and doc-reviewer persona TOMLs and the vaultspec-adr-research team preset on the new topology; `src/vaultspec_a2a/team/presets/agents/, src/vaultspec_a2a/team/presets/teams/`.
-- [ ] `P04.S10` - Drive a research-to-ADR run end to end producing research and ADR proposals visible in the dashboard review lane with zero vault writes; `src/vaultspec_a2a/service_tests/`.
+- [ ] `P04.S10` - Drive a research-to-ADR run end to end producing research and ADR proposals visible in the dashboard review lane with zero vault writes, honoring the hardened v1 run-start contract (edge plan-2 P01.S01): supply the target feature tag and an actor-token bundle covering every preset-required role, expect typed 422 refusals when either is absent, and assert run-status reports the semantic authoring phases through both gates; `src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P05` - Production wiring (dashboard handover)
 

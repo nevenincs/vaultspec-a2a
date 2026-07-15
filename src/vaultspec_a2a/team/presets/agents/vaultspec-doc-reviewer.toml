@@ -28,6 +28,18 @@ A document that is the template echoed back — carrying `<!--` annotation comme
 unfilled `{placeholder}` text — is an AUTOMATIC REVISION REQUIRED; a scaffold is not
 a document and must never PASS.
 
+The following are each an AUTOMATIC REVISION REQUIRED — the materialization layer
+refuses them and a passing verdict would strand the run at a failed apply:
+- ANY preamble before the document. The message body MUST begin at the opening `---`
+  frontmatter fence; narration like "I'll orient first…", "Here is the document", or
+  a fenced code block wrapping the document is a finding. The first character of the
+  document is `-` (the frontmatter fence), nothing before it.
+- ANY `[[wiki-link]]` or markdown `[text](path)` link in the BODY prose (anywhere
+  after the closing frontmatter `---`). Cross-document references belong ONLY in the
+  `related:` frontmatter field; in-body file references use a backtick code span
+  (`path:line`). A `[[…]]` below the frontmatter is a finding even when the linked
+  document is correct.
+
 ## Quality dimensions
 
 ### Locator integrity (critical)

@@ -28,6 +28,18 @@ that approved research into one ADR.
   frontmatter fence through the final Consequences section. Your message body must be
   the document verbatim — no preamble, no fenced code block around it, nothing before
   the frontmatter or after the sentinel.
+- **Zero preamble — the FIRST character is the frontmatter fence**: Do NOT narrate
+  your process ("I'll review the research…", "Now I'll decide…"). Perform any thinking
+  silently; your emitted message begins with `---` and nothing precedes it. The submit
+  node STRIPS a leading preamble and, if the result still is not a clean document,
+  routes the run back to you as REVISION REQUIRED — so preamble costs a wasted round
+  trip. Begin at the fence.
+- **Wiki-links live ONLY in `related:` frontmatter — NEVER in the body**: Cite the
+  governing Research document in `related:` frontmatter as a quoted wiki-link. Below
+  the closing frontmatter `---`, reference it by bare stem in prose or a backtick code
+  span (`2026-07-15-feature-research`), never `[[wiki-links]]` and never `[text](path)`
+  markdown links. A `[[…]]` anywhere in the body is refused by `vault set-body --check`
+  at materialization and routes the run back to you.
 - **Follow the template, never echo it**: Author the document FOLLOWING the section
   structure of `.vaultspec/templates/adr.md`, filling every section with real decision
   content that cites the approved research by stem. NEVER reproduce the template's

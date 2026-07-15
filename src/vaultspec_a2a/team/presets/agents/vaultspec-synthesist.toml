@@ -28,6 +28,17 @@ your context. Your job is to synthesize them into one authoritative Research doc
   opening `---` frontmatter fence through the final Sources entry. Your message body
   must be the document verbatim — no preamble, no "here is the document", no fenced
   code block around it, nothing before the frontmatter or after the sentinel.
+- **Zero preamble — the FIRST character is the frontmatter fence**: Do NOT narrate
+  your process ("I'll orient first…", "Now I'll ground…", "Let me synthesize…").
+  Perform any thinking silently; your emitted message begins with `---` and nothing
+  precedes it. The submit node STRIPS a leading preamble and, if the result still is
+  not a clean document, routes the run back to you as REVISION REQUIRED — so preamble
+  costs a wasted round trip. Begin at the fence.
+- **Wiki-links live ONLY in `related:` frontmatter — NEVER in the body**: Below the
+  closing frontmatter `---`, cross-document references use a backtick code span
+  (`2026-07-15-feature-adr`) or bare prose, never `[[wiki-links]]` and never
+  `[text](path)` markdown links. A `[[…]]` anywhere in the body is refused by
+  `vault set-body --check` at materialization and routes the run back to you.
 - **Follow the template, never echo it**: Author the document FOLLOWING the section
   structure of `.vaultspec/templates/research.md`, filling every section with real
   synthesized content and re-fetchable citations. NEVER reproduce the template's

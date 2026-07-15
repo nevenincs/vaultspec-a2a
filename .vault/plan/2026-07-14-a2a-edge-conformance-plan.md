@@ -119,7 +119,7 @@ Reshape the existing /api surface into versioned run-start, run-status, run-canc
 
 Restore a minimal vaultspec-a2a CLI as a thin client of the five-verb surface: serve, doctor, presets, run start/status/cancel. No second code path.
 
-- [ ] `W04.P11.S26` - Restore the vaultspec-a2a operator CLI as a thin client of the five-verb surface (serve, doctor, presets, run start/status/cancel) with a console-script entrypoint and live tests; `src/vaultspec_a2a/cli/, pyproject.toml`.
+- [x] `W04.P11.S26` - Restore the vaultspec-a2a operator CLI as a thin client of the five-verb surface (serve, doctor, presets, run start/status/cancel) with a console-script entrypoint and live tests; `src/vaultspec_a2a/cli/, pyproject.toml`.
 
 ## Wave `W05` - Discovery contract, ADR dispositions, full-team acceptance
 

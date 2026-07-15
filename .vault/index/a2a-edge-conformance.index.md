@@ -52,6 +52,7 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-w02-review-audit]]'
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-dead-code-campaign-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w05-review-audit]]'
@@ -73,6 +74,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-w02-review-audit` - `a2a-edge-conformance` audit: `W02 code review: deletion mandates and write-seam closure`
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
 - `2026-07-15-a2a-edge-conformance-audit` - `a2a-edge-conformance` audit: `full-edge live demonstration`
+- `2026-07-15-a2a-edge-conformance-dead-code-campaign-audit` - `a2a-edge-conformance` audit: `dead code campaign`
 - `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
 - `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
 - `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`

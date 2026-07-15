@@ -29,4 +29,20 @@ Ran green against a live engine (workspace-local `--no-seat` serve on port 8767,
 
 ## Notes
 
-Honest scope boundary, verified live 2026-07-14: on the engine build under test, only `session.created` reaches the `/events` durable outbox - creating and submitting a proposal advanced the outbox by a single `session.created` event and emitted no `proposal.*` / `approval.*` frames, so the reviewer-verdict events the subscriber resumes on (`approval.resolved` / `proposal.rejected`) are NOT observable on this engine yet. Consequently the full end-to-end verdict-to-resume hop across a real parked run is NOT proven live; that depends on (a) the engine emitting proposal/approval lifecycle events to the outbox, and (b) the phase-gate topology that actually parks a run at a proposal, which lands in P02.S05. The subscriber's own verdict decoding, id correlation, cursor persistence, and gap handling are proven over real infrastructure in the unit and integration suites. No test doubles were used; the live tests skip with a runbook pointer when no engine is reachable rather than simulating one.
+Original scope boundary (2026-07-14): the then-current engine build emitted only `session.created` to the `/events` outbox, so the verdict-to-resume hop was not provable live and the S08 live tests proved SSE-wire conformance on session events only.
+
+### HIGH-2 addendum (2026-07-15): engine gap closed, full round-trip proven live
+
+The engine now publishes the full review lifecycle to the durable outbox (dashboard commit `5173858`, "publish review lifecycle events to the durable outbox"). Re-verified against a freshly built binary served as a second workspace-local instance, attach-never-own, on an ephemeral port distinct from the owner's running engine.
+
+- Build: `cargo build --manifest-path engine/Cargo.toml --release -p vaultspec-cli` in the dashboard worktree.
+- Serve: `vaultspec serve --port 0 --no-seat` from a minimal throwaway workspace (its own `.vault/` + `.vaultspec/`), discovery at `<ws>/.vault/data/engine-data/service.json`, pointed at via `VAULTSPEC_ENGINE_SERVICE_JSON`. A serve from the full a2a worktree stalled the engine on repo indexing, hence the minimal workspace.
+
+Added `test_live_verdict_round_trip_parks_and_resumes` and updated the module docstring (the session-only limitation is obsolete). The live round-trip drives three real proposals through submit plus a human decision (approve / reject / request-changes via `POST /v1/reviews/{approval_id}/decisions`, envelope command `approve`/`reject`/`edit_proposal`, payload decision `approve`/`reject`/`edit`), seeds one parked run per proposal on a real `AsyncSqliteSaver`, and feeds the real outbox frames through the subscriber. Verified verbatim from the live stream:
+
+- `approval.requested` x3 - non-verdict, parks the run (`verdict_from_event` is `None`).
+- `approval.resolved` `decision=approve` `comment=ship it` -> verdict `(approved, "ship it")`, correlated to `thread-appr`.
+- `proposal.rejected` `decision=reject` `comment=not yet` -> verdict `(rejected, "not yet")`, correlated to `thread-rej`.
+- `proposal.updated` `decision=request_changes` `comment=tighten it` -> verdict `(request_changes, "tighten it")`, correlated to `thread-edit` (request-changes rides `proposal.updated`, disambiguated by the decision field only; the decoder keys decision-first).
+
+Each decision then ran the subscriber's real `_process_event` -> `safe_dispatch` resume path against an unreachable worker (genuine `WorkerUnreachableError` handling, no double), proving the subscriber reaches the resume with the correct verdict and no crash. The worker-side landing of the resumed graph belongs to the phase-gate topology and the service harness, not this subscriber unit. All three `service` live tests pass (43s); no test doubles anywhere; the live tests skip with a runbook pointer when no engine is reachable.

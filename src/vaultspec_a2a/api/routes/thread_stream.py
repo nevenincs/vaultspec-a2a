@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
@@ -16,6 +15,7 @@ from ...control.config import settings
 from ...database.session import get_db
 from ...database.thread_repository import get_thread
 from ...streaming.aggregator import EventAggregator, SequencedEvent
+from ...streaming.sse_frames import encode_sse_frame
 from ...thread.enums import TERMINAL_STATUSES
 from ..dependencies import get_aggregator
 from ..event_adapter import sequenced_to_wire
@@ -27,16 +27,6 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter()
-
-
-def _encode_sse(payload: dict[str, object], *, event: str | None = None) -> bytes:
-    """Encode a single JSON payload as an SSE frame."""
-    lines: list[str] = []
-    if event:
-        lines.append(f"event: {event}")
-    data = json.dumps(payload, separators=(",", ":"))
-    lines.extend(f"data: {line}" for line in data.splitlines() or [data])
-    return ("\n".join(lines) + "\n\n").encode("utf-8")
 
 
 def _normalize_payload(payload: dict[str, object]) -> dict[str, object]:
@@ -67,7 +57,7 @@ async def _stream_thread_events(
 
     try:
         if initial_status in TERMINAL_STATUSES:
-            yield _encode_sse(
+            yield encode_sse_frame(
                 {
                     "type": "thread_terminal",
                     "event_type": "thread_terminal",
@@ -76,6 +66,7 @@ async def _stream_thread_events(
                     "replay": True,
                 },
                 event="thread_terminal",
+                thread_id=thread_id,
             )
             return
 
@@ -90,9 +81,10 @@ async def _stream_thread_events(
                     timestamp=datetime.now(UTC),
                     server_uptime_seconds=time.monotonic() - start_time,
                 )
-                yield _encode_sse(
+                yield encode_sse_frame(
                     heartbeat.model_dump(mode="json"),
                     event="heartbeat",
+                    thread_id=thread_id,
                 )
                 continue
 
@@ -102,9 +94,10 @@ async def _stream_thread_events(
                 payload = _normalize_payload(item)
 
             event_type = payload.get("type")
-            yield _encode_sse(
+            yield encode_sse_frame(
                 payload,
                 event=str(event_type) if isinstance(event_type, str) else None,
+                thread_id=thread_id,
             )
             if event_type == "thread_terminal":
                 return

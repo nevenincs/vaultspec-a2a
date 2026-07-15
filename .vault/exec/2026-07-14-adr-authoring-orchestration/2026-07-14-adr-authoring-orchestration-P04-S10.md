@@ -27,6 +27,13 @@ Three-way evidence split, verified source by source rather than taken on report:
 
 3. **Session-only claim (MUST RE-DERIVE).** The "station-flow" sequence — submit → review station → system-actor AUTO approve → apply → materialize — was reportedly observed live in a stopped executor's session. No committed vault record, test file, or other artifact substantiates this sequence beyond the one committed code fix (`06f9151`, keying the submitter's role-token lookup by worker `agent_id`). This audit does not certify the station-flow sequence occurred as described; the only way to make it PROVEN is to build the P04.S10 standing harness and re-run it, which is the step's own remaining work.
 
+**Prerequisite gap-fixes landed by the parallel session (2026-07-15, verified by reading each commit in full, not inferred from author name — every commit in this shared tree shows the same git identity regardless of session):**
+
+- `3a121d5` (GAP A) — projects the document gate's `document_approval_request` interrupt to `INPUT_REQUIRED` so the out-of-run verdict subscriber can resume a parked document gate; previously the run stayed `status=running` and could never be matched.
+- `ddb8659` (GAP B) — commits gate correlation ids (`authoring_proposal_ids`) to the checkpoint in their own superstep before parking, so a parked run's proposal id survives to resume time instead of only being written post-resume.
+- `df6665b` — repins doc-reviewer off the non-resolving zhipu fallback tier onto the proven Claude subscription path, so all four research_adr personas can actually run.
+- `0916ed0` (GAP C) — keeps a run's actor tokens alive across an interrupt-park (previously dropped on any ingest-dispatch end, including a park); the ADR submit node reads the bearer and per-role token from `RunTokenStore` at resume time, so token loss on park failed the second document with `CredentialsMissingError`. Tokens now drop only on a TERMINAL outcome. This is directly load-bearing for the harness's HUMAN lane: park at the research gate → human verdict → resume to author the ADR requires the resumed run to still hold its tokens, which GAP C now guarantees rather than something the harness needs to work around.
+
 ## Outcome
 
 Not complete. No code changed by this record. The plan checkbox for P04.S10 stays unchecked — this record exists so the next executor (or a cold resume) inherits an honest evidence inventory instead of an unqualified "proven" claim.

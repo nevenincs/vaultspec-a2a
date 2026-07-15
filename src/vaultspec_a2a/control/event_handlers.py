@@ -208,14 +208,18 @@ async def _handle_permission_event(
     else:
         factory = session_factory
     async with factory() as db:
-        if event_type in {"permission_request", "plan_approval_request"}:
+        if event_type in {
+            "permission_request",
+            "plan_approval_request",
+            "document_approval_request",
+        }:
             request_id = str(payload.get("request_id", ""))
             if not request_id:
                 return
             tool_call = payload.get("tool_call")
             pause_reason_type = (
-                "plan_approval_request"
-                if event_type == "plan_approval_request"
+                event_type
+                if event_type in {"plan_approval_request", "document_approval_request"}
                 else classify_permission_pause_reason(tool_call)
             )
             fx = compute_permission_request_effects(pause_reason_type)

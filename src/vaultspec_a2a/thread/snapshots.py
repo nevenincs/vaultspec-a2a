@@ -50,10 +50,16 @@ __all__ = [
 
 # Shared constant — previously duplicated in control/projection.py and
 # control/event_handlers.py.
+# Verdict-style approval-gate pause causes (as opposed to tool permission pauses):
+# the FSM treats these as an approval whose resolution carries an approval_status
+# and whose resume value is a verdict, not a tool option. Both the execution
+# plan-approval gate and the document phase gates (adr-authoring-orchestration)
+# park with this shape, so the document gate is classified here too.
 PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     {
         PermissionType.PLAN_APPROVAL.value,
         "plan_approval_request",
+        "document_approval_request",
     }
 )
 
@@ -104,6 +110,7 @@ def is_permission_event(payload: dict[str, Any]) -> bool:
     return payload.get("type", "") in {
         "permission_request",
         "plan_approval_request",
+        "document_approval_request",
         "permission_resolved",
     }
 

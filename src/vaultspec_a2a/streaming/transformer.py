@@ -378,6 +378,7 @@ async def emit_interrupt_events(
             if interrupt_type not in (
                 "permission_request",
                 "plan_approval_request",
+                "document_approval_request",
             ):
                 continue
 
@@ -431,6 +432,43 @@ async def emit_interrupt_events(
                     node_name=task.name,
                     state=AgentLifecycleState.INPUT_REQUIRED,
                     detail=f"Awaiting plan approval for feature '{feature}'",
+                )
+            elif interrupt_type == "document_approval_request":
+                doc_phase: str = payload.get("phase") or "document"
+                doc_feature: str = payload.get("feature") or "unknown"
+                description = (
+                    f"Approve the {doc_phase} document for feature "
+                    f"'{doc_feature}' before the run proceeds"
+                )
+                options = [
+                    {
+                        "option_id": "approve",
+                        "name": "Approve Document",
+                        "kind": PermissionOptionKind.ALLOW_ONCE,
+                    },
+                    {
+                        "option_id": "reject",
+                        "name": "Reject — Revise Document",
+                        "kind": PermissionOptionKind.REJECT_ONCE,
+                    },
+                ]
+                await emitters.emit_permission_request(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    request_id=request_id,
+                    description=description,
+                    options=options,
+                    tool_call=PermissionType.PLAN_APPROVAL,
+                )
+                await emitters.emit_agent_status(
+                    thread_id=thread_id,
+                    agent_id=task.name,
+                    node_name=task.name,
+                    state=AgentLifecycleState.INPUT_REQUIRED,
+                    detail=(
+                        f"Awaiting {doc_phase} document approval for feature "
+                        f"'{doc_feature}'"
+                    ),
                 )
             else:
                 tool_name: str = payload.get("tool_name", "unknown")

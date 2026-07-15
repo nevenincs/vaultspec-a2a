@@ -158,3 +158,51 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
         assert thread is not None
         assert thread.approval_status == "pending"
         assert thread.approval_request_id == request_id
+
+
+@pytest.mark.asyncio
+async def test_document_approval_request_is_persisted_as_durable_pending_permission(
+    session_factory,
+) -> None:
+    """Document phase-gate interrupts must become durable pending rows (P04.S10).
+
+    The research_adr phase gate parks with a ``document_approval_request``
+    interrupt; the relay must record it as a verdict-style approval so the thread
+    is INPUT_REQUIRED and the out-of-run verdict subscriber can correlate an
+    engine verdict to the parked run.
+    """
+    async with session_factory() as session:
+        thread = await create_thread(session, title="Document approval relay")
+        await session.commit()
+        thread_id = thread.id
+
+    request_id = f"{thread_id}:document-approval-1"
+    payload = {
+        "type": "document_approval_request",
+        "request_id": request_id,
+        "phase": "research",
+        "feature": "sse-reconnection",
+        "description": "Approve the research document for feature 'sse-reconnection'",
+        "options": [
+            {"option_id": "approve", "name": "Approve Document", "kind": "allow_once"},
+            {"option_id": "reject", "name": "Reject", "kind": "reject_once"},
+        ],
+    }
+
+    await _handle_permission_event(
+        thread_id,
+        payload,
+        session_factory=session_factory,
+    )
+
+    async with session_factory() as session:
+        permission = await get_permission_request(session, request_id)
+        assert permission is not None
+        assert permission.pause_reason_type == "document_approval_request"
+        assert permission.request_status == "pending"
+
+        thread = await session.get(ThreadModel, thread_id)
+        assert thread is not None
+        assert thread.status == "input_required"
+        assert thread.approval_status == "pending"
+        assert thread.approval_request_id == request_id

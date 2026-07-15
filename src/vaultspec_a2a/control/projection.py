@@ -212,6 +212,31 @@ def _permission_data_from_interrupt(
             tool_kind="other",
         )
 
+    if interrupt.interrupt_type == "document_approval_request":
+        phase = str(payload.get("phase", "document"))
+        feature = str(payload.get("feature", "unknown"))
+        return PermissionData(
+            request_id=interrupt.interrupt_id,
+            description=(
+                f"Approve the {phase} document for feature '{feature}' "
+                f"before the run proceeds"
+            ),
+            options=[
+                PermissionOptionData(
+                    option_id="approve",
+                    name="Approve Document",
+                    kind=str(PermissionOptionKind.ALLOW_ONCE),
+                ),
+                PermissionOptionData(
+                    option_id="reject",
+                    name="Reject - Revise Document",
+                    kind=str(PermissionOptionKind.REJECT_ONCE),
+                ),
+            ],
+            tool_call=PermissionType.PLAN_APPROVAL.value,
+            tool_kind="other",
+        )
+
     return None
 
 

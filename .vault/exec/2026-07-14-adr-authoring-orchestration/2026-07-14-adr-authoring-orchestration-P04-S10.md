@@ -42,4 +42,11 @@ Next step for whoever picks this up: build the standing acceptance harness itsel
 
 **Known unreconciled naming gap (recorded explicitly, not papered over):** the parallel session (same P04.S10 mandate, see the TWO WORKSTREAMS CONVERGING note on the plan row) is separately building an uncommitted `vaultspec-adr-research-mock.toml` preset with `provider = "mock"` — the EXISTING `Provider.MOCK`/VidaiMock-HTTP-proxy path, not an in-process model. That preset's own description text claims "in-process deterministic" behavior it does not yet have. The two Option A devices (opus-6's `Provider.DETERMINISTIC` + own preset vs. the parallel session's `provider="mock"` preset) are deliberately NOT reconciled yet; per team-lead's ruling, whichever committed state lands last on this specific point wins, and the reconciliation call (repoint one preset at the other's provider, or keep both) is architect-2's to make once both plainly exist — tracked as the reconciliation checkpoint on the plan row.
 
-Remaining harness work (the large piece, in progress): the standing parameterized `service_tests/` driver itself, the HUMAN/AUTO/MIXED lane matrix, and the materialization assertions grounded in the real engine's `ApplyChildReceipt` shape (read from the dashboard repo's Rust source per the hard prerequisite, not assumed from prose).
+**Engine-API grounding for the harness (read directly from the dashboard repo's Rust source, `handlers2.rs` and `apply/types.rs`, per the hard prerequisite — not assumed from prose):**
+
+- Verdict route: `POST /reviews/{approval_id}/decisions`, with `ApprovalDecision` mapping `Approve` → `CommandKind::Approve`, `Reject` → `CommandKind::Reject`, `RequestChanges` → `CommandKind::EditProposal`.
+- `approval_id` is discovered via `GET /review-queue`.
+- The AUTO lane's system-actor trigger is `CommandKind::SetOperationMode`.
+- Materialization fields come from `ApplyChildReceipt.{result_stem, document_path, outcome}` in `apply/types.rs`.
+
+Remaining harness work (the large piece, in progress): the standing parameterized `service_tests/` driver itself, the HUMAN/AUTO/MIXED lane matrix, and the materialization assertions grounded in the fields above.

@@ -93,8 +93,8 @@ async def start_thread(
                          32,000 characters.
         team_preset:     Team configuration preset ID. Built-in presets:
                          'vaultspec-adaptive-coder', 'vaultspec-structured-coder',
-                         'vaultspec-iterative-coder', 'vaultspec-solo-coder',
-                         'vaultspec-continuous-audit'. Use ``list_team_presets``
+                         'vaultspec-iterative-coder', 'vaultspec-solo-coder'.
+                         Use ``list_team_presets``
                          to discover all available presets at runtime.
                          If omitted, defaults to 'vaultspec-adaptive-coder'.
         autonomous:      If True (default), agents auto-approve all tool calls

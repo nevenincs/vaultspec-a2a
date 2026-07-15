@@ -111,6 +111,12 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
         assert rbody["topology"]["team_preset"] == _PRESET
         assert "roles" in rbody
         assert isinstance(rbody["proposal_ids"], list)
+        # Semantic phase projection: a dispatched coder run is a generic
+        # "running" (no fabricated authoring precision for a non-research_adr
+        # preset), and the target-feature / authoring-session fields are present.
+        assert rbody["semantic_phase"] == "running"
+        assert "feature_tag" in rbody
+        assert "authoring_session_id" in rbody
 
         # unknown run -> 404
         missing = await client.get("/v1/runs/does-not-exist")

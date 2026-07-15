@@ -120,6 +120,13 @@ class RunStatusResponse(BaseModel):
     api_version: Literal["v1"] = _API_VERSION
     run_id: str
     status: ThreadStatus
+    # Product-safe semantic authoring phase projected from topology position and
+    # gate state, so the Rust backend never interprets LangGraph node names.
+    semantic_phase: str
+    # The run's target feature tag and the Rust-backend authoring session id it
+    # produced, read from the checkpoint (None until produced / for non-authoring).
+    feature_tag: str | None = None
+    authoring_session_id: str | None = None
     topology: TopologyPosition
     roles: list[RoleState] = Field(default_factory=list)
     proposal_ids: list[str] = Field(default_factory=list)

@@ -25,7 +25,12 @@ from ...control.thread_service import (
     generate_thread_id,
     process_metadata,
 )
-from ...control.thread_state_service import build_thread_state, read_run_authoring_ids
+from ...control.thread_state_service import (
+    build_thread_state,
+    project_semantic_phase,
+    read_run_authoring_ids,
+    read_run_semantic_context,
+)
 from ...database import get_thread
 from ...database.checkpoints import Checkpointer
 from ...database.session import get_db
@@ -242,10 +247,19 @@ async def run_status_endpoint(
     thread = await get_thread(db, run_id)
     team_preset = thread.team_preset if thread is not None else None
     proposal_ids, changeset_ids = await read_run_authoring_ids(checkpointer, run_id)
+    semantic = await read_run_semantic_context(checkpointer, run_id)
+    semantic_phase = project_semantic_phase(
+        status=snapshot.status,
+        next_nodes=snapshot.next_nodes,
+        repair_status=snapshot.repair_status,
+    )
 
     return RunStatusResponse(
         run_id=snapshot.thread_id,
         status=ThreadStatus(snapshot.status),
+        semantic_phase=semantic_phase,
+        feature_tag=semantic.feature_tag,
+        authoring_session_id=semantic.authoring_session_id,
         topology=TopologyPosition(
             team_preset=team_preset,
             active_agent=_active_agent(snapshot.next_nodes),

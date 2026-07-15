@@ -3,7 +3,7 @@ tags:
   - '#research'
   - '#integration-testing'
 date: '2026-03-31'
-modified: '2026-03-31'
+modified: '2026-07-15'
 related:
   - '[[2026-03-30-service-layer-research]]'
   - '[[2026-03-30-service-layer-rolling-audit]]'

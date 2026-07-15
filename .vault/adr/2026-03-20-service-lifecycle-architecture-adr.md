@@ -3,7 +3,7 @@ tags:
 - '#adr'
 - '#service-lifecycle-architecture'
 date: 2026-03-20
-modified: '2026-03-20'
+modified: '2026-07-15'
 related:
 - '[[2026-03-04-worker-process-architecture-adr]]'
 - '[[2026-03-19-control-layer-cli-justfile-separation-adr]]'

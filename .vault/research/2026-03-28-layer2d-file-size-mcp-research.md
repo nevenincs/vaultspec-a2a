@@ -3,7 +3,7 @@ tags:
   - '#research'
   - '#layer-2d'
 date: '2026-03-28'
-modified: '2026-03-28'
+modified: '2026-07-15'
 related:
   - '[[2026-03-28-post-layer2c-boundary-audit]]'
   - '[[2026-03-28-database-layer-adr]]'

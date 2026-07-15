@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#entry-point-layer'
 date: '2026-03-24'
-modified: '2026-03-24'
+modified: '2026-07-15'
 related:
   - '[[2026-03-24-entry-point-decomposition-adr]]'
   - '[[2026-03-24-api-module-research]]'

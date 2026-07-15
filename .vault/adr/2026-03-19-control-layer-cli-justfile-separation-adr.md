@@ -3,7 +3,7 @@ tags:
 - '#adr'
 - '#control-layer-cli-justfile-separation'
 date: 2026-03-19
-modified: '2026-03-19'
+modified: '2026-07-15'
 related:
 - '[[2026-03-04-worker-process-architecture-adr]]'
 - '[[2026-03-31-docs-vault-migration-research]]'

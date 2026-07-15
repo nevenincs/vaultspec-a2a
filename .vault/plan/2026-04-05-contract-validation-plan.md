@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#contract-validation'
 date: 2026-04-05
-modified: '2026-04-05'
+modified: '2026-07-15'
 related:
   - "[[2026-04-05-contract-validation-adr]]"
   - "[[2026-04-05-contract-validation-research]]"

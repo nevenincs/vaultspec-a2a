@@ -3,7 +3,7 @@ tags:
   - '#research'
   - '#database-layer'
 date: '2026-03-28'
-modified: '2026-03-28'
+modified: '2026-07-15'
 related:
   - '[[2026-03-28-post-layer2b-boundary-audit]]'
   - '[[2026-03-27-domain-logic-extraction-adr]]'

@@ -3,7 +3,7 @@ tags:
 - '#plan'
 - '#vowel-counter'
 date: 2026-03-26
-modified: '2026-03-26'
+modified: '2026-07-15'
 related:
 - '[[2026-03-31-docs-vault-authority-retention-adr]]'
 - '[[2026-03-31-docs-vault-migration-research]]'

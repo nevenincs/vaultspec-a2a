@@ -15,7 +15,7 @@ from ..team.team_config import AgentConfig
 from ..thread.errors import ConfigError
 from .acp_chat_model import AcpChatModel
 
-__all__ = ["ProviderFactory"]
+__all__ = ["ProviderFactory", "classify_provider_command"]
 
 logger = logging.getLogger(__name__)
 
@@ -230,6 +230,41 @@ def _build_acp_command(backend: str) -> list[str]:
     """Return the ACP gateway subprocess command for the given backend."""
     command, _ = _classify_acp_command(backend)
     return command
+
+
+def classify_provider_command(
+    provider: Provider, *, backend: str | None = None
+) -> dict[str, str]:
+    """Resolve a subprocess provider's launch command without instantiating it.
+
+    Returns the command metadata for a genuinely resolvable command and raises
+    when it cannot be resolved. This is the no-instantiation seam the model-profile
+    readiness probe consumes: ``_classify_acp_command`` raises when the Claude ACP
+    entry point is missing, and the Gemini classifier's ``fallback_cli_name``
+    origin (the only origin that does not correspond to a real resolved path) is
+    treated here as unresolvable rather than a silent bare-name fallback.
+
+    Raises:
+        ValueError: The provider has no subprocess command, or the Gemini CLI is
+            not resolvable on this host.
+        ConfigError: The Claude ACP entry point/binary does not exist.
+    """
+    if provider == Provider.CLAUDE:
+        resolved_backend = backend if backend is not None else settings.acp_backend
+        _, meta = _classify_acp_command(resolved_backend)
+        return meta
+    if provider == Provider.GEMINI:
+        default_model = MODEL_MAP[Provider.GEMINI][
+            PROVIDER_DEFAULT_MODELS[Provider.GEMINI]
+        ]
+        _, meta = _classify_gemini_command(default_model)
+        if meta.get("command_origin") == "fallback_cli_name":
+            raise ValueError(
+                "Gemini CLI not resolvable: not found in node_modules, the docker "
+                "entry, or on PATH."
+            )
+        return meta
+    raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 
 
 class ProviderFactory:

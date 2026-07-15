@@ -18,7 +18,7 @@ related:
 Profile declarations in team TOML and the single resolution-and-eligibility service both discovery and launch consume.
 
 - [x] `P01.S01` - Add the team.profiles TOML schema (per-role provider/capability/fallback overlays, implicit team-defaults, workspace-over-bundled discovery, validation) to team_config; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/team/presets/teams/`.
-- [ ] `P01.S02` - Build the shared resolution-and-eligibility service: profile-topped precedence resolution, no-instantiation provider readiness probe (credential presence, command resolvability, engine reachability), per-role and per-profile eligibility with safe reasons, consumed by compiler, discovery, and run-start alike; `src/vaultspec_a2a/control/, src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P01.S02` - Build the shared resolution-and-eligibility service: profile-topped precedence resolution, no-instantiation provider readiness probe (credential presence, command resolvability, engine reachability), per-role and per-profile eligibility with safe reasons, consumed by compiler, discovery, and run-start alike; `src/vaultspec_a2a/control/, src/vaultspec_a2a/providers/, src/vaultspec_a2a/graph/compiler.py`.
 
 ### Phase `P02` - Discovery and launch integration
 

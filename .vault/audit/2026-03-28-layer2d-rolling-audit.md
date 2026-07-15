@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#layer-2d'
 date: '2026-03-28'
-modified: '2026-03-28'
+modified: '2026-07-15'
 related:
   - '[[2026-03-28-layer2d-file-size-adr]]'
   - '[[2026-03-28-layer2d-file-size-plan]]'

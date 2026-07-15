@@ -7,6 +7,7 @@ date: '2026-07-15'
 modified: '2026-07-15'
 related:
   - '[[2026-07-15-model-profiles-P01-S01]]'
+  - '[[2026-07-15-model-profiles-P01-S02]]'
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-model-profiles-plan]]'
   - '[[2026-07-15-model-profiles-research]]'
@@ -25,6 +26,7 @@ Auto-generated index of all documents tagged with `#model-profiles`.
 ### exec
 
 - `2026-07-15-model-profiles-P01-S01` - Add the team.profiles TOML schema (per-role provider/capability/fallback overlays, implicit team-defaults, workspace-over-bundled discovery, validation) to team_config
+- `2026-07-15-model-profiles-P01-S02` - Build the shared resolution-and-eligibility service: profile-topped precedence resolution, no-instantiation provider readiness probe (credential presence, command resolvability, engine reachability), per-role and per-profile eligibility with safe reasons, consumed by compiler, discovery, and run-start alike
 
 ### plan
 

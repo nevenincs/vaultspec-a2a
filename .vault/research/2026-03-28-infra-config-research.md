@@ -3,7 +3,7 @@ tags:
   - '#research'
   - '#infra-config'
 date: '2026-03-28'
-modified: '2026-03-28'
+modified: '2026-07-15'
 related:
   - '[[2026-03-28-post-layer2d-boundary-audit]]'
   - '[[2026-03-28-layer2d-rolling-audit]]'

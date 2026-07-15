@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#ui-integration-wire-regen'
 date: 2026-04-04
-modified: '2026-04-04'
+modified: '2026-07-15'
 related:
   - "[[2026-04-04-ui-integration-wire-regen-plan]]"
 ---

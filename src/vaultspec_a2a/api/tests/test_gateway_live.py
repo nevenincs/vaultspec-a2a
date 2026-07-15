@@ -349,6 +349,79 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
         assert terminal["status"] == "completed"
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
+    session_factory, checkpointer
+) -> None:
+    """Progress frames carry the semantic phase; oversized bodies bound (P02.S05)."""
+    from ...database.thread_repository import create_thread
+    from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
+    from ...thread.enums import ThreadStatus
+
+    aggregator = EventAggregator()
+    app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
+
+    async with session_factory() as session:
+        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="live")
+        await session.commit()
+        run_id = thread.id
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+        client.stream("GET", f"/api/threads/{run_id}/stream") as resp,
+    ):
+        assert resp.status_code == 200
+        lines = resp.aiter_lines()
+        for _ in range(200):
+            if agg.subscriber_count() > 0:
+                break
+            await asyncio.sleep(0.01)
+        assert agg.subscriber_count() > 0
+
+        # A progress frame naming a research_adr node is stamped with the phase.
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "agent_status",
+                "event_type": "agent_status",
+                "thread_id": run_id,
+                "node_name": "synthesis",
+                "state": "working",
+            },
+        )
+        status_frame = await _read_event(lines, wanted="agent_status")
+        assert status_frame["api_version"] == "v1"
+        assert status_frame["semantic_phase"] == "synthesizing_research"
+
+        # A document-body-sized frame is bounded: it degrades to a droppable
+        # sentinel rather than streaming the body verbatim.
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "artifact",
+                "event_type": "artifact",
+                "thread_id": run_id,
+                "content": "D" * (MAX_SSE_FRAME_BYTES + 4096),
+            },
+        )
+        dropped = await _read_event(lines, wanted="progress_dropped")
+        assert dropped["api_version"] == "v1"
+        assert dropped["dropped_type"] == "artifact"
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "thread_terminal",
+                "event_type": "thread_terminal",
+                "thread_id": run_id,
+                "status": "completed",
+            },
+        )
+        terminal = await _read_event(lines, wanted="thread_terminal")
+        assert terminal["status"] == "completed"
+
+
 async def _read_event(
     lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
 ) -> dict:

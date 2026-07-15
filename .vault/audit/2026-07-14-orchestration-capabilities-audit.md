@@ -3,7 +3,7 @@ tags:
   - '#audit'
   - '#orchestration-capabilities'
 date: '2026-07-14'
-modified: '2026-07-14'
+modified: '2026-07-15'
 related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
 ---

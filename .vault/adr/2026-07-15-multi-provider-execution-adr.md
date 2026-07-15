@@ -12,7 +12,9 @@ related:
   - "[[2026-07-14-a2a-edge-conformance-adr]]"
 ---
 
-# `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `proposed`)
+# `multi-provider-execution` adr: `provider matrix, per-role assignment, and cross-repo initialization for Codex, Claude, and Z.ai` | (**status:** `accepted`)
+
+**Ratified 2026-07-15** (interactive owner decision): all decisions below are accepted as drafted, including the per-branch-diversity deferral and the mandatory cross-repo check in Constraints. Execution proceeds per `[[2026-07-15-multi-provider-execution-plan]]`, approved the same day with Phase 1 (Z.ai) and Phase 2 (Codex) authorized to run in parallel.
 
 ## Problem Statement
 

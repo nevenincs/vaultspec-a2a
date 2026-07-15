@@ -40,7 +40,11 @@ from .nodes.diverge import (
     create_researcher_node,
     researcher_node_name,
 )
-from .nodes.phase_gate import DocumentProposalSubmitter, create_phase_gate_node
+from .nodes.phase_gate import (
+    DocumentProposalSubmitter,
+    create_phase_gate_node,
+    create_phase_submit_node,
+)
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
@@ -931,9 +935,11 @@ def _compile_pipeline_loop(
 _RA_DISPATCH = "research_dispatch"
 _RA_SYNTHESIS = "synthesis"
 _RA_RESEARCH_REVIEW = "research_review"
+_RA_RESEARCH_SUBMIT = "research_submit"
 _RA_RESEARCH_GATE = "research_gate"
 _RA_ADR_AUTHOR = "adr_author"
 _RA_ADR_REVIEW = "adr_review"
+_RA_ADR_SUBMIT = "adr_submit"
 _RA_ADR_GATE = "adr_gate"
 
 _RA_REQUIRED_ROLES = ("researcher", "synthesist", "adr-author", "doc-reviewer")
@@ -1062,13 +1068,16 @@ def _compile_research_adr(
     Structural sequencing (gates enforced by graph shape, not LLM convention):
 
         START -> diverge (N researchers) -> synthesis -> research_review
-              -> [PASS] research_gate -> [approved] adr_author
-                                      -> [revise]   synthesis
+              -> [PASS] research_submit -> research_gate -> [approved] adr_author
+                                                         -> [revise]   synthesis
               -> [REVISION] synthesis
         adr_author -> adr_review
-              -> [PASS] adr_gate -> [approved] END
-                                 -> [revise]   adr_author
+              -> [PASS] adr_submit -> adr_gate -> [approved] END
+                                               -> [revise]   adr_author
               -> [REVISION] adr_author
+
+    Each gate is a submit node (commits the proposal id before parking) plus a
+    pure gate node (interrupt + verdict routing).
 
     The diverge stage (S04) fans out to one researcher branch per configured
     thread spec; each document phase is guarded by the generalized phase gate
@@ -1151,20 +1160,39 @@ def _compile_research_adr(
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
+    # Each gate is split into a submit node (commits the proposal id to the
+    # checkpoint) and a pure gate node (interrupt + verdict routing), so the
+    # out-of-run verdict subscriber can correlate a verdict to the parked run via
+    # the committed ``authoring_proposal_ids`` (P04.S10). The inner review loop
+    # routes into the SUBMIT node; the submit node routes on into its gate.
+    builder.add_node(
+        _RA_RESEARCH_SUBMIT,
+        create_phase_submit_node(
+            PipelinePhase.RESEARCH,
+            proposal_submitter,
+            gate_target=_RA_RESEARCH_GATE,
+        ),
+    )
     builder.add_node(
         _RA_RESEARCH_GATE,
         create_phase_gate_node(
             PipelinePhase.RESEARCH,
-            proposal_submitter,
             approved_target=_RA_ADR_AUTHOR,
             revision_target=_RA_SYNTHESIS,
+        ),
+    )
+    builder.add_node(
+        _RA_ADR_SUBMIT,
+        create_phase_submit_node(
+            PipelinePhase.ADR,
+            proposal_submitter,
+            gate_target=_RA_ADR_GATE,
         ),
     )
     builder.add_node(
         _RA_ADR_GATE,
         create_phase_gate_node(
             PipelinePhase.ADR,
-            proposal_submitter,
             approved_target=END,
             revision_target=_RA_ADR_AUTHOR,
         ),
@@ -1174,19 +1202,21 @@ def _compile_research_adr(
     builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
     builder.add_conditional_edges(
         _RA_RESEARCH_REVIEW,
-        _doc_review_router(writer_target=_RA_SYNTHESIS, gate_target=_RA_RESEARCH_GATE),
+        _doc_review_router(
+            writer_target=_RA_SYNTHESIS, gate_target=_RA_RESEARCH_SUBMIT
+        ),
         cast(
             "dict[Hashable, str]",
-            {_RA_SYNTHESIS: _RA_SYNTHESIS, _RA_RESEARCH_GATE: _RA_RESEARCH_GATE},
+            {_RA_SYNTHESIS: _RA_SYNTHESIS, _RA_RESEARCH_SUBMIT: _RA_RESEARCH_SUBMIT},
         ),
     )
     builder.add_edge(_RA_ADR_AUTHOR, _RA_ADR_REVIEW)
     builder.add_conditional_edges(
         _RA_ADR_REVIEW,
-        _doc_review_router(writer_target=_RA_ADR_AUTHOR, gate_target=_RA_ADR_GATE),
+        _doc_review_router(writer_target=_RA_ADR_AUTHOR, gate_target=_RA_ADR_SUBMIT),
         cast(
             "dict[Hashable, str]",
-            {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_GATE: _RA_ADR_GATE},
+            {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_SUBMIT: _RA_ADR_SUBMIT},
         ),
     )
 

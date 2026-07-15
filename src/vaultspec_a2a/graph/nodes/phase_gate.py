@@ -2,13 +2,24 @@
 
 The phase gate generalizes the plan-approval pattern (commit ``f5f650d``,
 ``create_plan_approval_node``) from a single execution gate into a factory
-parameterized by document phase. A resumed LangGraph node re-runs from its start,
-so everything before the ``interrupt()`` call must be deterministic and
-replay-safe. The gate's pre-interrupt side effect is a propose-and-submit through
-an injected :class:`DocumentProposalSubmitter`, which is replay-safe by
-construction: the authoring client derives idempotency keys from stable run-local
-material, so the replayed submit on resume is a no-op that returns the same
-proposal id.
+parameterized by document phase. The gate is split into two nodes so the
+correlation ids are COMMITTED to the checkpoint before the run parks:
+
+- The submit node (:func:`create_phase_submit_node`) is the deterministic
+  pre-interrupt side effect: a propose-and-submit through an injected
+  :class:`DocumentProposalSubmitter`, returning the ``proposal_id`` and
+  ``gate_phase`` into state and routing on into the gate node. Because it commits
+  as its own superstep, the proposal id is durable in the checkpoint WHILE the
+  run is parked - the run-external verdict subscriber correlates a verdict to the
+  parked run through those committed ids (P04.S10 finding: a single-node gate
+  wrote the ids only in its post-resume return, so nothing correlated while
+  parked). The submit is replay-safe: the authoring client derives idempotency
+  keys from stable run-local material, so should the checkpoint not commit and
+  the node re-run, the repeated submit is a deduplicated no-op returning the same
+  proposal id.
+- The gate node (:func:`create_phase_gate_node`) is pure: its only act is the
+  ``interrupt()`` on the parked verdict plus the verdict routing. A resumed run
+  restarts at this node, so the submit node does NOT re-run on resume.
 
 The submitter is a Protocol seam, not a concrete client: the control layer owns
 wiring the real authoring client (out of this module's scope), so the gate stays
@@ -41,6 +52,7 @@ __all__ = [
     "VERDICT_REQUEST_CHANGES",
     "DocumentProposalSubmitter",
     "create_phase_gate_node",
+    "create_phase_submit_node",
 ]
 
 VERDICT_APPROVED = "approved"
@@ -76,37 +88,81 @@ def _parse_verdict(resume_value: object) -> tuple[str | None, str | None]:
     return verdict_str, notes_str
 
 
-def create_phase_gate_node(
+def create_phase_submit_node(
     phase: str,
     submitter: DocumentProposalSubmitter,
+    *,
+    gate_target: str,
+) -> WorkerNode:
+    """Create the deterministic pre-interrupt propose-and-submit node.
+
+    Runs the idempotent submitter and COMMITS the resulting correlation ids into
+    state before routing into the gate node. Because this runs as its own
+    superstep, ``authoring_proposal_ids`` and ``gate_phase`` are durable in the
+    checkpoint while the downstream gate node is parked at its interrupt - the
+    verdict subscriber needs those committed ids to correlate an out-of-run
+    verdict to the parked run.
+
+    Args:
+        phase:       The document phase this gate guards (e.g. ``research``,
+                     ``adr``); recorded in ``gate_phase`` and carried to the gate.
+        submitter:   Deterministic, idempotent propose-and-submit callable;
+                     returns the proposal id.
+        gate_target: The pure gate node to route into after the submit commits.
+
+    Returns:
+        An async node that proposes+submits and routes via ``Command.goto`` into
+        the gate, committing ``authoring_proposal_ids`` / ``gate_phase`` /
+        ``gate_pending_proposal_id``.
+    """
+
+    async def phase_submit_node(state: TeamState) -> Command:
+        """Propose+submit (idempotent), commit the ids, route into the gate."""
+        proposal_id = await submitter(state, phase)
+        return Command(
+            goto=gate_target,
+            update={
+                "next": gate_target,
+                "gate_phase": phase,
+                "gate_pending_proposal_id": proposal_id,
+                "authoring_proposal_ids": [proposal_id],
+                "routing_error": None,
+            },
+        )
+
+    phase_submit_node.__name__ = f"phase_submit_{phase}"
+    return phase_submit_node
+
+
+def create_phase_gate_node(
+    phase: str,
     *,
     approved_target: str,
     revision_target: str,
 ) -> WorkerNode:
-    """Create a replay-safe per-phase document-approval gate node.
+    """Create the pure per-phase document-approval gate node.
+
+    The proposal was submitted and its id committed to state by the preceding
+    :func:`create_phase_submit_node`; this node's only act is the ``interrupt()``
+    on the parked verdict and the verdict routing. A resumed run restarts at this
+    node (the submit node already committed), so nothing re-submits on resume.
 
     Args:
-        phase:           The document phase this gate guards (e.g. ``research``,
-                         ``adr``); carried in the interrupt payload and recorded
-                         in ``gate_phase``.
-        submitter:       Deterministic, idempotent propose-and-submit callable
-                         run before the interrupt; returns the proposal id.
+        phase:           The document phase this gate guards; carried in the
+                         interrupt payload and recorded in ``gate_phase``.
         approved_target: Node to route to when the reviewer approves.
         revision_target: Node to route to on ``rejected`` / ``request_changes``
                          (the phase's writer); reviewer notes are appended to
                          ``validation_errors``.
 
     Returns:
-        An async node that proposes+submits, interrupts for the human verdict on
-        first pass, and on resume routes via ``Command.goto`` with the verdict
-        recorded in ``gate_phase`` / ``gate_verdict``.
+        An async node that interrupts for the human verdict and on resume routes
+        via ``Command.goto`` with the verdict recorded in ``gate_verdict``.
     """
 
     async def phase_gate_node(state: TeamState) -> Command:
-        """Propose+submit (idempotent), pause for the verdict, then route."""
-        # Deterministic pre-interrupt side effect: replay-safe because the
-        # submitter is idempotent and returns the same proposal id on resume.
-        proposal_id = await submitter(state, phase)
+        """Pause for the committed proposal's verdict, then route."""
+        proposal_id = state.get("gate_pending_proposal_id")
         resume_value = interrupt(
             {
                 "type": "document_approval_request",
@@ -124,7 +180,6 @@ def create_phase_gate_node(
                     "next": approved_target,
                     "gate_phase": phase,
                     "gate_verdict": VERDICT_APPROVED,
-                    "authoring_proposal_ids": [proposal_id],
                     "routing_error": None,
                 },
             )
@@ -145,7 +200,6 @@ def create_phase_gate_node(
                 "next": revision_target,
                 "gate_phase": phase,
                 "gate_verdict": recorded_verdict,
-                "authoring_proposal_ids": [proposal_id],
                 "validation_errors": [revise_note],
             },
         )

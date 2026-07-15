@@ -16,7 +16,10 @@ from langgraph.checkpoint.memory import InMemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
-from vaultspec_a2a.graph.nodes.phase_gate import create_phase_gate_node
+from vaultspec_a2a.graph.nodes.phase_gate import (
+    create_phase_gate_node,
+    create_phase_submit_node,
+)
 from vaultspec_a2a.thread.state import TeamState
 
 
@@ -50,7 +53,12 @@ def _base_state() -> TeamState:
 
 
 def _gate_graph(submitter: _CountingSubmitter) -> Any:
-    """Build START -> gate -> {approved_end | revise_end} -> END."""
+    """Build START -> submit -> gate -> {approved_end | revise_end} -> END.
+
+    The gate is split (P04.S10): a submit node commits the proposal id before the
+    pure gate node parks at its interrupt, so the correlation id is durable in the
+    checkpoint while parked.
+    """
     builder: StateGraph = StateGraph(cast("Any", TeamState))
 
     async def approved_end(state: TeamState) -> dict[str, Any]:
@@ -59,16 +67,17 @@ def _gate_graph(submitter: _CountingSubmitter) -> Any:
     async def revise_end(state: TeamState) -> dict[str, Any]:
         return {}
 
+    submit = create_phase_submit_node("research", submitter, gate_target="gate")
     gate = create_phase_gate_node(
         "research",
-        submitter,
         approved_target="approved_end",
         revision_target="revise_end",
     )
+    builder.add_node("submit", submit)
     builder.add_node("gate", gate)
     builder.add_node("approved_end", approved_end)
     builder.add_node("revise_end", revise_end)
-    builder.add_edge(START, "gate")
+    builder.add_edge(START, "submit")
     builder.add_edge("approved_end", END)
     builder.add_edge("revise_end", END)
     return builder.compile(checkpointer=InMemorySaver())
@@ -165,23 +174,31 @@ async def test_gate_unknown_verdict_fails_closed_to_revision() -> None:
 
 
 @pytest.mark.asyncio
-async def test_gate_resubmits_idempotently_on_resume() -> None:
-    """The submitter runs before the interrupt on every pass, replay included.
+async def test_submit_commits_ids_before_parking_and_no_resubmit_on_resume() -> None:
+    """The split gate commits the proposal id BEFORE the run parks (P04.S10).
 
-    A resumed node re-runs from its start, so the gate calls the submitter again
-    on resume; the submitter is idempotent (same proposal id), which is what makes
-    the pre-interrupt propose+submit replay-safe.
+    The submit node commits ``authoring_proposal_ids`` as its own superstep, so
+    the correlation id is durable in the checkpoint WHILE the gate node is parked
+    at its interrupt - this is what lets the out-of-run verdict subscriber
+    correlate a verdict to the parked run. Because the resume restarts at the pure
+    gate node, the submit node does NOT re-run: the submitter is called exactly
+    once across park and resume.
     """
     submitter = _CountingSubmitter("prop-idem")
     graph = _gate_graph(submitter)
-    config = {"configurable": {"thread_id": "gate-idem"}}
+    config: Any = {"configurable": {"thread_id": "gate-idem"}}
 
     await graph.ainvoke(_base_state(), config=config)
-    assert submitter.calls == ["research"]  # first pass, pre-interrupt
+    assert submitter.calls == ["research"]  # submit ran once, pre-interrupt
+
+    # While parked, the checkpoint already carries the committed correlation id.
+    parked = await graph.aget_state(config)
+    assert parked.values.get("authoring_proposal_ids") == ["prop-idem"]
+    assert parked.values.get("gate_pending_proposal_id") == "prop-idem"
 
     resumed = await graph.ainvoke(
         Command(resume={"verdict": "approved", "notes": None}), config=config
     )
-    # Replayed on resume: called a second time, same stable proposal id.
-    assert submitter.calls == ["research", "research"]
+    # Resume restarts at the pure gate node; the submit node does NOT re-run.
+    assert submitter.calls == ["research"]
     assert resumed["authoring_proposal_ids"] == ["prop-idem"]

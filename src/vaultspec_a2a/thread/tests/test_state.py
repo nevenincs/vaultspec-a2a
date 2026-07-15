@@ -273,6 +273,7 @@ class TestTeamStateStructure:
             "research_findings",
             "gate_phase",
             "gate_verdict",
+            "gate_pending_proposal_id",
             # ADR-014: workspace root path
             "workspace_root",
         }

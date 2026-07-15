@@ -206,6 +206,10 @@ class TeamState(TypedDict):
     # ``approval_request_id`` pair the plan-approval gate uses; last-write-wins.
     gate_phase: NotRequired[str | None]
     gate_verdict: NotRequired[str | None]
+    # gate_pending_proposal_id: the proposal id the phase-submit node committed
+    # for the currently parked gate, carried to the (pure) gate node for its
+    # interrupt payload. Last-write-wins; a fresh submit overwrites it each phase.
+    gate_pending_proposal_id: NotRequired[str | None]
 
     # --- routing error: set by supervisor on parse failure ---
     routing_error: NotRequired[str | None]

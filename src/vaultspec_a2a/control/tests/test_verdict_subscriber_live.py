@@ -9,22 +9,28 @@ runbook pointer (an infrastructure gate, not a masked failure). Point
 ``--no-seat`` workspace-local serve.
 
 What this proves live against the review-outbox engine build
-(dashboard ``5173858``, verified 2026-07-15): a real proposal's full review
+(dashboard ``a7ad6f3``, verified 2026-07-15): a real proposal's full review
 round-trip - ``submit_for_review`` publishes ``approval.requested`` (a
-non-verdict parking event), and a human decision publishes the verdict event
-(``approval.resolved`` for approve, ``proposal.rejected`` for reject,
-``proposal.updated`` for request-changes, each carrying an authoritative
-``decision`` field). Every frame is replayed over ``GET /authoring/v1/events``
-and decoded by the subscriber's SSE parser; the verdict + reviewer notes are
-extracted, and each decision correlates to the right run seeded into a real
-``AsyncSqliteSaver`` checkpoint by its proposal/changeset id. The end-to-end
-resume dispatch runs through the real ``safe_dispatch`` path (a real - here
-unreachable - worker, so no double), proving the subscriber reaches the resume
-with no crash; the worker-side landing of the resumed graph belongs to the
-phase-gate topology and the service harness, not this subscriber unit.
+non-verdict parking event), and a human decision publishes the verdict event.
+Both approve and request-changes ride ``approval.resolved`` (disambiguated only
+by the authoritative ``data.decision`` field: ``approve`` vs
+``request_changes``); reject rides ``proposal.rejected`` (``decision=reject``).
+Each decision payload carries ``{decision, comment, proposal_id, changeset_id,
+approval_id, resulting_status, resulting_revision}``. Every frame is replayed
+over ``GET /authoring/v1/events`` and decoded by the subscriber's SSE parser;
+the verdict + reviewer notes are extracted, and each decision correlates to the
+right run seeded into a real ``AsyncSqliteSaver`` checkpoint by its
+proposal/changeset id. The end-to-end resume dispatch runs through the real
+``safe_dispatch`` path (a real - here unreachable - worker, so no double),
+proving the subscriber reaches the resume with no crash; the worker-side landing
+of the resumed graph belongs to the phase-gate topology and the service harness,
+not this subscriber unit.
 
 The earlier ``session.created``-only limitation is obsolete: the engine now
-emits the full proposal/approval lifecycle to the durable outbox.
+emits the full proposal/approval lifecycle to the durable outbox. Non-verdict
+transitions (e.g. supersede -> ``proposal.updated`` with no ``decision`` field)
+remain correctly non-resolving because the decoder keys the decision field
+first.
 """
 
 from __future__ import annotations
@@ -339,12 +345,14 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         assert len(requested) >= 3, "each submit must park via approval.requested"
         assert all(verdict_from_event(f) is None for f in requested)
 
-        # (b) each decision frame carries the pinned verdict + notes and
-        #     correlates to the run seeded for that proposal.
+        # (b) each decision frame carries the pinned verdict + notes, rides the
+        #     a7ad6f3 event kind, and correlates to the run seeded for that
+        #     proposal. Approve and request-changes both ride approval.resolved
+        #     (decision-field disambiguated); reject rides proposal.rejected.
         expected = {
-            "approved": (approve, "ship it"),
-            "rejected": (reject, "not yet"),
-            "request_changes": (changes, "tighten it"),
+            "approved": (approve, "ship it", "approval.resolved"),
+            "rejected": (reject, "not yet", "proposal.rejected"),
+            "request_changes": (changes, "tighten it", "approval.resolved"),
         }
         matched: dict[str, str] = {}
         for frame in lifecycle:
@@ -352,8 +360,11 @@ async def test_live_verdict_round_trip_parks_and_resumes(
             if verdict is None:
                 continue
             verdict_kind, notes = verdict
-            info, want_notes = expected[verdict_kind]
+            info, want_notes, want_kind = expected[verdict_kind]
             assert notes == want_notes, f"{verdict_kind}: notes {notes!r}"
+            assert frame.event_kind == want_kind, (
+                f"{verdict_kind} rode {frame.event_kind}, expected {want_kind}"
+            )
             assert info["proposal_id"] in frame.correlation_ids()
             thread_id = await subscriber._find_parked_thread(frame.correlation_ids())
             assert thread_id is not None

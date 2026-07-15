@@ -31,7 +31,7 @@ Serve profiles and eligibility on the truthful discovery record; validate, freez
 
 The handover verification battery over real providers, workspace configs, and restarts.
 
-- [ ] `P03.S05` - Run the handover evidence battery live: bundled plus workspace discovery, mock marking, invalid-preset isolation, heterogeneous team-defaults disclosure, missing-credential unavailable profile, fallback eligibility, unknown-profile rejection, frozen assignment surviving restart and config drift, no secrets anywhere, and a real research-to-ADR run on the served assignments; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/`.
+- [x] `P03.S05` - Run the handover evidence battery live: bundled plus workspace discovery, mock marking, invalid-preset isolation, heterogeneous team-defaults disclosure, missing-credential unavailable profile, fallback eligibility, unknown-profile rejection, frozen assignment surviving restart and config drift, no secrets anywhere, and a real research-to-ADR run on the served assignments; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/`.
 
 ## Description
 

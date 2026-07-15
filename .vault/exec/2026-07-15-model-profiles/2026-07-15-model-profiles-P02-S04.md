@@ -34,3 +34,7 @@ Green on its owned surface: `ruff`/`format`/`ty` clean across all eight touched 
 ## Notes
 
 Launch-eligibility semantics: run-start rejects unknown and provider-unavailable profiles but does not enforce the open acceptance-gate term (that would refuse every run), keeping the gate a discovery-certification signal surfaced by presets-list. Restart reuse reads the same persisted `model_profile` record run-status discloses; the redispatch read mirrors the run-status read (both proven readable). Persistence embeds the frozen record as a `model_profile` key in the existing thread-metadata JSON (ThreadMetadata is `extra=ignore`, and production reads it as raw JSON), avoiding a new DB column.
+
+### Review fold-in (MEDIUM-1)
+
+Code review flagged that run-start idempotency was check-then-act (`get_thread` then create), so simultaneous same-`run_id` retries could race into a primary-key collision 500 instead of returning the existing run. Landed as a follow-up (the S04 code was already committed): the create-and-dispatch is now insert-or-return atomic - an `IntegrityError` from the losing racer's insert is caught, the session rolled back, and the winner's run returned as the dispatch-exactly-once response (with its persisted profile disclosed). A concurrency test fires five simultaneous same-`run_id` requests and asserts none 5xx, all resolve to the one run, and the worker dispatched exactly once.

@@ -291,8 +291,14 @@ class AcceptanceHarness:
 
     async def _set_mode(
         self, ec: AuthoringClient, mode: str, *, setter_token: str
-    ) -> None:
-        """Set the worktree operation mode; the scope is backend-derived."""
+    ) -> int:
+        """Set the worktree operation mode; return its requeued_approvals count.
+
+        The scope is backend-derived. A downgrade (e.g. autonomous -> manual)
+        re-queues NOT-YET-APPLYING system approvals for human review; an
+        already-applied changeset is past that seam and is never disturbed
+        (engine `modes.rs` `requeue_system_approvals` gates on Approved heads).
+        """
         result = await ec.post_command(
             "/v1/mode",
             "set_operation_mode",
@@ -309,12 +315,16 @@ class AcceptanceHarness:
         )
         assert result.data.get("mode") == mode, f"mode not applied: {result.data}"
         self._current_mode = mode
+        requeued = result.data.get("requeued_approvals")
+        return requeued if isinstance(requeued, int) else 0
 
     async def _ensure_mode(
         self, ec: AuthoringClient, mode: str, *, setter_token: str
-    ) -> None:
+    ) -> int | None:
+        """Set the mode if it differs; return its requeued_approvals, else None."""
         if self._current_mode != mode:
-            await self._set_mode(ec, mode, setter_token=setter_token)
+            return await self._set_mode(ec, mode, setter_token=setter_token)
+        return None
 
     @staticmethod
     def _mode_for(policy: str) -> str:
@@ -348,6 +358,17 @@ class AcceptanceHarness:
             if self.run_id in changeset and changeset not in handled:
                 return item
         return None
+
+    async def _marker_applied(self, ec: AuthoringClient, changeset_id: str) -> bool:
+        """True if *changeset_id* still holds an applied system-policy marker."""
+        resp = await ec.get("/v1/proposals", with_actor=False)
+        data = resp.data if isinstance(resp.data, dict) else {}
+        for item in _items(data.get("applied_under_policy")):
+            if (_dig(item, "changeset_id") or "") != changeset_id:
+                continue
+            proposal = item.get("proposal")
+            return isinstance(proposal, dict) and proposal.get("status") == "applied"
+        return False
 
     # ------------------------------------------------------------------
     # Verdict choreography
@@ -662,11 +683,28 @@ class AcceptanceHarness:
                     # switch lands before the resumed run authors the next document.
                     if index + 1 < len(gate_names):
                         next_policy = self.case.gate_policy[gate_names[index + 1]]
-                        await self._ensure_mode(
-                            ec,
-                            self._mode_for(next_policy),
-                            setter_token=reviewer_human,
+                        next_mode = self._mode_for(next_policy)
+                        requeued = await self._ensure_mode(
+                            ec, next_mode, setter_token=reviewer_human
                         )
+                        # MIXED per-gate seam (rider): an AUTO->HUMAN downgrade must
+                        # NOT disturb the AUTO gate's ALREADY-APPLIED document - it is
+                        # past the requeue seam, so the downgrade requeues nothing and
+                        # its applied-under-policy marker stays applied.
+                        if (
+                            policy == POLICY_AUTO
+                            and next_mode == _MODE_MANUAL
+                            and requeued is not None
+                        ):
+                            assert requeued == 0, (
+                                f"downgrade after applied AUTO gate {gate!r} requeued "
+                                f"{requeued} approvals; the applied doc was disturbed"
+                            )
+                            applied_changeset = self.materializations[-1].changeset_id
+                            assert await self._marker_applied(ec, applied_changeset), (
+                                f"AUTO gate {gate!r} marker no longer applied after "
+                                f"the mode downgrade: {applied_changeset}"
+                            )
                 return gates_done
 
     def materialized(self) -> dict[str, list[Path]]:

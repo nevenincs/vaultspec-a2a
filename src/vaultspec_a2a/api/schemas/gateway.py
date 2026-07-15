@@ -176,13 +176,37 @@ class PresetsListResponse(BaseModel):
 
 
 class ServiceStateResponse(BaseModel):
-    """Health/doctor rollup for the resident gateway (service-state verb)."""
+    """Backend-served readiness for the A2A service (service-state verb).
+
+    Distinguishes three truths the Rust backend must not conflate: the process is
+    ``alive`` (it answered), the service ``can_accept_run`` (dependencies are
+    ready), and - separately, via presets-list eligibility - whether a chosen
+    authoring preset is runnable. A live HTTP process is not evidence that a run
+    can start, so ``status`` is derived from real dependency probes rather than
+    hardcoded.
+    """
 
     api_version: Literal["v1"] = _API_VERSION
+    service_version: str
+    # "ready" (can accept a run), "degraded" (alive but a dependency is unready),
+    # or "unavailable" (a hard dependency such as the database is down).
     status: str
+    alive: bool = True
     ready: bool
+    can_accept_run: bool
+    gateway_pid: int
     worker_status: str | None = None
     worker_connected: bool | None = None
     circuit_breaker: str | None = None
     database_backend: str | None = None
     checkpoint_backend: str | None = None
+    database_ready: bool | None = None
+    checkpoint_ready: bool | None = None
+    worker_ready: bool | None = None
+    # Engine authoring-backend discovery freshness (non-blocking, file+heartbeat):
+    # True when a fresh valid discovery record exists, False when present but
+    # stale/malformed, None when no engine is configured for this process.
+    authoring_backend_reachable: bool | None = None
+    # Configured maximum concurrent runs this gateway admits.
+    active_run_capacity: int | None = None
+    degraded_reasons: list[str] = Field(default_factory=list)

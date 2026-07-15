@@ -75,7 +75,9 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
         assert service.status_code == 200
         sbody = service.json()
         assert sbody["api_version"] == "v1"
-        assert sbody["status"] == "ok"
+        # Status is probe-derived, not hardcoded: the in-process worker /health,
+        # real DB, and real checkpointer all answer, so the service is ready.
+        assert sbody["status"] == "ready"
         assert isinstance(sbody["ready"], bool)
 
         # run-start (carries the R7 actor token bundle)
@@ -120,6 +122,42 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
         assert first.json()["api_version"] == "v1"
         second = await client.post(f"/v1/runs/{run_id}/cancel")
         assert second.status_code == 200
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_service_state_is_probe_backed_and_distinguishes_readiness(
+    session_factory, checkpointer
+) -> None:
+    """service-state reports truthful probe-derived readiness fields (P01.S03)."""
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/service")
+        assert resp.status_code == 200
+        body = resp.json()
+
+        # Versions, identity, capacity.
+        assert body["service_version"]
+        assert isinstance(body["gateway_pid"], int)
+        assert body["active_run_capacity"] is not None
+
+        # Alive vs can-accept-run are distinct fields; both true in this app.
+        assert body["alive"] is True
+        assert body["can_accept_run"] is True
+        assert body["status"] == "ready"
+
+        # Real probe results are surfaced.
+        assert body["database_ready"] is True
+        assert body["checkpoint_ready"] is True
+        assert body["worker_ready"] is True
+        assert body["degraded_reasons"] == []
+
+        # Authoring-backend reachability is a non-blocking tri-state derived from
+        # discovery-file freshness (True fresh / False stale / None not wired);
+        # its exact value depends on the host's engine discovery file.
+        assert body["authoring_backend_reachable"] in (None, True, False)
 
 
 @pytest.mark.asyncio(loop_scope="function")

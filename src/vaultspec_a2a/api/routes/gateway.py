@@ -7,6 +7,7 @@ richer internal ``/api`` surface and these verbs call the same services beneath.
 """
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -16,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
 from ...control.config import settings
-from ...control.health import assemble_health_status
+from ...control.health import build_full_health, probe_engine_discovery_freshness
 from ...control.run_start_policy import evaluate_run_start_eligibility
 from ...control.thread_service import (
     ThreadCreationRequest,
@@ -56,6 +57,13 @@ from ..schemas.gateway import (
 
 router = APIRouter(prefix="/v1")
 logger = logging.getLogger(__name__)
+
+# Health-check statuses that represent a genuine dependency failure (as opposed
+# to informational states like worker_spawned="yes"); these populate
+# service-state degraded_reasons.
+_DEGRADED_CHECK_STATUSES: frozenset[str] = frozenset(
+    {"error", "open", "down", "restarting", "half_open", "timeout"}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -382,20 +390,77 @@ def _summarize_preset(preset_id: str, ws_root: Path | None) -> PresetSummary:
 
 
 @router.get("/service", response_model=ServiceStateResponse)
-async def service_state_endpoint(request: Request) -> ServiceStateResponse:
-    """Return the health/doctor rollup for the resident gateway."""
-    shared = assemble_health_status(app_state=request.app.state)
-    ready = not (
-        shared["circuit_breaker"] == "open"
-        or shared["worker_status"] in {"down", "restarting"}
-        or (shared["worker_spawned"] and not shared["worker_connected"])
+async def service_state_endpoint(
+    request: Request,
+    services: tuple[
+        AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient
+    ] = Depends(get_services),
+    circuit_breaker: Any = Depends(get_circuit_breaker),
+    worker_spawner: Any = Depends(get_worker_spawner),
+) -> ServiceStateResponse:
+    """Return truthful, probe-backed readiness for the resident gateway.
+
+    Runs the real dependency probes (database, checkpoint, worker) rather than
+    reporting a hardcoded status, and separates process-alive from
+    can-accept-run. Engine authoring-backend reachability is reported from
+    non-blocking discovery-file freshness.
+    """
+    db, _aggregator, _checkpointer, worker_client = services
+    full = await build_full_health(
+        db=db,
+        worker_client=worker_client,
+        circuit_breaker=circuit_breaker,
+        worker_spawner=worker_spawner,
+        app_state=request.app.state,
     )
+    checks: dict[str, Any] = full["checks"]
+    database_ready = checks.get("database", {}).get("status") == "ok"
+    checkpoint_ready = checks.get("checkpoint", {}).get("status") == "ok"
+    worker_ready = checks.get("worker", {}).get("status") == "ok"
+    can_accept_run = full["status"] == "ok"
+
+    if not database_ready:
+        status = "unavailable"
+    elif not can_accept_run:
+        status = "degraded"
+    else:
+        status = "ready"
+
+    # Only genuine failure statuses degrade readiness; informational checks such
+    # as worker_spawned ("yes"/"no") or worker_stderr_log ("configured") are not
+    # degradation signals.
+    degraded_reasons = [
+        f"{name}: {check.get('detail', check.get('status'))}"
+        for name, check in checks.items()
+        if isinstance(check, dict) and check.get("status") in _DEGRADED_CHECK_STATUSES
+    ]
+
     return ServiceStateResponse(
-        status="ok",
-        ready=ready,
-        worker_status=shared.get("worker_status"),
-        worker_connected=shared.get("worker_connected"),
-        circuit_breaker=shared.get("circuit_breaker"),
+        service_version=_service_version(),
+        status=status,
+        alive=True,
+        ready=can_accept_run,
+        can_accept_run=can_accept_run,
+        gateway_pid=os.getpid(),
+        worker_status=full.get("worker_status"),
+        worker_connected=full.get("worker_connected"),
+        circuit_breaker=full.get("circuit_breaker"),
         database_backend=settings.resolved_database_backend,
         checkpoint_backend=settings.resolved_checkpoint_backend,
+        database_ready=database_ready,
+        checkpoint_ready=checkpoint_ready,
+        worker_ready=worker_ready,
+        authoring_backend_reachable=probe_engine_discovery_freshness(),
+        active_run_capacity=domain_config.max_concurrent_threads,
+        degraded_reasons=degraded_reasons,
     )
+
+
+def _service_version() -> str:
+    """Return the installed a2a distribution version, or 'unknown'."""
+    from importlib.metadata import PackageNotFoundError, version
+
+    try:
+        return version("vaultspec-a2a")
+    except PackageNotFoundError:
+        return "unknown"

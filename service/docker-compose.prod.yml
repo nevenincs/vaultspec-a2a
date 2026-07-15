@@ -7,7 +7,7 @@
 # Postgres (recommended for production):
 #   docker compose -f service/docker-compose.prod.yml -f service/docker-compose.prod.postgres.yml up --build
 #
-# Gateway: http://localhost:8000 (FastAPI serves React SPA)
+# Gateway: http://localhost:8000 (headless FastAPI — REST/SSE + health)
 # Jaeger UI: http://localhost:16686
 
 services:

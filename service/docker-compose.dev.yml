@@ -1,7 +1,6 @@
-# Frontend-ready development environment: backend + worker + Vite.
+# Headless development environment: backend gateway + worker.
 # Usage: docker compose -f service/docker-compose.dev.yml up --build
 # Gateway: http://localhost:8000
-# Frontend: http://localhost:5173 (HMR, proxied to the gateway)
 
 services:
   gateway:
@@ -59,27 +58,6 @@ services:
       timeout: 5s
       retries: 5
       start_period: 15s
-
-  frontend:
-    build:
-      context: ..
-      dockerfile: service/docker/dev.Dockerfile
-      target: node-base
-    command: npm run dev -- --host 0.0.0.0
-    ports:
-      - '${VAULTSPEC_UI_PORT:-5173}:5173'
-    volumes:
-      - ../src/ui:/app/src/ui
-      - /app/src/ui/node_modules # exclude host node_modules from mount
-    working_dir: /app/src/ui
-    environment:
-      # Vite proxy target inside Docker network
-      VITE_API_URL: http://gateway:8000
-      # Empty = browser uses relative URLs that hit the Vite dev proxy
-      VITE_API_BASE_URL: ''
-    depends_on:
-      gateway:
-        condition: service_healthy
 
 volumes:
   db-data:

@@ -14,6 +14,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ...control.cancel_service import cancel_thread
@@ -186,6 +187,22 @@ async def run_start_endpoint(
         raise HTTPException(
             status_code=409, detail=f"Run nickname already exists: {exc.nickname!r}"
         ) from exc
+    except IntegrityError:
+        # Insert-or-return idempotency: two simultaneous retries with the same
+        # run_id race past the check-then-act guard above; the loser's insert
+        # hits the primary-key unique violation. Roll back and return the winner's
+        # run as the dispatch-exactly-once response rather than a 500.
+        await db.rollback()
+        winner = await get_thread(db, run_id)
+        if winner is not None:
+            return RunStartResponse(
+                run_id=winner.id,
+                status=winner.status,
+                nickname=winner.nickname,
+                eligible=True,
+                profile_id=_persisted_profile_id(winner.thread_metadata),
+            )
+        raise
 
     if result.dispatched:
         mark_worker_connected(request)
@@ -507,6 +524,26 @@ def _build_preset_summaries(ws_root: Path | None) -> list[PresetSummary]:
     ]
 
 
+def _safe_load_reason(exc: Exception) -> str:
+    """Return a path-free unavailable reason for a preset load/validation failure.
+
+    Raw exception strings (TOML parse errors, config errors) can embed the
+    workspace/preset filesystem path; the served reason states the failure
+    category without any path so discovery never leaks local paths.
+    """
+    from pydantic import ValidationError
+
+    from ...thread.errors import ConfigError, TeamConfigNotFoundError
+
+    if isinstance(exc, TeamConfigNotFoundError):
+        return "preset not found"
+    if isinstance(exc, ValidationError):
+        return "preset failed schema validation"
+    if isinstance(exc, ConfigError):
+        return "preset TOML is invalid or missing its [team] section"
+    return f"preset failed to load ({type(exc).__name__})"
+
+
 def _preset_origin(preset_id: str, ws_root: Path | None, *, is_mock: bool) -> str:
     """Classify a preset's origin: test_mock, workspace, or bundled."""
     if is_mock:
@@ -542,7 +579,7 @@ def _summarize_preset(
         return PresetSummary(
             id=preset_id,
             loadable=False,
-            unavailable_reason=str(exc)[:500] or type(exc).__name__,
+            unavailable_reason=_safe_load_reason(exc),
             is_mock=is_mock,
             origin=_preset_origin(preset_id, ws_root, is_mock=is_mock),
         )

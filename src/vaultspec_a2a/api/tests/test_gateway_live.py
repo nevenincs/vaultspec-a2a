@@ -251,7 +251,12 @@ async def test_presets_list_is_truthful_and_resilient(
         # The malformed workspace preset is listed as unloadable, not omitted.
         assert "broken-preset" in by_id
         assert by_id["broken-preset"]["loadable"] is False
-        assert by_id["broken-preset"]["unavailable_reason"]
+        broken_reason = by_id["broken-preset"]["unavailable_reason"]
+        assert broken_reason
+        # The reason is path-free: the workspace/preset filesystem path must not
+        # leak into the served discovery record (review LOW fold-in).
+        assert str(tmp_path) not in broken_reason
+        assert ".vaultspec" not in broken_reason and ".toml" not in broken_reason
 
         # A bundled coder preset loads and is marked mock.
         assert by_id[_PRESET]["loadable"] is True
@@ -680,3 +685,27 @@ async def test_run_start_conflicts_on_profile_change_retry(
         replay = await client.post("/v1/runs", json=payload)
         assert replay.status_code == 201
         assert replay.json()["run_id"] == first.json()["run_id"]
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_start_idempotency_is_race_safe(
+    session_factory, checkpointer
+) -> None:
+    """Concurrent same-run_id retries never 500: insert-or-return is atomic."""
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        payload = {"team_preset": _PRESET, "message": "go", "run_id": "rid-race"}
+        results = await asyncio.gather(
+            *(client.post("/v1/runs", json=payload) for _ in range(5))
+        )
+        # No request races into a 5xx; every one resolves to the same single run.
+        assert all(r.status_code == 201 for r in results), [
+            r.status_code for r in results
+        ]
+        assert {r.json()["run_id"] for r in results} == {"rid-race"}
+        # The winner dispatched exactly once; the losers returned it idempotently.
+        raced = [d for d in worker.dispatches if d.get("thread_id") == "rid-race"]
+        assert len(raced) == 1

@@ -367,14 +367,20 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
 
 
 def _command_readiness(provider: Provider) -> ProviderReadiness:
-    """Check a subprocess provider's command resolves via the factory classifier."""
+    """Check a subprocess provider's command resolves via the factory classifier.
+
+    The reason string is path-free by construction: the classifier's exception can
+    name a filesystem path (an ACP entry point, node_modules), so it is logged but
+    never surfaced in the served reason.
+    """
     try:
         classify_provider_command(provider)
     except (ValueError, ConfigError, FileNotFoundError) as exc:
+        logger.debug("provider %s command not resolvable: %s", provider.value, exc)
         return ProviderReadiness(
             provider=provider,
             ready=False,
-            reason=f"provider command is not resolvable: {exc}",
+            reason="provider launch command is not installed or resolvable",
         )
     return ProviderReadiness(provider=provider, ready=True)
 

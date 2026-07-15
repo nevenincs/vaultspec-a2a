@@ -32,3 +32,7 @@ Green on its owned surface: `ruff`/`format`/`ty` clean. Two live presets-list te
 ## Notes
 
 Eligibility is reported honestly: the production acceptance gate is open (P04.S10 not passed) and the authoring engine is not running in the test environment, so every profile is served `eligible=false` with safe reasons rather than a false positive - exactly the ADR's honesty requirement. The `source` refinement touches `providers/model_profiles.py` (S02's module) because the discovery exposure is where per-role source attribution is consumed; the S02 unit tests assert per-field sources and are unaffected.
+
+### Review fold-in (LOW)
+
+Code review flagged that exception-derived reason strings can embed local filesystem paths. Landed as a follow-up (the S03 code was already committed): `_summarize_preset` now derives a path-free `unavailable_reason` by failure category (`_safe_load_reason`), and the `model_profiles` command-unresolvable reason no longer embeds the classifier exception (which can name an ACP entry point or node_modules path) - the exception is logged, the served reason is fixed and path-free. Asserted: a malformed workspace preset's reason contains neither the workspace path nor `.vaultspec`/`.toml`.

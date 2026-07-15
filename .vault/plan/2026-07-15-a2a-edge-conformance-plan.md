@@ -33,7 +33,7 @@ Serve product-safe semantic authoring phases instead of LangGraph node names, in
 
 Produce the handover's live verification evidence and document the verb-to-legacy-service mapping with a retirement path.
 
-- [ ] `P03.S06` - Run the handover live evidence battery (refusal matrix, idempotent retry same-run, restart recovery, degraded service-state under dependency failures, SSE reconnect, engine pass-through) and document the verb-to-legacy-service mapping with an explicit legacy-route retirement path; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/, docs/`.
+- [x] `P03.S06` - Run the handover live evidence battery (refusal matrix, idempotent retry same-run, restart recovery, degraded service-state under dependency failures, SSE reconnect, engine pass-through) and document the verb-to-legacy-service mapping with an explicit legacy-route retirement path; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/, docs/`.
 
 ## Description
 

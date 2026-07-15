@@ -131,6 +131,66 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 
 
 @pytest.mark.asyncio(loop_scope="function")
+async def test_service_state_degrades_when_circuit_breaker_opens(
+    session_factory, checkpointer
+) -> None:
+    """A real dependency failure (open circuit) degrades service-state (P03.S06).
+
+    Evidence battery: an open worker circuit breaker is a genuine dependency
+    failure. service-state must report it truthfully - not ready, status degraded,
+    the failure named in degraded_reasons - rather than a hardcoded ok.
+    """
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    # Trip the real circuit breaker the gateway reads, then probe service-state.
+    app.state.circuit_breaker.force_open()
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/service")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["alive"] is True  # process still answers
+        assert body["can_accept_run"] is False  # but cannot accept a run
+        assert body["status"] == "degraded"
+        assert body["circuit_breaker"] == "open"
+        assert any("circuit_breaker" in reason for reason in body["degraded_reasons"])
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_status_carries_reconnect_cursor(
+    session_factory, checkpointer
+) -> None:
+    """run-status carries the monotonic last_sequence reconnect cursor (P03.S06).
+
+    Evidence battery, SSE reconnect with non-authoritative semantics: durable
+    reconnect reconciliation comes from run-status (last_sequence), not from the
+    droppable SSE progress stream. This asserts the cursor is served.
+    """
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
+    async with session_factory() as session:
+        thread = await create_thread(
+            session, status=ThreadStatus.RUNNING, title="cursor"
+        )
+        await session.commit()
+        run_id = thread.id
+
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get(f"/v1/runs/{run_id}")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "last_sequence" in body
+        assert isinstance(body["last_sequence"], int)
+
+
+@pytest.mark.asyncio(loop_scope="function")
 async def test_service_state_is_probe_backed_and_distinguishes_readiness(
     session_factory, checkpointer
 ) -> None:

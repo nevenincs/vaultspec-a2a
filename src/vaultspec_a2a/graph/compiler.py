@@ -34,7 +34,13 @@ from vaultspec_a2a.thread.errors import (
 from vaultspec_a2a.thread.state import TeamState
 
 from .enums import Model, PipelinePhase, Provider
-from .nodes.diverge import create_research_dispatch_node, researcher_node_name
+from .nodes.diverge import (
+    ResearchFindingProducer,
+    create_research_dispatch_node,
+    create_researcher_node,
+    researcher_node_name,
+)
+from .nodes.phase_gate import DocumentProposalSubmitter, create_phase_gate_node
 from .nodes.supervisor import create_plan_approval_node, create_supervisor_node
 from .nodes.vault_reader import build_initial_vault_index, create_mount_node
 from .nodes.worker import WorkerNode, create_worker_node
@@ -294,14 +300,17 @@ def compile_team_graph(
     step_timeout: float | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    proposal_submitter: DocumentProposalSubmitter | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
-    Supports three topology types (ADR-013 S2.5):
+    Supports four topology types (ADR-013 S2.5, adr-authoring-orchestration):
 
     - ``star``:          Dynamic supervisor routing.
     - ``pipeline``:      Fixed sequential chain (no supervisor).
     - ``pipeline_loop``: Sequential chain with conditional back-edge.
+    - ``research_adr``:  Document phase machine (diverge, synthesize, gate,
+                         decide, gate); requires ``proposal_submitter``.
 
     Args:
         team_config:             Validated team preset (loaded from TOML).
@@ -384,10 +393,20 @@ def compile_team_graph(
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
         )
+    elif topology.type == TopologyType.RESEARCH_ADR:
+        _compile_research_adr(
+            builder,
+            team_config,
+            agent_configs,
+            provider_factory=provider_factory,
+            workspace_root=workspace_root,
+            autonomous=autonomous,
+            proposal_submitter=proposal_submitter,
+        )
     else:
         raise ValueError(
             f"Unknown topology type: {topology.type!r}. "
-            "Expected 'star', 'pipeline', or 'pipeline_loop'."
+            "Expected 'star', 'pipeline', 'pipeline_loop', or 'research_adr'."
         )
 
     graph = builder.compile(
@@ -859,4 +878,278 @@ def _compile_pipeline_loop(
         loop_node_id,
         _loop_router,
         {"revise": loop_target_mount, "FINISH": END},
+    )
+
+
+# ---------------------------------------------------------------------------
+# research_adr topology (adr-authoring-orchestration)
+# ---------------------------------------------------------------------------
+
+# Structural node names for the document phase machine. Fixed rather than
+# agent-id-derived so the phase gates and inner review loops can reference their
+# targets deterministically.
+_RA_DISPATCH = "research_dispatch"
+_RA_SYNTHESIS = "synthesis"
+_RA_RESEARCH_REVIEW = "research_review"
+_RA_RESEARCH_GATE = "research_gate"
+_RA_ADR_AUTHOR = "adr_author"
+_RA_ADR_REVIEW = "adr_review"
+_RA_ADR_GATE = "adr_gate"
+
+_RA_REQUIRED_ROLES = ("researcher", "synthesist", "adr-author", "doc-reviewer")
+
+
+def _resolve_research_adr_models(
+    team_config: Any,
+    agent_configs: dict[str, Any],
+    workspace_root: Path | None,
+    *,
+    provider_factory: ProviderFactoryProtocol,
+) -> dict[str, BaseChatModel]:
+    """Resolve one model per required research_adr role.
+
+    Raises ConfigError when a required role has no resolved AgentConfig among the
+    team's workers.
+    """
+    cfg_by_role: dict[str, Any] = {}
+    ref_by_role: dict[str, Any] = {}
+    for worker_ref in team_config.workers:
+        cfg = agent_configs.get(worker_ref.agent_id)
+        if cfg is None:
+            continue
+        cfg_by_role.setdefault(cfg.role, cfg)
+        ref_by_role.setdefault(cfg.role, worker_ref)
+
+    missing = [role for role in _RA_REQUIRED_ROLES if role not in cfg_by_role]
+    if missing:
+        raise ConfigError(
+            f"research_adr topology for team {team_config.id!r} is missing a "
+            f"worker for role(s) {missing}; required roles are "
+            f"{list(_RA_REQUIRED_ROLES)}."
+        )
+
+    models: dict[str, BaseChatModel] = {}
+    for role in _RA_REQUIRED_ROLES:
+        models[role] = _resolve_model_for_worker(
+            ref_by_role[role],
+            cfg_by_role[role],
+            team_config,
+            workspace_root,
+            provider_factory=provider_factory,
+        )
+    return models
+
+
+def _make_research_producer(
+    model: BaseChatModel,
+    system_prompt: str,
+) -> ResearchFindingProducer:
+    """Bridge a researcher model into a ResearchFindingProducer.
+
+    Runs one model turn scoped to the branch's thread spec and packages the
+    response as a finding keyed by the thread id. Locators are left to the
+    researcher's prose in this structural wiring; richer locator extraction is a
+    later refinement.
+    """
+
+    async def producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
+        from langchain_core.messages import SystemMessage
+
+        assignment = SystemMessage(
+            content=(
+                f"Research thread {spec.get('thread_id', '')!r}.\n"
+                f"Topic: {spec.get('topic', '')}\n"
+                f"{spec.get('instructions', '')}"
+            )
+        )
+        messages = [
+            SystemMessage(content=system_prompt),
+            assignment,
+            *state.get("messages", []),
+        ]
+        response = await model.ainvoke(messages)
+        return {
+            "claim": str(response.content),
+            "locators": [],
+            "source_thread": spec.get("thread_id", ""),
+        }
+
+    return producer
+
+
+def _doc_review_router(*, writer_target: str, gate_target: str) -> Any:
+    """Return the inner-quality-loop router for a document phase.
+
+    Reads the doc-reviewer's last message: a ``REVISION`` sentinel routes back to
+    the phase writer to revise, anything else (the ``PASS`` sentinel) advances to
+    the phase gate. Absent an explicit revision signal the loop advances, so the
+    human gate remains the backstop rather than an inner loop that never exits.
+    """
+
+    def router(state: TeamState) -> str:
+        messages = state.get("messages") or []
+        last_content = str(getattr(messages[-1], "content", "")) if messages else ""
+        if "REVISION" in last_content.upper():
+            return writer_target
+        return gate_target
+
+    return router
+
+
+def _compile_research_adr(
+    builder: StateGraph,
+    team_config: Any,
+    agent_configs: dict[str, Any],
+    *,
+    provider_factory: ProviderFactoryProtocol,
+    workspace_root: Path | None = None,
+    autonomous: bool = False,
+    proposal_submitter: DocumentProposalSubmitter | None,
+) -> None:
+    """Wire the research_adr document phase machine.
+
+    Structural sequencing (gates enforced by graph shape, not LLM convention):
+
+        START -> diverge (N researchers) -> synthesis -> research_review
+              -> [PASS] research_gate -> [approved] adr_author
+                                      -> [revise]   synthesis
+              -> [REVISION] synthesis
+        adr_author -> adr_review
+              -> [PASS] adr_gate -> [approved] END
+                                 -> [revise]   adr_author
+              -> [REVISION] adr_author
+
+    The diverge stage (S04) fans out to one researcher branch per configured
+    thread spec; each document phase is guarded by the generalized phase gate
+    (S05) whose propose-and-submit runs through the injected
+    ``proposal_submitter``. The inner doc-review loop enforces the prose quality
+    bar before each human gate.
+    """
+    if proposal_submitter is None:
+        raise ConfigError(
+            "research_adr topology requires a proposal_submitter for its phase "
+            "gates; the control layer injects the concrete authoring client."
+        )
+
+    models = _resolve_research_adr_models(
+        team_config,
+        agent_configs,
+        workspace_root,
+        provider_factory=provider_factory,
+    )
+
+    specs: list[dict[str, Any]] = [
+        spec.model_dump() for spec in team_config.topology.research_threads
+    ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
+
+    researcher_producer = _make_research_producer(
+        models["researcher"],
+        _agent_system_prompt(team_config, agent_configs, "researcher"),
+    )
+
+    _wire_diverge_stage(
+        builder,
+        dispatch_name=_RA_DISPATCH,
+        synthesis_name=_RA_SYNTHESIS,
+        specs=specs,
+        make_researcher=lambda spec: create_researcher_node(spec, researcher_producer),
+    )
+
+    builder.add_node(
+        _RA_SYNTHESIS,
+        create_worker_node(
+            models["synthesist"],
+            _agent_system_prompt(team_config, agent_configs, "synthesist"),
+            name=_RA_SYNTHESIS,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_RESEARCH_REVIEW,
+        create_worker_node(
+            models["doc-reviewer"],
+            _agent_system_prompt(team_config, agent_configs, "doc-reviewer"),
+            name=_RA_RESEARCH_REVIEW,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_ADR_AUTHOR,
+        create_worker_node(
+            models["adr-author"],
+            _agent_system_prompt(team_config, agent_configs, "adr-author"),
+            name=_RA_ADR_AUTHOR,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_ADR_REVIEW,
+        create_worker_node(
+            models["doc-reviewer"],
+            _agent_system_prompt(team_config, agent_configs, "doc-reviewer"),
+            name=_RA_ADR_REVIEW,
+            autonomous=autonomous,
+            workspace_root=workspace_root,
+        ),
+        retry_policy=_NODE_RETRY_POLICY,
+    )
+    builder.add_node(
+        _RA_RESEARCH_GATE,
+        create_phase_gate_node(
+            PipelinePhase.RESEARCH,
+            proposal_submitter,
+            approved_target=_RA_ADR_AUTHOR,
+            revision_target=_RA_SYNTHESIS,
+        ),
+    )
+    builder.add_node(
+        _RA_ADR_GATE,
+        create_phase_gate_node(
+            PipelinePhase.ADR,
+            proposal_submitter,
+            approved_target=END,
+            revision_target=_RA_ADR_AUTHOR,
+        ),
+    )
+
+    builder.add_edge(START, _RA_DISPATCH)
+    builder.add_edge(_RA_SYNTHESIS, _RA_RESEARCH_REVIEW)
+    builder.add_conditional_edges(
+        _RA_RESEARCH_REVIEW,
+        _doc_review_router(writer_target=_RA_SYNTHESIS, gate_target=_RA_RESEARCH_GATE),
+        cast(
+            "dict[Hashable, str]",
+            {_RA_SYNTHESIS: _RA_SYNTHESIS, _RA_RESEARCH_GATE: _RA_RESEARCH_GATE},
+        ),
+    )
+    builder.add_edge(_RA_ADR_AUTHOR, _RA_ADR_REVIEW)
+    builder.add_conditional_edges(
+        _RA_ADR_REVIEW,
+        _doc_review_router(writer_target=_RA_ADR_AUTHOR, gate_target=_RA_ADR_GATE),
+        cast(
+            "dict[Hashable, str]",
+            {_RA_ADR_AUTHOR: _RA_ADR_AUTHOR, _RA_ADR_GATE: _RA_ADR_GATE},
+        ),
+    )
+
+
+def _agent_system_prompt(
+    team_config: Any,
+    agent_configs: dict[str, Any],
+    role: str,
+) -> str:
+    """Return the system prompt for the first worker with ``role``."""
+    for worker_ref in team_config.workers:
+        cfg = agent_configs.get(worker_ref.agent_id)
+        if cfg is not None and cfg.role == role:
+            return str(cfg.persona.system_prompt)
+    raise ConfigError(
+        f"research_adr topology for team {team_config.id!r} has no worker with "
+        f"role {role!r}."
     )

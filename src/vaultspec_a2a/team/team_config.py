@@ -45,6 +45,7 @@ __all__ = [
     "AgentModelConfig",
     "AgentPermissionsConfig",
     "AgentPersonaConfig",
+    "ResearchThreadSpec",
     "SupervisorConfig",
     "TeamConfig",
     "TeamConfigNotFoundError",
@@ -72,6 +73,7 @@ class TopologyType(StrEnum):
     STAR = "star"
     PIPELINE = "pipeline"
     PIPELINE_LOOP = "pipeline_loop"
+    RESEARCH_ADR = "research_adr"
 
 
 # Bundled preset directories, relative to this file.
@@ -225,6 +227,19 @@ class WorkerRef(BaseModel):
     model: WorkerOverrideConfig = Field(default_factory=WorkerOverrideConfig)
 
 
+class ResearchThreadSpec(BaseModel):
+    """A single research thread for the ``research_adr`` diverge stage.
+
+    Each spec becomes one parallel researcher branch in the Send-based fan-out.
+    ``thread_id`` names the branch and is recorded on every finding it produces;
+    ``topic`` and ``instructions`` scope the branch's research assignment.
+    """
+
+    thread_id: str
+    topic: str = ""
+    instructions: str = ""
+
+
 class TopologyConfig(BaseModel):
     """LangGraph graph structure declaration (ADR-013 §2.5).
 
@@ -233,6 +248,9 @@ class TopologyConfig(BaseModel):
     - ``pipeline``: fixed sequential chain, no supervisor needed.
     - ``pipeline_loop``: sequential chain where the loop_node's output
       triggers a conditional back-edge.
+    - ``research_adr``: the document phase machine -- a Send-based research
+      diverge stage joins into synthesis, each document phase guarded by a human
+      approval gate (adr-authoring-orchestration).
     """
 
     # M5: use TopologyType enum for membership validation instead of string comparison
@@ -241,6 +259,10 @@ class TopologyConfig(BaseModel):
     loop_node: str | None = None
     # M7: max_loops range validated; must be between 1 and 100 inclusive
     max_loops: int = Field(default=3, ge=1, le=100)
+    # research_adr fan-out: one researcher branch per spec. Empty is permitted
+    # and compiles to a single default branch; declare specs for real N-way
+    # parallel research.
+    research_threads: list[ResearchThreadSpec] = Field(default_factory=list)
 
     @model_validator(mode="after")
     def validate_topology(self) -> "TopologyConfig":

@@ -60,6 +60,16 @@ are otherwise unaltered.
 - **Coverage cliff in `control/`:** 19 source files, 3 test files. thread_service, permission_service, message_service, team_service, worker_management (including the restart/backoff watchdog), health, diagnostics, snapshot, projection, and circuit_breaker have no dedicated tests.
 - Nothing exercises a live provider end-to-end (no live CLI turn, no live API call) - the ADR itself flags one real end-to-end agent turn as unverified.
 
+### Latent import cycle in the graph domain (appended 2026-07-15, W04 finding)
+
+`context -> thread -> graph -> nodes -> supervisor -> context` is a real
+import cycle that triggers whenever `control.thread_service` is the first
+`vaultspec_a2a` import. W04.P09 mitigated it test-side only (a graph
+warm-up import in the control conftest); the source-level fix is
+graph-domain restructuring (breaking the supervisor-to-context back-edge
+or extracting the shared surface) and is successor-plan work alongside
+the execution-mode axis split and the `control/` coverage cliff above.
+
 ## Recommendations
 
 - **Introduce an explicit execution-mode axis** (vendor x mechanism) in the provider config model before adding any new provider: split `Provider` into vendor identity plus `execution_mode: cli|api`, thread through AgentConfig/TOML, and add `langchain_anthropic`-style direct-API branches for Claude/Gemini in the factory. This is the single highest-leverage refactor for the stated mandate.

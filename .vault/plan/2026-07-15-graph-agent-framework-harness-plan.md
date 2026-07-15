@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#graph-agent-framework-harness'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 tier: L2
 related:
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
@@ -62,6 +62,8 @@ Executes the accepted `graph-agent-framework-harness-adr` (closing the framework
 Phase `P01` verifies the persona-prompt finding against the already-landed upstream fixes rather than re-deriving it from scratch, confirming what is closed (scaffold-propose) and what remains open (rag-search) before later phases proceed. `P02` first fixes the `_RULES_SUBDIR` path defect (a mechanical code bug, not a design choice), then designs a role-scoped rule-propagation shape that avoids ADR-028's own flagged token-inflation and cross-role-noise risk rather than reaching for a blanket `include_builtin=True`. `P03` reconciles any remaining persona-prompt gaps against the `P01` finding. `P04` wires the `P02` shape into the two `RuleManager` call sites. `P05` proves the fix live against a real provisioned run workspace, per the ADR's explicit constraint that a static-repo check is insufficient.
 
 Related to `adr-authoring-orchestration-adr`/`-plan` (the research_adr topology this harness gap lives inside) and `multi-provider-execution-adr`/`-plan` (the broader Program 3 mission this feature belongs to). Cross-referenced, not folded into, the parallel session's `agent-harness-provisioning-adr`/`-plan`: that plan covers the system-wide harness contract across all agent types and its own open `Opens` item (per-role rag MCP composition) is the dependency this plan's rag-search half tracks, not resolves; this plan is the narrower, code-verified fix for the research_adr topology's specific `RuleManager` and persona-prompt gaps.
+
+**APPROVED for execution** (2026-07-16, owner decision relayed by team-lead) against `2026-07-15-graph-agent-framework-harness-adr` (status `accepted`). Full execution authorized, no phase restriction. Sequencing per this plan's own Parallelization section stands: `P01`'s evidence probe gates `P02` and `P03`; its finding routes back through architect-2 before `P02` design work locks in. Primary assignee: executor-opus-5. PW7 critical path (executor-opus-7) retains priority if any resource conflict arises.
 
 ## Steps
 

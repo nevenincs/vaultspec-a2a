@@ -40,8 +40,10 @@ from ..authoring import (
 from ..database import (
     ThreadStatus,
     get_authoring_cursor,
+    get_pending_permission_requests,
     get_thread,
     list_threads,
+    mark_permission_request_applied,
     set_authoring_cursor,
     update_thread_status,
 )
@@ -305,13 +307,29 @@ class VerdictSubscriber:
     async def _resume_with_verdict(
         self, thread_id: str, verdict: str, notes: str | None
     ) -> None:
-        """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run."""
+        """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
+
+        The verdict answers the document gate the run is parked at, so its durable
+        permission row is resolved on a successful resume - otherwise the row is
+        stranded pending while the checkpoint interrupt it belonged to is gone, and
+        run-status (the authoritative recovery read) asserts ``recovery_required``
+        and masks the real ``awaiting_adr_decision`` phase (P04.S10 GAP D). Only the
+        rows that existed BEFORE this resume are resolved; the next gate parks with
+        its own fresh row after the run advances.
+        """
         async with self._session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
                 return
             team_preset = thread.team_preset
             workspace_root = _workspace_root(thread.thread_metadata)
+            parked_gate_request_ids = [
+                permission.request_id
+                for permission in await get_pending_permission_requests(
+                    db, thread_id=thread_id
+                )
+                if permission.pause_reason_type == "document_approval_request"
+            ]
 
         resume_value: dict[str, str | None] = {"verdict": verdict, "notes": notes}
         dispatch = DispatchRequest(
@@ -344,6 +362,11 @@ class VerdictSubscriber:
             )
             return
         async with self._session_factory() as db:
+            # Resolve the answered gate's durable permission row(s) so run-status
+            # does not strand them as recovery_required drift once the run advances
+            # past the gate's checkpoint interrupt (GAP D).
+            for request_id in parked_gate_request_ids:
+                await mark_permission_request_applied(db, request_id=request_id)
             await update_thread_status(db, thread_id, ThreadStatus.RUNNING)
             await db.commit()
 

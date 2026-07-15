@@ -25,6 +25,7 @@ from ..control.snapshot import (
     load_checkpoint_history_depth,
 )
 from ..database import get_thread
+from ..graph.enums import research_adr_semantic_phase
 from ..thread.enums import RepairStatus, ThreadStatus
 from ..thread.snapshots import (
     ThreadStateData,
@@ -81,17 +82,6 @@ _RECOVERY_REPAIR: frozenset[str] = frozenset(
     }
 )
 
-# research_adr structural node -> product-safe semantic authoring phase. The
-# dispatch/researcher fan-out nodes are handled by prefix; the rest map directly.
-_RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
-    "synthesis": "synthesizing_research",
-    "research_review": "reviewing_research",
-    "research_gate": "awaiting_research_decision",
-    "adr_author": "writing_adr",
-    "adr_review": "reviewing_adr",
-    "adr_gate": "awaiting_adr_decision",
-}
-
 
 def project_semantic_phase(
     *,
@@ -104,9 +94,11 @@ def project_semantic_phase(
     Maps terminal and recovery states first, then the research_adr topology
     position (from the checkpoint's next nodes) to the document-authoring phase
     vocabulary the Rust backend consumes, so it never interprets internal
-    LangGraph node names. A run whose position is not a research_adr node - a
-    coder preset, or a run between nodes - gets an honest generic ``running``
-    (or ``starting`` before dispatch) rather than a fabricated authoring phase.
+    LangGraph node names. The node-to-phase mapping is the single shared
+    ``research_adr_semantic_phase`` (graph.enums) that the SSE frame stamping also
+    reads. A run whose position is not a research_adr node - a coder preset, or a
+    run between nodes - gets an honest generic ``running`` (or ``starting`` before
+    dispatch) rather than a fabricated authoring phase.
     """
     if status in _SEMANTIC_TERMINAL:
         return _SEMANTIC_TERMINAL[status]
@@ -115,12 +107,7 @@ def project_semantic_phase(
     ):
         return "recovery_required"
     for raw in next_nodes:
-        node = raw.removeprefix("mount_")
-        if not node or node == "__end__":
-            continue
-        if node.startswith("research_dispatch"):
-            return "researching"
-        phase = _RESEARCH_ADR_NODE_PHASE.get(node)
+        phase = research_adr_semantic_phase(raw)
         if phase is not None:
             return phase
     if status == ThreadStatus.SUBMITTED.value:

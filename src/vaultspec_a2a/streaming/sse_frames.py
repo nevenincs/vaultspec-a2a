@@ -21,6 +21,12 @@ from __future__ import annotations
 import json
 from typing import TYPE_CHECKING
 
+# Progress frames stamp the semantic phase from the single shared research_adr
+# vocabulary (graph.enums), which run-status also reads - one source of truth,
+# not a per-layer copy. Re-exported under the module's public name so callers
+# and tests keep importing it from here.
+from ..graph.enums import research_adr_semantic_phase as semantic_phase_for_node
+
 if TYPE_CHECKING:
     from collections.abc import Mapping
 
@@ -32,35 +38,6 @@ __all__ = [
 ]
 
 SSE_FRAME_VERSION = "v1"
-
-# research_adr structural node -> product-safe semantic authoring phase for
-# progress frames. Mirrors the run-status projection vocabulary
-# (control.thread_state_service.project_semantic_phase), duplicated here so the
-# streaming layer stamps a phase without importing the control layer; run-status
-# remains the authoritative phase, these frames are non-authoritative progress.
-_RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
-    "synthesis": "synthesizing_research",
-    "research_review": "reviewing_research",
-    "research_gate": "awaiting_research_decision",
-    "adr_author": "writing_adr",
-    "adr_review": "reviewing_adr",
-    "adr_gate": "awaiting_adr_decision",
-}
-
-
-def semantic_phase_for_node(node_name: str) -> str | None:
-    """Map a research_adr node name to its semantic authoring phase, or None.
-
-    Returns None for a node that is not part of the research_adr topology (a
-    coder node, the supervisor, an empty or end marker), so progress frames only
-    carry a phase when one is genuinely known - never a fabricated one.
-    """
-    node = node_name.removeprefix("mount_")
-    if not node or node == "__end__":
-        return None
-    if node.startswith("research_dispatch"):
-        return "researching"
-    return _RESEARCH_ADR_NODE_PHASE.get(node)
 
 
 # Hard per-frame byte cap for the encoded SSE frame. Sized to carry ordinary

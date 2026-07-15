@@ -773,10 +773,23 @@ class TestDocumentAuthoringPersonas:
         cfg = load_agent_config("vaultspec-adr-author")
         assert "ADR READY" in cfg.persona.system_prompt
 
-    def test_adr_author_amend_or_supersede_in_prompt(self) -> None:
-        """ADR author system prompt articulates the amend-or-supersede check."""
-        cfg = load_agent_config("vaultspec-adr-author")
-        assert "supersede" in cfg.persona.system_prompt.lower()
+    def test_writers_emit_document_body_not_scaffold(self) -> None:
+        """Writers emit the document as their message body (ADR PW3 graph-submitter).
+
+        The production mechanism is the gate node's in-process submit of the
+        writer's message body; the agent-initiated authoring path (scaffold via
+        `vault add`, propose/validate) is rejected for this topology. The writer
+        personas must therefore instruct emitting the document, not scaffolding
+        or proposing it themselves.
+        """
+        for agent_id in ("vaultspec-synthesist", "vaultspec-adr-author"):
+            prompt = load_agent_config(agent_id).persona.system_prompt.lower()
+            assert "your response body is the document" in prompt, (
+                f"{agent_id} must instruct emitting the document as its body"
+            )
+            assert "you have no authoring tools" in prompt, (
+                f"{agent_id} must forbid self-scaffolding (graph-submitter owns submit)"
+            )
 
     def test_doc_reviewer_has_filesystem_read_no_write(self) -> None:
         """Doc-reviewer can read but must not write."""

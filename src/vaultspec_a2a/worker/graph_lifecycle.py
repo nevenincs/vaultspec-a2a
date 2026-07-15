@@ -318,11 +318,13 @@ class GraphLifecycleManager:
                     document_role="vaultspec-synthesist",
                     writer_message_name="synthesis",
                     doc_type="research",
+                    completion_sentinel="RESEARCH READY",
                 ),
                 "adr": PhaseAuthoringSpec(
                     document_role="vaultspec-adr-author",
                     writer_message_name="adr_author",
                     doc_type="adr",
+                    completion_sentinel="ADR READY",
                 ),
             },
         )

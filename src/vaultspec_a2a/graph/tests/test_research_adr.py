@@ -74,6 +74,24 @@ class _FakeSubmitter:
         return f"prop-{phase}"
 
 
+class _ThreadCapturingSubmitter:
+    """Records the ``state['thread_id']`` observed at each submit call.
+
+    The production submitter keys the run's engine session, changeset, and
+    proposal on ``state['thread_id']`` (``AuthoringSession(client, thread_id)``),
+    so that value MUST be the run's own id — never a branch-scoped id leaked out
+    of the Send fan-out or the synthesis join. This submitter captures what the
+    gate actually saw so a regression can assert the invariant.
+    """
+
+    def __init__(self) -> None:
+        self.seen_thread_ids: list[str | None] = []
+
+    async def __call__(self, state: Any, phase: str) -> str:
+        self.seen_thread_ids.append(state.get("thread_id"))
+        return f"prop-{phase}"
+
+
 @pytest_asyncio.fixture
 async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
     async with AsyncSqliteSaver.from_conn_string(":memory:") as saver:
@@ -211,3 +229,57 @@ async def test_research_adr_runs_to_first_document_gate(
     threads = sorted(f["source_thread"] for f in result["research_findings"])
     assert threads == ["codebase", "prior-art"]
     assert submitter.phases == ["research"]
+
+
+@pytest.mark.asyncio
+async def test_research_gate_submit_sees_run_thread_id(
+    checkpointer: AsyncSqliteSaver,
+    pf: ProviderFactoryProtocol,
+) -> None:
+    """The gate submit must observe the RUN's thread id, never a branch id.
+
+    Regression for the diverge/synthesis provenance defect: the dispatch node
+    fans the full state out to each researcher branch via ``Send`` and the
+    branches join at synthesis, all under the same checkpointer thread. The
+    production submitter derives the engine session/changeset/proposal ids from
+    ``state['thread_id']``, so a branch-scoped id leaking back into the joined
+    state would key the proposal under the wrong thread and strand the parked
+    run. Drive the topology over a real checkpointer with per-thread research
+    branches and assert the submit node saw exactly the seeded run id.
+    """
+    submitter = _ThreadCapturingSubmitter()
+    team = _research_adr_team(
+        [
+            ResearchThreadSpec(thread_id="codebase"),
+            ResearchThreadSpec(thread_id="prior-art"),
+        ]
+    )
+    graph = compile_team_graph(
+        team_config=team,
+        agent_configs=_agent_configs(team),
+        checkpointer=checkpointer,
+        provider_factory=pf,
+        proposal_submitter=submitter,
+    )
+
+    run_thread_id = "run-1784136458"
+    state: dict[str, Any] = {
+        "active_agent": "research_dispatch",
+        "artifacts": [],
+        "current_plan": [],
+        "messages": [HumanMessage(content="Research the phase machine.")],
+        "next": "",
+        "thread_id": run_thread_id,
+        "active_feature": "adr-authoring-orchestration",
+        "token_usage": {},
+    }
+    result = await graph.ainvoke(
+        state, config={"configurable": {"thread_id": run_thread_id}}
+    )
+
+    assert "__interrupt__" in result
+    # The submit node ran exactly once, and it saw the run's own thread id —
+    # not "codebase"/"prior-art" (the research branch ids) nor any synthesis id.
+    assert submitter.seen_thread_ids == [run_thread_id]
+    # The parked state still carries the run id verbatim.
+    assert result["thread_id"] == run_thread_id

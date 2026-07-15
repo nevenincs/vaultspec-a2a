@@ -112,20 +112,53 @@ class PhaseAuthoringSpec:
     doc_type:
         The engine document type for the proposal target (e.g. ``research``,
         ``adr``).
+    completion_sentinel:
+        The machine-checkable stage-completion line the writer persona ends its
+        turn with (``RESEARCH READY`` / ``ADR READY``, ADR S48). The graph-
+        submitter mechanism (ADR PW3) submits the writer's message body verbatim,
+        so this trailing marker MUST be stripped before submit or it lands in the
+        materialized document. ``None`` disables stripping.
     """
 
     document_role: str
     writer_message_name: str
     doc_type: str
+    completion_sentinel: str | None = None
 
 
-def _latest_document(state: TeamState, writer_message_name: str) -> tuple[str, int]:
+def _strip_completion_sentinel(body: str, sentinel: str | None) -> str:
+    """Remove a trailing whole-line completion sentinel from a writer's body.
+
+    The writer persona ends its turn with a machine-checkable sentinel line so
+    the phase machine can observe stage completion; that marker is not document
+    content and must not reach the engine. Only a sentinel occupying the final
+    line on its own is stripped, so a sentinel phrase appearing mid-prose is
+    left untouched.
+    """
+    if not sentinel:
+        return body
+    trimmed = body.rstrip()
+    if not trimmed.endswith(sentinel):
+        return body
+    head = trimmed[: -len(sentinel)]
+    if head and not head.endswith("\n"):
+        # The sentinel is glued to preceding prose, not on its own line.
+        return body
+    return head.rstrip()
+
+
+def _latest_document(
+    state: TeamState,
+    writer_message_name: str,
+    completion_sentinel: str | None = None,
+) -> tuple[str, int]:
     """Return ``(body, revision_cycle)`` for the phase's document from state.
 
     The body is the content of the most recent message the phase's author wrote
-    (``AIMessage.name == writer_message_name``); the revision cycle is how many
-    such messages exist — one per author pass, so a request-changes revision
-    advances it, making the idempotency key advance with the revision.
+    (``AIMessage.name == writer_message_name``) with its trailing completion
+    sentinel stripped; the revision cycle is how many such messages exist — one
+    per author pass, so a request-changes revision advances it, making the
+    idempotency key advance with the revision.
     """
     bodies: list[str] = []
     for message in state.get("messages", []):
@@ -140,7 +173,14 @@ def _latest_document(state: TeamState, writer_message_name: str) -> tuple[str, i
             f"phase author {writer_message_name!r} produced no document body to "
             f"submit; the run cannot propose an empty document"
         )
-    return bodies[-1], len(bodies)
+    body = _strip_completion_sentinel(bodies[-1], completion_sentinel)
+    if not body.strip():
+        raise DocumentUnavailableError(
+            f"phase author {writer_message_name!r} produced only the completion "
+            f"sentinel with no document body; the run cannot propose an empty "
+            f"document"
+        )
+    return body, len(bodies)
 
 
 class DocumentProposalSubmitter:
@@ -200,7 +240,9 @@ class DocumentProposalSubmitter:
                 f"{thread_id}; identity is unavailable for authoring"
             )
 
-        body, revision_cycle = _latest_document(state, spec.writer_message_name)
+        body, revision_cycle = _latest_document(
+            state, spec.writer_message_name, spec.completion_sentinel
+        )
         return await self._propose_and_submit(
             thread_id=thread_id,
             feature=feature,
@@ -260,9 +302,7 @@ class DocumentProposalSubmitter:
                 changeset_id=changeset_id,
                 expected_revision=revision,
                 summary=f"submit {feature} {phase} (r{rev})",
-                idempotency_key=derive_idempotency_key(
-                    thread_id, phase, "submit", rev
-                ),
+                idempotency_key=derive_idempotency_key(thread_id, phase, "submit", rev),
             )
             self._reject_denial("submit", submitted)
             return self._proposal_id(submitted)

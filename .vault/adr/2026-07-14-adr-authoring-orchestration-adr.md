@@ -107,7 +107,20 @@ correctly fail-closed dead code until this amendment's work lands.
   Rust-backend identifiers (authoring session id, changeset ids,
   proposal ids in the existing correlation fields); no document content,
   no tokens; product-facing status speaks role/phase vocabulary, never
-  internal node names.
+  internal node names. In-flight reconciliation (2026-07-15): the
+  product vocabulary is CONCRETIZED by the edge plan-2 semantic
+  authoring-phase projection (starting, researching,
+  synthesizing_research, reviewing_research, awaiting_research_decision,
+  writing_adr, reviewing_adr, awaiting_adr_decision, completed, failed,
+  cancelled, recovery_required) - single-homed there; this record does
+  not define a second enum. The fail-closed posture is two composed
+  layers decided independently and deliberately kept: the gateway's
+  pre-dispatch run-start eligibility refusals (missing/unloadable
+  preset, empty prompt, absent target feature for document presets,
+  token bundle not covering the preset's required roles - typed 422s)
+  refuse BEFORE dispatch, and PW2's construction-site errors fail
+  closed AFTER dispatch for anything that slips past or degrades
+  mid-lifecycle; neither replaces the other.
 - **PW5 - Verification standard and documentation integrity.** The
   handover's verification requirements are the plan extension's
   Verification verbatim (no stub submitter, no graph-shape-only tests;
@@ -128,3 +141,49 @@ correctly fail-closed dead code until this amendment's work lands.
   longer program-blocking. This ruling is recorded on the conformance
   ADR as well and was RATIFIED by the owner on 2026-07-15 at the
   production-wiring plan approval.
+- **PW7 - Headless acceptance contract with a per-gate verdict-policy
+  axis (owner mandate, 2026-07-15).** The loop must be testable with
+  tangible results and NO frontend: given a prompt, the result is N
+  markdown documents. The contract: run-start (prompt, target feature,
+  actor-token bundle) -> agent collaboration -> parked proposals ->
+  verdicts driven PROGRAMMATICALLY over the engine's HTTP review surface
+  (review-queue -> claim -> decisions -> apply) -> assertion that N
+  documents MATERIALIZED on disk under `.vault/` (count, expected stems,
+  frontmatter validity). For `research_adr`, N = 2 (research + ADR).
+  Contract-legitimacy reading, verified against the wire reference and
+  engine shapes: `ActorKind` admits `human` and `system` classes; actor
+  tokens mint against any registered actor; the review surface is plain
+  authoring-API HTTP; and the self-approval ban is ORIGIN-keyed - it
+  binds the proposing agent actor, not the reviewer class - so a
+  registered human- or system-class test actor deciding an agent-origin
+  approval over HTTP is the normal review flow driven without a GUI, not
+  a bypass. The dashboard review lane remains available to WATCH; no
+  test may REQUIRE it.
+  Verdict-policy axis (per gate, not per run): (a) AUTO - a
+  system/test-class actor approves immediately per recorded policy; the
+  TESTING default: prompt in, N documents out, zero waits; (b) HUMAN -
+  parked until a real dashboard or API verdict; the PRODUCTION default
+  for real authorship; (c) MIXED - per-gate choice (e.g. auto research
+  gate, human ADR gate). Grounding: the dashboard operation-modes ADR's
+  invariant, already quoted in the conformance research - one lifecycle
+  (proposed -> approved -> applying -> applied) in EVERY mode; autonomy
+  is a recorded approval-policy bundle with a system-actor approver,
+  never a bypass arc. AUTO therefore approves ON the ledger by a
+  different actor class; nothing skips proposal, validation, approval,
+  or apply.
+  Policy ownership: the ENGINE owns approval-policy declaration (its
+  operation-modes surface - `/v1/mode` exists on the wire; its exact
+  semantics and whether approval-policy bundles are engageable from a
+  sibling are a follow-on check); A2A carries only a per-gate verdict-
+  policy SELECTOR - in the harness now, optionally as a preset/run-start
+  flag later (cross-repo contract event if it rides run-start). Until
+  the engine-side engagement is settled, AUTO executes as
+  harness-driven system-actor decisions over the review surface, which
+  honors the same invariant.
+  Harness reuse: the finale's driver is built as the STANDING acceptance
+  harness - parameterized over prompt, preset, expected document count
+  and stems, and per-gate verdict policy - not a one-off; successor
+  plans (curation, plan-authoring) reuse it. Single-home note: the edge
+  plan-2 evidence battery (its P03.S06) covers gateway behaviour and
+  composes with this harness; the document-materialization loop
+  assertion lives HERE.

@@ -8,14 +8,14 @@ document propose-and-submit through the engine authoring API, and it is
 replay-exact by construction so a repeated call for the same run/phase/revision
 is a no-op that returns the same proposal id.
 
-Idempotency is anchored in DURABLE run material, not an in-memory sequence: each
-call builds a fresh :class:`AuthoringSession` whose ``run_id`` is derived from
-``thread_id + phase + document kind + revision cycle`` (PW1). Because the call
-order within a gate is fixed (create_session -> create_proposal -> submit), the
-session's per-command idempotency keys become a deterministic function of that
-durable material — so a restarted worker that resumes straight to a later gate
-reproduces byte-identical keys and the engine dedupes, never creating a second
-changeset or proposal.
+Idempotency is anchored in DURABLE run material, not an in-memory sequence. There
+is ONE engine session per run (``run_id = thread_id``): a constant
+``create_session`` key makes every call a create-or-resume of the same session,
+reused across the research and adr phases. Each mutating call passes an explicit
+key derived from ``thread_id + phase + command + revision cycle`` (PW1), so each
+phase/revision is its own changeset and proposal, and every key is reproduced
+byte-for-byte on replay and after a worker restart — the engine dedupes, never
+creating a second session, changeset, or proposal.
 
 Token hygiene (conformance R7): the submitter holds NO token. It reads the
 machine bearer and the calling role's per-actor token from the worker-scoped
@@ -36,7 +36,7 @@ from typing import TYPE_CHECKING, Any
 
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
-from ._ids import validate_id
+from ._ids import derive_idempotency_key
 from .client import AuthoringClient
 from .session import AuthoringSession
 
@@ -206,11 +206,6 @@ class DocumentProposalSubmitter:
             actor_token=actor_token,
         )
 
-    def _session_run_id(self, thread_id: str, phase: str, revision_cycle: int) -> str:
-        """Derive the durable idempotency seed (thread + phase + revision, PW1)."""
-        candidate = f"{thread_id}:{phase}:r{revision_cycle}"
-        return validate_id(candidate, field="session_run_id")
-
     async def _propose_and_submit(
         self,
         *,
@@ -222,23 +217,32 @@ class DocumentProposalSubmitter:
         bearer: str,
         actor_token: str,
     ) -> str:
-        session_run_id = self._session_run_id(thread_id, phase, revision_cycle)
+        rev = str(revision_cycle)
         async with AuthoringClient(
             self._engine_base_url, bearer, actor_token=actor_token
         ) as client:
-            session = AuthoringSession(client, session_run_id)
-
+            # One session per run (run_id = thread_id): a constant create_session
+            # key makes every call a create-or-resume of the same engine session,
+            # reused across the research and adr phases. The per-command keys below
+            # add phase + revision so each phase/revision is its own changeset and
+            # proposal, and all keys are reproduced byte-for-byte on replay and
+            # after a restart (PW1).
+            session = AuthoringSession(client, thread_id)
             created_session = await session.create_session(
-                scope="repo", title=f"{self._feature} {phase}"
+                scope="repo",
+                title=f"{self._feature} authoring",
+                idempotency_key=derive_idempotency_key(thread_id, "create_session"),
             )
             self._reject_denial("create_session", created_session)
 
-            changeset_id = session.new_changeset_id(phase)
-            operations = [self._whole_document_op(session_run_id, phase, spec, body)]
+            changeset_id = session.new_changeset_id(f"{phase}-r{revision_cycle}")
             created = await session.create_proposal(
                 changeset_id=changeset_id,
-                summary=f"{self._feature} {phase} document",
-                operations=operations,
+                summary=f"{self._feature} {phase} document (r{rev})",
+                operations=[self._whole_document_op(thread_id, phase, rev, spec, body)],
+                idempotency_key=derive_idempotency_key(
+                    thread_id, phase, "create_proposal", rev
+                ),
             )
             self._reject_denial("create_proposal", created)
             revision = self._changeset_revision(created)
@@ -246,15 +250,19 @@ class DocumentProposalSubmitter:
             submitted = await session.submit(
                 changeset_id=changeset_id,
                 expected_revision=revision,
-                summary=f"submit {self._feature} {phase}",
+                summary=f"submit {self._feature} {phase} (r{rev})",
+                idempotency_key=derive_idempotency_key(
+                    thread_id, phase, "submit", rev
+                ),
             )
             self._reject_denial("submit", submitted)
             return self._proposal_id(submitted)
 
     def _whole_document_op(
         self,
-        session_run_id: str,
+        thread_id: str,
         phase: str,
+        rev: str,
         spec: PhaseAuthoringSpec,
         body: str,
     ) -> dict[str, Any]:
@@ -271,7 +279,7 @@ class DocumentProposalSubmitter:
             "target": {
                 "document": {
                     "kind": "provisional_create",
-                    "provisional_doc_id": f"prov:{session_run_id}",
+                    "provisional_doc_id": f"prov:{thread_id}:{phase}:r{rev}",
                     "doc_type": spec.doc_type,
                     "feature": self._feature,
                     "title": f"{self._feature} {phase}",

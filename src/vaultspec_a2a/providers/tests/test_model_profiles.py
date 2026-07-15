@@ -130,7 +130,7 @@ class TestResolution:
             "vaultspec-doc-reviewer",
         }
         # Heterogeneous team: doc-reviewer is a different provider than the rest.
-        assert by_agent["vaultspec-doc-reviewer"].provider == Provider.ZHIPU
+        assert by_agent["vaultspec-doc-reviewer"].provider == Provider.CLAUDE
         assert by_agent["vaultspec-researcher"].provider == Provider.CLAUDE
 
     def test_bundled_fast_profile_lowers_two_roles_only(self) -> None:

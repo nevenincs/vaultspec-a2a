@@ -7,6 +7,7 @@ date: '2026-07-15'
 modified: '2026-07-15'
 related:
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
+  - '[[2026-07-15-graph-agent-framework-harness-plan]]'
   - '[[2026-07-15-graph-agent-framework-harness-research]]'
 ---
 
@@ -18,7 +19,11 @@ Auto-generated index of all documents tagged with `#graph-agent-framework-harnes
 
 ### adr
 
-- `2026-07-15-graph-agent-framework-harness-adr` - `graph-agent-framework-harness` adr: `closing the framework-harness gap for graph-executed document-authoring agents` | (**status:** `{proposed|accepted|rejected|superseded|deprecated}`)
+- `2026-07-15-graph-agent-framework-harness-adr` - `graph-agent-framework-harness` adr: `closing the framework-harness gap for graph-executed document-authoring agents` | (**status:** `accepted`)
+
+### plan
+
+- `2026-07-15-graph-agent-framework-harness-plan` - `graph-agent-framework-harness` plan
 
 ### research
 

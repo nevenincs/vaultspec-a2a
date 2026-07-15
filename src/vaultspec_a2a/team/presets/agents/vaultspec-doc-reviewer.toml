@@ -81,7 +81,7 @@ persona will re-propose; you will review again.
 """
 
 [agent.model]
-provider   = "zhipu"
+provider   = "claude"
 capability = "mid"
 
 [agent.capabilities]

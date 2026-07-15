@@ -790,10 +790,17 @@ class TestDocumentAuthoringPersonas:
         assert "PASS" in cfg.persona.system_prompt
         assert "REVISION REQUIRED" in cfg.persona.system_prompt
 
-    def test_doc_reviewer_uses_zhipu_provider(self) -> None:
-        """Doc-reviewer uses ZHIPU provider (consistent with vaultspec-reviewer)."""
+    def test_doc_reviewer_uses_claude_provider(self) -> None:
+        """Doc-reviewer uses the CLAUDE subscription provider.
+
+        Subscription-first (ADR 2026-02-25 llm-context-provider-abstraction):
+        Claude/Gemini CLI subscriptions are the primary tier; OpenAI/Zhipu are
+        fallback only. All four research_adr document personas pin to Claude so
+        the headless acceptance run authenticates on the proven subscription
+        path rather than a fallback-tier API key.
+        """
         cfg = load_agent_config("vaultspec-doc-reviewer")
-        assert cfg.model.provider == Provider.ZHIPU
+        assert cfg.model.provider == Provider.CLAUDE
 
     def test_no_request_apply_in_writer_prompts(self) -> None:
         """Writer persona prompts explicitly prohibit request_apply calls."""

@@ -1,0 +1,65 @@
+[team]
+id           = "vaultspec-adr-research-deterministic"
+display_name = "Vaultspec ADR Research (deterministic)"
+description  = """
+Deterministic driver variant of vaultspec-adr-research for the PW7 standing
+acceptance harness. Identical research_adr topology and the SAME four worker
+agent_ids (so the actor-token bundle keys and the submitter role keys are
+unchanged); only the provider is set to Provider.DETERMINISTIC, the in-process
+DeterministicResearchAdrChatModel, so the full Research -> ADR contract runs with
+no Docker, no VidaiMock tape server, and no real provider credentials. Not a
+product preset: it exists to certify the loop reproducibly and fast. Real-provider
+collaboration is proven by running the same harness against the vaultspec-adr-research
+preset (or a mixed-provider profile).
+"""
+
+[team.defaults]
+provider   = "deterministic"
+capability = "mid"
+
+[team.topology]
+type  = "research_adr"
+order = []
+
+[team.permissions]
+auto_approve = false
+
+[team.persona]
+directive = """
+# Vaultspec-ADR-Research Workflow (deterministic driver)
+
+Deterministic stand-in for the vaultspec-adr-research directive. The research_adr
+graph structure enforces the phase machine (Ground -> Diverge -> Synthesize -> Gate
+-> Decide); the in-process deterministic provider supplies each role's turn from
+fixed, role-keyed content. Structural gates, not prompt convention, drive
+transitions.
+
+- Vault documents only; no direct filesystem writes; all authoring goes through
+  engine proposals.
+- vaultspec-doc-reviewer returns "PASS" to advance a phase; "REVISION REQUIRED"
+  routes back to the writer.
+- The outer human review-lane verdict is driven over the engine review surface by
+  the acceptance harness, not by any persona.
+
+{{FEATURE_CONTEXT}}
+"""
+
+[team.graph]
+step_timeout_seconds = 600
+recursion_limit      = 50
+
+[[team.workers]]
+agent_id = "vaultspec-researcher"
+model    = { provider = "deterministic" }
+
+[[team.workers]]
+agent_id = "vaultspec-synthesist"
+model    = { provider = "deterministic" }
+
+[[team.workers]]
+agent_id = "vaultspec-adr-author"
+model    = { provider = "deterministic" }
+
+[[team.workers]]
+agent_id = "vaultspec-doc-reviewer"
+model    = { provider = "deterministic" }

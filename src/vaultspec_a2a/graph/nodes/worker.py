@@ -109,11 +109,14 @@ def _attach_authoring_tools(
     """Surface the run's bridged authoring tools to an ACP session model (R4).
 
     When a binding is present and the model exposes an ACP ``mcp_servers``
-    surface, return a copy whose ``session/new`` advertises the loopback
-    authoring MCP server so the spawned CLI sees the propose/read tools. Models
-    without an MCP surface (mock, hosted APIs) are returned unchanged. The
-    binding lives only in this worker closure — never in graph state or a
-    checkpoint (R7).
+    surface, return a copy whose ``session/new`` advertises the run's authoring
+    MCP server so the spawned CLI sees the propose/read tools. The transport is
+    chosen from the binding: the stdio bridge (spawned subprocess) is preferred
+    because the pinned CLI surfaces stdio MCP tools reliably while it connects to
+    but does not surface loopback HTTP MCP tools; the HTTP bridge is used when
+    the binding carries only that transport (ADR R4 amendment). Models without an
+    MCP surface (mock, hosted APIs) are returned unchanged. The binding lives
+    only in this worker closure — never in graph state or a checkpoint (R7).
 
     In autonomous (headless) mode ONLY, the exact bridged tool names are
     auto-permitted so the CLI can invoke them without a local prompt — a
@@ -129,10 +132,15 @@ def _attach_authoring_tools(
     from vaultspec_a2a.providers._acp_authoring import (
         authoring_allowed_tool_names,
         build_authoring_mcp_servers,
+        build_authoring_stdio_mcp_servers,
     )
 
     allowed_tools = authoring_allowed_tool_names(binding) if autonomous else None
-    return attach(build_authoring_mcp_servers(binding), allowed_tools)
+    if binding.engine_base_url is not None and binding.run_id is not None:
+        mcp_servers = build_authoring_stdio_mcp_servers(binding)
+    else:
+        mcp_servers = build_authoring_mcp_servers(binding)
+    return attach(mcp_servers, allowed_tools)
 
 
 def _wrap_worker_exception(

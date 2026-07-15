@@ -136,6 +136,78 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
     assert not any(name == "mcp__vaultspec-authoring__*" for name in allowed)
 
 
+def _stdio_binding(
+    engine_base_url: str = "http://127.0.0.1:8767",
+    run_id: str = "run:xyz",
+) -> AuthoringToolBinding:
+    return AuthoringToolBinding(
+        snapshot=_binding().snapshot,
+        bearer_token="machine-bearer-xyz",
+        actor_token="actor-token-abc",
+        engine_base_url=engine_base_url,
+        run_id=run_id,
+    )
+
+
+@pytest.mark.asyncio
+async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
+    tmp_path: Path,
+) -> None:
+    """A stdio binding makes session/new advertise the spawn-a-bridge entry.
+
+    When the binding carries the engine transport (engine_base_url + run_id) the
+    worker prefers stdio (the CLI surfaces stdio MCP tools reliably where it does
+    not surface loopback HTTP MCP tools). The session/new the real CLI receives
+    must carry a stdio server entry (command + args, no url/type) whose env
+    carries the run's engine facts — proving the wiring reaches a subprocess.
+    """
+    from vaultspec_a2a.providers._acp_authoring import AUTHORING_MCP_SERVER_NAME
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
+    record_file = tmp_path / "session_new.json"
+    model = AcpChatModel(
+        command=[
+            PYTHON_EXE,
+            str(SIMULATOR_PATH),
+            "--response",
+            "authored",
+            "--record-session-new",
+            str(record_file),
+        ],
+        env_vars={},
+        workspace_root=str(tmp_path),
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        autonomous=True,
+        authoring_binding=_stdio_binding(),
+    )
+
+    await node(_make_state())
+
+    params = json.loads(record_file.read_text(encoding="utf-8"))
+    servers = params["mcpServers"]
+    assert len(servers) == 1
+    entry = servers[0]
+    assert entry["name"] == AUTHORING_MCP_SERVER_NAME
+    # A stdio entry spawns a command; it carries no HTTP url/type.
+    assert "url" not in entry
+    assert "type" not in entry
+    assert entry["args"][0] == "-m"
+    assert entry["args"][1].endswith("authoring_stdio")
+    env = {item["name"]: item["value"] for item in entry["env"]}
+    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
+    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:xyz"
+    assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+
+    # The exact allowlist is still threaded so the CLI can invoke the bridged
+    # tools headless.
+    allowed = params["_meta"]["claudeCode"]["options"]["allowedTools"]
+    assert allowed == authoring_allowed_tool_names(_stdio_binding())
+
+
 class TestAuthoringAllowlist:
     """The auto-permit allowlist is exact, catalog-derived, and autonomous-only."""
 

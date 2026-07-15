@@ -136,6 +136,16 @@ async def on_request_permission(
     name = tool_call.get("title", "unknown")
     args = tool_call.get("rawInput", {})
 
+    # Diagnostic (R7: tool name + option ids only, never rawInput/payloads):
+    # this handler firing means the SDK's canUseTool rung was reached — i.e. no
+    # allow-rule pre-empted the call. Logging it disambiguates which permission
+    # rung resolved a bridged authoring tool during headless runs.
+    logger.info(
+        "ACP permission requested (canUseTool rung): tool=%s options=%s",
+        name,
+        [o.get("optionId") for o in options if isinstance(o, dict)],
+    )
+
     if config.permission_callback:
         try:
             option_id = await config.permission_callback(name, args, options)
@@ -200,6 +210,7 @@ async def on_request_permission(
         )
         option_id = options[0]["optionId"]
 
+    logger.info("ACP permission decision: tool=%s option=%s", name, option_id)
     return {
         "jsonrpc": "2.0",
         "id": rpc_id,

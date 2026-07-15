@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#a2a-edge-conformance'
 date: '2026-07-14'
-modified: '2026-07-14'
+modified: '2026-07-15'
 tier: L3
 related:
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
@@ -95,7 +95,7 @@ Fetch and snapshot /v1/agent-tools per run and bridge the catalog into the agent
 A vaultspec-solo-coder run produces a research document as a proposed changeset: propose, submit, human-visible in the dashboard review lane, with zero .vault/ writes anywhere in the run.
 
 - [ ] `W03.P08.S20` - Drive a vaultspec-solo-coder run that produces a research document as propose then submit, confirm human visibility in the dashboard review lane, and record proposal and changeset ids in thread state; `src/vaultspec_a2a/team/presets/teams/, src/vaultspec_a2a/service_tests/`.
-- [ ] `W03.P08.S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record; `src/vaultspec_a2a/service_tests/`.
+- [x] `W03.P08.S21` - Assert zero .vault/ filesystem writes across the whole proof run via filesystem watch or audit and capture the evidence in the step record; `src/vaultspec_a2a/service_tests/`.
 
 ## Wave `W04` - Actor tokens and the five-verb gateway
 

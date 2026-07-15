@@ -54,7 +54,14 @@ related:
   - '[[2026-07-15-a2a-edge-conformance-P01-S01]]'
   - '[[2026-07-15-a2a-edge-conformance-P01-S02]]'
   - '[[2026-07-15-a2a-edge-conformance-P01-S03]]'
+  - '[[2026-07-15-a2a-edge-conformance-P01-summary]]'
+  - '[[2026-07-15-a2a-edge-conformance-P02-S04]]'
+  - '[[2026-07-15-a2a-edge-conformance-P02-S05]]'
+  - '[[2026-07-15-a2a-edge-conformance-P02-summary]]'
+  - '[[2026-07-15-a2a-edge-conformance-P03-S06]]'
+  - '[[2026-07-15-a2a-edge-conformance-P03-summary]]'
   - '[[2026-07-15-a2a-edge-conformance-audit]]'
+  - '[[2026-07-15-a2a-edge-conformance-dead-code-campaign-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-plan]]'
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
@@ -77,6 +84,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-14-a2a-edge-conformance-w02-review-audit` - `a2a-edge-conformance` audit: `W02 code review: deletion mandates and write-seam closure`
 - `2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit` - `a2a-edge-conformance` audit: `worktree and branch reconciliation`
 - `2026-07-15-a2a-edge-conformance-audit` - `a2a-edge-conformance` audit: `full-edge live demonstration`
+- `2026-07-15-a2a-edge-conformance-dead-code-campaign-audit` - `a2a-edge-conformance` audit: `dead code campaign`
 - `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
 - `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
 - `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`
@@ -122,6 +130,12 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-P01-S01` - Harden run-start: client-supplied stable run id or idempotency key with dispatch-exactly-once under retry, reject empty prompt, reject missing or unloadable preset (no silent draft on the v1 verb), require target feature for document-authoring presets, validate the token bundle covers the preset's required roles, and return initial semantic status plus eligibility
 - `2026-07-15-a2a-edge-conformance-P01-S02` - Make presets-list truthful: loadable/unloadable status with unavailable_reason, resilience to any single preset load or validation failure, required roles and authoring capability, mock/test marking, and workspace-context-aware resolution
 - `2026-07-15-a2a-edge-conformance-P01-S03` - Deepen service-state: truthful ready/degraded/unavailable status, service and API versions, gateway pid, provider and engine-authoring-backend reachability, active-run capacity, discovery freshness, and the alive versus can-accept-run versus preset-eligible distinction
+- `2026-07-15-a2a-edge-conformance-P01-summary` - `a2a-edge-conformance` `P01` summary
+- `2026-07-15-a2a-edge-conformance-P02-S04` - Project semantic authoring phases (starting, researching, synthesizing_research, reviewing_research, awaiting_research_decision, writing_adr, reviewing_adr, awaiting_adr_decision, completed, failed, cancelled, recovery_required) from research_adr topology position and gate state into run-status, plus target feature and authoring session id fields
+- `2026-07-15-a2a-edge-conformance-P02-S05` - Carry the semantic phase in versioned SSE progress frames and audit frame content against the handover exclusions: no secrets, prompts, document bodies, tokens, or raw provider payloads
+- `2026-07-15-a2a-edge-conformance-P02-summary` - `a2a-edge-conformance` `P02` summary
+- `2026-07-15-a2a-edge-conformance-P03-S06` - Run the handover live evidence battery (refusal matrix, idempotent retry same-run, restart recovery, degraded service-state under dependency failures, SSE reconnect, engine pass-through) and document the verb-to-legacy-service mapping with an explicit legacy-route retirement path
+- `2026-07-15-a2a-edge-conformance-P03-summary` - `a2a-edge-conformance` `P03` summary
 
 ### plan
 

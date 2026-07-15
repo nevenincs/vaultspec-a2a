@@ -353,7 +353,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-init",
             content="Hello",
-            team_preset="vaultspec-adaptive-coder",
+            team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
@@ -413,7 +413,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-sdd",
             content="Hello",
-            team_preset="vaultspec-adaptive-coder",
+            team_preset="vaultspec-solo-coder",
             active_feature="auth-flow",
             pipeline_phase="implement",
             vault_index={"specs": ["auth.md"]},
@@ -433,7 +433,7 @@ class TestGraphInputBuilding:
             action="ingest",
             thread_id="t-sdd-empty",
             content="Hello",
-            team_preset="vaultspec-adaptive-coder",
+            team_preset="vaultspec-solo-coder",
             recursion_limit=25,
         )
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
@@ -507,7 +507,7 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = ("vaultspec-adaptive-coder", None, False)
+                cache_key = ("vaultspec-solo-coder", None, False)
                 executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
                 executor._thread_to_cache_key["t-cache"] = cache_key
                 assert executor._thread_to_cache_key["t-cache"] == cache_key
@@ -557,7 +557,7 @@ class TestLazyRecompilation:
             bridge = _make_bridge()
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
-                cache_key = ("vaultspec-adaptive-coder", "/some/path", False)
+                cache_key = ("vaultspec-solo-coder", "/some/path", False)
                 executor._graph_cache[cache_key] = object()  # type: ignore[assignment]
                 executor._thread_to_cache_key["t-preset"] = cache_key
 
@@ -577,7 +577,7 @@ class TestLazyRecompilation:
             try:
                 executor = Executor(checkpointer=cp, bridge=bridge)
                 executor._thread_to_cache_key["t-1"] = (
-                    "vaultspec-adaptive-coder",
+                    "vaultspec-solo-coder",
                     None,
                     False,
                 )

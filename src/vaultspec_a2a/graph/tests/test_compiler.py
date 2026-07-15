@@ -16,6 +16,7 @@ if TYPE_CHECKING:
     from ..protocols import ProviderFactoryProtocol
 
 from vaultspec_a2a.team.team_config import (
+    TeamConfig,
     TopologyConfig,
     TopologyType,
     WorkerRef,
@@ -44,26 +45,39 @@ async def checkpointer() -> AsyncGenerator[AsyncSqliteSaver]:
 # Parametrized compilation (C7 rewrite)
 # ---------------------------------------------------------------------------
 
+
+def _make_team(
+    *,
+    topology: TopologyConfig,
+    worker_ids: list[str],
+    team_id: str = "inline-test-team",
+) -> TeamConfig:
+    """Build a TeamConfig inline from real models for topology coverage.
+
+    The multi-role coder presets that used to carry the star, pipeline, and
+    pipeline_loop topologies were retired; this constructs an equivalent config
+    directly so the real ``compile_team_graph`` paths for those topologies stay
+    exercised without depending on a bundled preset.
+    """
+    return TeamConfig(
+        id=team_id,
+        display_name=team_id,
+        topology=topology,
+        workers=[WorkerRef(agent_id=aid) for aid in worker_ids],
+    )
+
+
+def _pipeline_team() -> TeamConfig:
+    """A standard three-role pipeline team (planner -> coder -> reviewer)."""
+    roles = ["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"]
+    return _make_team(
+        topology=TopologyConfig(type=TopologyType.PIPELINE, order=roles),
+        worker_ids=roles,
+    )
+
+
 # (preset, topology, expected_worker_nodes, has_supervisor)
 _PRESET_CASES: list[tuple[str, str, set[str], bool]] = [
-    (
-        "vaultspec-adaptive-coder",
-        "star",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        True,
-    ),
-    (
-        "vaultspec-structured-coder",
-        "pipeline",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        False,
-    ),
-    (
-        "vaultspec-iterative-coder",
-        "pipeline_loop",
-        {"vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"},
-        False,
-    ),
     ("vaultspec-solo-coder", "pipeline", {"vaultspec-coder"}, False),
 ]
 
@@ -121,7 +135,10 @@ async def test_compile_team_graph_accepts_workspace_root(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """compile_team_graph accepts workspace_root and produces a valid graph."""
-    team = load_team_config("vaultspec-adaptive-coder")
+    team = _make_team(
+        topology=TopologyConfig(type=TopologyType.STAR),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     supervisor_cfg = load_agent_config("vaultspec-supervisor")
 
@@ -164,7 +181,7 @@ async def test_compile_interrupt_before_always_empty(
     autonomous: bool,
 ) -> None:
     """interrupt_before is [] in both supervised and autonomous modes."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(
@@ -193,7 +210,7 @@ async def test_compile_unknown_topology_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """An unknown topology type raises ValueError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     bad_topology = team.topology.model_copy(update={"type": "unknown_topology"})
@@ -217,8 +234,16 @@ async def test_compile_pipeline_loop_structure(
     checkpointer: AsyncSqliteSaver,
     pf: ProviderFactoryProtocol,
 ) -> None:
-    """vaultspec-iterative-coder (pipeline_loop) produces correct node set."""
-    team = load_team_config("vaultspec-iterative-coder")
+    """pipeline_loop topology produces the correct node set."""
+    team = _make_team(
+        topology=TopologyConfig(
+            type=TopologyType.PIPELINE_LOOP,
+            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+            loop_node="vaultspec-reviewer",
+            max_loops=3,
+        ),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(
@@ -240,17 +265,13 @@ async def test_compile_pipeline_loop_single_agent_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """pipeline_loop with only the loop_node raises ConfigError."""
-    team = load_team_config("vaultspec-iterative-coder")
     bad_topology = TopologyConfig(
         type=TopologyType.PIPELINE_LOOP,
         order=["vaultspec-reviewer"],
         loop_node="vaultspec-reviewer",
         max_loops=3,
     )
-    reviewer_ref = WorkerRef(agent_id="vaultspec-reviewer")
-    bad_team = team.model_copy(
-        update={"topology": bad_topology, "workers": [reviewer_ref]}
-    )
+    bad_team = _make_team(topology=bad_topology, worker_ids=["vaultspec-reviewer"])
     agent_configs = {"vaultspec-reviewer": load_agent_config("vaultspec-reviewer")}
     with pytest.raises(ConfigError, match="degenerate self-loop"):
         compile_team_graph(
@@ -267,7 +288,7 @@ async def test_compile_pipeline_missing_agent_config_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """Referencing an agent_id not in agent_configs raises ConfigError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     agent_configs = {
         w.agent_id: load_agent_config(w.agent_id)
         for w in team.workers
@@ -288,7 +309,7 @@ async def test_compile_pipeline_empty_order_raises(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """Empty pipeline_order raises ConfigError."""
-    team = load_team_config("vaultspec-structured-coder")
+    team = _pipeline_team()
     bad_topology = team.topology.model_copy(update={"order": []})
     bad_team = team.model_copy(update={"topology": bad_topology})
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
@@ -307,7 +328,15 @@ async def test_loop_router_worker_can_signal_finish(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """_loop_router returns FINISH when state['next'] is set to 'FINISH'."""
-    team = load_team_config("vaultspec-iterative-coder")
+    team = _make_team(
+        topology=TopologyConfig(
+            type=TopologyType.PIPELINE_LOOP,
+            order=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+            loop_node="vaultspec-reviewer",
+            max_loops=3,
+        ),
+        worker_ids=["vaultspec-planner", "vaultspec-coder", "vaultspec-reviewer"],
+    )
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
 
     graph = compile_team_graph(
@@ -409,7 +438,7 @@ def test_worker_retry_on_worker_error_with_runtime_cause_not_retried() -> None:
 @pytest.mark.asyncio(loop_scope="function")
 async def test_compile_team_graph_step_timeout_set(pf: ProviderFactoryProtocol) -> None:
     """compile_team_graph sets step_timeout on the compiled Pregel graph."""
-    team = load_team_config("vaultspec-adaptive-coder")
+    team = _pipeline_team()
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
@@ -428,8 +457,8 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
     pf: ProviderFactoryProtocol,
 ) -> None:
     """When step_timeout=None, the team TOML step_timeout_seconds is used."""
-    team = load_team_config("vaultspec-adaptive-coder")
-    assert team.graph.step_timeout_seconds == 300
+    team = load_team_config("vaultspec-solo-coder")
+    assert team.graph.step_timeout_seconds == 120
     agent_configs = {w.agent_id: load_agent_config(w.agent_id) for w in team.workers}
     async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
         await cp.setup()
@@ -440,7 +469,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
             step_timeout=None,
             provider_factory=pf,
         )
-    assert graph.step_timeout == 300.0
+    assert graph.step_timeout == 120.0
 
 
 # ---------------------------------------------------------------------------

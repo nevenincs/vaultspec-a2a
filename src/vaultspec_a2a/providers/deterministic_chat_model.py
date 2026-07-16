@@ -34,9 +34,11 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["DeterministicResearchAdrChatModel"]
 
-# Canonical research_adr worker roles (mirrors compiler `_RA_REQUIRED_ROLES`), matched
-# as a suffix of the AgentConfig id so both bare ("researcher") and namespaced
-# ("vaultspec-researcher") agent ids resolve to the same role content.
+# Canonical research_adr worker roles (the authoring contract's
+# DOCUMENT_AUTHORING_ROLES), matched as a suffix of the AgentConfig id so both bare
+# ("researcher") and namespaced ("vaultspec-researcher") agent ids resolve to the
+# same role content. Kept as individual per-role content-dispatch keys here rather
+# than the contract tuple; a data-sync guard could fold them - see task #35.
 _ROLE_RESEARCHER = "researcher"
 _ROLE_SYNTHESIST = "synthesist"
 _ROLE_ADR_AUTHOR = "adr-author"

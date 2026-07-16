@@ -17,8 +17,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from ..team.team_config import TopologyType
-
 if TYPE_CHECKING:
     from ..context.harness import HarnessReadiness
     from ..team.team_config import TeamConfig
@@ -30,13 +28,6 @@ __all__ = [
     "is_document_authoring_preset",
     "required_role_ids",
 ]
-
-# Topologies whose runs author vault documents through engine proposals and so
-# require a target feature and a per-role actor-token bundle. Kept as a set so
-# future authoring topologies join without touching the eligibility logic.
-_DOCUMENT_AUTHORING_TOPOLOGIES: frozenset[TopologyType] = frozenset(
-    {TopologyType.RESEARCH_ADR}
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +44,12 @@ class RunStartEligibility:
 
 
 def is_document_authoring_preset(team_config: TeamConfig) -> bool:
-    """Return True when the preset authors documents through engine proposals."""
-    return team_config.topology.type in _DOCUMENT_AUTHORING_TOPOLOGIES
+    """Return True when the preset authors documents through engine proposals.
+
+    Delegates to :attr:`TeamConfig.is_document_authoring`, which reads the single
+    document-authoring-topology source of truth in the authoring contract.
+    """
+    return team_config.is_document_authoring
 
 
 def required_role_ids(team_config: TeamConfig) -> list[str]:

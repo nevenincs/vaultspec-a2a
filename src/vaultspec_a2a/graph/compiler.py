@@ -33,6 +33,7 @@ from vaultspec_a2a.thread.errors import (
 )
 from vaultspec_a2a.thread.state import TeamState
 
+from ..authoring.contract import DOCUMENT_AUTHORING_ROLES
 from .enums import Model, PipelinePhase, Provider
 from .nodes.diverge import (
     ResearchFindingProducer,
@@ -938,8 +939,6 @@ _RA_ADR_REVIEW = "adr_review"
 _RA_ADR_SUBMIT = "adr_submit"
 _RA_ADR_GATE = "adr_gate"
 
-_RA_REQUIRED_ROLES = ("researcher", "synthesist", "adr-author", "doc-reviewer")
-
 
 def _resolve_research_adr_models(
     team_config: Any,
@@ -963,16 +962,16 @@ def _resolve_research_adr_models(
         cfg_by_role.setdefault(cfg.role, cfg)
         ref_by_role.setdefault(cfg.role, worker_ref)
 
-    missing = [role for role in _RA_REQUIRED_ROLES if role not in cfg_by_role]
+    missing = [role for role in DOCUMENT_AUTHORING_ROLES if role not in cfg_by_role]
     if missing:
         raise ConfigError(
             f"research_adr topology for team {team_config.id!r} is missing a "
             f"worker for role(s) {missing}; required roles are "
-            f"{list(_RA_REQUIRED_ROLES)}."
+            f"{list(DOCUMENT_AUTHORING_ROLES)}."
         )
 
     models: dict[str, BaseChatModel] = {}
-    for role in _RA_REQUIRED_ROLES:
+    for role in DOCUMENT_AUTHORING_ROLES:
         models[role] = _resolve_model_for_worker(
             ref_by_role[role],
             cfg_by_role[role],

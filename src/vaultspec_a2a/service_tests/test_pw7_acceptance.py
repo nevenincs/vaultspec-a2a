@@ -61,6 +61,7 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
 
 import httpx
 import pytest
@@ -226,6 +227,63 @@ class Materialization:
     changeset_id: str
     document_path: str | None = None
     result_stem: str | None = None
+
+
+class _ResilientAuthoringClient(AuthoringClient):
+    """An :class:`AuthoringClient` that re-resolves the machine bearer on a 401.
+
+    A shared engine can restart mid-run - a real observed failure: a long
+    real-provider run outlives one engine process, so the bearer cached at start
+    goes stale and every subsequent call 401s (outer bearer-gate: status 401, no
+    ``error_kind``). On that 401 this client re-resolves the endpoint from the
+    workspace ``service.json`` (the engine mints a fresh bearer at each boot and
+    republishes it there), swaps in the new bearer + transport, and retries the
+    call ONCE; a still-failing call or an unreachable engine fails loud. Being a
+    subclass, it is a drop-in wherever an ``AuthoringClient`` is expected.
+    """
+
+    async def _reresolve_bearer(self) -> None:
+        endpoint = resolve_engine()
+        if endpoint is None:
+            raise AssertionError(
+                "engine unreachable while re-resolving the bearer after a 401 "
+                "(engine likely restarted and its service.json is not fresh)"
+            )
+        self._base_url = endpoint.base_url.rstrip("/")
+        self._bearer_token = endpoint.bearer_token
+        await self._client.aclose()
+        self._client = httpx.AsyncClient(
+            base_url=self._base_url, timeout=httpx.Timeout(30.0, connect=5.0)
+        )
+
+    async def get(self, *args: Any, **kwargs: Any) -> AuthoringResponse:
+        try:
+            return await super().get(*args, **kwargs)
+        except AuthoringTransportError as exc:
+            if exc.status_code != 401:
+                raise
+            await self._reresolve_bearer()
+            return await super().get(*args, **kwargs)
+
+    async def post_command(
+        self, *args: Any, **kwargs: Any
+    ) -> AuthoringResponse | Denial:
+        try:
+            return await super().post_command(*args, **kwargs)
+        except AuthoringTransportError as exc:
+            if exc.status_code != 401:
+                raise
+            await self._reresolve_bearer()
+            return await super().post_command(*args, **kwargs)
+
+    async def post_bare(self, *args: Any, **kwargs: Any) -> AuthoringResponse | Denial:
+        try:
+            return await super().post_bare(*args, **kwargs)
+        except AuthoringTransportError as exc:
+            if exc.status_code != 401:
+                raise
+            await self._reresolve_bearer()
+            return await super().post_bare(*args, **kwargs)
 
 
 @dataclass(slots=True)
@@ -654,7 +712,9 @@ class AcceptanceHarness:
         if timeout_seconds is None:
             timeout_seconds = self._runtime_budget()
         deadline = time.monotonic() + timeout_seconds
-        async with AuthoringClient(self.engine_base_url, self.engine_bearer) as ec:
+        async with _ResilientAuthoringClient(
+            self.engine_base_url, self.engine_bearer
+        ) as ec:
             tokens = {
                 role: await self._mint(ec, f"agent:{self.run_id}:{role}", "agent")
                 for role in self.case.roles

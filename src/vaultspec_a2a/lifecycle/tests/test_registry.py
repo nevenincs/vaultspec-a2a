@@ -10,6 +10,7 @@ the real OS, not a stub.
 from __future__ import annotations
 
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -22,6 +23,7 @@ from ..registry import (
     ProcRecord,
     RegistryOwnershipError,
     StalenessState,
+    _port_is_free,
     allocate_port,
     classify_record,
     commit_reservation,
@@ -272,3 +274,40 @@ def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path) -> None:
 
     reclaimed = reserve_port("scratch", role, home=tmp_path, config=config)
     assert reclaimed.port == 18900
+
+
+def test_port_free_and_reserve_skip_a_foreign_reuseaddr_listener(tmp_path) -> None:
+    # Regression lock for the Windows collision the live dogfood caught: a real
+    # SO_REUSEADDR listener NOT in the registry (a foreign resident gateway). The
+    # old bind+SO_REUSEADDR free-check reported such a port FREE on Windows, so
+    # reserve_port handed out a live foreign port. The connect-probe must catch it.
+    foreign = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    foreign.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    foreign.bind(("127.0.0.1", 0))
+    foreign.listen(1)
+    held_port = foreign.getsockname()[1]
+    try:
+        # The foreign listener answers a connect, so the port reads as taken ...
+        assert _port_is_free(held_port) is False
+        # ... and a truly free port still reads as free.
+        assert _port_is_free(_unused_port()) is True
+
+        # reserve_port must SKIP the foreign-held port: a single-port band holding
+        # only it is exhausted, never handed out to a colliding boot.
+        band = PortBand(held_port, held_port)
+        with pytest.raises(RuntimeError, match="exhausted"):
+            reserve_port(
+                "scratch",
+                _role(band, heartbeat=False),
+                home=tmp_path,
+                config=_config(band),
+            )
+    finally:
+        foreign.close()
+
+
+def _unused_port() -> int:
+    """An ephemeral port with no listener (bound then released), for a free probe."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return sock.getsockname()[1]

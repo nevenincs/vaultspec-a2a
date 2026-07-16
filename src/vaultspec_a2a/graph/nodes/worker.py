@@ -59,10 +59,12 @@ def _build_worker_messages(
 ) -> list[BaseMessage]:
     """Build the worker prompt/message list before model invocation.
 
-    Rules are compiled from the bundled defaults unioned with the workspace corpus
-    (P02.S03). A document-authoring *role* is scoped to its own conventions; every
-    other role compiles the whole corpus (role=None), so a coder's rules are never
-    stripped (P02.S04/P04).
+    A document-authoring *role* is scoped to its own bundled conventions; every
+    other role (coders, etc.) compiles the whole WORKSPACE corpus (role=None) and
+    does NOT receive the bundled defaults - the bundled dir is gated on document
+    roles, so the ``roles:``-tagged conventions never leak into a coder turn
+    (compile(None) disables the role filter, which would otherwise re-admit them -
+    reviewer HIGH-1). A coder's own workspace rules are never stripped (P02/P04).
     """
     working_state = (
         compact_context(state, domain_config.context_limit_tokens)
@@ -73,10 +75,12 @@ def _build_worker_messages(
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     effective_workspace_root = workspace_root or state.get("workspace_root")
     if effective_workspace_root:
-        compile_role = role if role in _DOCUMENT_AUTHORING_ROLES else None
+        is_document_role = role in _DOCUMENT_AUTHORING_ROLES
+        compile_role = role if is_document_role else None
+        bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
         rules = RuleManager(
             Path(effective_workspace_root),
-            bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
+            bundled_rules_dir=bundled_dir,
         ).compile(compile_role)
         if rules:
             messages.append(

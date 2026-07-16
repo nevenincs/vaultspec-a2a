@@ -38,15 +38,15 @@ Rewrite each of the four research_adr document personas' TOML system prompts aga
 
 - [ ] `P03.S05` - Rewrite the researcher persona's discovery-rag prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
 - [ ] `P03.S06` - Rewrite the synthesist persona's document-scaffold CLI prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml`.
-- [ ] `P03.S07` - Rewrite the adr-author persona's scaffold and mandatory amend-vs-supersede rag-search prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
+- [x] `P03.S07` - Confirm the adr-author persona carries no residual scaffold or amend-vs-supersede rag-search instructions - both were excised upstream by 9c2e9dc and verified by the P01 probe (416b7f0), reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
 - [ ] `P03.S08` - Reconcile the doc-reviewer persona's prompt instructions per the P01 finding for consistency across all four personas; `src/vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml`.
 
 ### Phase `P04` - wire role-scoped propagation at the graph entry points
 
 Wire the P02-designed role-scoped rule selection into the two RuleManager call sites so each persona's worker/supervisor turn actually receives its scoped rule set.
 
-- [ ] `P04.S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile; `src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P04.S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+- [x] `P04.S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile; `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P04.S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
 
 ### Phase `P05` - prove live receipt against a real provisioned run
 
@@ -79,7 +79,7 @@ The plan is complete when every Step is closed. Beyond checkbox completion, miss
 
 - The `P01` probe note confirms, by content not summary, which persona-prompt instructions the upstream `9c2e9dc`/`b1d9892` fixes already resolved and which (rag-search) remain open and tracked, not re-litigated.
 - The `_RULES_SUBDIR` path defect is fixed to the current flat vaultspec-core schema with no dual-read legacy fallback, and `RuleManager.discover()` demonstrably finds the real rule corpus under `.vaultspec/rules/` post-fix.
-- The role-scoped rule source lands as real files under `.vaultspec/rules/` (flat, per the current schema), readable and distinct from the full builtin corpus, with `RuleManager` discovery able to select a persona-scoped subset (not all-or-nothing).
+- The role-scoped rule source lands per the ratified Path B (P02.S03 record, e975850): shipped as tracked a2a package data (`src/vaultspec_a2a/context/presets/rules/document-authoring-conventions.md`), unioned under the workspace corpus with name-for-name workspace shadowing, readable and distinct from the full builtin corpus, with `RuleManager` discovery able to select a persona-scoped subset (not all-or-nothing). The original criterion (real files under `.vaultspec/rules/`) is superseded: a2a has no runtime `.vaultspec` materialization seam until the agent-harness-provisioning workspace-provision verb ships, and a workspace copy still shadows the bundled default the moment that verb exists.
 - Any persona TOML prompt edits in `P03` leave no instruction the runtime cannot execute; each prompt accurately reflects either the already-landed graph-driven propose/submit flow or an explicitly tracked open dependency (rag-search).
 - Both `worker.py` and `supervisor.py` call sites inject the role-scoped rule set, verified by reading the actual code change, not a summary.
 - `P05`'s live assertion demonstrates end-to-end that a graph-executed persona's compiled system messages actually contain its scoped rule content in a real provisioned run workspace - `RuleManager.compile()` returning non-None in isolation is explicitly insufficient per the ADR's Constraints.

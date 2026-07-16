@@ -19,6 +19,8 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-P03-summary]]'
   - '[[2026-07-14-adr-authoring-orchestration-P04-S09]]'
   - '[[2026-07-14-adr-authoring-orchestration-P04-S10]]'
+  - '[[2026-07-14-adr-authoring-orchestration-P04-S16]]'
+  - '[[2026-07-14-adr-authoring-orchestration-P04-summary]]'
   - '[[2026-07-14-adr-authoring-orchestration-P05-S11]]'
   - '[[2026-07-14-adr-authoring-orchestration-P05-S12]]'
   - '[[2026-07-14-adr-authoring-orchestration-P05-S13]]'
@@ -68,6 +70,8 @@ Auto-generated index of all documents tagged with `#adr-authoring-orchestration`
 - `2026-07-14-adr-authoring-orchestration-P05-S13` - Make graph_lifecycle the single construction site with rag-first discovery before editing: build the AuthoringSession factory and production submitter from run-start facts (engine origin via discovery or explicit config, run id, RunTokenStore) and pass proposal_submitter into compile_team_graph for research_adr presets, raising typed fail-closed construction errors (engine unavailable, identity missing, submitter unconfigured, role config invalid, credentials missing) surfaced as truthful run failure
 - `2026-07-14-adr-authoring-orchestration-P05-S14` - Reconcile the AuthoringToolBinding production construction site honestly: rag-first locate what W03 S19 actually landed versus the S20-deferred binding assembly, construct what production needs (or record precisely why the document topology needs none), and correct the W03 records only on source evidence
 - `2026-07-14-adr-authoring-orchestration-P05-S15` - Enforce state and status discipline with live tests and a rag-first sweep for violations: LangGraph state carries only Rust-backend identifiers for authoring (session, changeset, proposal ids), never content or tokens, and product-facing status speaks role and phase vocabulary rather than internal node names
+- `2026-07-14-adr-authoring-orchestration-P04-S16` - Thread grounding research stem into ADR proposal related and enforce canonical adr-status token
+- `2026-07-14-adr-authoring-orchestration-P04-summary` - `adr-authoring-orchestration` `P04` summary
 
 ### plan
 

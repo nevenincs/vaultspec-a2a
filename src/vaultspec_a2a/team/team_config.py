@@ -1,4 +1,4 @@
-"""Agent and Team configuration schema (ADR-012, ADR-013).
+"""Agent and Team configuration schema.
 
 Provides Pydantic models for loading agent and team definitions from TOML
 files. Config is validated eagerly at startup; invalid TOML raises
@@ -31,7 +31,7 @@ from vaultspec_a2a.thread.errors import (
     TeamConfigNotFoundError,
 )
 
-# H5: safe agent_id pattern — alphanumeric, underscores, hyphens only.
+# Safe agent_id pattern — alphanumeric, underscores, hyphens only.
 # Prevents path traversal attacks via crafted agent_id values (e.g. "../../etc").
 # Must be a valid Python identifier (validated in
 # AgentConfig.validate_id_is_identifier), but this pattern adds an explicit
@@ -75,8 +75,8 @@ __all__ = [
 ]
 
 # The implicit, always-present profile: the empty overlay that runs the team's
-# normal ADR-013 resolution chain with no profile layer. It is every team's
-# default profile (model-profiles ADR).
+# normal resolution chain with no profile layer. It is every team's
+# default profile.
 DEFAULT_PROFILE_ID = "team-defaults"
 DEFAULT_PROFILE_DISPLAY_NAME = "Team defaults"
 DEFAULT_PROFILE_DESCRIPTION = (
@@ -84,7 +84,7 @@ DEFAULT_PROFILE_DESCRIPTION = (
 )
 
 # The five agent-harness surfaces a document-authoring run's workspace must
-# carry (agent-harness-provisioning ADR): personas (runtime + workspace depth),
+# carry: personas (runtime + workspace depth),
 # rules (the compiled + on-disk corpus), skills (procedure documents), templates
 # (canonical placeholder shapes), and tools (the vaultspec-core CLI, MCP servers,
 # provider web tooling). Absence of a ``[team.harness]`` block means all five are
@@ -101,7 +101,7 @@ DEFAULT_AUTHORING_SURFACES: tuple[str, ...] = (
 class TopologyType(StrEnum):
     """Supported graph topology types.
 
-    M5: enum membership instead of string comparison.
+    Uses enum membership instead of string comparison.
     """
 
     STAR = "star"
@@ -183,12 +183,12 @@ def supported_capabilities(topology_type: TopologyType) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Agent config models (ADR-012 §2.3)
+# Agent config models
 # ---------------------------------------------------------------------------
 
 
 class AgentCapabilitiesConfig(BaseModel):
-    """ACP clientCapabilities flags for an agent (ADR-012 §2.6)."""
+    """ACP clientCapabilities flags for an agent."""
 
     filesystem_read: bool = False
     filesystem_write: bool = False
@@ -196,9 +196,9 @@ class AgentCapabilitiesConfig(BaseModel):
 
 
 class AgentPermissionsConfig(BaseModel):
-    """Per-agent approval requirements for ACP method calls (ADR-013 §2.7).
+    """Per-agent approval requirements for ACP method calls.
 
-    M4 note: ``require_approval_for`` entries are ACP method names
+    Note: ``require_approval_for`` entries are ACP method names
     (e.g. ``"fs.writeTextFile"``) that must match the method names sent by the
     ACP subprocess at runtime.  Because the full set of ACP tool names is
     determined by the agent binary — not by a static schema known at config-load
@@ -216,7 +216,7 @@ class AgentPermissionsConfig(BaseModel):
 
 
 class AgentModelConfig(BaseModel):
-    """Optional per-agent provider/capability override (ADR-012 §2.2)."""
+    """Optional per-agent provider/capability override."""
 
     provider: Provider | None = None
     capability: Model | None = None
@@ -230,7 +230,7 @@ class AgentPersonaConfig(BaseModel):
 
 
 class AgentConfig(BaseModel):
-    """Full configuration for a single agent role (ADR-012 §2.3).
+    """Full configuration for a single agent role.
 
     Loaded from a TOML file whose ``[agent]`` section is validated here.
     ``agent.id`` must be a valid Python identifier (it becomes a LangGraph
@@ -269,7 +269,7 @@ class AgentConfig(BaseModel):
             Validated ``AgentConfig`` instance.
 
         Raises:
-            ConfigError: If the file is not valid TOML (M8: domain exception).
+            ConfigError: If the file is not valid TOML (domain exception).
             pydantic.ValidationError: If the TOML data fails schema validation.
         """
         try:
@@ -285,12 +285,12 @@ class AgentConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Team config models (ADR-013 §2.4)
+# Team config models
 # ---------------------------------------------------------------------------
 
 
 class WorkerOverrideConfig(BaseModel):
-    """Per-worker model override in a team TOML (ADR-013 §2.3)."""
+    """Per-worker model override in a team TOML."""
 
     provider: Provider | None = None
     capability: Model | None = None
@@ -305,11 +305,11 @@ class WorkerRef(BaseModel):
 
 
 class TeamProfileRoleConfig(BaseModel):
-    """Per-role assignment overlay inside a model profile (model-profiles ADR).
+    """Per-role assignment overlay inside a model profile.
 
     Keyed by worker ``agent_id`` in the profile's ``roles`` map; carries the same
     provider/capability/fallback overlay shape as a ``[[team.workers]]`` override.
-    A field left unset falls through the ADR-013 S2.3 precedence chain unchanged,
+    A field left unset falls through the normal precedence chain unchanged,
     so a partial overlay only redirects the fields it names.
     """
 
@@ -319,7 +319,7 @@ class TeamProfileRoleConfig(BaseModel):
 
 
 class TeamProfileConfig(BaseModel):
-    """A named whole-team model profile (model-profiles ADR).
+    """A named whole-team model profile.
 
     Declared as ``[team.profiles.<id>]`` in team TOML. ``roles`` maps a worker
     ``agent_id`` to its overlay; roles absent from the profile fall through the
@@ -334,7 +334,7 @@ class TeamProfileConfig(BaseModel):
 
 
 class TeamHarnessConfig(BaseModel):
-    """Declared agent-harness composition for a team preset (agent-harness ADR).
+    """Declared agent-harness composition for a team preset.
 
     Declared as ``[team.harness]`` in team TOML. ``required_surfaces`` names the
     harness surfaces a run's workspace must carry (a subset of
@@ -393,7 +393,7 @@ class ResearchThreadSpec(BaseModel):
 
 
 class TopologyConfig(BaseModel):
-    """LangGraph graph structure declaration (ADR-013 §2.5).
+    """LangGraph graph structure declaration.
 
     ``type`` selects the compilation strategy:
     - ``star``: supervisor routes dynamically to any worker.
@@ -402,14 +402,14 @@ class TopologyConfig(BaseModel):
       triggers a conditional back-edge.
     - ``research_adr``: the document phase machine -- a Send-based research
       diverge stage joins into synthesis, each document phase guarded by a human
-      approval gate (adr-authoring-orchestration).
+      approval gate.
     """
 
-    # M5: use TopologyType enum for membership validation instead of string comparison
+    # Use TopologyType enum for membership validation instead of string comparison
     type: TopologyType
     order: list[str] = Field(default_factory=list)
     loop_node: str | None = None
-    # M7: max_loops range validated; must be between 1 and 100 inclusive
+    # max_loops range validated; must be between 1 and 100 inclusive
     max_loops: int = Field(default=3, ge=1, le=100)
     # research_adr fan-out: one researcher branch per spec. Empty is permitted
     # and compiles to a single default branch; declare specs for real N-way
@@ -446,7 +446,7 @@ class SupervisorConfig(BaseModel):
 
 
 class TeamDefaultsConfig(BaseModel):
-    """Team-wide fallback model binding (ADR-013 §2.3 model resolution)."""
+    """Team-wide fallback model binding (model resolution)."""
 
     provider: Provider | None = None
     capability: Model | None = None
@@ -474,7 +474,7 @@ class TeamGraphConfig(BaseModel):
 
 
 class TeamConfig(BaseModel):
-    """Full configuration for a team preset (ADR-013 §2.4).
+    """Full configuration for a team preset.
 
     Loaded from a TOML file whose ``[team]`` section is validated here.
     ``team.id`` must match the filename stem.
@@ -543,7 +543,7 @@ class TeamConfig(BaseModel):
 
         Mirrors ``validate_profiles``: a role-skills key naming an agent the team
         does not run is a first-class config failure, not a silently ignored map
-        entry (agent-harness-provisioning ADR: declared composition is enforced).
+        entry (declared composition is enforced).
         """
         if self.harness is None:
             return self
@@ -578,8 +578,7 @@ class TeamConfig(BaseModel):
         declared, a document-authoring preset gets the DEFAULT authoring harness
         (all five surfaces required, no extra skills or MCP servers), while a
         non-authoring preset has no harness requirement and returns ``None``
-        (agent-harness-provisioning ADR: absence means the default authoring
-        harness for writer roles).
+        (absence means the default authoring harness for writer roles).
         """
         if self.harness is not None:
             return self.harness
@@ -614,7 +613,7 @@ class TeamConfig(BaseModel):
             Validated ``TeamConfig`` instance.
 
         Raises:
-            ConfigError: If the file is not valid TOML (M8: domain exception).
+            ConfigError: If the file is not valid TOML (domain exception).
             pydantic.ValidationError: If the TOML data fails schema validation.
         """
         try:
@@ -630,7 +629,7 @@ class TeamConfig(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Config discovery helpers (ADR-012 §2.8, ADR-013 §2.8)
+# Config discovery helpers
 # ---------------------------------------------------------------------------
 
 
@@ -654,7 +653,7 @@ def load_agent_config(
                                    bundled preset exists.
         pydantic.ValidationError: If the TOML data fails schema validation.
     """
-    # H5: validate agent_id before using it in path construction to prevent
+    # Validate agent_id before using it in path construction to prevent
     # path traversal attacks (e.g. agent_id="../../etc/passwd").
     if not _SAFE_AGENT_ID_RE.match(agent_id):
         raise ConfigError(

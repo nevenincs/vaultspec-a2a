@@ -1,4 +1,4 @@
-"""Tests for context/rules.py — RuleManager (ADR-028).
+"""Tests for context/rules.py — RuleManager.
 
 All tests use real temp directories (tmp_path). No mocks, no monkeypatching.
 """
@@ -18,7 +18,7 @@ def _rules_dir(tmp_path: Path) -> Path:
 
     The rule corpus lives directly under ``.vaultspec/rules/`` in the current
     vaultspec-core schema (no nested ``rules/rules/``); the fixtures mirror that
-    real layout (graph-agent-framework-harness P02.S13).
+    real layout.
     """
     d = tmp_path / ".vaultspec" / "rules"
     d.mkdir(parents=True)
@@ -234,7 +234,7 @@ class TestCompile:
 
 
 class TestCompileCache:
-    """Tests for the mtime-based compile cache (HIGH-01)."""
+    """Tests for the mtime-based compile cache."""
 
     def test_second_call_returns_cached_result(self, tmp_path: Path) -> None:
         d = _rules_dir(tmp_path)
@@ -340,7 +340,7 @@ class TestCompileCache:
 
 
 class TestRealSyncedCorpus:
-    """Prove the fix against the ACTUAL synced flat rule corpus (P02.S13).
+    """Prove the fix against the ACTUAL synced flat rule corpus.
 
     Not a hand-built fixture: this points ``RuleManager`` at the repository's real
     ``.vaultspec/rules/`` corpus as ``vaultspec-core`` synced it. Before the
@@ -399,7 +399,7 @@ class TestRealSyncedCorpus:
         Role scoping opts in, never adds: ``discover(role)`` can only ever return a
         subset of ``discover(None)``. Today no shipped rule carries a ``roles:``
         key, so a scoped turn is empty until the document-authoring rule source
-        (P02.S03) lands - which is exactly the point: the mechanism is inert on the
+        lands - which is exactly the point: the mechanism is inert on the
         current corpus and turns on only for files that opt in.
         """
         root = _find_synced_rules_root()
@@ -431,7 +431,7 @@ def _write_rule(directory: Path, name: str, roles, body: str = "body") -> None:
 
 
 class TestRoleScoping:
-    """Opt-in ``role`` filter on discover/compile (P02.S04).
+    """Opt-in ``role`` filter on discover/compile.
 
     Real temp dirs, no mocks. Scoping is opt-in and restrictive: only files whose
     ``roles:`` frontmatter includes the role are selected for a scoped turn, and
@@ -523,7 +523,7 @@ class TestRoleScoping:
 
 
 class TestBundledDefaults:
-    """Bundled-default plus workspace-override read path (P02.S03, Path B).
+    """Bundled-default plus workspace-override read path (Path B).
 
     Real temp dirs, no mocks. Mirrors ``team_config``'s preset resolution: a
     workspace file SHADOWS a bundled file of the same name entirely (no merging);
@@ -612,8 +612,8 @@ def _write_ordered(directory: Path, name: str, order: object, body: str) -> None
 class TestCompileOrderAndCacheEdges:
     """Compile order honors ``order:`` and the cache watches both source dirs.
 
-    Reviewer LOW-3 (the ``order:`` key was declared but never consumed) and LOW-4
-    (two uncovered cache-invalidation edges). Real temp dirs, no mocks.
+    Covers the ``order:`` key being consumed in compile order and two
+    cache-invalidation edges. Real temp dirs, no mocks.
     """
 
     def test_compile_honors_order_key_over_name(self, tmp_path: Path) -> None:

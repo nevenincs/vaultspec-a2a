@@ -1,4 +1,4 @@
-"""Agent harness verification (agent-harness-provisioning ADR).
+"""Agent harness verification.
 
 An authoring run's agent harness is a set of workspace surfaces the runtime
 needs present and readable before dispatch: rules, templates, skills, and the
@@ -14,10 +14,6 @@ The verifier is read-only and workspace-scoped: it inspects the flat
 ``vaultspec-core`` CLI resolves in the agent's environment. It never writes,
 never spawns the CLI, and never emits a filesystem path in a served reason -
 reasons name WHAT is missing, not WHERE.
-
-References:
-    - agent-harness-provisioning ADR (the harness contract; the
-      ``Verification, not hope`` clause)
 """
 
 from __future__ import annotations
@@ -44,9 +40,9 @@ _TEMPLATES_DIR = Path(".vaultspec") / "templates"
 _SKILLS_DIR = Path(".vaultspec") / "skills"
 
 # The canonical authoring templates every placeholder is filled from. A
-# document-authoring harness requires these readable on disk - the first S10 run
+# document-authoring harness requires these readable on disk - an early run
 # shipped an ADR carrying the raw ``{accepted|rejected|...}`` enum precisely
-# because none were reachable (research).
+# because none were reachable.
 DEFAULT_REQUIRED_TEMPLATES: tuple[str, ...] = (
     "adr",
     "plan",
@@ -59,7 +55,7 @@ DEFAULT_REQUIRED_TEMPLATES: tuple[str, ...] = (
 # The CLI the agent environment must resolve for read-only self-validation
 # (template reading, ``vault check`` on drafts staged outside ``.vault/``): the
 # console script on PATH, or the ``uvx`` shim that runs
-# ``uvx --from vaultspec-core vaultspec-core`` (the ws5 provisioning recipe).
+# ``uvx --from vaultspec-core vaultspec-core``.
 _CLI_NAMES: tuple[str, ...] = ("vaultspec-core", "uvx")
 
 
@@ -178,6 +174,6 @@ def _cli_resolvable() -> bool:
     """True when the vaultspec-core CLI resolves in the current environment.
 
     Resolution only, never a spawn: the console script on PATH, or the ``uvx``
-    shim that runs ``uvx --from vaultspec-core vaultspec-core`` (ws5 recipe).
+    shim that runs ``uvx --from vaultspec-core vaultspec-core``.
     """
     return any(shutil.which(name) is not None for name in _CLI_NAMES)

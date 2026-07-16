@@ -1,11 +1,8 @@
-"""Universal Rule Propagation — RuleManager (ADR-028).
+"""Universal Rule Propagation — RuleManager.
 
 Discovers and compiles project-level coding rules from
 ``.vaultspec/rules/*.md`` into a single string for injection
 into LLM system prompts.
-
-References:
-    - ADR-028: Universal Rule Propagation
 """
 
 import contextlib
@@ -20,16 +17,14 @@ _logger = logging.getLogger(__name__)
 
 # The rule corpus lives FLAT directly under ``.vaultspec/rules/`` in the current
 # vaultspec-core schema; there is no nested ``rules/rules/`` directory. Aligned
-# forward to that schema with no dual-read fallback (ADR-028 / graph-agent-
-# framework-harness P02.S13).
+# forward to that schema with no dual-read fallback.
 _RULES_SUBDIR = Path(".vaultspec") / "rules"
 
 # Bundled rule defaults shipped inside the a2a package (tracked under ``src/``,
 # unlike the gitignored workspace ``.vaultspec/``). A run's workspace copies SHADOW
 # these bundled defaults name-for-name - a2a's own bundled-default + workspace-
-# override convention, mirroring ``team_config``'s preset resolution
-# (graph-agent-framework-harness P02.S03; agent-harness-provisioning-adr's
-# workspace-over-bundled principle). Opt-in: a caller passes this directory as
+# override convention, mirroring ``team_config``'s preset resolution and its
+# workspace-over-bundled principle. Opt-in: a caller passes this directory as
 # ``bundled_rules_dir`` (the two graph call sites do); ``RuleManager`` defaults to
 # workspace-only so unrelated construction is unaffected.
 DEFAULT_BUNDLED_RULES_DIR = Path(__file__).parent / "presets" / "rules"
@@ -67,9 +62,9 @@ class RuleManager:
             bundled_rules_dir.resolve() if bundled_rules_dir is not None else None
         )
 
-        # mtime-based compile cache (HIGH-01), keyed by the requested role so a
+        # mtime-based compile cache, keyed by the requested role so a
         # role-scoped turn and a whole-corpus turn never serve each other's
-        # compiled string (graph-agent-framework-harness P02.S04). The mtime
+        # compiled string. The mtime
         # snapshot watches the FULL corpus across BOTH source dirs, so any rule-file
         # change drops every role's cached entry at once.
         self._cached_results: dict[str | None, str | None] = {}
@@ -91,7 +86,7 @@ class RuleManager:
         When *role* is given, the result is RESTRICTED to files whose ``roles:``
         frontmatter list includes that role - a document-authoring turn passes its
         persona role and receives only the rules opted in to it, instead of the
-        whole corpus (graph-agent-framework-harness P02.S04). Scoping is opt-in and
+        whole corpus. Scoping is opt-in and
         restrictive: a file with no ``roles:`` key is not role-scoped and is
         excluded from a scoped turn, so scoping never requires editing the
         vaultspec-core-managed corpus. When *role* is ``None`` the filter is off
@@ -101,7 +96,7 @@ class RuleManager:
         workspace file SHADOWS a bundled file of the same name entirely (resolved by
         name before any builtin/role filter), so the workspace override wins even if
         it opts into a different role set - mirroring ``team_config``'s preset
-        resolution (P02.S03).
+        resolution.
 
         Returns:
             Sorted list of absolute ``Path`` objects; empty list if no source
@@ -127,7 +122,7 @@ class RuleManager:
         # undeclared files get a neutral default), tie-broken by name - a stable
         # order that is INDEPENDENT of absolute deployment path. Before this the
         # ``order:`` key was declared-but-never-consumed and concatenation order was
-        # path-dependent (reviewer LOW-3).
+        # path-dependent.
         return [p for _, _, p in sorted(selected)]
 
     def _rule_source_dirs(self) -> list[Path]:
@@ -143,7 +138,7 @@ class RuleManager:
     def compile(self, role: str | None = None) -> str | None:
         """Compile the discovered rule files into a single string.
 
-        Uses a two-tier mtime cache (HIGH-01):
+        Uses a two-tier mtime cache:
         1. Directory mtime check (single stat) to detect added/removed files
         2. Per-file mtime check to detect content edits
         Returns the cached result if nothing changed.
@@ -152,7 +147,7 @@ class RuleManager:
         :meth:`discover`); results are cached PER ROLE so a scoped turn and a
         whole-corpus turn never serve each other's string. The mtime snapshot
         watches the full corpus, so any rule-file change invalidates every role's
-        cached entry at once (graph-agent-framework-harness P02.S04).
+        cached entry at once.
 
         Processes each file in :meth:`discover` order:
 
@@ -340,7 +335,7 @@ class RuleManager:
 
 # Compile order for a rule file whose frontmatter declares no ``order:`` - a
 # neutral default that sorts undeclared files after the low-numbered mandates but
-# keeps them deterministic (reviewer LOW-3).
+# keeps them deterministic.
 _DEFAULT_RULE_ORDER = 100
 
 
@@ -393,7 +388,7 @@ def _order_from_meta(meta: dict[str, object]) -> int:
 
     A declared integer ``order:`` orders the file in the compiled concatenation
     (low first); anything absent or non-integer falls back to
-    :data:`_DEFAULT_RULE_ORDER` (reviewer LOW-3).
+    :data:`_DEFAULT_RULE_ORDER`.
     """
     order = meta.get("order")
     if isinstance(order, bool):

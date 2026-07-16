@@ -1,4 +1,4 @@
-"""Tests for agent and team TOML config loading and validation (ADR-012, ADR-013).
+"""Tests for agent and team TOML config loading and validation.
 
 All tests load real TOML files from src/vaultspec_a2a/team/presets/ — no mocks or stubs.
 """
@@ -337,7 +337,7 @@ class TestTeamConfigFromToml:
 
 
 class TestWorkerModelOverride:
-    """Verify per-worker model overrides are loaded correctly (ADR-013 §2.3)."""
+    """Verify per-worker model overrides are loaded correctly."""
 
     def test_worker_without_override_has_none_fields(self) -> None:
         """Workers with no override have None provider and capability."""
@@ -476,12 +476,12 @@ class TestTomlDecodeErrors:
 
 
 # ---------------------------------------------------------------------------
-# load_agent_config: agent_id validation (CORE-H5)
+# load_agent_config: agent_id validation
 # ---------------------------------------------------------------------------
 
 
 class TestLoadAgentConfigValidation:
-    """Verify agent_id is validated before path construction (CORE-H5)."""
+    """Verify agent_id is validated before path construction."""
 
     def test_path_traversal_agent_id_raises(self) -> None:
         """agent_id containing '..' raises ConfigError (path traversal prevention)."""
@@ -532,12 +532,12 @@ class TestLoadAgentConfigValidation:
 
 
 # ---------------------------------------------------------------------------
-# load_team_config: team_id path traversal guard (TC-01)
+# load_team_config: team_id path traversal guard
 # ---------------------------------------------------------------------------
 
 
 class TestLoadTeamConfigValidation:
-    """Verify team_id is validated before path construction (TC-01)."""
+    """Verify team_id is validated before path construction."""
 
     def test_path_traversal_team_id_raises(self) -> None:
         """team_id containing '..' raises ConfigError."""
@@ -702,7 +702,7 @@ agent_id = "coder"
 
 
 # ---------------------------------------------------------------------------
-# Document-authoring persona TOMLs (P04.S09)
+# Document-authoring persona TOMLs
 # ---------------------------------------------------------------------------
 
 
@@ -775,7 +775,7 @@ class TestDocumentAuthoringPersonas:
         assert "ADR READY" in cfg.persona.system_prompt
 
     def test_writers_emit_document_body_not_scaffold(self) -> None:
-        """Writers emit the document as their message body (ADR PW3 graph-submitter).
+        """Writers emit the document as their message body.
 
         The production mechanism is the gate node's in-process submit of the
         writer's message body; the agent-initiated authoring path (scaffold via
@@ -832,7 +832,7 @@ class TestDocumentAuthoringPersonas:
 
 
 # ---------------------------------------------------------------------------
-# vaultspec-adr-research team preset (P04.S09)
+# vaultspec-adr-research team preset
 # ---------------------------------------------------------------------------
 
 
@@ -871,12 +871,12 @@ class TestAdrResearchTeamPreset:
     def test_adr_research_team_loads_when_research_adr_topology_lands(self) -> None:
         """vaultspec-adr-research loads once TopologyType.RESEARCH_ADR is present.
 
-        This test passes trivially until P02.S06 adds TopologyType.RESEARCH_ADR.
+        This test passes trivially until TopologyType.RESEARCH_ADR is added.
         Once the enum member exists, the preset MUST load successfully — if it
         cannot, the test FAILS (not skips) with a diagnostic message.
         """
         if not hasattr(TopologyType, "RESEARCH_ADR"):
-            # P02.S06 has not landed; loading requires the enum member.
+            # Not yet landed; loading requires the enum member.
             # Not skipping — return early so the test suite stays green until
             # the enum arrives. When it does, this guard is removed and the
             # assertion below runs.
@@ -887,7 +887,7 @@ class TestAdrResearchTeamPreset:
         except Exception as exc:
             pytest.fail(
                 f"vaultspec-adr-research preset failed to load even though "
-                f"TopologyType.RESEARCH_ADR is present — P02.S06 may be incomplete "
+                f"TopologyType.RESEARCH_ADR is present — the enum may be incomplete "
                 f"or the TOML schema is broken: {exc}"
             )
         assert cfg.id == "vaultspec-adr-research"
@@ -1013,8 +1013,7 @@ class TestModelProfiles:
 class TestTeamHarness:
     """team.harness declaration schema and the default authoring harness.
 
-    Real in-memory ``model_validate`` over dicts (config, not a mock),
-    agent-harness-provisioning ADR.
+    Real in-memory ``model_validate`` over dicts (config, not a mock).
     """
 
     def _authoring_dict(

@@ -19,6 +19,7 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
   - '[[2026-07-15-graph-agent-framework-harness-research]]'
   - '[[2026-07-16-graph-agent-framework-harness-batch2-3-review-audit]]'
+  - '[[2026-07-16-graph-agent-framework-harness-batch4-5-review-audit]]'
   - '[[2026-07-16-graph-agent-framework-harness-exec]]'
 ---
 
@@ -35,6 +36,7 @@ Auto-generated index of all documents tagged with `#graph-agent-framework-harnes
 ### audit
 
 - `2026-07-16-graph-agent-framework-harness-batch2-3-review-audit` - `graph-agent-framework-harness` audit: `batch-2 and batch-3 reviewer verdict: bundled rule wiring, role-leak fix, and context-graph cycle break`
+- `2026-07-16-graph-agent-framework-harness-batch4-5-review-audit` - `graph-agent-framework-harness` audit: `batch-4 and batch-5 reviewer verdict: P05.S11 receipt proof, verify_harness rules-leg fix, and MCP composition`
 
 ### exec
 

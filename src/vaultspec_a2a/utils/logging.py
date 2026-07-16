@@ -119,6 +119,8 @@ class JSONFormatter(logging.Formatter):
 def setup_logging(
     level: LogLevel | str | None = None,
     settings_override: _LoggingSettings | None = None,
+    *,
+    force_interactive: bool | None = None,
 ) -> None:
     """Configure structured JSON logging or rich terminal logging.
 
@@ -127,6 +129,15 @@ def setup_logging(
             is used (``settings_override`` must be provided in that case).
         settings_override: Application settings instance. Required when *level*
             is *None* or when interactive/color/CI decisions are needed.
+        force_interactive: Override the terminal-interactivity decision that
+            selects the Rich handler. When *None* (the default), interactivity is
+            auto-detected from whether both stdout and stderr are TTYs. Set
+            *True* to force the interactive Rich path or *False* to force the
+            JSON path regardless of the attached streams — useful when the
+            process runs under a supervisor that owns a real terminal whose
+            streams do not report as TTYs, or when a caller wants deterministic
+            output. The ``no_color``, ``ci``, and production ``force_json``
+            guards still apply on top of this decision.
     """
     if level is None:
         if settings_override is None:
@@ -147,7 +158,10 @@ def setup_logging(
     for handler in list(root_logger.handlers):
         root_logger.removeHandler(handler)
 
-    is_interactive = sys.stdout.isatty() and sys.stderr.isatty()
+    if force_interactive is None:
+        is_interactive = sys.stdout.isatty() and sys.stderr.isatty()
+    else:
+        is_interactive = force_interactive
     disable_color = settings_override.no_color if settings_override else False
     ci_mode = settings_override.ci if settings_override else False
     force_json = not settings_override.is_dev if settings_override else True

@@ -11,6 +11,11 @@ and are marked @pytest.mark.requires_jaeger. Run them with: just test-tracing
 
 from __future__ import annotations
 
+import json
+import os
+import subprocess
+import sys
+import textwrap
 from typing import TYPE_CHECKING, Any, cast
 
 import pytest
@@ -23,6 +28,8 @@ from starlette.responses import JSONResponse
 from starlette.routing import Route
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from starlette.requests import Request
 
 from .. import (
@@ -41,6 +48,51 @@ from .. import (
 
 _HTTP_OK = 200
 _HTTP_SERVER_ERROR = 500
+
+# The telemetry config constants (``_SDK_DISABLED``, ``_LANGSMITH_ENABLED``) are
+# evaluated once at import time from the environment, so a running-interpreter
+# monkeypatch cannot vary them. This probe imports the module and calls
+# ``configure_telemetry`` inside a spawned child whose environment the parent
+# controls, exercising the real import-time env read across a process boundary.
+_TELEMETRY_PROBE_SCRIPT = textwrap.dedent(
+    """
+    import json
+
+    from vaultspec_a2a.telemetry import configure_telemetry
+
+    cfg = configure_telemetry()
+    print(json.dumps({
+        "sdk_available": cfg.sdk_available,
+        "sdk_enabled": cfg.sdk_enabled,
+        "langsmith_enabled": cfg.langsmith_enabled,
+    }))
+    """
+)
+
+
+def _run_telemetry_probe(tmp_path: Path, env_overrides: dict[str, str]) -> dict:
+    """Run ``configure_telemetry`` in a spawned child with a controlled env.
+
+    The parent starts from its own environment, strips the telemetry toggles so
+    a host value cannot pre-decide the result, applies *env_overrides*, and
+    returns the child's parsed JSON config snapshot.
+    """
+    script = tmp_path / "telemetry_probe.py"
+    script.write_text(_TELEMETRY_PROBE_SCRIPT, encoding="utf-8")
+    env = dict(os.environ)
+    for key in ("OTEL_SDK_DISABLED", "LANGSMITH_TRACING"):
+        env.pop(key, None)
+    env.update(env_overrides)
+    result = subprocess.run(
+        [sys.executable, str(script)],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])
 
 
 def _make_test_app(*, excluded: frozenset[str] | None = None) -> Starlette:
@@ -95,16 +147,21 @@ def test_configure_telemetry_service_name_type() -> None:
     assert len(cfg.service_name) > 0
 
 
-def test_configure_telemetry_sdk_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
-    """OTEL_SDK_DISABLED=true is reflected in the returned config."""
-    monkeypatch.setenv("OTEL_SDK_DISABLED", "true")
-    cfg = configure_telemetry()
-    # If SDK not installed, sdk_enabled is always False regardless.
-    # If installed but disabled, sdk_enabled must be False.
-    assert isinstance(cfg.sdk_enabled, bool)
-    # The module-level _SDK_DISABLED constant is evaluated at import time,
-    # so monkeypatching the env var does not affect already-imported modules.
-    # We only verify the return type is correct here.
+def test_configure_telemetry_sdk_disabled(tmp_path: Path) -> None:
+    """OTEL_SDK_DISABLED=true forces sdk_enabled False in a fresh process.
+
+    ``_SDK_DISABLED`` is frozen at import from the env var, so this is exercised
+    across a real process boundary. The disabled run reports the SDK *available*
+    (the package is installed) yet *not enabled*; a control run with the var
+    absent reports it enabled — proving the flag, not SDK absence, drove the
+    disabled result.
+    """
+    disabled = _run_telemetry_probe(tmp_path, {"OTEL_SDK_DISABLED": "true"})
+    assert disabled["sdk_available"] is True
+    assert disabled["sdk_enabled"] is False
+
+    enabled = _run_telemetry_probe(tmp_path, {})
+    assert enabled["sdk_enabled"] is True
 
 
 def test_configure_telemetry_langsmith_flag() -> None:
@@ -131,15 +188,19 @@ def test_telemetry_config_langsmith_enabled_field() -> None:
     assert cfg.langsmith_enabled is True
 
 
-def test_configure_telemetry_langsmith_off(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Absent LANGCHAIN_TRACING_V2 in test env yields langsmith_enabled=False.
+def test_configure_telemetry_langsmith_off(tmp_path: Path) -> None:
+    """LangSmith tracing reflects LANGSMITH_TRACING read at import in a fresh process.
 
-    The module-level constant is frozen at import time.
+    ``_LANGSMITH_ENABLED`` is frozen at import from ``LANGSMITH_TRACING``. With the
+    var absent the config reports LangSmith disabled; a control run with
+    ``LANGSMITH_TRACING=true`` reports it enabled — proving the real import-time env
+    read in both directions rather than asserting a bare type.
     """
-    monkeypatch.delenv("LANGCHAIN_TRACING_V2", raising=False)
-    cfg = configure_telemetry()
-    # The value reflects what was set when the module was first imported.
-    assert isinstance(cfg.langsmith_enabled, bool)
+    off = _run_telemetry_probe(tmp_path, {})
+    assert off["langsmith_enabled"] is False
+
+    on = _run_telemetry_probe(tmp_path, {"LANGSMITH_TRACING": "true"})
+    assert on["langsmith_enabled"] is True
 
 
 def test_telemetry_config_repr() -> None:

@@ -3,9 +3,12 @@
 Every test creates a fresh temporary git repo — no mocks, no monkeypatching.
 """
 
+import json
+import os
 import subprocess
+import sys
+import textwrap
 from pathlib import Path
-from typing import ClassVar
 
 import pytest
 
@@ -332,98 +335,167 @@ class TestResolveEnvVars:
 # ---------------------------------------------------------------------------
 
 
+# A probe that runs the REAL ``resolve_env_vars`` inside a spawned child process
+# and emits the resolved environment as JSON. The child reads only the process
+# environment its parent hands it, so the scrub is exercised across a real
+# process boundary rather than by monkeypatching the running interpreter (mirrors
+# the readiness-probe pattern in ``api/tests/test_model_profiles_evidence.py``).
+_SCRUB_PROBE_SCRIPT = textwrap.dedent(
+    """
+    import json
+    import sys
+    from pathlib import Path
+
+    from vaultspec_a2a.workspace.environment import resolve_env_vars
+
+    resolved = resolve_env_vars(Path(sys.argv[1]))
+    print(json.dumps(resolved))
+    """
+)
+
+_SCRUB_SECRET_KEYS: list[str] = [
+    "ANTHROPIC_API_KEY",
+    # CLAUDE_CODE_OAUTH_TOKEN is intentionally NOT scrubbed here — it is in the
+    # CLAUDE_CODE_* allowlist so the provider layer can re-inject it. See
+    # test_claude_code_allowlist_keys_are_preserved below.
+    "OPENAI_API_KEY",
+    "GEMINI_API_KEY",
+    "GOOGLE_API_KEY",
+    "AWS_SECRET_ACCESS_KEY",
+    "AZURE_OPENAI_API_KEY",
+    "ZHIPU_API_KEY",
+    "LANGCHAIN_API_KEY",
+    "LANGCHAIN_TRACING_V2",
+    # ANTHROPIC_LOG causes SDK debug text on stdout → JSON-RPC corruption.
+    "ANTHROPIC_LOG",
+]
+
+_SCRUB_VAULTSPEC_KEYS: dict[str, str] = {
+    "VAULTSPEC_SECRET_TOKEN": "should-not-leak",
+    "VAULTSPEC_ANOTHER_KEY": "also-secret",
+}
+
+_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE: dict[str, str] = {
+    "CLAUDE_CODE_SKIP_BROWSER_AUTH": "1",
+    "CLAUDE_CODE_API_KEY_HELPER": "helper-script",
+    "CLAUDE_CODE_SOME_INTERNAL_FLAG": "true",
+}
+
+_SCRUB_ALLOWLISTED_CLAUDE_CODE: dict[str, str] = {
+    "CLAUDE_CODE_OAUTH_TOKEN": "tok-abc123",
+    "CLAUDE_CODE_EXECUTABLE": "/usr/local/bin/claude",
+    "CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY": "1",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+}
+
+_SCRUB_ZAI_KEYS: dict[str, str] = {
+    "ANTHROPIC_BASE_URL": "https://api.z.ai/api/anthropic",
+    "ANTHROPIC_AUTH_TOKEN": "zai-token-value",
+}
+
+_SCRUB_SAFE_KEYS: dict[str, str] = {"MY_SAFE_VAR": "visible-value"}
+
+
+@pytest.fixture(scope="module")
+def resolved_env(tmp_path_factory: pytest.TempPathFactory) -> dict[str, str]:
+    """Spawn one child ``resolve_env_vars`` over a fully controlled env.
+
+    The parent seeds the child environment with a known value for every key the
+    scrub contract concerns — secrets, ``VAULTSPEC_*`` keys, both the allowlisted
+    and non-allowlisted ``CLAUDE_CODE_*`` keys, the Z.ai pass-through pair, and a
+    plainly-safe var — then returns the child's resolved-env dict.
+    """
+    tmp_path = tmp_path_factory.mktemp("scrub-probe")
+    script = tmp_path / "scrub_probe.py"
+    script.write_text(_SCRUB_PROBE_SCRIPT, encoding="utf-8")
+
+    env = dict(os.environ)
+    for key in _SCRUB_SECRET_KEYS:
+        env[key] = "super-secret-value"
+    env.update(_SCRUB_VAULTSPEC_KEYS)
+    env.update(_SCRUB_NON_ALLOWLISTED_CLAUDE_CODE)
+    env.update(_SCRUB_ALLOWLISTED_CLAUDE_CODE)
+    env.update(_SCRUB_ZAI_KEYS)
+    env.update(_SCRUB_SAFE_KEYS)
+
+    result = subprocess.run(
+        [sys.executable, str(script), str(tmp_path)],
+        cwd=str(tmp_path),
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=120,
+    )
+    assert result.returncode == 0, result.stderr
+    return json.loads(result.stdout.strip().splitlines()[-1])
+
+
 class TestCredentialScrubbing:
-    """Tests verifying that known secret env vars are scrubbed."""
+    """Tests verifying that known secret env vars are scrubbed.
 
-    _SECRET_KEYS: ClassVar[list[str]] = [
-        "ANTHROPIC_API_KEY",
-        # CLAUDE_CODE_OAUTH_TOKEN is intentionally NOT scrubbed here — it is in
-        # the CLAUDE_CODE_* allowlist so the provider layer can re-inject it.
-        # See test_claude_code_wildcard_scrub_preserves_allowlist below.
-        "OPENAI_API_KEY",
-        "GEMINI_API_KEY",
-        "GOOGLE_API_KEY",
-        "AWS_SECRET_ACCESS_KEY",
-        "AZURE_OPENAI_API_KEY",
-        "ZHIPU_API_KEY",
-        "LANGCHAIN_API_KEY",
-        "LANGCHAIN_TRACING_V2",
-        # ANTHROPIC_LOG causes SDK debug text on stdout
-        # → JSON-RPC corruption
-        "ANTHROPIC_LOG",
-    ]
+    ``resolve_env_vars`` is exercised in a spawned child process whose entire
+    environment is constructed by the parent — the real settings path over a real
+    process boundary, never a monkeypatch of the running interpreter. A single
+    module-scoped child spawn produces one resolved-env snapshot; each test asserts
+    its own slice of the scrub/preserve contract against that shared real result.
+    """
 
-    @pytest.mark.parametrize("secret_key", _SECRET_KEYS)
+    @pytest.mark.parametrize("secret_key", _SCRUB_SECRET_KEYS)
     def test_known_secret_is_scrubbed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, secret_key: str
+        self, resolved_env: dict[str, str], secret_key: str
     ) -> None:
         """Known secret env vars are NOT present in the returned env dict."""
-        monkeypatch.setenv(secret_key, "super-secret-value")
-        env = resolve_env_vars(tmp_path)
-        assert secret_key not in env, (
+        assert secret_key not in resolved_env, (
             f"{secret_key} should be scrubbed but was present in env"
         )
 
     def test_vaultspec_prefixed_key_is_scrubbed(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
         """VAULTSPEC_ prefixed keys are scrubbed regardless of suffix."""
-        monkeypatch.setenv("VAULTSPEC_SECRET_TOKEN", "should-not-leak")
-        monkeypatch.setenv("VAULTSPEC_ANOTHER_KEY", "also-secret")
-        env = resolve_env_vars(tmp_path)
-        assert "VAULTSPEC_SECRET_TOKEN" not in env
-        assert "VAULTSPEC_ANOTHER_KEY" not in env
+        for key in _SCRUB_VAULTSPEC_KEYS:
+            assert key not in resolved_env, (
+                f"VAULTSPEC_-prefixed {key} should be scrubbed but was present"
+            )
 
     def test_non_secret_env_vars_are_preserved(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
         """Non-secret env vars like HOME, PATH, USER are preserved."""
-        monkeypatch.setenv("MY_SAFE_VAR", "visible-value")
-        env = resolve_env_vars(tmp_path)
-        assert env.get("MY_SAFE_VAR") == "visible-value"
+        assert resolved_env.get("MY_SAFE_VAR") == "visible-value"
 
     def test_scrub_is_comprehensive_no_false_positives(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
-        """All known secrets are scrubbed while PATH and PWD are preserved."""
-        for key in self._SECRET_KEYS:
-            monkeypatch.setenv(key, "secret")
-        env = resolve_env_vars(tmp_path)
-        for key in self._SECRET_KEYS:
-            assert key not in env
+        """All known secrets are scrubbed while PWD is preserved."""
+        for key in _SCRUB_SECRET_KEYS:
+            assert key not in resolved_env, (
+                f"secret {key} should be scrubbed but was present"
+            )
         # Non-secret keys must still be present
-        assert "PWD" in env
+        assert "PWD" in resolved_env, "PWD should be preserved but was absent"
 
     def test_claude_code_wildcard_scrub_removes_non_allowlisted(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
         """CLAUDE_CODE_* keys not in allowlist are scrubbed."""
-        monkeypatch.setenv("CLAUDE_CODE_SKIP_BROWSER_AUTH", "1")
-        monkeypatch.setenv("CLAUDE_CODE_API_KEY_HELPER", "helper-script")
-        monkeypatch.setenv("CLAUDE_CODE_SOME_INTERNAL_FLAG", "true")
-        env = resolve_env_vars(tmp_path)
-        assert "CLAUDE_CODE_SKIP_BROWSER_AUTH" not in env
-        assert "CLAUDE_CODE_API_KEY_HELPER" not in env
-        assert "CLAUDE_CODE_SOME_INTERNAL_FLAG" not in env
+        for key in _SCRUB_NON_ALLOWLISTED_CLAUDE_CODE:
+            assert key not in resolved_env, (
+                f"non-allowlisted {key} should be scrubbed but was present"
+            )
 
     def test_claude_code_allowlist_keys_are_preserved(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
-        """Allowlisted CLAUDE_CODE_* keys pass through
-        the wildcard scrub.
-        """
-        monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-abc123")
-        monkeypatch.setenv("CLAUDE_CODE_EXECUTABLE", "/usr/local/bin/claude")
-        monkeypatch.setenv("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY", "1")
-        monkeypatch.setenv("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC", "1")
-        env = resolve_env_vars(tmp_path)
-        assert env.get("CLAUDE_CODE_OAUTH_TOKEN") == "tok-abc123"
-        assert env.get("CLAUDE_CODE_EXECUTABLE") == "/usr/local/bin/claude"
-        assert env.get("CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY") == "1"
-        assert env.get("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC") == "1"
+        """Allowlisted CLAUDE_CODE_* keys pass through the wildcard scrub."""
+        for key, value in _SCRUB_ALLOWLISTED_CLAUDE_CODE.items():
+            assert resolved_env.get(key) == value, (
+                f"allowlisted {key} should be preserved as {value!r}, "
+                f"got {resolved_env.get(key)!r}"
+            )
 
     def test_zai_gateway_env_vars_are_preserved(
-        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+        self, resolved_env: dict[str, str]
     ) -> None:
         """The Z.ai path depends on ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN surviving.
 
@@ -434,11 +506,15 @@ class TestCredentialScrubbing:
         ``scrub_keys`` cannot silently break Z.ai auth. ``ANTHROPIC_API_KEY`` (a
         distinct name) remains scrubbed; these two are not secrets-by-name here.
         """
-        monkeypatch.setenv("ANTHROPIC_BASE_URL", "https://api.z.ai/api/anthropic")
-        monkeypatch.setenv("ANTHROPIC_AUTH_TOKEN", "zai-token-value")
-        env = resolve_env_vars(tmp_path)
-        assert env.get("ANTHROPIC_BASE_URL") == "https://api.z.ai/api/anthropic"
-        assert env.get("ANTHROPIC_AUTH_TOKEN") == "zai-token-value"
+        for key, value in _SCRUB_ZAI_KEYS.items():
+            assert resolved_env.get(key) == value, (
+                f"Z.ai pass-through {key} should be preserved as {value!r}, "
+                f"got {resolved_env.get(key)!r}"
+            )
+        # The distinct ANTHROPIC_API_KEY name remains scrubbed.
+        assert "ANTHROPIC_API_KEY" not in resolved_env, (
+            "ANTHROPIC_API_KEY should remain scrubbed even alongside the Z.ai vars"
+        )
 
 
 # ---------------------------------------------------------------------------

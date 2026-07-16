@@ -3,7 +3,6 @@
 import io
 import json
 import logging
-import sys
 from collections.abc import Generator
 
 import pytest
@@ -173,18 +172,23 @@ def test_setup_logging_attaches_correlation_filter_json_path() -> None:
     assert any(isinstance(f, OTelCorrelationFilter) for f in handler.filters)
 
 
-def test_setup_logging_attaches_correlation_filter_rich_path(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """Interactive dev setup attaches the correlation filter to Rich logging."""
-    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
-    monkeypatch.setattr(sys.stderr, "isatty", lambda: True)
+def test_setup_logging_attaches_correlation_filter_rich_path() -> None:
+    """Interactive dev setup attaches the correlation filter to Rich logging.
+
+    The interactive path is selected through the real ``force_interactive`` API
+    input rather than by patching ``sys.stdout.isatty`` — the parameter exists so
+    a caller can deterministically choose the Rich handler regardless of the
+    attached streams (e.g. under a test runner that captures stdout).
+    """
     settings_override = Settings(
         environment=Environment.DEVELOPMENT,
         log_level=LogLevel.DEBUG,
     )
 
-    setup_logging(settings_override=settings_override)  # ty: ignore[invalid-argument-type]
+    setup_logging(
+        settings_override=settings_override,  # ty: ignore[invalid-argument-type]
+        force_interactive=True,
+    )
 
     handler = logging.getLogger().handlers[0]
     assert handler.__class__.__name__ == "RichHandler"

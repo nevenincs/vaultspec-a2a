@@ -339,5 +339,30 @@ dispatch dedup is untouched.
   parked run mis-statused `RUNNING` with a real `request_changes` decision and asserts the
   reconcile re-dispatches exactly one resume. Proven non-tautological: FAILS on stashed
   pre-fix code, PASSES with the fix. The existing missed-reject live test still passes.
+- Guard against false re-drive (real DB + checkpointer + engine, no mocks):
+  `test_live_running_with_fresh_resume_claim_is_not_re_driven` — the SAME seed as the
+  recovery test (RUNNING, parked, decided verdict) but with a FRESH resume claim on
+  the current gate asserts the reconcile dispatches ZERO resumes. Paired with the
+  recovery test (no claim -> exactly one dispatch), this proves the claim lease, not
+  the broadened candidacy, is the discriminator: an in-flight resume is never
+  double-driven. Ingest-active (worker-side) is the second in-flight guard and
+  rejects a stray dispatch harmlessly; the stale-claim re-drive is covered by the
+  non-live `test_stale_resume_claim_is_redriven`.
 - `ruff`/`ty` clean; all 23 non-live `verdict_subscriber` tests pass (incl. claim
   dedup/re-drive); pre-commit hooks green in the isolated land worktree.
+
+### Bounded candidacy (sweep query cost)
+
+The broadened sweep stays on the existing throttle (`_PARKED_RECONCILE_INTERVAL_SECONDS`
+= 10s) and the existing `parked_thread_limit` (default 200) bound. Per sweep it now
+issues two `list_threads` queries (`INPUT_REQUIRED` + `RUNNING`, each `LIMIT`-capped)
+and, for each distinct candidate, one read-only `aget_tuple` checkpoint read
+(`_thread_pending_gate_proposal`). A candidate is dropped cheaply the moment its
+checkpoint has no `gate_pending_proposal_id` (any non-gate run — a coder turn, a run
+between nodes) or its gate proposal is not in the decided-verdict map, BEFORE any
+resume work. So the added cost is bounded by min(running_count, limit) WAL-safe
+checkpoint reads on a 10s cadence, not a hot-path scan; the resume itself fires only
+for a run actually parked at a gate whose verdict is decided and whose claim is stale.
+For document-authoring volume this is negligible; a very busy coder-gateway could add a
+cheaper pre-filter (e.g. a `repair_status` posture) if run counts grow — noted, not
+needed now.

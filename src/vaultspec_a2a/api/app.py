@@ -57,6 +57,11 @@ from ..lifecycle.discovery import (
     service_json_path,
     write_service_json,
 )
+from ..lifecycle.registration import (
+    deregister_serve,
+    refresh_registration,
+    register_serve,
+)
 from ..streaming.aggregator import EventAggregator
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..telemetry.aggregator_hook import OTelAggregatorHook
@@ -79,16 +84,24 @@ logger = logging.getLogger(__name__)
 
 
 async def _discovery_heartbeat(
-    path: Any, port: int, pid: int, service_token: str | None
+    path: Any,
+    port: int,
+    pid: int,
+    service_token: str | None,
+    serve_record: Any = None,
 ) -> None:
     """Refresh the machine-global discovery heartbeat every cadence (ADR R8).
 
-    Non-fatal: a transient write failure is logged and retried on the next tick
-    so a full disk or race never crashes the gateway.
+    Also advances the dev-process registry record (when this is a band-port dev
+    instance) on the same cadence, so a live dev gateway never drifts to STALE and
+    gets reaped out from under itself. Non-fatal: a transient write failure is
+    logged and retried on the next tick so a full disk or race never crashes the
+    gateway.
     """
     while True:
         try:
             write_service_json(path, port=port, pid=pid, service_token=service_token)
+            refresh_registration(serve_record)
         except OSError:
             logger.warning(
                 "Failed to refresh service discovery heartbeat at %s",
@@ -243,12 +256,22 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             pid=discovery_pid,
             service_token=settings.internal_token,
         )
+        # dev-process-registry: a gateway booted on a band port (gateway-dev)
+        # self-registers so `procs` can enumerate/attach/reap it; a resident
+        # gateway on its fixed out-of-band port registers nothing (returns None).
+        serve_record = register_serve(
+            "gateway-dev",
+            settings.port,
+            workspace=str(settings.workspace_root),
+            command=["vaultspec-a2a", "serve", "--port", str(settings.port)],
+        )
         discovery_task = asyncio.create_task(
             _discovery_heartbeat(
                 discovery_path,
                 settings.port,
                 discovery_pid,
                 settings.internal_token,
+                serve_record,
             )
         )
         logger.info("Service discovery published at %s", discovery_path)
@@ -300,6 +323,9 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 discovery_path,
                 exc_info=True,
             )
+        # dev-process-registry: drop our own record so `procs list` shows the
+        # gateway gone, not a stale orphan the next reap must collect.
+        deregister_serve(serve_record)
 
         logger.info("Shutting down gateway")
 

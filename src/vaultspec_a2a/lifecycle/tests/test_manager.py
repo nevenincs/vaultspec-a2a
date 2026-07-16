@@ -27,11 +27,13 @@ from ..manager import (
     render_command,
     resolve,
     resume,
+    serve_up,
     tree_kill,
 )
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registry import (
     ProcRecord,
+    list_records,
     now_ms,
     read_record,
     record_path,
@@ -207,3 +209,62 @@ def test_reap_clears_dead_and_stale_but_keeps_live(tmp_path) -> None:
         assert read_record(record_path("scratch", "alive", home=tmp_path)) is not None
     finally:
         tree_kill(child.pid)
+
+
+# A real serve command that binds the given port and holds it until felled.
+_BIND_SERVE = (
+    "import socket,sys,time;"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(sys.argv[1])));"
+    "s.listen();"
+    "time.sleep(60)"
+)
+
+
+def _serve_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
+    role = RoleConfig(
+        name="scratch",
+        band=PortBand(*band),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=serve,
+    )
+    return ProcsConfig(resident={}, roles={"scratch": role})
+
+
+def test_serve_up_boots_registers_and_picks_distinct_ports(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _serve_config(serve, band=(18990, 18992))
+
+    first = serve_up(
+        "scratch", "alpha", home=tmp_path, config=config, ready_timeout=15.0
+    )
+    second = serve_up(
+        "scratch", "beta", home=tmp_path, config=config, ready_timeout=15.0
+    )
+    try:
+        # Two live processes on two DIFFERENT band ports — the collision the race
+        # would have caused cannot happen because reserve_port is exclusive.
+        assert is_pid_alive(first.pid) and is_pid_alive(second.pid)
+        assert first.port != second.port
+        assert first.port in range(18990, 18993)
+        assert second.port in range(18990, 18993)
+        # Records committed, reservation markers cleared, listeners real.
+        assert read_record(record_path("scratch", "alpha", home=tmp_path)) is not None
+        assert not list(tmp_path.glob("*.reserved"))
+        assert attach("alpha", home=tmp_path).endpoint.endswith(str(first.port))
+    finally:
+        tree_kill(first.pid)
+        tree_kill(second.pid)
+
+
+def test_serve_up_raises_when_no_band_port_yields_a_listener(tmp_path) -> None:
+    # A serve command that exits immediately never binds; a 2-port band bounds the
+    # retry loop so the exhaustion is fast and deterministic.
+    config = _serve_config([sys.executable, "-c", "pass"], band=(18994, 18995))
+    with pytest.raises(LifecycleError, match="no band port yielded a live listener"):
+        serve_up("scratch", "doomed", home=tmp_path, config=config, ready_timeout=3.0)
+    # Nothing registered, every reservation released.
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))

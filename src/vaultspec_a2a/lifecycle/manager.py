@@ -28,14 +28,18 @@ from typing import TYPE_CHECKING
 
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
+    PortReservation,
     ProcRecord,
     StalenessState,
     classify_record,
+    commit_reservation,
     list_records,
     now_ms,
     read_record,
     record_path,
+    release_reservation,
     remove_record,
+    reserve_port,
     write_record,
 )
 
@@ -59,6 +63,7 @@ __all__ = [
     "rerun",
     "resolve",
     "resume",
+    "serve_up",
     "spawn",
     "tree_kill",
 ]
@@ -376,15 +381,109 @@ def reap(
     return reaped
 
 
+def serve_up(
+    role: str,
+    name: str,
+    *,
+    workspace: str = "",
+    repo: str = "",
+    owner: str | None = None,
+    log_path: str | None = None,
+    ready_timeout: float = 20.0,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+) -> ProcRecord:
+    """Boot a role's serve command on a freshly-allocated band port and register it.
+
+    The race-free, collision-tolerant allocate-and-claim the registry was missing:
+    reserve a band port (``O_EXCL`` marker, so two concurrent same-band boots can
+    never collide), spawn the role's serve command on it, wait for a live listener,
+    then commit the claiming record and drop the marker. If the child dies (e.g.
+    ``EADDRINUSE`` from a non-registry racer) or never binds within *ready_timeout*,
+    the port is felled and released and the NEXT band port is tried - failed
+    reservations are held (not released) across the loop so each attempt gets a
+    fresh port. Raises :class:`LifecycleError` when the role has no serve command or
+    no band port yields a listener; :class:`RuntimeError` when the band is exhausted.
+    """
+    from pathlib import Path as _Path
+
+    resolved_config = config if config is not None else load_procs_config()
+    role_cfg = resolved_config.role(role)
+    if not role_cfg.serve:
+        raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
+    owner_label = owner if owner is not None else default_owner()
+    cwd = _Path(repo) if repo else _default_repo()
+    max_attempts = role_cfg.band.end - role_cfg.band.start + 1
+    held: list[PortReservation] = []
+    try:
+        for _ in range(max_attempts):
+            reservation = reserve_port(
+                role, role_cfg, home=home, config=resolved_config
+            )
+            held.append(reservation)
+            command = render_command(
+                role_cfg.serve, port=reservation.port, workspace=workspace
+            )
+            process = spawn(command, cwd=cwd, log_path=log_path)
+            if _await_listener(reservation.port, process, timeout=ready_timeout):
+                stamp = now_ms()
+                record = ProcRecord(
+                    name=name,
+                    role=role,
+                    pid=process.pid,
+                    port=reservation.port,
+                    repo=str(cwd) if repo else "",
+                    workspace=workspace,
+                    build_sha=_build_sha(cwd),
+                    command=command,
+                    started_at_ms=stamp,
+                    last_seen_ms=stamp,
+                    log_path=log_path,
+                    owner=owner_label,
+                )
+                commit_reservation(reservation, record, home=home)
+                held.remove(reservation)
+                return record
+            # The child never bound (a racer took the port, or it crashed): fell it
+            # and try the next band port. Keep the reservation held so reserve_port
+            # skips this port on the next pass.
+            tree_kill(process.pid)
+        raise LifecycleError(
+            f"could not bring up {role}-{name}: no band port yielded a live listener"
+        )
+    finally:
+        for reservation in held:
+            release_reservation(reservation)
+
+
+def _await_listener(
+    port: int, process: subprocess.Popen[bytes], *, timeout: float
+) -> bool:
+    """Wait for a live listener on *port*; return ``False`` if the child dies first."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if process.poll() is not None:
+            return False
+        if _port_is_bound(port):
+            return True
+        time.sleep(0.1)
+    return False
+
+
+def _default_repo() -> Path:
+    """The repo root a serve command runs in when a record carries no explicit repo."""
+    from ..control.config import settings
+
+    return settings.project_root
+
+
 def _cwd_for(record: ProcRecord) -> Path:
     """The dir a role's build/serve runs in: the record's repo, else the root."""
     from pathlib import Path as _Path
 
-    from ..control.config import settings
-
     if record.repo:
         return _Path(record.repo)
-    return settings.project_root
+    return _default_repo()
 
 
 def _start_from_record(

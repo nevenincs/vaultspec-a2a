@@ -13,8 +13,10 @@ test app uses a real in-process FastAPI ASGI app (via ASGITransport)
 for worker dispatch — no MockTransport, no fake responses.
 
 Error-path tests (unknown preset, connection error) call MCP tool
-functions directly and rely on the known unreachable ``localhost:8000``
-default to exercise the ``httpx.RequestError`` branch.
+functions directly against an unreachable gateway URL (an ASGI
+``http://testserver`` base with no live transport) to exercise the
+``httpx.RequestError`` branch — never a hardcoded live-service port, so a
+resident gateway on its real port can never accidentally satisfy them.
 """
 
 import asyncio

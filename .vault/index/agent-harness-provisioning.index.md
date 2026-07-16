@@ -14,6 +14,7 @@ related:
   - '[[2026-07-15-agent-harness-provisioning-plan]]'
   - '[[2026-07-15-agent-harness-provisioning-research]]'
   - '[[2026-07-16-agent-harness-provisioning-exec]]'
+  - '[[2026-07-16-agent-harness-provisioning-metadata-scrub-review-audit]]'
 ---
 
 # `agent-harness-provisioning` feature index
@@ -25,6 +26,10 @@ Auto-generated index of all documents tagged with `#agent-harness-provisioning`.
 ### adr
 
 - `2026-07-15-agent-harness-provisioning-adr` - `agent-harness-provisioning` adr: `the agent harness contract: skills, personas, rules, templates, and tools provisioned and verified per run` | (**status:** `accepted`)
+
+### audit
+
+- `2026-07-16-agent-harness-provisioning-metadata-scrub-review-audit` - `agent-harness-provisioning` audit: `batch-6 reviewer verdict: metadata-scrub gate arc, frozen-content PASS with AST-equivalence certification`
 
 ### exec
 

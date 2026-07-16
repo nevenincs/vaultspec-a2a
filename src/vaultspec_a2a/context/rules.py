@@ -190,32 +190,6 @@ class RuleManager:
         self._cached_results[role] = result
         return result
 
-    def has_workspace_rules(self) -> bool:
-        """Return whether the WORKSPACE rule corpus is present (a harness signal).
-
-        True when at least one non-builtin rule file exists under the workspace
-        ``.vaultspec/rules`` directory. The a2a-shipped ``bundled_rules_dir`` is
-        deliberately ignored: a run's harness completeness is about the
-        PROVISIONED workspace, not the package fallbacks, so a bare workspace with
-        only bundled defaults must still read as absent. Callers surface this as a
-        harness ineligibility with a safe reason instead of letting
-        :meth:`compile` degrade silently to ``None`` (agent-harness-provisioning
-        ADR: RuleManager finding nothing is a harness violation for authoring
-        presets, not an invisible no-op).
-
-        The check is corpus-presence only and role-agnostic: harness readiness
-        asks whether the workspace is provisioned at all, independent of any
-        role-scoped rule selection.
-        """
-        workspace_rules = self._workspace_root / _RULES_SUBDIR
-        if not workspace_rules.is_dir():
-            return False
-        for p in workspace_rules.glob("*.md"):
-            if not self._include_builtin and p.name.endswith(".builtin.md"):
-                continue
-            return True
-        return False
-
     def invalidate(self) -> None:
         """Clear the compile cache, forcing a full recompile on next call."""
         self._cache_valid = False

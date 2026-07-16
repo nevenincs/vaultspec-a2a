@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from vaultspec_a2a.authoring.contract import DOCUMENT_AUTHORING_ROLES
 from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 
 
@@ -539,8 +540,8 @@ class TestBundledDefaults:
         out = rm.compile("researcher")
         assert out is not None
         assert "Tag taxonomy" in out  # a stable heading from the shipped bundled file
-        # Every one of the four document roles receives it...
-        for role in ("researcher", "synthesist", "adr-author", "doc-reviewer"):
+        # Every document-authoring role (from the single contract) receives it...
+        for role in DOCUMENT_AUTHORING_ROLES:
             assert rm.compile(role) is not None
         # ...and a non-document role does NOT (the file opts into doc roles only).
         assert rm.compile("standard-executor") is None
@@ -668,40 +669,3 @@ class TestCompileOrderAndCacheEdges:
         _write_rule(ws_rules, "w.md", None, body="WSNEW")
         second = rm.compile(None)
         assert second is not None and "WSNEW" in second and "BUNDLED" in second
-
-
-class TestHasWorkspaceRules:
-    """RuleManager.has_workspace_rules — the harness rules-surface signal.
-
-    agent-harness-provisioning ADR: RuleManager finding nothing is a surfaceable
-    harness violation, not a silent None. Real temp dirs only.
-    """
-
-    def test_absent_rules_dir_reads_as_no_rules(self, tmp_path: Path) -> None:
-        assert RuleManager(tmp_path).has_workspace_rules() is False
-
-    def test_populated_workspace_corpus_reads_as_present(self, tmp_path: Path) -> None:
-        d = _rules_dir(tmp_path)
-        (d / "01-core.md").write_text("# core\n", encoding="utf-8")
-        assert RuleManager(tmp_path).has_workspace_rules() is True
-
-    def test_only_builtin_files_read_as_absent(self, tmp_path: Path) -> None:
-        d = _rules_dir(tmp_path)
-        (d / "core.builtin.md").write_text("# builtin\n", encoding="utf-8")
-        # A workspace carrying only *.builtin.md is not a provisioned corpus.
-        assert RuleManager(tmp_path).has_workspace_rules() is False
-        # include_builtin admits them.
-        assert RuleManager(tmp_path, include_builtin=True).has_workspace_rules() is True
-
-    def test_bundled_defaults_do_not_count_as_workspace_rules(
-        self, tmp_path: Path
-    ) -> None:
-        """A bundled_rules_dir must not mask an unprovisioned workspace."""
-        bundled = tmp_path / "bundled"
-        bundled.mkdir()
-        (bundled / "00-default.md").write_text("# bundled\n", encoding="utf-8")
-        rm = RuleManager(tmp_path / "ws", bundled_rules_dir=bundled)
-        # discover() unions the bundled defaults in...
-        assert rm.discover() != []
-        # ...but has_workspace_rules reports the WORKSPACE alone as absent.
-        assert rm.has_workspace_rules() is False

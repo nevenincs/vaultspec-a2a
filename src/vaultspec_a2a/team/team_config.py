@@ -23,6 +23,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field, model_validator
 
+from vaultspec_a2a.authoring.contract import is_document_authoring_topology
 from vaultspec_a2a.graph.enums import Model, Provider
 from vaultspec_a2a.thread.errors import (
     AgentConfigNotFoundError,
@@ -565,10 +566,10 @@ class TeamConfig(BaseModel):
     def is_document_authoring(self) -> bool:
         """Whether this preset authors vault documents through engine proposals.
 
-        The ``research_adr`` topology is the sole document-authoring topology
-        today; the agent-harness contract applies to its writer roles.
+        The document-authoring topologies are defined once in the authoring
+        contract; the agent-harness contract applies to their writer roles.
         """
-        return self.topology.type == TopologyType.RESEARCH_ADR
+        return is_document_authoring_topology(self.topology.type)
 
     def effective_harness(self) -> TeamHarnessConfig | None:
         """Return the run's agent harness, defaulting authoring presets when absent.

@@ -10,6 +10,7 @@ from langchain_core.messages import AIMessage, BaseMessage, SystemMessage, ToolM
 from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
+from vaultspec_a2a.authoring.contract import is_document_authoring_role
 from vaultspec_a2a.context.anchoring import build_anchoring_context
 from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
@@ -30,14 +31,11 @@ _logger = logging.getLogger(__name__)
 
 __all__ = ["create_worker_node"]
 
-# The research_adr document-authoring roles whose rule set is role-SCOPED: they
-# receive only the document-authoring conventions opted in to their role, not the
-# whole rule corpus (graph-agent-framework-harness P02). Every other role (coders,
-# etc.) passes role=None and keeps the unchanged whole-corpus-plus-bundled behavior,
-# so scoping never strips a coder's rules.
-_DOCUMENT_AUTHORING_ROLES = frozenset(
-    {"researcher", "synthesist", "adr-author", "doc-reviewer"}
-)
+# The research_adr document-authoring roles are role-SCOPED: they receive only the
+# document-authoring conventions opted in to their role (via the authoring
+# contract), not the whole corpus (graph-agent-framework-harness P02). Every other
+# role (coders, etc.) passes role=None and keeps the unchanged whole-corpus-plus-
+# bundled behavior, so scoping never strips a coder's rules.
 
 
 class WorkerNode(Protocol):
@@ -75,7 +73,7 @@ def _build_worker_messages(
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     effective_workspace_root = workspace_root or state.get("workspace_root")
     if effective_workspace_root:
-        is_document_role = role in _DOCUMENT_AUTHORING_ROLES
+        is_document_role = is_document_authoring_role(role)
         compile_role = role if is_document_role else None
         bundled_dir = DEFAULT_BUNDLED_RULES_DIR if is_document_role else None
         rules = RuleManager(

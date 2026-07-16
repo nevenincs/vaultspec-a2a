@@ -1,7 +1,7 @@
-"""procs.toml parsing + band-invariant validation (dev-process-registry P01.S01).
+"""procs.toml parsing + band-invariant validation.
 
 Real file I/O against the committed procs.toml and against tmp fixtures - no
-mocks. The committed file is the source of truth the ADR pins, so its bands and
+mocks. The committed file is the source of truth, so its bands and
 resident ports are asserted verbatim; the malformed fixtures prove the parser
 refuses to silently accept a broken band definition.
 """
@@ -14,7 +14,7 @@ from ..procs_config import ProcsConfigError, load_procs_config
 
 
 def test_committed_procs_toml_matches_the_adr_bands() -> None:
-    """The committed procs.toml declares exactly the ADR-pinned bands and residents."""
+    """The committed procs.toml declares exactly the pinned bands and residents."""
     config = load_procs_config()
 
     assert config.resident == {"engine": 8767, "gateway": 8000}

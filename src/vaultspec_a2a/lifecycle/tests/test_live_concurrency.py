@@ -1,6 +1,6 @@
-"""Live concurrency proof for the dev-process registry (dev-process-registry P02.S04).
+"""Live concurrency proof for the dev-process registry.
 
-The ADR's headline claim, proven end to end against real OS processes and real
+The headline claim, proven end to end against real OS processes and real
 loopback binds - no mocks, no fakes. Four registered engine+gateway stacks are
 booted SEQUENTIALLY (each live record holds its port, so the next allocation must
 pick a different one) and come up on distinct band ports without collision;

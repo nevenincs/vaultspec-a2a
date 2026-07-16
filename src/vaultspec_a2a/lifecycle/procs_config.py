@@ -1,4 +1,4 @@
-"""Parse the committed ``procs.toml`` (dev-process-registry ADR).
+"""Parse the committed ``procs.toml``.
 
 The single source of truth for per-role port bands, build/serve command
 templates, and staleness windows, plus the fixed resident ports the registry must

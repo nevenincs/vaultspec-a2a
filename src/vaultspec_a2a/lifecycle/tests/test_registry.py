@@ -1,4 +1,4 @@
-"""File-per-process registry core (dev-process-registry P01.S01).
+"""File-per-process registry core.
 
 Real filesystem, real process pids, and real loopback socket binds - no mocks.
 The registry home is an isolated ``tmp_path`` per test, the live pid is this test

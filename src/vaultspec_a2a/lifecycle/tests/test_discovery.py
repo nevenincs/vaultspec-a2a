@@ -1,8 +1,8 @@
-"""Live tests for the machine-global service discovery contract (ADR R8).
+"""Live tests for the machine-global service discovery contract.
 
 Real filesystem, real process-liveness, and a real ``/health`` server on a real
-socket — no mocks. Covers the four things S28 demands: freshness classification,
-stale-pid (Crashed) detection, single-resident semantics, and
+socket — no mocks. Covers the four things this contract demands: freshness
+classification, stale-pid (Crashed) detection, single-resident semantics, and
 health-while-degraded still counting as a live resident.
 """
 

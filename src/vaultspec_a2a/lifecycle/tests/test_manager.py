@@ -1,4 +1,4 @@
-"""Process-lifecycle verbs over the registry (dev-process-registry P01.S02).
+"""Process-lifecycle verbs over the registry.
 
 Real subprocesses, real loopback sockets, and real registry files - no mocks.
 Every liveness assertion runs against a genuine OS process this test spawned:

@@ -1,4 +1,4 @@
-"""The ``vaultspec-a2a`` operator CLI (ADR R9).
+"""The ``vaultspec-a2a`` operator CLI.
 
 A minimal operator surface restored as a thin client of the five-verb gateway —
 ``serve``, ``doctor`` (service-state), ``presets`` (presets-list), and
@@ -187,7 +187,7 @@ def workspace_provision(path: Path, verify_only: bool) -> None:
 
 @main.group()
 def procs() -> None:
-    """Manage machine-global dev processes via the registry (dev-process-registry)."""
+    """Manage machine-global dev processes via the registry."""
 
 
 def _lifecycle_error(exc: Exception) -> click.ClickException:

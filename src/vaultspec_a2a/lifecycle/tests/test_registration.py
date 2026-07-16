@@ -1,4 +1,4 @@
-"""Serve-path registration adoption (dev-process-registry P02.S03).
+"""Serve-path registration adoption.
 
 Real registry files under an isolated home, real process pid (this test process)
 - no mocks. Proves the band-gated registration contract: a dev instance on a role

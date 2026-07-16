@@ -1,4 +1,4 @@
-"""File-per-process dev-process registry (dev-process-registry ADR).
+"""File-per-process dev-process registry.
 
 One JSON state file per managed dev/test process at an explicit machine-global
 path - ``~/.vaultspec/procs/<role>-<name>.json`` - so a single place always knows
@@ -69,7 +69,7 @@ class RegistryOwnershipError(RuntimeError):
 
 
 class StalenessState(StrEnum):
-    """A record's liveness verdict (dev-process-registry ADR)."""
+    """A record's liveness verdict."""
 
     LIVE = "live"
     STALE = "stale"

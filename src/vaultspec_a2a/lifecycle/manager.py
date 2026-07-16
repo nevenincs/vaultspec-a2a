@@ -1,4 +1,4 @@
-"""Process-lifecycle operations over the registry (dev-process-registry ADR).
+"""Process-lifecycle operations over the registry.
 
 The verbs the operator CLI exposes - ``list``/``attach``/``kill``/``rebuild``/
 ``rerun``/``resume``/``reap`` - orchestrated here over the file-per-process
@@ -8,7 +8,7 @@ build-sha capture) and the verb logic that composes them; the CLI in
 ``vaultspec_a2a.cli`` is a thin formatter over the structured results returned
 here, so the lifecycle behaviour is testable without a terminal.
 
-Kill discipline is Windows-first per the ADR: ``taskkill /T /F /PID`` fells the
+Kill discipline is Windows-first: ``taskkill /T /F /PID`` fells the
 whole process tree by pid (a bare ``terminate`` orphans grandchildren on
 Windows); POSIX falls back to ``SIGTERM`` then ``SIGKILL``. A kill is an OS
 action, not a registry write - once the pid is dead the record is freely
@@ -110,8 +110,8 @@ def _is_pid_alive(pid: int) -> bool:
 def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     """Kill *pid* and its whole process tree, returning ``True`` once it is dead.
 
-    Windows uses ``taskkill /T /F /PID`` (the ADR's tree-kill discipline: a bare
-    terminate orphans grandchildren). POSIX escalates ``SIGTERM`` then
+    Windows uses ``taskkill /T /F /PID`` (a bare terminate orphans grandchildren
+    on Windows). POSIX escalates ``SIGTERM`` then
     ``SIGKILL``. A pid that is already dead is a success. The call blocks up to
     *timeout* seconds for the process to disappear before reporting.
     """

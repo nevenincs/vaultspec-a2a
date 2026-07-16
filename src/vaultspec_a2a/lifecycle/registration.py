@@ -1,4 +1,4 @@
-"""Serve-path adoption of the dev-process registry (dev-process-registry ADR).
+"""Serve-path adoption of the dev-process registry.
 
 A serve entry point - the gateway, the worker, the engine-serve wrapper - calls
 :func:`register_serve` on startup and :func:`deregister_serve` on owned shutdown,
@@ -6,7 +6,7 @@ so a dev/test instance booted on a role band port becomes enumerable, attachable
 and reapable through the ``procs`` verbs. A RESIDENT instance on its fixed
 out-of-band port (gateway 8000, engine 8767) registers nothing - ``register_serve``
 returns ``None`` when the port is not inside the role's band - so production
-behaviour is unchanged and the ADR's "resident instances are never managed" rule
+behaviour is unchanged and the "resident instances are never managed" rule
 holds by construction rather than by a config flag.
 
 For a heartbeating role the serve path refreshes the record via

@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import time
 from typing import Any
 
 import pytest
@@ -23,12 +24,15 @@ from ..registry import (
     StalenessState,
     allocate_port,
     classify_record,
+    commit_reservation,
     list_records,
     now_ms,
     read_record,
     record_path,
     refresh_last_seen,
+    release_reservation,
     remove_record_if_owned,
+    reserve_port,
     write_record,
 )
 
@@ -187,3 +191,66 @@ def test_allocate_raises_when_band_exhausted(tmp_path) -> None:
         )
     with pytest.raises(RuntimeError, match="exhausted"):
         allocate_port("scratch", role, home=tmp_path, config=config)
+
+
+def test_reserve_port_is_exclusive_across_concurrent_callers(tmp_path) -> None:
+    # The allocate-and-claim race closer: a held reservation blocks the SAME port,
+    # so two back-to-back reservations (neither yet backed by a record) differ.
+    band = PortBand(18900, 18902)
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    first = reserve_port("scratch", role, home=tmp_path, config=config)
+    second = reserve_port("scratch", role, home=tmp_path, config=config)
+    assert first.port in band
+    assert second.port in band
+    assert first.port != second.port
+    assert first.path.exists()
+
+    # allocate_port must also skip a live reservation, not just live records.
+    allocated = allocate_port("scratch", role, home=tmp_path, config=config)
+    assert allocated not in {first.port, second.port}
+
+
+def test_commit_reservation_writes_record_and_clears_marker(tmp_path) -> None:
+    band = PortBand(18900, 18902)
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    reservation = reserve_port("scratch", role, home=tmp_path, config=config)
+    record = _record(role="scratch", name="committed", port=reservation.port)
+    commit_reservation(reservation, record, home=tmp_path)
+
+    assert not reservation.path.exists()
+    persisted = read_record(record_path("scratch", "committed", home=tmp_path))
+    assert persisted is not None
+    assert persisted.port == reservation.port
+
+
+def test_release_reservation_frees_the_port(tmp_path) -> None:
+    band = PortBand(18900, 18900)  # single-port band
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    first = reserve_port("scratch", role, home=tmp_path, config=config)
+    # The band is now exhausted by the held reservation ...
+    with pytest.raises(RuntimeError, match="exhausted"):
+        reserve_port("scratch", role, home=tmp_path, config=config)
+    # ... until it is released.
+    release_reservation(first)
+    again = reserve_port("scratch", role, home=tmp_path, config=config)
+    assert again.port == first.port
+
+
+def test_stale_reservation_marker_is_reclaimable(tmp_path) -> None:
+    band = PortBand(18900, 18900)
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    stale = reserve_port("scratch", role, home=tmp_path, config=config)
+    # Backdate the marker well beyond the TTL; it must no longer block the port.
+    old = time.time() - 3600
+    os.utime(stale.path, (old, old))
+
+    reclaimed = reserve_port("scratch", role, home=tmp_path, config=config)
+    assert reclaimed.port == stale.port

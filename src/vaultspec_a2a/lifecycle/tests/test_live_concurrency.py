@@ -1,12 +1,16 @@
 """Live concurrency proof for the dev-process registry (dev-process-registry P02.S04).
 
 The ADR's headline claim, proven end to end against real OS processes and real
-loopback binds - no mocks, no fakes. Two concurrent registered engine+gateway
-stacks come up on distinct band ports without collision; ``procs list`` enumerates
-every one truthfully; a felled orphan reads DEAD and is reaped while the live
-stacks survive; ``rerun`` rebuilds and re-registers on the same port. Every port
-is band-allocated through the registry and every pid killed is one this test
-spawned - the live acceptance stack (18770/18110/18111) is never touched.
+loopback binds - no mocks, no fakes. Four registered engine+gateway stacks are
+booted SEQUENTIALLY (each live record holds its port, so the next allocation must
+pick a different one) and come up on distinct band ports without collision;
+``procs list`` enumerates every one truthfully; a felled orphan reads DEAD and is
+reaped while the live stacks survive; ``rerun`` rebuilds and re-registers on the
+same port. This proves no-collision-across-allocations plus truthful
+enumerate/reap/rerun - not simultaneous O_EXCL contention, which the reserve_port
+unit tests cover. Every port is band-allocated through the registry and every pid
+killed is one this test spawned - the live acceptance stack (18770/18110/18111) is
+never touched.
 """
 
 from __future__ import annotations
@@ -74,11 +78,12 @@ def _wait_pid_dead(pid: int, *, timeout: float = 10.0) -> bool:
     return not is_pid_alive(pid)
 
 
-def test_two_concurrent_stacks_no_collision_reap_and_rerun(tmp_path) -> None:
+def test_sequential_stacks_no_collision_reap_and_rerun(tmp_path) -> None:
     config = _stacks_config()
     spawned = []
     try:
-        # Two concurrent engine+gateway stacks, each booted through the registry.
+        # Four engine+gateway stacks booted sequentially through the registry; each
+        # live record holds its port, so no two land on the same one.
         e1 = serve_up(
             "engine-dev", "e1", home=tmp_path, config=config, ready_timeout=15
         )

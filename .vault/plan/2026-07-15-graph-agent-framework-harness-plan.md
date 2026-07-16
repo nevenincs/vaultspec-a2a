@@ -15,6 +15,16 @@ related:
   - '[[2026-07-15-multi-provider-execution-plan]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `graph-agent-framework-harness` plan
 
 ### Phase `P01` - resolve the persona-prompt CLI-invocation question
@@ -53,7 +63,7 @@ Wire the P02-designed role-scoped rule selection into the two RuleManager call s
 
 Assert end-to-end, against a real provisioned run workspace rather than RuleManager.compile() in isolation, that a graph-executed persona actually receives its scoped rules and reconciled prompt, per the ADR's live-proof constraint.
 
-- [ ] `P05.S11` - Add a live service-level assertion that a research_adr worker turn's compiled system messages actually contain the P02 role-scoped rule content, run against a real provisioned workspace rather than a static-repo RuleManager.compile() call; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py or a new sibling service test module`.
+- [x] `P05.S11` - Add a live service-level assertion that a research_adr worker turn's compiled system messages actually contain the P02 role-scoped rule content, run against a real provisioned workspace rather than a static-repo RuleManager.compile() call; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py or a new sibling service test module`.
 - [ ] `P05.S12` - Record the verification evidence and close out the plan's Verification criteria, reconciling this feature's exec summary against what actually landed; `.vault/exec/2026-07-15-graph-agent-framework-harness/2026-07-15-graph-agent-framework-harness-P05-summary.md`.
 
 ## Description

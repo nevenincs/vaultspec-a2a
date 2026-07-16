@@ -8,6 +8,7 @@ non-authoring coder preset.
 
 from __future__ import annotations
 
+from vaultspec_a2a.context.harness import HarnessReadiness
 from vaultspec_a2a.control.run_start_policy import (
     evaluate_run_start_eligibility,
     is_document_authoring_preset,
@@ -95,5 +96,42 @@ def test_coder_preset_is_eligible_without_feature_or_tokens() -> None:
         load_team_config(_CODER),
         feature_tag=None,
         actor_tokens=None,
+    )
+    assert result.eligible is True
+
+
+def test_incomplete_harness_refuses_an_otherwise_eligible_authoring_run() -> None:
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag="my-feature",
+        actor_tokens=_full_bundle(),
+        harness=HarnessReadiness(
+            ready=False,
+            reasons=["rules corpus is empty or absent (.vaultspec/rules)"],
+        ),
+    )
+    assert result.eligible is False
+    assert "agent harness incomplete" in (result.reason or "")
+    assert "rules corpus" in (result.reason or "")
+
+
+def test_ready_harness_leaves_authoring_run_eligible() -> None:
+    result = evaluate_run_start_eligibility(
+        load_team_config(_AUTHORING),
+        feature_tag="my-feature",
+        actor_tokens=_full_bundle(),
+        harness=HarnessReadiness(ready=True),
+    )
+    assert result.eligible is True
+    assert result.reason is None
+
+
+def test_harness_is_not_enforced_on_non_authoring_presets() -> None:
+    """A coder preset never gates on harness, even with a broken verdict."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_CODER),
+        feature_tag=None,
+        actor_tokens=None,
+        harness=HarnessReadiness(ready=False, reasons=["rules corpus absent"]),
     )
     assert result.eligible is True

@@ -47,7 +47,10 @@ from ..thread.errors import AgentConfigNotFoundError, ConfigError
 from .factory import classify_provider_command
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
     from pathlib import Path
+
+    from ..context.harness import HarnessReadiness
 
 __all__ = [
     "AssignmentSource",
@@ -62,6 +65,7 @@ __all__ = [
     "freeze_assignment",
     "frozen_from_record",
     "probe_engine_reachable",
+    "probe_harness_ready",
     "probe_provider_readiness",
     "resolve_effective_assignment",
     "resolve_role_assignment",
@@ -415,6 +419,28 @@ def probe_engine_reachable() -> bool:
     return resolve_engine() is not None
 
 
+def probe_harness_ready(
+    workspace_root: Path,
+    *,
+    required_skills: Sequence[str] = (),
+) -> HarnessReadiness:
+    """Verify a workspace's authoring harness for the shared eligibility service.
+
+    Thin wrapper over :func:`context.harness.verify_harness` co-located with the
+    other readiness probes so discovery and run-start reach every readiness term
+    through one module. ``required_skills`` is the run's declared harness skills
+    list (the ``[team.harness]`` schema supplies it); the canonical authoring
+    templates are always required. Read-only: no write, no CLI spawn, no secret.
+
+    The verifier is imported lazily: ``context`` pulls in the graph/thread import
+    graph, and ``model_profiles`` is itself imported during graph compilation, so
+    a top-level import would close a cycle.
+    """
+    from ..context.harness import verify_harness
+
+    return verify_harness(workspace_root, required_skills=required_skills)
+
+
 # ---------------------------------------------------------------------------
 # Eligibility
 # ---------------------------------------------------------------------------
@@ -426,15 +452,19 @@ def evaluate_profile_eligibility(
     readiness: dict[Provider, ProviderReadiness] | None = None,
     engine_reachable: bool | None = None,
     acceptance_gate_passed: bool = False,
+    harness: HarnessReadiness | None = None,
 ) -> ProfileEligibility:
     """Compose per-role and per-profile eligibility with safe reasons.
 
     A role is eligible when its primary provider is ready OR an eligible declared
     fallback is ready. A profile is eligible when every role is eligible, the
-    authoring engine is reachable, and the production acceptance gate has passed -
-    the last term is reported honestly and keeps the profile unavailable until it
-    does. ``readiness`` may be injected (probed once by the caller); otherwise it
-    is probed here.
+    authoring engine is reachable, the production acceptance gate has passed, and
+    the agent harness (when a verdict is supplied) is complete - each failing
+    term contributes a safe reason and keeps the profile unavailable. The
+    acceptance-gate term is reported honestly; the ``harness`` term is composed
+    only when a verdict is injected (an unprovisioned or non-authoring caller
+    omits it). ``readiness`` may be injected (probed once by the caller);
+    otherwise it is probed here.
     """
     cache: dict[Provider, ProviderReadiness] = dict(readiness or {})
 
@@ -500,6 +530,9 @@ def evaluate_profile_eligibility(
 
     if not acceptance_gate_passed:
         reasons.append(_ACCEPTANCE_GATE_REASON)
+
+    if harness is not None and not harness.ready:
+        reasons.append("agent harness incomplete: " + "; ".join(harness.reasons))
 
     return ProfileEligibility(
         profile_id=assignment.profile_id,

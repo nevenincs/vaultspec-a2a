@@ -20,6 +20,7 @@ from typing import TYPE_CHECKING
 from ..team.team_config import TopologyType
 
 if TYPE_CHECKING:
+    from ..context.harness import HarnessReadiness
     from ..team.team_config import TeamConfig
     from ..thread.actor_tokens import ActorTokenBundle
 
@@ -70,13 +71,18 @@ def evaluate_run_start_eligibility(
     *,
     feature_tag: str | None,
     actor_tokens: ActorTokenBundle | None,
+    harness: HarnessReadiness | None = None,
 ) -> RunStartEligibility:
     """Decide whether a run-start request is eligible to dispatch.
 
-    Document-authoring presets require a target feature tag and an actor-token
-    bundle with one token per required role; a role must never share another's
-    token, so coverage is checked by explicit per-role presence. Non-authoring
-    presets carry neither requirement here. The reason string is safe to surface.
+    Document-authoring presets require a target feature tag, an actor-token
+    bundle with one token per required role, and - when a ``harness`` verdict is
+    supplied - a complete agent harness; a role must never share another's token,
+    so coverage is checked by explicit per-role presence. Run-start REFUSES on an
+    incomplete harness (the discovery-vs-launch binding: discovery serves the
+    reason, launch refuses), unlike the acceptance gate which only certifies at
+    discovery. Non-authoring presets carry none of these requirements here. The
+    reason string is safe to surface.
     """
     if not is_document_authoring_preset(team_config):
         return RunStartEligibility(eligible=True)
@@ -100,6 +106,15 @@ def evaluate_run_start_eligibility(
             reason=(
                 "actor token bundle for preset "
                 f"{team_config.id!r} is missing a token for role(s): {missing}"
+            ),
+        )
+
+    if harness is not None and not harness.ready:
+        return RunStartEligibility(
+            eligible=False,
+            reason=(
+                "agent harness incomplete for preset "
+                f"{team_config.id!r}: " + "; ".join(harness.reasons)
             ),
         )
 

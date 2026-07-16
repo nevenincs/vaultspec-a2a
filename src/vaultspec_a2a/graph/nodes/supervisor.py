@@ -11,7 +11,7 @@ from langgraph.constants import TAG_NOSTREAM
 from langgraph.types import interrupt
 
 from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
+from vaultspec_a2a.context.rules import RuleManager
 from vaultspec_a2a.context.stage import infer_phase_from_vault_index
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
 from vaultspec_a2a.domain_config import domain_config
@@ -307,12 +307,11 @@ def _build_supervisor_messages(
     anchoring = build_anchoring_context(state)
     messages: list[BaseMessage] = [SystemMessage(content=full_prompt)]
     if workspace_root:
-        # The supervisor is not a document-authoring role, so it compiles the whole
-        # corpus (role=None) unioned with the bundled defaults (P02.S03/P04).
-        rules = RuleManager(
-            Path(workspace_root),
-            bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
-        ).compile(None)
+        # The supervisor is not a document-authoring role: it compiles the whole
+        # WORKSPACE corpus (role=None) and does NOT receive the bundled defaults -
+        # the bundled dir is gated on document roles so the roles:-tagged
+        # conventions never leak into a non-document turn (reviewer HIGH-1).
+        rules = RuleManager(Path(workspace_root)).compile(None)
         if rules:
             messages.append(
                 SystemMessage(

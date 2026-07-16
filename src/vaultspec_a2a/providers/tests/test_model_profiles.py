@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import pytest
 
+from vaultspec_a2a.context.harness import HarnessReadiness
 from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.graph.enums import MODEL_MAP, Model, Provider
 from vaultspec_a2a.team.team_config import (
@@ -299,6 +300,54 @@ class TestEligibility:
         )
         assert elig.eligible is False
         assert any("engine is not reachable" in r for r in elig.reasons)
+
+    def test_incomplete_harness_makes_profile_ineligible(self) -> None:
+        readiness = {
+            Provider.MOCK: ProviderReadiness(Provider.MOCK, True),
+            Provider.CLAUDE: ProviderReadiness(Provider.CLAUDE, True),
+        }
+        elig = evaluate_profile_eligibility(
+            _mock_assignment(),
+            readiness=readiness,
+            engine_reachable=True,
+            acceptance_gate_passed=True,
+            harness=HarnessReadiness(
+                ready=False, reasons=["required templates missing: adr, plan"]
+            ),
+        )
+        assert elig.eligible is False
+        assert any("agent harness incomplete" in r for r in elig.reasons)
+        assert any("templates missing" in r for r in elig.reasons)
+
+    def test_ready_harness_leaves_profile_eligible(self) -> None:
+        readiness = {
+            Provider.MOCK: ProviderReadiness(Provider.MOCK, True),
+            Provider.CLAUDE: ProviderReadiness(Provider.CLAUDE, True),
+        }
+        elig = evaluate_profile_eligibility(
+            _mock_assignment(),
+            readiness=readiness,
+            engine_reachable=True,
+            acceptance_gate_passed=True,
+            harness=HarnessReadiness(ready=True),
+        )
+        assert elig.eligible is True
+        assert elig.reasons == []
+
+    def test_omitted_harness_is_not_composed(self) -> None:
+        """A ``None`` harness contributes no reason (non-authoring/unprobed caller)."""
+        readiness = {
+            Provider.MOCK: ProviderReadiness(Provider.MOCK, True),
+            Provider.CLAUDE: ProviderReadiness(Provider.CLAUDE, True),
+        }
+        elig = evaluate_profile_eligibility(
+            _mock_assignment(),
+            readiness=readiness,
+            engine_reachable=True,
+            acceptance_gate_passed=True,
+        )
+        assert elig.eligible is True
+        assert not any("harness" in r for r in elig.reasons)
 
 
 class TestFreeze:

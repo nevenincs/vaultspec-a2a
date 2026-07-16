@@ -18,8 +18,10 @@ from typing import TYPE_CHECKING, Any
 import httpx
 
 if TYPE_CHECKING:
-    from collections.abc import AsyncIterator
+    from collections.abc import AsyncIterator, Awaitable, Callable
     from types import TracebackType
+
+    from .discovery import EngineEndpoint
 
 from ._envelope import (
     AuthoringResponse,
@@ -28,7 +30,7 @@ from ._envelope import (
     decode_success_envelope,
     extract_denial,
 )
-from ._errors import AuthoringError, raise_for_typed_error
+from ._errors import AuthoringError, AuthoringTransportError, raise_for_typed_error
 from .lifecycle import SseFrame, parse_sse_frame
 
 __all__ = ["ACTOR_TOKEN_HEADER", "BEARER_HEADER", "AuthoringClient"]
@@ -104,15 +106,28 @@ class AuthoringClient:
         actor_token: str | None = None,
         client: httpx.AsyncClient | None = None,
         timeout: float = 30.0,
+        bearer_resolver: Callable[[], EngineEndpoint | None] | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._bearer_token = bearer_token
         self._actor_token = actor_token
+        self._timeout = timeout
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(timeout, connect=5.0),
         )
+        # Optional re-resolution of the ENGINE machine bearer. When set, an outer
+        # bearer-gate 401 (the engine rotated its bearer, e.g. it restarted
+        # mid-run and republished service.json) triggers a single re-read of the
+        # engine origin and one retry, so a long run outlives a bearer rotation
+        # instead of dying on the stale token. None keeps the caller-supplied
+        # bearer fixed (no retry). The origin SWAP on re-resolution is effective
+        # only for a client this instance owns (rebuilt in _reresolve_machine_bearer);
+        # with a caller-injected client the retry follows a bearer rotation (same
+        # origin) but not an origin MOVE, since the injected transport's base_url is
+        # fixed - the production worker path owns its client, so this is exact there.
+        self._bearer_resolver = bearer_resolver
 
     # ------------------------------------------------------------------
     # Lifecycle
@@ -156,6 +171,58 @@ class AuthoringClient:
         return headers
 
     # ------------------------------------------------------------------
+    # Machine-bearer re-resolution (engine rotation resilience)
+    # ------------------------------------------------------------------
+
+    async def _reresolve_machine_bearer(self) -> None:
+        """Re-read the engine origin and swap in the fresh machine bearer.
+
+        Called on an outer bearer-gate 401 when a ``bearer_resolver`` is set.
+        Fails loud (typed :class:`AuthoringError`) when the origin cannot be
+        re-resolved: an unreadable service.json means the engine is genuinely
+        unreachable, not merely rotated.
+        """
+        endpoint = self._bearer_resolver() if self._bearer_resolver else None
+        if endpoint is None:
+            raise AuthoringError(
+                "engine unreachable while re-resolving the machine bearer after a "
+                "401; its service.json is not readable (the engine may be down)"
+            )
+        self._base_url = endpoint.base_url.rstrip("/")
+        self._bearer_token = endpoint.bearer_token
+        # Single-consumer invariant: the submitter creates one client per
+        # _propose_and_submit and drives it sequentially, so no request is ever
+        # in flight while this swap runs and no lock is needed. Sharing one
+        # AuthoringClient across concurrent tasks would break that assumption and
+        # require guarding this rebuild.
+        if self._owns_client:
+            await self._client.aclose()
+            self._client = httpx.AsyncClient(
+                base_url=self._base_url,
+                timeout=httpx.Timeout(self._timeout, connect=5.0),
+            )
+
+    async def _send(
+        self, do_request: Callable[[], Awaitable[AuthoringResponse | Denial]]
+    ) -> AuthoringResponse | Denial:
+        """Run *do_request*, re-resolving the machine bearer once on a rotation.
+
+        A single outer bearer-gate 401 with a ``bearer_resolver`` configured is
+        treated as a rotated engine bearer (e.g. the engine restarted mid-run):
+        re-resolve from service.json and retry ONCE. An inner per-actor 401, a
+        second rejection, or any other typed error is not retried and propagates.
+        ``do_request`` rebuilds its headers and reads ``self._client`` on each
+        call, so the retry runs against the freshly resolved bearer and origin.
+        """
+        try:
+            return await do_request()
+        except AuthoringTransportError as exc:
+            if self._bearer_resolver is None or not exc.is_machine_bearer_rejection:
+                raise
+            await self._reresolve_machine_bearer()
+            return await do_request()
+
+    # ------------------------------------------------------------------
     # Low-level transport
     # ------------------------------------------------------------------
 
@@ -178,12 +245,16 @@ class AuthoringClient:
         envelope = CommandEnvelope(
             command=command, idempotency_key=idempotency_key, payload=payload
         )
-        response = await self._client.post(
-            self._url(path),
-            json=envelope.to_body(),
-            headers=self._headers(actor_token=actor_token, with_actor=True),
-        )
-        return self._decode(response)
+
+        async def _do() -> AuthoringResponse | Denial:
+            response = await self._client.post(
+                self._url(path),
+                json=envelope.to_body(),
+                headers=self._headers(actor_token=actor_token, with_actor=True),
+            )
+            return self._decode(response)
+
+        return await self._send(_do)
 
     async def post_bare(
         self,
@@ -198,12 +269,16 @@ class AuthoringClient:
         Bearer-gated only by default; ``with_actor`` adds the per-actor header
         for the rare non-envelope routes that still require a principal.
         """
-        response = await self._client.post(
-            self._url(path),
-            json=payload,
-            headers=self._headers(actor_token=actor_token, with_actor=with_actor),
-        )
-        return self._decode(response)
+
+        async def _do() -> AuthoringResponse | Denial:
+            response = await self._client.post(
+                self._url(path),
+                json=payload,
+                headers=self._headers(actor_token=actor_token, with_actor=with_actor),
+            )
+            return self._decode(response)
+
+        return await self._send(_do)
 
     async def get(
         self,
@@ -214,12 +289,16 @@ class AuthoringClient:
         actor_token: str | None = None,
     ) -> AuthoringResponse:
         """GET a read route and decode its success envelope."""
-        response = await self._client.get(
-            self._url(path),
-            params=params,
-            headers=self._headers(actor_token=actor_token, with_actor=with_actor),
-        )
-        decoded = self._decode(response)
+
+        async def _do() -> AuthoringResponse | Denial:
+            response = await self._client.get(
+                self._url(path),
+                params=params,
+                headers=self._headers(actor_token=actor_token, with_actor=with_actor),
+            )
+            return self._decode(response)
+
+        decoded = await self._send(_do)
         if isinstance(decoded, Denial):
             # Reads never denominate as business denials; treat as a protocol
             # violation rather than silently returning a non-response.

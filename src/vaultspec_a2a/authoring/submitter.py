@@ -42,6 +42,7 @@ from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
 from ._ids import derive_idempotency_key
 from .client import AuthoringClient
+from .discovery import resolve_engine
 from .session import AuthoringSession
 
 if TYPE_CHECKING:
@@ -474,7 +475,10 @@ class DocumentProposalSubmitter:
     ) -> str:
         rev = str(revision_cycle)
         async with AuthoringClient(
-            self._engine_base_url, bearer, actor_token=actor_token
+            self._engine_base_url,
+            bearer,
+            actor_token=actor_token,
+            bearer_resolver=resolve_engine,
         ) as client:
             # One session per run (run_id = thread_id): a constant create_session
             # key makes every call a create-or-resume of the same engine session,

@@ -69,10 +69,13 @@ import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import httpx
 import pytest
+
+if TYPE_CHECKING:
+    from _pytest.mark.structures import ParameterSet
 
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
@@ -246,6 +249,71 @@ CASE_ZAI = _research_adr_case(
 )
 
 _ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED, CASE_CODEX, CASE_ZAI)
+
+
+def _runtime_budget_for(case: AcceptanceCase) -> float:
+    """The per-lane deadline scaled to gate count/policy, not one global default.
+
+    A HUMAN gate runs a full reject-with-notes revision loop (park -> edit ->
+    re-author -> re-submit -> approve -> apply); an AUTO gate resolves in one
+    synchronous submit; the LIVE preset authors each turn with a real provider
+    (minutes/turn), so it multiplies. This is the SINGLE source of truth for both
+    the harness's own deadline and the per-case ``pytest-timeout`` marker, so the
+    two can never drift - a bare ``pytest -m service -k live`` must not be killed
+    by the 300s global before the lane's own specified workload completes.
+    """
+    per_gate = {POLICY_HUMAN: 600.0, POLICY_AUTO: 240.0}
+    base = 180.0
+    budget = base + sum(per_gate.get(p, 300.0) for p in case.gate_policy.values())
+    return budget * (4.0 if case.preset == _PRESET_LIVE else 1.0)
+
+
+def _case_param(case: AcceptanceCase) -> ParameterSet:
+    """Parametrize entry that arms a real-provider (LIVE) lane with its own budget.
+
+    The global 300s ``pytest-timeout`` is right for the fast deterministic lanes
+    but far short of a LIVE lane's ~4080s budget; without an override a bare
+    ``pytest -m service`` kills the live lane mid-run (between the research AUTO
+    gate and the ADR HUMAN gate). ``pytest-timeout``'s per-test marker overrides
+    the global for exactly the LIVE cases; the deterministic lanes keep the 300s
+    global so a genuine hang there is still detected fast.
+    """
+    if case.preset == _PRESET_LIVE:
+        return pytest.param(
+            case,
+            marks=pytest.mark.timeout(_runtime_budget_for(case)),
+            id=case.label,
+        )
+    return pytest.param(case, id=case.label)
+
+
+def test_live_lane_timeout_marker_matches_runtime_budget() -> None:
+    """Every LIVE lane's pytest-timeout equals its runtime budget and exceeds 300s.
+
+    A fast, stack-free guard for the exact gap that killed a bare
+    ``pytest -m service -k live``: the 300s global timeout is far shorter than a
+    LIVE lane's ~4080s budget, so the lane was truncated mid-run. Tied to
+    :func:`_runtime_budget_for` so a future budget change cannot silently re-open
+    the gap. Deterministic lanes keep the 300s global (fast failure detection).
+    """
+    for case in _ALL_CASES:
+        timeout_marks = [m for m in _case_param(case).marks if m.name == "timeout"]
+        if case.preset == _PRESET_LIVE:
+            assert timeout_marks, f"LIVE lane {case.label!r} needs a timeout marker"
+            armed = timeout_marks[0].args[0]
+            assert armed == _runtime_budget_for(case)
+            assert armed > 300.0  # must exceed the global that truncated the lane
+        else:
+            assert not timeout_marks, (
+                f"non-LIVE lane {case.label!r} must keep the 300s global timeout"
+            )
+
+
+def test_live_mixed_runtime_budget_is_the_specified_value() -> None:
+    """The live-mixed lane budgets to (180 + AUTO 240 + HUMAN 600) x4 = 4080s."""
+    assert _runtime_budget_for(CASE_LIVE_MIXED) == pytest.approx(4080.0)
+    # Same gate shape at the deterministic preset is x1 - well under 4080s.
+    assert _runtime_budget_for(CASE_MIXED) == pytest.approx(1020.0)
 
 
 def _dig(item: dict, field_name: str) -> str | None:
@@ -738,21 +806,13 @@ class AcceptanceHarness:
     # ------------------------------------------------------------------
 
     def _runtime_budget(self) -> float:
-        """A per-lane deadline scaled to gate count/policy, not one global default.
+        """This lane's deadline - the shared budget also armed as the timeout marker.
 
-        A HUMAN gate runs a full reject-with-notes revision loop (park -> edit ->
-        re-author -> re-submit -> approve -> apply); an AUTO gate resolves in one
-        synchronous submit. The LIVE preset authors each turn with a real provider
-        (minutes/turn), so it multiplies. The harness fails loud on ITS budget with
-        an actionable message rather than being killed by a fixed global timeout
-        that is too short for the lane's own specified workload.
+        Delegates to the module-level :func:`_runtime_budget_for` so the harness's
+        own deadline and the per-case ``pytest-timeout`` marker are one formula and
+        can never drift.
         """
-        per_gate = {POLICY_HUMAN: 600.0, POLICY_AUTO: 240.0}
-        base = 180.0
-        budget = base + sum(
-            per_gate.get(p, 300.0) for p in self.case.gate_policy.values()
-        )
-        return budget * (4.0 if self.case.preset == _PRESET_LIVE else 1.0)
+        return _runtime_budget_for(self.case)
 
     async def run(
         self, *, timeout_seconds: float | None = None, poll_seconds: float = 5.0
@@ -898,7 +958,7 @@ def _reachable_stack() -> tuple[str, str, Path] | None:
 
 @pytest.mark.service
 @pytest.mark.asyncio
-@pytest.mark.parametrize("case", _ALL_CASES, ids=[c.label for c in _ALL_CASES])
+@pytest.mark.parametrize("case", [_case_param(c) for c in _ALL_CASES])
 async def test_pw7_research_adr_materializes_two_documents(
     case: AcceptanceCase,
 ) -> None:

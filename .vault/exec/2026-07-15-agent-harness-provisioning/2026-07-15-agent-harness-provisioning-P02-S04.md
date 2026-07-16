@@ -24,13 +24,13 @@ related:
 
 ## Description
 
-- Prove the refuse/serve binding LIVE at the gateway HTTP boundary in `api/tests/`: real gateway app on a real socket, real eligibility service, and a real `vaultspec-core install` (no doubles). An unprovisioned document-authoring workspace is REFUSED at run-start with the harness reason before any dispatch, and SERVED as unavailable at discovery on every profile; a provisioned workspace clears the harness gate at both surfaces. Reasons are asserted path-free.
+- Prove the refuse/serve binding LIVE at the gateway HTTP boundary in `api/tests/`: real gateway app on a real socket, real eligibility service, and a real `vaultspec-core install` (no doubles). Three live directions: an unprovisioned document-authoring workspace is REFUSED at run-start with the harness reason before any dispatch and SERVED as unavailable at discovery on every profile; a workspaceless authoring run (top-level feature and tokens but no metadata) is REFUSED with the no-workspace reason before any dispatch; a provisioned workspace clears the harness gate at both surfaces. Reasons are asserted path-free.
 - Prove the service-fixture adoption in `service_tests/`: the `provisioned_workspace` fixture runs a genuine install and the resulting workspace passes the harness verifier and carries the flat rules corpus plus every required template.
-- Confirm the wiring is additive: the four route tests and two service tests pass, and the pre-existing API and eligibility suites are unchanged.
+- Confirm the wiring is additive: the new gateway route + unit tests and the service tests pass, and the pre-existing API and eligibility suites are unchanged.
 
 ## Outcome
 
-- Refuse and serve are proven LIVE and automatable: 4 gateway route tests + 2 service-fixture tests pass, all against real HTTP / real installs with no mocks. This closes the reviewer's carried MEDIUM - the harness gate is no longer inert at the boundary.
+- Refuse and serve are proven LIVE and automatable: 5 gateway route tests + 2 gateway unit tests + 2 service-fixture tests pass, all against real HTTP / real installs with no mocks. This closes the reviewer's carried MEDIUM (the harness gate is no longer inert at the boundary) and the workspaceless-authoring bypass raised in S03 REVIEW 5b.
 - Honest gap on the full agent-authoring lane: the plan's "a provisioned run passes with agents demonstrably reading templates and rules, and the skills surface is present and consulted" requires a running authoring engine plus real LLM agents. In this session no engine is reachable and real Claude runs are blocked by the weekly usage limit, so the end-to-end authoring materialization was NOT re-driven here. The provisioned run's acceptance is proven up to the gateway boundary (harness gate cleared); the agents-actually-read-the-corpus assertion rests on the ADR's ws5 counterfactual and the prior S10 live runs, and a fresh live re-drive is deferred to when the engine + LLM quota are available.
 
 ## Notes

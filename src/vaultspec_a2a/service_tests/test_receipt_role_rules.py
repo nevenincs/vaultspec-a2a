@@ -34,6 +34,7 @@ from langgraph.errors import GraphRecursionError
 
 from ..graph.compiler import compile_team_graph
 from ..team import load_agent_config, load_team_config
+from ..thread.errors import AgentConfigNotFoundError
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -299,7 +300,9 @@ async def test_coder_role_excluded_from_conventions_but_keeps_workspace_rules(
 
     supervisor_cfg = None
     if team.topology.type in ("star", "pipeline_loop"):
-        with contextlib.suppress(Exception):
+        # A missing supervisor config is tolerated (the coder preset may ship
+        # none); any other failure is a real regression and must surface.
+        with contextlib.suppress(AgentConfigNotFoundError):
             supervisor_cfg = load_agent_config("vaultspec-supervisor")
 
     factory = _RecordingProviderFactory()

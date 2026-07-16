@@ -7,14 +7,36 @@ import shutil
 import time
 from pathlib import Path
 
+import pytest
+
 from vaultspec_a2a.context.rules import RuleManager
 
 
 def _rules_dir(tmp_path: Path) -> Path:
-    """Create and return .vaultspec/rules/rules/ under tmp_path."""
-    d = tmp_path / ".vaultspec" / "rules" / "rules"
+    """Create and return the FLAT .vaultspec/rules/ directory under tmp_path.
+
+    The rule corpus lives directly under ``.vaultspec/rules/`` in the current
+    vaultspec-core schema (no nested ``rules/rules/``); the fixtures mirror that
+    real layout (graph-agent-framework-harness P02.S13).
+    """
+    d = tmp_path / ".vaultspec" / "rules"
     d.mkdir(parents=True)
     return d
+
+
+def _find_synced_rules_root() -> Path | None:
+    """Locate a real workspace whose ``.vaultspec/rules/`` holds synced ``*.md``.
+
+    Walks up from this test file to the first ancestor carrying a populated flat
+    rule corpus. Returns ``None`` when no synced corpus is present (e.g. a bare
+    checkout without ``vaultspec-core install``), so the real-corpus test can skip
+    honestly rather than fabricate the layout.
+    """
+    for ancestor in Path(__file__).resolve().parents:
+        rules_dir = ancestor / ".vaultspec" / "rules"
+        if rules_dir.is_dir() and any(rules_dir.glob("*.md")):
+            return ancestor
+    return None
 
 
 class TestDiscover:
@@ -314,3 +336,58 @@ class TestCompileCache:
 
         second = mgr.compile()
         assert second is None
+
+
+class TestRealSyncedCorpus:
+    """Prove the fix against the ACTUAL synced flat rule corpus (P02.S13).
+
+    Not a hand-built fixture: this points ``RuleManager`` at the repository's real
+    ``.vaultspec/rules/`` corpus as ``vaultspec-core`` synced it. Before the
+    path-alignment fix, ``_RULES_SUBDIR`` targeted a nonexistent nested
+    ``rules/rules/`` directory, so ``compile()`` returned ``None`` against this
+    same real corpus and these assertions would have failed - this is the
+    regression that catches the defect. Skips honestly where no corpus is synced
+    (a bare checkout without ``vaultspec-core install``).
+    """
+
+    def test_compile_returns_real_corpus_content(self) -> None:
+        root = _find_synced_rules_root()
+        if root is None:
+            pytest.skip(
+                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
+                "`vaultspec-core install` to materialize the flat rule corpus"
+            )
+
+        result = RuleManager(root).compile()
+
+        # The defect made this None (nested path missing); the fix makes it real.
+        assert result is not None, (
+            "compile() returned None against the real synced corpus - the flat "
+            "rules path is misaligned"
+        )
+        assert result.strip(), "compiled rule text is empty"
+        # Stable content from the real non-builtin corpus (01-core.md).
+        assert "Core Mandates" in result
+
+    def test_discover_reads_flat_corpus_and_excludes_builtin(self) -> None:
+        root = _find_synced_rules_root()
+        if root is None:
+            pytest.skip(
+                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
+                "`vaultspec-core install` to materialize the flat rule corpus"
+            )
+
+        default = RuleManager(root).discover()
+        with_builtin = RuleManager(root, include_builtin=True).discover()
+
+        # The flat path finds the real corpus (non-empty); every hit is a direct
+        # child of .vaultspec/rules/ (flat, not nested); and .builtin.md files are
+        # excluded by default but admitted with the flag - the exclusion behaviour
+        # holds on the real corpus, not just fixtures.
+        assert default, "discover() found no rule files in the real flat corpus"
+        rules_dir = (root / ".vaultspec" / "rules").resolve()
+        for path in default:
+            assert path.parent == rules_dir
+            assert not path.name.endswith(".builtin.md")
+        assert len(with_builtin) > len(default)
+        assert any(p.name.endswith(".builtin.md") for p in with_builtin)

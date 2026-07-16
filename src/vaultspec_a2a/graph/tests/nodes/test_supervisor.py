@@ -376,7 +376,7 @@ def test_revision_phase_prefers_revision_worker_phase() -> None:
 
 def test_build_supervisor_messages_adds_workspace_rules(tmp_path: Path) -> None:
     workspace_root = tmp_path / "supervisor-rules"
-    rules_dir = workspace_root / ".vaultspec" / "rules" / "rules"
+    rules_dir = workspace_root / ".vaultspec" / "rules"
     rules_dir.mkdir(parents=True, exist_ok=True)
     rule_file = rules_dir / "project.md"
     rule_file.write_text("# Repo Rules\n\nDo the thing.\n", encoding="utf-8")

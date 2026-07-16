@@ -1,7 +1,7 @@
 """Universal Rule Propagation — RuleManager (ADR-028).
 
 Discovers and compiles project-level coding rules from
-``.vaultspec/rules/rules/*.md`` into a single string for injection
+``.vaultspec/rules/*.md`` into a single string for injection
 into LLM system prompts.
 
 References:
@@ -16,11 +16,15 @@ __all__ = ["RuleManager"]
 
 _logger = logging.getLogger(__name__)
 
-_RULES_SUBDIR = Path(".vaultspec") / "rules" / "rules"
+# The rule corpus lives FLAT directly under ``.vaultspec/rules/`` in the current
+# vaultspec-core schema; there is no nested ``rules/rules/`` directory. Aligned
+# forward to that schema with no dual-read fallback (ADR-028 / graph-agent-
+# framework-harness P02.S13).
+_RULES_SUBDIR = Path(".vaultspec") / "rules"
 
 
 class RuleManager:
-    """Discovers and compiles ``.vaultspec/rules/rules/*.md`` rule files.
+    """Discovers and compiles ``.vaultspec/rules/*.md`` rule files.
 
     Args:
         workspace_root:  Absolute path to the project workspace root.
@@ -47,7 +51,7 @@ class RuleManager:
     def discover(self) -> list[Path]:
         """Return a sorted list of rule file paths.
 
-        Searches ``<workspace_root>/.vaultspec/rules/rules/`` for ``*.md``
+        Searches ``<workspace_root>/.vaultspec/rules/`` for ``*.md``
         files.  Files ending in ``.builtin.md`` are excluded unless
         ``include_builtin=True`` was passed at construction.
 

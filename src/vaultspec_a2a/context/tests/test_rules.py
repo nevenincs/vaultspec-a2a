@@ -9,6 +9,7 @@ from pathlib import Path
 
 import pytest
 
+from vaultspec_a2a.authoring.contract import DOCUMENT_AUTHORING_ROLES
 from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 
 
@@ -539,8 +540,8 @@ class TestBundledDefaults:
         out = rm.compile("researcher")
         assert out is not None
         assert "Tag taxonomy" in out  # a stable heading from the shipped bundled file
-        # Every one of the four document roles receives it...
-        for role in ("researcher", "synthesist", "adr-author", "doc-reviewer"):
+        # Every document-authoring role (from the single contract) receives it...
+        for role in DOCUMENT_AUTHORING_ROLES:
             assert rm.compile(role) is not None
         # ...and a non-document role does NOT (the file opts into doc roles only).
         assert rm.compile("standard-executor") is None

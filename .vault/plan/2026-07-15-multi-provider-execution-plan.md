@@ -80,11 +80,14 @@ proves in turn. All 19 Steps are closed. P01 (Z.ai) and P02 (Codex) landed on
 main - see each Step row for its exact commit SHA(s) and the Step Records under
 `.vault/exec/2026-07-15-multi-provider-execution/`.
 
-**Tracked hardening follow-up (out of P01/P02 scope):** `AcpChatModel.env_vars`
-has no repr redaction - the Z.ai auth token and Claude's OAuth token both sit in
-that plain dict unredacted. Residual risk is scoped to a direct `repr(model)`
-call, not present in any current code path. Cross-cutting across every ACP-path
-provider; not picked up by this plan.
+**Token-in-repr hardening (CLOSED):** `AcpChatModel.env_vars` repr/serialization
+redaction landed `9ebcbc3` - the field carries `repr=False` + `exclude=True`
+(`src/vaultspec_a2a/providers/acp_chat_model.py:84-92`) with a regression test
+(`src/vaultspec_a2a/providers/tests/test_acp_token_redaction.py`) asserting no
+token appears in `repr`/`str`/`model_dump_json`, so the Z.ai and Claude auth
+tokens can never reach a log, checkpoint, or traceback via serialization. The
+earlier "no repr redaction" note described the pre-`9ebcbc3` state; that latent
+exposure is CLOSED (audit item marked closed at `cc3f65c`). No follow-up owed.
 
 ## Steps
 

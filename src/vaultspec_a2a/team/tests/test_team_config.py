@@ -18,6 +18,7 @@ from vaultspec_a2a.thread.errors import (
 )
 
 from ..team_config import (
+    DEFAULT_AUTHORING_SURFACES,
     AgentConfig,
     AgentModelConfig,
     TeamConfig,
@@ -1007,3 +1008,100 @@ class TestModelProfiles:
         cfg = load_team_config("ws-team", workspace_root=tmp_path)
         assert cfg.profiles["fast"].roles["role_a"].capability == Model.LOW
         assert "team-defaults" in cfg.effective_profiles()
+
+
+class TestTeamHarness:
+    """team.harness declaration schema and the default authoring harness.
+
+    Real in-memory ``model_validate`` over dicts (config, not a mock),
+    agent-harness-provisioning ADR.
+    """
+
+    def _authoring_dict(
+        self, harness: dict[str, object] | None = None
+    ) -> dict[str, object]:
+        d: dict[str, object] = {
+            "id": "authoring-team",
+            "display_name": "Authoring",
+            "topology": {"type": "research_adr"},
+            "workers": [{"agent_id": "role_a"}, {"agent_id": "role_b"}],
+        }
+        if harness is not None:
+            d["harness"] = harness
+        return d
+
+    def test_authoring_preset_without_block_defaults_to_full_harness(self) -> None:
+        cfg = TeamConfig.model_validate(self._authoring_dict())
+        assert cfg.harness is None
+        assert cfg.is_document_authoring is True
+        effective = cfg.effective_harness()
+        assert effective is not None
+        assert tuple(effective.required_surfaces) == DEFAULT_AUTHORING_SURFACES
+        assert effective.role_skills == {}
+        assert effective.mcp_servers == []
+
+    def test_non_authoring_preset_without_block_has_no_harness(self) -> None:
+        cfg = TeamConfig.model_validate(
+            {
+                "id": "coder-team",
+                "display_name": "Coder",
+                "topology": {"type": "star"},
+                "workers": [{"agent_id": "role_a"}],
+            }
+        )
+        assert cfg.is_document_authoring is False
+        assert cfg.effective_harness() is None
+
+    def test_declared_block_is_returned_verbatim(self) -> None:
+        cfg = TeamConfig.model_validate(
+            self._authoring_dict(
+                {
+                    "required_surfaces": ["rules", "templates", "tools"],
+                    "role_skills": {"role_a": ["vaultspec-research", "vaultspec-adr"]},
+                    "mcp_servers": ["authoring-bridge"],
+                }
+            )
+        )
+        harness = cfg.effective_harness()
+        assert harness is not None
+        assert harness.required_surfaces == ["rules", "templates", "tools"]
+        assert harness.skills_for("role_a") == ["vaultspec-research", "vaultspec-adr"]
+        assert harness.skills_for("role_b") == []
+        assert harness.mcp_servers == ["authoring-bridge"]
+
+    def test_bare_block_defaults_surfaces_to_all_five(self) -> None:
+        cfg = TeamConfig.model_validate(self._authoring_dict({}))
+        harness = cfg.effective_harness()
+        assert harness is not None
+        assert tuple(harness.required_surfaces) == DEFAULT_AUTHORING_SURFACES
+
+    def test_all_required_skills_dedupes_in_first_seen_order(self) -> None:
+        cfg = TeamConfig.model_validate(
+            self._authoring_dict(
+                {
+                    "role_skills": {
+                        "role_a": ["vaultspec-research", "vaultspec-write"],
+                        "role_b": ["vaultspec-write", "vaultspec-adr"],
+                    }
+                }
+            )
+        )
+        harness = cfg.effective_harness()
+        assert harness is not None
+        assert harness.all_required_skills() == [
+            "vaultspec-research",
+            "vaultspec-write",
+            "vaultspec-adr",
+        ]
+
+    def test_unknown_surface_raises_config_error(self) -> None:
+        with pytest.raises(ConfigError, match="Unknown harness surface"):
+            TeamConfig.model_validate(
+                self._authoring_dict({"required_surfaces": ["rules", "bogus"]})
+            )
+
+    def test_role_skills_for_unknown_role_raises_config_error(self) -> None:
+        with pytest.raises(ConfigError, match="unknown role 'ghost'"):
+            TeamConfig.model_validate(
+                self._authoring_dict({"role_skills": {"ghost": ["vaultspec-adr"]}})
+            )

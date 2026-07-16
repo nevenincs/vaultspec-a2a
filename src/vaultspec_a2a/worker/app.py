@@ -36,6 +36,7 @@ from opentelemetry import metrics, trace
 from ..control.config import settings
 from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
+from ..lifecycle.registration import deregister_serve, register_serve
 from ..telemetry import TelemetryMiddleware, configure_telemetry
 from ..utils.asyncio_compat import configure_asyncio_runtime
 from ..utils.enums import Environment
@@ -136,6 +137,23 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.executor = executor
         app.state.bridge = bridge
 
+        # dev-process-registry: a worker booted on a band port (worker-dev)
+        # self-registers so `procs` can enumerate/reap it; a resident worker on
+        # its fixed out-of-band port registers nothing (returns None). worker-dev
+        # is a non-heartbeat role, so pid-liveness alone governs its staleness.
+        worker_record = register_serve(
+            "worker-dev",
+            settings.worker_port,
+            workspace=str(settings.workspace_root),
+            command=[
+                "python",
+                "-m",
+                "vaultspec_a2a.worker",
+                "--port",
+                str(settings.worker_port),
+            ],
+        )
+
         async with anyio.create_task_group() as tg:
             app.state.task_group = tg
 
@@ -148,6 +166,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
 
             # Shutdown path
             logger.info("Worker %s shutting down", worker_id)
+            deregister_serve(worker_record)
             tg.cancel_scope.cancel()
 
         await executor.shutdown()

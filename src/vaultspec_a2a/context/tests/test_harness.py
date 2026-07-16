@@ -47,11 +47,35 @@ def test_fully_provisioned_workspace_is_ready(tmp_path: Path) -> None:
     assert verdict.reasons == []
 
 
-def test_absent_rules_corpus_is_a_reason(tmp_path: Path) -> None:
+def test_workspace_without_rules_corpus_is_satisfied_by_bundled_defaults(
+    tmp_path: Path,
+) -> None:
+    """A workspace with no on-disk rules is rules-satisfied via bundled defaults.
+
+    Post-Path-B (architect arbitration): rules are delivered in-process by the
+    RuleManager as the union of the workspace corpus and the bundled defaults, so
+    an absent ``.vaultspec/rules`` no longer fails the rules surface. With every
+    template present, such a workspace is fully ready.
+    """
     _provision(tmp_path, rules=False)
     verdict = verify_harness(tmp_path)
+    assert verdict.ready is True
+    assert not any("rule content" in r or "rules corpus" in r for r in verdict.reasons)
+
+
+def test_bare_workspace_rules_satisfied_but_templates_missing(tmp_path: Path) -> None:
+    """A bare workspace: rules pass on bundled defaults, but templates still fail.
+
+    The bundled-only tripwire. A workspace with no ``.vaultspec`` at all is NOT
+    refused on the rules surface (the bundled defaults resolve), but templates
+    have no bundled fallback, so the verdict is not-ready for the TEMPLATES
+    reason - never the rules reason. This is the arbitrated truth that replaces
+    the pre-Path-B ``.vaultspec/rules`` on-disk probe.
+    """
+    verdict = verify_harness(tmp_path)
     assert verdict.ready is False
-    assert any("rules corpus" in r for r in verdict.reasons)
+    assert not any("rule content" in r or "rules corpus" in r for r in verdict.reasons)
+    assert any("templates missing" in r for r in verdict.reasons)
 
 
 def test_missing_required_templates_are_named(tmp_path: Path) -> None:

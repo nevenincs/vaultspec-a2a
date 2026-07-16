@@ -2,9 +2,14 @@
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import pytest
 
 from .harness import ServiceStack, build_service_stack
+
+if TYPE_CHECKING:
+    from pathlib import Path
 
 FAILED_SERVICE_TESTS: list[dict[str, str]] = []
 
@@ -41,6 +46,27 @@ def service_stack(request: pytest.FixtureRequest) -> ServiceStack:
 def service_started_at(service_stack: ServiceStack) -> float:
     """Convenience fixture for trace-window assertions."""
     return service_stack.started_at
+
+
+@pytest.fixture
+def provisioned_workspace(tmp_path: Path) -> Path:
+    """A freshly provisioned, harness-ready run workspace (agent-harness ADR).
+
+    Adopts the P02.S03 provision verb: one ``provision_workspace`` call scaffolds
+    the ``.vaultspec`` corpus and verifies its harness, replacing the ws5 manual
+    recipe the acceptance harness used to hand-roll. Fails loudly if provisioning
+    runs but leaves the harness incomplete; skips honestly only when
+    ``vaultspec-core`` is not resolvable in the environment at all.
+    """
+    from ..cli.provision import ProvisionError, provision_workspace
+
+    ws = tmp_path / "ws"
+    try:
+        result = provision_workspace(ws)
+    except ProvisionError as exc:
+        pytest.skip(f"vaultspec-core not provisionable in this environment: {exc}")
+    assert result.ok, result.harness.reasons
+    return ws
 
 
 def pytest_runtest_logreport(report: pytest.TestReport) -> None:

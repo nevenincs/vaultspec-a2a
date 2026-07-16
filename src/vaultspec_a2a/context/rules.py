@@ -114,15 +114,21 @@ class RuleManager:
             for p in source.glob("*.md"):
                 by_name[p.name] = p
 
-        paths = []
+        selected: list[tuple[int, str, Path]] = []
         for name, p in by_name.items():
             if not self._include_builtin and name.endswith(".builtin.md"):
                 continue
-            if role is not None and role not in _read_frontmatter_roles(p):
+            meta = _read_frontmatter(p)
+            if role is not None and role not in _roles_from_meta(meta):
                 continue
-            paths.append(p)
+            selected.append((_order_from_meta(meta), name, p))
 
-        return sorted(paths)
+        # Compile order HONORS an optional ``order:`` frontmatter key (low first;
+        # undeclared files get a neutral default), tie-broken by name - a stable
+        # order that is INDEPENDENT of absolute deployment path. Before this the
+        # ``order:`` key was declared-but-never-consumed and concatenation order was
+        # path-dependent (reviewer LOW-3).
+        return [p for _, _, p in sorted(selected)]
 
     def _rule_source_dirs(self) -> list[Path]:
         """Existing rule source dirs, bundled first then workspace (workspace wins).
@@ -183,6 +189,32 @@ class RuleManager:
         result = "\n\n".join(parts) if parts else None
         self._cached_results[role] = result
         return result
+
+    def has_workspace_rules(self) -> bool:
+        """Return whether the WORKSPACE rule corpus is present (a harness signal).
+
+        True when at least one non-builtin rule file exists under the workspace
+        ``.vaultspec/rules`` directory. The a2a-shipped ``bundled_rules_dir`` is
+        deliberately ignored: a run's harness completeness is about the
+        PROVISIONED workspace, not the package fallbacks, so a bare workspace with
+        only bundled defaults must still read as absent. Callers surface this as a
+        harness ineligibility with a safe reason instead of letting
+        :meth:`compile` degrade silently to ``None`` (agent-harness-provisioning
+        ADR: RuleManager finding nothing is a harness violation for authoring
+        presets, not an invisible no-op).
+
+        The check is corpus-presence only and role-agnostic: harness readiness
+        asks whether the workspace is provisioned at all, independent of any
+        role-scoped rule selection.
+        """
+        workspace_rules = self._workspace_root / _RULES_SUBDIR
+        if not workspace_rules.is_dir():
+            return False
+        for p in workspace_rules.glob("*.md"):
+            if not self._include_builtin and p.name.endswith(".builtin.md"):
+                continue
+            return True
+        return False
 
     def invalidate(self) -> None:
         """Clear the compile cache, forcing a full recompile on next call."""
@@ -332,42 +364,69 @@ class RuleManager:
 # ------------------------------------------------------------------
 
 
-def _read_frontmatter_roles(path: Path) -> frozenset[str]:
-    """Return the ``roles:`` set declared in a rule file's YAML frontmatter.
+# Compile order for a rule file whose frontmatter declares no ``order:`` - a
+# neutral default that sorts undeclared files after the low-numbered mandates but
+# keeps them deterministic (reviewer LOW-3).
+_DEFAULT_RULE_ORDER = 100
 
-    Reads only the leading ``---``-delimited frontmatter block and extracts a
-    ``roles:`` sequence (or a bare string) of role names. Returns an empty set
-    when the file has no frontmatter, no ``roles:`` key, or an unreadable or
-    malformed block - a file that opts in to no role is simply not role-scoped and
-    is skipped by a scoped :meth:`RuleManager.discover`. The compile path still
-    strips the whole frontmatter afterwards via :func:`_strip_frontmatter`.
+
+def _read_frontmatter(path: Path) -> dict[str, object]:
+    """Return the parsed YAML frontmatter of a rule file, or ``{}``.
+
+    Reads only the leading ``---``-delimited block. Returns an empty dict when the
+    file has no frontmatter, no closing fence, an unreadable file, or a malformed /
+    non-mapping block. The compile path still strips the whole frontmatter
+    afterwards via :func:`_strip_frontmatter`; this only PEEKS at it for the role
+    filter and the compile-order sort key.
     """
     try:
         raw = path.read_text(encoding="utf-8")
     except OSError:
-        return frozenset()
+        return {}
     lines = raw.splitlines()
     if not lines or lines[0].strip() != "---":
-        return frozenset()
+        return {}
     block: list[str] = []
     for line in lines[1:]:
         if line.strip() == "---":
             break
         block.append(line)
     else:
-        return frozenset()  # no closing fence — not valid frontmatter
+        return {}  # no closing fence — not valid frontmatter
     try:
         meta = yaml.safe_load("\n".join(block))
     except yaml.YAMLError:
-        return frozenset()
-    if not isinstance(meta, dict):
-        return frozenset()
+        return {}
+    return meta if isinstance(meta, dict) else {}
+
+
+def _roles_from_meta(meta: dict[str, object]) -> frozenset[str]:
+    """Extract the ``roles:`` set from parsed frontmatter (list or bare string).
+
+    Empty when absent or malformed - a file opting into no role is not role-scoped
+    and a scoped :meth:`RuleManager.discover` skips it.
+    """
     roles = meta.get("roles")
     if isinstance(roles, str):
         return frozenset({roles})
     if isinstance(roles, list):
         return frozenset(item for item in roles if isinstance(item, str))
     return frozenset()
+
+
+def _order_from_meta(meta: dict[str, object]) -> int:
+    """Extract the ``order:`` sort key from parsed frontmatter, or the default.
+
+    A declared integer ``order:`` orders the file in the compiled concatenation
+    (low first); anything absent or non-integer falls back to
+    :data:`_DEFAULT_RULE_ORDER` (reviewer LOW-3).
+    """
+    order = meta.get("order")
+    if isinstance(order, bool):
+        return _DEFAULT_RULE_ORDER
+    if isinstance(order, int):
+        return order
+    return _DEFAULT_RULE_ORDER
 
 
 def _strip_frontmatter(content: str) -> str:

@@ -23,8 +23,8 @@ The procs.toml port-band definitions, the file-per-process registry with atomic 
 
 Auto-registration in the serve paths and test harnesses, the engine-serve wrapper, and live multi-instance contention evidence.
 
-- [ ] `P02.S03` - Route the gateway/worker serve paths, the engine-serve wrapper script, and the live-test/service-harness fixtures through registry registration and band-allocated ports; `repoint the port-asserting MCP tests at the declared bands; `src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/worker/, scripts/, src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/protocols/mcp/tests/`.
-- [ ] `P02.S04` - Prove it live: two concurrent registered engine+gateway stacks without collision, a stale orphan detected and reaped, rerun rebuilding and re-registering on the same port, and procs list enumerating truthfully throughout; `src/vaultspec_a2a/lifecycle/tests/, src/vaultspec_a2a/service_tests/`.
+- [x] `P02.S03` - Route the gateway/worker serve paths, the engine-serve wrapper script, and the live-test/service-harness fixtures through registry registration and band-allocated ports; `repoint the port-asserting MCP tests at the declared bands; `src/vaultspec_a2a/api/app.py, src/vaultspec_a2a/worker/, scripts/, src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/protocols/mcp/tests/`.
+- [x] `P02.S04` - Prove it live: two concurrent registered engine+gateway stacks without collision, a stale orphan detected and reaped, rerun rebuilding and re-registering on the same port, and procs list enumerating truthfully throughout; `src/vaultspec_a2a/lifecycle/tests/, src/vaultspec_a2a/service_tests/`.
 
 ## Description
 

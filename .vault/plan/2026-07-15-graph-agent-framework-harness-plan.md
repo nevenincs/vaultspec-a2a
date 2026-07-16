@@ -15,6 +15,16 @@ related:
   - '[[2026-07-15-multi-provider-execution-plan]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `graph-agent-framework-harness` plan
 
 ### Phase `P01` - resolve the persona-prompt CLI-invocation question
@@ -36,7 +46,7 @@ Shape which mechanical conventions (tag taxonomy, wiki-link/frontmatter rules, t
 
 Rewrite each of the four research_adr document personas' TOML system prompts against the resolved reading from P01 - either pointing them at a newly built invocation path, or replacing the impossible CLI instructions with an accurate description of the real graph-driven propose/submit flow.
 
-- [ ] `P03.S05` - Rewrite the researcher persona's discovery-rag prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
+- [ ] `P03.S05` - Rewrite the researcher persona's discovery-rag prompt instructions per the P01 finding - BLOCKED solely on the upstream Claude CLI surfacing gate (session-injected MCP servers connect but do not surface to the model, baseline 2.1.211, standing re-probe) once the S15 composition wiring lands, and the re-expression must instruct only tools the model can actually see; `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
 - [x] `P03.S06` - Confirm the synthesist persona carries no residual document-scaffold CLI instructions - the scaffold-propose path was excised upstream by 9c2e9dc and the current prompt only PROHIBITS vault-add/propose while describing the graph-submitter flow, verified per the P01 probe and re-verified against HEAD, reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml`.
 - [x] `P03.S07` - Confirm the adr-author persona carries no residual scaffold or amend-vs-supersede rag-search instructions - both were excised upstream by 9c2e9dc and verified by the P01 probe (416b7f0), reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
 - [x] `P03.S08` - Confirm the doc-reviewer persona prompt is consistent with the graph-submitter mechanism - aligned upstream by b1d9892 to review the writer's message body with the scaffold-echo auto-revision rule, verified per the P01 probe and re-verified against HEAD, reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml`.
@@ -47,13 +57,14 @@ Wire the P02-designed role-scoped rule selection into the two RuleManager call s
 
 - [x] `P04.S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile; `src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P04.S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
-- [x] `P04.S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 96bd13e as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path); `src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P04.S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 138f76f as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path); `src/vaultspec_a2a/graph/compiler.py`.
+- [ ] `P04.S15` - Consume the declared team.harness mcp_servers into the ACP session composition - resolve each declared server name to a launch spec and thread it per-role through AcpChatModel.with_mcp_servers into session/new, claiming the agent-harness-provisioning ADR's unowned per-role MCP-composition Opens item with a protocol-layer assertion (advertised servers present in session/new params), model-visible surfacing remaining upstream-gated per the S20 constraint; `src/vaultspec_a2a/providers/_acp_mcp.py, src/vaultspec_a2a/providers/_acp_session.py, src/vaultspec_a2a/graph/compiler.py`.
 
 ### Phase `P05` - prove live receipt against a real provisioned run
 
 Assert end-to-end, against a real provisioned run workspace rather than RuleManager.compile() in isolation, that a graph-executed persona actually receives its scoped rules and reconciled prompt, per the ADR's live-proof constraint.
 
-- [ ] `P05.S11` - Add a live service-level assertion that a research_adr worker turn's compiled system messages actually contain the P02 role-scoped rule content, run against a real provisioned workspace rather than a static-repo RuleManager.compile() call; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py or a new sibling service test module`.
+- [x] `P05.S11` - Add a live service-level assertion that a research_adr worker turn's compiled system messages actually contain the P02 role-scoped rule content, run against a real provisioned workspace rather than a static-repo RuleManager.compile() call; `src/vaultspec_a2a/service_tests/test_pw7_acceptance.py or a new sibling service test module`.
 - [ ] `P05.S12` - Record the verification evidence and close out the plan's Verification criteria, reconciling this feature's exec summary against what actually landed; `.vault/exec/2026-07-15-graph-agent-framework-harness/2026-07-15-graph-agent-framework-harness-P05-summary.md`.
 
 ## Description

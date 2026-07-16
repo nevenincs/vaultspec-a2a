@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import click
@@ -142,6 +143,49 @@ def run_cancel(run_id: str, url: str | None) -> None:
 
 
 @main.group()
+def workspace() -> None:
+    """Provision and verify a run workspace's agent harness."""
+
+
+@workspace.command("provision")
+@click.argument(
+    "path",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=".",
+    required=False,
+)
+@click.option(
+    "--verify-only",
+    is_flag=True,
+    help="Verify an already-provisioned workspace; skip vaultspec-core install.",
+)
+def workspace_provision(path: Path, verify_only: bool) -> None:
+    """Install the vaultspec framework into PATH and verify its agent harness.
+
+    Wraps ``vaultspec-core install`` plus the harness verifier and reports the
+    verdict, any version skew, and each missing surface. Exits non-zero when the
+    harness is incomplete so a caller can gate on provisioning.
+    """
+    from .provision import ProvisionError, provision_workspace
+
+    try:
+        result = provision_workspace(path, install=not verify_only)
+    except ProvisionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(result.install_summary)
+    if result.version_skew is not None:
+        click.echo(f"WARNING: {result.version_skew}")
+    if result.harness.ready:
+        click.echo(f"harness ready: {path}")
+    else:
+        click.echo(f"harness INCOMPLETE: {path}")
+        for reason in result.harness.reasons:
+            click.echo(f"  - {reason}")
+        sys.exit(1)
+
+
+@main.group()
 def procs() -> None:
     """Manage machine-global dev processes via the registry (dev-process-registry)."""
 
@@ -248,6 +292,59 @@ def procs_reap() -> None:
         return
     for record in reaped:
         click.echo(f"reaped {record.role}-{record.name} (pid {record.pid})")
+
+
+@procs.command("up")
+@click.argument("role")
+@click.argument("name")
+@click.option(
+    "--workspace", default="", help="Workspace path recorded for the process."
+)
+@click.option(
+    "--repo", default="", help="Repo dir to serve from (default: project root)."
+)
+@click.option(
+    "--log", "log_path", default=None, help="Append process output to this file."
+)
+def procs_up(
+    role: str, name: str, workspace: str, repo: str, log_path: str | None
+) -> None:
+    """Allocate a band port, boot the role's serve command, and register it.
+
+    The race-free boot verb: reserves a band port, spawns ROLE's serve command
+    from procs.toml, waits for a live listener, then registers the process. Two
+    concurrent same-band boots can never collide on a port.
+    """
+    from ..lifecycle.manager import endpoint_for, serve_up
+
+    try:
+        record = serve_up(role, name, workspace=workspace, repo=repo, log_path=log_path)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(
+        f"up {record.role}-{record.name} pid={record.pid} {endpoint_for(record)}"
+    )
+
+
+@procs.command("allocate")
+@click.argument("role")
+def procs_allocate(role: str) -> None:
+    """Reserve and print the next free band port for ROLE (marker held ~30s).
+
+    For callers that boot their own process: prints a band port with an exclusive
+    reservation so a concurrent allocator cannot pick the same one. Register the
+    process (or let the reservation lapse) once bound.
+    """
+    from ..lifecycle.manager import _load_config_or_empty
+    from ..lifecycle.registry import reserve_port
+
+    config = _load_config_or_empty()
+    try:
+        role_cfg = config.role(role)
+        reservation = reserve_port(role, role_cfg, config=config)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(str(reservation.port))
 
 
 if __name__ == "__main__":

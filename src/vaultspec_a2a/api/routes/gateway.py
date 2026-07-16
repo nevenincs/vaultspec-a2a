@@ -147,6 +147,7 @@ async def run_start_endpoint(
         team_config,
         feature_tag=effective_feature or None,
         actor_tokens=body.actor_tokens,
+        harness=_probe_harness(team_config, ws_root),
     )
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
@@ -241,6 +242,34 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
             status_code=422,
             detail=f"Team preset {team_preset!r} failed to load: {exc}",
         ) from exc
+
+
+def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
+    """Probe the agent harness for a document-authoring preset, else ``None``.
+
+    A non-authoring preset carries no harness requirement, so it returns ``None``
+    (composes nothing into eligibility; pre-existing refusals unchanged). A
+    document-authoring preset ALWAYS yields a verdict: the verifier's over a
+    resolved workspace, or a synthetic not-ready verdict when no workspace is
+    resolved - a workspaceless authoring run cannot possibly carry a complete
+    harness, so it is refused, not silently skipped (agent-harness-provisioning
+    ADR: operator override possible, silent degradation never). This preserves the
+    discovery-serves / run-start-refuses binding uniformly. Read-only.
+    """
+    from ...context.harness import HarnessReadiness
+    from ...providers.model_profiles import probe_harness_ready
+
+    harness_decl = team_config.effective_harness()
+    if harness_decl is None:
+        return None
+    if ws_root is None:
+        return HarnessReadiness(
+            ready=False,
+            reasons=["no workspace resolved for a document-authoring preset"],
+        )
+    return probe_harness_ready(
+        ws_root, required_skills=harness_decl.all_required_skills()
+    )
 
 
 def _resolve_and_freeze_profile_or_refuse(
@@ -631,6 +660,11 @@ def _summarize_profiles(
             readiness[provider] = probe_provider_readiness(provider)
         return readiness[provider]
 
+    # Probe the harness once per preset (workspace-level, profile-independent) so
+    # discovery SERVES the harness reason on an unprovisioned authoring preset -
+    # the discovery half of the agent-harness contract.
+    harness = _probe_harness(tc, ws_root)
+
     summaries: list[ProfileSummary] = []
     profiles = tc.effective_profiles()
     for profile_id, profile in profiles.items():
@@ -640,6 +674,7 @@ def _summarize_profiles(
             readiness=readiness,
             engine_reachable=engine_reachable,
             acceptance_gate_passed=False,
+            harness=harness,
         )
         assignments = [
             RoleAssignmentSummary(

@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#graph-agent-framework-harness'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 related:
   - "[[2026-07-15-graph-agent-framework-harness-research]]"
   - "[[2026-03-31-universal-rule-propagation-adr]]"

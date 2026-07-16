@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
@@ -38,7 +40,6 @@ __all__ = [
 
 # The flat ``.vaultspec/`` corpus subdirectories a provisioned workspace carries
 # under the current vaultspec-core schema.
-_RULES_DIR = Path(".vaultspec") / "rules"
 _TEMPLATES_DIR = Path(".vaultspec") / "templates"
 _SKILLS_DIR = Path(".vaultspec") / "skills"
 
@@ -86,7 +87,10 @@ def verify_harness(
 
     Checks, each contributing one safe reason on failure:
 
-    - **rules**: the flat ``.vaultspec/rules/*.md`` corpus is non-empty;
+    - **rules**: the ``RuleManager`` resolves rule content for the run - the
+      union of the workspace ``.vaultspec/rules`` corpus and the bundled
+      in-process defaults, so a bundled-only (Path B) workspace is satisfied
+      even with no ``.vaultspec/rules`` on disk;
     - **templates**: every name in *required_templates* is present as
       ``.vaultspec/templates/<name>.md``;
     - **skills**: every name in *required_skills* is present under
@@ -101,10 +105,10 @@ def verify_harness(
     root = workspace_root.resolve()
     reasons: list[str] = []
 
-    if not _has_markdown(root / _RULES_DIR):
+    if not _rule_content_resolves(root):
         reasons.append(
-            "rules corpus is empty or absent (.vaultspec/rules) - "
-            "workspace is not provisioned"
+            "no rule content resolvable for the run "
+            "(neither the workspace corpus nor the bundled defaults)"
         )
 
     templates_dir = root / _TEMPLATES_DIR
@@ -134,12 +138,29 @@ def verify_harness(
 # ---------------------------------------------------------------------------
 
 
-def _has_markdown(directory: Path) -> bool:
-    """True when *directory* exists and holds at least one ``*.md`` file."""
+def _rule_content_resolves(root: Path) -> bool:
+    """True when the ``RuleManager`` resolves any rule content for *root*.
+
+    Rules are delivered in-process by the ``RuleManager`` as the union of the
+    workspace ``.vaultspec/rules`` corpus and the bundled defaults
+    (:data:`~vaultspec_a2a.context.rules.DEFAULT_BUNDLED_RULES_DIR`), a workspace
+    file shadowing a bundled one by name. A bundled-only (Path B) workspace
+    therefore carries rules with no ``.vaultspec/rules`` on disk, so the surface
+    is satisfied whenever compilation over that union yields content. ``compile``
+    reads files and writes nothing, preserving this module's read-only contract.
+
+    A compilation failure degrades to "not resolved" (a served reason) rather
+    than propagating: this is a readiness probe wired to a 422 refusal gate, so a
+    future rule-file parse error must become an eligibility reason, never a crash
+    on the run-start path.
+    """
     try:
-        return any(directory.glob("*.md"))
-    except OSError:
+        resolved = RuleManager(
+            root, bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR
+        ).compile()
+    except Exception:
         return False
+    return bool(resolved)
 
 
 def _skill_present(skills_dir: Path, name: str) -> bool:

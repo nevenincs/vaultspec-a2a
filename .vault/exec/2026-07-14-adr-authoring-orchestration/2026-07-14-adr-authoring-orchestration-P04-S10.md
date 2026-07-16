@@ -282,3 +282,62 @@ actively re-drive a run stuck in `recovery_required` (which the current sweep, g
 `control/projection.py` + `worker/executor.py` resume finally +
 `control/event_handlers.py` (the durable-row event writers). The dispatch-side hardening
 (d899030) is already in the running code, so a successor is not re-solving it.
+
+## request_changes-recovery wedge: FIXED, sharpened root cause (executor-opus-9, 2026-07-16)
+
+Took the wedge with opus-8's reliable repro as the instrument and fixed it. Landed as
+`3d55486` (`fix(control): recover checkpoint-parked runs mis-statused RUNNING`). The
+P04.S10 checkbox stays UNCHECKED per the owner's deferred gate — this records the fix,
+not a closeout.
+
+### Sharpened root cause (live-verified, not durable-row lag per se)
+
+The wedge is not primarily an eventual-consistency read lag; it is a lost-verdict /
+never-re-driven failure that leaves the run mis-statused. Verified live (own gateway on
+the shared `:8767` engine, wedge captured mid-flight and the DBs inspected):
+
+- At wedge the engine HOLDS the gate proposal with a full `request_changes` decision
+  (`approval.present=true`, `decision=request_changes`, `stale=false`). The verdict
+  reached the engine. But the next revision (`r2`) is NEVER authored (engine review-queue
+  empty for the run) — the a2a run never advances.
+- The wedged thread's own DB row is `status=running`; the checkpoint is parked at the
+  gate (`gate_pending` set, `pending_writes=True`). run-status' `recovery_required` is a
+  READ-TIME projection of the checkpoint(parked)-vs-durable(missing/stale) gap; the thread
+  row's `repair_status` is healthy/`paused_resumable`, not itself `recovery_required`.
+- Why `status=running` on a parked run: a parked run reaches `INPUT_REQUIRED` ONLY via the
+  `document_approval_request` permission event (`emit_terminal_status` is a deliberate
+  no-op for the `interrupted` outcome, `worker/state_projection.py`). That signal is lost
+  or clobbered two ways, both observed: (1) CLOBBER — `_resume_with_verdict`'s optimistic
+  `update_thread_status(RUNNING)` for gate N's resume races AFTER gate N+1's perm event set
+  `INPUT_REQUIRED` (seen at the ADR gate: `status=running` but `repair=paused_resumable`,
+  `execution_state` stale at the research gate, resume claim still on the OLD research
+  proposal); (2) LOST PERM EVENT — the perm event / execution_state projection (both from
+  `graph.aget_state()` in the ingest finally) never land, leaving `status=running`,
+  `execution_state=NONE`.
+- The verdict subscriber's recovery (`_find_parked_thread`, `_reconcile_parked_runs`)
+  acted ONLY on `INPUT_REQUIRED` threads, so a run mis-statused `RUNNING` was invisible to
+  ALL recovery — the decided verdict was never delivered and nothing re-drove it.
+
+### The fix (direction b, checkpoint-truth reconcile)
+
+`_reconcile_parked_runs` now also considers `RUNNING` candidates and recovers by CHECKPOINT
+truth (`gate_pending_proposal_id` + the engine's decided approval decision) rather than the
+fragile derived `thread.status`. Re-drive routes through the EXISTING gate-precise,
+claim-leased `_resume_with_verdict`; the worker ingest-active lock + gate-precision +
+decided-verdict requirement mean a genuinely executing run is never disturbed. No
+write-path emit reordering (direction (a) was rejected on evidence — it would only quiet
+the read-side projection while the run stayed stuck, `r2` never authored). `d899030`'s
+dispatch dedup is untouched.
+
+### Validation
+
+- Reliable-repro acceptance: 6/6 deterministic HUMAN lane GREEN (baseline wedge rate ~60%),
+  own gateway/worker attached to the shared engine, all iters healthy ~28–39s (no recovery
+  stalls). Runs `pw7-1784183511/546/577/612/647/677`.
+- Targeted unit, real DB + real `AsyncSqliteSaver` + real engine round-trip, no mocks:
+  `test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile` — seeds a
+  parked run mis-statused `RUNNING` with a real `request_changes` decision and asserts the
+  reconcile re-dispatches exactly one resume. Proven non-tautological: FAILS on stashed
+  pre-fix code, PASSES with the fix. The existing missed-reject live test still passes.
+- `ruff`/`ty` clean; all 23 non-live `verdict_subscriber` tests pass (incl. claim
+  dedup/re-drive); pre-commit hooks green in the isolated land worktree.

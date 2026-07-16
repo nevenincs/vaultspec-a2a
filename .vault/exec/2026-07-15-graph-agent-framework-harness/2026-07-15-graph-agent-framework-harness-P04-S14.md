@@ -17,7 +17,7 @@ related:
 
 ## Description
 
-Retroactive Step Record, authored by the architect: the work landed inside commit `96bd13e` (the P04.S09/S10 call-site wiring) before this row existed; the row was added afterward so the third rule-injection entry point has plan traceability rather than riding invisibly on S09.
+Step Record, authored by the architect. Attribution corrected per the executor: the wiring landed in `138f76f` (feat(graph): give the researcher persona its scoped conventions), NOT in `96bd13e` as this record first claimed - the architect's original "verified at HEAD" read was actually a read of the executor's then-uncommitted working tree, and `96bd13e` (the S09/S10 call-site wiring) never touched the diverge producer. The row itself was added before the landing on that mistaken read; the checkbox is honest against the real landing.
 
 - Compile role-scoped rules inside the researcher producer: `_make_research_producer` in `src/vaultspec_a2a/graph/compiler.py` builds a `RuleManager` with the bundled defaults dir and calls `compile("researcher")`, injecting the result as a `Project Coding Rules & Guidelines` system message before the thread-spec message.
 - Resolve the workspace root with the same fallback the worker path uses: an explicit argument or the graph state's `workspace_root` (mirroring `worker.py`), fed from the run's thread metadata by the worker graph lifecycle.
@@ -25,8 +25,8 @@ Retroactive Step Record, authored by the architect: the work landed inside commi
 
 ## Outcome
 
-Landed and verified in `96bd13e` on main. Architect verified against HEAD by reading the producer in full: the researcher turn now receives the same role-scoped bundled conventions (S03 content through the S04 filter) as the worker/supervisor turns. Checkbox flipped on that landed evidence.
+Landed in `138f76f` on main, with a real-object test (recording fake model, bare tmp workspace) proving the researcher's compiled messages carry the bundled conventions; 112 graph tests pass per the executor. The researcher turn now receives the same role-scoped bundled conventions (S03 content through the S04 filter) as the worker/supervisor turns. Checkbox stands on that landed evidence.
 
 ## Notes
 
-The gap was flagged during the S09 wiring as the executor's own carried finding and closed within the same landing; team-lead separately authorized it as a follow-on before the landing was confirmed, so this record also serves as the do-not-refix marker. Live receipt-proof for the researcher persona (like the other three) belongs to P05.S11.
+The gap was flagged during the S09 wiring as the executor's own carried finding, authorized by team-lead as a follow-on, and closed by the executor in `138f76f`. Process lesson recorded: in this shared multi-writer tree a working-tree read is NOT landed evidence - verify landed claims with `git show HEAD:<file>` (or the commit diff), never the checkout, before citing a SHA. Live receipt-proof for the researcher persona (like the other three) belongs to P05.S11.

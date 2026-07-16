@@ -47,7 +47,7 @@ Wire the P02-designed role-scoped rule selection into the two RuleManager call s
 
 - [x] `P04.S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile; `src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P04.S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
-- [x] `P04.S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 96bd13e as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path); `src/vaultspec_a2a/graph/compiler.py`.
+- [x] `P04.S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 138f76f as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path); `src/vaultspec_a2a/graph/compiler.py`.
 
 ### Phase `P05` - prove live receipt against a real provisioned run
 

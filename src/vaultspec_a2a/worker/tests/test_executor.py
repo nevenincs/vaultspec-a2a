@@ -368,6 +368,57 @@ class TestHandleDispatch:
             finally:
                 await bridge.close()
 
+    @pytest.mark.asyncio(loop_scope="function")
+    async def test_resume_hard_rejects_when_ingest_active(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        """A resume for a thread with an active ingest is hard-rejected, not queued.
+
+        The load-bearing guard for the P04.S10 live-lane composition: the resume
+        claim TTL deliberately does not cover a live authoring turn, so when the
+        parked-run reconcile re-drives a run whose claim expired mid-authoring, the
+        worker's ingest-active lock is what stops a second ``Command(resume=...)``
+        from being injected into the active step. This pins that the reject returns
+        BEFORE any ingest and emits nothing: the pre-held slot stays held (no
+        ``_mark_ingest_done`` ran) and the bridge never tracked the thread
+        (``track_thread`` is past the reject), so the resume is dropped, never
+        queued or injected.
+        """
+        async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
+            await cp.setup()
+            bridge = _make_bridge()
+            try:
+                executor = Executor(checkpointer=cp, bridge=bridge)
+                # Inject a placeholder graph so the code reaches the gating check.
+                _inject_graph(executor, "t-resume")
+                # Pre-occupy the slot (simulates the active authoring ingest).
+                await executor._mark_ingest_active("t-resume")
+
+                req = DispatchRequest(
+                    action="resume",
+                    thread_id="t-resume",
+                    option_id={"verdict": "rejected", "notes": None},
+                    recursion_limit=25,
+                )
+                with caplog.at_level(
+                    logging.WARNING, logger="vaultspec_a2a.worker.executor"
+                ):
+                    await executor.handle_dispatch(req)
+
+                record = next(
+                    rec for rec in caplog.records if "cannot resume" in rec.message
+                )
+                assert record.__dict__["action"] == "resume_rejected_active"
+                assert record.__dict__["runtime_mode"] == "resume"
+                assert record.__dict__["dispatch_action"] == "resume"
+                # Returned before ingest, emitted nothing: the pre-held slot is
+                # intact (no finally / _mark_ingest_done ran) and the resume never
+                # reached bridge.track_thread.
+                assert "t-resume" in executor._active_ingests
+                assert "t-resume" not in bridge.active_threads
+            finally:
+                await bridge.close()
+
 
 # ---------------------------------------------------------------------------
 # graph_input construction -- tested via _build_graph_input (T13)

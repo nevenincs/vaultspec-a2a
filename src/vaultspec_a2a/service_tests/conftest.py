@@ -50,10 +50,10 @@ def service_started_at(service_stack: ServiceStack) -> float:
 
 @pytest.fixture
 def provisioned_workspace(tmp_path: Path) -> Path:
-    """A freshly provisioned, harness-ready run workspace (agent-harness ADR).
+    """A freshly provisioned, harness-ready run workspace.
 
-    Adopts the P02.S03 provision verb: one ``provision_workspace`` call scaffolds
-    the ``.vaultspec`` corpus and verifies its harness, replacing the ws5 manual
+    Adopts the provision verb: one ``provision_workspace`` call scaffolds
+    the ``.vaultspec`` corpus and verifies its harness, replacing the manual
     recipe the acceptance harness used to hand-roll. Fails loudly if provisioning
     runs but leaves the harness incomplete; skips honestly only when
     ``vaultspec-core`` is not resolvable in the environment at all.

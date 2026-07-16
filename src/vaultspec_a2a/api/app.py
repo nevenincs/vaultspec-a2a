@@ -252,7 +252,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             pid=discovery_pid,
             service_token=settings.internal_token,
         )
-        # dev-process-registry: a gateway booted on a band port (gateway-dev)
+        # A gateway booted on a band port (gateway-dev)
         # self-registers so `procs` can enumerate/attach/reap it; a resident
         # gateway on its fixed out-of-band port registers nothing (returns None).
         serve_record = register_serve(
@@ -319,7 +319,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
                 discovery_path,
                 exc_info=True,
             )
-        # dev-process-registry: drop our own record so `procs list` shows the
+        # Drop our own record so `procs list` shows the
         # gateway gone, not a stale orphan the next reap must collect.
         deregister_serve(serve_record)
 

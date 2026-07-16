@@ -1,9 +1,8 @@
-"""Live proof of the agent-harness refuse/serve binding at the gateway boundary
-(agent-harness-provisioning P02.S04).
+"""Live proof of the agent-harness refuse/serve binding at the gateway boundary.
 
 Real gateway app on a real socket, real eligibility service, real
 ``provision_workspace`` (a genuine ``vaultspec-core install``) - no mocks. Proves
-the P02.S03 wiring is LIVE rather than inert:
+the wiring is LIVE rather than inert:
 
 - an UNPROVISIONED workspace for a document-authoring preset is REFUSED at
   run-start with the harness reason (before any dispatch) and SERVED as

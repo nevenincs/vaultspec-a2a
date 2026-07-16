@@ -1,10 +1,9 @@
-"""Service-layer proof that the provision fixture yields a harness-ready workspace
-(agent-harness-provisioning P02.S04).
+"""Service-layer proof that the provision fixture yields a harness-ready workspace.
 
-Exercises the ``provisioned_workspace`` fixture (the S03 adoption of the provision
+Exercises the ``provisioned_workspace`` fixture (the adoption of the provision
 verb in the service fixtures) against the real harness verifier - a genuine
 ``vaultspec-core install`` under the fixture, no doubles. This is the fixture
-adoption the ADR calls for ("the service fixtures call it"), proven at the
+adoption called for ("the service fixtures call it"), proven at the
 service-test layer independently of the compose stack.
 """
 

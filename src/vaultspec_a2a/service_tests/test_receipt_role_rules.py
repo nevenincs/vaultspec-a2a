@@ -1,11 +1,11 @@
 """Live receipt proof: a document-persona graph agent receives its role-scoped
-rule conventions AT THE AGENT BOUNDARY in the REAL compiled graph (P05.S11).
+rule conventions AT THE AGENT BOUNDARY in the REAL compiled graph.
 
-The graph-agent-framework-harness ADR is explicit that a static-repo
+The design is explicit that a static-repo
 ``RuleManager.compile()`` returning non-None is INSUFFICIENT proof: the scoped
 conventions must actually reach the model an executing document node hands its
 messages to, in a graph produced by the real ``compile_team_graph`` wiring
-(P04.S09/S10 threads ``role=agent_cfg.role`` into ``create_worker_node``; the
+(the wiring threads ``role=agent_cfg.role`` into ``create_worker_node``; the
 worker gates the bundled conventions on document roles). These tests exercise
 that wiring end to end without the engine.
 

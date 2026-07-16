@@ -1,4 +1,4 @@
-"""Tests for workspace provisioning (agent-harness-provisioning P02.S03).
+"""Tests for workspace provisioning.
 
 Pure-logic helpers (version-skew composition, version parsing) are exercised with
 real string inputs - no mocks. Provisioning itself is proven the honest way: a

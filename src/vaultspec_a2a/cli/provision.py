@@ -1,12 +1,12 @@
-"""Workspace provisioning (agent-harness-provisioning ADR, P02.S03).
+"""Workspace provisioning.
 
 One verb that turns a bare directory into a harness-ready run workspace: it wraps
 ``vaultspec-core install`` (scaffold + sync the ``.vaultspec`` corpus) and then
-runs the S01 harness verifier over the result, returning a single verdict. This
-is what the ws5 driver did by hand; the PW7 acceptance harness and service
+runs the harness verifier over the result, returning a single verdict. This
+was previously done by hand; the acceptance harness and service
 fixtures call it instead of hand-rolling the recipe.
 
-Two honesty guarantees carry from the ADR constraints:
+Two honesty guarantees carry from the design constraints:
 
 - **Version skew is surfaced, not hidden**: the vaultspec-core the environment
   pins (``importlib.metadata``) and the vaultspec-core the CLI resolves to on

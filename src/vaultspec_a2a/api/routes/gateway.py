@@ -252,8 +252,8 @@ def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     document-authoring preset ALWAYS yields a verdict: the verifier's over a
     resolved workspace, or a synthetic not-ready verdict when no workspace is
     resolved - a workspaceless authoring run cannot possibly carry a complete
-    harness, so it is refused, not silently skipped (agent-harness-provisioning
-    ADR: operator override possible, silent degradation never). This preserves the
+    harness, so it is refused, not silently skipped (operator override possible,
+    silent degradation never). This preserves the
     discovery-serves / run-start-refuses binding uniformly. Read-only.
     """
     from ...context.harness import HarnessReadiness

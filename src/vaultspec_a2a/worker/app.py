@@ -137,7 +137,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         app.state.executor = executor
         app.state.bridge = bridge
 
-        # dev-process-registry: a worker booted on a band port (worker-dev)
+        # A worker booted on a band port (worker-dev)
         # self-registers so `procs` can enumerate/reap it; a resident worker on
         # its fixed out-of-band port registers nothing (returns None). worker-dev
         # is a non-heartbeat role, so pid-liveness alone governs its staleness.

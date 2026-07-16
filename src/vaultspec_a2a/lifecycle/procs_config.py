@@ -17,7 +17,7 @@ to end.
 from __future__ import annotations
 
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 from ..control.config import settings
@@ -71,6 +71,7 @@ class RoleConfig:
     staleness_ms: int
     build: list[str]
     serve: list[str]
+    env: dict[str, str] = field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -142,6 +143,23 @@ def _parse_command(role: str, key: str, raw: object) -> list[str]:
     return items
 
 
+def _parse_env(role: str, raw: object) -> dict[str, str]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise ProcsConfigError(
+            f"role {role!r} env must be a table of string -> string, got {raw!r}"
+        )
+    env: dict[str, str] = {}
+    for key, value in raw.items():
+        if not isinstance(key, str) or not isinstance(value, str):
+            raise ProcsConfigError(
+                f"role {role!r} env must be a table of string -> string, got {raw!r}"
+            )
+        env[key] = value
+    return env
+
+
 def _parse_role(name: str, raw: object) -> RoleConfig:
     if not isinstance(raw, dict):
         raise ProcsConfigError(
@@ -161,6 +179,7 @@ def _parse_role(name: str, raw: object) -> RoleConfig:
         staleness_ms=staleness_ms,
         build=_parse_command(name, "build", raw.get("build")),
         serve=_parse_command(name, "serve", raw.get("serve")),
+        env=_parse_env(name, raw.get("env")),
     )
 
 

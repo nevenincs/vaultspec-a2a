@@ -77,7 +77,20 @@ def main(argv: list[str] | None = None) -> int:
         beat = threading.Thread(target=_heartbeat, args=(record, stop), daemon=True)
         beat.start()
 
-    process = subprocess.Popen(_engine_command(args.port))
+    command = _engine_command(args.port)
+    try:
+        process = subprocess.Popen(command)
+    except OSError as exc:
+        stop.set()
+        if beat is not None:
+            beat.join(timeout=2.0)
+        deregister_serve(record)
+        print(
+            f"engine-serve: cannot launch {command[0]!r}: {exc}. "
+            "Set VAULTSPEC_ENGINE_SERVE_CMD or ensure the engine binary is on PATH.",
+            file=sys.stderr,
+        )
+        return 127
     try:
         return process.wait()
     except KeyboardInterrupt:

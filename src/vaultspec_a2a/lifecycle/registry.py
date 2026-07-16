@@ -291,9 +291,24 @@ def classify_record(
 
 
 def _port_is_free(port: int) -> bool:
-    """Return ``True`` when *port* can be bound on the loopback interface right now."""
+    """Return ``True`` when nothing holds *port* and it can be bound right now.
+
+    Two probes, because neither alone is reliable on Windows:
+
+    - A connect probe first: if a listener answers a loopback connect the port is
+      taken. This is the ONLY reliable way to detect a foreign holder on Windows,
+      where a plain ``bind('127.0.0.1', port)`` SUCCEEDS even when another process
+      already serves ``0.0.0.0:port`` (no ``SO_EXCLUSIVEADDRUSE``) - observed live
+      handing out a resident gateway's port, the exact collision the registry
+      exists to prevent.
+    - Then a bind probe (no ``SO_REUSEADDR``): catches a port bound but not yet
+      listening, which the connect probe would miss.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
+        probe.settimeout(0.5)
+        if probe.connect_ex(("127.0.0.1", port)) == 0:
+            return False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             sock.bind(("127.0.0.1", port))
         except OSError:

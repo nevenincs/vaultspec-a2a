@@ -21,10 +21,12 @@ import pytest
 from ..discovery import is_pid_alive
 from ..manager import (
     LifecycleError,
+    _serve_env,
     attach,
     kill,
     reap,
     render_command,
+    render_env,
     resolve,
     resume,
     serve_up,
@@ -268,3 +270,80 @@ def test_serve_up_raises_when_no_band_port_yields_a_listener(tmp_path) -> None:
     # Nothing registered, every reservation released.
     assert list_records(tmp_path) == []
     assert not list(tmp_path.glob("*.reserved"))
+
+
+# A serve command that binds the port it reads from an env var (never argv).
+_BIND_FROM_ENV = (
+    "import socket,os,time;"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(os.environ['PROBEPORT'])));"
+    "s.listen();"
+    "time.sleep(60)"
+)
+
+
+def _serve_config_with_env(
+    serve: list[str], band: tuple[int, int], env: dict[str, str]
+) -> ProcsConfig:
+    role = RoleConfig(
+        name="scratch",
+        band=PortBand(*band),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=serve,
+        env=env,
+    )
+    return ProcsConfig(resident={}, roles={"scratch": role})
+
+
+def test_render_command_resolves_the_python_interpreter() -> None:
+    rendered = render_command(
+        ["{python}", "-m", "mod", "--flag", "{port}"], port=18100, workspace=""
+    )
+    assert rendered == [sys.executable, "-m", "mod", "--flag", "18100"]
+
+
+def test_render_env_substitutes_port_and_workspace() -> None:
+    env = render_env(
+        {"VAULTSPEC_PORT": "{port}", "WS": "{workspace}", "K": "v"},
+        port=18101,
+        workspace="/w",
+    )
+    assert env == {"VAULTSPEC_PORT": "18101", "WS": "/w", "K": "v"}
+
+
+def test_serve_env_carries_identity_and_rendered_role_env() -> None:
+    role = RoleConfig(
+        name="gateway-dev",
+        band=PortBand(18100, 18109),
+        heartbeat=True,
+        staleness_ms=120000,
+        build=[],
+        serve=["x"],
+        env={"VAULTSPEC_PORT": "{port}"},
+    )
+    env = _serve_env(role, port=18103, workspace="ws", name="g1", owner="sess-a")
+    # Rendered role env plus the managed identity, so a self-registering child
+    # converges onto the same (role, name)/owner record instead of a rival one.
+    assert env["VAULTSPEC_PORT"] == "18103"
+    assert env["VAULTSPEC_PROCS_NAME"] == "g1"
+    assert env["VAULTSPEC_PROCS_OWNER"] == "sess-a"
+
+
+def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:
+    # The child binds a port it learns ONLY from the injected env var (never argv),
+    # so a live listener proves serve_up wired render_env into the child environment.
+    config = _serve_config_with_env(
+        [sys.executable, "-c", _BIND_FROM_ENV],
+        band=(18996, 18997),
+        env={"PROBEPORT": "{port}"},
+    )
+    record = serve_up(
+        "scratch", "envboot", home=tmp_path, config=config, ready_timeout=15.0
+    )
+    try:
+        assert record.port in range(18996, 18998)
+        assert attach("envboot", home=tmp_path).endpoint.endswith(str(record.port))
+    finally:
+        tree_kill(record.pid)

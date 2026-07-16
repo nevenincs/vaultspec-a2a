@@ -31,6 +31,18 @@ def test_committed_procs_toml_matches_the_adr_bands() -> None:
     assert engine.staleness_ms == 120000
     assert engine.serve and "{port}" in engine.serve
 
+    # Serve templates resolve the interpreter via {python}, never a bare `python`.
+    for role in ("engine-dev", "gateway-dev", "worker-dev"):
+        assert config.roles[role].serve[0] == "{python}"
+
+    # Roles whose serve reads its port from the environment declare it via `env`
+    # (the CLI `serve` has no --port; the worker main ignores argv), so the serve
+    # templates carry NO --port flag.
+    assert config.roles["gateway-dev"].env == {"VAULTSPEC_PORT": "{port}"}
+    assert config.roles["worker-dev"].env == {"VAULTSPEC_WORKER_PORT": "{port}"}
+    assert "--port" not in config.roles["gateway-dev"].serve
+    assert "--port" not in config.roles["worker-dev"].serve
+
 
 def test_role_lookup_names_known_roles_on_miss() -> None:
     config = load_procs_config()
@@ -85,4 +97,33 @@ def test_malformed_band_is_rejected(tmp_path) -> None:
 def test_missing_roles_table_is_rejected(tmp_path) -> None:
     path = _write(tmp_path, "[resident]\nengine = 8767\n")
     with pytest.raises(ProcsConfigError, match="at least one role"):
+        load_procs_config(path)
+
+
+def test_role_env_table_is_parsed(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "\n".join(
+            [
+                "[roles.a]",
+                "band = [100, 200]",
+                "env = { VAULTSPEC_PORT = '{port}', FOO = 'bar' }",
+            ]
+        ),
+    )
+    config = load_procs_config(path)
+    assert config.roles["a"].env == {"VAULTSPEC_PORT": "{port}", "FOO": "bar"}
+
+
+def test_role_without_env_defaults_to_empty(tmp_path) -> None:
+    path = _write(tmp_path, "[roles.a]\nband = [100, 200]\n")
+    assert load_procs_config(path).roles["a"].env == {}
+
+
+def test_non_string_env_value_is_rejected(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "[roles.a]\nband = [100, 200]\nenv = { VAULTSPEC_PORT = 8000 }\n",
+    )
+    with pytest.raises(ProcsConfigError, match="env must be a table of string"):
         load_procs_config(path)

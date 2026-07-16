@@ -53,9 +53,12 @@ __all__ = [
     "write_record",
 ]
 
-# A reservation marker older than this (with no live record on the port) is stale
-# and reclaimable, so a crash between reserve and commit cannot wedge a band port.
-RESERVATION_TTL_MS = 30_000
+# Liveness-aware reclaim governs a reservation marker: it is reclaimable the moment
+# its stored reserver pid is dead (fast crash recovery), so the pid check does the
+# real work. This mtime-TTL is only a pid-reuse backstop - generous, so a live
+# reserver holding a marker is honoured well beyond any bounded reserve->commit and
+# the reclaim never couples to a caller's ready_timeout.
+RESERVATION_TTL_MS = 300_000
 _RESERVATION_SUFFIX = ".reserved"
 
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
@@ -339,13 +342,34 @@ def _reservation_path(role: str, port: int, *, home: Path | None) -> Path:
     return procs_home(home) / f"{role}-{port}{_RESERVATION_SUFFIX}"
 
 
+def _read_reservation_pid(path: Path) -> int | None:
+    """Read the reserver pid stamped into a marker, or ``None`` when unreadable."""
+    try:
+        raw = path.read_text(encoding="ascii").strip()
+    except OSError:
+        return None
+    return int(raw) if raw.isdigit() else None
+
+
 def _reservation_is_live(path: Path, *, now: int) -> bool:
-    """A reservation marker is live while it is younger than the TTL."""
+    """Return ``True`` while a marker still holds its port (blocks allocation).
+
+    Liveness-aware: a marker is reclaimable the instant its stored reserver pid is
+    dead, so a crashed reserver frees its port immediately instead of wedging it for
+    the whole TTL. The mtime-TTL is only a pid-reuse backstop - a live-pid marker
+    past it, or a marker with no readable pid past it, is reclaimed - never the
+    primary signal, so the reclaim never couples to a caller's reserve->commit span.
+    """
     try:
         age = now - int(path.stat().st_mtime * 1000)
     except OSError:
         return False
-    return 0 <= age <= RESERVATION_TTL_MS
+    if age < 0 or age > RESERVATION_TTL_MS:
+        return False
+    pid = _read_reservation_pid(path)
+    if pid is None:
+        return True
+    return is_pid_alive(pid)
 
 
 def _live_reservation_ports(home: Path | None, *, now: int) -> set[int]:

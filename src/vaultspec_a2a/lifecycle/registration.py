@@ -16,12 +16,14 @@ instance never drifts to STALE and gets reaped out from under itself.
 
 from __future__ import annotations
 
+import logging
 import os
 from typing import TYPE_CHECKING
 
 from .procs_config import ProcsConfigError, load_procs_config
 from .registry import (
     ProcRecord,
+    RegistryOwnershipError,
     now_ms,
     refresh_last_seen,
     remove_record_if_owned,
@@ -38,6 +40,8 @@ __all__ = [
     "refresh_registration",
     "register_serve",
 ]
+
+logger = logging.getLogger(__name__)
 
 _NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
@@ -91,7 +95,21 @@ def register_serve(
         last_seen_ms=stamp,
         owner=owner if owner is not None else default_owner(),
     )
-    write_record(record, home=home)
+    # Registration is best-effort adoption, never a boot dependency: a registry
+    # hiccup (a live foreign-owned record on the band port, a full disk) must not
+    # take down a serving gateway/worker, so it degrades to "unregistered" - the
+    # same non-fatal stance the heartbeat refresh already takes.
+    try:
+        write_record(record, home=home)
+    except (RegistryOwnershipError, OSError):
+        logger.warning(
+            "dev-process registration skipped for %s-%s on port %d",
+            role,
+            resolved_name,
+            port,
+            exc_info=True,
+        )
+        return None
     return record
 
 

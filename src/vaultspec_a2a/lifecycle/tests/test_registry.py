@@ -193,9 +193,11 @@ def test_allocate_raises_when_band_exhausted(tmp_path) -> None:
         allocate_port("scratch", role, home=tmp_path, config=config)
 
 
-def test_reserve_port_is_exclusive_across_concurrent_callers(tmp_path) -> None:
+def test_reserve_port_is_exclusive_across_back_to_back_callers(tmp_path) -> None:
     # The allocate-and-claim race closer: a held reservation blocks the SAME port,
     # so two back-to-back reservations (neither yet backed by a record) differ.
+    # (The O_EXCL create is the concurrency arbiter; this proves the held-marker
+    # exclusion that makes it race-free.)
     band = PortBand(18900, 18902)
     role = _role(band, heartbeat=False)
     config = _config(band)
@@ -248,9 +250,25 @@ def test_stale_reservation_marker_is_reclaimable(tmp_path) -> None:
     config = _config(band)
 
     stale = reserve_port("scratch", role, home=tmp_path, config=config)
-    # Backdate the marker well beyond the TTL; it must no longer block the port.
-    old = time.time() - 3600
+    # Backdate the marker well beyond the TTL backstop; it must no longer block the
+    # port even though its stored pid (this test process) is still alive.
+    old = time.time() - 10_000_000
     os.utime(stale.path, (old, old))
 
     reclaimed = reserve_port("scratch", role, home=tmp_path, config=config)
     assert reclaimed.port == stale.port
+
+
+def test_reserve_reclaims_a_marker_whose_reserver_pid_is_dead(tmp_path) -> None:
+    band = PortBand(18900, 18900)  # single-port band
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    # A fresh marker (well within the TTL backstop) stamped with a DEAD reserver
+    # pid: liveness-aware reclaim must free the port immediately rather than wait
+    # out the backstop, so a crashed reserver never wedges a band port.
+    marker = tmp_path / "scratch-18900.reserved"
+    marker.write_text(str(_dead_pid()), encoding="ascii")
+
+    reclaimed = reserve_port("scratch", role, home=tmp_path, config=config)
+    assert reclaimed.port == 18900

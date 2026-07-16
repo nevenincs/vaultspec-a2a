@@ -80,3 +80,10 @@ related:
 - The engine-serve wrapper is correct-by-construction but not run here: no engine
   binary is present in this worktree, and the exact engine port flag is kept in
   configuration (`VAULTSPEC_ENGINE_SERVE_CMD`) rather than hardcoded.
+- Post-review hardening (review-fanout REVIEW 7 MEDIUM + LOW): reservation reclaim
+  is now liveness-aware - a marker whose stored reserver pid is dead is reclaimed
+  immediately (fast crash recovery), with the mtime-TTL demoted to a generous
+  pid-reuse backstop so the reclaim never couples to a caller's reserve-to-commit
+  span. `register_serve` is now non-fatal - a registry write fault degrades to
+  "unregistered" and logs rather than crashing a serving gateway/worker, matching
+  the heartbeat's stance.

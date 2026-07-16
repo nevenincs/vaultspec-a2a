@@ -11,7 +11,7 @@ from langgraph.errors import GraphBubbleUp
 from langgraph.types import Command, interrupt
 
 from vaultspec_a2a.context.anchoring import build_anchoring_context
-from vaultspec_a2a.context.rules import RuleManager
+from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 from vaultspec_a2a.context.token_budget import compact_context, should_compact
 from vaultspec_a2a.domain_config import domain_config
 from vaultspec_a2a.thread.errors import WorkerExecutionError
@@ -30,6 +30,15 @@ _logger = logging.getLogger(__name__)
 
 __all__ = ["create_worker_node"]
 
+# The research_adr document-authoring roles whose rule set is role-SCOPED: they
+# receive only the document-authoring conventions opted in to their role, not the
+# whole rule corpus (graph-agent-framework-harness P02). Every other role (coders,
+# etc.) passes role=None and keeps the unchanged whole-corpus-plus-bundled behavior,
+# so scoping never strips a coder's rules.
+_DOCUMENT_AUTHORING_ROLES = frozenset(
+    {"researcher", "synthesist", "adr-author", "doc-reviewer"}
+)
+
 
 class WorkerNode(Protocol):
     """Protocol for the worker node callable with __name__ attribute."""
@@ -46,8 +55,15 @@ def _build_worker_messages(
     state: TeamState,
     system_prompt: str,
     workspace_root: Path | None,
+    role: str | None = None,
 ) -> list[BaseMessage]:
-    """Build the worker prompt/message list before model invocation."""
+    """Build the worker prompt/message list before model invocation.
+
+    Rules are compiled from the bundled defaults unioned with the workspace corpus
+    (P02.S03). A document-authoring *role* is scoped to its own conventions; every
+    other role compiles the whole corpus (role=None), so a coder's rules are never
+    stripped (P02.S04/P04).
+    """
     working_state = (
         compact_context(state, domain_config.context_limit_tokens)
         if should_compact(state, domain_config.context_limit_tokens)
@@ -57,7 +73,11 @@ def _build_worker_messages(
     messages: list[BaseMessage] = [SystemMessage(content=system_prompt)]
     effective_workspace_root = workspace_root or state.get("workspace_root")
     if effective_workspace_root:
-        rules = RuleManager(Path(effective_workspace_root)).compile()
+        compile_role = role if role in _DOCUMENT_AUTHORING_ROLES else None
+        rules = RuleManager(
+            Path(effective_workspace_root),
+            bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
+        ).compile(compile_role)
         if rules:
             messages.append(
                 SystemMessage(
@@ -414,6 +434,7 @@ def create_worker_node(
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
     authoring_binding: "AuthoringToolBinding | None" = None,
+    role: str | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -454,6 +475,7 @@ def create_worker_node(
             state=state,
             system_prompt=system_prompt,
             workspace_root=workspace_root,
+            role=role,
         )
         compacted = should_compact(state, domain_config.context_limit_tokens)
         effective_model = _resolve_effective_worker_model(

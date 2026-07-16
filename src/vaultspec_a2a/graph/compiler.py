@@ -577,6 +577,7 @@ def _compile_star(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            role=agent_cfg.role,
         )
         builder.add_node(
             agent_cfg.id,
@@ -717,6 +718,7 @@ def _compile_pipeline(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            role=agent_cfg.role,
         )
         # ADR-020: insert mount node between pipeline stages.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
@@ -872,6 +874,7 @@ def _compile_pipeline_loop(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            role=agent_cfg.role,
         )
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
@@ -1124,6 +1127,7 @@ def _compile_research_adr(
             name=_RA_SYNTHESIS,
             autonomous=autonomous,
             workspace_root=workspace_root,
+            role="synthesist",
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1135,6 +1139,7 @@ def _compile_research_adr(
             name=_RA_RESEARCH_REVIEW,
             autonomous=autonomous,
             workspace_root=workspace_root,
+            role="doc-reviewer",
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1146,6 +1151,7 @@ def _compile_research_adr(
             name=_RA_ADR_AUTHOR,
             autonomous=autonomous,
             workspace_root=workspace_root,
+            role="adr-author",
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1157,6 +1163,7 @@ def _compile_research_adr(
             name=_RA_ADR_REVIEW,
             autonomous=autonomous,
             workspace_root=workspace_root,
+            role="doc-reviewer",
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )

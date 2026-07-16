@@ -105,3 +105,53 @@ def test_build_worker_messages_adds_rejection_revision_instruction() -> None:
         in str(message.content)
         for message in messages
     )
+
+
+def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
+    """A document role gets role-scoped rules; a coder role gets the whole corpus.
+
+    P04 wiring: ``_build_worker_messages`` routes a research_adr document role to the
+    role-scoped bundled conventions and every other role (coders) to the unchanged
+    whole-corpus compile, so a coder's rules are never stripped.
+    """
+    rules_dir = tmp_path / ".vaultspec" / "rules"
+    rules_dir.mkdir(parents=True)
+    (rules_dir / "coder-only.md").write_text(
+        "---\norder: 1\n---\n\nCODER ONLY GUIDANCE\n", encoding="utf-8"
+    )
+    state: TeamState = {
+        "messages": [HumanMessage(content="go")],
+        "active_agent": "a",
+        "artifacts": [],
+        "current_plan": [],
+        "thread_id": "t",
+        "token_usage": {},
+        "next": "",
+        "active_feature": "f",
+        "approval_status": None,
+        "routing_error": None,
+    }
+
+    def _rules_text(role: str) -> str:
+        messages = _build_worker_messages(
+            state=state,
+            system_prompt="sp",
+            workspace_root=tmp_path,
+            role=role,
+        )
+        return "\n".join(
+            str(m.content)
+            for m in messages
+            if isinstance(m, SystemMessage) and "Project Coding Rules" in str(m.content)
+        )
+
+    # Document role: scoped to the bundled document-authoring conventions; the
+    # untagged coder rule is NOT included.
+    doc = _rules_text("researcher")
+    assert "Tag taxonomy" in doc  # a stable heading from the bundled conventions
+    assert "CODER ONLY GUIDANCE" not in doc
+
+    # Coder role: whole corpus (compiled with role=None), so the untagged coder
+    # rule IS included - scoping never strips it.
+    coder = _rules_text("standard-executor")
+    assert "CODER ONLY GUIDANCE" in coder

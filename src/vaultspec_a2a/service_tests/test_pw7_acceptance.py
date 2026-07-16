@@ -179,17 +179,17 @@ def _research_adr_case(
 # real-Claude preset - the Option C real-provider proof - carrying `live` in its
 # id so `-k "not live"` runs the fast lanes and `-k live` runs Option C alone.
 CASE_AUTO = _research_adr_case(
-    "auto", "sse-reconnection-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
+    "auto", "pw7-acceptance-auto", {"research": POLICY_AUTO, "adr": POLICY_AUTO}
 )
 CASE_HUMAN = _research_adr_case(
-    "human", "sse-reconnection-human", {"research": POLICY_HUMAN, "adr": POLICY_HUMAN}
+    "human", "pw7-acceptance-human", {"research": POLICY_HUMAN, "adr": POLICY_HUMAN}
 )
 CASE_MIXED = _research_adr_case(
-    "mixed", "sse-reconnection-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
+    "mixed", "pw7-acceptance-mixed", {"research": POLICY_AUTO, "adr": POLICY_HUMAN}
 )
 CASE_LIVE_MIXED = _research_adr_case(
     "live-mixed",
-    "sse-reconnection-live",
+    "pw7-acceptance-live",
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
 )
@@ -240,8 +240,18 @@ class AcceptanceHarness:
     run_id: str = field(default_factory=lambda: f"pw7-{int(time.time())}")
     phases_seen: list[str] = field(default_factory=list)
     materializations: list[Materialization] = field(default_factory=list)
+    feature: str = ""
     _idk_counter: itertools.count = field(default_factory=lambda: itertools.count())
     _current_mode: str | None = None
+
+    def __post_init__(self) -> None:
+        # A UNIQUE per-run feature tag: the engine's create refuses to overwrite an
+        # existing document at the predicted path (path-collision gate), so a fixed
+        # per-lane tag makes a re-run's apply fail on the prior run's leftover doc.
+        # Deriving it from the run id keeps it unique AND identifiable/disposable in
+        # the shared engine vault (pw7-acceptance-<lane>-<run-stamp>).
+        if not self.feature:
+            self.feature = f"{self.case.feature}-{self.run_id.rsplit('-', 1)[-1]}"
 
     def _idk(self, tag: str) -> str:
         """A grammar-valid, unique-per-call idempotency key for this run."""
@@ -619,11 +629,30 @@ class AcceptanceHarness:
     # Orchestration
     # ------------------------------------------------------------------
 
+    def _runtime_budget(self) -> float:
+        """A per-lane deadline scaled to gate count/policy, not one global default.
+
+        A HUMAN gate runs a full reject-with-notes revision loop (park -> edit ->
+        re-author -> re-submit -> approve -> apply); an AUTO gate resolves in one
+        synchronous submit. The LIVE preset authors each turn with a real provider
+        (minutes/turn), so it multiplies. The harness fails loud on ITS budget with
+        an actionable message rather than being killed by a fixed global timeout
+        that is too short for the lane's own specified workload.
+        """
+        per_gate = {POLICY_HUMAN: 600.0, POLICY_AUTO: 240.0}
+        base = 180.0
+        budget = base + sum(
+            per_gate.get(p, 300.0) for p in self.case.gate_policy.values()
+        )
+        return budget * (4.0 if self.case.preset == _PRESET_LIVE else 1.0)
+
     async def run(
-        self, *, timeout_seconds: float = 2400.0, poll_seconds: float = 5.0
+        self, *, timeout_seconds: float | None = None, poll_seconds: float = 5.0
     ) -> list[str]:
         """Drive the full loop; return the ordered list of gates driven."""
         gate_names = list(self.case.gate_policy) or ["gate"]
+        if timeout_seconds is None:
+            timeout_seconds = self._runtime_budget()
         deadline = time.monotonic() + timeout_seconds
         async with AuthoringClient(self.engine_base_url, self.engine_bearer) as ec:
             tokens = {
@@ -649,7 +678,7 @@ class AcceptanceHarness:
                     hc,
                     run_id=f"{self.run_id}-missing-role",
                     tokens=partial,
-                    feature=self.case.feature,
+                    feature=self.feature,
                     expect=422,
                 )
 
@@ -663,7 +692,7 @@ class AcceptanceHarness:
                     hc,
                     run_id=self.run_id,
                     tokens=tokens,
-                    feature=self.case.feature,
+                    feature=self.feature,
                     expect=201,
                 )
 
@@ -731,7 +760,7 @@ class AcceptanceHarness:
         for kind in self.case.expected_doc_kinds:
             directory = self.vault_root / kind
             files = (
-                sorted(directory.glob(f"*{self.case.feature}*.md"))
+                sorted(directory.glob(f"*{self.feature}*.md"))
                 if directory.is_dir()
                 else []
             )

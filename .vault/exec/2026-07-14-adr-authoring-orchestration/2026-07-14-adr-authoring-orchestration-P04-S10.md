@@ -218,3 +218,67 @@ dashboard workspace vault.
 lane's intermittent request_changes-recovery control race (recorded above, owned by
 the park/resume zone); the acceptance contract's HUMAN leg remains the open item.
 The provider axis (P03.S15-S17) is complete and green.
+
+## request_changes-recovery race: hardening landed, RELIABLE REPRO, sharpened mechanism (executor-opus-8, 2026-07-16)
+
+Took the intermittent request_changes-recovery wedge (recorded at e106b7a). Outcome:
+a dispatch-side correctness hole was found, fixed, and landed as HARDENING; it is NOT
+the wedge's cause (disproven by a live 5x); and the wedge now has a RELIABLE repro on a
+working instrumented stack - the lever every prior session lacked. Checkbox stays open.
+
+### Landed hardening (commit d899030) - real, unit-proven, NOT the wedge fix
+
+The verdict subscriber's resume path had a genuine double-dispatch/stale-gate hole:
+three resume triggers (SSE `_process_event`, the reconcile sweep, gap recovery) all
+reach `_resume_with_verdict` with no cross-path dedup, and the SSE + recovery paths
+correlate by a run's ACCUMULATED authoring ids, so a late verdict for a SUPERSEDED gate
+could resume a run parked at a newer gate. Closed with two ordering invariants keyed on
+the run's current `gate_pending_proposal_id`: gate-precision (resume only when the
+current gate proposal is among the correlated ids) and a durable wall-clock claim
+written BEFORE dispatch (a lease, not fire-once: a stale claim is re-driven, so a lost
+dispatch is retried not orphaned - idempotent-with-retry, the GAP-B symmetry). Unit
+coverage on real DB + checkpointer: superseded-gate verdict does not dispatch;
+fresh-claim dedups; stale-claim re-drives (crash-window liveness).
+
+### Why it is NOT the wedge fix (live 5x disproof)
+
+A live 5x of the deterministic HUMAN lane WITH d899030 applied wedged 3/5 with the
+IDENTICAL signature (`status=running`, `readiness=needs_reconciliation`,
+`phase=recovery_required`, `degraded=[checkpoint_permission_without_durable_row,
+execution_state_projection_missing|stale]`). The double-dispatch hypothesis is disproven
+as this wedge's cause. The hardening still lands on its own merits.
+
+### RELIABLE REPRO (the next builder's acceptance instrument)
+
+- **Command:** `python <scratchpad>/repro_human_race.py <N> 900` (loops the fast
+  deterministic HUMAN lane N times; prints per-iter PASS/FAIL + the wedged run-status).
+- **Stack:** own gateway+worker on free ports, own scratchpad sqlite checkpoint,
+  `VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true`, attached to the shared dashboard
+  `--no-seat` engine via `VAULTSPEC_ENGINE_SERVICE_JSON` (attach-never-own).
+- **Two hard-won stack rules:** do NOT set `VAULTSPEC_LOG_LEVEL=debug` (it starved the
+  auto-spawned worker so it never connected - every run hung to timeout with zero
+  resumes, a DEAD STACK that masquerades as a no-repro); and VERIFY worker-connected
+  health (`/api/health` -> `worker_connected: true`) before iterating.
+- **Observed wedge rate:** ~60% (3/5) on the fixed stack. Reliable enough to bisect.
+- **The tell:** a wedged run is `status=running` + `phase=recovery_required` with the
+  two durable-side-table degraded reasons; a healthy run completes the revision loop.
+
+### Sharpened mechanism + fix direction (write-ordering, NOT dispatch)
+
+The wedge is the READ-side `recovery_required` assertion driven by the durable
+side-tables being out of sync with the checkpoint. The worker writes the CHECKPOINT
+synchronously (langgraph) but EMITS the durable execution_state + permission rows as
+lifecycle EVENTS in its resume `finally` (`worker/executor.py` ~517
+`emit_execution_state_projection` -> `emit_terminal_status` -> `_mark_ingest_done`); the
+control plane writes those durable rows ASYNCHRONOUSLY from the events. Run-status reads
+the gap and fails closed (`control/projection.py`
+`reconcile_checkpoint_permissions_with_durable_state` +
+`enrich_snapshot_from_execution_state`), and NOTHING reconciles the run back out of
+`recovery_required` - so the harness times out. Fix direction, either: (a) commit the
+durable execution_state + permission rows in LOCKSTEP with the checkpoint advance on the
+resume path (close the eventual-consistency gap), OR (b) make the reconcile sweep
+actively re-drive a run stuck in `recovery_required` (which the current sweep, gated on
+`INPUT_REQUIRED` only, never touches). Ground in `control/verdict_subscriber.py` +
+`control/projection.py` + `worker/executor.py` resume finally +
+`control/event_handlers.py` (the durable-row event writers). The dispatch-side hardening
+(d899030) is already in the running code, so a successor is not re-solving it.

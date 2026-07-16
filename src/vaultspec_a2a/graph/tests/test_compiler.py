@@ -27,6 +27,7 @@ from vaultspec_a2a.thread.errors import ConfigError
 
 from ..compiler import (
     _build_supervisor_prompt,
+    _make_research_producer,
     _resolve_worker_model_preferences,
     _worker_retry_on,
     compile_team_graph,
@@ -649,3 +650,46 @@ def test_worker_retry_on_graph_recursion_error_not_retried() -> None:
 
     exc = GraphRecursionError("Recursion limit of 100 reached")
     assert _worker_retry_on(exc) is False
+
+
+@pytest.mark.asyncio
+async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
+    """The researcher's model turn receives the role-scoped bundled conventions.
+
+    The researcher is the fourth research_adr document persona but runs through
+    ``_make_research_producer`` (not ``_build_worker_messages``); this pins the P04
+    follow-on that wires the scoped document-authoring conventions into its turn so
+    it is not conventions-blind (graph-agent-framework-harness, S09 flag).
+    """
+    from typing import Any, cast
+
+    from langchain_core.messages import AIMessage
+    from langchain_core.outputs import ChatGeneration, ChatResult
+
+    captured: dict[str, list] = {}
+
+    class _RecordingModel(FakeChatModel):
+        async def _agenerate(  # type: ignore[no-untyped-def]
+            self, messages, stop=None, run_manager=None, **kwargs
+        ):
+            captured["messages"] = list(messages)
+            return ChatResult(
+                generations=[ChatGeneration(message=AIMessage(content="finding"))]
+            )
+
+    # A bare tmp workspace with no .vaultspec rules: the scoped conventions can
+    # only arrive from the shipped bundled default.
+    producer = _make_research_producer(
+        cast("Any", _RecordingModel()),
+        "RESEARCHER SYSTEM PROMPT",
+        workspace_root=tmp_path,
+    )
+    await producer(
+        cast("Any", {"messages": []}),
+        {"thread_id": "t", "topic": "x", "instructions": "y"},
+    )
+
+    texts = "\n".join(str(m.content) for m in captured["messages"])
+    assert "RESEARCHER SYSTEM PROMPT" in texts
+    # A stable heading from the bundled document-authoring conventions.
+    assert "Tag taxonomy" in texts

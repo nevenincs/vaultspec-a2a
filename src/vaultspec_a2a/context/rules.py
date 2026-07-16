@@ -24,30 +24,57 @@ _logger = logging.getLogger(__name__)
 # framework-harness P02.S13).
 _RULES_SUBDIR = Path(".vaultspec") / "rules"
 
+# Bundled rule defaults shipped inside the a2a package (tracked under ``src/``,
+# unlike the gitignored workspace ``.vaultspec/``). A run's workspace copies SHADOW
+# these bundled defaults name-for-name - a2a's own bundled-default + workspace-
+# override convention, mirroring ``team_config``'s preset resolution
+# (graph-agent-framework-harness P02.S03; agent-harness-provisioning-adr's
+# workspace-over-bundled principle). Opt-in: a caller passes this directory as
+# ``bundled_rules_dir`` (the two graph call sites do); ``RuleManager`` defaults to
+# workspace-only so unrelated construction is unaffected.
+DEFAULT_BUNDLED_RULES_DIR = Path(__file__).parent / "presets" / "rules"
+
 
 class RuleManager:
-    """Discovers and compiles ``.vaultspec/rules/*.md`` rule files.
+    """Discovers and compiles vaultspec rule files into an LLM system message.
+
+    Reads the flat ``<workspace_root>/.vaultspec/rules/*.md`` corpus and, when a
+    ``bundled_rules_dir`` is given, unions it with the a2a-shipped bundled
+    defaults - a workspace file SHADOWS a bundled file of the same name entirely
+    (no merging), mirroring ``team_config``'s preset resolution.
 
     Args:
-        workspace_root:  Absolute path to the project workspace root.
-        include_builtin: When ``True``, include ``*.builtin.md`` files that
-                         are normally excluded (they are scaffold/IDE files,
-                         not project-specific rules).
+        workspace_root:    Absolute path to the project workspace root.
+        include_builtin:   When ``True``, include ``*.builtin.md`` files that are
+                           normally excluded (scaffold/IDE files, not project rules).
+        bundled_rules_dir: Optional directory of bundled default rules unioned under
+                           (shadowed by) the workspace corpus; ``None`` (default) is
+                           workspace-only. The graph call sites pass
+                           :data:`DEFAULT_BUNDLED_RULES_DIR`.
     """
 
-    def __init__(self, workspace_root: Path, *, include_builtin: bool = False) -> None:
+    def __init__(
+        self,
+        workspace_root: Path,
+        *,
+        include_builtin: bool = False,
+        bundled_rules_dir: Path | None = None,
+    ) -> None:
         """Set up rule discovery rooted at *workspace_root*."""
         self._workspace_root = workspace_root.resolve()
         self._include_builtin = include_builtin
+        self._bundled_rules_dir = (
+            bundled_rules_dir.resolve() if bundled_rules_dir is not None else None
+        )
 
         # mtime-based compile cache (HIGH-01), keyed by the requested role so a
         # role-scoped turn and a whole-corpus turn never serve each other's
         # compiled string (graph-agent-framework-harness P02.S04). The mtime
-        # snapshot watches the FULL corpus, so any rule-file change drops every
-        # role's cached entry at once.
+        # snapshot watches the FULL corpus across BOTH source dirs, so any rule-file
+        # change drops every role's cached entry at once.
         self._cached_results: dict[str | None, str | None] = {}
         self._cache_valid: bool = False
-        self._cached_dir_mtime: float = 0.0
+        self._cached_dir_mtimes: dict[Path, float] = {}
         self._cached_file_mtimes: dict[Path, float] = {}
 
     # ------------------------------------------------------------------
@@ -70,23 +97,42 @@ class RuleManager:
         vaultspec-core-managed corpus. When *role* is ``None`` the filter is off
         and every non-builtin file is returned (the unchanged whole-corpus path).
 
+        A ``bundled_rules_dir`` (when set) is unioned UNDER the workspace corpus: a
+        workspace file SHADOWS a bundled file of the same name entirely (resolved by
+        name before any builtin/role filter), so the workspace override wins even if
+        it opts into a different role set - mirroring ``team_config``'s preset
+        resolution (P02.S03).
+
         Returns:
-            Sorted list of absolute ``Path`` objects; empty list if the
-            directory does not exist or nothing matches.
+            Sorted list of absolute ``Path`` objects; empty list if no source
+            directory exists or nothing matches.
         """
-        rules_dir = self._workspace_root / _RULES_SUBDIR
-        if not rules_dir.is_dir():
-            return []
+        # Resolve the effective file per name first: bundled defaults, then the
+        # workspace corpus which shadows them name-for-name (later source wins).
+        by_name: dict[str, Path] = {}
+        for source in self._rule_source_dirs():
+            for p in source.glob("*.md"):
+                by_name[p.name] = p
 
         paths = []
-        for p in rules_dir.glob("*.md"):
-            if not self._include_builtin and p.name.endswith(".builtin.md"):
+        for name, p in by_name.items():
+            if not self._include_builtin and name.endswith(".builtin.md"):
                 continue
             if role is not None and role not in _read_frontmatter_roles(p):
                 continue
             paths.append(p)
 
         return sorted(paths)
+
+    def _rule_source_dirs(self) -> list[Path]:
+        """Existing rule source dirs, bundled first then workspace (workspace wins).
+
+        Order is load-bearing: :meth:`discover` resolves same-named files by keeping
+        the LAST source, so the workspace corpus must come after the bundled defaults
+        to shadow them.
+        """
+        candidates = [self._bundled_rules_dir, self._workspace_root / _RULES_SUBDIR]
+        return [d for d in candidates if d is not None and d.is_dir()]
 
     def compile(self, role: str | None = None) -> str | None:
         """Compile the discovered rule files into a single string.
@@ -142,7 +188,7 @@ class RuleManager:
         """Clear the compile cache, forcing a full recompile on next call."""
         self._cache_valid = False
         self._cached_results = {}
-        self._cached_dir_mtime = 0.0
+        self._cached_dir_mtimes = {}
         self._cached_file_mtimes = {}
 
     # ------------------------------------------------------------------
@@ -153,35 +199,36 @@ class RuleManager:
         """Snapshot dir + per-file mtimes over the FULL corpus for change detection.
 
         Role-independent by design: the snapshot always covers every discoverable
-        rule file (role filter off), so a change to ANY rule file is seen by
-        :meth:`_has_changes` regardless of which role's cached result is being
-        served, and every role entry is dropped together.
+        rule file across BOTH source dirs (role filter off), so a change to ANY rule
+        file is seen by :meth:`_has_changes` regardless of which role's cached result
+        is being served, and every role entry is dropped together.
         """
-        rules_dir = self._workspace_root / _RULES_SUBDIR
-        try:
-            self._cached_dir_mtime = rules_dir.stat().st_mtime
-        except OSError:
-            self._cached_dir_mtime = 0.0
+        self._cached_dir_mtimes = {}
+        for source in self._rule_source_dirs():
+            with contextlib.suppress(OSError):
+                self._cached_dir_mtimes[source] = source.stat().st_mtime
         self._cached_file_mtimes = {}
         for p in self.discover(None):
             with contextlib.suppress(OSError):
                 self._cached_file_mtimes[p] = p.stat().st_mtime
 
     def _has_changes(self) -> bool:
-        """Check if the rules directory or any cached file has changed.
+        """Check if any rule source dir or cached file has changed.
 
-        Tier 1: single stat on the rules directory detects added/removed files.
+        Tier 1: a stat on each source directory (bundled + workspace) detects
+        added/removed files, including a source dir appearing or disappearing.
         Tier 2: per-file mtime check detects content edits.
         """
-        rules_dir = self._workspace_root / _RULES_SUBDIR
-        try:
-            dir_mtime = rules_dir.stat().st_mtime
-        except OSError:
-            # Directory gone — if we had cached files, that's a change
-            return bool(self._cached_file_mtimes)
-
-        if dir_mtime != self._cached_dir_mtime:
-            return True
+        # Tier 1: check every directory we snapshotted AND every one that exists now,
+        # so an appearing OR disappearing source dir both register as a change.
+        candidate_dirs = set(self._cached_dir_mtimes) | set(self._rule_source_dirs())
+        for source in candidate_dirs:
+            try:
+                dir_mtime = source.stat().st_mtime
+            except OSError:
+                dir_mtime = None
+            if dir_mtime != self._cached_dir_mtimes.get(source):
+                return True
 
         for path, cached_mtime in self._cached_file_mtimes.items():
             try:

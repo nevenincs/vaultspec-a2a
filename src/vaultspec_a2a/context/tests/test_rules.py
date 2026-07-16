@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from vaultspec_a2a.context.rules import RuleManager
+from vaultspec_a2a.context.rules import DEFAULT_BUNDLED_RULES_DIR, RuleManager
 
 
 def _rules_dir(tmp_path: Path) -> Path:
@@ -519,3 +519,84 @@ class TestRoleScoping:
         assert rm.discover("researcher") == []
         # ...but role=None still sees it (whole corpus).
         assert {p.name for p in rm.discover(None)} == {"plain.md"}
+
+
+class TestBundledDefaults:
+    """Bundled-default plus workspace-override read path (P02.S03, Path B).
+
+    Real temp dirs, no mocks. Mirrors ``team_config``'s preset resolution: a
+    workspace file SHADOWS a bundled file of the same name entirely (no merging);
+    ``bundled_rules_dir=None`` is workspace-only.
+    """
+
+    def test_shipped_conventions_reach_a_bare_workspace_with_role_scope(
+        self, tmp_path: Path
+    ) -> None:
+        """Whole-chain: a workspace with NO .vaultspec rules still compiles the
+        shipped document-authoring conventions for a document persona role."""
+        # A real tmp workspace, entirely bare - no .vaultspec/rules/ at all.
+        rm = RuleManager(tmp_path, bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR)
+        out = rm.compile("researcher")
+        assert out is not None
+        assert "Tag taxonomy" in out  # a stable heading from the shipped bundled file
+        # Every one of the four document roles receives it...
+        for role in ("researcher", "synthesist", "adr-author", "doc-reviewer"):
+            assert rm.compile(role) is not None
+        # ...and a non-document role does NOT (the file opts into doc roles only).
+        assert rm.compile("standard-executor") is None
+
+    def test_workspace_file_shadows_bundled_entirely(self, tmp_path: Path) -> None:
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "conv.md", ["researcher"], body="BUNDLED CONTENT")
+        ws_rules = _rules_dir(tmp_path)
+        _write_rule(ws_rules, "conv.md", ["researcher"], body="WORKSPACE OVERRIDE")
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        out = rm.compile("researcher")
+        assert out is not None
+        assert "WORKSPACE OVERRIDE" in out
+        assert "BUNDLED CONTENT" not in out
+        # Exactly one file resolves for the name - shadow, never merge.
+        assert [p.name for p in rm.discover("researcher")] == ["conv.md"]
+
+    def test_shadow_is_by_name_not_by_role(self, tmp_path: Path) -> None:
+        # Bundled file opts into researcher; a same-named workspace file opts into a
+        # DIFFERENT role. The workspace file wins ENTIRELY, so the bundled file is
+        # gone and 'researcher' no longer resolves it.
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "conv.md", ["researcher"], body="BUNDLED")
+        ws_rules = _rules_dir(tmp_path)
+        _write_rule(ws_rules, "conv.md", ["adr-author"], body="WS")
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        assert rm.discover("researcher") == []
+        assert [p.name for p in rm.discover("adr-author")] == ["conv.md"]
+
+    def test_role_none_unions_bundled_and_workspace(self, tmp_path: Path) -> None:
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "b.md", ["researcher"], body="BUNDLED")
+        ws_rules = _rules_dir(tmp_path)
+        _write_rule(ws_rules, "w.md", None, body="WORKSPACE")
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        whole = rm.compile(None)
+        assert whole is not None
+        assert "BUNDLED" in whole and "WORKSPACE" in whole
+
+    def test_bundled_dir_change_invalidates_cache(self, tmp_path: Path) -> None:
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "b.md", ["researcher"], body="V1")
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        assert "V1" in (rm.compile("researcher") or "")
+        time.sleep(0.01)
+        _write_rule(bundled, "b.md", ["researcher"], body="V2")
+        assert "V2" in (rm.compile("researcher") or "")
+
+    def test_none_bundled_is_workspace_only(self, tmp_path: Path) -> None:
+        ws_rules = _rules_dir(tmp_path)
+        _write_rule(ws_rules, "w.md", ["researcher"], body="WS")
+        rm = RuleManager(tmp_path)  # bundled_rules_dir defaults to None
+        assert [p.name for p in rm.discover("researcher")] == ["w.md"]
+        # A bare workspace with neither source resolves nothing.
+        assert RuleManager(tmp_path / "empty").compile("researcher") is None

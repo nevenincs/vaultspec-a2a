@@ -278,11 +278,14 @@ async def test_presets_list_is_truthful_and_resilient(
         ]
         assert authoring["default_profile_id"] == "team-defaults"
         profiles = {p["id"]: p for p in authoring["profiles"]}
-        assert set(profiles) == {"team-defaults", "fast"}
+        assert set(profiles) == {"team-defaults", "fast", "codex", "zai"}
         assert profiles["team-defaults"]["is_default"] is True
 
-        # team-defaults effective assignments: safe operational fields only, and
-        # the resolver's real heterogeneity is disclosed (doc-reviewer differs).
+        # team-defaults effective assignments: safe operational fields only. All
+        # four document personas resolve to the Claude subscription tier (the
+        # doc-reviewer was repinned off the non-resolving zhipu fallback in
+        # df6665b); provider heterogeneity is instead disclosed by the codex/zai
+        # provider-axis profiles asserted below.
         td_by_agent = {
             a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
         }
@@ -291,7 +294,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert researcher["model_name"]  # a concrete, stable name
         assert researcher["role_id"] == "researcher"
         assert "capability" in researcher
-        assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "zhipu"
+        assert td_by_agent["vaultspec-doc-reviewer"]["provider_id"] == "claude"
 
         # fast lowers the researcher to a low capability and attributes the change
         # to the profile; the authoring roles fall through unchanged.
@@ -300,16 +303,59 @@ async def test_presets_list_is_truthful_and_resilient(
         assert fast_by_agent["vaultspec-researcher"]["source"] == "profile"
         assert fast_by_agent["vaultspec-synthesist"]["source"] == "agent"
 
+        # Provider axis (multi-provider-execution P03.S17): the discovery response
+        # surfaces the new providers per role. `codex` overlays codex on the three
+        # research/authoring roles; `zai` overlays zai. The overlay attribution
+        # (source == "profile") is disclosed and the un-overlaid doc-reviewer falls
+        # through to a different provider - a genuinely mixed profile.
+        authoring_roles = (
+            "vaultspec-researcher",
+            "vaultspec-synthesist",
+            "vaultspec-adr-author",
+        )
+        codex_by_agent = {a["agent_id"]: a for a in profiles["codex"]["assignments"]}
+        for agent_id in authoring_roles:
+            assert codex_by_agent[agent_id]["provider_id"] == "codex"
+            assert codex_by_agent[agent_id]["source"] == "profile"
+        assert codex_by_agent["vaultspec-doc-reviewer"]["provider_id"] != "codex"
+
+        zai_by_agent = {a["agent_id"]: a for a in profiles["zai"]["assignments"]}
+        for agent_id in authoring_roles:
+            assert zai_by_agent[agent_id]["provider_id"] == "zai"
+            assert zai_by_agent[agent_id]["source"] == "profile"
+        # With no Z.ai credential in the environment, the zai lane is unavailable
+        # with a safe reason that ATTRIBUTES the unready provider by name - the
+        # system disclosing what is missing, never a credential value.
+        zai_reasons = " ".join(profiles["zai"]["unavailable_reasons"]).lower()
+        assert "zai" in zai_reasons
+
         # Eligibility is reported honestly: the production acceptance gate is open,
         # so every profile is unavailable with a safe reason (no secrets anywhere).
         for profile in profiles.values():
             assert profile["eligible"] is False
             assert any("acceptance gate" in r for r in profile["unavailable_reasons"])
 
-        # No credential/token/env material appears anywhere in the served record.
-        raw = resp.text.lower()
-        for secret_marker in ("api_key", "oauth", "token", "secret", "password"):
-            assert secret_marker not in raw
+        # No credential VALUE appears anywhere in the served discovery record.
+        # Safe readiness reasons and profile descriptions legitimately name a
+        # credential TYPE ("Z.ai auth token", "OAuth") - the system disclosing what
+        # is absent, not a leak - so the innocent type words are NOT banned. The
+        # strong, value-based check asserts the real configured secret values are
+        # absent, plus canary markers that would only surface in a raw env/
+        # credential dump.
+        from vaultspec_a2a.control.config import settings
+
+        raw = resp.text
+        for secret_value in (
+            settings.zai_auth_token,
+            settings.claude_code_oauth_token,
+            settings.openai_api_key,
+            settings.zhipu_api_key,
+        ):
+            if secret_value and secret_value.strip():
+                assert secret_value not in raw
+        lowered = raw.lower()
+        for canary in ("api_key", "secret", "password", "bearer "):
+            assert canary not in lowered
 
 
 @pytest.mark.asyncio(loop_scope="function")

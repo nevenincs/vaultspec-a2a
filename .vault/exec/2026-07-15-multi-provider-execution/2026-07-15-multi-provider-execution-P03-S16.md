@@ -54,11 +54,51 @@ the a2a `ScaffoldEchoError` submit guard and the engine apply, and the ADR
 correctly cited the research document by stem in its `related` frontmatter and
 body.
 
+### Z.ai lane (2026-07-16)
+
+GREEN. The Z.ai sibling lane - credential-blocked and shipped as a truthful skip
+when this step first closed - now passes end to end on the real Z.ai endpoint:
+run `pw7-1784221291`, 606.95s. It ran on the hardened worker (`decc667`, the
+outer-gate-401 machine-bearer re-resolution), so the lane doubles as the
+end-to-end validation of that bearer fix - the worker authored across a live,
+concurrently-loaded shared engine with no stale-bearer failure.
+
+Materialized documents (engine workspace vault, feature
+`pw7-acceptance-zai-1784221291`):
+
+- research: `2026-07-16-pw7-acceptance-zai-1784221291-research.md`
+- adr: `2026-07-16-pw7-acceptance-zai-1784221291-adr.md`
+
+Per-gate ledger classes (the MIXED per-gate proof, verbatim from the engine
+surface):
+
+- research AUTO gate -> `SystemPolicyApprovalRecord`: `system_actor.id =
+  system:operation-modes`, `kind = system`, `mode = autonomous`, `policy_id =
+  authoring.operation_modes`, proposal `status = applied` - the anti-bypass
+  invariant held (system approval, never a human decision).
+- adr HUMAN gate -> `ReviewDecisionRecord`: the full reject-with-notes ->
+  revision -> approve chain (409 stale-review fence, `edit_proposal`
+  request-changes, zai re-author, approve
+  `approval:87ee24c5e422a225a2560d0b5352595e5dd0ca94`, apply).
+
+Providers resolved per-role: researcher `glm-4.7-flagship`, synthesist +
+adr-author `glm-5`, doc-reviewer on `claude` (the inner quality gate) - real Z.ai
+spend, `ZAI_AUTH_TOKEN` env-injected from settings and never logged. Both
+hardened run-start refusals (422 missing-feature, 422 missing-role) passed and
+the verdict subscriber resumed the parked run across both gates.
+
+An earlier attempt (`pw7-1784220945`) aborted at ~57s on a transient
+shared-engine `ReadTimeout` in the harness's OWN `/v1/proposals` poll (not the
+worker; the timeout passed through the bearer fix untouched, since it is not a
+typed 401). The harness engine client's retry-less poll was then hardened with a
+bounded transient retry (`aae97ff`), and the re-fired lane passed clean.
+
 ## Notes
 
 The pure-HUMAN acceptance lane's intermittent request_changes-recovery control
 race (documented on the adr-authoring-orchestration P04.S10 record) is unrelated
 to the provider axis and was not exercised here - this lane's HUMAN gate is the
-ADR gate only (MIXED shape), which is solid. The Z.ai sibling lane is
-credential-blocked (no `ZAI_AUTH_TOKEN`) and ships as a truthful skip, not a live
-proof; see S15 for the zai profile and the harness skip gate.
+ADR gate only (MIXED shape), which is solid. The Z.ai sibling lane, credential-
+blocked when this step first closed, is now live-proven end to end (see the Z.ai
+lane section under Outcome above); see S15 for the zai profile and the harness
+skip gate.

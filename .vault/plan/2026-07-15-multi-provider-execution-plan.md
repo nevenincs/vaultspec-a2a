@@ -54,7 +54,7 @@ Land Codex as a new non-ACP subprocess chat model: resolve its headless auth mod
 Prove researcher=codex, synthesist=claude, adr-author=zai end to end on the vaultspec-adr-research preset, riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands.
 
 - [x] `P03.S15` - Author or extend a team profile assigning distinct providers per role (researcher=codex, synthesist=claude, adr-author=zai) on the vaultspec-adr-research preset; `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`.
-- [x] `P03.S16` - Run a live research_adr run under the mixed-provider profile end to end riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands, verifying per-role attribution and document quality hold across providers; `src/vaultspec_a2a/service_tests/`.
+- [x] `P03.S16` - Run a live research_adr run under the mixed-provider profile end to end on the standing acceptance harness (PW7), verifying per-role attribution and document quality hold across providers. GREEN across both provider lanes: codex/claude (run pw7-1784166683, 14m24s) and Z.ai (run pw7-1784221291, 606.95s, on the hardened worker decc667) - per-role attribution and document quality held on both; the Z.ai lane also validates the worker bearer-resilience fix end to end. See step record for the doc paths and per-gate ledger classes.; `src/vaultspec_a2a/service_tests/`.
 - [x] `P03.S17` - Verify the a2a-edge discovery/eligibility responses correctly surface the new providers with safe reasons on failure and no secrets; `src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P04` - Cross-repo verification
@@ -70,9 +70,21 @@ Adds two provider integrations (Z.ai routed through the existing Claude ACP path
 
 ## Description
 
-**Resumability state (2026-07-15, updated live):** P01 (Z.ai, executor-opus-5) and P02 (Codex, executor-opus-6) are both landed on main — see each step row for its exact commit SHA(s) and the corresponding Step Records under `.vault/exec/2026-07-15-multi-provider-execution/`. P01.S06 (the Z.ai live fidelity probe) stays open, blocked on a Z.ai credential; see its row for the exact re-arm command. Current frontier: P03 (per-role mixed-provider proof), which depends on the adr-authoring-orchestration P04.S10 acceptance harness landing first — that harness now has a full re-dispatch spec (`2026-07-15-adr-authoring-orchestration-reference`) but is not yet built. P04 (cross-repo verification) can start independently at any time.
+**Program closure (2026-07-16):** all three target providers are live-proven
+coordinating in the LangGraph `research_adr` orchestration on real endpoints (no
+mocks): Claude (`47b9088`), Codex (`6536b3e`, the P03.S16 codex/claude lane, run
+`pw7-1784166683`), and Z.ai (the P03.S16 Z.ai lane, run `pw7-1784221291`). The
+Z.ai lane was validated end to end on the hardened worker (`decc667`, the
+outer-gate-401 machine-bearer re-resolution), which the lane's clean completion
+proves in turn. All 19 Steps are closed. P01 (Z.ai) and P02 (Codex) landed on
+main - see each Step row for its exact commit SHA(s) and the Step Records under
+`.vault/exec/2026-07-15-multi-provider-execution/`.
 
-**Tracked hardening follow-up (out of P01/P02 scope):** `AcpChatModel.env_vars` has no repr redaction — the Z.ai auth token and Claude's OAuth token both sit in that plain dict unredacted. Residual risk is scoped to a direct `repr(model)` call, not present in any current code path. Cross-cutting across every ACP-path provider; not picked up by this plan.
+**Tracked hardening follow-up (out of P01/P02 scope):** `AcpChatModel.env_vars`
+has no repr redaction - the Z.ai auth token and Claude's OAuth token both sit in
+that plain dict unredacted. Residual risk is scoped to a direct `repr(model)`
+call, not present in any current code path. Cross-cutting across every ACP-path
+provider; not picked up by this plan.
 
 ## Steps
 

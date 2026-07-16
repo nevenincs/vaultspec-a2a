@@ -17,6 +17,9 @@ from langchain_core.messages import AIMessage, HumanMessage
 from ..submitter import (
     DocumentConformanceError,
     DocumentUnavailableError,
+    _conformance_notes,
+    _grounding_child_key,
+    _grounding_dated_stem,
     _latest_document,
     _strip_completion_sentinel,
 )
@@ -175,3 +178,119 @@ class TestConformanceGuard:
         # The real authored document (no comments, no placeholders) is accepted.
         body, _ = _latest_document(_state(f"{_DOC}\n\n{_SENTINEL}"), _WRITER, _SENTINEL)
         assert body == _DOC
+
+
+class TestGroundingReferenceResolution:
+    """P04.S16: deriving an applied grounding doc's canonical dated stem."""
+
+    # created_at_ms 1784157786246 is 2026-07-15 UTC (verified against live
+    # materialization: the engine's ms_to_date_key is UTC).
+    _MS = 1784157786246
+
+    def test_child_key_read_from_rollback_projection(self) -> None:
+        item = {"rollback": {"child_key": "research/sse-reconnection-live-research.md"}}
+        assert (
+            _grounding_child_key(item) == "research/sse-reconnection-live-research.md"
+        )
+
+    def test_missing_or_malformed_child_key_is_none(self) -> None:
+        assert _grounding_child_key({}) is None
+        assert _grounding_child_key({"rollback": {}}) is None
+        assert _grounding_child_key({"rollback": {"child_key": ""}}) is None
+
+    def test_dated_stem_prepends_utc_date_for_research(self) -> None:
+        stem = _grounding_dated_stem(
+            "research/sse-reconnection-live-research.md",
+            self._MS,
+            "sse-reconnection-live",
+        )
+        assert stem == "2026-07-15-sse-reconnection-live-research"
+
+    def test_dated_stem_resolves_reference_docs_too(self) -> None:
+        stem = _grounding_dated_stem(
+            "reference/sse-reconnection-live-reference.md",
+            self._MS,
+            "sse-reconnection-live",
+        )
+        assert stem == "2026-07-15-sse-reconnection-live-reference"
+
+    def test_dated_stem_skips_foreign_feature(self) -> None:
+        assert (
+            _grounding_dated_stem(
+                "research/other-feature-research.md", self._MS, "sse-reconnection-live"
+            )
+            is None
+        )
+
+    def test_dated_stem_skips_non_grounding_dir(self) -> None:
+        # A plan/adr sibling is not a grounding doc for an ADR.
+        assert (
+            _grounding_dated_stem(
+                "plan/sse-reconnection-live-plan.md", self._MS, "sse-reconnection-live"
+            )
+            is None
+        )
+
+    def test_dated_stem_skips_unusable_timestamp(self) -> None:
+        assert (
+            _grounding_dated_stem(
+                "research/sse-reconnection-live-research.md",
+                None,
+                "sse-reconnection-live",
+            )
+            is None
+        )
+        assert (
+            _grounding_dated_stem(
+                "research/sse-reconnection-live-research.md",
+                True,
+                "sse-reconnection-live",
+            )
+            is None
+        )
+
+
+class TestAdrStatusConformance:
+    """P04.S16: the submit-node refuses a legacy `## Status` section in an ADR."""
+
+    _ADR_LEGACY = """---
+tags:
+  - '#adr'
+  - '#sse-reconnection-live'
+related: []
+---
+
+# `sse-reconnection-live` ADR: cursor persistence
+
+## Status
+
+Accepted
+
+## Problem statement
+
+Body.
+"""
+
+    _ADR_CANONICAL = """---
+tags:
+  - '#adr'
+  - '#sse-reconnection-live'
+---
+
+# `sse-reconnection-live` adr: cursor persistence | (**status:** `accepted`)
+
+## Problem statement
+
+Body.
+"""
+
+    def test_legacy_status_section_is_refused_for_adr(self) -> None:
+        notes = _conformance_notes(self._ADR_LEGACY, "adr")
+        assert any("legacy `## Status`" in n for n in notes)
+
+    def test_canonical_h1_status_token_passes(self) -> None:
+        assert _conformance_notes(self._ADR_CANONICAL, "adr") == []
+
+    def test_status_section_not_checked_for_non_adr(self) -> None:
+        # A research doc is never subject to the ADR status-token rule.
+        assert _conformance_notes(self._ADR_LEGACY, "research") == []

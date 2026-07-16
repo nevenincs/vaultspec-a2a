@@ -65,6 +65,18 @@ The `related:` field MUST list the governing Research document and any linked re
 as quoted wiki-links: `"[[yyyy-mm-dd-<feature>-research]]"`. Never use relative paths
 or @ref.
 
+## Status lives in the H1 title, never a `## Status` section
+
+The ADR status rides the level-one heading as a token, exactly as
+`.vaultspec/templates/adr.md` shows — NOT a separate `## Status` section. Your first
+heading MUST be:
+
+  # `<feature>` adr: `<title>` | (**status:** `accepted`)
+
+Do NOT emit a `## Status` section (e.g. a `## Status` heading followed by `Accepted`).
+A legacy `## Status` section trips `vault check`'s `adr-status` rule and is refused at
+the submit node, routing the run back to you. Put the status only in the H1 token.
+
 ## ADR structure
 
 Populate every section of the template:

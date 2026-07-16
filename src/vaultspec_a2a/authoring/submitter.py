@@ -31,10 +31,12 @@ subclasses) surfaced as a truthful run failure — never a silent skip.
 
 from __future__ import annotations
 
+import datetime
 import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from ..graph.enums import PipelinePhase
 from ..graph.nodes.phase_gate import ProposalRevisionRequiredError
 from ._envelope import AuthoringResponse, Denial
 from ._errors import AuthoringError
@@ -96,6 +98,13 @@ _CODE_FENCE_RE = re.compile(
 )
 _INLINE_CODE_RE = re.compile(r"`[^`]+`")
 _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
+
+# A legacy ``## Status`` section — the canonical ADR template carries the status in
+# the H1 token ``# {feature} adr: {title} | (**status:** `accepted`)``, never a
+# level-two ``Status`` heading. The two-step apply preserves the authored body, so a
+# ## Status section survives to disk and trips `adr-status`; the submit-node refuses
+# it (ADR phase only) and routes the author to rewrite the H1 token (P04.S16).
+_LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
 
 
 class SubmitterError(AuthoringError):
@@ -184,6 +193,51 @@ class PhaseAuthoringSpec:
     completion_sentinel: str | None = None
 
 
+#: The `.vault/` sub-directories whose applied documents ground an ADR (P04.S16).
+_GROUNDING_DIRS: tuple[str, ...] = ("research", "reference")
+
+
+def _grounding_child_key(item: dict[str, Any]) -> str | None:
+    """Read an applied proposal's materialized child path from a recovery item.
+
+    The recovery-snapshot proposal item exposes the created document's path only
+    through the rollback projection's ``child_key`` (the authoring API surfaces no
+    dedicated field); ``None`` when absent or malformed.
+    """
+    rollback = item.get("rollback")
+    if isinstance(rollback, dict):
+        child_key = rollback.get("child_key")
+        if isinstance(child_key, str) and child_key:
+            return child_key
+    return None
+
+
+def _grounding_dated_stem(
+    child_key: str, created_at_ms: Any, feature: str
+) -> str | None:
+    """Derive an applied grounding doc's canonical DATED stem from its child key.
+
+    ``child_key`` is ``<doc_type>/<feature>-<doc_type>.md`` (undated). The engine
+    materializes it at ``<yyyy-mm-dd>-<feature>-<doc_type>.md`` where the date is the
+    proposal's ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` (verified
+    against live materialization). Returns the dated stem for a ``research``/
+    ``reference`` child of THIS feature, else ``None`` (a foreign feature, a non-
+    grounding doc type, or an unusable timestamp is skipped).
+    """
+    doc_dir, sep, filename = child_key.partition("/")
+    if not sep or doc_dir not in _GROUNDING_DIRS or not filename.endswith(".md"):
+        return None
+    base = filename[: -len(".md")]
+    if not base.startswith(f"{feature}-"):
+        return None
+    if not isinstance(created_at_ms, int) or isinstance(created_at_ms, bool):
+        return None
+    date = datetime.datetime.fromtimestamp(
+        created_at_ms / 1000, tz=datetime.UTC
+    ).strftime("%Y-%m-%d")
+    return f"{date}-{base}"
+
+
 def _strip_completion_sentinel(body: str, sentinel: str | None) -> str:
     """Remove a trailing whole-line completion sentinel from a writer's body.
 
@@ -209,6 +263,7 @@ def _latest_document(
     state: TeamState,
     writer_message_name: str,
     completion_sentinel: str | None = None,
+    doc_type: str | None = None,
 ) -> tuple[str, int]:
     """Return ``(body, revision_cycle)`` for the phase's document from state.
 
@@ -243,7 +298,7 @@ def _latest_document(
     # revision loop — anything the engine's set-body conformance check would
     # reject at materialization.
     body = _strip_leading_preamble(body)
-    notes = _conformance_notes(body)
+    notes = _conformance_notes(body, doc_type)
     if notes:
         raise DocumentConformanceError(notes)
     return body, len(bodies)
@@ -280,17 +335,26 @@ def _split_frontmatter_body(text: str) -> tuple[str, str]:
     return text[: match.end()], text[match.end() :]
 
 
-def _conformance_notes(body: str) -> list[str]:
+def _conformance_notes(body: str, doc_type: str | None = None) -> list[str]:
     """Collect actionable revision notes for every vault-conformance violation.
 
     Returns one note per violation (empty when the body is clean), so the writer
     gets EVERY problem in a single revision pass. The checks mirror what
     ``vault set-body --check`` enforces at materialization: a document must begin
     at its frontmatter fence, carry no leftover template annotations or unfilled
-    placeholders, and place no wiki-/markdown-link in body prose.
+    placeholders, and place no wiki-/markdown-link in body prose. For an ``adr``
+    document it additionally refuses a legacy ``## Status`` section (the status must
+    ride the H1 token) — a check `vault set-body` does not make but `vault check`'s
+    `adr-status` does, closed here so a non-canonical status never materializes.
     """
     notes: list[str] = []
     frontmatter, prose_region = _split_frontmatter_body(body)
+    if doc_type == "adr" and _LEGACY_STATUS_HEADING_RE.search(prose_region):
+        notes.append(
+            "ADR status is in a legacy `## Status` section; move it into the H1 as "
+            "`# `{feature}` adr: `{title}` | (**status:** `accepted`)` and remove the "
+            "`## Status` heading"
+        )
     if not frontmatter:
         notes.append(
             "document must begin with a `---` frontmatter fence; the body carries "
@@ -383,7 +447,7 @@ class DocumentProposalSubmitter:
             )
 
         body, revision_cycle = _latest_document(
-            state, spec.writer_message_name, spec.completion_sentinel
+            state, spec.writer_message_name, spec.completion_sentinel, spec.doc_type
         )
         return await self._propose_and_submit(
             thread_id=thread_id,
@@ -426,12 +490,39 @@ class DocumentProposalSubmitter:
             )
             self._reject_denial("create_session", created_session)
 
+            # Grounding references (P04.S16): the ADR must cite the feature's applied
+            # research/reference docs in its `related:` frontmatter, but the two-step
+            # create+set-body apply replaces the body while the scaffold's frontmatter
+            # wins, so the author cannot self-author the link. Resolve the grounding
+            # docs' canonical dated stems from the engine's recovery snapshot (ground
+            # truth: only APPLIED docs count) and thread them into the create target,
+            # where the engine flows them to `vault add --related`. ADR phase only;
+            # replay-exact because the applied grounding docs are terminal.
+            related = await self._resolve_grounding_related(client, feature, phase)
+            if phase == PipelinePhase.ADR and not related:
+                # The ADR schema requires a grounding reference; if the engine holds
+                # no applied research/reference doc for the feature there is nothing
+                # to ground against, so refuse before proposing an ungrounded ADR that
+                # `vault check` would reject. Routes to the revision loop rather than
+                # failing the run (the writer cannot fix this, but the guard keeps a
+                # non-conformant ADR off disk; in the normal flow research applies
+                # first and this never fires).
+                raise DocumentConformanceError(
+                    [
+                        "ADR has no grounding reference: no applied research or "
+                        "reference document exists for this feature yet; the research "
+                        "phase must materialize before the ADR can cite it"
+                    ]
+                )
+
             changeset_id = session.new_changeset_id(f"{phase}-r{revision_cycle}")
             created = await session.create_proposal(
                 changeset_id=changeset_id,
                 summary=f"{feature} {phase} document (r{rev})",
                 operations=[
-                    self._whole_document_op(thread_id, feature, phase, rev, spec, body)
+                    self._whole_document_op(
+                        thread_id, feature, phase, rev, spec, body, related
+                    )
                 ],
                 idempotency_key=derive_idempotency_key(
                     thread_id, phase, "create_proposal", rev
@@ -457,29 +548,75 @@ class DocumentProposalSubmitter:
         rev: str,
         spec: PhaseAuthoringSpec,
         body: str,
+        related: list[str],
     ) -> dict[str, Any]:
         """Build the engine-proven whole-document create operation.
 
         Shape matches the live-verified ``create_document`` op (a
         ``provisional_create`` document target plus a ``whole_document`` draft).
         Every id is deterministic in the run material so a replayed create is a
-        byte-identical, deduped no-op.
+        byte-identical, deduped no-op. ``related`` (grounding wiki-links) rides the
+        provisional-create target so the engine writes it via ``vault add --related``
+        at apply; it is omitted when empty (the engine defaults it) to keep the op
+        byte-identical to the pre-S16 shape for phases with no grounding.
         """
+        document: dict[str, Any] = {
+            "kind": "provisional_create",
+            "provisional_doc_id": f"prov:{thread_id}:{phase}:r{rev}",
+            "doc_type": spec.doc_type,
+            "feature": feature,
+            "title": f"{feature} {phase}",
+            "collision_status": "available",
+        }
+        if related:
+            document["related"] = related
         return {
             "child_key": f"{spec.doc_type}/{feature}-{phase}.md",
             "operation": "create_document",
-            "target": {
-                "document": {
-                    "kind": "provisional_create",
-                    "provisional_doc_id": f"prov:{thread_id}:{phase}:r{rev}",
-                    "doc_type": spec.doc_type,
-                    "feature": feature,
-                    "title": f"{feature} {phase}",
-                    "collision_status": "available",
-                }
-            },
+            "target": {"document": document},
             "draft": {"mode": "whole_document", "body": body},
         }
+
+    async def _resolve_grounding_related(
+        self, client: AuthoringClient, feature: str, phase: str
+    ) -> list[str]:
+        """Resolve the feature's applied grounding docs as ``[[stem]]`` wiki-links.
+
+        Only the ADR phase is grounded (research/reference documents precede it). The
+        engine's recovery snapshot is the ground truth: every APPLIED proposal whose
+        child document is a ``research/`` or ``reference/`` doc for this feature yields
+        its canonical DATED stem ``<yyyy-mm-dd>-<feature>-<doc_type>`` — the date the
+        engine assigned at materialization, recovered from the proposal's
+        ``created_at_ms`` under the engine's UTC ``ms_to_date_key`` convention (the
+        child_key itself is undated, and the authoring API exposes no dated stem). The
+        result is sorted and deduplicated so the op is deterministic and replay-exact.
+        A phase with no grounding, or an unreadable snapshot, yields an empty list
+        (the submit-node conformance guard is the backstop that refuses an ungrounded
+        ADR).
+        """
+        if phase != PipelinePhase.ADR:
+            return []
+        try:
+            snapshot = await client.recovery_snapshot(last_seq=0)
+        except AuthoringError:
+            return []
+        data = snapshot.data if isinstance(snapshot.data, dict) else {}
+        proposals = (
+            data.get("snapshot", {}).get("proposals", {}).get("items", [])
+            if isinstance(data.get("snapshot"), dict)
+            else []
+        )
+        stems: set[str] = set()
+        for item in proposals if isinstance(proposals, list) else []:
+            if not isinstance(item, dict) or item.get("status") != "applied":
+                continue
+            child_key = _grounding_child_key(item)
+            if child_key is None:
+                continue
+            stem = _grounding_dated_stem(child_key, item.get("created_at_ms"), feature)
+            if stem is not None:
+                stems.add(f"[[{stem}]]")
+        return sorted(stems)
 
     @staticmethod
     def _reject_denial(stage: str, result: AuthoringResponse | Denial) -> None:

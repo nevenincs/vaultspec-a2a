@@ -67,3 +67,13 @@ what that step's tripwire could only assert at the compile-path level - because
 the gateway was actively disputed at the time - is now the arbitrated gateway
 behaviour. Cites the architect's Path B ruling and the researcher's escalation
 of the live `verify_harness` gate as the module (`f0bba58`) this corrects.
+
+The arbitration is FINAL (option a), recorded in the ruling and its addendum
+(commits `48e2c70`, `62e2bd3`). The decisive fact: a provisioned `.vaultspec`
+corpus carries ZERO `roles:`-tagged rule files - the only role-tagged rules file
+anywhere is the bundled `document-authoring-conventions.md`, which the provision
+verb (`vaultspec-core install`) can never materialise into a workspace. So a
+document turn draws its role-scoped rules from the bundled dir in EVERY
+workspace, which is why the old workspace-only probe verified a corpus the
+document roles never consume, and why the RuleManager-grounded probe is the
+correct verification of the real delivery path.

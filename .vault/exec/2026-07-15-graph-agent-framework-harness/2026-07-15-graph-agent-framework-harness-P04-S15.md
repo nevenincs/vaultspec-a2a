@@ -82,3 +82,17 @@ ever ADDs the declared servers (union by name), pairing with `--strict-mcp-confi
 thinking; the strict-config hardening itself is not implemented here, only the
 interaction noted. No consumption of `has_workspace_rules`, which is slated for
 deletion as dead code.
+
+Topology boundary (reviewer observation, a stated boundary not a fix): the
+harness `mcp_servers` declaration is threaded only in the `research_adr` compile
+path, so a `star` / `pipeline` / `pipeline_loop` coding team that declares
+`mcp_servers` gets nothing composed - silently inert. This matches the
+document-role intent of the Opens item (the harness surfaces are a
+document-authoring concern), but a non-`research_adr` team ever needing harness
+MCP servers would require threading the same composition through the star and
+pipeline worker sites.
+
+Follow-up (reviewer LOW-9, landed `a3d4e01`): `compose_harness_mcp_servers` now
+validates the declared names BEFORE the non-ACP feature-detect passthrough, so an
+unknown server name is refused loudly regardless of model type rather than being
+swallowed when composition is inapplicable.

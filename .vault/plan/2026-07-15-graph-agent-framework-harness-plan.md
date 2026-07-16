@@ -28,7 +28,7 @@ Determine, with evidence rather than assumption, whether the four research_adr p
 
 Shape which mechanical conventions (tag taxonomy, wiki-link/frontmatter rules, template-read guidance) each of the four document personas needs, scoped per role rather than a blanket include_builtin=True, to avoid ADR-028's flagged token-inflation and cross-role-noise risk.
 
-- [ ] `P02.S13` - Fix the RuleManager path-misalignment defect: align _RULES_SUBDIR to the current flat vaultspec-core 0.1.42 schema (rules live directly under .vaultspec/rules/*.md, confirmed by spec rules status) rather than the nonexistent nested rules/rules/ directory, with no dual-read legacy fallback per the owner's no-compat-shims directive; `src/vaultspec_a2a/context/rules.py`.
+- [x] `P02.S13` - Fix the RuleManager path-misalignment defect: align _RULES_SUBDIR to the current flat vaultspec-core 0.1.42 schema (rules live directly under .vaultspec/rules/*.md, confirmed by spec rules status) rather than the nonexistent nested rules/rules/ directory, with no dual-read legacy fallback per the owner's no-compat-shims directive; `src/vaultspec_a2a/context/rules.py`.
 - [ ] `P02.S03` - Extract the taxonomy/frontmatter/wiki-link/template conventions a document-authoring agent needs into a role-scoped rule source, separate from the full builtin corpus; `.vaultspec/rules/ (new non-builtin rule file(s), flat per the current schema), .vaultspec/templates/adr.md, research.md, plan.md, audit.md, ref-audit.md`.
 - [ ] `P02.S04` - Add role-targeting to rule discovery so a worker's compiled rule set can be scoped by persona role instead of concatenating every non-builtin file into every turn; `src/vaultspec_a2a/context/rules.py`.
 

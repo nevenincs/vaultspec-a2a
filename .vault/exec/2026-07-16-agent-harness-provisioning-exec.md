@@ -77,3 +77,19 @@ document turn draws its role-scoped rules from the bundled dir in EVERY
 workspace, which is why the old workspace-only probe verified a corpus the
 document roles never consume, and why the RuleManager-grounded probe is the
 correct verification of the real delivery path.
+
+Reviewer framing to preserve for future readers: after this change the rules
+leg is effectively a bundled-integrity check rather than a workspace-provisioning
+check. That is the intended consequence of the ruling - rules ship bundled, so
+their presence is a property of the install, not of the workspace - and must not
+be misread as the verifier having gone lax on provisioning; templates, skills,
+and the CLI remain genuine workspace-provisioning surfaces.
+
+Follow-up review (reviewer PASS on `90c3522`, plus three LOWs folded in): the
+`service` marker doc now acknowledges engine-free members (LOW-5, `664bd49`); the
+P05.S11 coder test narrows its supervisor-config `suppress` to the specific
+missing-config exception (LOW-6, `a160bfb`); and the rules-leg probe now degrades
+a `compile()` failure to a served "not resolved" reason instead of propagating a
+crash onto the 422 run-start path (LOW-7, `5fdf4f6`) - restoring the defensive
+contract the removed on-disk helper carried, ahead of the in-flight `order:`
+rule-parsing work that could raise.

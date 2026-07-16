@@ -392,12 +392,18 @@ async def _seed_parked_gate(
     thread_id: str,
     proposal_id: str,
     changeset_id: str,
+    status: ThreadStatus = ThreadStatus.INPUT_REQUIRED,
 ) -> None:
-    """Seed an INPUT_REQUIRED run parked at ``proposal_id``'s gate (with its row).
+    """Seed a run parked at ``proposal_id``'s gate (with its durable row).
 
     Mirrors what the phase submit node commits before the gate parks:
     ``gate_pending_proposal_id`` is the ONE proposal the run awaits a verdict for,
     and a durable ``document_approval_request`` permission row records the pause.
+
+    ``status`` defaults to ``INPUT_REQUIRED`` (the healthy parked posture); pass
+    ``RUNNING`` to model the P04.S10 clobber, where a prior gate's verdict resume
+    left the run mis-statused RUNNING even though its checkpoint is parked at the
+    gate - the case the reconcile must still recover by checkpoint truth.
     """
     checkpoint = empty_checkpoint()
     checkpoint["id"] = f"cp-{thread_id}"
@@ -412,7 +418,7 @@ async def _seed_parked_gate(
     )
     async with session_factory() as session:
         await create_thread(session, thread_id=thread_id)
-        await update_thread_status(session, thread_id, ThreadStatus.INPUT_REQUIRED)
+        await update_thread_status(session, thread_id, status)
         await record_permission_request(
             session,
             request_id=f"{thread_id}:adr-gate",
@@ -557,5 +563,128 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
             thread = await get_thread(db, thread_id)
             assert thread is not None
             assert thread.status == ThreadStatus.RUNNING.value
+
+    await db_engine.dispose()
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
+    client: AuthoringClient, engine: tuple[str, str], tmp_path
+) -> None:
+    """A run parked at a gate but mis-statused RUNNING is still recovered (P04.S10).
+
+    The recovery_required wedge: a run's checkpoint is parked at a gate awaiting a
+    verdict, but its thread status is RUNNING rather than INPUT_REQUIRED - because a
+    prior gate's verdict resume set RUNNING (``_resume_with_verdict``, optimistic)
+    and that write raced AFTER the next gate's permission event set INPUT_REQUIRED,
+    or that gate's permission event never landed. Keyed on ``thread.status`` alone
+    the reconcile would never see such a run, so its decided verdict is never
+    delivered and NOTHING re-drives it - the run stalls forever while run-status
+    projects ``recovery_required`` off the checkpoint-vs-durable gap.
+
+    This is the same live round-trip as the missed-reject test, differing ONLY in
+    the seeded status: the parked run is RUNNING (the clobber), and the reconcile -
+    keyed on CHECKPOINT truth (``gate_pending_proposal_id`` + the engine's decided
+    approval decision) rather than the derived status - must still correlate it and
+    re-dispatch exactly one ``resume`` carrying the missed ``request_changes``.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    base_url, bearer = engine
+
+    run_id = f"cl-{uuid.uuid4().hex[:8]}"
+    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
+    assert isinstance(minted, AuthoringResponse)
+    client._actor_token = minted.data["raw_token"]
+
+    session = AuthoringSession(client, run_id)
+    await session.create_session(scope="repo", title=run_id)
+    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
+    assert isinstance(reviewer, AuthoringResponse)
+    reviewer_token = reviewer.data["raw_token"]
+
+    info = await _submit_proposal(session, run_id, "adr")
+    await _decide(
+        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
+    )
+
+    # The reject leaves the changeset non-terminal (draft) with a resolved,
+    # non-stale approval decision - the exact recovery signal the reconcile reads.
+    snapshot = await client.recovery_snapshot(last_seq=0)
+    assert isinstance(snapshot.data, dict)
+    proposals = snapshot.data["snapshot"]["proposals"]["items"]
+    mine = [p for p in proposals if p.get("changeset_id") == info["changeset_id"]]
+    assert mine, "submitted changeset absent from the recovery snapshot"
+    assert mine[0]["status"] == "draft"
+    assert mine[0]["approval"]["decision"] == "request_changes"
+    assert mine[0]["approval"]["stale"] is False
+
+    db_file = tmp_path / "cl.db"
+    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    checkpoints = tmp_path / "cl-cp.db"
+    thread_id = f"thread-{run_id}"
+
+    recorded: list[dict[str, Any]] = []
+
+    async def _accept_dispatch(request: Any) -> JSONResponse:
+        recorded.append(await request.json())
+        return JSONResponse({"status": "dispatched"})
+
+    worker_app = Starlette(
+        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
+    )
+
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=worker_app),
+            base_url="http://worker",
+        ) as worker_client,
+    ):
+        await checkpointer.setup()
+        # The distinguishing seed: parked in the checkpoint, but RUNNING in the DB.
+        await _seed_parked_gate(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+            status=ThreadStatus.RUNNING,
+        )
+
+        subscriber = VerdictSubscriber(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://worker", worker_port=1, auto_spawn=False
+            ),
+            endpoint_provider=lambda: EngineEndpoint(
+                base_url=base_url, bearer_token=bearer
+            ),
+            recursion_limit=25,
+        )
+
+        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
+        await subscriber._reconcile_parked_runs(endpoint)
+
+        # The RUNNING-clobbered parked run was recovered by checkpoint truth: one
+        # resume carrying the missed request_changes was re-dispatched for it.
+        assert len(recorded) == 1, f"expected one resume dispatch, got {recorded}"
+        dispatch = recorded[0]
+        assert dispatch["action"] == "resume"
+        assert dispatch["thread_id"] == thread_id
+        assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
 
     await db_engine.dispose()

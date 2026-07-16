@@ -304,9 +304,15 @@ class VerdictSubscriber:
         ``decision`` (present, non-stale) to recover a missed request_changes and
         resume the parked run back into its writer's revision loop.
 
-        Idempotent (only INPUT_REQUIRED runs), throttled, and a run still awaiting a
+        Candidate set is checkpoint-truth, not status-derived: both INPUT_REQUIRED
+        and RUNNING threads are considered, because a run parked at a gate can be
+        left mis-statused RUNNING (a clobbered or lost gate permission event, see
+        the fetch below). Idempotent and throttled; the per-thread gate_pending +
+        decided-verdict + gate-precise, claim-leased resume disturbs only a run
+        actually parked at a gate whose verdict is decided - a run still awaiting a
         human verdict has an undecided current proposal (no terminal status, no
-        resolved approval) and is never disturbed.
+        resolved approval) and a genuinely executing run has no decided gate_pending
+        (or a fresh resume claim on it), so neither is ever disturbed.
         """
         now = time.monotonic()
         if now - self._last_parked_reconcile < _PARKED_RECONCILE_INTERVAL_SECONDS:
@@ -318,7 +324,33 @@ class VerdictSubscriber:
                 status=ThreadStatus.INPUT_REQUIRED,
                 limit=self._parked_thread_limit,
             )
-        if not parked:
+            # P04.S10 recovery_required wedge: a run whose checkpoint is parked at
+            # a gate interrupt can be left mis-statused RUNNING rather than
+            # INPUT_REQUIRED - either because a prior gate's verdict resume set
+            # RUNNING (``_resume_with_verdict``, optimistic) and that write raced
+            # AFTER the next gate's permission event set INPUT_REQUIRED (a
+            # cross-writer clobber), or because that gate's permission event never
+            # landed. Such a run is parked-in-checkpoint but invisible to an
+            # INPUT_REQUIRED-only sweep, so its decided verdict is never delivered
+            # and NOTHING re-drives it. Recover by CHECKPOINT truth: also consider
+            # RUNNING candidates and let the per-thread gate_pending +
+            # decided-verdict + gate-precise, claim-leased ``_resume_with_verdict``
+            # filter to exactly the stuck-parked runs. A genuinely executing run
+            # has no decided gate_pending (or a fresh resume claim on it), so it is
+            # never disturbed; a resume it does not need is rejected harmlessly by
+            # the worker's ingest-active lock.
+            running, _ = await list_threads(
+                db,
+                status=ThreadStatus.RUNNING,
+                limit=self._parked_thread_limit,
+            )
+        candidates = list(parked)
+        seen = {thread.id for thread in candidates}
+        for thread in running:
+            if thread.id not in seen:
+                candidates.append(thread)
+                seen.add(thread.id)
+        if not candidates:
             return
         try:
             async with AuthoringClient(
@@ -343,7 +375,7 @@ class VerdictSubscriber:
                 verdict_by_id.setdefault(pid, verdict)
         if not verdict_by_id:
             return
-        for thread in parked:
+        for thread in candidates:
             pending = await self._thread_pending_gate_proposal(thread.id)
             if pending is None:
                 continue

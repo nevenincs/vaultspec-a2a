@@ -321,7 +321,10 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
     commands are workspace-independent, so no workspace is taken. The reason
     string is safe - it names what is missing, never a secret value.
     """
-    if provider == Provider.MOCK:
+    if provider in (Provider.MOCK, Provider.DETERMINISTIC):
+        # Both are in-process fakes with no credential and no launch command:
+        # MOCK proxies the VidaiMock tape server, DETERMINISTIC runs entirely
+        # in-process (the research_adr acceptance provider). Always runnable.
         return ProviderReadiness(provider=provider, ready=True)
 
     if provider == Provider.CLAUDE:

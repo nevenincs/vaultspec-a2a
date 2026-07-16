@@ -159,6 +159,16 @@ class TestReadiness:
         assert r.ready is True
         assert r.reason is None
 
+    def test_deterministic_is_always_ready(self) -> None:
+        # The in-process research_adr acceptance provider (Provider.DETERMINISTIC,
+        # 4a66cb2) needs no credential and no launch command, so the readiness
+        # gate must report it runnable - without this the run-start eligibility
+        # 422s "unsupported provider deterministic" and the deterministic
+        # acceptance lanes cannot start (proven live, PW7 harness).
+        r = probe_provider_readiness(Provider.DETERMINISTIC)
+        assert r.ready is True
+        assert r.reason is None
+
     def test_probe_returns_verdict_without_raising_for_every_provider(self) -> None:
         for provider in Provider:
             r = probe_provider_readiness(provider)

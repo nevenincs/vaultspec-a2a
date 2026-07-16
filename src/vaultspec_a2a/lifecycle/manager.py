@@ -60,6 +60,7 @@ __all__ = [
     "reap",
     "rebuild",
     "render_command",
+    "render_env",
     "rerun",
     "resolve",
     "resume",
@@ -69,6 +70,7 @@ __all__ = [
 ]
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
+_NAME_ENV = "VAULTSPEC_PROCS_NAME"
 _KILL_POLL_INTERVAL = 0.1
 
 
@@ -142,12 +144,40 @@ def tree_kill(pid: int, *, timeout: float = 10.0) -> bool:
     return not _is_pid_alive(pid)
 
 
+def _subst(value: str, *, port: int, workspace: str) -> str:
+    """Substitute the ``{python}``/``{port}``/``{workspace}`` tokens in a value.
+
+    ``{python}`` resolves to :data:`sys.executable` - the interpreter of the
+    serving process - so a role that shells ``python`` always runs the SAME venv
+    interpreter (with ``vaultspec_a2a`` installed), never whatever bare ``python``
+    a PATH lookup would otherwise resolve to (a uv-managed base interpreter).
+    """
+    return (
+        value.replace("{python}", sys.executable)
+        .replace("{port}", str(port))
+        .replace("{workspace}", workspace)
+    )
+
+
 def render_command(template: list[str], *, port: int, workspace: str) -> list[str]:
-    """Substitute the ``{port}`` and ``{workspace}`` tokens in a command template."""
-    return [
-        arg.replace("{port}", str(port)).replace("{workspace}", workspace)
-        for arg in template
-    ]
+    """Substitute the ``{python}``/``{port}``/``{workspace}`` tokens in a command."""
+    return [_subst(arg, port=port, workspace=workspace) for arg in template]
+
+
+def render_env(
+    env_template: dict[str, str], *, port: int, workspace: str
+) -> dict[str, str]:
+    """Substitute the ``{port}``/``{workspace}`` tokens in each env-var value.
+
+    A role whose serve reads its port from the environment (the a2a gateway from
+    ``VAULTSPEC_PORT``, the worker from ``VAULTSPEC_WORKER_PORT``) declares an
+    ``env`` table in procs.toml; the boot verb renders it into the child's
+    environment rather than passing a ``--port`` flag the command does not accept.
+    """
+    return {
+        key: _subst(value, port=port, workspace=workspace)
+        for key, value in env_template.items()
+    }
 
 
 def _build_sha(cwd: Path) -> str | None:
@@ -167,13 +197,19 @@ def _build_sha(cwd: Path) -> str | None:
 
 
 def spawn(
-    command: list[str], *, cwd: Path, log_path: str | None = None
+    command: list[str],
+    *,
+    cwd: Path,
+    log_path: str | None = None,
+    env: dict[str, str] | None = None,
 ) -> subprocess.Popen[bytes]:
     """Start *command* detached from the CLI so it outlives the invocation.
 
     Windows gets a new process group (``CREATE_NEW_PROCESS_GROUP``) so a later
     ``taskkill /T`` fells the whole tree by pid; POSIX gets its own session.
-    Output is appended to *log_path* when given, else discarded.
+    Output is appended to *log_path* when given, else discarded. *env*, when given,
+    is overlaid on the inherited environment (not a replacement) so a serve command
+    inherits PATH and the venv while picking up its injected port/config vars.
     """
     if not command:
         raise LifecycleError("cannot spawn an empty command")
@@ -181,6 +217,7 @@ def spawn(
     stdout: IO[bytes] | int = (
         log_handle if log_handle is not None else subprocess.DEVNULL
     )
+    child_env = {**os.environ, **env} if env is not None else None
     if sys.platform == "win32":
         creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
         start_new_session = False
@@ -196,6 +233,7 @@ def spawn(
             stdin=subprocess.DEVNULL,
             creationflags=creationflags,
             start_new_session=start_new_session,
+            env=child_env,
         )
     finally:
         if log_handle is not None:
@@ -381,6 +419,22 @@ def reap(
     return reaped
 
 
+def _serve_env(
+    role_cfg: RoleConfig, *, port: int, workspace: str, name: str, owner: str
+) -> dict[str, str]:
+    """The env overlay for a boot: the role's rendered port/config vars plus identity.
+
+    Carrying the managed name and owner into the child means a serve process that
+    self-registers (a gateway/worker booted on a band port) converges onto THIS
+    record - same ``(role, name)`` and owner - and refreshes it, instead of writing
+    a second, foreign-owned record that the owner-check would then refuse.
+    """
+    env = render_env(role_cfg.env, port=port, workspace=workspace)
+    env[_NAME_ENV] = name
+    env[_OWNER_ENV] = owner
+    return env
+
+
 def serve_up(
     role: str,
     name: str,
@@ -424,7 +478,14 @@ def serve_up(
             command = render_command(
                 role_cfg.serve, port=reservation.port, workspace=workspace
             )
-            process = spawn(command, cwd=cwd, log_path=log_path)
+            child_env = _serve_env(
+                role_cfg,
+                port=reservation.port,
+                workspace=workspace,
+                name=name,
+                owner=owner_label,
+            )
+            process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
             if _await_listener(reservation.port, process, timeout=ready_timeout):
                 stamp = now_ms()
                 record = ProcRecord(
@@ -502,8 +563,15 @@ def _start_from_record(
             f"role {record.role!r} declares no serve command in procs.toml"
         )
     command = render_command(role.serve, port=record.port, workspace=record.workspace)
+    child_env = _serve_env(
+        role,
+        port=record.port,
+        workspace=record.workspace,
+        name=record.name,
+        owner=record.owner or default_owner(),
+    )
     cwd = _cwd_for(record)
-    process = spawn(command, cwd=cwd, log_path=record.log_path or None)
+    process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
     stamp = now_ms()
     updated = replace(
         record,

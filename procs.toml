@@ -16,27 +16,34 @@ gateway = 8000
 # the registry allocates only within it. `heartbeat` marks roles that refresh a
 # last_seen stamp, so staleness is judged against `staleness_ms`; non-heartbeat
 # roles fall back to pure pid-liveness. `build`/`serve` are command templates; the
-# tokens {port} and {workspace} are substituted by the lifecycle verbs at run time.
+# tokens {python}, {port}, and {workspace} are substituted by the lifecycle verbs
+# at run time. {python} resolves to the serving process's own interpreter
+# (sys.executable) so `python`-invoking roles always run the venv interpreter that
+# has vaultspec_a2a installed, never a bare-PATH base interpreter. A role whose
+# serve reads its port from the environment declares an `env` table (values are
+# {port}/{workspace}-substituted) instead of passing a flag the command lacks.
 
 [roles.engine-dev]
 band = [18760, 18769]
 build = ["cargo", "build", "--release", "-p", "vaultspec-cli"]
 heartbeat = true
-serve = ["python", "scripts/engine_serve.py", "--port", "{port}"]
+serve = ["{python}", "scripts/engine_serve.py", "--port", "{port}"]
 staleness_ms = 120000
 
 [roles.gateway-dev]
 band = [18100, 18109]
 build = []
+env = { VAULTSPEC_PORT = "{port}" }
 heartbeat = true
-serve = ["vaultspec-a2a", "serve", "--port", "{port}"]
+serve = ["{python}", "-m", "vaultspec_a2a.cli.main", "serve"]
 staleness_ms = 120000
 
 [roles.worker-dev]
 band = [18110, 18119]
 build = []
+env = { VAULTSPEC_WORKER_PORT = "{port}" }
 heartbeat = false
-serve = ["python", "-m", "vaultspec_a2a.worker", "--port", "{port}"]
+serve = ["{python}", "-m", "vaultspec_a2a.worker"]
 staleness_ms = 120000
 
 [roles.scratch]

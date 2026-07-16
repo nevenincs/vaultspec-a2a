@@ -12,6 +12,8 @@ import contextlib
 import logging
 from pathlib import Path
 
+import yaml
+
 __all__ = ["RuleManager"]
 
 _logger = logging.getLogger(__name__)
@@ -38,8 +40,12 @@ class RuleManager:
         self._workspace_root = workspace_root.resolve()
         self._include_builtin = include_builtin
 
-        # mtime-based compile cache (HIGH-01)
-        self._cached_result: str | None = None
+        # mtime-based compile cache (HIGH-01), keyed by the requested role so a
+        # role-scoped turn and a whole-corpus turn never serve each other's
+        # compiled string (graph-agent-framework-harness P02.S04). The mtime
+        # snapshot watches the FULL corpus, so any rule-file change drops every
+        # role's cached entry at once.
+        self._cached_results: dict[str | None, str | None] = {}
         self._cache_valid: bool = False
         self._cached_dir_mtime: float = 0.0
         self._cached_file_mtimes: dict[Path, float] = {}
@@ -48,16 +54,25 @@ class RuleManager:
     # Public API
     # ------------------------------------------------------------------
 
-    def discover(self) -> list[Path]:
+    def discover(self, role: str | None = None) -> list[Path]:
         """Return a sorted list of rule file paths.
 
         Searches ``<workspace_root>/.vaultspec/rules/`` for ``*.md``
         files.  Files ending in ``.builtin.md`` are excluded unless
         ``include_builtin=True`` was passed at construction.
 
+        When *role* is given, the result is RESTRICTED to files whose ``roles:``
+        frontmatter list includes that role - a document-authoring turn passes its
+        persona role and receives only the rules opted in to it, instead of the
+        whole corpus (graph-agent-framework-harness P02.S04). Scoping is opt-in and
+        restrictive: a file with no ``roles:`` key is not role-scoped and is
+        excluded from a scoped turn, so scoping never requires editing the
+        vaultspec-core-managed corpus. When *role* is ``None`` the filter is off
+        and every non-builtin file is returned (the unchanged whole-corpus path).
+
         Returns:
             Sorted list of absolute ``Path`` objects; empty list if the
-            directory does not exist or contains no matching files.
+            directory does not exist or nothing matches.
         """
         rules_dir = self._workspace_root / _RULES_SUBDIR
         if not rules_dir.is_dir():
@@ -67,17 +82,25 @@ class RuleManager:
         for p in rules_dir.glob("*.md"):
             if not self._include_builtin and p.name.endswith(".builtin.md"):
                 continue
+            if role is not None and role not in _read_frontmatter_roles(p):
+                continue
             paths.append(p)
 
         return sorted(paths)
 
-    def compile(self) -> str | None:
-        """Compile all discovered rule files into a single string.
+    def compile(self, role: str | None = None) -> str | None:
+        """Compile the discovered rule files into a single string.
 
         Uses a two-tier mtime cache (HIGH-01):
         1. Directory mtime check (single stat) to detect added/removed files
         2. Per-file mtime check to detect content edits
-        Returns cached result if nothing changed.
+        Returns the cached result if nothing changed.
+
+        When *role* is given, only rules opted in to that role are compiled (see
+        :meth:`discover`); results are cached PER ROLE so a scoped turn and a
+        whole-corpus turn never serve each other's string. The mtime snapshot
+        watches the full corpus, so any rule-file change invalidates every role's
+        cached entry at once (graph-agent-framework-harness P02.S04).
 
         Processes each file in :meth:`discover` order:
 
@@ -86,17 +109,20 @@ class RuleManager:
         * Concatenates results with double newlines
 
         Returns:
-            Combined rule text, or ``None`` if no rules exist or all
+            Combined rule text, or ``None`` if no rules exist for this role or all
             content is empty after processing.
         """
-        if self._cache_valid and not self._has_changes():
-            return self._cached_result
-
-        paths = self.discover()
-        if not paths:
-            self._cached_result = None
+        if not self._cache_valid or self._has_changes():
+            self._cached_results = {}
             self._cache_valid = True
-            self._cached_file_mtimes = {}
+            self._snapshot_mtimes()
+
+        if role in self._cached_results:
+            return self._cached_results[role]
+
+        paths = self.discover(role)
+        if not paths:
+            self._cached_results[role] = None
             return None
 
         seen: set[Path] = set()
@@ -109,32 +135,37 @@ class RuleManager:
                 parts.append(stripped)
 
         result = "\n\n".join(parts) if parts else None
-
-        # Update cache state
-        self._cached_result = result
-        self._cache_valid = True
-        rules_dir = self._workspace_root / _RULES_SUBDIR
-        try:
-            self._cached_dir_mtime = rules_dir.stat().st_mtime
-        except OSError:
-            self._cached_dir_mtime = 0.0
-        self._cached_file_mtimes = {}
-        for p in paths:
-            with contextlib.suppress(OSError):
-                self._cached_file_mtimes[p] = p.stat().st_mtime
-
+        self._cached_results[role] = result
         return result
 
     def invalidate(self) -> None:
         """Clear the compile cache, forcing a full recompile on next call."""
         self._cache_valid = False
-        self._cached_result = None
+        self._cached_results = {}
         self._cached_dir_mtime = 0.0
         self._cached_file_mtimes = {}
 
     # ------------------------------------------------------------------
     # Internal helpers
     # ------------------------------------------------------------------
+
+    def _snapshot_mtimes(self) -> None:
+        """Snapshot dir + per-file mtimes over the FULL corpus for change detection.
+
+        Role-independent by design: the snapshot always covers every discoverable
+        rule file (role filter off), so a change to ANY rule file is seen by
+        :meth:`_has_changes` regardless of which role's cached result is being
+        served, and every role entry is dropped together.
+        """
+        rules_dir = self._workspace_root / _RULES_SUBDIR
+        try:
+            self._cached_dir_mtime = rules_dir.stat().st_mtime
+        except OSError:
+            self._cached_dir_mtime = 0.0
+        self._cached_file_mtimes = {}
+        for p in self.discover(None):
+            with contextlib.suppress(OSError):
+                self._cached_file_mtimes[p] = p.stat().st_mtime
 
     def _has_changes(self) -> bool:
         """Check if the rules directory or any cached file has changed.
@@ -252,6 +283,44 @@ class RuleManager:
 # ------------------------------------------------------------------
 # Module-level helpers
 # ------------------------------------------------------------------
+
+
+def _read_frontmatter_roles(path: Path) -> frozenset[str]:
+    """Return the ``roles:`` set declared in a rule file's YAML frontmatter.
+
+    Reads only the leading ``---``-delimited frontmatter block and extracts a
+    ``roles:`` sequence (or a bare string) of role names. Returns an empty set
+    when the file has no frontmatter, no ``roles:`` key, or an unreadable or
+    malformed block - a file that opts in to no role is simply not role-scoped and
+    is skipped by a scoped :meth:`RuleManager.discover`. The compile path still
+    strips the whole frontmatter afterwards via :func:`_strip_frontmatter`.
+    """
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return frozenset()
+    lines = raw.splitlines()
+    if not lines or lines[0].strip() != "---":
+        return frozenset()
+    block: list[str] = []
+    for line in lines[1:]:
+        if line.strip() == "---":
+            break
+        block.append(line)
+    else:
+        return frozenset()  # no closing fence — not valid frontmatter
+    try:
+        meta = yaml.safe_load("\n".join(block))
+    except yaml.YAMLError:
+        return frozenset()
+    if not isinstance(meta, dict):
+        return frozenset()
+    roles = meta.get("roles")
+    if isinstance(roles, str):
+        return frozenset({roles})
+    if isinstance(roles, list):
+        return frozenset(item for item in roles if isinstance(item, str))
+    return frozenset()
 
 
 def _strip_frontmatter(content: str) -> str:

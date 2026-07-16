@@ -391,3 +391,131 @@ class TestRealSyncedCorpus:
             assert not path.name.endswith(".builtin.md")
         assert len(with_builtin) > len(default)
         assert any(p.name.endswith(".builtin.md") for p in with_builtin)
+
+    def test_role_scope_is_subset_of_whole_corpus_on_real_corpus(self) -> None:
+        """On the real corpus a scoped set is always a SUBSET of the whole corpus.
+
+        Role scoping opts in, never adds: ``discover(role)`` can only ever return a
+        subset of ``discover(None)``. Today no shipped rule carries a ``roles:``
+        key, so a scoped turn is empty until the document-authoring rule source
+        (P02.S03) lands - which is exactly the point: the mechanism is inert on the
+        current corpus and turns on only for files that opt in.
+        """
+        root = _find_synced_rules_root()
+        if root is None:
+            pytest.skip(
+                "no synced .vaultspec/rules/ corpus found in any ancestor; run "
+                "`vaultspec-core install` to materialize the flat rule corpus"
+            )
+        rm = RuleManager(root)
+        whole = {p.name for p in rm.discover(None)}
+        scoped = {p.name for p in rm.discover("researcher")}
+        assert scoped <= whole
+
+
+def _write_rule(directory: Path, name: str, roles, body: str = "body") -> None:
+    """Write a rule file with an optional ``roles:`` frontmatter list.
+
+    ``roles=None`` writes a file with frontmatter but NO ``roles:`` key (not
+    role-scoped); a list writes a ``roles:`` sequence; a string writes a bare
+    scalar ``roles:`` value.
+    """
+    if roles is None:
+        front = "order: 1\n"
+    elif isinstance(roles, str):
+        front = f"order: 1\nroles: {roles}\n"
+    else:
+        front = "order: 1\nroles:\n" + "".join(f"  - {r}\n" for r in roles)
+    (directory / name).write_text(f"---\n{front}---\n\n{body}\n", encoding="utf-8")
+
+
+class TestRoleScoping:
+    """Opt-in ``role`` filter on discover/compile (P02.S04).
+
+    Real temp dirs, no mocks. Scoping is opt-in and restrictive: only files whose
+    ``roles:`` frontmatter includes the role are selected for a scoped turn, and
+    ``role=None`` preserves the unchanged whole-corpus behaviour.
+    """
+
+    def test_discover_role_selects_only_opted_in_files(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher", "adr-author"])
+        _write_rule(d, "coder.md", ["standard-executor"])
+        _write_rule(d, "untagged.md", None)
+        rm = RuleManager(tmp_path)
+        assert {p.name for p in rm.discover("researcher")} == {"doc.md"}
+        assert {p.name for p in rm.discover("adr-author")} == {"doc.md"}
+        assert {p.name for p in rm.discover("standard-executor")} == {"coder.md"}
+        # A file with no roles: key (untagged) is excluded from every scoped turn.
+        assert rm.discover("doc-reviewer") == []
+
+    def test_discover_none_returns_whole_corpus_unchanged(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher"])
+        _write_rule(d, "untagged.md", None)
+        (d / "x.builtin.md").write_text("builtin", encoding="utf-8")
+        rm = RuleManager(tmp_path)
+        # role=None and the default are identical: every non-builtin file, tagged
+        # or not - the scoping is genuinely opt-in, not a behaviour change.
+        assert {p.name for p in rm.discover()} == {"doc.md", "untagged.md"}
+        assert {p.name for p in rm.discover(None)} == {"doc.md", "untagged.md"}
+
+    def test_compile_role_compiles_only_scoped_subset(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher"], body="DOC ONLY")
+        _write_rule(d, "coder.md", ["standard-executor"], body="CODER ONLY")
+        out = RuleManager(tmp_path).compile("researcher")
+        assert out is not None
+        assert "DOC ONLY" in out
+        assert "CODER ONLY" not in out
+
+    def test_compile_none_for_role_with_no_opted_in_files(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher"])
+        assert RuleManager(tmp_path).compile("doc-reviewer") is None
+
+    def test_per_role_cache_does_not_cross_serve(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher"], body="DOC")
+        _write_rule(d, "coder.md", ["standard-executor"], body="CODER")
+        rm = RuleManager(tmp_path)
+        researcher = rm.compile("researcher")
+        coder = rm.compile("standard-executor")
+        whole = rm.compile(None)
+        assert researcher is not None
+        assert "DOC" in researcher and "CODER" not in researcher
+        assert coder is not None
+        assert "CODER" in coder and "DOC" not in coder
+        assert whole is not None
+        assert "DOC" in whole and "CODER" in whole
+        # Cached second calls serve the SAME per-role string (no cross-contamination).
+        assert rm.compile("researcher") == researcher
+        assert rm.compile("standard-executor") == coder
+
+    def test_corpus_change_invalidates_every_role_cache(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "doc.md", ["researcher"], body="V1")
+        rm = RuleManager(tmp_path)
+        assert "V1" in (rm.compile("researcher") or "")
+        # A new file lands for a DIFFERENT role; the dir mtime changes.
+        time.sleep(0.01)
+        _write_rule(d, "coder.md", ["standard-executor"], body="CODER")
+        # The researcher cache is dropped and recomputed - still correct - and the
+        # new role now resolves too (whole-corpus mtime watch, not per-role).
+        assert "V1" in (rm.compile("researcher") or "")
+        assert "CODER" in (rm.compile("standard-executor") or "")
+
+    def test_bare_string_roles_value_is_honoured(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        _write_rule(d, "one.md", "researcher")  # scalar, not a list
+        assert {p.name for p in RuleManager(tmp_path).discover("researcher")} == {
+            "one.md"
+        }
+
+    def test_no_frontmatter_file_is_never_scoped(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        (d / "plain.md").write_text("no frontmatter at all", encoding="utf-8")
+        rm = RuleManager(tmp_path)
+        assert rm.discover("researcher") == []
+        # ...but role=None still sees it (whole corpus).
+        assert {p.name for p in rm.discover(None)} == {"plain.md"}

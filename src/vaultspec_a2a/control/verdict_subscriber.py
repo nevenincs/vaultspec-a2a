@@ -49,6 +49,7 @@ from ..database import (
     list_threads,
     mark_permission_request_applied,
     set_authoring_cursor,
+    update_thread_metadata,
     update_thread_status,
 )
 from ..ipc.schemas import DispatchRequest
@@ -81,6 +82,64 @@ _GATE_PENDING_PROPOSAL_FIELD = "gate_pending_proposal_id"
 # verdict proposals (the AUTO submit-time race recovery). Bounded so a legitimately
 # parked HUMAN gate does not fetch a recovery snapshot every poll cycle.
 _PARKED_RECONCILE_INTERVAL_SECONDS = 10.0
+
+# The thread-metadata key holding the in-flight resume CLAIM: the gate proposal a
+# resume was last dispatched for, plus its wall-clock (``time.time()``) timestamp.
+# Wall clock, not monotonic: the claim is DURABLE and outlives the gateway process,
+# so its staleness must remain comparable across a restart (a monotonic stamp from a
+# dead process is meaningless to a fresh one and would misjudge a stale claim as
+# fresh, orphaning the run). It is the
+# durable "this gate's verdict is being resumed" marker written BEFORE dispatch so
+# a second trigger (SSE event / reconcile sweep / gap recovery) for the SAME gate
+# skips instead of double-dispatching (P04.S10 request_changes-recovery race,
+# e106b7a). It is a lease, not a fire-once flag: a claim older than the TTL is
+# STALE, so a still-parked run whose dispatch was lost (process died or dispatch
+# failed in the claim->resume window) is legitimately re-driven rather than
+# orphaned. This is the GAP-B ordering symmetry (ddb8659) applied to resume:
+# durable first, liveness preserved.
+_RESUME_CLAIM_FIELD = "resume_claim"
+
+# A resume claim older than this is stale and re-drivable. Sized to cover the
+# projection-lag window between a resume's checkpoint write and its durable
+# side-tables landing (seconds), NOT a full re-authoring turn - a concurrent
+# re-dispatch during an ACTIVE resume is already blocked by the worker's
+# per-thread ingest-active lock, so the lease only guards the post-ingest window
+# where the run's parked state has not yet reflected the advance.
+_RESUME_CLAIM_TTL_SECONDS = 90.0
+
+
+def _read_resume_claim(thread_metadata: str | None) -> tuple[str, float] | None:
+    """Return ``(claimed_proposal_id, claimed_ts)`` from a thread's metadata blob."""
+    if not thread_metadata:
+        return None
+    try:
+        meta = json.loads(thread_metadata)
+    except (json.JSONDecodeError, TypeError):
+        return None
+    if not isinstance(meta, dict):
+        return None
+    claim = meta.get(_RESUME_CLAIM_FIELD)
+    if not isinstance(claim, dict):
+        return None
+    proposal_id = claim.get("proposal_id")
+    ts = claim.get("ts")
+    if isinstance(proposal_id, str) and proposal_id and isinstance(ts, (int, float)):
+        return proposal_id, float(ts)
+    return None
+
+
+def _with_resume_claim(thread_metadata: str | None, proposal_id: str, ts: float) -> str:
+    """Merge a resume claim into a metadata blob, preserving every other key."""
+    meta: dict[str, Any] = {}
+    if thread_metadata:
+        try:
+            loaded = json.loads(thread_metadata)
+        except (json.JSONDecodeError, TypeError):
+            loaded = None
+        if isinstance(loaded, dict):
+            meta = loaded
+    meta[_RESUME_CLAIM_FIELD] = {"proposal_id": proposal_id, "ts": ts}
+    return json.dumps(meta)
 
 
 def _gate_resume_verdict(status: str) -> str | None:
@@ -290,7 +349,9 @@ class VerdictSubscriber:
                 continue
             verdict = verdict_by_id.get(pending)
             if verdict is not None:
-                await self._resume_with_verdict(thread.id, verdict, None)
+                # Gate-precise by construction: keyed on the run's CURRENT gate
+                # proposal, so the correlated id set is exactly that proposal.
+                await self._resume_with_verdict(thread.id, verdict, None, {pending})
 
     async def _thread_pending_gate_proposal(self, thread_id: str) -> str | None:
         """The proposal id of the gate a run is CURRENTLY parked at.
@@ -364,15 +425,16 @@ class VerdictSubscriber:
         if verdict is None:
             return
         verdict_kind, notes = verdict
-        thread_id = await self._find_parked_thread(event.correlation_ids())
+        correlated_ids = event.correlation_ids()
+        thread_id = await self._find_parked_thread(correlated_ids)
         if thread_id is None:
             logger.debug(
                 "No parked thread correlates to authoring ids %s (seq=%d)",
-                sorted(event.correlation_ids()),
+                sorted(correlated_ids),
                 event.seq,
             )
             return
-        await self._resume_with_verdict(thread_id, verdict_kind, notes)
+        await self._resume_with_verdict(thread_id, verdict_kind, notes, correlated_ids)
 
     # ------------------------------------------------------------------
     # Gap recovery
@@ -419,10 +481,11 @@ class VerdictSubscriber:
             verdict = changeset_status_verdict(proposal["status"])
             if verdict is None:
                 continue
-            thread_id = await self._find_parked_thread(proposal["ids"])
+            correlated_ids = set(proposal["ids"])
+            thread_id = await self._find_parked_thread(correlated_ids)
             if thread_id is None:
                 continue
-            await self._resume_with_verdict(thread_id, verdict, None)
+            await self._resume_with_verdict(thread_id, verdict, None, correlated_ids)
 
     # ------------------------------------------------------------------
     # Correlation
@@ -481,7 +544,11 @@ class VerdictSubscriber:
     # ------------------------------------------------------------------
 
     async def _resume_with_verdict(
-        self, thread_id: str, verdict: str, notes: str | None
+        self,
+        thread_id: str,
+        verdict: str,
+        notes: str | None,
+        correlated_ids: set[str],
     ) -> None:
         """Dispatch ``Command(resume={"verdict", "notes"})`` to a parked run.
 
@@ -492,13 +559,72 @@ class VerdictSubscriber:
         and masks the real ``awaiting_adr_decision`` phase (P04.S10 GAP D). Only the
         rows that existed BEFORE this resume are resolved; the next gate parks with
         its own fresh row after the run advances.
+
+        Two ordering invariants close the intermittent request_changes-recovery race
+        (P04.S10, e106b7a), both keyed on the run's CURRENT gate proposal:
+
+        - **Gate-precision.** Resume only when the run's current
+          ``gate_pending_proposal_id`` is among ``correlated_ids`` - the ids the
+          caller matched the verdict on. A verdict for a SUPERSEDED gate (a late r1
+          request_changes arriving after the run already re-parked at r2, matched by
+          the run's ACCUMULATED authoring ids) has a current gate that is not in its
+          id set, so it is skipped rather than applied to the wrong gate's interrupt
+          - a stale resume that corrupts the checkpoint's interrupt lineage and
+          wedges the run at ``next_nodes=[]``.
+        - **Durable claim before dispatch.** A resume writes a durable claim on the
+          current gate proposal BEFORE dispatching, so a second trigger for the SAME
+          gate sees a fresh claim and skips instead of double-dispatching. The claim
+          is a lease, not a fire-once flag: a stale claim (dispatch lost in the
+          claim->resume window) is re-drivable, so a lost dispatch is retried, never
+          orphaned.
         """
         async with self._session_factory() as db:
             thread = await get_thread(db, thread_id)
             if thread is None:
                 return
             team_preset = thread.team_preset
-            workspace_root = _workspace_root(thread.thread_metadata)
+            thread_metadata = thread.thread_metadata
+            workspace_root = _workspace_root(thread_metadata)
+
+        # Gate-precision: the verdict must answer the gate the run is CURRENTLY
+        # parked at, not a superseded earlier gate matched by accumulated ids.
+        current_gate = await self._thread_pending_gate_proposal(thread_id)
+        if current_gate is None or current_gate not in correlated_ids:
+            logger.debug(
+                "Skipping resume for thread %s: current gate proposal %s not in "
+                "verdict ids %s (superseded or not parked at a gate)",
+                thread_id,
+                current_gate,
+                sorted(correlated_ids),
+            )
+            return
+
+        # Durable claim: skip a same-gate resume already in flight (fresh claim);
+        # re-drive a stale one (lost dispatch). Lease keyed on the current gate.
+        # Wall clock so the durable stamp stays comparable across a gateway restart.
+        now = time.time()
+        claim = _read_resume_claim(thread_metadata)
+        if (
+            claim is not None
+            and claim[0] == current_gate
+            and now - claim[1] < _RESUME_CLAIM_TTL_SECONDS
+        ):
+            logger.debug(
+                "Skipping resume for thread %s: fresh resume claim on gate %s "
+                "(age %.1fs < %.0fs TTL)",
+                thread_id,
+                current_gate,
+                now - claim[1],
+                _RESUME_CLAIM_TTL_SECONDS,
+            )
+            return
+        async with self._session_factory() as db:
+            await update_thread_metadata(
+                db, thread_id, _with_resume_claim(thread_metadata, current_gate, now)
+            )
+            await db.commit()
+
+        async with self._session_factory() as db:
             parked_gate_request_ids = [
                 permission.request_id
                 for permission in await get_pending_permission_requests(

@@ -10,6 +10,7 @@ gateway restart. The engine-facing SSE consumption is proved live in
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING
 
 import httpx
@@ -26,15 +27,20 @@ from sqlalchemy.ext.asyncio import (
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
 
+    from starlette.applications import Starlette
+    from starlette.requests import Request
+
 from vaultspec_a2a.authoring import AuthoringClient, LifecycleEvent, StreamError
 from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
 from vaultspec_a2a.control.verdict_subscriber import (
+    _RESUME_CLAIM_TTL_SECONDS,
     VerdictSubscriber,
     _gate_resume_verdict,
     _iter_recovery_proposals,
     _proposal_reconcile_verdict,
     _recovery_high_water,
     _StreamInterruptedError,
+    _with_resume_claim,
 )
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 from vaultspec_a2a.database import (
@@ -43,6 +49,7 @@ from vaultspec_a2a.database import (
     get_permission_request,
     get_thread,
     record_permission_request,
+    update_thread_metadata,
     update_thread_status,
 )
 from vaultspec_a2a.database.models import Base
@@ -152,6 +159,7 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
             thread_id=thread_id,
             proposal_ids=["proposal:research"],
             changeset_ids=["cs:research"],
+            gate_pending="proposal:research",
         )
         async with session_factory() as session:
             await record_permission_request(
@@ -175,7 +183,9 @@ async def test_resume_resolves_the_answered_document_gate_permission_row(
             await session.commit()
 
         subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
-        await subscriber._resume_with_verdict(thread_id, "approved", None)
+        await subscriber._resume_with_verdict(
+            thread_id, "approved", None, {"proposal:research"}
+        )
 
         async with session_factory() as session:
             gate_row = await get_permission_request(
@@ -717,3 +727,140 @@ async def test_reconcile_parked_runs_noops_when_none_parked_and_throttles(
         # engine fetch is attempted.
         await subscriber._reconcile_parked_runs(endpoint)
         assert subscriber._last_parked_reconcile == first_stamp
+
+
+def _recording_worker() -> tuple[Starlette, list[dict[str, object]]]:
+    """A worker app recording each dispatch POST; returns ``(app, calls)``."""
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    calls: list[dict[str, object]] = []
+
+    async def _accept(request: Request) -> JSONResponse:
+        calls.append(await request.json())
+        return JSONResponse({"status": "dispatched"})
+
+    return Starlette(routes=[Route("/dispatch", _accept, methods=["POST"])]), calls
+
+
+@pytest.mark.asyncio
+async def test_resume_skips_a_superseded_gate_verdict(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """Gate-precision: a late verdict for an EARLIER gate is not applied (P04.S10).
+
+    The run has advanced to the ADR gate (gate_pending = ``proposal:adr``) but still
+    carries the research gate's proposal id in its ACCUMULATED authoring ids. A late
+    research request_changes verdict, matched only by that accumulated id, must NOT
+    resume the run - its current gate is not the one the verdict answers, so applying
+    it would consume the ADR gate's interrupt with a stale verdict and wedge the run
+    at ``next_nodes=[]``. No dispatch occurs and the run stays parked (e106b7a).
+    """
+    app, calls = _recording_worker()
+    checkpoints = tmp_path / "cp-superseded.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://worker"
+        ) as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id="superseded",
+            proposal_ids=["proposal:research", "proposal:adr"],
+            changeset_ids=["cs:research", "cs:adr"],
+            gate_pending="proposal:adr",
+        )
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(
+            "superseded", "request_changes", None, {"proposal:research"}
+        )
+        assert calls == []
+        async with session_factory() as session:
+            thread = await get_thread(session, "superseded")
+            assert thread is not None
+            assert thread.status == ThreadStatus.INPUT_REQUIRED.value
+
+
+@pytest.mark.asyncio
+async def test_fresh_resume_claim_dedups_double_dispatch(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A second trigger for the SAME gate skips on the fresh claim (P04.S10).
+
+    Two triggers (e.g. the SSE per-event path and the reconcile sweep) can fire for
+    one gate's verdict. The first writes a durable claim before dispatch; the second,
+    reading a fresh claim on the same gate, skips - so the gate is resumed exactly
+    once and the checkpoint's interrupt lineage is never double-consumed.
+    """
+    app, calls = _recording_worker()
+    checkpoints = tmp_path / "cp-dedup.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://worker"
+        ) as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id="dedup",
+            proposal_ids=["proposal:research"],
+            changeset_ids=["cs:research"],
+            gate_pending="proposal:research",
+        )
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(
+            "dedup", "request_changes", None, {"proposal:research"}
+        )
+        await subscriber._resume_with_verdict(
+            "dedup", "request_changes", None, {"proposal:research"}
+        )
+        assert len(calls) == 1
+
+
+@pytest.mark.asyncio
+async def test_stale_resume_claim_is_redriven(
+    tmp_path, session_factory: async_sessionmaker[AsyncSession]
+) -> None:
+    """A still-parked run whose dispatch was lost is re-driven, not orphaned.
+
+    The crash window: a claim was written before a dispatch that never landed (the
+    process died or the dispatch failed between claim and resume). The run is still
+    parked at the same gate and the claim is now older than the TTL, so the next
+    trigger legitimately re-drives it - a lost dispatch is retried, not permanently
+    stranded. This is the liveness half of the idempotent-with-retry invariant: the
+    durable-before-dispatch marker must never convert the double-dispatch hole into
+    a lost-dispatch hole.
+    """
+    app, calls = _recording_worker()
+    checkpoints = tmp_path / "cp-stale.db"
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=app), base_url="http://worker"
+        ) as worker_client,
+    ):
+        await _seed_parked_thread(
+            session_factory,
+            checkpointer,
+            thread_id="stale",
+            proposal_ids=["proposal:research"],
+            changeset_ids=["cs:research"],
+            gate_pending="proposal:research",
+        )
+        stale_ts = time.time() - _RESUME_CLAIM_TTL_SECONDS - 10.0
+        async with session_factory() as session:
+            await update_thread_metadata(
+                session,
+                "stale",
+                _with_resume_claim(None, "proposal:research", stale_ts),
+            )
+            await session.commit()
+        subscriber = _make_subscriber(session_factory, checkpointer, worker_client)
+        await subscriber._resume_with_verdict(
+            "stale", "request_changes", None, {"proposal:research"}
+        )
+        assert len(calls) == 1

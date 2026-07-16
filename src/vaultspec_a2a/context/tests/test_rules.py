@@ -600,3 +600,71 @@ class TestBundledDefaults:
         assert [p.name for p in rm.discover("researcher")] == ["w.md"]
         # A bare workspace with neither source resolves nothing.
         assert RuleManager(tmp_path / "empty").compile("researcher") is None
+
+
+def _write_ordered(directory: Path, name: str, order: object, body: str) -> None:
+    """Write a rule file with an optional ``order:`` frontmatter key."""
+    front = "" if order is None else f"order: {order}\n"
+    (directory / name).write_text(f"---\n{front}---\n\n{body}\n", encoding="utf-8")
+
+
+class TestCompileOrderAndCacheEdges:
+    """Compile order honors ``order:`` and the cache watches both source dirs.
+
+    Reviewer LOW-3 (the ``order:`` key was declared but never consumed) and LOW-4
+    (two uncovered cache-invalidation edges). Real temp dirs, no mocks.
+    """
+
+    def test_compile_honors_order_key_over_name(self, tmp_path: Path) -> None:
+        d = _rules_dir(tmp_path)
+        # Names sort b < a, but order: makes A-BODY (order 1) precede B-BODY (10).
+        _write_ordered(d, "b_low.md", 1, "A-BODY")
+        _write_ordered(d, "a_high.md", 10, "B-BODY")
+        out = RuleManager(tmp_path).compile()
+        assert out is not None
+        assert out.index("A-BODY") < out.index("B-BODY")
+
+    def test_undeclared_order_defaults_after_low_and_ties_by_name(
+        self, tmp_path: Path
+    ) -> None:
+        d = _rules_dir(tmp_path)
+        _write_ordered(d, "z_first.md", 1, "FIRST")  # low order wins despite name
+        _write_ordered(d, "a_none.md", None, "UNDECLARED_A")  # default 100
+        _write_ordered(d, "b_none.md", None, "UNDECLARED_B")  # default 100, name tie
+        out = RuleManager(tmp_path).compile()
+        assert out is not None
+        assert (
+            out.index("FIRST") < out.index("UNDECLARED_A") < out.index("UNDECLARED_B")
+        )
+
+    def test_cache_invalidates_when_bundled_file_disappears(
+        self, tmp_path: Path
+    ) -> None:
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "b.md", ["researcher"], body="BUNDLED")
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        assert "BUNDLED" in (rm.compile("researcher") or "")
+        # The bundled file disappears while the bundled dir is still set.
+        time.sleep(0.01)
+        (bundled / "b.md").unlink()
+        # Cache is invalidated (per-file mtime tier catches the removal), so the
+        # role now resolves nothing rather than serving the stale bundled body.
+        assert rm.compile("researcher") is None
+
+    def test_cache_invalidates_on_workspace_change_while_bundled_set(
+        self, tmp_path: Path
+    ) -> None:
+        bundled = tmp_path / "bundled"
+        bundled.mkdir()
+        _write_rule(bundled, "b.md", ["researcher"], body="BUNDLED")
+        ws_rules = _rules_dir(tmp_path)
+        rm = RuleManager(tmp_path, bundled_rules_dir=bundled)
+        first = rm.compile(None)
+        assert first is not None and "BUNDLED" in first and "WSNEW" not in first
+        # A new workspace file appears while the bundled dir is also a source: the
+        # candidate-dirs union in _has_changes must see the workspace dir change.
+        time.sleep(0.01)
+        _write_rule(ws_rules, "w.md", None, body="WSNEW")
+        second = rm.compile(None)
+        assert second is not None and "WSNEW" in second and "BUNDLED" in second

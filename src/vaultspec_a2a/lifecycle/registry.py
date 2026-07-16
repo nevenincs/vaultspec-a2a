@@ -1,0 +1,314 @@
+"""File-per-process dev-process registry (dev-process-registry ADR).
+
+One JSON state file per managed dev/test process at an explicit machine-global
+path - ``~/.vaultspec/procs/<role>-<name>.json`` - so a single place always knows
+what runs where, for whom, from which build. This module owns the record schema,
+atomic owner-checked writes, pid-liveness and staleness classification, and
+band-constrained port allocation; the lifecycle verbs (``procs list/attach/kill/
+rebuild/rerun/resume/reap``) compose over it.
+
+The discipline mirrors the service.json discovery machinery one level up: writes
+are temp-and-rename atomic, mutation of a record is refused when a *live* process
+of a *different* owner holds it, and a dead-pid record is freely reclaimable. The
+registry references the services' own service.json records (via ``port``/``pid``);
+it never fights them.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import socket
+import time
+from dataclasses import asdict, dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING, Any
+
+from .discovery import is_pid_alive
+
+if TYPE_CHECKING:
+    from pathlib import Path
+
+    from .procs_config import ProcsConfig, RoleConfig
+
+__all__ = [
+    "ProcRecord",
+    "RegistryOwnershipError",
+    "StalenessState",
+    "allocate_port",
+    "classify_record",
+    "list_records",
+    "now_ms",
+    "procs_home",
+    "read_record",
+    "record_path",
+    "refresh_last_seen",
+    "remove_record",
+    "remove_record_if_owned",
+    "write_record",
+]
+
+_PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
+
+
+class RegistryOwnershipError(RuntimeError):
+    """A mutation was refused: a live process of another owner holds the record."""
+
+
+class StalenessState(StrEnum):
+    """A record's liveness verdict (dev-process-registry ADR)."""
+
+    LIVE = "live"
+    STALE = "stale"
+    DEAD = "dead"
+
+
+@dataclass(frozen=True, slots=True)
+class ProcRecord:
+    """A single managed process. Never carries a credential, token, or env value."""
+
+    name: str
+    role: str
+    pid: int
+    port: int
+    repo: str = ""
+    workspace: str = ""
+    build_sha: str | None = None
+    command: list[str] = field(default_factory=list)
+    started_at_ms: int = 0
+    last_seen_ms: int = 0
+    log_path: str | None = None
+    owner: str = ""
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def now_ms() -> int:
+    """Milliseconds since the epoch (registry timestamp unit)."""
+    return int(time.time() * 1000)
+
+
+def procs_home(home: Path | None = None) -> Path:
+    """Resolve the registry home: explicit arg, env override, or ``~/.vaultspec/procs``.
+
+    The ``VAULTSPEC_PROCS_HOME`` override exists for test isolation and for adopting
+    an interim state-file directory; the default is the machine-global home shared
+    with the engine's service.json.
+    """
+    from pathlib import Path as _Path
+
+    if home is not None:
+        return home
+    override = os.environ.get(_PROCS_HOME_ENV)
+    if override:
+        return _Path(override)
+    return _Path.home() / ".vaultspec" / "procs"
+
+
+def record_path(role: str, name: str, *, home: Path | None = None) -> Path:
+    """Return the state-file path for ``<role>-<name>.json`` under the registry home."""
+    return procs_home(home) / f"{role}-{name}.json"
+
+
+def _coerce_command(value: object) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    items: list[str] = []
+    for entry in value:
+        if not isinstance(entry, str):
+            return []
+        items.append(entry)
+    return items
+
+
+def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
+    """Build a :class:`ProcRecord` from a parsed record, or ``None`` if invalid."""
+    name = data.get("name")
+    role = data.get("role")
+    pid = data.get("pid")
+    port = data.get("port")
+    if not isinstance(name, str) or not name:
+        return None
+    if not isinstance(role, str) or not role:
+        return None
+    if not isinstance(pid, int) or isinstance(pid, bool):
+        return None
+    if not isinstance(port, int) or isinstance(port, bool):
+        return None
+
+    def _opt_str(key: str) -> str:
+        v = data.get(key)
+        return v if isinstance(v, str) else ""
+
+    def _opt_str_or_none(key: str) -> str | None:
+        v = data.get(key)
+        return v if isinstance(v, str) and v else None
+
+    def _opt_int(key: str) -> int:
+        v = data.get(key)
+        return v if isinstance(v, int) and not isinstance(v, bool) else 0
+
+    return ProcRecord(
+        name=name,
+        role=role,
+        pid=pid,
+        port=port,
+        repo=_opt_str("repo"),
+        workspace=_opt_str("workspace"),
+        build_sha=_opt_str_or_none("build_sha"),
+        command=_coerce_command(data.get("command")),
+        started_at_ms=_opt_int("started_at_ms"),
+        last_seen_ms=_opt_int("last_seen_ms"),
+        log_path=_opt_str_or_none("log_path"),
+        owner=_opt_str("owner"),
+    )
+
+
+def read_record(path: Path) -> ProcRecord | None:
+    """Read one record file, or ``None`` when it is absent, unreadable, or malformed."""
+    try:
+        raw = path.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    try:
+        data = json.loads(raw)
+    except (json.JSONDecodeError, ValueError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    return _record_from_dict(data)
+
+
+def list_records(home: Path | None = None) -> list[ProcRecord]:
+    """Enumerate all valid records under the registry home (malformed files skipped)."""
+    root = procs_home(home)
+    if not root.is_dir():
+        return []
+    records: list[ProcRecord] = []
+    for entry in sorted(root.glob("*.json")):
+        record = read_record(entry)
+        if record is not None:
+            records.append(record)
+    return records
+
+
+def write_record(record: ProcRecord, *, home: Path | None = None) -> Path:
+    """Atomically write a record, refusing to clobber a live record of another owner.
+
+    Owner-checked mutation: if a record already exists for ``(role, name)`` whose
+    pid is alive and whose owner differs, the write is refused with
+    :class:`RegistryOwnershipError`. A dead-pid record, a same-owner record, or an
+    absent one is freely (re)claimable. The write itself is temp-and-rename atomic,
+    so a concurrent reader never sees a partial record.
+    """
+    path = record_path(record.role, record.name, home=home)
+    existing = read_record(path)
+    if (
+        existing is not None
+        and existing.owner != record.owner
+        and is_pid_alive(existing.pid)
+    ):
+        raise RegistryOwnershipError(
+            f"record {record.role}-{record.name} is held by a live process "
+            f"(pid {existing.pid}, owner {existing.owner!r}); refusing to overwrite"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f"{path.name}.{os.getpid()}.tmp")
+    tmp.write_text(json.dumps(record.to_dict(), indent=2), encoding="utf-8")
+    os.replace(tmp, path)
+    return path
+
+
+def refresh_last_seen(
+    record: ProcRecord, *, at_ms: int | None = None, home: Path | None = None
+) -> ProcRecord:
+    """Rewrite the record's ``last_seen_ms`` heartbeat and return the updated record."""
+    from dataclasses import replace
+
+    updated = replace(record, last_seen_ms=at_ms if at_ms is not None else now_ms())
+    write_record(updated, home=home)
+    return updated
+
+
+def remove_record(role: str, name: str, *, home: Path | None = None) -> bool:
+    """Delete a record file unconditionally; ``True`` when a file was removed."""
+    path = record_path(role, name, home=home)
+    if not path.exists():
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def remove_record_if_owned(
+    role: str, name: str, owner: str, *, home: Path | None = None
+) -> bool:
+    """Delete a record only when *owner* holds it or its process is already dead.
+
+    Mirrors the discovery discipline: a live record owned by someone else is left
+    in place. Returns ``True`` when the file was removed.
+    """
+    path = record_path(role, name, home=home)
+    existing = read_record(path)
+    if existing is None:
+        return False
+    if existing.owner != owner and is_pid_alive(existing.pid):
+        return False
+    path.unlink(missing_ok=True)
+    return True
+
+
+def classify_record(
+    record: ProcRecord, role_config: RoleConfig | None, *, now: int | None = None
+) -> StalenessState:
+    """Classify a record ``LIVE | STALE | DEAD``.
+
+    ``DEAD`` when the pid is not a live process. For a heartbeating role, ``STALE``
+    when the pid is alive but ``last_seen_ms`` is older than the role's staleness
+    window; a non-heartbeating role (or an unknown role) rests on pid-liveness
+    alone and reads ``LIVE`` while its pid is alive.
+    """
+    if not is_pid_alive(record.pid):
+        return StalenessState.DEAD
+    if role_config is not None and role_config.heartbeat:
+        current = now if now is not None else now_ms()
+        if current - record.last_seen_ms > role_config.staleness_ms:
+            return StalenessState.STALE
+    return StalenessState.LIVE
+
+
+def _port_is_free(port: int) -> bool:
+    """Return ``True`` when *port* can be bound on the loopback interface right now."""
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
+
+
+def allocate_port(
+    role: str,
+    role_config: RoleConfig,
+    *,
+    home: Path | None = None,
+    config: ProcsConfig | None = None,
+) -> int:
+    """Allocate the first free port in *role*'s band, recording no claim by itself.
+
+    A port is taken when a live registry record already holds it (any role) or when
+    it cannot be bound on the loopback interface (a non-registry process holds it).
+    The caller writes the claiming record once the process is spawned. Raises
+    :class:`RuntimeError` when the band is exhausted.
+    """
+    claimed = {rec.port for rec in list_records(home) if is_pid_alive(rec.pid)}
+    resident_ports = set(config.resident.values()) if config is not None else set()
+    for candidate in role_config.band:
+        if candidate in claimed or candidate in resident_ports:
+            continue
+        if _port_is_free(candidate):
+            return candidate
+    raise RuntimeError(
+        f"role {role!r} band {role_config.band} is exhausted: no free port"
+    )

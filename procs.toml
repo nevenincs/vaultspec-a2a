@@ -1,0 +1,47 @@
+# Machine-global dev-process registry configuration (dev-process-registry ADR).
+#
+# Single committed source of truth for port bands, per-role build/serve command
+# templates, and staleness windows, shared across the a2a and dashboard repos.
+# The registry allocates and the lifecycle verbs build/serve strictly from here;
+# port-asserting tests read the bands from here too, so no port constant is ever
+# scattered per test. Resident owner instances keep their fixed ports and are
+# never allocated into by dev/test instances.
+
+[resident]
+# Fixed ports for the resident owner instances (never allocated by the registry).
+engine = 8767
+gateway = 8000
+
+# Per-role dev/test configuration. `band` is an inclusive [start, end] port range;
+# the registry allocates only within it. `heartbeat` marks roles that refresh a
+# last_seen stamp, so staleness is judged against `staleness_ms`; non-heartbeat
+# roles fall back to pure pid-liveness. `build`/`serve` are command templates; the
+# tokens {port} and {workspace} are substituted by the lifecycle verbs at run time.
+
+[roles.engine-dev]
+band = [18760, 18769]
+build = ["cargo", "build", "--release", "-p", "vaultspec-cli"]
+heartbeat = true
+serve = ["python", "scripts/engine_serve.py", "--port", "{port}"]
+staleness_ms = 120000
+
+[roles.gateway-dev]
+band = [18100, 18109]
+build = []
+heartbeat = true
+serve = ["vaultspec-a2a", "serve", "--port", "{port}"]
+staleness_ms = 120000
+
+[roles.worker-dev]
+band = [18110, 18119]
+build = []
+heartbeat = false
+serve = ["python", "-m", "vaultspec_a2a.worker", "--port", "{port}"]
+staleness_ms = 120000
+
+[roles.scratch]
+band = [18900, 18999]
+build = []
+heartbeat = false
+serve = []
+staleness_ms = 120000

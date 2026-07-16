@@ -1,0 +1,189 @@
+"""File-per-process registry core (dev-process-registry P01.S01).
+
+Real filesystem, real process pids, and real loopback socket binds - no mocks.
+The registry home is an isolated ``tmp_path`` per test, the live pid is this test
+process (``os.getpid()``), and a genuinely dead pid comes from a spawned process
+that has already exited, so liveness and ownership verdicts are exercised against
+the real OS, not a stub.
+"""
+
+from __future__ import annotations
+
+import os
+import subprocess
+import sys
+from typing import Any
+
+import pytest
+
+from ..procs_config import PortBand, ProcsConfig, RoleConfig
+from ..registry import (
+    ProcRecord,
+    RegistryOwnershipError,
+    StalenessState,
+    allocate_port,
+    classify_record,
+    list_records,
+    now_ms,
+    read_record,
+    record_path,
+    refresh_last_seen,
+    remove_record_if_owned,
+    write_record,
+)
+
+
+def _dead_pid() -> int:
+    """Spawn a trivial process, wait for it to exit, and return its now-dead pid."""
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    return proc.pid
+
+
+def _record(**overrides: Any) -> ProcRecord:
+    base: dict[str, Any] = {
+        "name": "alpha",
+        "role": "gateway-dev",
+        "pid": os.getpid(),
+        "port": 18100,
+        "owner": "session-a",
+        "started_at_ms": now_ms(),
+        "last_seen_ms": now_ms(),
+    }
+    base.update(overrides)
+    return ProcRecord(**base)
+
+
+def test_write_then_read_roundtrips_at_the_named_path(tmp_path) -> None:
+    record = _record(command=["vaultspec-a2a", "serve", "--port", "18100"])
+    path = write_record(record, home=tmp_path)
+
+    assert path == record_path("gateway-dev", "alpha", home=tmp_path)
+    assert path.name == "gateway-dev-alpha.json"
+    back = read_record(path)
+    assert back == record
+
+
+def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:
+    write_record(_record(name="alpha", port=18100), home=tmp_path)
+    write_record(_record(name="beta", port=18101), home=tmp_path)
+    # A malformed sibling file must not break enumeration.
+    (tmp_path / "gateway-dev-broken.json").write_text("{not json", encoding="utf-8")
+
+    names = {r.name for r in list_records(tmp_path)}
+    assert names == {"alpha", "beta"}
+
+
+def test_write_refuses_to_clobber_a_live_record_of_another_owner(tmp_path) -> None:
+    # A live record (this process's pid) owned by session-a.
+    write_record(_record(owner="session-a", pid=os.getpid()), home=tmp_path)
+
+    # session-b cannot overwrite it while its process is alive.
+    with pytest.raises(RegistryOwnershipError, match="held by a live process"):
+        write_record(_record(owner="session-b", pid=os.getpid()), home=tmp_path)
+
+
+def test_write_reclaims_a_dead_record_of_another_owner(tmp_path) -> None:
+    write_record(_record(owner="session-a", pid=_dead_pid()), home=tmp_path)
+
+    # The prior owner's process is dead, so the record is freely reclaimable.
+    reclaimed = _record(owner="session-b", pid=os.getpid())
+    write_record(reclaimed, home=tmp_path)
+    assert read_record(record_path("gateway-dev", "alpha", home=tmp_path)) == reclaimed
+
+
+def test_remove_if_owned_respects_a_live_foreign_owner(tmp_path) -> None:
+    write_record(_record(owner="session-a", pid=os.getpid()), home=tmp_path)
+
+    # A different owner cannot remove a live record ...
+    assert (
+        remove_record_if_owned("gateway-dev", "alpha", "session-b", home=tmp_path)
+        is False
+    )
+    # ... but the holder can.
+    assert (
+        remove_record_if_owned("gateway-dev", "alpha", "session-a", home=tmp_path)
+        is True
+    )
+    assert read_record(record_path("gateway-dev", "alpha", home=tmp_path)) is None
+
+
+def _role(band: PortBand, *, heartbeat: bool, staleness_ms: int = 120000) -> RoleConfig:
+    return RoleConfig(
+        name="gateway-dev",
+        band=band,
+        heartbeat=heartbeat,
+        staleness_ms=staleness_ms,
+        build=[],
+        serve=[],
+    )
+
+
+def test_classify_reports_dead_stale_and_live(tmp_path) -> None:
+    role = _role(PortBand(18100, 18109), heartbeat=True, staleness_ms=1000)
+
+    dead = _record(pid=_dead_pid())
+    assert classify_record(dead, role) is StalenessState.DEAD
+
+    # Alive pid, heartbeat far in the past -> stale.
+    stale = _record(pid=os.getpid(), last_seen_ms=now_ms() - 5000)
+    assert classify_record(stale, role, now=now_ms()) is StalenessState.STALE
+
+    # Alive pid, fresh heartbeat -> live.
+    live = _record(pid=os.getpid(), last_seen_ms=now_ms())
+    assert classify_record(live, role, now=now_ms()) is StalenessState.LIVE
+
+    # A non-heartbeat role rests on pid-liveness alone: an old last_seen is still live.
+    no_hb = _role(PortBand(18100, 18109), heartbeat=False)
+    assert classify_record(stale, no_hb, now=now_ms()) is StalenessState.LIVE
+
+
+def test_refresh_last_seen_advances_the_heartbeat(tmp_path) -> None:
+    record = _record(last_seen_ms=1)
+    write_record(record, home=tmp_path)
+
+    updated = refresh_last_seen(record, at_ms=999999, home=tmp_path)
+    assert updated.last_seen_ms == 999999
+
+    persisted = read_record(record_path("gateway-dev", "alpha", home=tmp_path))
+    assert persisted is not None
+    assert persisted.last_seen_ms == 999999
+
+
+def _config(band: PortBand) -> ProcsConfig:
+    return ProcsConfig(
+        resident={"engine": 8767, "gateway": 8000},
+        roles={"scratch": _role(band, heartbeat=False)},
+    )
+
+
+def test_allocate_returns_a_free_band_port_and_skips_live_claims(tmp_path) -> None:
+    # A small band of real, high, likely-free ports for a deterministic bind test.
+    band = PortBand(18900, 18902)
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+
+    first = allocate_port("scratch", role, home=tmp_path, config=config)
+    assert first in band
+
+    # Record a LIVE claim on the allocated port; the next allocation must skip it.
+    write_record(
+        _record(role="scratch", name="claimant", port=first, pid=os.getpid()),
+        home=tmp_path,
+    )
+    second = allocate_port("scratch", role, home=tmp_path, config=config)
+    assert second in band and second != first
+
+
+def test_allocate_raises_when_band_exhausted(tmp_path) -> None:
+    band = PortBand(18900, 18901)
+    role = _role(band, heartbeat=False)
+    config = _config(band)
+    # Claim every port in the band with live records.
+    for i, port in enumerate(band):
+        write_record(
+            _record(role="scratch", name=f"c{i}", port=port, pid=os.getpid()),
+            home=tmp_path,
+        )
+    with pytest.raises(RuntimeError, match="exhausted"):
+        allocate_port("scratch", role, home=tmp_path, config=config)

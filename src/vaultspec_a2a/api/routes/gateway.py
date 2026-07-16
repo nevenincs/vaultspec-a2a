@@ -247,18 +247,26 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
 def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
     """Probe the agent harness for a document-authoring preset, else ``None``.
 
-    Returns the harness verdict only when the preset declares (or defaults to) an
-    authoring harness AND a workspace root is resolved - the discovery-serves /
-    run-start-refuses binding for the agent-harness contract (agent-harness-
-    provisioning ADR). A non-authoring preset or a run with no workspace carries
-    no harness signal, so ``None`` composes nothing into eligibility and the
-    pre-existing refusals are unchanged. Read-only: no write, no CLI spawn.
+    A non-authoring preset carries no harness requirement, so it returns ``None``
+    (composes nothing into eligibility; pre-existing refusals unchanged). A
+    document-authoring preset ALWAYS yields a verdict: the verifier's over a
+    resolved workspace, or a synthetic not-ready verdict when no workspace is
+    resolved - a workspaceless authoring run cannot possibly carry a complete
+    harness, so it is refused, not silently skipped (agent-harness-provisioning
+    ADR: operator override possible, silent degradation never). This preserves the
+    discovery-serves / run-start-refuses binding uniformly. Read-only.
     """
+    from ...context.harness import HarnessReadiness
     from ...providers.model_profiles import probe_harness_ready
 
     harness_decl = team_config.effective_harness()
-    if harness_decl is None or ws_root is None:
+    if harness_decl is None:
         return None
+    if ws_root is None:
+        return HarnessReadiness(
+            ready=False,
+            reasons=["no workspace resolved for a document-authoring preset"],
+        )
     return probe_harness_ready(
         ws_root, required_skills=harness_decl.all_required_skills()
     )

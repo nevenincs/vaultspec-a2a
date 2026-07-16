@@ -147,3 +147,54 @@ async def test_provisioned_preset_has_no_harness_reason_at_discovery(
         for profile in by_id[_AUTHORING]["profiles"]:
             reasons = " ".join(profile["unavailable_reasons"])
             assert "harness" not in reasons.lower()
+
+
+def test_probe_harness_refuses_authoring_preset_without_workspace() -> None:
+    """An authoring preset with no resolved workspace is not silently skipped."""
+    from ...team.team_config import load_team_config
+    from ..routes.gateway import _probe_harness
+
+    verdict = _probe_harness(load_team_config(_AUTHORING), None)
+    assert verdict is not None
+    assert verdict.ready is False
+    assert "no workspace resolved" in " ".join(verdict.reasons)
+
+
+def test_probe_harness_is_none_for_non_authoring_without_workspace() -> None:
+    """A non-authoring preset stays a no-op (None) even with no workspace."""
+    from ...team.team_config import load_team_config
+    from ..routes.gateway import _probe_harness
+
+    assert _probe_harness(load_team_config("mock-success-single"), None) is None
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_workspaceless_authoring_run_is_refused(
+    session_factory, checkpointer
+) -> None:
+    """An authoring run with a top-level feature but NO workspace is hard-refused.
+
+    The bypass: a top-level feature_tag satisfies the feature gate independent of
+    metadata, so without this refusal a workspaceless authoring run would clear
+    feature + tokens and dispatch with the harness gate silently skipped.
+    """
+    app, _agg, worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=30.0) as client,
+    ):
+        resp = await client.post(
+            "/v1/runs",
+            json={
+                "team_preset": _AUTHORING,
+                "message": "research it",
+                "feature_tag": "harness-edge",
+                "actor_tokens": _full_bundle(),
+                # No metadata block -> ws_root is None.
+            },
+        )
+        assert resp.status_code == 422
+        detail = resp.json()["detail"]
+        assert "harness" in detail.lower()
+        assert "no workspace resolved" in detail
+        assert worker.dispatches == []

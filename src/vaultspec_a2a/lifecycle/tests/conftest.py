@@ -12,7 +12,12 @@ _PACKAGE_DIR = str(__import__("pathlib").Path(__file__).resolve().parent)
 # Files whose tests drive real infrastructure (fs/process/HTTP) rather than pure
 # domain logic; marked middleware instead of core+unit.
 _INFRA_FILES = frozenset(
-    {"test_discovery.py", "test_registry.py", "test_procs_config.py"}
+    {
+        "test_discovery.py",
+        "test_registry.py",
+        "test_procs_config.py",
+        "test_manager.py",
+    }
 )
 
 

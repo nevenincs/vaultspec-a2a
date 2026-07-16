@@ -17,7 +17,7 @@ related:
 The procs.toml port-band definitions, the file-per-process registry with atomic owner-checked writes, and the lifecycle verbs.
 
 - [x] `P01.S01` - Define procs.toml (role port bands, role build/serve commands, staleness windows) and the registry module: file-per-process JSON records under ~/.vaultspec/procs with atomic temp-and-rename writes, owner-checked mutation, pid-liveness and band-constrained port allocation; `src/vaultspec_a2a/lifecycle/, procs.toml`.
-- [ ] `P01.S02` - Implement the lifecycle verbs on the operator CLI: procs list/attach/kill/rebuild/rerun/resume/reap with Windows tree-kill and staleness verdicts; `src/vaultspec_a2a/cli/, src/vaultspec_a2a/lifecycle/`.
+- [x] `P01.S02` - Implement the lifecycle verbs on the operator CLI: procs list/attach/kill/rebuild/rerun/resume/reap with Windows tree-kill and staleness verdicts; `src/vaultspec_a2a/cli/, src/vaultspec_a2a/lifecycle/`.
 
 ### Phase `P02` - Adoption and evidence
 

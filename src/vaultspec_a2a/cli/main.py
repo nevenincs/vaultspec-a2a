@@ -141,5 +141,114 @@ def run_cancel(run_id: str, url: str | None) -> None:
     _emit(resp)
 
 
+@main.group()
+def procs() -> None:
+    """Manage machine-global dev processes via the registry (dev-process-registry)."""
+
+
+def _lifecycle_error(exc: Exception) -> click.ClickException:
+    from ..lifecycle.manager import LifecycleError
+    from ..lifecycle.procs_config import ProcsConfigError
+
+    if isinstance(exc, (LifecycleError, ProcsConfigError)):
+        return click.ClickException(str(exc))
+    raise exc
+
+
+@procs.command("list")
+def procs_list() -> None:
+    """List every registered process with its liveness verdict and endpoint."""
+    from ..lifecycle.manager import list_verdicts
+
+    verdicts = list_verdicts()
+    if not verdicts:
+        click.echo("no registered processes")
+        return
+    for verdict in verdicts:
+        rec = verdict.record
+        click.echo(
+            f"{verdict.state.value.upper():5} {rec.role}-{rec.name} "
+            f"pid={rec.pid} {verdict.endpoint} owner={rec.owner or '-'}"
+        )
+
+
+@procs.command("attach")
+@click.argument("name")
+def procs_attach(name: str) -> None:
+    """Verify a process is live on its recorded port and print its endpoint."""
+    from ..lifecycle.manager import attach
+
+    try:
+        verdict = attach(name)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(verdict.endpoint)
+
+
+@procs.command("kill")
+@click.argument("name")
+def procs_kill(name: str) -> None:
+    """Tree-kill a process and remove its record."""
+    from ..lifecycle.manager import kill
+
+    try:
+        record = kill(name)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(f"killed {record.role}-{record.name} (pid {record.pid})")
+
+
+@procs.command("rebuild")
+@click.argument("name")
+def procs_rebuild(name: str) -> None:
+    """Run the role's build command from procs.toml."""
+    from ..lifecycle.manager import rebuild
+
+    try:
+        sha = rebuild(name)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(f"rebuilt {name}" + (f" @ {sha}" if sha else ""))
+
+
+@procs.command("rerun")
+@click.argument("name")
+def procs_rerun(name: str) -> None:
+    """Kill, rebuild, and restart a process on the same port and workspace."""
+    from ..lifecycle.manager import rerun
+
+    try:
+        record = rerun(name)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(f"reran {record.role}-{record.name} (pid {record.pid})")
+
+
+@procs.command("resume")
+@click.argument("name")
+def procs_resume(name: str) -> None:
+    """Restart a died record's process on its original port and workspace."""
+    from ..lifecycle.manager import resume
+
+    try:
+        record = resume(name)
+    except Exception as exc:
+        raise _lifecycle_error(exc) from exc
+    click.echo(f"resumed {record.role}-{record.name} (pid {record.pid})")
+
+
+@procs.command("reap")
+def procs_reap() -> None:
+    """Kill and clear every stale or dead record."""
+    from ..lifecycle.manager import reap
+
+    reaped = reap()
+    if not reaped:
+        click.echo("nothing to reap")
+        return
+    for record in reaped:
+        click.echo(f"reaped {record.role}-{record.name} (pid {record.pid})")
+
+
 if __name__ == "__main__":
     main()

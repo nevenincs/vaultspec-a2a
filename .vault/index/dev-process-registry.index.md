@@ -7,6 +7,7 @@ date: '2026-07-16'
 modified: '2026-07-16'
 related:
   - '[[2026-07-15-dev-process-registry-P01-S01]]'
+  - '[[2026-07-15-dev-process-registry-P01-S02]]'
   - '[[2026-07-15-dev-process-registry-adr]]'
   - '[[2026-07-15-dev-process-registry-plan]]'
   - '[[2026-07-15-dev-process-registry-research]]'
@@ -25,6 +26,7 @@ Auto-generated index of all documents tagged with `#dev-process-registry`.
 ### exec
 
 - `2026-07-15-dev-process-registry-P01-S01` - Define procs.toml (role port bands, role build/serve commands, staleness windows) and the registry module: file-per-process JSON records under ~/.vaultspec/procs with atomic temp-and-rename writes, owner-checked mutation, pid-liveness and band-constrained port allocation
+- `2026-07-15-dev-process-registry-P01-S02` - Implement the lifecycle verbs on the operator CLI: procs list/attach/kill/rebuild/rerun/resume/reap with Windows tree-kill and staleness verdicts
 
 ### plan
 

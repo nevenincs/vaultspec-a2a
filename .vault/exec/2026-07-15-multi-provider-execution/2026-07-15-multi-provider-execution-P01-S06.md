@@ -25,33 +25,30 @@ related:
 
 ## Outcome
 
-BLOCKED-ON-BALANCE (2026-07-16, first live attempt). The owner delivered a Z.ai
-token (`ZAI_AUTH_TOKEN`, resolved through `settings`), and both probe tests ran
-live against the real gateway but FAILED - NOT on fidelity and NOT on auth. Both
-turns returned the same gateway error:
+PASS (2026-07-16, on the funded account). The owner funded the Z.ai account
+(team-lead verified live: a real glm-4.6 completion returned through the Z.ai
+Anthropic gateway), and both service-marked probes then passed live against the
+real gateway in 51.5s:
 
-    HTTP 429 rate_limit_error, code "1113": "Insufficient balance or no resource
-    package. Please recharge." (Z.ai request_id present)
+- `test_zai_streaming_shape_is_faithful`: a real streaming turn returned assistant
+  deltas through the Claude ACP path - the streaming-chunk shape the reused
+  `AcpChatModel` path depends on survives Z.ai's gateway.
+- `test_zai_tool_calling_is_faithful`: a real turn drove the native `Write` tool
+  to materialize `zai_probe.txt` containing `pong` - an unfakeable end-to-end
+  signal that Z.ai reproduces the Anthropic tool-calling schema faithfully enough
+  for the CLI's agentic loop.
 
-surfaced as `AcpPromptError [-32603]` from the ACP path. What this establishes and
-leaves open:
+The ADR's flagged Z.ai-fidelity unknown is CLOSED: Z.ai is fidelity-proven
+(streaming shape AND tool-calling) for the reused Claude ACP path, so Z.ai
+profiles may now be marked eligible.
 
-- The token AUTHENTICATES: the request reached the Z.ai Anthropic-Messages
-  gateway and received a structured Z.ai API error with a request_id - a 429
-  balance error, not a 401/403 rejection. Base URL correct
-  (`settings.zai_base_url` = the Z.ai Anthropic endpoint); env injection verified
-  (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` present in the model env; the
-  token value is never surfaced).
-- NO FIDELITY VERDICT is possible: the account has no balance/resource package, so
-  the endpoint never produced a turn to judge the streaming shape or tool-calling
-  schema against. Neither green nor a fidelity-red - the ADR's Z.ai-fidelity
-  unknown stays open.
-- Each test failed clean at ~220s (the timeout-hardened retry window did its job -
-  no hang). The default suite is unaffected (`-m "not service"`).
-
-Checkbox stays UNCHECKED. No profile may mark Z.ai eligible until a green fidelity
-run, which requires the owner to fund the Z.ai account (recharge / add a resource
-package) - an account-billing action, not a code, auth, base-URL, or fidelity fix.
+This SUPERSEDES the first live attempt earlier the same day, which was
+BLOCKED-ON-BALANCE: with the delivered token but an unfunded account, both tests
+failed on HTTP 429 code 1113 ("Insufficient balance or no resource package"), NOT
+on fidelity or auth - the token always authenticated (structured Z.ai error with a
+request_id, base URL and env injection verified), the account simply had no funds
+so no turn was produced. Once funded, the identical probe passed unchanged: the
+gate was billing, never code, auth, base-URL, or fidelity.
 
 ## Notes
 

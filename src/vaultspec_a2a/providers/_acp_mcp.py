@@ -73,10 +73,14 @@ def compose_harness_mcp_servers(
     """
     if not names:
         return model
+    # Validate the declared names FIRST, so an unknown name is refused loudly
+    # regardless of model type - a configuration error is an error even when
+    # composition is inapplicable (a non-ACP model) and would otherwise swallow
+    # it silently.
+    resolved = resolve_harness_mcp_servers(names)
     attach = getattr(model, "with_mcp_servers", None)
     if attach is None:
         return model
-    resolved = resolve_harness_mcp_servers(names)
     existing = list(getattr(model, "mcp_servers", []) or [])
     seen = {s.get("name") for s in existing}
     combined = existing + [s for s in resolved if s.get("name") not in seen]

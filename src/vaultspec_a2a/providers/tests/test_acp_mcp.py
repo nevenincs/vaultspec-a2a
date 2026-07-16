@@ -82,3 +82,12 @@ def test_compose_unknown_name_raises() -> None:
     model = AcpChatModel(command=["echo"], env_vars={})
     with pytest.raises(ConfigError):
         compose_harness_mcp_servers(model, ["totally-unknown"])
+
+
+def test_compose_unknown_name_raises_even_on_non_acp_model() -> None:
+    # An unknown declared name is a configuration error even when composition is
+    # inapplicable: the loud refusal is uniform across model types, not swallowed
+    # by the non-ACP pass-through.
+    model = FakeListChatModel(responses=["ok"])
+    with pytest.raises(ConfigError):
+        compose_harness_mcp_servers(model, ["totally-unknown"])

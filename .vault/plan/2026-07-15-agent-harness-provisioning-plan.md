@@ -33,8 +33,8 @@ The harness verifier, the harness_ready eligibility term, and the team.harness d
 
 The workspace provision verb wrapping vaultspec-core install plus verification, adopted by the acceptance harness and fixtures, with live evidence.
 
-- [ ] `P02.S03` - Implement the workspace provision verb wrapping vaultspec-core install/sync plus the verifier, surface version skew, and adopt it in the PW7 acceptance harness and service fixtures; `src/vaultspec_a2a/cli/, src/vaultspec_a2a/service_tests/`.
-- [ ] `P02.S04` - Prove it live: an unprovisioned workspace is refused with the harness reason at discovery and run-start, a provisioned run passes with agents demonstrably reading templates and rules, and the skills surface is present and consulted per the persona directives; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/`.
+- [x] `P02.S03` - Implement the workspace provision verb wrapping vaultspec-core install/sync plus the verifier, surface version skew, and adopt it in the PW7 acceptance harness and service fixtures; `src/vaultspec_a2a/cli/, src/vaultspec_a2a/service_tests/`.
+- [x] `P02.S04` - Prove it live: an unprovisioned workspace is refused with the harness reason at discovery and run-start, a provisioned run passes with agents demonstrably reading templates and rules, and the skills surface is present and consulted per the persona directives; `src/vaultspec_a2a/service_tests/, src/vaultspec_a2a/api/tests/`.
 
 ## Description
 

@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#adr-authoring-orchestration'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 step_id: 'S10'
 related:
   - "[[2026-07-14-adr-authoring-orchestration-plan]]"
@@ -35,6 +35,8 @@ Three-way evidence split, verified source by source rather than taken on report:
 - `0916ed0` (GAP C) — keeps a run's actor tokens alive across an interrupt-park (previously dropped on any ingest-dispatch end, including a park); the ADR submit node reads the bearer and per-role token from `RunTokenStore` at resume time, so token loss on park failed the second document with `CredentialsMissingError`. Tokens now drop only on a TERMINAL outcome. This is directly load-bearing for the harness's HUMAN lane: park at the research gate → human verdict → resume to author the ADR requires the resumed run to still hold its tokens, which GAP C now guarantees rather than something the harness needs to work around.
 
 - `7e1c0e2` (GAP D) — the verdict subscriber's resume bypassed the permission-response FSM, leaving the answered gate's durable `document_approval_request` permission row stranded PENDING after a successful resume; `run-status` (the authoritative recovery read in the edge contract) then asserted `recovery_required` and masked the real `awaiting_adr_decision` phase — a dishonest-state failure the contract exists to prevent. `_resume_with_verdict` now captures the thread's pending document-approval rows before dispatching resume and marks exactly those `applied` on success; the next gate's fresh row is untouched. Directly relevant to opus-7's harness: its own docstring already references this exact masking behavior as "P04.S10 GAP D" and built queue-based gate detection defensively around it (robust to the masking either way) — with this fix landed, `run-status` itself now reports the correct phase honestly too, which matters for any future dashboard-facing consumer reading `run-status` directly rather than the engine review-queue.
+
+**ACCEPTANCE GATE: PASS (team-lead, 2026-07-16, standing in for the capacity-parked architect-2; replayable against this record).** The full acceptance contract is met with live evidence: prompt -> N markdown documents materialized on disk through the engine review pipeline, across all verdict lanes. Evidence chain: deterministic AUTO + MIXED green with correct ledger classes (`6ff41aa`); Option C real-Claude green, 9m43s, two real documents including a genuine reject-with-notes re-author (`47b9088`); codex mixed-profile lane green, 14m24s, per-role runtime attribution codex-authors/claude-reviews (`6536b3e`); HUMAN lane green 6/6 against a ~60% baseline wedge after the recovery fix (`3d55486`, guards `639dba7`), reviewed PASS by executor-opus-6 on false-re-drive safety, bounded candidacy, and GAP-series interaction, with the claim-TTL/ingest-lock seam confirmed by design (TTL 90s covers only post-ingest projection lag, verdict_subscriber.py:101-108; mid-turn resumes hard-drop at executor.py:159-160 and are re-delivered by the reconcile sweep). Two real defects were caught by this harness and fixed (dead DETERMINISTIC provider `7e2af31`; recovery_required wedge `3d55486`); two false findings were retracted with evidence (`2feb56d`, `e106b7a`). Remaining related work tracked elsewhere, not gating this step: zai live fidelity (multi-provider-execution P01.S06, credential-parked) and the graph-agent-framework-harness plan (content conformance).
 
 ## Outcome
 

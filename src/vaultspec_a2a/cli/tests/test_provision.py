@@ -58,11 +58,17 @@ class TestParseVersion:
 
 class TestVerifyOnly:
     def test_bare_workspace_is_not_harness_ready(self, tmp_path: Path) -> None:
-        """verify-only over an unprovisioned dir yields an incomplete harness."""
+        """verify-only over an unprovisioned dir yields an incomplete harness.
+
+        Post-Path-B (architect arbitration): rules resolve via the bundled
+        in-process defaults, so an unprovisioned dir's incompleteness surfaces on
+        the templates surface (no bundled fallback), never the rules corpus.
+        """
         result = provision_workspace(tmp_path, install=False)
         assert result.installed is False
         assert result.ok is False
-        assert any("rules corpus" in r for r in result.harness.reasons)
+        assert any("templates missing" in r for r in result.harness.reasons)
+        assert not any("rules corpus" in r for r in result.harness.reasons)
 
 
 @pytest.mark.skipif(

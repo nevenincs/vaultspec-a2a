@@ -65,7 +65,13 @@ def _run_start_body(workspace_root: Path) -> dict:
 async def test_unprovisioned_workspace_refused_at_run_start(
     session_factory, checkpointer, tmp_path: Path
 ) -> None:
-    """A complete request into a bare workspace is refused on the harness alone."""
+    """A complete request into a bare workspace is refused on the harness alone.
+
+    Post-Path-B (architect arbitration): the rules surface resolves via the
+    bundled in-process defaults, so a bare workspace is refused on the TEMPLATES
+    surface (which has no bundled fallback), never the rules one. The refuse
+    binding is unchanged - a bare workspace still cannot start an authoring run.
+    """
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -75,7 +81,10 @@ async def test_unprovisioned_workspace_refused_at_run_start(
         assert resp.status_code == 422
         detail = resp.json()["detail"]
         assert "harness" in detail.lower()
-        assert "rules corpus" in detail or "not provisioned" in detail
+        assert "templates missing" in detail
+        # The disputed pre-Path-B rules reason is gone: bundled defaults satisfy
+        # the rules surface even on a bare workspace.
+        assert "rules corpus" not in detail
         # The safe reason names WHAT is missing, never the workspace path.
         assert str(tmp_path) not in detail
         # The refusal happened in the eligibility gate, before any dispatch.

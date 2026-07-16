@@ -3,8 +3,8 @@ generated: true
 tags:
   - '#index'
   - '#multi-provider-execution'
-date: '2026-07-15'
-modified: '2026-07-15'
+date: '2026-07-16'
+modified: '2026-07-16'
 related:
   - '[[2026-07-15-multi-provider-execution-P01-S01]]'
   - '[[2026-07-15-multi-provider-execution-P01-S02]]'
@@ -20,6 +20,9 @@ related:
   - '[[2026-07-15-multi-provider-execution-P02-S12]]'
   - '[[2026-07-15-multi-provider-execution-P02-S13]]'
   - '[[2026-07-15-multi-provider-execution-P02-S14]]'
+  - '[[2026-07-15-multi-provider-execution-P03-S15]]'
+  - '[[2026-07-15-multi-provider-execution-P03-S16]]'
+  - '[[2026-07-15-multi-provider-execution-P03-S17]]'
   - '[[2026-07-15-multi-provider-execution-P04-S18]]'
   - '[[2026-07-15-multi-provider-execution-P04-S19]]'
   - '[[2026-07-15-multi-provider-execution-adr]]'
@@ -61,6 +64,9 @@ Auto-generated index of all documents tagged with `#multi-provider-execution`.
 - `2026-07-15-multi-provider-execution-P02-S14` - Unit tests for CodexChatModel's JSON-RPC framing and subprocess lifecycle, plus a live probe against the real codex app-server once the auth model is resolved
 - `2026-07-15-multi-provider-execution-P04-S18` - Check whether the dashboard/engine's own schema treats provider as an open string or a closed enum
 - `2026-07-15-multi-provider-execution-P04-S19` - Document the outcome in a phase summary
+- `2026-07-15-multi-provider-execution-P03-S15` - Author or extend a team profile assigning distinct providers per role (researcher=codex, synthesist=claude, adr-author=zai) on the vaultspec-adr-research preset
+- `2026-07-15-multi-provider-execution-P03-S16` - Run a live research_adr run under the mixed-provider profile end to end riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands, verifying per-role attribution and document quality hold across providers
+- `2026-07-15-multi-provider-execution-P03-S17` - Verify the a2a-edge discovery/eligibility responses correctly surface the new providers with safe reasons on failure and no secrets
 
 ### plan
 

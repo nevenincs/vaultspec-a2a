@@ -166,3 +166,55 @@ opus-7 stops here on a clean boundary rather than start the codex lane on tight 
 **Z.ai lane:** credential-blocked on `ZAI_AUTH_TOKEN` (owner-held). Build the case but mark it skip-with-reason (mirror the engine-attach skip gate: a loud, truthful skip naming the missing `ZAI_AUTH_TOKEN`), never faked. Z.ai readiness already gates on the token (`model_profiles.py` Provider.ZAI branch).
 
 **Harness runner used for the live battery** (not committed, in opus-7's scratchpad, reproduce trivially): spawns an OWN gateway+worker (uvicorn `api.app:create_app` + `worker.app:create_worker_app`, free ports, own sqlite checkpoint, `VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true`, `VAULTSPEC_ENGINE_SERVICE_JSON` -> the dashboard `--no-seat` workspace engine), waits for worker-connected health, sets `VAULTSPEC_GATEWAY_URL`, runs `pytest -m service -k <lane> --timeout=3600`, tears the pair down (engine untouched, attach-never-own). Not `ServiceStack` (that is docker/vidaimock-based and does not fit the in-process-provider + engine-attach shape).
+
+## Codex provider lane - GREEN (executor-opus-8, 2026-07-16)
+
+The final provider-axis leg is built and live-proven. The codex lane closes the
+mixed-provider proof that live-mixed (real Claude) opened; the zai lane ships as a
+truthful credential-gated skip. Chose the richer target the re-dispatch flagged - a
+mixed-provider PROFILE, not a single-provider preset - after verifying the profile
+machinery resolves and freezes per-role providers end to end (gateway
+`_freeze_from_profile` -> `resolve_effective_assignment` -> `freeze_assignment`,
+applied at dispatch). Landed as multi-provider-execution P03.S15 (profile), P03.S16
+(live run), P03.S17 (discovery verification) with their own Step Records.
+
+**Build (additive, provably non-regressing).** Two new `[team.profiles.*]` blocks
+on the shared `vaultspec-adr-research.toml`: `codex` (researcher/synthesist/adr-author
+= codex, doc-reviewer = claude) and `zai` (same three = zai, doc-reviewer = claude).
+Zero changes to defaults; team-defaults AND fast still resolve all-claude, so the
+existing Claude lanes are untouched. Threaded a per-case `profile_id` (default
+`team-defaults`) and `required_env` through `AcceptanceCase`/`_research_adr_case`/
+`_run_start`, and added `CASE_CODEX` (MIXED shape, `-k codex`, real codex spend) and
+`CASE_ZAI` (`required_env=("ZAI_AUTH_TOKEN",)`, a loud pytest.skip naming the missing
+credential BEFORE run-start - never faked). Provider readiness needed no change
+(CODEX = command-resolvability, already landed P02).
+
+**Live codex run - GREEN (14m24s, run `pw7-1784166683`).** Own gateway/worker on
+free ports with own scratchpad checkpoint + subscriber enabled, attached to the
+shared `:8767` engine (attach-never-own; real `codex app-server` processes confirmed
+running). Full MIXED sequence proven: research AUTO system-auto-approve+apply under
+`system:operation-modes` -> mode downgrade to manual (requeued 0, applied research
+marker undisturbed) -> ADR HUMAN gate 409 `authoring_stale_review` fence ->
+`edit_proposal` (reject-with-notes) -> codex re-author -> approve -> apply. Two
+substantial codex-authored documents materialized on the engine vault:
+`2026-07-16-pw7-acceptance-codex-1784166683-research.md` (15.6 KB) and
+`2026-07-16-pw7-acceptance-codex-1784166683-adr.md` (10.1 KB, wiki-links the research
+by stem) - real content, zero `<!--`, zero placeholders, valid frontmatter.
+
+**Per-role attribution (runtime evidence, not inference).** Read live from
+run-status `assignments`: researcher/synthesist/adr-author = `codex` (`source=profile`),
+doc-reviewer = `claude` (`source=agent`). Codex authors both documents; Claude runs
+the inner quality gate. That is the genuine cross-provider collaboration the mixed
+profile promises, not merely "another provider works".
+
+**Deterministic `auto` lane re-run GREEN** as a runner smoke test (16.6s, two docs)
+before spending codex tokens - the runner + engine attach are sound.
+
+**Dashboard vault artifacts (owner's to keep or dispose - not touched by me):** the
+two `2026-07-16-pw7-acceptance-codex-1784166683-{research,adr}.md` documents on the
+dashboard workspace vault.
+
+**P04.S10 checkbox stays UNCHECKED.** The codex lane does not resolve the pure-HUMAN
+lane's intermittent request_changes-recovery control race (recorded above, owned by
+the park/resume zone); the acceptance contract's HUMAN leg remains the open item.
+The provider axis (P03.S15-S17) is complete and green.

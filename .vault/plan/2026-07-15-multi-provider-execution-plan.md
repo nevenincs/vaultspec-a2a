@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#multi-provider-execution'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 tier: L2
 related:
   - '[[2026-07-15-multi-provider-execution-adr]]'
@@ -43,9 +43,9 @@ Land Codex as a new non-ACP subprocess chat model: resolve its headless auth mod
 
 Prove researcher=codex, synthesist=claude, adr-author=zai end to end on the vaultspec-adr-research preset, riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands.
 
-- [ ] `P03.S15` - Author or extend a team profile assigning distinct providers per role (researcher=codex, synthesist=claude, adr-author=zai) on the vaultspec-adr-research preset; `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`.
-- [ ] `P03.S16` - Run a live research_adr run under the mixed-provider profile end to end riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands, verifying per-role attribution and document quality hold across providers; `src/vaultspec_a2a/service_tests/`.
-- [ ] `P03.S17` - Verify the a2a-edge discovery/eligibility responses correctly surface the new providers with safe reasons on failure and no secrets; `src/vaultspec_a2a/api/tests/`.
+- [x] `P03.S15` - Author or extend a team profile assigning distinct providers per role (researcher=codex, synthesist=claude, adr-author=zai) on the vaultspec-adr-research preset; `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`.
+- [x] `P03.S16` - Run a live research_adr run under the mixed-provider profile end to end riding the standing acceptance harness (PW7) once the adr-authoring-orchestration P04.S10 finale harness lands, verifying per-role attribution and document quality hold across providers; `src/vaultspec_a2a/service_tests/`.
+- [x] `P03.S17` - Verify the a2a-edge discovery/eligibility responses correctly surface the new providers with safe reasons on failure and no secrets; `src/vaultspec_a2a/api/tests/`.
 
 ### Phase `P04` - Cross-repo verification
 

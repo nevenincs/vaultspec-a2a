@@ -284,7 +284,7 @@ class ThreadCreationRequest:
     metadata_json: str | None
     workspace_root: Path | None
     actor_tokens: ActorTokenBundle | None = None
-    # model-profiles ADR: the selected profile id and its frozen effective
+    # model-profiles: the selected profile id and its frozen effective
     # per-role assignment (agent_id -> {provider, capability, fallback}), threaded
     # to the worker so compilation reproduces the launched models verbatim.
     profile_id: str | None = None

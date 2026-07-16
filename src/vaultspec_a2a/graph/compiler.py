@@ -126,7 +126,7 @@ def _resolve_model_for_worker(
     """Resolve provider + capability following the standard precedence.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
-    fallback are used verbatim (model-profiles ADR: restart reproduces the exact
+    fallback are used verbatim (model-profiles: restart reproduces the exact
     launched models, never a re-resolution against possibly-drifted config).
     """
     factory = provider_factory
@@ -177,7 +177,7 @@ def _resolve_worker_model_preferences(
     """Resolve provider + capability following the standard precedence.
 
     A ``frozen_assignment`` entry for this worker wins outright and is applied
-    verbatim (model-profiles ADR: the run's frozen effective assignment is
+    verbatim (model-profiles: the run's frozen effective assignment is
     reproduced exactly across restarts, never re-resolved). Absent a frozen entry,
     delegates to the shared model-profile resolver (the single source discovery,
     launch, and compilation all consume) with no profile overlay - byte-identical

@@ -238,7 +238,7 @@ async def redispatch_reconciling_threads(
                             thread.id,
                             exc_info=True,
                         )
-                # model-profiles ADR: reuse the frozen effective assignment on
+                # model-profiles: reuse the frozen effective assignment on
                 # restart so the run recompiles the exact launched models, never
                 # a re-resolution against possibly-drifted config.
                 frozen_record = meta.get("model_profile")

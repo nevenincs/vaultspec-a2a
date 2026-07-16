@@ -994,6 +994,7 @@ def _resolve_research_adr_models(
 def _make_research_producer(
     model: BaseChatModel,
     system_prompt: str,
+    workspace_root: Path | None = None,
 ) -> ResearchFindingProducer:
     """Bridge a researcher model into a ResearchFindingProducer.
 
@@ -1001,23 +1002,46 @@ def _make_research_producer(
     response as a finding keyed by the thread id. Locators are left to the
     researcher's prose in this structural wiring; richer locator extraction is a
     later refinement.
+
+    The researcher is the fourth research_adr document persona, so its turn
+    receives the role-scoped document-authoring conventions the worker path
+    already injects (graph-agent-framework-harness P04 follow-on to the S09 flag):
+    ``create_researcher_node`` is a lightweight producer node that never routed
+    through ``_build_worker_messages``, so a conventions-blind researcher would
+    author findings the synthesist then folds into a non-conformant document.
     """
 
     async def producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
         from langchain_core.messages import SystemMessage
 
-        assignment = SystemMessage(
-            content=(
-                f"Research thread {spec.get('thread_id', '')!r}.\n"
-                f"Topic: {spec.get('topic', '')}\n"
-                f"{spec.get('instructions', '')}"
+        from vaultspec_a2a.context.rules import (
+            DEFAULT_BUNDLED_RULES_DIR,
+            RuleManager,
+        )
+
+        messages: list[Any] = [SystemMessage(content=system_prompt)]
+        effective_workspace_root = workspace_root or state.get("workspace_root")
+        if effective_workspace_root:
+            rules = RuleManager(
+                Path(effective_workspace_root),
+                bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR,
+            ).compile("researcher")
+            if rules:
+                messages.append(
+                    SystemMessage(
+                        content=f"## Project Coding Rules & Guidelines\n\n{rules}"
+                    )
+                )
+        messages.append(
+            SystemMessage(
+                content=(
+                    f"Research thread {spec.get('thread_id', '')!r}.\n"
+                    f"Topic: {spec.get('topic', '')}\n"
+                    f"{spec.get('instructions', '')}"
+                )
             )
         )
-        messages = [
-            SystemMessage(content=system_prompt),
-            assignment,
-            *state.get("messages", []),
-        ]
+        messages.extend(state.get("messages", []))
         response = await model.ainvoke(messages)
         return {
             "claim": str(response.content),
@@ -1109,6 +1133,7 @@ def _compile_research_adr(
     researcher_producer = _make_research_producer(
         models["researcher"],
         _agent_system_prompt(team_config, agent_configs, "researcher"),
+        workspace_root=workspace_root,
     )
 
     _wire_diverge_stage(

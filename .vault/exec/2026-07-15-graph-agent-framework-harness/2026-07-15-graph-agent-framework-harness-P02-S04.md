@@ -43,3 +43,9 @@ Design recorded, not implemented. P04 implements `discover(role)`/`compile(role)
 ## Notes
 
 Open for architect-2: whether the coder roles (executor/reviewer/curator) should ALSO be scoped (each getting only its own persona-guidance file rather than all nine) is a natural follow-on the `role` filter enables but this plan does not require - the four document roles are the ratified scope. Recorded as an extension point, not actioned (scope fence: S05/S06/S07 and coder-role scoping are architect/owner calls).
+
+## Implemented and landed (a251b70)
+
+S04 shipped as `feat(context): opt-in role filter for RuleManager rule discovery` (commit `a251b70`), authorized by team-lead's design-gate PASS. `RuleManager.discover(role)` / `compile(role)` gained the opt-in role filter with a per-role mtime cache (full-corpus change watch); `_read_frontmatter_roles` parses the `roles:` sequence via pyyaml. Verified by the rider evidence (a `roles:`-tagged source survives `vaultspec-core sync` + `spec doctor`, read from the SOURCE file) plus real-temp-dir tests (no mocks): selection, the `None` whole-corpus path unchanged, per-role cache isolation, full-corpus change invalidation, bare-string roles, no-frontmatter files, and a real-corpus subset assertion. `ruff`/`ty` clean; hooks green in the isolated land worktree; 37 tests pass under a warmed run.
+
+Carried finding (flagged to team-lead, NOT fixed - out of P02.S04 scope): `context/tests/test_rules.py` is uncollectable in isolation due to a PRE-EXISTING circular import (`context/__init__` -> `token_budget` -> `thread` -> `graph` -> `supervisor` -> `context.token_budget`); it collects in the full suite once an earlier module warms the graph import. A conftest import-warm or breaking the token_budget->thread import would fix it - a separate hygiene item.

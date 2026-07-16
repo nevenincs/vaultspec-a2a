@@ -37,9 +37,9 @@ Shape which mechanical conventions (tag taxonomy, wiki-link/frontmatter rules, t
 Rewrite each of the four research_adr document personas' TOML system prompts against the resolved reading from P01 - either pointing them at a newly built invocation path, or replacing the impossible CLI instructions with an accurate description of the real graph-driven propose/submit flow.
 
 - [ ] `P03.S05` - Rewrite the researcher persona's discovery-rag prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
-- [ ] `P03.S06` - Rewrite the synthesist persona's document-scaffold CLI prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml`.
+- [x] `P03.S06` - Confirm the synthesist persona carries no residual document-scaffold CLI instructions - the scaffold-propose path was excised upstream by 9c2e9dc and the current prompt only PROHIBITS vault-add/propose while describing the graph-submitter flow, verified per the P01 probe and re-verified against HEAD, reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml`.
 - [x] `P03.S07` - Confirm the adr-author persona carries no residual scaffold or amend-vs-supersede rag-search instructions - both were excised upstream by 9c2e9dc and verified by the P01 probe (416b7f0), reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
-- [ ] `P03.S08` - Reconcile the doc-reviewer persona's prompt instructions per the P01 finding for consistency across all four personas; `src/vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml`.
+- [x] `P03.S08` - Confirm the doc-reviewer persona prompt is consistent with the graph-submitter mechanism - aligned upstream by b1d9892 to review the writer's message body with the scaffold-echo auto-revision rule, verified per the P01 probe and re-verified against HEAD, reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml`.
 
 ### Phase `P04` - wire role-scoped propagation at the graph entry points
 
@@ -47,6 +47,7 @@ Wire the P02-designed role-scoped rule selection into the two RuleManager call s
 
 - [x] `P04.S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile; `src/vaultspec_a2a/graph/nodes/worker.py`.
 - [x] `P04.S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call; `src/vaultspec_a2a/graph/nodes/supervisor.py`.
+- [x] `P04.S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 96bd13e as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path); `src/vaultspec_a2a/graph/compiler.py`.
 
 ### Phase `P05` - prove live receipt against a real provisioned run
 

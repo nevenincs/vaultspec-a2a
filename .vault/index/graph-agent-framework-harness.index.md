@@ -12,6 +12,7 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-P02-S13]]'
   - '[[2026-07-15-graph-agent-framework-harness-P04-S09]]'
   - '[[2026-07-15-graph-agent-framework-harness-P04-S10]]'
+  - '[[2026-07-15-graph-agent-framework-harness-P04-S14]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
   - '[[2026-07-15-graph-agent-framework-harness-research]]'
@@ -35,6 +36,7 @@ Auto-generated index of all documents tagged with `#graph-agent-framework-harnes
 - `2026-07-15-graph-agent-framework-harness-P02-S13` - Fix the RuleManager path-misalignment defect: align _RULES_SUBDIR to the current flat vaultspec-core 0.1.42 schema (rules live directly under .vaultspec/rules/*.md, confirmed by spec rules status) rather than the nonexistent nested rules/rules/ directory, with no dual-read legacy fallback per the owner's no-compat-shims directive
 - `2026-07-15-graph-agent-framework-harness-P04-S09` - Wire the P02 role-scoped rule selection into the worker node's rule-compilation call, replacing the unconditional whole-corpus compile
 - `2026-07-15-graph-agent-framework-harness-P04-S10` - Wire the equivalent role-scoped rule selection into the supervisor node's rule-compilation call
+- `2026-07-15-graph-agent-framework-harness-P04-S14` - Wire the role-scoped rule compilation into the researcher producer path - create_researcher_node's injected producer never routed through the worker node's rule-compilation call, leaving the fourth document persona conventions-blind (P04.S09 follow-on flag, landed in 96bd13e as _make_research_producer compiling the researcher role with the bundled dir and the same workspace_root state fallback as the worker path)
 
 ### plan
 

@@ -1,4 +1,4 @@
-"""Shared IPC contract types for the gateway-worker boundary (D-01)."""
+"""Shared IPC contract types for the gateway-worker boundary."""
 
 from .schemas import DispatchRequest as DispatchRequest
 from .schemas import DispatchResponse as DispatchResponse

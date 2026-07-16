@@ -29,7 +29,7 @@ logger = logging.getLogger(__name__)
 # Shared httpx client lifecycle
 # ---------------------------------------------------------------------------
 
-# MCP-05: Shared httpx.AsyncClient — lazily created on first use and reused
+# Shared httpx.AsyncClient — lazily created on first use and reused
 # across all tool calls to avoid per-request connection setup overhead.
 # The client has no base_url so it works with the runtime env var value.
 #
@@ -56,7 +56,7 @@ def _reset_client() -> None:
     """Close and discard the shared client.  Used by test fixtures."""
     global _shared_client
     if _shared_client is not None and not _shared_client.is_closed:
-        # LG-030: use close() instead of __del__() for proper cleanup.
+        # Use close() instead of __del__() for proper cleanup.
         with contextlib.suppress(Exception):
             transport = _shared_client._transport
             _close = getattr(transport, "close", None)
@@ -96,7 +96,7 @@ def _strip_credentials(url: str) -> str:
 # Preset cache
 # ---------------------------------------------------------------------------
 
-# DYN-01: Known presets — lazily fetched from the gateway via HTTP on first
+# Known presets — lazily fetched from the gateway via HTTP on first
 # use.  This replaces the former import of discover_team_preset_ids() so the
 # MCP server has zero coupling to the core team_config module.  The cache is
 # populated once per process lifetime; restart the MCP server to pick up new

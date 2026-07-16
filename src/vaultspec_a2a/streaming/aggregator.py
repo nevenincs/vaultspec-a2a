@@ -8,7 +8,6 @@ Thin facade that delegates to focused sub-modules:
 - ``ingest.IngestManager`` — graph consumption lifecycle
 
 The public API is identical to the pre-decomposition monolith.
-See ADR D-01, Phase 6 of the core-layer-boundary plan.
 """
 
 import asyncio

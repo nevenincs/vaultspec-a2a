@@ -1,8 +1,7 @@
 """Core state schema for LangGraph agent orchestration.
 
 Every field must be JSON-serializable (primitives + dicts + lists only)
-so the SQLite checkpointer can persist state without pickle errors
-(ADR-002, ADR-008).
+so the SQLite checkpointer can persist state without pickle errors.
 """
 
 from typing import Annotated, Any, NotRequired, TypedDict
@@ -139,7 +138,7 @@ class TeamState(TypedDict):
     # --- plan: full-replacement on each supervisor cycle ---
     current_plan: Annotated[list[dict[str, str]], _replace_plan]
 
-    # --- pipeline_loop iteration guard (ADR-013 §5) ---
+    # --- pipeline_loop iteration guard ---
     # Plain last-write-wins int, incremented by the _loop_node_with_counter wrapper
     # on each pass.  The _loop_router conditional edge enforces the max_loops cap:
     # when loop_count >= max_loops it returns "FINISH" regardless of state["next"].
@@ -154,26 +153,26 @@ class TeamState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     next: NotRequired[str]
 
-    # --- SDD blackboard awareness (ADR-019) ---
+    # --- SDD blackboard awareness ---
     active_feature: NotRequired[str | None]
     pipeline_phase: NotRequired[str | None]
     vault_index: NotRequired[Annotated[dict[str, list[str]], _merge_vault_index]]
     validation_errors: NotRequired[Annotated[list[str], _append_validation_errors]]
 
-    # --- transient: mounted .vault/ document content (ADR-020) ---
+    # --- transient: mounted .vault/ document content ---
     # Populated by mount_node before worker invocation;
     # cleared by worker_node after reading.
     # None when active_feature is unset, vault_index is
     # empty, or workspace_root is None.
     mounted_context: NotRequired[str | None]
 
-    # --- task queue pointer (ADR-021) ---
+    # --- task queue pointer ---
     # ID of the task currently assigned to the worker. None when no feature is active
     # or no task has been assigned. Updated via
     # Command(update={...}) from mark_task_complete.
     current_task_id: NotRequired[str | None]
 
-    # --- authoring proposal references (ADR R3) ---
+    # --- authoring proposal references ---
     # References (D5) to engine authoring artifacts this run produced — the
     # session id and the changeset/proposal ids, never document content. Ids
     # are appended and de-duplicated as proposals are created and submitted.
@@ -181,7 +180,7 @@ class TeamState(TypedDict):
     authoring_changeset_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
     authoring_proposal_ids: NotRequired[Annotated[list[str], _merge_unique_strs]]
 
-    # --- plan approval gate (ADR-024) ---
+    # --- plan approval gate ---
     # Durable approval-state linkage for execution approval. Legacy
     # checkpoints may still carry ``plan_approved``; consuming code should
     # treat that as a backward-compatibility alias for ``approval_status ==
@@ -189,7 +188,7 @@ class TeamState(TypedDict):
     approval_status: NotRequired[str | None]
     approval_request_id: NotRequired[str | None]
 
-    # --- document phase machine (adr-authoring-orchestration) ---
+    # --- document phase machine ---
     # research_findings: per-thread findings accumulated by the Send-based
     # diverge stage. Each item is a ``{"claim", "locators", "source_thread"}``
     # dict; the reducer is append-only and the synthesis stage consumes the
@@ -217,7 +216,7 @@ class TeamState(TypedDict):
     # --- routing / identification ---
     thread_id: str
 
-    # --- workspace root path (ADR-014) ---
+    # --- workspace root path ---
     # Threaded from API endpoint through graph compilation into graph_input.
     # Used by supervisor_node and worker_node for RuleManager scoping.
     workspace_root: NotRequired[str | None]

@@ -1,4 +1,4 @@
-"""Tests for the Send-based diverge stage (adr-authoring-orchestration S04).
+"""Tests for the Send-based diverge stage.
 
 The fan-out/join structure is exercised over a real ``StateGraph`` with an
 ``InMemorySaver`` checkpointer -- no mocks. The researcher work is a small

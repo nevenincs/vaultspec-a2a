@@ -71,7 +71,7 @@ class WorkerState:
 def _runtime_dir() -> Path:
     """Return the machine-global runtime directory for gateway-managed process logs.
 
-    Lives under the A2A home (ADR R8), not inside ``.vault/`` — vaultspec
+    Lives under the A2A home, not inside ``.vault/`` — vaultspec
     firmware rejects foreign directories inside the vault.
     """
     runtime_dir = settings.a2a_home / "runtime"
@@ -163,7 +163,7 @@ async def _spawn_worker(
         return None
 
     logger.info(
-        "Auto-spawning worker on port %d (ADR-031)",
+        "Auto-spawning worker on port %d",
         worker_port,
     )
     logger.info(
@@ -175,7 +175,7 @@ async def _spawn_worker(
         settings.gateway_url,
     )
 
-    # Phase 6: explicitly propagate critical config to the worker subprocess.
+    # Explicitly propagate critical config to the worker subprocess.
     # While Python's subprocess.Popen() inherits the parent env by default,
     # the gateway may have auto-derived gateway_url from host+port.  That
     # computed value is NOT in os.environ, so the child would re-derive it
@@ -421,7 +421,7 @@ class LazyWorkerSpawner:
 
 
 # ---------------------------------------------------------------------------
-# Worker watchdog (PROD-002)
+# Worker watchdog
 # ---------------------------------------------------------------------------
 
 

@@ -1,7 +1,7 @@
-"""Generalized per-phase human-approval gate (adr-authoring-orchestration S05).
+"""Generalized per-phase human-approval gate.
 
-The phase gate generalizes the plan-approval pattern (commit ``f5f650d``,
-``create_plan_approval_node``) from a single execution gate into a factory
+The phase gate generalizes the plan-approval pattern
+(``create_plan_approval_node``) from a single execution gate into a factory
 parameterized by document phase. The gate is split into two nodes so the
 correlation ids are COMMITTED to the checkpoint before the run parks:
 
@@ -11,9 +11,9 @@ correlation ids are COMMITTED to the checkpoint before the run parks:
   ``gate_phase`` into state and routing on into the gate node. Because it commits
   as its own superstep, the proposal id is durable in the checkpoint WHILE the
   run is parked - the run-external verdict subscriber correlates a verdict to the
-  parked run through those committed ids (P04.S10 finding: a single-node gate
-  wrote the ids only in its post-resume return, so nothing correlated while
-  parked). The submit is replay-safe: the authoring client derives idempotency
+  parked run through those committed ids. A single-node gate would instead
+  write the ids only in its post-resume return, so nothing would correlate
+  while parked. The submit is replay-safe: the authoring client derives idempotency
   keys from stable run-local material, so should the checkpoint not commit and
   the node re-run, the repeated submit is a deduplicated no-op returning the same
   proposal id.

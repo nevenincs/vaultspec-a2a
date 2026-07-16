@@ -1,4 +1,4 @@
-"""Tests for thread metadata models and discovery utilities (ADR-014)."""
+"""Tests for thread metadata models and discovery utilities."""
 
 from pathlib import Path
 
@@ -247,7 +247,7 @@ class TestGenerateNickname:
         assert "pipeline" in nick_pipe
         assert "pipeline-loop" in nick_loop
 
-    # --- M1 / TEST-M4: sanitization edge cases ---
+    # --- sanitization edge cases ---
 
     def test_uppercase_feature_tag_lowercased(self) -> None:
         """Uppercase feature_tag is lowercased so the slug is valid (M1)."""
@@ -267,7 +267,7 @@ class TestGenerateNickname:
         assert nick.startswith("thread-star-")
 
     def test_feature_tag_empty_string(self) -> None:
-        """Empty feature_tag falls back to 'thread-{topology}-{hash}' (TEST-M4)."""
+        """Empty feature_tag falls back to 'thread-{topology}-{hash}'."""
         nick = generate_nickname("", "star", "a3f2bcde")
         assert nick == "thread-star-a3f2"
 
@@ -282,13 +282,13 @@ class TestGenerateNickname:
         assert nick == "auth-flow-star-a3f2"
 
     def test_empty_thread_id_uses_zero_padding(self) -> None:
-        """Empty thread_id falls back to '0000' suffix (TEST-M4)."""
+        """Empty thread_id falls back to '0000' suffix."""
         nick = generate_nickname("feat", "star", "")
         assert nick == "feat-star-0000"
 
 
 # ---------------------------------------------------------------------------
-# discover_context_refs: security edge cases (CORE-C3)
+# discover_context_refs: security edge cases
 # ---------------------------------------------------------------------------
 
 

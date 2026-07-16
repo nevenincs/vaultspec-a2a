@@ -2,7 +2,7 @@
 id           = "vaultspec-adr-research-deterministic"
 display_name = "Vaultspec ADR Research (deterministic)"
 description  = """
-Deterministic driver variant of vaultspec-adr-research for the PW7 standing
+Deterministic driver variant of vaultspec-adr-research for the standing
 acceptance harness. Identical research_adr topology and the SAME four worker
 agent_ids (so the actor-token bundle keys and the submitter role keys are
 unchanged); only the provider is set to Provider.DETERMINISTIC, the in-process

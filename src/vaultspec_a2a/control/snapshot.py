@@ -114,7 +114,7 @@ def enrich_snapshot_from_state(
                     )
                 )
 
-    # F-38: Merge tool calls from aggregator in-memory state for tool calls
+    # Merge tool calls from aggregator in-memory state for tool calls
     # not present in the checkpoint.
     if aggregator is not None:
         thread_id = snapshot.thread_id

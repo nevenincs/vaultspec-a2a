@@ -1,4 +1,4 @@
-"""Tests for the authoring tool-catalog MCP bridge (ADR R4, S19).
+"""Tests for the authoring tool-catalog MCP bridge.
 
 No mocks: the tool advertisement is proven over the REAL MCP protocol using the
 in-memory connected client/server helper — the same list_tools/call_tool path a

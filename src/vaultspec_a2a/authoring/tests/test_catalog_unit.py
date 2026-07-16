@@ -1,8 +1,8 @@
-"""Unit tests for catalog parsing and the MCP tool-spec bridge (ADR R4).
+"""Unit tests for catalog parsing and the MCP tool-spec bridge.
 
 No mocks: parsing and spec generation are pure functions exercised against the
 verified catalog shape. Live catalog fetch and run-scoped execute are covered
-by the S17/S18 integration tests.
+by the live integration tests.
 """
 
 import pytest

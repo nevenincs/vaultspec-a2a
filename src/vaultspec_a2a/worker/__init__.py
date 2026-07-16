@@ -1,4 +1,4 @@
-"""Agent Worker -- LangGraph execution engine (ADR-019).
+"""Agent Worker -- LangGraph execution engine.
 
 Runs as a separate process from the gateway.
 Communicates via HTTP POST (events/heartbeats -> API) and HTTP

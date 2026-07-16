@@ -111,7 +111,7 @@ class TestSessionManagement:
     async def _isolate_singleton(self) -> AsyncGenerator[None]:
         """Ensure the module-level singleton engine is torn down.
 
-        Prevents singleton state from leaking between tests (H30 fix).
+        Prevents singleton state from leaking between tests.
         """
         await close_db()
         yield
@@ -171,7 +171,7 @@ class TestThreadCRUD:
 
     @pytest.mark.asyncio
     async def test_create_thread_with_metadata(self, session: AsyncSession) -> None:
-        """metadata should store JSON as text (ADR-014 rename from agent_config)."""
+        """metadata should store JSON as text (rename from agent_config)."""
         meta = json.dumps(
             {"workspace_root": "Y:/code/vaultspec", "feature_tag": "auth"},
         )
@@ -183,7 +183,7 @@ class TestThreadCRUD:
 
     @pytest.mark.asyncio
     async def test_create_thread_with_nickname(self, session: AsyncSession) -> None:
-        """nickname should be stored on the thread (ADR-014)."""
+        """nickname should be stored on the thread."""
         thread = await create_thread(
             session, title="Named", nickname="auth-flow-star-a3f2"
         )
@@ -338,7 +338,7 @@ class TestThreadCRUD:
     async def test_get_thread_not_found_returns_none(
         self, session: AsyncSession
     ) -> None:
-        """DB-H1: get_thread returns None (not an exception) for non-existent ID.
+        """get_thread returns None (not an exception) for non-existent ID.
 
         Callers must handle None — the API layer converts it to a 404 response.
         """
@@ -349,7 +349,7 @@ class TestThreadCRUD:
     async def test_get_thread_after_status_update_has_fresh_updated_at(
         self, session: AsyncSession
     ) -> None:
-        """DB-H2: updated_at in the returned object should reflect the update time.
+        """updated_at in the returned object should reflect the update time.
 
         With expire_on_commit=False and onupdate= on the column, the in-memory
         value is stale after flush unless we set it explicitly.
@@ -366,7 +366,7 @@ class TestThreadCRUD:
     async def test_nickname_conflict_via_create_thread(
         self, session: AsyncSession
     ) -> None:
-        """DB-MEDIUM-01: create_thread() raises NicknameConflictError on duplicate.
+        """create_thread() raises NicknameConflictError on duplicate.
 
         Calls create_thread() twice with the same nickname. Verifies that the
         SELECT pre-check in create_thread() produces NicknameConflictError.
@@ -379,7 +379,7 @@ class TestThreadCRUD:
 
     @pytest.mark.asyncio
     async def test_update_thread_metadata(self, session: AsyncSession) -> None:
-        """DB-M2: update_thread_metadata should update the thread_metadata field."""
+        """update_thread_metadata should update the thread_metadata field."""
         thread = await create_thread(session, title="Meta Update")
         assert thread.thread_metadata is None
 
@@ -412,7 +412,7 @@ class TestThreadCRUD:
     async def test_create_thread_invalid_status_raises(
         self, session: AsyncSession
     ) -> None:
-        """DB-HIGH-02: create_thread() rejects invalid status strings."""
+        """create_thread() rejects invalid status strings."""
         with pytest.raises(ValueError, match="Invalid thread status"):
             await create_thread(session, title="Bad Status", status="bogus")
 
@@ -420,7 +420,7 @@ class TestThreadCRUD:
     async def test_update_thread_status_invalid_raises(
         self, session: AsyncSession
     ) -> None:
-        """DB-HIGH-02: update_thread_status() rejects invalid status strings."""
+        """update_thread_status() rejects invalid status strings."""
         thread = await create_thread(session, title="Valid Thread")
         with pytest.raises(ValueError, match="Invalid thread status"):
             await update_thread_status(session, thread.id, "not-a-real-status")
@@ -429,7 +429,7 @@ class TestThreadCRUD:
     async def test_create_thread_all_valid_statuses(
         self, session: AsyncSession
     ) -> None:
-        """DB-HIGH-02: create_thread() accepts all ThreadStatus enum values."""
+        """create_thread() accepts all ThreadStatus enum values."""
         for status in ThreadStatus:
             thread = await create_thread(
                 session, title=f"Status {status.value}", status=status.value
@@ -441,7 +441,7 @@ class TestThreadCRUD:
         self,
         session_factory: async_sessionmaker,
     ) -> None:
-        """DB-MEDIUM-03: committed data is readable from a new session.
+        """committed data is readable from a new session.
 
         Verifies that WAL + commit semantics are correct — data is not
         ephemeral in the session-local state.
@@ -741,12 +741,12 @@ class TestCostTrackingCRUD:
 
 
 # ---------------------------------------------------------------------------
-# WAL Mode Tests (M17: file-backed DB)
+# WAL Mode Tests (file-backed DB)
 # ---------------------------------------------------------------------------
 
 
 class TestWALMode:
-    """M17: verify WAL mode on a file-backed SQLite database."""
+    """Verify WAL mode on a file-backed SQLite database."""
 
     @pytest.mark.asyncio
     async def test_wal_mode_on_file_db(self, runtime_dir: Path) -> None:
@@ -769,7 +769,7 @@ class TestWALMode:
 
 
 # ---------------------------------------------------------------------------
-# Session Management Function Tests (DB-MEDIUM-04)
+# Session Management Function Tests
 # ---------------------------------------------------------------------------
 
 
@@ -833,7 +833,7 @@ class TestSessionFunctions:
 
 
 # ---------------------------------------------------------------------------
-# Cascade Delete Tests (DB-MEDIUM-05)
+# Cascade Delete Tests
 # ---------------------------------------------------------------------------
 
 
@@ -887,12 +887,12 @@ class TestCascadeDelete:
 
 
 # ---------------------------------------------------------------------------
-# Thread Status State Machine Tests (DB-H / BE-37)
+# Thread Status State Machine Tests
 # ---------------------------------------------------------------------------
 
 
 class TestInvalidTransitionError:
-    """BE-37: _VALID_TRANSITIONS state machine — allowed and forbidden paths."""
+    """_VALID_TRANSITIONS state machine — allowed and forbidden paths."""
 
     @pytest.mark.asyncio
     async def test_submitted_to_running_is_allowed(self, session: AsyncSession) -> None:
@@ -971,7 +971,7 @@ class TestInvalidTransitionError:
 
 
 # ---------------------------------------------------------------------------
-# delete_thread CRUD Tests (DB-H)
+# delete_thread CRUD Tests
 # ---------------------------------------------------------------------------
 
 

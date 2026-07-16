@@ -1,6 +1,6 @@
 """State projection and terminal status emission.
 
-Extracted from ``executor.py`` (D-09) to isolate checkpoint inspection,
+Extracted from ``executor.py`` to isolate checkpoint inspection,
 state normalization, and terminal event emission from the dispatch
 orchestration logic in ``Executor``.
 """
@@ -274,8 +274,7 @@ class StateProjector:
         and the thread should remain ``RUNNING``.
 
         *error_detail* is forwarded in the event payload when set, allowing
-        the gateway to surface compilation/execution error messages to clients
-        (WRK-K03).
+        the gateway to surface compilation/execution error messages to clients.
         """
         if outcome not in TERMINAL_STATUSES:
             return
@@ -287,7 +286,7 @@ class StateProjector:
         if error_detail:
             payload["error_detail"] = error_detail
         await self._bridge.send_event(thread_id, payload)
-        # F-17 fix: flush terminal events immediately -- do not batch.
+        # Flush terminal events immediately -- do not batch.
         # A lost thread_terminal event leaves the thread stuck in RUNNING
         # forever.  The cost is one extra HTTP POST per thread completion.
         try:

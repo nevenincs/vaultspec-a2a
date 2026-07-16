@@ -41,16 +41,16 @@ class CreateThreadRequest(BaseModel):
     title: str | None = Field(default=None, max_length=200)
     # 64 KB limit prevents excessive LLM token consumption and memory pressure
     initial_message: str = Field(max_length=65536)
-    # NEW: select a team preset by ID (ADR-013 §6)
+    # NEW: select a team preset by ID
     team_preset: str | None = Field(default=None, max_length=64)
-    # NEW: thread metadata for provenance and context (ADR-014)
+    # NEW: thread metadata for provenance and context
     metadata: ThreadMetadata | None = None
-    # Optional nickname for the thread (ADR-034). Overrides metadata.nickname
+    # Optional nickname for the thread. Overrides metadata.nickname
     # when both are set. Allows CLI users to name threads without full metadata.
     nickname: str | None = Field(default=None, max_length=64)
     # None = use team preset default (auto_approve); False = always supervised
     autonomous: bool | None = None
-    # ADR R7: engine-provisioned per-role actor token bundle. The engine mints
+    # Engine-provisioned per-role actor token bundle. The engine mints
     # one token per role at run-start and forwards it here; the gateway threads
     # each token to its owning worker without logging or persisting it.
     actor_tokens: ActorTokenBundle | None = None
@@ -130,7 +130,7 @@ class ThreadSummary(BaseModel):
     team_preset: str | None = None
     created_at: datetime
     updated_at: datetime
-    # ADR-014: metadata summary fields for UI thread list
+    # metadata summary fields for UI thread list
     nickname: str | None = None
     feature_tag: str | None = None
     source_branch: str | None = None
@@ -199,7 +199,7 @@ class PermissionResponseResult(BaseModel):
 
 
 class TeamPresetSummary(BaseModel):
-    """Lightweight team preset descriptor for the team picker UI (ADR-013 §6)."""
+    """Lightweight team preset descriptor for the team picker UI."""
 
     id: str
     display_name: str
@@ -209,6 +209,6 @@ class TeamPresetSummary(BaseModel):
 
 
 class TeamPresetsResponse(BaseModel):
-    """Response for GET /teams: list of available team presets (ADR-013 §6)."""
+    """Response for GET /teams: list of available team presets."""
 
     presets: list[TeamPresetSummary]

@@ -1,4 +1,4 @@
-"""Shared IPC message types between gateway and worker (ADR-019, D-01).
+"""Shared IPC message types between gateway and worker.
 
 These types define the gateway-worker contract.  Neither ``api/`` nor
 ``worker/`` owns them; both are equal consumers.
@@ -43,19 +43,19 @@ class DispatchRequest(BaseModel):
     metadata_json: str | None = None
     context_preamble: str | None = None
     recursion_limit: int
-    # ADR-019: SDD blackboard fields
+    # SDD blackboard fields
     active_feature: str | None = None
     pipeline_phase: str | None = None
     vault_index: dict[str, list[str]] = Field(default_factory=dict)
     validation_errors: list[str] = Field(default_factory=list)
-    # model-profiles ADR: the selected profile id and the frozen effective per-role
+    # model-profiles: the selected profile id and the frozen effective per-role
     # assignment the run was launched with. Compilation consumes this verbatim
     # (never re-resolves) so restart/recovery reproduces the identical models even
     # if team/agent config drifts. Each value is {"provider", "capability",
     # "fallback"} keyed by worker agent_id. Never carries a credential.
     profile_id: str | None = None
     model_assignment: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    # ADR R7: engine-provisioned per-role actor tokens forwarded from run-start.
+    # Engine-provisioned per-role actor tokens forwarded from run-start.
     # The bundle's redacting repr keeps raw tokens out of any dispatch log line;
     # model_dump still emits them for the gateway->worker loopback transport. The
     # worker holds them in worker-scoped runtime state only and drops them at run

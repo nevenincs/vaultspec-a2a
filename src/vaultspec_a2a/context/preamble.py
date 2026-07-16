@@ -1,11 +1,8 @@
-"""Context preamble builder for ADR-014.
+"""Context preamble builder.
 
 Constructs a ``SystemMessage`` containing project context (workspace,
 feature tag, branch, available documents) that is prepended to the
 graph input message list at thread creation time.
-
-References:
-    - ADR-014 §2.3: Context Preamble Injection
 """
 
 from langchain_core.messages import SystemMessage

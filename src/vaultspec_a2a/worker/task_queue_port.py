@@ -1,4 +1,4 @@
-"""Database-backed adapter for the graph task-queue port (ADR R5).
+"""Database-backed adapter for the graph task-queue port.
 
 Composition-layer bridge: adapts the pure persistence functions in
 ``database.task_queue_repository`` to the graph layer's abstract

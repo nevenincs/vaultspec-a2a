@@ -1,4 +1,4 @@
-"""Tests for Executor, GraphLifecycleManager, and StateProjector (ADR-019, D-09).
+"""Tests for Executor, GraphLifecycleManager, and StateProjector.
 
 Validates the Executor's ingest gating logic, dispatch routing, and
 shutdown behaviour; GraphLifecycleManager's input construction; using a real
@@ -173,7 +173,7 @@ class TestIngestGating:
         A document run parks at its first gate (``"interrupted"``) and later
         resumes to author the ADR document, which needs the run's tokens; the
         active-window close that drops them is the run's TERMINAL outcome, not the
-        interrupt-park (P04.S10, ADR R7).
+        interrupt-park.
         """
         async with AsyncSqliteSaver.from_conn_string(":memory:") as cp:
             await cp.setup()
@@ -374,7 +374,7 @@ class TestHandleDispatch:
     ) -> None:
         """A resume for a thread with an active ingest is hard-rejected, not queued.
 
-        The load-bearing guard for the P04.S10 live-lane composition: the resume
+        The load-bearing guard for the live-lane composition: the resume
         claim TTL deliberately does not cover a live authoring turn, so when the
         parked-run reconcile re-drives a run whose claim expired mid-authoring, the
         worker's ingest-active lock is what stops a second ``Command(resume=...)``
@@ -495,7 +495,7 @@ class TestGraphInputBuilding:
         assert inp["thread_id"] == "thread-xyz"
 
     def test_sdd_fields_included_on_first_ingest_when_provided(self) -> None:
-        """ADR-019 SDD blackboard fields are included in graph_input on first ingest."""
+        """SDD blackboard fields are included in graph_input on first ingest."""
         req = DispatchRequest(
             action="ingest",
             thread_id="t-sdd",

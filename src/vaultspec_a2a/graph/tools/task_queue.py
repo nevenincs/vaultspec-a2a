@@ -1,4 +1,4 @@
-"""Database-backed worker task queue (ADR R5, amends ADR-021).
+"""Database-backed worker task queue.
 
 The task queue is orchestration state and now lives in A2A's own database
 rather than a ``.vault/plan`` markdown table.  This module owns the graph-side
@@ -7,7 +7,7 @@ mark-task-complete tool.  All persistence is reached through the injected
 :class:`~vaultspec_a2a.graph.protocols.TaskQueuePort`; this module never
 imports the database layer.
 
-The mark-complete tool follows the ADR-021 *revised* contract: a single
+The mark-complete tool follows the *revised* contract: a single
 ``@tool``-decorated coroutine returning ``Command(update=...)``.  The update
 carries the ``current_task_id`` advance and a ``ToolMessage`` keyed by the
 injected ``tool_call_id`` so the reducer pipeline applies it and message history

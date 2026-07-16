@@ -1,16 +1,16 @@
-"""Acceptance coverage for the five-verb edge (ADR R6/R7, W05.P14.S31).
+"""Acceptance coverage for the five-verb edge.
 
 In-process, real-component coverage of the acceptance criteria that do NOT need
-the live dashboard engine or Docker (both absent here — see the step record for
-the deferral posture). No mocks: a real ``Executor`` runs a real multi-role
-compiled graph against a real file-backed ``AsyncSqliteSaver``; the five-verb
-gateway then reads that durable state back over a real TCP socket.
+the live dashboard engine or Docker (both absent here). No mocks: a real
+``Executor`` runs a real multi-role compiled graph against a real file-backed
+``AsyncSqliteSaver``; the five-verb gateway then reads that durable state back
+over a real TCP socket.
 
 Covers: per-role run through the surface, ``run-status`` as the authoritative
 recovery snapshot, restart recovery (a fresh gateway on the same durable
 checkpoint returns the same snapshot), zero ``.vault/`` writes across the run,
-and no actor token in any captured log record (the W04 review's recommended
-regression, closing the ``model_dump`` residual).
+and no actor token in any captured log record (closing the ``model_dump``
+residual).
 """
 
 from __future__ import annotations

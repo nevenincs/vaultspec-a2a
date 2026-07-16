@@ -3,10 +3,6 @@
 Provides backend-selectable ``create_async_engine`` wiring,
 ``async_sessionmaker`` for FastAPI dependency injection, and schema
 initialisation through Alembic.
-
-References:
-    - ADR-007: SQLite WAL mode, aiosqlite
-    - ADR-009: Module hierarchy
 """
 
 import logging
@@ -48,11 +44,10 @@ def _set_wal_mode(dbapi_conn: sqlite3.Connection, _connection_record: object) ->
     """Enable WAL journal mode on every new SQLite connection.
 
     WAL allows concurrent readers while a write is in progress,
-    which is critical for the Event Aggregator's high-frequency writes
-    (ADR-007 section 5).
+    which is critical for the Event Aggregator's high-frequency writes.
     """
     cursor = dbapi_conn.cursor()
-    # H18: check the return value — PRAGMA journal_mode returns the mode that
+    # check the return value — PRAGMA journal_mode returns the mode that
     # was actually set (or the current mode on read-only filesystems).
     cursor.execute("PRAGMA journal_mode=WAL")
     row = cursor.fetchone()
@@ -161,7 +156,7 @@ async def init_db(
     """Initialise the database engine, session factory, and schema.
 
     For file-based databases, schema management is routed through Alembic
-    migrations (ADR-029).  For in-memory databases (test use only),
+    migrations.  For in-memory databases (test use only),
     ``Base.metadata.create_all`` is used directly since Alembic cannot
     target ``:memory:``.
 
@@ -197,7 +192,7 @@ async def get_db(
         @app.get("/threads")
         async def list_threads(db: AsyncSession = Depends(get_db)): ...
 
-    DB-M3: The ``async with factory() as session`` context manager already
+    The ``async with factory() as session`` context manager already
     handles rollback on exception and close on exit.  We wrap in try/finally
     to ensure ``session.close()`` is called even if the generator is abandoned
     mid-stream (e.g. client disconnect before the generator resumes).

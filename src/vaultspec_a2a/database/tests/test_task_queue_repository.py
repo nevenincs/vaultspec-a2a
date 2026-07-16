@@ -1,4 +1,4 @@
-"""Tests for the database-backed task-queue repository (ADR R5).
+"""Tests for the database-backed task-queue repository.
 
 Real in-memory aiosqlite, no mocks. Covers seeding, the injectable queue
 view (current + horizon selection), the idempotent mark-complete transition,

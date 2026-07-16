@@ -107,7 +107,7 @@ class TestWorktreeLifecycle:
 
     @pytest.mark.asyncio
     async def test_main_worktree_is_main(self, manager: GitManager) -> None:
-        """list_worktrees marks the main checkout with is_main=True (WS-HIGH-003)."""
+        """list_worktrees marks the main checkout with is_main=True."""
         await manager.create_worktree("wt-main-check", base_branch="main")
         wts = await manager.list_worktrees()
         main_entries = [wt for wt in wts if wt.is_main]
@@ -116,7 +116,7 @@ class TestWorktreeLifecycle:
 
     @pytest.mark.asyncio
     async def test_agent_worktrees_are_not_main(self, manager: GitManager) -> None:
-        """Agent worktrees must have is_main=False (WS-HIGH-003)."""
+        """Agent worktrees must have is_main=False."""
         await manager.create_worktree("not-main", base_branch="main")
         wts = await manager.list_worktrees()
         agent_entries = [wt for wt in wts if wt.branch != "main"]
@@ -303,7 +303,7 @@ class TestResolveEnvVars:
     """Tests for the environment variable builder."""
 
     def test_includes_cwd(self, tmp_path: Path) -> None:
-        """PWD key is set to the stringified workspace path (M34)."""
+        """PWD key is set to the stringified workspace path."""
         env = resolve_env_vars(tmp_path)
         assert env["PWD"] == str(tmp_path)
 
@@ -318,22 +318,22 @@ class TestResolveEnvVars:
         assert str(venv_dir / "Scripts") in env["PATH"]
 
     def test_no_virtual_env_when_missing(self, tmp_path: Path) -> None:
-        """VIRTUAL_ENV is absent when no .venv found (WS-M3)."""
+        """VIRTUAL_ENV is absent when no .venv found."""
         workspace = tmp_path / "no-venv"
         workspace.mkdir()
         env = resolve_env_vars(workspace)
-        # WS-M3: VIRTUAL_ENV must be explicitly removed when no .venv found
+        # VIRTUAL_ENV must be explicitly removed when no .venv found
         # to prevent the caller's venv from leaking into the agent environment.
         assert "VIRTUAL_ENV" not in env
 
 
 # ---------------------------------------------------------------------------
-# Credential scrubbing — WS-H3
+# Credential scrubbing
 # ---------------------------------------------------------------------------
 
 
 class TestCredentialScrubbing:
-    """Tests verifying that known secret env vars are scrubbed (WS-H3)."""
+    """Tests verifying that known secret env vars are scrubbed."""
 
     _SECRET_KEYS: ClassVar[list[str]] = [
         "ANTHROPIC_API_KEY",
@@ -348,7 +348,7 @@ class TestCredentialScrubbing:
         "ZHIPU_API_KEY",
         "LANGCHAIN_API_KEY",
         "LANGCHAIN_TRACING_V2",
-        # ACP-ENV-005: ANTHROPIC_LOG causes SDK debug text on stdout
+        # ANTHROPIC_LOG causes SDK debug text on stdout
         # → JSON-RPC corruption
         "ANTHROPIC_LOG",
     ]
@@ -397,7 +397,7 @@ class TestCredentialScrubbing:
     def test_claude_code_wildcard_scrub_removes_non_allowlisted(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ACP-ENV-004: CLAUDE_CODE_* keys not in allowlist are scrubbed."""
+        """CLAUDE_CODE_* keys not in allowlist are scrubbed."""
         monkeypatch.setenv("CLAUDE_CODE_SKIP_BROWSER_AUTH", "1")
         monkeypatch.setenv("CLAUDE_CODE_API_KEY_HELPER", "helper-script")
         monkeypatch.setenv("CLAUDE_CODE_SOME_INTERNAL_FLAG", "true")
@@ -409,7 +409,7 @@ class TestCredentialScrubbing:
     def test_claude_code_allowlist_keys_are_preserved(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
-        """ACP-ENV-004/006: allowlisted CLAUDE_CODE_* keys pass through
+        """Allowlisted CLAUDE_CODE_* keys pass through
         the wildcard scrub.
         """
         monkeypatch.setenv("CLAUDE_CODE_OAUTH_TOKEN", "tok-abc123")
@@ -427,10 +427,10 @@ class TestCredentialScrubbing:
     ) -> None:
         """The Z.ai path depends on ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN surviving.
 
-        multi-provider-execution ADR: Z.ai rides the Claude ACP path by injecting
-        these two vars. The provider layer sets them in ``env_vars`` after the base
-        scrub, but the base scrub must not strip them if they are already present in
-        the process environment — this pins that invariant so a future addition to
+        Z.ai rides the Claude ACP path by injecting these two vars. The provider
+        layer sets them in ``env_vars`` after the base scrub, but the base scrub
+        must not strip them if they are already present in the process
+        environment — this pins that invariant so a future addition to
         ``scrub_keys`` cannot silently break Z.ai auth. ``ANTHROPIC_API_KEY`` (a
         distinct name) remains scrubbed; these two are not secrets-by-name here.
         """
@@ -442,12 +442,12 @@ class TestCredentialScrubbing:
 
 
 # ---------------------------------------------------------------------------
-# Input validation — WS-H6
+# Input validation
 # ---------------------------------------------------------------------------
 
 
 class TestInputValidation:
-    """Tests for _AGENT_ID_RE and _BRANCH_NAME_RE validation (WS-H6)."""
+    """Tests for _AGENT_ID_RE and _BRANCH_NAME_RE validation."""
 
     # Valid agent IDs
     @pytest.mark.parametrize(
@@ -563,12 +563,12 @@ class TestInputValidation:
 
 
 # ---------------------------------------------------------------------------
-# Path traversal protection — WS-HIGH-002
+# Path traversal protection
 # ---------------------------------------------------------------------------
 
 
 class TestWorktreePathValidation:
-    """Tests that adversarial worktree_path inputs are rejected (WS-HIGH-002)."""
+    """Tests that adversarial worktree_path inputs are rejected."""
 
     @pytest.mark.asyncio
     async def test_has_conflicts_rejects_relative_path(
@@ -626,12 +626,12 @@ class TestWorktreePathValidation:
 
 
 # ---------------------------------------------------------------------------
-# MergeStrategy.REBASE — WS-H7
+# MergeStrategy.REBASE
 # ---------------------------------------------------------------------------
 
 
 class TestRebaseStrategy:
-    """Tests for the corrected MergeStrategy.REBASE (WS-H7)."""
+    """Tests for the corrected MergeStrategy.REBASE."""
 
     @pytest.mark.asyncio
     async def test_rebase_strategy_lands_commit_on_target(

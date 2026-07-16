@@ -1,6 +1,6 @@
 """Provider auth tokens must never surface via repr/str/model_dump.
 
-Pins the multi-provider-execution env_vars redaction audit: env_vars carries
+Pins the env_vars redaction audit: env_vars carries
 CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_AUTH_TOKEN, and neither the Pydantic model's
 repr/str/serialization nor the frozen _AcpModelConfig snapshot's dataclass repr
 may render the token value. Real objects, a token-shaped (synthetic) value.

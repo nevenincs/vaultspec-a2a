@@ -1,12 +1,8 @@
-"""Thread metadata and context discovery for ADR-014.
+"""Thread metadata and context discovery.
 
 Provides the ``ThreadMetadata`` and ``ContextRef`` models for thread
 provenance tracking, plus utilities for auto-discovering ``.vault/``
 documents and generating human-friendly thread nicknames.
-
-References:
-    - ADR-014: Thread Metadata & Context Injection
-    - ADR-012 §2.8: Workspace-local TOML overrides
 """
 
 import glob

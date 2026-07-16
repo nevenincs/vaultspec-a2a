@@ -2,7 +2,7 @@
 
 Manages graph consumption (``astream_events``), cancellation events, and
 outcome classification.  Extracted from the monolithic ``aggregator.py``
-during Phase 6 decomposition (ADR D-01).
+during the aggregator decomposition.
 """
 
 import asyncio
@@ -41,7 +41,7 @@ class IngestManager:
         self._buffering = buffering
         self._telemetry = telemetry
 
-        # Per-thread cancellation events for ingest loops (Fix 15 / M4).
+        # Per-thread cancellation events for ingest loops.
         self._cancel_events: dict[str, asyncio.Event] = {}
         # Per-thread ingest queues for backpressure (research §1.3)
         self._ingest_queues: dict[str, asyncio.Queue[dict[str, Any] | None]] = {}
@@ -49,7 +49,7 @@ class IngestManager:
         self._fanout_tasks: dict[str, asyncio.Task[None]] = {}
 
     # ------------------------------------------------------------------
-    # Thread cancellation (Fix 15 / M4)
+    # Thread cancellation
     # ------------------------------------------------------------------
 
     def cancel_thread(self, thread_id: str) -> None:

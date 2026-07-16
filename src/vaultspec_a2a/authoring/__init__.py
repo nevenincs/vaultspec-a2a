@@ -1,4 +1,4 @@
-"""Engine authoring-API client (ADR R3).
+"""Engine authoring-API client.
 
 The single package that speaks to the dashboard engine's authoring plane. No
 other package in this repo may talk to the engine directly; all envelope,

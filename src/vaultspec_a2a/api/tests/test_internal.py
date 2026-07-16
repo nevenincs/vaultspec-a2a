@@ -1,5 +1,4 @@
-"""Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints
-(ADR-019).
+"""Tests for src/vaultspec_a2a/api/internal.py -- internal IPC router endpoints.
 
 Validates the /internal/health, /internal/events, and /internal/heartbeat
 HTTP endpoints using a real FastAPI test client with httpx.ASGITransport.
@@ -729,7 +728,7 @@ class TestInternalWebSocketLogging:
 
 
 class TestWorkerBridgeRetry:
-    """WorkerBridge retries batch flush on gateway failures (IPC-03)."""
+    """WorkerBridge retries batch flush on gateway failures."""
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_flush_retries_on_http_500_then_succeeds(self) -> None:
@@ -802,7 +801,7 @@ class TestWorkerBridgeRetry:
 
 
 class TestAggregatorGCOnTerminal:
-    """Aggregator sequence counters are pruned on thread_terminal events (AGG-01/05)."""
+    """Aggregator sequence counters are pruned on thread_terminal events."""
 
     @pytest.mark.asyncio(loop_scope="function")
     async def test_terminal_event_prunes_thread_from_aggregator_sequences(

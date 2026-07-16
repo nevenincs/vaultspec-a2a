@@ -1,4 +1,4 @@
-"""Event handlers for worker → gateway relay (D-05).
+"""Event handlers for worker → gateway relay.
 
 Business-logic handlers that persist worker events into the database,
 manage permission state machines, and perform aggregator GC on thread
@@ -66,7 +66,7 @@ async def _handle_terminal_event(
     local to avoid circular dependencies at module level.
 
     When *aggregator* is provided, prune stale permissions and sequence
-    counters for the terminated thread (AGG-01/05).
+    counters for the terminated thread.
     """
     if not is_terminal_event(payload):
         return
@@ -126,7 +126,7 @@ async def _handle_terminal_event(
             },
         )
     except InvalidTransitionError:
-        # BE-37: race condition — cancel endpoint already set terminal status.
+        # Race condition — cancel endpoint already set terminal status.
         # This is expected and not an error.
         logger.info(
             "Thread %s transition to %s skipped (already terminal)",
@@ -152,7 +152,7 @@ async def _handle_terminal_event(
             },
         )
 
-    # AGG-01/05: GC aggregator state for the terminated thread.
+    # GC aggregator state for the terminated thread.
     if aggregator is not None:
         try:
             aggregator.prune_stale_permissions()
@@ -462,7 +462,7 @@ async def relay_event(
         payload,
         session_factory=session_factory,
     )
-    # DB-CRIT-01: terminal status update + AGG-01/05 GC.
+    # Terminal status update + aggregator GC.
     await _handle_terminal_event(
         thread_id,
         payload,

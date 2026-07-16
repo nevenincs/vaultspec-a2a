@@ -1,11 +1,11 @@
-"""Shared model-profile resolution and backend-served eligibility (model-profiles ADR).
+"""Shared model-profile resolution and backend-served eligibility.
 
 One resolution-and-eligibility service consumed by graph compilation, discovery,
 and run-start alike, so the picker's truth cannot drift from execution's. It
 owns three concerns:
 
 - **Resolution**: ``resolve_effective_assignment`` and the per-role
-  ``resolve_role_assignment`` implement the ADR-013 S2.3 precedence chain with a
+  ``resolve_role_assignment`` implement the precedence chain with a
   selected profile as the topmost layer (profile > worker override > agent TOML
   > team defaults), attaching per-field source attribution and the stable,
   safe-to-expose concrete model name.
@@ -77,8 +77,8 @@ logger = logging.getLogger(__name__)
 # the compiler's historical default).
 _DEFAULT_PROVIDER = Provider.CLAUDE
 
-# The production acceptance-gate term (ADR: still open until the research-to-ADR
-# capability passes P04.S10). Reported honestly as an ineligibility reason.
+# The production acceptance-gate term: still open until the research-to-ADR
+# capability passes. Reported honestly as an ineligibility reason.
 _ACCEPTANCE_GATE_REASON = (
     "production acceptance gate for the research-to-ADR capability has not passed"
 )
@@ -197,7 +197,7 @@ def resolve_role_assignment(
     override > agent TOML ``[agent.model]`` > ``[team.defaults]``. Each of
     provider, capability, and fallback resolves independently, so a partial
     overlay only redirects the fields it sets. With ``profile_overlay=None`` this
-    is byte-identical to the historical ADR-013 chain.
+    is byte-identical to the historical precedence chain.
     """
     overlay = profile_overlay
 
@@ -543,7 +543,7 @@ def evaluate_profile_eligibility(
 
 
 # ---------------------------------------------------------------------------
-# Freezing and persistence (model-profiles ADR)
+# Freezing and persistence
 # ---------------------------------------------------------------------------
 
 

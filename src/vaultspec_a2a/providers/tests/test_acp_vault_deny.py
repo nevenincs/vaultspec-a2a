@@ -1,4 +1,4 @@
-"""Adversarial tests for the ADR R2 ``.vault/**`` write-deny policy.
+"""Adversarial tests for the ``.vault/**`` write-deny policy.
 
 These drive the REAL ``on_fs_write_text_file`` / ``on_fs_read_text_file`` RPC
 handlers against a real temp-dir workspace — no mocks, no monkeypatching. They

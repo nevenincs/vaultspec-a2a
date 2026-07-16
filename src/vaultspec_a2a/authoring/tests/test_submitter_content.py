@@ -1,6 +1,6 @@
-"""Pure-logic regression for the submitter's document-content chain (P04.S10).
+"""Pure-logic regression for the submitter's document-content chain.
 
-The graph-submitter mechanism (ADR PW3) submits the writer node's message body
+The graph-submitter mechanism submits the writer node's message body
 verbatim as the whole document. Two defects motivated these tests: the writer's
 completion sentinel leaking into the materialized document, and an empty body
 slipping through as a hollow scaffold. No engine and no network — the body
@@ -118,7 +118,7 @@ class TestConformanceGuard:
 
     def test_template_annotation_comment_is_refused(self) -> None:
         # The verbatim scaffold (annotation comments + unfilled {topic}) — the
-        # exact P04.S10 empty-scaffold specimen — must not reach the engine.
+        # exact empty-scaffold specimen — must not reach the engine.
         with pytest.raises(DocumentConformanceError) as excinfo:
             _latest_document(_state(_SCAFFOLD), _WRITER, _SENTINEL)
         assert any("annotation" in note for note in excinfo.value.revision_notes)
@@ -144,7 +144,7 @@ class TestConformanceGuard:
 
     def test_leading_preamble_is_stripped_and_the_document_passes(self) -> None:
         # A writer that prefixes orientation narration before the frontmatter
-        # (the P04.S10 live failure) has the preamble stripped; the document proper
+        # has the preamble stripped; the document proper
         # — whose related: wiki-link is legal frontmatter — then passes cleanly.
         doc_with_related = _DOC.replace(
             "  - '#sse-reconnection'\n---",
@@ -181,7 +181,7 @@ class TestConformanceGuard:
 
 
 class TestGroundingReferenceResolution:
-    """P04.S16: deriving an applied grounding doc's canonical dated stem."""
+    """Deriving an applied grounding doc's canonical dated stem."""
 
     # created_at_ms 1784157786246 is 2026-07-15 UTC (verified against live
     # materialization: the engine's ms_to_date_key is UTC).
@@ -251,7 +251,7 @@ class TestGroundingReferenceResolution:
 
 
 class TestAdrStatusConformance:
-    """P04.S16: the submit-node refuses a legacy `## Status` section in an ADR."""
+    """The submit-node refuses a legacy `## Status` section in an ADR."""
 
     _ADR_LEGACY = """---
 tags:

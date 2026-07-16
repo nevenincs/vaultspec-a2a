@@ -1,11 +1,11 @@
-"""Worker-to-control-surface IPC bridge (ADR-031).
+"""Worker-to-control-surface IPC bridge.
 
 Uses HTTP POST to push events and heartbeats to the gateway.
 Avoids introducing a WebSocket client dependency by using httpx
 (already in the project's dependency set).
 
 Events are batched for up to ``ipc_flush_interval_seconds`` seconds before being
-sent as a single HTTP POST to ``/internal/events/batch`` (CRIT-02).
+sent as a single HTTP POST to ``/internal/events/batch``.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ class WorkerBridge:
     actively being processed so the heartbeat payload can report them.
 
     Events are accumulated in a buffer and flushed as a batch every
-    ``ipc_flush_interval_seconds`` seconds to reduce HTTP overhead (CRIT-02).
+    ``ipc_flush_interval_seconds`` seconds to reduce HTTP overhead.
 
     Parameters
     ----------
@@ -53,7 +53,7 @@ class WorkerBridge:
     ) -> None:
         self._api_url = api_url.rstrip("/")
         self._worker_id = worker_id
-        # WPA-002: attach bearer token to all internal IPC requests if provided.
+        # Attach bearer token to all internal IPC requests if provided.
         headers = {}
         if internal_token:
             headers["Authorization"] = f"Bearer {internal_token}"
@@ -63,13 +63,13 @@ class WorkerBridge:
             headers=headers,
         )
         self._active_threads: set[str] = set()
-        self._start_time = time.monotonic()  # WPA-004: track uptime
+        self._start_time = time.monotonic()  # track uptime
 
-        # CRIT-02: event batching state
+        # Event batching state
         self._event_buffer: list[dict[str, Any]] = []
         self._flush_task: asyncio.Task[None] | None = None
 
-        # Phase 4: consecutive heartbeat failure tracking for escalating logs.
+        # Consecutive heartbeat failure tracking for escalating logs.
         self._consecutive_hb_failures: int = 0
 
     # ------------------------------------------------------------------
@@ -101,7 +101,7 @@ class WorkerBridge:
         return frozenset(self._active_threads)
 
     # ------------------------------------------------------------------
-    # Event relay (batched, CRIT-02)
+    # Event relay (batched)
     # ------------------------------------------------------------------
 
     @staticmethod
@@ -118,7 +118,7 @@ class WorkerBridge:
         ``ipc_flush_interval_seconds`` seconds of inactivity or when ``flush_events``
         is called explicitly.
         """
-        # IPC-03: cap buffer to prevent unbounded memory growth.
+        # Cap buffer to prevent unbounded memory growth.
         if len(self._event_buffer) >= settings.ipc_max_event_buffer:
             logger.warning(
                 "Event buffer full (%d events), dropping oldest event",
@@ -152,7 +152,7 @@ class WorkerBridge:
     async def flush_events(self) -> None:
         """Immediately send all buffered events as a single batch POST.
 
-        IPC-03: retries up to ``_MAX_FLUSH_RETRIES`` times with exponential
+        Retries up to ``_MAX_FLUSH_RETRIES`` times with exponential
         backoff on failure.  Events are re-queued on final failure so they
         are not silently lost (subject to the buffer cap).
 
@@ -211,7 +211,7 @@ class WorkerBridge:
                 )
 
         # All retries exhausted — events could not reach the gateway.
-        # Phase 4: escalate to ERROR so operators notice IPC breakdown.
+        # Escalate to ERROR so operators notice IPC breakdown.
         logger.error(
             "Event flush to gateway FAILED after %d attempts"
             " (gateway_url=%s, batch_size=%d) — permission and status"
@@ -302,7 +302,7 @@ class WorkerBridge:
     async def heartbeat_loop(self, interval: float = 30.0) -> None:
         """Run a periodic heartbeat in a loop (designed for task groups).
 
-        Phase 4: tracks consecutive failures and escalates log severity.
+        Tracks consecutive failures and escalates log severity.
         First failure → WARNING, every 5th consecutive failure → ERROR.
         On recovery after failures → INFO with recovery notice.
 

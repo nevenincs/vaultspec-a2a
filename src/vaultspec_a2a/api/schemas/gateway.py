@@ -1,4 +1,4 @@
-"""Versioned five-verb gateway wire models (ADR R6).
+"""Versioned five-verb gateway wire models.
 
 The engine pass-through forwards exactly five verbs across the frozen edge:
 ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
@@ -44,7 +44,7 @@ _API_VERSION = "v1"
 class RunStartRequest(BaseModel):
     """Start a run: the engine-facing shape of thread-create + first message.
 
-    Carries the engine-provisioned per-role actor token bundle (ADR R7) alongside
+    Carries the engine-provisioned per-role actor token bundle alongside
     the run's preset and opening message. The gateway threads this onto the same
     dispatch path the internal thread-create flow uses — no second code path.
     """
@@ -67,7 +67,7 @@ class RunStartRequest(BaseModel):
     # dispatch-exactly-once: a retry with the same id returns the existing run
     # instead of starting a second. Absent, the gateway mints a server-side id.
     run_id: str | None = Field(default=None, min_length=1, max_length=128)
-    # model-profiles ADR: the selected model profile id. Defaults to the implicit
+    # model-profiles: the selected model profile id. Defaults to the implicit
     # team-defaults profile (the team's normal resolution). An unknown or
     # ineligible profile is refused before dispatch - never silently replaced.
     profile_id: str = Field(default="team-defaults", min_length=1, max_length=64)
@@ -94,7 +94,7 @@ class RunStartResponse(BaseModel):
     # Whether the run was accepted as eligible to dispatch (always True on a 201;
     # ineligible requests are refused with a 4xx before reaching this response).
     eligible: bool = True
-    # model-profiles ADR: the profile the run was frozen with and its effective
+    # model-profiles: the profile the run was frozen with and its effective
     # per-role assignment (additive v1). Absent on the idempotent-replay short
     # path where the response is reconstructed from the existing run row.
     profile_id: str | None = None
@@ -102,13 +102,13 @@ class RunStartResponse(BaseModel):
 
 
 class TopologyPosition(BaseModel):
-    """Where a run sits in its team topology (recovery snapshot, ADR R6).
+    """Where a run sits in its team topology (recovery snapshot).
 
-    Product-facing status speaks role vocabulary only (PW4): ``active_agent`` is
+    Product-facing status speaks role vocabulary only: ``active_agent`` is
     the role currently working, never an internal LangGraph node name. The raw
     next-node projection lives in the internal recovery snapshot
-    (``thread/snapshots.py``), not this contract — see the S15 record for why
-    ``next_nodes`` was dropped from the v1 surface.
+    (``thread/snapshots.py``), not this contract; ``next_nodes`` was dropped
+    from the v1 surface.
     """
 
     team_preset: str | None = None
@@ -117,7 +117,7 @@ class TopologyPosition(BaseModel):
 
 
 class RoleState(BaseModel):
-    """Per-role lifecycle state within a run (recovery snapshot, ADR R6)."""
+    """Per-role lifecycle state within a run (recovery snapshot)."""
 
     agent_id: str
     role: str = ""
@@ -126,7 +126,7 @@ class RoleState(BaseModel):
 
 
 class RunStatusResponse(BaseModel):
-    """The authoritative recovery snapshot for a run (ADR R6).
+    """The authoritative recovery snapshot for a run.
 
     Designed as the read a restarted A2A resumes or reports a run from: topology
     position, per-role state, and the engine proposal/changeset ids the run has
@@ -155,7 +155,7 @@ class RunStatusResponse(BaseModel):
     repair_status: str | None = None
     execution_readiness: str | None = None
     degraded_reasons: list[str] = Field(default_factory=list)
-    # model-profiles ADR: the frozen profile the run launched with and its
+    # model-profiles: the frozen profile the run launched with and its
     # effective per-role assignment, reproduced verbatim from run metadata across
     # restarts (additive v1; absent for runs started before profiles landed).
     profile_id: str | None = None
@@ -176,7 +176,7 @@ class RunCancelResponse(BaseModel):
 
 
 class RoleAssignmentSummary(BaseModel):
-    """Effective per-role model assignment under a profile (model-profiles ADR).
+    """Effective per-role model assignment under a profile.
 
     Only safe operational metadata: role id, agent id, provider id, capability,
     the stable concrete model name, ordered fallbacks, current provider readiness,
@@ -196,7 +196,7 @@ class RoleAssignmentSummary(BaseModel):
 
 
 class ProfileSummary(BaseModel):
-    """One selectable model profile for a preset (model-profiles ADR).
+    """One selectable model profile for a preset.
 
     Carries the profile's identity, whether it is the default, its per-role
     effective assignments (resolved by the same shared resolver launch uses, so
@@ -233,7 +233,7 @@ class PresetSummary(BaseModel):
     authoring_capability: str | None = None
     # True for bundled mock/test presets so the product layer can exclude them.
     is_mock: bool = False
-    # model-profiles ADR additions (additive v1 fields, absent-safe):
+    # model-profiles additions (additive v1 fields, absent-safe):
     # preset origin (bundled | workspace | test_mock), the document outputs the
     # topology delivers, the selectable profiles with effective assignments and
     # eligibility, and the default profile id.

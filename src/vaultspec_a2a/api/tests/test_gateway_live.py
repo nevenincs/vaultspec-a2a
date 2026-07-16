@@ -1,4 +1,4 @@
-"""Live gateway coverage for the five verbs and the SSE stream (ADR R6).
+"""Live gateway coverage for the five verbs and the SSE stream.
 
 Replaces the deleted UI contract coverage: the browser SPA was the only
 end-to-end exerciser of the gateway edge, and it is gone. These tests drive the
@@ -134,7 +134,7 @@ async def test_five_verbs_over_live_socket(session_factory, checkpointer) -> Non
 async def test_service_state_degrades_when_circuit_breaker_opens(
     session_factory, checkpointer
 ) -> None:
-    """A real dependency failure (open circuit) degrades service-state (P03.S06).
+    """A real dependency failure (open circuit) degrades service-state.
 
     Evidence battery: an open worker circuit breaker is a genuine dependency
     failure. service-state must report it truthfully - not ready, status degraded,
@@ -162,7 +162,7 @@ async def test_service_state_degrades_when_circuit_breaker_opens(
 async def test_run_status_carries_reconnect_cursor(
     session_factory, checkpointer
 ) -> None:
-    """run-status carries the monotonic last_sequence reconnect cursor (P03.S06).
+    """run-status carries the monotonic last_sequence reconnect cursor.
 
     Evidence battery, SSE reconnect with non-authoritative semantics: durable
     reconnect reconciliation comes from run-status (last_sequence), not from the
@@ -194,7 +194,7 @@ async def test_run_status_carries_reconnect_cursor(
 async def test_service_state_is_probe_backed_and_distinguishes_readiness(
     session_factory, checkpointer
 ) -> None:
-    """service-state reports truthful probe-derived readiness fields (P01.S03)."""
+    """service-state reports truthful probe-derived readiness fields."""
     app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -230,7 +230,7 @@ async def test_service_state_is_probe_backed_and_distinguishes_readiness(
 async def test_presets_list_is_truthful_and_resilient(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """presets-list marks loadable/unloadable and survives one bad preset (P01.S02)."""
+    """presets-list marks loadable/unloadable and survives one bad preset."""
     teams_dir = tmp_path / ".vaultspec" / "teams"
     teams_dir.mkdir(parents=True)
     # A malformed workspace preset: valid TOML, invalid schema (no [team]).
@@ -283,8 +283,8 @@ async def test_presets_list_is_truthful_and_resilient(
 
         # team-defaults effective assignments: safe operational fields only. All
         # four document personas resolve to the Claude subscription tier (the
-        # doc-reviewer was repinned off the non-resolving zhipu fallback in
-        # df6665b); provider heterogeneity is instead disclosed by the codex/zai
+        # doc-reviewer was repinned off the non-resolving zhipu fallback);
+        # provider heterogeneity is instead disclosed by the codex/zai
         # provider-axis profiles asserted below.
         td_by_agent = {
             a["agent_id"]: a for a in profiles["team-defaults"]["assignments"]
@@ -303,7 +303,7 @@ async def test_presets_list_is_truthful_and_resilient(
         assert fast_by_agent["vaultspec-researcher"]["source"] == "profile"
         assert fast_by_agent["vaultspec-synthesist"]["source"] == "agent"
 
-        # Provider axis (multi-provider-execution P03.S17): the discovery response
+        # Provider axis: the discovery response
         # surfaces the new providers per role. `codex` overlays codex on the three
         # research/authoring roles; `zai` overlays zai. The overlay attribution
         # (source == "profile") is disclosed and the un-overlaid doc-reviewer falls
@@ -410,7 +410,7 @@ async def test_presets_list_discloses_workspace_profile_origin(
 async def test_run_start_refusals_over_live_socket(
     session_factory, checkpointer
 ) -> None:
-    """The v1 run-start refuses invalid requests before dispatch (P01.S01)."""
+    """The v1 run-start refuses invalid requests before dispatch."""
     app, _agg, worker, _cp = make_app(session_factory, checkpointer)
     async with (
         _live_server(app) as base,
@@ -553,7 +553,7 @@ async def test_sse_stream_delivers_versioned_event_mid_stream(
 async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
     session_factory, checkpointer
 ) -> None:
-    """Progress frames carry the semantic phase; oversized bodies bound (P02.S05)."""
+    """Progress frames carry the semantic phase; oversized bodies bound."""
     from ...database.thread_repository import create_thread
     from ...streaming.sse_frames import MAX_SSE_FRAME_BYTES
     from ...thread.enums import ThreadStatus

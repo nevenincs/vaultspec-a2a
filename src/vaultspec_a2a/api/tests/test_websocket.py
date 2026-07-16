@@ -204,7 +204,7 @@ class TestInvalidCommands:
 
 
 # ---------------------------------------------------------------------------
-# Permission response WebSocket rejection (ADR-011 §3.1)
+# Permission response WebSocket rejection
 # ---------------------------------------------------------------------------
 
 
@@ -214,7 +214,7 @@ class TestPermissionResponseRejection:
     def test_permission_response_returns_error_frame(self) -> None:
         """Sending permission_response over WebSocket triggers an error event.
 
-        ADR-011 §3.1 mandates REST-only delivery for permission responses.
+        REST-only delivery is required for permission responses.
         The server must send back an explicit error frame so the client can
         redirect to POST /threads/{id}/permission.
         """
@@ -241,7 +241,7 @@ class TestPermissionResponseRejection:
 
 
 # ---------------------------------------------------------------------------
-# SEND_MESSAGE command dispatch (API-M5)
+# SEND_MESSAGE command dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -388,7 +388,7 @@ class TestSendMessageCommand:
 
 
 # ---------------------------------------------------------------------------
-# AGENT_CONTROL command dispatch (API-M5)
+# AGENT_CONTROL command dispatch
 # ---------------------------------------------------------------------------
 
 
@@ -470,7 +470,7 @@ class TestAgentControlCommand:
 
 
 # ---------------------------------------------------------------------------
-# Oversized frame rejection (API-M5)
+# Oversized frame rejection
 # ---------------------------------------------------------------------------
 
 

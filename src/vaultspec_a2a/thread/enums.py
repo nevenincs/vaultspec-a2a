@@ -80,7 +80,7 @@ class ApprovalStatus(StrEnum):
 
 
 class TaskQueueStatus(StrEnum):
-    """Durable execution states for a worker task-queue entry (ADR R5)."""
+    """Durable execution states for a worker task-queue entry."""
 
     PENDING = "pending"
     IN_PROGRESS = "in_progress"

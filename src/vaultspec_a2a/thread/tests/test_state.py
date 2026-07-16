@@ -253,28 +253,28 @@ class TestTeamStateStructure:
             "token_usage",
             "loop_count",
             "routing_error",
-            # ADR-019: SDD blackboard awareness fields
+            # SDD blackboard awareness fields
             "active_feature",
             "pipeline_phase",
             "vault_index",
             "validation_errors",
-            # ADR-020: transient mounted document content
+            # transient mounted document content
             "mounted_context",
-            # ADR-021: task queue pointer
+            # task queue pointer
             "current_task_id",
-            # ADR R3: authoring proposal references
+            # authoring proposal references
             "authoring_session_id",
             "authoring_changeset_ids",
             "authoring_proposal_ids",
-            # ADR-024: plan approval gate
+            # plan approval gate
             "approval_status",
             "approval_request_id",
-            # adr-authoring-orchestration: document phase machine
+            # document phase machine
             "research_findings",
             "gate_phase",
             "gate_verdict",
             "gate_pending_proposal_id",
-            # ADR-014: workspace root path
+            # workspace root path
             "workspace_root",
         }
         actual = set(TeamState.__annotations__)

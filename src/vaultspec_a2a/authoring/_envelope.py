@@ -1,4 +1,4 @@
-"""Shared-envelope, tiers, and denial-as-value decoding (ADR R3).
+"""Shared-envelope, tiers, and denial-as-value decoding.
 
 The engine wraps every authoring response in a shared envelope: success is
 ``{data, tiers, next_cursor?}`` and a typed error is ``{error, error_kind?,
@@ -32,7 +32,7 @@ Tiers = dict[str, Any]
 
 
 class CommandEnvelope(BaseModel):
-    """Request envelope wrapping every mutating authoring command (ADR R3).
+    """Request envelope wrapping every mutating authoring command.
 
     The idempotency key is a BODY field, never a header. ``api_version`` is a
     snake_case enum whose only variant is ``v1``.

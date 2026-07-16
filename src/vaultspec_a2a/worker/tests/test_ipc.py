@@ -1,4 +1,4 @@
-"""Tests for src/vaultspec_a2a/worker/ipc.py -- WorkerBridge IPC layer (ADR-019).
+"""Tests for src/vaultspec_a2a/worker/ipc.py -- WorkerBridge IPC layer.
 
 Validates thread tracking, event relay, heartbeat sending, and the
 resilient error-swallowing behaviour of the bridge.
@@ -308,7 +308,7 @@ class TestSendHeartbeat:
         assert body["worker_id"] == "worker-xyz"
         # active_threads must be sorted
         assert body["active_threads"] == ["t-1", "t-2"]
-        # uptime_seconds must be a non-negative integer (WPA-004)
+        # uptime_seconds must be a non-negative integer
         assert isinstance(body["uptime_seconds"], int)
         assert body["uptime_seconds"] >= 0
 

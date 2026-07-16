@@ -1,4 +1,4 @@
-"""Unit tests for engine discovery skip/non-raise behavior (P03.S07).
+"""Unit tests for engine discovery skip/non-raise behavior.
 
 Exercises the file-resolution guards without a live server: a malformed or
 stale candidate must be skipped, and ``resolve_engine`` must never raise on bad

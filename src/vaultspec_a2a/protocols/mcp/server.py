@@ -3,7 +3,7 @@
 Exposes the LangGraph orchestrator as standard MCP tools so external IDEs
 (Cursor, Windsurf) can trigger agent workflows without custom plugins.
 
-Per ADR-003 and ADR-006, the MCP server must:
+The MCP server must:
 - Expose stable, synchronous-looking tools (start_thread, get_thread_status,
   send_message)
 - Return immediately with a task ID and progress URL rather than blocking
@@ -22,8 +22,6 @@ Available tools:
 - ``delete_thread``:             Permanently delete a thread and its data
 - ``archive_thread``:            Archive a completed/failed/cancelled thread
 - ``cancel_thread``:             Cancel a running thread
-
-See ADR-003 §2 (Protocol Bridging), ADR-006 §5 (MCP Tool Mapping).
 """
 
 from mcp.server.fastmcp import FastMCP

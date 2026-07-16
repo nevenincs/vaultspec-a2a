@@ -33,8 +33,7 @@ async def get_thread_state_endpoint(
     """Return a complete thread state snapshot for client reconnection.
 
     The ``last_sequence`` field enables gap detection: the client discards
-    any subsequent WebSocket events with ``sequence <= last_sequence``
-    (ADR-011 section 2.3).
+    any subsequent WebSocket events with ``sequence <= last_sequence``.
     """
     snapshot = await build_thread_state(
         db,

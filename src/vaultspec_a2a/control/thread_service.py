@@ -308,7 +308,7 @@ def process_metadata(
     thread_id: str,
     team_preset: str | None,
 ) -> tuple[Path | None, str | None, str | None]:
-    """Validate and enrich thread metadata (ADR-014).
+    """Validate and enrich thread metadata.
 
     Returns ``(workspace_root, nickname, metadata_json)``.
 

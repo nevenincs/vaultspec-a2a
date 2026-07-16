@@ -1,4 +1,4 @@
-r"""Worker process -- standalone FastAPI application (ADR-019).
+r"""Worker process -- standalone FastAPI application.
 
 Exposes an internal HTTP dispatch endpoint that the gateway
 calls to schedule graph execution.  Manages the ``Executor`` lifecycle
@@ -91,7 +91,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     logger.info("Worker %s starting", worker_id)
     settings.validate_postgres_requirement()
 
-    # TEL-01: Configure OTel with the worker service name so spans are
+    # Configure OTel with the worker service name so spans are
     # attributed separately from the gateway in Jaeger/OTLP backends.
     configure_telemetry(service_name="vaultspec-worker")
     logger.info("Telemetry configured (service=vaultspec-worker)")
@@ -103,7 +103,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             settings.internal_token,
         )
 
-        # Phase 4: non-fatal startup probe — verify the gateway is
+        # Non-fatal startup probe — verify the gateway is
         # reachable *before* we accept dispatches. Logs ERROR if the
         # gateway cannot be contacted so operators notice immediately.
         try:
@@ -177,7 +177,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         lifespan=lifespan or _lifespan,
     )
 
-    # TEL-01: Instrument incoming requests so the worker's spans participate
+    # Instrument incoming requests so the worker's spans participate
     # in distributed traces started by the gateway (W3C traceparent extraction).
     app.add_middleware(cast("Any", TelemetryMiddleware))
 
@@ -195,7 +195,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
         executor: Executor = app.state.executor
         tg = app.state.task_group
 
-        # WPA-001: Reject dispatch when concurrent thread cap is reached.
+        # Reject dispatch when concurrent thread cap is reached.
         if executor.at_capacity():
             raise HTTPException(
                 status_code=429,
@@ -224,7 +224,7 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
     @app.post("/admin/shutdown", status_code=202)
     async def shutdown_endpoint() -> dict[str, str]:
-        """Initiate graceful worker shutdown (PROD-038)."""
+        """Initiate graceful worker shutdown."""
         os.kill(os.getpid(), signal.SIGTERM)
         return {"detail": "shutdown initiated"}
 

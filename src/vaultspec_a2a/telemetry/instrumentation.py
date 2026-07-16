@@ -1,6 +1,6 @@
 """OpenTelemetry TracerProvider and MeterProvider setup for the orchestrator.
 
-ADR-010 mandates OTel from day one. This module configures the global
+OTel is enabled from day one. This module configures the global
 TracerProvider and MeterProvider with OTLP export when the optional
 ``opentelemetry-sdk`` and ``opentelemetry-exporter-otlp-proto-grpc``
 packages are installed. Without those packages the opentelemetry-api
@@ -11,12 +11,12 @@ LangSmith tracing is configured separately via environment variables
 (``LANGSMITH_TRACING`` / ``LANGSMITH_API_KEY``) and does not require
 any code here — LangChain reads those variables automatically on import.
 
-Credential safety (ADR-002): this module never reads, logs, or forwards
+Credential safety: this module never reads, logs, or forwards
 ``CLAUDE_CODE_OAUTH_TOKEN``, ``ANTHROPIC_API_KEY``, or any other secret.
 The only env vars consumed are the standard OTel and LangSmith vars listed
 below.
 
-Environment variables consumed (TEL-M5: all read at import time):
+Environment variables consumed (all read at import time):
     OTEL_SERVICE_NAME: Service name emitted in every span (default: vaultspec-a2a).
     OTEL_SERVICE_VERSION: Version string (default: 0.1.0).
     OTEL_EXPORTER_OTLP_ENDPOINT: gRPC endpoint (default: http://localhost:4317).
@@ -45,13 +45,13 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# M32/TEL-M5: These module-level env var reads are intentional.  OTel SDK
+# These module-level env var reads are intentional.  OTel SDK
 # configuration must be determined at import time so that ``get_tracer`` and
 # ``get_meter`` callers at module scope (e.g. the aggregator) receive a correctly
 # configured provider.  Changing telemetry config at runtime is explicitly out of
 # scope for this service — operators restart the process to pick up new settings.
 #
-# TEL-M5: _SDK_DISABLED (and other constants below) are evaluated once at import
+# _SDK_DISABLED (and other constants below) are evaluated once at import
 # time.  Tests that need to vary this behaviour must use subprocess isolation
 # (e.g. ``subprocess.run([sys.executable, ...])`` with a custom env dict) rather
 # than monkeypatching the env var after import — the constant will not re-evaluate.
@@ -113,7 +113,7 @@ class TelemetryConfig:
 
 
 def _check_sdk() -> bool:
-    """Return True — opentelemetry-sdk is a mandatory dependency (ADR-015)."""
+    """Return True — opentelemetry-sdk is a mandatory dependency."""
     return importlib.util.find_spec("opentelemetry.sdk.trace") is not None
 
 
@@ -186,7 +186,7 @@ def _build_sdk_meter_provider(
 ) -> None:
     """Configure the global MeterProvider when SDK is available.
 
-    ADR-015: opentelemetry-sdk is a mandatory dependency — no ImportError guard.
+    opentelemetry-sdk is a mandatory dependency — no ImportError guard.
 
     Args:
         otlp_available: Whether the OTLP gRPC metric exporter is installed.
@@ -228,7 +228,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
 
     This function is idempotent — calling it multiple times is safe because
     ``set_tracer_provider`` is a no-op if a non-proxy provider is already set.
-    Call once during FastAPI lifespan startup (ADR-007).
+    Call once during FastAPI lifespan startup.
 
     Args:
         service_name: Override the OTel ``service.name`` resource attribute.
@@ -287,7 +287,7 @@ def configure_telemetry(*, service_name: str | None = None) -> TelemetryConfig:
             _LANGSMITH_PROJECT,
         )
 
-    # TEL-H2: opentelemetry-instrumentation-fastapi is declared as a dependency
+    # opentelemetry-instrumentation-fastapi is declared as a dependency
     # but FastAPIInstrumentor().instrument() is intentionally NOT called here.
     # Auto-instrumentation via FastAPIInstrumentor conflicts with our custom
     # TelemetryMiddleware which already instruments every HTTP request with

@@ -1,4 +1,4 @@
-"""Unit tests for the semantic authoring-phase projection (P02.S04).
+"""Unit tests for the semantic authoring-phase projection.
 
 Pure logic - the projection maps thread status, checkpoint next-node position,
 and repair posture to the product-safe phase vocabulary the Rust backend reads.

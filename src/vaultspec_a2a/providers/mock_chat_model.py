@@ -139,7 +139,7 @@ class MockChatModel(BaseChatModel):
         """Route to the correct VidaiMock tape based on agent config."""
         agent_config = kwargs.pop("agent_config", None)
 
-        # PROV-M2: Route to the right tape via URL path matching.
+        # Route to the right tape via URL path matching.
         if agent_config:
             kwargs.setdefault("model_name", agent_config.id)
             default_base_url = f"http://localhost:8100/{agent_config.id}/v1"
@@ -203,7 +203,7 @@ class MockChatModel(BaseChatModel):
         run_manager: AsyncCallbackManagerForLLMRun | None = None,
         **kwargs: Any,
     ) -> AsyncIterator[ChatGenerationChunk]:
-        """Proxy to VidaiMock via native SSE streaming (ADR-032 §2).
+        """Proxy to VidaiMock via native SSE streaming.
 
         Sends ``stream: true`` and iterates ``data:`` lines from the SSE
         response.  VidaiMock v0.1.2 sends tool calls as complete single

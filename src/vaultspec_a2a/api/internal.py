@@ -1,4 +1,4 @@
-"""Internal endpoints for worker <-> gateway communication (ADR-031).
+"""Internal endpoints for worker <-> gateway communication.
 
 The worker process communicates with the gateway via two channels:
 
@@ -68,11 +68,11 @@ def _validate_event_envelope(
 async def _verify_internal_token(
     authorization: str | None = Header(None),
 ) -> None:
-    """WPA-002: Verify bearer token for internal IPC endpoints.
+    """Verify bearer token for internal IPC endpoints.
 
     Skipped when settings.internal_token is None **and** the environment
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
-    configuration error (PROD-017).
+    configuration error.
     """
     from ..utils.enums import Environment
 
@@ -177,7 +177,7 @@ async def _relay_worker_event(websocket: WebSocket, msg: dict, raw: str) -> None
 @internal_router.websocket("/ws")
 async def worker_ws_endpoint(websocket: WebSocket) -> None:
     """Internal WebSocket -- receives events and heartbeats from the worker."""
-    # AUTH-02: WebSocket routes bypass router-level Depends(), so verify
+    # WebSocket routes bypass router-level Depends(), so verify
     # the bearer token manually before accepting the connection.
     if settings.internal_token is not None:
         token = websocket.headers.get("authorization", "").removeprefix("Bearer ")
@@ -195,7 +195,7 @@ async def worker_ws_endpoint(websocket: WebSocket) -> None:
     try:
         while True:
             raw = await websocket.receive_text()
-            # API-02: reject oversized frames (1 MB) to prevent memory exhaustion.
+            # Reject oversized frames (1 MB) to prevent memory exhaustion.
             if len(raw) > settings.internal_max_frame_bytes:
                 logger.warning(
                     "Dropping oversized internal WS frame (%d bytes)", len(raw)
@@ -258,7 +258,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
     sending a WebSocket frame.  The payload format matches
     ``WorkerEventEnvelope``.
     """
-    # API-03: reject oversized payloads (1 MB) on internal HTTP path.
+    # Reject oversized payloads (1 MB) on internal HTTP path.
     content_length = request.headers.get("content-length")
     try:
         if (
@@ -297,7 +297,7 @@ async def receive_worker_event(request: Request) -> dict[str, str]:
 
 @internal_router.post("/events/batch")
 async def receive_worker_event_batch(request: Request) -> dict[str, str]:
-    """Receive a batch of events from the worker (CRIT-02).
+    """Receive a batch of events from the worker.
 
     The ``WorkerBridge`` accumulates events for a short interval then
     POSTs them as a single ``{"events": [...]}`` payload.  Each entry

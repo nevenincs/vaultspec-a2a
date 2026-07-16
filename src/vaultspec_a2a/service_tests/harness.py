@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 COMPOSE_FILE = REPO_ROOT / "service" / "docker-compose.integration.yml"
-# Service-test runtime lives in the machine-global A2A home (ADR R8), not inside
+# Service-test runtime lives in the machine-global A2A home, not inside
 # .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 RUNTIME_ROOT = settings.a2a_home / "runtime" / "service-tests"
 

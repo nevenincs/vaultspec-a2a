@@ -1,4 +1,4 @@
-"""Production ``DocumentProposalSubmitter`` for document phase gates (ADR PW1).
+"""Production ``DocumentProposalSubmitter`` for document phase gates.
 
 The phase gate (``graph/nodes/phase_gate.py``) calls an injected
 :class:`~vaultspec_a2a.graph.nodes.phase_gate.DocumentProposalSubmitter` before
@@ -12,12 +12,12 @@ Idempotency is anchored in DURABLE run material, not an in-memory sequence. Ther
 is ONE engine session per run (``run_id = thread_id``): a constant
 ``create_session`` key makes every call a create-or-resume of the same session,
 reused across the research and adr phases. Each mutating call passes an explicit
-key derived from ``thread_id + phase + command + revision cycle`` (PW1), so each
+key derived from ``thread_id + phase + command + revision cycle``, so each
 phase/revision is its own changeset and proposal, and every key is reproduced
 byte-for-byte on replay and after a worker restart — the engine dedupes, never
 creating a second session, changeset, or proposal.
 
-Token hygiene (conformance R7): the submitter holds NO token. It reads the
+Token hygiene: the submitter holds NO token. It reads the
 machine bearer and the calling role's per-actor token from the worker-scoped
 :class:`~vaultspec_a2a.worker.token_store.RunTokenStore` at call time, so a
 restart re-resolves identity correctly and no token is ever captured, logged, or
@@ -75,7 +75,7 @@ _TEMPLATE_ANNOTATION = "<!--"
 
 #: The opening frontmatter fence, possibly GLUED to leading preamble narration on
 #: the same line (a capable writer sometimes prefixes orientation prose before the
-#: document — observed live in P04.S10). Matched as a ``---`` immediately followed
+#: document). Matched as a ``---`` immediately followed
 #: by a newline and a YAML key line (``tags:`` etc.), which distinguishes the true
 #: frontmatter opening from an incidental ``---`` in prose. Everything before it is
 #: preamble and is stripped so the submitted body begins at the frontmatter.
@@ -103,12 +103,12 @@ _HTML_COMMENT_RE = re.compile(r"<!--.*?-->", re.DOTALL)
 # the H1 token ``# {feature} adr: {title} | (**status:** `accepted`)``, never a
 # level-two ``Status`` heading. The two-step apply preserves the authored body, so a
 # ## Status section survives to disk and trips `adr-status`; the submit-node refuses
-# it (ADR phase only) and routes the author to rewrite the H1 token (P04.S16).
+# it (ADR phase only) and routes the author to rewrite the H1 token.
 _LEGACY_STATUS_HEADING_RE = re.compile(r"^##[ \t]+Status[ \t]*$", re.MULTILINE)
 
 
 class SubmitterError(AuthoringError):
-    """Base of the fail-closed submitter error family (ADR PW4).
+    """Base of the fail-closed submitter error family.
 
     Every member is actionable and surfaced as a truthful run failure state, so a
     run that cannot author never proceeds vaguely.
@@ -144,8 +144,8 @@ class DocumentConformanceError(ProposalRevisionRequiredError):
     fatal :class:`SubmitterError`: the submit node routes it back into the phase's
     inner revision loop as REVISION REQUIRED with these notes as the reviewer
     signal, rather than failing the run or proposing a body the engine would reject
-    at materialization (P04.S10 finding: an AUTO gate applied an empty scaffold; the
-    fixed engine now fails such a body closed, so it must never be proposed).
+    at materialization (an AUTO gate once applied an empty scaffold; the engine
+    now fails such a body closed, so it must never be proposed).
     """
 
 
@@ -164,7 +164,7 @@ class ProposalDeniedError(SubmitterError):
 
 @dataclass(frozen=True, slots=True)
 class PhaseAuthoringSpec:
-    """Per-phase authoring configuration, supplied by the construction site (S13).
+    """Per-phase authoring configuration, supplied by the construction site.
 
     Parameters
     ----------
@@ -181,8 +181,8 @@ class PhaseAuthoringSpec:
         ``adr``).
     completion_sentinel:
         The machine-checkable stage-completion line the writer persona ends its
-        turn with (``RESEARCH READY`` / ``ADR READY``, ADR S48). The graph-
-        submitter mechanism (ADR PW3) submits the writer's message body verbatim,
+        turn with (``RESEARCH READY`` / ``ADR READY``). The graph-
+        submitter mechanism submits the writer's message body verbatim,
         so this trailing marker MUST be stripped before submit or it lands in the
         materialized document. ``None`` disables stripping.
     """
@@ -193,7 +193,7 @@ class PhaseAuthoringSpec:
     completion_sentinel: str | None = None
 
 
-#: The `.vault/` sub-directories whose applied documents ground an ADR (P04.S16).
+#: The `.vault/` sub-directories whose applied documents ground an ADR.
 _GROUNDING_DIRS: tuple[str, ...] = ("research", "reference")
 
 
@@ -310,8 +310,8 @@ def _strip_leading_preamble(body: str) -> str:
     A conformant vault document begins at its ``---`` frontmatter fence. A capable
     writer sometimes prefixes orientation prose ("I'll orient first…") before it,
     and that preamble displaces the opening fence so the whole document misparses
-    (its ``related:`` wiki-links are then read as body links — the P04.S10 live
-    failure). When the frontmatter opening is located (on its own line or glued to
+    (its ``related:`` wiki-links are then read as body links). When the frontmatter
+    opening is located (on its own line or glued to
     the end of the preamble), everything before it is dropped; a body with no
     locatable frontmatter opening is returned unchanged for :func:`_conformance_notes`
     to flag.
@@ -390,9 +390,9 @@ def _conformance_notes(body: str, doc_type: str | None = None) -> list[str]:
 
 
 class DocumentProposalSubmitter:
-    """Whole-document propose-and-submit for a document phase (ADR PW1).
+    """Whole-document propose-and-submit for a document phase.
 
-    Constructed per run by the worker lifecycle (S13/PW2) from run-start facts:
+    Constructed per run by the worker lifecycle from run-start facts:
     the engine origin, the run's :class:`RunTokenStore`, the feature tag, and the
     per-phase authoring specs. Conforms to the phase-gate
     ``DocumentProposalSubmitter`` Protocol.
@@ -481,7 +481,7 @@ class DocumentProposalSubmitter:
             # reused across the research and adr phases. The per-command keys below
             # add phase + revision so each phase/revision is its own changeset and
             # proposal, and all keys are reproduced byte-for-byte on replay and
-            # after a restart (PW1).
+            # after a restart.
             session = AuthoringSession(client, thread_id)
             created_session = await session.create_session(
                 scope="repo",
@@ -490,7 +490,7 @@ class DocumentProposalSubmitter:
             )
             self._reject_denial("create_session", created_session)
 
-            # Grounding references (P04.S16): the ADR must cite the feature's applied
+            # Grounding references: the ADR must cite the feature's applied
             # research/reference docs in its `related:` frontmatter, but the two-step
             # create+set-body apply replaces the body while the scaffold's frontmatter
             # wins, so the author cannot self-author the link. Resolve the grounding
@@ -558,7 +558,7 @@ class DocumentProposalSubmitter:
         byte-identical, deduped no-op. ``related`` (grounding wiki-links) rides the
         provisional-create target so the engine writes it via ``vault add --related``
         at apply; it is omitted when empty (the engine defaults it) to keep the op
-        byte-identical to the pre-S16 shape for phases with no grounding.
+        byte-identical to the grounding-free shape for phases with no grounding.
         """
         document: dict[str, Any] = {
             "kind": "provisional_create",

@@ -1,4 +1,4 @@
-"""The ``vaultspec-a2a`` operator CLI package (ADR R9).
+"""The ``vaultspec-a2a`` operator CLI package.
 
 Thin client of the five-verb gateway surface. The public entry point is
 :func:`main`, wired as the ``vaultspec-a2a`` console script.

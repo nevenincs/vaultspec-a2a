@@ -1,4 +1,4 @@
-"""Worker-scoped registry of per-run actor token bundles (ADR R7).
+"""Worker-scoped registry of per-run actor token bundles.
 
 A run's engine-provisioned :class:`~vaultspec_a2a.thread.actor_tokens.ActorTokenBundle`
 reaches the worker process on the dispatch payload. This store holds it in memory
@@ -9,8 +9,8 @@ checkpointed, and — via the bundle's redacting repr — never reach a log line
 
 Every read is scoped to a single role (:meth:`actor_token`), so the authoring
 bridge for one worker can only ever obtain that worker's own token; a bug in one
-role's binding cannot hand another role's principal across (R7: roles never
-share). The store is the single injection seam the per-run authoring binding
+role's binding cannot hand another role's principal across. The store is the
+single injection seam the per-run authoring binding
 consumes when it assembles a worker's tool surface.
 
 The worker process runs a single asyncio event loop, so the plain-dict backing

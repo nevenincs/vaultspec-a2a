@@ -1,4 +1,4 @@
-"""Unit tests for workspace-aware preset discovery and preset markers (P01.S02).
+"""Unit tests for workspace-aware preset discovery and preset markers.
 
 Real filesystem fixtures (tmp workspaces with real TOML), no mocks.
 """

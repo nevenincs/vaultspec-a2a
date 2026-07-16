@@ -1,11 +1,12 @@
-"""Live proof of the production DocumentProposalSubmitter (ADR PW1, P05.S12).
+"""Live proof of the production DocumentProposalSubmitter.
 
 Mock-free against the running dashboard engine on loopback, resolved through the
 discovery-file contract (``service`` marked, skipped when no engine is reachable
 — an infrastructure gate, not a masked failure). Set
 ``VAULTSPEC_ENGINE_SERVICE_JSON`` to the engine's discovery file.
 
-Proves the properties PW1/PW5 demand on real engine state:
+Proves the idempotency and replay-safety properties this submitter demands on
+real engine state:
 
 - a whole-document propose-and-submit returns a real engine proposal id;
 - ONE session is reused across calls (the constant create_session key dedupes);

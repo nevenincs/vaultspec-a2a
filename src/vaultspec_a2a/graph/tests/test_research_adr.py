@@ -1,4 +1,4 @@
-"""Tests for the research_adr topology compilation (P02.S06).
+"""Tests for the research_adr topology compilation.
 
 The topology is compiled from the real ``vaultspec-adr-research`` preset with a
 stub provider factory (FakeChatModel) and a fake proposal submitter, then driven

@@ -13,7 +13,7 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class DomainConfig(BaseModel):
     """Behavioural knobs consumed by Layer 1 (domain) modules."""
 
-    # -- Event aggregator debounce / buffer (D-20) ---------------------------
+    # -- Event aggregator debounce / buffer --------------------------------
 
     tool_call_debounce_seconds: float = Field(
         default=0.100,
@@ -54,7 +54,7 @@ class DomainConfig(BaseModel):
         description="Aggregator: timeout (seconds) for checkpointer aget_state calls.",
     )
 
-    # -- Context window sizing (D-21) ----------------------------------------
+    # -- Context window sizing -----------------------------------------------
 
     context_limit_tokens: int = Field(
         default=120_000,
@@ -67,7 +67,7 @@ class DomainConfig(BaseModel):
         ),
     )
 
-    # -- Workspace / context reference caps (D-22) ----------------------------
+    # -- Workspace / context reference caps ----------------------------------
 
     anchor_path_cap: int = Field(
         default=10,
@@ -98,14 +98,14 @@ class DomainConfig(BaseModel):
         ),
     )
 
-    # -- LangGraph execution (D-16) ------------------------------------------
+    # -- LangGraph execution -------------------------------------------------
 
     graph_recursion_limit: int = Field(
         default=100,
         description="LangGraph recursion limit passed to every graph invocation.",
     )
 
-    # -- Worker executor (D-18) ----------------------------------------------
+    # -- Worker executor -----------------------------------------------------
 
     max_cached_graphs: int = Field(
         default=32,
@@ -115,7 +115,7 @@ class DomainConfig(BaseModel):
     )
     max_concurrent_threads: int = Field(
         default=5,
-        description="Max concurrent graph executions per worker (WPA-001).",
+        description="Max concurrent graph executions per worker.",
     )
 
 

@@ -1,8 +1,8 @@
-"""Tests for graph.tools.task_queue (ADR R5, ADR-021 revised).
+"""Tests for graph.tools.task_queue (revised contract).
 
 The mark-complete tool is exercised through the real ``SqlTaskQueuePort``
 adapter backed by real in-memory aiosqlite — no mocks, no fakes. The tool
-follows the ADR-021 revised contract: a single ``@tool`` returning
+follows the revised contract: a single ``@tool`` returning
 ``Command(update=...)`` carrying the ``current_task_id`` advance and a
 ``ToolMessage`` keyed by the injected ``tool_call_id``. The pure render helper
 is tested directly.

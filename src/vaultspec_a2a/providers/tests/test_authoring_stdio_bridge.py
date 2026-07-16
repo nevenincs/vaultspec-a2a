@@ -1,4 +1,4 @@
-"""Live-engine proof that the stdio authoring bridge serves + executes (R4).
+"""Live-engine proof that the stdio authoring bridge serves + executes.
 
 No mocks: spawns the real per-run stdio bridge subprocess
 (``python -m vaultspec_a2a.protocols.mcp.authoring_stdio``) via a real MCP stdio

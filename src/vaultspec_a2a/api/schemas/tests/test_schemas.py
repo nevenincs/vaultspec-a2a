@@ -571,7 +571,7 @@ class TestSnapshotModels:
 class TestMissingFacadeTypes:
     """Round-trip tests for types previously missing from the schemas facade.
 
-    API-M4: SendMessageResponse, AgentStatusEntry, PendingPermission were
+    SendMessageResponse, AgentStatusEntry, PendingPermission were
     missing from schemas/__init__.py — this class verifies they are now
     importable and round-trip correctly.
     """

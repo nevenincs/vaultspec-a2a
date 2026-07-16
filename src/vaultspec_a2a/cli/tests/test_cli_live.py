@@ -1,4 +1,4 @@
-"""Live coverage of the operator CLI against a real gateway (ADR R9).
+"""Live coverage of the operator CLI against a real gateway.
 
 The CLI is a thin HTTP client of the five-verb surface, so it is proven the only
 honest way: run the real gateway app on a real socket (uvicorn in a background

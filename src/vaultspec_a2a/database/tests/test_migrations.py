@@ -1,4 +1,4 @@
-"""Tests for Alembic migration framework (ADR-029).
+"""Tests for Alembic migration framework.
 
 Verifies:
 1. Upgrade head creates all 4 app-owned tables

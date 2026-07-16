@@ -1,4 +1,4 @@
-"""Unit tests for the run-start eligibility policy (a2a-edge-conformance P01.S01).
+"""Unit tests for the run-start eligibility policy.
 
 Pure logic over real ``TeamConfig`` objects loaded from the bundled presets and a
 real ``ActorTokenBundle`` - no mocks. The document-authoring preset is

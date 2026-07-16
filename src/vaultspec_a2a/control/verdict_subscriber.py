@@ -1,4 +1,4 @@
-"""Engine authoring-verdict subscriber (ADR R3, P03.S07).
+"""Engine authoring-verdict subscriber.
 
 A supervised background consumer of the dashboard engine's authoring lifecycle
 stream. It resolves a live engine, reads its persisted cursor, opens
@@ -91,11 +91,10 @@ _PARKED_RECONCILE_INTERVAL_SECONDS = 10.0
 # fresh, orphaning the run). It is the
 # durable "this gate's verdict is being resumed" marker written BEFORE dispatch so
 # a second trigger (SSE event / reconcile sweep / gap recovery) for the SAME gate
-# skips instead of double-dispatching (P04.S10 request_changes-recovery race,
-# e106b7a). It is a lease, not a fire-once flag: a claim older than the TTL is
-# STALE, so a still-parked run whose dispatch was lost (process died or dispatch
-# failed in the claim->resume window) is legitimately re-driven rather than
-# orphaned. This is the GAP-B ordering symmetry (ddb8659) applied to resume:
+# skips instead of double-dispatching. It is a lease, not a fire-once flag: a claim
+# older than the TTL is STALE, so a still-parked run whose dispatch was lost
+# (process died or dispatch failed in the claim->resume window) is legitimately
+# re-driven rather than orphaned. This is an ordering symmetry applied to resume:
 # durable first, liveness preserved.
 _RESUME_CLAIM_FIELD = "resume_claim"
 
@@ -297,7 +296,7 @@ class VerdictSubscriber:
         not the transient ``approved``) - handled locally so the shared
         `changeset_status_verdict`/gap path keeps its narrower semantics.
 
-        Reject recovery (P04.S10): a HUMAN ``request_changes`` (or edit-proposal
+        Reject recovery: a HUMAN ``request_changes`` (or edit-proposal
         reject) returns its changeset to ``draft``, so the changeset status carries
         NO verdict - the reviewer decision survives only on the resolved approval
         record. `_proposal_reconcile_verdict` therefore falls back to the approval
@@ -324,7 +323,7 @@ class VerdictSubscriber:
                 status=ThreadStatus.INPUT_REQUIRED,
                 limit=self._parked_thread_limit,
             )
-            # P04.S10 recovery_required wedge: a run whose checkpoint is parked at
+            # recovery_required wedge: a run whose checkpoint is parked at
             # a gate interrupt can be left mis-statused RUNNING rather than
             # INPUT_REQUIRED - either because a prior gate's verdict resume set
             # RUNNING (``_resume_with_verdict``, optimistic) and that write raced
@@ -588,12 +587,12 @@ class VerdictSubscriber:
         permission row is resolved on a successful resume - otherwise the row is
         stranded pending while the checkpoint interrupt it belonged to is gone, and
         run-status (the authoritative recovery read) asserts ``recovery_required``
-        and masks the real ``awaiting_adr_decision`` phase (P04.S10 GAP D). Only the
+        and masks the real ``awaiting_adr_decision`` phase. Only the
         rows that existed BEFORE this resume are resolved; the next gate parks with
         its own fresh row after the run advances.
 
-        Two ordering invariants close the intermittent request_changes-recovery race
-        (P04.S10, e106b7a), both keyed on the run's CURRENT gate proposal:
+        Two ordering invariants close the intermittent request_changes-recovery
+        race, both keyed on the run's CURRENT gate proposal:
 
         - **Gate-precision.** Resume only when the run's current
           ``gate_pending_proposal_id`` is among ``correlated_ids`` - the ids the
@@ -704,7 +703,7 @@ class VerdictSubscriber:
         async with self._session_factory() as db:
             # Resolve the answered gate's durable permission row(s) so run-status
             # does not strand them as recovery_required drift once the run advances
-            # past the gate's checkpoint interrupt (GAP D).
+            # past the gate's checkpoint interrupt.
             for request_id in parked_gate_request_ids:
                 await mark_permission_request_applied(db, request_id=request_id)
             await update_thread_status(db, thread_id, ThreadStatus.RUNNING)

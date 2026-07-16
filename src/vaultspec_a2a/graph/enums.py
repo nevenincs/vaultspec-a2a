@@ -50,7 +50,7 @@ class AgentState(StrEnum):
 class AgentLifecycleState(StrEnum):
     """Observable agent states exposed to the frontend.
 
-    Maps to ADR-003 MCP states. Distinct from ``AgentState`` which tracks
+    Maps to the MCP states. Distinct from ``AgentState`` which tracks
     internal process lifecycle (init/ready/running/error/done).
     """
 
@@ -179,9 +179,9 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "gpt-5.6-sol",
         Model.MAX: "gpt-5.6-sol",
     },
-    # Deterministic in-process acceptance provider (PW7 harness): content is
-    # role-keyed, not model-keyed, so these names are inert selectors kept only to
-    # satisfy the MODEL_MAP contract.
+    # Deterministic in-process acceptance provider: content is role-keyed, not
+    # model-keyed, so these names are inert selectors kept only to satisfy the
+    # MODEL_MAP contract.
     Provider.DETERMINISTIC: {
         Model.LOW: "deterministic",
         Model.MID: "deterministic",
@@ -201,8 +201,8 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.MAX: "glm-5",
     },
     # Z.ai serves the same GLM family over an Anthropic-Messages-compatible
-    # endpoint consumed through the Claude ACP path (see multi-provider-execution
-    # ADR); the model names mirror Provider.ZHIPU.
+    # endpoint consumed through the Claude ACP path; the model names mirror
+    # Provider.ZHIPU.
     Provider.ZAI: {
         Model.LOW: "glm-4.7-flash",
         Model.MID: "glm-4.7-flagship",
@@ -226,7 +226,7 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
 
 
 # ---------------------------------------------------------------------------
-# research_adr node -> semantic authoring phase (a2a-edge-conformance)
+# research_adr node -> semantic authoring phase
 # ---------------------------------------------------------------------------
 
 # Canonical map from a research_adr structural node name to the product-safe
@@ -248,7 +248,7 @@ RESEARCH_ADR_NODE_PHASE: dict[str, str] = {
 def research_adr_semantic_phase(node_name: str) -> str | None:
     """Map a research_adr node name to its semantic authoring phase, or None.
 
-    Strips the ADR-020 ``mount_`` prefix, resolves the dispatch and researcher
+    Strips the ``mount_`` prefix, resolves the dispatch and researcher
     fan-out nodes to ``researching`` by prefix, and looks up the remaining
     structural nodes in :data:`RESEARCH_ADR_NODE_PHASE`. Returns None for a node
     that is not part of the research_adr topology (a coder node, the supervisor,

@@ -126,7 +126,7 @@ async def test_compile_graph_structure(
 
 
 # ---------------------------------------------------------------------------
-# workspace_root kwarg (ADR-014)
+# workspace_root kwarg
 # ---------------------------------------------------------------------------
 
 
@@ -474,7 +474,7 @@ async def test_compile_team_graph_step_timeout_falls_back_to_toml(
 
 
 # ---------------------------------------------------------------------------
-# TOML-05 -- directive injection + recursion_limit
+# directive injection + recursion_limit
 # ---------------------------------------------------------------------------
 
 
@@ -567,7 +567,7 @@ async def test_compile_team_graph_does_not_set_recursion_limit(
 
 
 # ---------------------------------------------------------------------------
-# TOML-05 Scope 2 -- provider_fallback chain
+# provider_fallback chain
 # ---------------------------------------------------------------------------
 
 
@@ -657,9 +657,9 @@ async def test_research_producer_injects_scoped_conventions(tmp_path) -> None:
     """The researcher's model turn receives the role-scoped bundled conventions.
 
     The researcher is the fourth research_adr document persona but runs through
-    ``_make_research_producer`` (not ``_build_worker_messages``); this pins the P04
-    follow-on that wires the scoped document-authoring conventions into its turn so
-    it is not conventions-blind (graph-agent-framework-harness, S09 flag).
+    ``_make_research_producer`` (not ``_build_worker_messages``); this pins the
+    behavior that wires the scoped document-authoring conventions into its turn so
+    it is not conventions-blind.
     """
     from typing import Any, cast
 

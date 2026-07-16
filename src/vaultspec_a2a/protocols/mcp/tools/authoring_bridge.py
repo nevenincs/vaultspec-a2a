@@ -1,4 +1,4 @@
-"""Bridge the engine's served tool catalog into agent-facing MCP tools (ADR R4).
+"""Bridge the engine's served tool catalog into agent-facing MCP tools.
 
 The engine owns the agent-tool catalog; this module turns a per-run
 :class:`~vaultspec_a2a.authoring.catalog.CatalogSnapshot` into a live MCP server
@@ -10,7 +10,7 @@ engine's run-scoped execute endpoint via the injected dispatcher.
 
 Only the catalog's tools are surfaced, so the agent gets propose and read tools
 and no vault-write path: no filesystem-write tool exists in the engine catalog
-by construction, and the ACP fs-write RPC is separately denied (S11).
+by construction, and the ACP fs-write RPC is separately denied.
 """
 
 from __future__ import annotations

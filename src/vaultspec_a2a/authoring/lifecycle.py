@@ -1,4 +1,4 @@
-"""Typed decoding of the engine authoring lifecycle SSE stream (ADR R3, P03.S07).
+"""Typed decoding of the engine authoring lifecycle SSE stream.
 
 The engine's ``GET /authoring/v1/events`` endpoint replays the durable
 transactional outbox as Server-Sent Events. Three frame types appear on the

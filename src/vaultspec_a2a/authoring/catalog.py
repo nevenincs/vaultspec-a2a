@@ -1,4 +1,4 @@
-"""Served agent-tool catalog: fetch, snapshot, and execute routing (ADR R4).
+"""Served agent-tool catalog: fetch, snapshot, and execute routing.
 
 The engine owns the agent-tool catalog and versions it with itself
 (``schema_version = authoring.semantic_tools.v1``). Rather than hand-roll
@@ -10,7 +10,7 @@ under the calling role's actor token.
 This module owns the engine-facing half: parsing the catalog into a typed
 snapshot and issuing the ``AgentToolCall`` to ``/v1/runs/{run_id}/agent-tools/
 execute``. Turning a snapshot into MCP tool registrations lives in
-``protocols/mcp/tools`` and the ACP session wiring in ``providers`` (S19).
+``protocols/mcp/tools`` and the ACP session wiring in ``providers``.
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ _CATALOG_PATH = "/v1/agent-tools"
 
 @dataclass(frozen=True)
 class AgentTool:
-    """One served agent tool as the bridge needs it (ADR R4).
+    """One served agent tool as the bridge needs it.
 
     The bridge mirrors ``name`` + ``input_schema`` + ``risk_tier`` +
     ``permission_requirement`` — a higher-level vocabulary than the wire route

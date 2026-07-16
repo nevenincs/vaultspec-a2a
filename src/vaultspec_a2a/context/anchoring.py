@@ -3,8 +3,6 @@
 Builds a structured summary of active SDD feature context from TeamState.
 This summary is injected as a SystemMessage at position [1] (after persona,
 before history) on every node invocation when an active_feature is set.
-
-ADR-022: Contextual Anchoring in Graph Lifecycle.
 """
 
 from __future__ import annotations

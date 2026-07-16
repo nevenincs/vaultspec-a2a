@@ -1,6 +1,6 @@
 """Live Z.ai fidelity probe (service-marked, re-armable from one env var).
 
-Closes the multi-provider-execution ADR's flagged unknown: whether Z.ai's
+Closes a flagged unknown: whether Z.ai's
 Anthropic-Messages-compatible gateway is faithful enough — streaming shape AND
 tool-calling — to drive the reused Claude ACP path. This is a REAL turn against
 the REAL endpoint through claude-agent-acp; no mocks, no fakes, no hardcoded

@@ -123,7 +123,7 @@ async def _seed_parked_thread(
 async def test_resume_resolves_the_answered_document_gate_permission_row(
     tmp_path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """A subscriber-driven resume resolves the answered gate's durable row (GAP D).
+    """A subscriber-driven resume resolves the answered gate's durable row.
 
     The document gate parks with a durable ``document_approval_request`` permission
     row; the verdict subscriber resumes the run past it via ``Command(resume)``,
@@ -576,7 +576,7 @@ def test_gate_resume_verdict_maps_applied_as_approved() -> None:
 def test_proposal_reconcile_verdict_recovers_missed_request_changes() -> None:
     """A rejected (request_changes'd) proposal is recovered from its approval.
 
-    The exact P04.S10 stall shape (captured live from the engine recovery
+    The exact stall shape (captured live from the engine recovery
     snapshot): a HUMAN edit-proposal reject returns the changeset to ``draft`` -
     the changeset status carries no verdict - but the resolved approval record
     holds ``decision=request_changes``. The reconcile verdict resolver must read
@@ -748,14 +748,14 @@ def _recording_worker() -> tuple[Starlette, list[dict[str, object]]]:
 async def test_resume_skips_a_superseded_gate_verdict(
     tmp_path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """Gate-precision: a late verdict for an EARLIER gate is not applied (P04.S10).
+    """Gate-precision: a late verdict for an EARLIER gate is not applied.
 
     The run has advanced to the ADR gate (gate_pending = ``proposal:adr``) but still
     carries the research gate's proposal id in its ACCUMULATED authoring ids. A late
     research request_changes verdict, matched only by that accumulated id, must NOT
     resume the run - its current gate is not the one the verdict answers, so applying
     it would consume the ADR gate's interrupt with a stale verdict and wedge the run
-    at ``next_nodes=[]``. No dispatch occurs and the run stays parked (e106b7a).
+    at ``next_nodes=[]``. No dispatch occurs and the run stays parked.
     """
     app, calls = _recording_worker()
     checkpoints = tmp_path / "cp-superseded.db"
@@ -788,7 +788,7 @@ async def test_resume_skips_a_superseded_gate_verdict(
 async def test_fresh_resume_claim_dedups_double_dispatch(
     tmp_path, session_factory: async_sessionmaker[AsyncSession]
 ) -> None:
-    """A second trigger for the SAME gate skips on the fresh claim (P04.S10).
+    """A second trigger for the SAME gate skips on the fresh claim.
 
     Two triggers (e.g. the SSE per-event path and the reconcile sweep) can fire for
     one gate's verdict. The first writes a durable claim before dispatch; the second,

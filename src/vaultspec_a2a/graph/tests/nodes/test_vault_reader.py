@@ -82,7 +82,7 @@ async def test_mount_refreshes_vault_index_for_documents_written_mid_run(
 
     The index is seeded empty; the mount node re-scans .vault/ each pass, so a
     research document written during the run must appear in both the mounted
-    context and the returned vault_index update (S01).
+    context and the returned vault_index update.
     """
     research_dir = tmp_path / ".vault" / "research"
     research_dir.mkdir(parents=True)
@@ -123,7 +123,7 @@ async def test_mount_refresh_preserves_prior_index_entries(tmp_path: Path) -> No
 
 
 # ---------------------------------------------------------------------------
-# Database-backed queue injection (ADR R5) — real SQLite via SqlTaskQueuePort
+# Database-backed queue injection — real SQLite via SqlTaskQueuePort
 # ---------------------------------------------------------------------------
 
 

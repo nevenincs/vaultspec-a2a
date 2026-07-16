@@ -1,9 +1,9 @@
-"""Unit tests for the authoring client's pure logic (ADR R3).
+"""Unit tests for the authoring client's pure logic.
 
 No mocks: id validation, idempotency derivation, envelope/denial/error
 decoding, header assembly, and URL resolution are pure functions, and the
 client decoder is exercised against real ``httpx.Response`` objects. Live HTTP
-behaviour against the running engine is covered by the S17 integration tests.
+behaviour against the running engine is covered by the live integration tests.
 """
 
 import httpx

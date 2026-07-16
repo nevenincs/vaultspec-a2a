@@ -1,4 +1,4 @@
-"""Gateway-side actor-token threading and non-persistence (ADR R7).
+"""Gateway-side actor-token threading and non-persistence.
 
 Proves the run-start intake path does two things with the engine-provisioned
 token bundle: it threads the real tokens onto the dispatch payload the worker

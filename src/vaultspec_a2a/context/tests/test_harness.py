@@ -1,4 +1,4 @@
-"""Tests for the agent-harness verifier (agent-harness-provisioning P01.S01).
+"""Tests for the agent-harness verifier.
 
 Real filesystem only: each test provisions (or under-provisions) a genuine
 ``.vaultspec/`` corpus in a ``tmp_path`` workspace and asserts the verdict.

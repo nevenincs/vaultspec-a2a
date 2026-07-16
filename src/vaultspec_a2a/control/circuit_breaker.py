@@ -1,4 +1,4 @@
-"""Worker circuit breaker (PROD-028).
+"""Worker circuit breaker.
 
 Tracks worker dispatch health and rejects requests when the worker is down.
 Protocol-agnostic: callers are responsible for translating a ``False`` return

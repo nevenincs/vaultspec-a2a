@@ -1,8 +1,7 @@
 """Context window management for LangGraph orchestration.
 
 Provides token estimation, context compaction, and clean handoff
-preparation as mandated by ADR-002 (context management) and ADR-008
-(state serialization).
+preparation for context management and state serialization.
 """
 
 from collections.abc import Sequence
@@ -56,7 +55,7 @@ def should_compact(state: TeamState, max_tokens: int) -> bool:
 def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     """Return a copy of *state* with messages trimmed to fit *max_tokens*.
 
-    Strategy (per ADR-002 — no sliding-window amnesia):
+    Strategy (no sliding-window amnesia):
     1. Always preserve the first system message (core objective).
     2. Always preserve the last ``keep_recent`` messages (working context).
     3. Replace everything in between with a single summary message so the
@@ -100,7 +99,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
     # Keep enough recent messages to stay under budget after adding the
     # system prefix + pinned HumanMessage + a summary placeholder.  Clamp to
     # zero so that when system messages alone exceed max_tokens the budget
-    # doesn't go negative and confuse the kept-message selection loop (H5 fix).
+    # doesn't go negative and confuse the kept-message selection loop.
     summary_overhead = 50  # tokens for the inserted summary message
     system_tokens = estimate_tokens(system_msgs)
     pinned_tokens = estimate_tokens([pinned_human]) if pinned_human else 0
@@ -139,7 +138,7 @@ def compact_context(state: TeamState, max_tokens: int) -> TeamState:
 def prepare_handoff(state: TeamState, target_agent: str) -> dict:
     """Prepare a lean state dict for handing off to *target_agent*.
 
-    Per ADR-002, handoffs strip internal reasoning loops and pass only
+    Handoffs strip internal reasoning loops and pass only
     the compiled structural state.  The receiving agent gets:
     - ``thread_id``
     - ``current_plan``

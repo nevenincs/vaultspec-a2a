@@ -286,7 +286,7 @@ def test_terminal_status_map_keys() -> None:
 
 
 # ---------------------------------------------------------------------------
-# D-12 dataclass round-trip: dataclass -> asdict -> Pydantic model_validate
+# dataclass round-trip: dataclass -> asdict -> Pydantic model_validate
 # ---------------------------------------------------------------------------
 
 

@@ -242,7 +242,7 @@ async def test_ws_span_extra_attributes() -> None:
     async with ws_span("ws.op", thread_id="t1", agent="coder", node="worker") as span:
         assert span is not None
         assert span.is_recording()
-        # ReadableSpan.name is available when the SDK is active (ADR-015 mandates SDK)
+        # ReadableSpan.name is available when the SDK is active
         if isinstance(span, ReadableSpan):
             assert span.name == "ws.op"
 
@@ -264,7 +264,7 @@ async def test_ws_span_no_thread_id() -> None:
 
 def test_inject_trace_context_with_active_span() -> None:
     """inject_trace_context injects real trace context (traceparent) when a
-    span is active under the real SDK (TEL-HIGH-002)."""
+    span is active under the real SDK."""
     # Use a fresh SDK provider so the span is valid and the context propagator
     # has a real trace ID to inject.
     provider = TracerProvider(resource=Resource.create({"service.name": "test"}))
@@ -378,12 +378,12 @@ async def test_middleware_custom_excluded_paths() -> None:
 
 
 # ---------------------------------------------------------------------------
-# TEL-01: configure_telemetry service_name override
+# configure_telemetry service_name override
 # ---------------------------------------------------------------------------
 
 
 def test_configure_telemetry_service_name_override() -> None:
-    """configure_telemetry(service_name=...) returns the overridden name (TEL-01).
+    """configure_telemetry(service_name=...) returns the overridden name.
 
     The worker calls configure_telemetry(service_name="vaultspec-worker") so
     its spans are attributed separately from the gateway in Jaeger.
@@ -400,12 +400,12 @@ def test_configure_telemetry_service_name_none_uses_default() -> None:
 
 
 # ---------------------------------------------------------------------------
-# TEL-03: W3C trace context injection into dispatch HTTP calls
+# W3C trace context injection into dispatch HTTP calls
 # ---------------------------------------------------------------------------
 
 
 def test_trace_headers_produces_traceparent_under_real_span() -> None:
-    """_trace_headers() injects traceparent when a real SDK span is active (TEL-03).
+    """_trace_headers() injects traceparent when a real SDK span is active.
 
     Verifies the gateway-to-worker dispatch path propagates distributed traces.
     Uses a fresh local TracerProvider so the test is isolated from the global

@@ -1,4 +1,4 @@
-"""Live integration tests against the running dashboard engine (ADR R3, S17).
+"""Live integration tests against the running dashboard engine.
 
 No mocks: these exercise the real ``AuthoringClient`` against a live engine on
 loopback, resolved through the discovery-file contract. They are ``service``

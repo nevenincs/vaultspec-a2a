@@ -54,7 +54,7 @@ def test_build_worker_restart_detail_includes_log_tail(tmp_path: Path) -> None:
 def test_worker_stderr_log_path_lives_in_a2a_home() -> None:
     """Gateway-managed worker stderr logs live under the machine-global A2A home.
 
-    Runtime state was relocated out of ``.vault/`` (ADR R8) — vaultspec firmware
+    Runtime state was relocated out of ``.vault/`` — vaultspec firmware
     rejects foreign directories inside the vault — into ``~/.vaultspec-a2a``.
     """
     from ...control.config import settings

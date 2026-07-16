@@ -1,6 +1,6 @@
 """ACP RPC handler implementations.
 
-Extracted from ``acp_chat_model.py`` (ADR D-06).  Contains permission,
+Extracted from ``acp_chat_model.py``.  Contains permission,
 filesystem, and terminal RPC handlers as free functions.  Constants are
 placed next to their consumers.
 """
@@ -61,7 +61,7 @@ _SHELL_METACHAR_RE = re.compile(r"[|&;`$()<>]")
 # Server-side cap for subprocess-supplied terminal wait_for_exit timeout.
 _MAX_TERMINAL_TIMEOUT: float = 300.0
 
-# Valid POSIX environment variable name pattern (PROV-M3).
+# Valid POSIX environment variable name pattern.
 _ENV_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
@@ -77,7 +77,7 @@ def sandbox_path(path: str, config: _AcpModelConfig) -> Path:
 def _targets_vault(file_path: Path, _config: _AcpModelConfig) -> bool:
     """Return True if a sandbox-resolved path lies within any ``.vault`` dir.
 
-    ADR R2: agents may not write the vault corpus through their coding-CLI file
+    Agents may not write the vault corpus through their coding-CLI file
     tools. ``file_path`` is already ``.resolve()``-d and confined to the agent
     cwd by :func:`sandbox_path`, so symlinks and ``..`` traversal are already
     collapsed to a real path under the workspace. We deny if ANY component of
@@ -95,7 +95,7 @@ def _targets_vault(file_path: Path, _config: _AcpModelConfig) -> bool:
 
 
 def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:
-    """Build the value-typed ``.vault`` write denial (ADR R2).
+    """Build the value-typed ``.vault`` write denial.
 
     Mirrors the engine's ``forbidden_actor`` 200-value shape (wire-shapes
     reference §2): a value-typed ``result`` carrying a snake_case
@@ -237,7 +237,7 @@ async def on_fs_read_text_file(
             int(params["limit"]) if params.get("limit") is not None else None
         )
 
-        # ACP-03: cap reads at _FS_READ_MAX_BYTES.  When the caller also
+        # Cap reads at _FS_READ_MAX_BYTES.  When the caller also
         # supplies a limit, honour whichever is smaller.
         effective_limit = settings.acp_fs_read_max_bytes
         if limit is not None:
@@ -268,7 +268,7 @@ async def on_fs_write_text_file(
     """Handle fs/write_text_file RPC.
 
     Acquires the global git mutex before writing to prevent races with
-    concurrent git operations (ADR-001 §2). Uses asyncio.to_thread so
+    concurrent git operations. Uses asyncio.to_thread so
     blocking I/O does not stall the event loop.
     """
     from ..workspace.git_manager import _git_mutex
@@ -276,7 +276,7 @@ async def on_fs_write_text_file(
     try:
         file_path = sandbox_path(params["path"], config)
 
-        # ADR R2: deny agent writes into the vault corpus. Returns a value-typed
+        # Deny agent writes into the vault corpus. Returns a value-typed
         # forbidden_actor denial (not a transport error) so the agent is steered
         # to the authoring tools. Reads (on_fs_read_text_file) stay permitted.
         if _targets_vault(file_path, config):
@@ -351,7 +351,7 @@ async def on_terminal_create(
                 f"Terminal cwd {raw_cwd!r} escapes sandbox root {sandbox_root}"
             )
 
-        # Audit log for all terminal commands (ADR-001 §2)
+        # Audit log for all terminal commands
         logger.info(
             "terminal/create: command=%r args=%r cwd=%s",
             command,
@@ -359,13 +359,13 @@ async def on_terminal_create(
             resolved_cwd,
         )
 
-        # Build env: use resolve_env_vars() to scrub API credentials (ACP-02),
+        # Build env: use resolve_env_vars() to scrub API credentials,
         # then apply any agent-supplied overrides from the RPC params.
         terminal_env = resolve_env_vars(resolved_cwd)
         if extra_env := params.get("env"):
             if isinstance(extra_env, list):
                 # ACP protocol: env is list[EnvVariable] with name/value keys
-                # PROV-M3: validate env variable names before applying
+                # Validate env variable names before applying
                 for v in extra_env:
                     if not _ENV_NAME_RE.match(v["name"]):
                         raise ValueError(

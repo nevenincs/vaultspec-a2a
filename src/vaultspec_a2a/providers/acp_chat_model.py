@@ -87,7 +87,7 @@ class AcpChatModel(BaseChatModel):
         # Carries provider auth tokens (CLAUDE_CODE_OAUTH_TOKEN,
         # ANTHROPIC_AUTH_TOKEN). Keep it out of repr and model_dump so a token
         # value can never reach a log, checkpoint, or traceback via serialization
-        # (multi-provider-execution env_vars redaction audit).
+        # (env_vars redaction audit).
         repr=False,
         exclude=True,
     )
@@ -126,7 +126,7 @@ class AcpChatModel(BaseChatModel):
     )
     workspace_root: str | None = Field(
         default=None,
-        description="Workspace root override for CWD resolution (ADR-014).",
+        description="Workspace root override for CWD resolution.",
         exclude=True,
     )
     use_exec: bool = Field(
@@ -221,7 +221,7 @@ class AcpChatModel(BaseChatModel):
         ``model_post_init``; ``model_copy`` alone does not re-run it, so the new
         servers would never reach the session. This rebuilds the snapshot on the
         copy so the wired servers actually take effect (used by the worker node
-        to surface the per-run bridged authoring tools, ADR R4). When
+        to surface the per-run bridged authoring tools). When
         ``allowed_tools`` is supplied (headless runs only), the exact tool names
         are auto-permitted so the CLI can invoke them without a local prompt.
         """
@@ -249,30 +249,30 @@ class AcpChatModel(BaseChatModel):
             ):
                 prompt_blocks.append({"type": "text", "text": str(msg.content)})
 
-        # ACP-02: use resolve_env_vars() as base so API credentials are scrubbed
+        # Use resolve_env_vars() as base so API credentials are scrubbed
         # from the subprocess environment.  Provider-specific keys (e.g.
         # CLAUDE_CODE_OAUTH_TOKEN) are re-injected explicitly via self.env_vars,
         # which is set by ProviderFactory with only the required token.
         _ws_path = Path(self.workspace_root or self.cwd or str(Path.cwd()))
         env = resolve_env_vars(_ws_path)
         env.update(self.env_vars)
-        # ADR-002 §2: When using CLAUDE_CODE_OAUTH_TOKEN (flat-rate subscription),
+        # When using CLAUDE_CODE_OAUTH_TOKEN (flat-rate subscription),
         # ANTHROPIC_API_KEY must be explicitly removed. If both are present,
         # claude-agent-acp will use pay-as-you-go billing instead of the OAuth
         # subscription, causing auth/billing failures.
         if "CLAUDE_CODE_OAUTH_TOKEN" in env:
             env.pop("ANTHROPIC_API_KEY", None)
-        # ADR-002 §5.1: bypass bundled cli.js — use system
+        # Bypass bundled cli.js — use system
         # claude binary (native PE32+ Bun exe)
         _system_claude = shutil.which("claude")
         if "CLAUDE_CODE_OAUTH_TOKEN" in env and _system_claude:
             env["CLAUDE_CODE_EXECUTABLE"] = _system_claude
         env.pop("CLAUDECODE", None)  # Prevent nested session abort
-        # ACP-ENV-006: suppress interactive prompts that
+        # Suppress interactive prompts that
         # stall non-interactive ACP subprocesses.
         env["CLAUDE_CODE_DISABLE_FEEDBACK_SURVEY"] = "1"
         env["CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC"] = "1"
-        # ADR R4: bridged runs must EAGERLY load their per-run authoring MCP
+        # Bridged runs must EAGERLY load their per-run authoring MCP
         # tools. The pinned CLI defers MCP tool schemas under Tool Search
         # ("deferred-tool registry"); a stdio bridge's tools are then deferred
         # and unindexed, so the agent connects to the server but never finds the
@@ -418,7 +418,7 @@ class AcpChatModel(BaseChatModel):
                     )
                 yield chunk
 
-        # PROV-M2: propagate any interrupt that raced with end_turn
+        # Propagate any interrupt that raced with end_turn
         if ctx.interrupt_exc:
             raise ctx.interrupt_exc[0]
 
@@ -437,7 +437,7 @@ class AcpChatModel(BaseChatModel):
 
         if self._active_session_id and not ctx.prompt_done.is_set():
             with suppress(Exception):
-                # ADR-006 §5.1 pt 6: session/cancel must be a proper JSON-RPC
+                # session/cancel must be a proper JSON-RPC
                 # (with id) and awaited with a 3-second timeout so the subprocess
                 # has a chance to flush its state before we kill it.
                 rpc_id = AcpRequestId.SESSION_CANCEL
@@ -454,13 +454,13 @@ class AcpChatModel(BaseChatModel):
                     await ctx.stdin.drain()
                 await asyncio.wait_for(ctx.response_futures[rpc_id], timeout=3.0)
 
-        # PROV-C1: cancel all in-flight background RPC tasks before killing process
+        # Cancel all in-flight background RPC tasks before killing process
         for task in list(ctx.background_tasks):
             task.cancel()
         if ctx.background_tasks:
             await asyncio.gather(*ctx.background_tasks, return_exceptions=True)
 
-        # PROV-M1: await task cancellation before killing the process
+        # Await task cancellation before killing the process
         stdout_task.cancel()
         stderr_task.cancel()
         await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)

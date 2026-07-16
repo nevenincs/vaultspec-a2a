@@ -1,4 +1,4 @@
-"""Consolidated health-data assembly for gateway health endpoints (D-06).
+"""Consolidated health-data assembly for gateway health endpoints.
 
 Both ``/health`` (liveness) and ``/api/health`` (readiness) share a common
 set of worker, circuit breaker, spawner, and infrastructure diagnostics.

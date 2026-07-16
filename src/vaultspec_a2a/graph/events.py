@@ -1,4 +1,4 @@
-"""Domain event dataclasses for the graph orchestration layer (ADR D-01).
+"""Domain event dataclasses for the graph orchestration layer.
 
 These are plain ``@dataclass`` types (NOT Pydantic) that represent the
 aggregator's output in domain terms.  A separate adapter in ``api/`` translates

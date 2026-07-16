@@ -6,8 +6,7 @@ or ``{id, error}``, ``{method, params}`` notifications in both directions). It i
 neither ACP nor an OpenAI Chat-Completions endpoint, so it cannot reuse
 ``AcpChatModel`` or ``ChatOpenAI``. This module drives the protocol directly,
 following the ``mock_chat_model.py`` precedent of a non-ACP ``BaseChatModel`` and
-reusing ``_subprocess.py``'s protocol-agnostic process-lifecycle helpers
-(multi-provider-execution ADR).
+reusing ``_subprocess.py``'s protocol-agnostic process-lifecycle helpers.
 
 Authentication is file-based: ``codex app-server`` inherits the persisted local
 session from the Codex home (``~/.codex`` by default, ``CODEX_HOME`` override),

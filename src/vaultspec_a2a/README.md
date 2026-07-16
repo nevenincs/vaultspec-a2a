@@ -1,11 +1,5 @@
 # vaultspec_a2a — Package Architecture
 
-**Binding ADR chain:** `.vault/adr/2026-03-23-core-layer-boundary-adr.md`,
-`.vault/adr/2026-03-24-entry-point-decomposition-adr.md`,
-`.vault/adr/2026-03-27-domain-logic-extraction-adr.md`,
-`.vault/adr/2026-03-28-database-layer-adr.md`,
-`.vault/adr/2026-03-28-infra-config-adr.md`
-
 ## Full Tree
 
 ```text
@@ -467,7 +461,7 @@ grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from
 
 ## Boundary Audit Status (2026-03-29)
 
-### Layer 1 + Layer 2a — PASS (PR #3 + PR #4)
+### Layer 1 + Layer 2a — PASS
 
 | Check | Status |
 |-------|--------|
@@ -479,7 +473,7 @@ grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from
 | Test markers correctly isolate layers | PASS |
 | Infrastructure failures hard-fail | PASS |
 
-### Layer 2b Infrastructure Services — CLEAN (PR #9)
+### Layer 2b Infrastructure Services — CLEAN
 
 | Package | Status | Finding |
 |---------|--------|---------|
@@ -491,14 +485,14 @@ grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from
 | `control/` | CLEAN | Domain logic extracted to `thread/snapshots` and `thread/transitions`. Zero imports from `api/`. Pure infrastructure concerns remain. |
 | `utils/` | CLEAN | Dead code removed. Layer inversions fixed. |
 
-### Layer 2c Database + Handlers — CLEAN (PR #11)
+### Layer 2c Database + Handlers — CLEAN
 
 | Check | Status | Finding |
 |-------|--------|---------|
 | Handler extraction | DONE | Route handlers thinned: threads 425→281, messages 205→92, cancel 163→66, permissions 309→81, thread_state 145→50 |
 | Service modules | DONE | 6 new control/ services: thread_service, cancel_service, message_service, permission_service, thread_state_service, repair_transitions |
 
-### Layer 2d File Size Violations — RESOLVED (PR #15)
+### Layer 2d File Size Violations — RESOLVED
 
 | Check | Status | Finding |
 |-------|--------|---------|
@@ -508,7 +502,7 @@ grep -rn 'from.*api\.\|from.*worker\.\|from.*database\.\|from.*providers\.\|from
 | Zero httpx in MCP tools/ | PASS | All HTTP via `_http.py` |
 | MCP HTTP loopback preserved | PASS | Standalone process model unchanged |
 
-### Layer 3 Infrastructure Config — DONE (PR #16)
+### Layer 3 Infrastructure Config — DONE
 
 | Check | Status | Finding |
 |-------|--------|---------|

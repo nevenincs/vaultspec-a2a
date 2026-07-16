@@ -31,7 +31,7 @@ _CLAUDE_ACP_JS = (
 )
 
 # Resolve the precompiled Bun binary from the package-local bin/ directory.
-# ADR-002 §5.1 mandates node backend as default; binary mode requires ADR amendment
+# Node backend is the default; binary mode requires an ADR amendment
 # — experimental.
 _BIN_DIR = Path(__file__).resolve().parent.parent / "bin"
 _bin_candidates = list(_BIN_DIR.glob("claude-agent-acp*")) if _BIN_DIR.is_dir() else []
@@ -72,7 +72,7 @@ def _build_zai_env(
 ) -> dict[str, str]:
     """Return explicit Z.ai auth env vars for the Claude ACP subprocess.
 
-    Z.ai rides the Claude ACP path (multi-provider-execution ADR): the wrapper's
+    Z.ai rides the Claude ACP path: the wrapper's
     Claude Code CLI honours ``ANTHROPIC_BASE_URL``/``ANTHROPIC_AUTH_TOKEN`` to
     retarget the Anthropic Messages API at Z.ai's compatible gateway. The base env
     is scrubbed of ``ANTHROPIC_API_KEY`` (workspace/environment.py) but leaves both
@@ -299,7 +299,7 @@ def classify_provider_command(
     """
     if provider in (Provider.CLAUDE, Provider.ZAI):
         # Z.ai launches the same claude-agent-acp wrapper as Claude; only the
-        # injected auth env differs (multi-provider-execution ADR).
+        # injected auth env differs.
         resolved_backend = backend if backend is not None else settings.acp_backend
         _, meta = _classify_acp_command(resolved_backend)
         return meta
@@ -454,7 +454,7 @@ class ProviderFactory:
 
             command, command_meta = _classify_acp_command(backend)
 
-            # ADR-002 §2: Only inject CLAUDE_CODE_OAUTH_TOKEN. ANTHROPIC_API_KEY
+            # Only inject CLAUDE_CODE_OAUTH_TOKEN. ANTHROPIC_API_KEY
             # is explicitly stripped in _astream() to prevent pay-as-you-go billing
             # from overriding the OAuth subscription.
             env_vars: dict[str, str] = (
@@ -487,7 +487,7 @@ class ProviderFactory:
         if provider == Provider.ZAI:
             # Z.ai is a config variant of the Claude ACP path: same wrapper
             # command, Anthropic base URL + auth token injected instead of the
-            # Claude OAuth token (multi-provider-execution ADR). ENABLE_TOOL_SEARCH
+            # Claude OAuth token. ENABLE_TOOL_SEARCH
             # and the other Claude-CLI behaviours in AcpChatModel._astream are
             # inherited unchanged.
             backend = backend if backend is not None else settings.acp_backend

@@ -1,4 +1,4 @@
-"""Unit tests for lifecycle SSE decoding and verdict extraction (P03.S07).
+"""Unit tests for lifecycle SSE decoding and verdict extraction.
 
 Pure logic, no I/O. Frame shapes are constructed from the engine's
 ``LifecycleEventFeedRecord`` / gap / error contracts (read from the Rust source

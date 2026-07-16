@@ -2,7 +2,7 @@
 
 Manages client WebSocket connections, thread subscriptions, broadcast hooks,
 and the graph node metadata cache.  Extracted from the monolithic
-``aggregator.py`` during Phase 6 decomposition (ADR D-01).
+``aggregator.py`` during the aggregator decomposition.
 """
 
 import asyncio
@@ -134,7 +134,7 @@ class SubscriberManager:
                 )
 
     # ------------------------------------------------------------------
-    # Graph registration (ADR-012 §6)
+    # Graph registration
     # ------------------------------------------------------------------
 
     def register_graph(self, graph: StreamableGraph) -> None:

@@ -2,7 +2,7 @@
 
 Manages token chunk batching (50ms / 4KB flush), tool call update debounce,
 and plan update debounce.  Extracted from the monolithic ``aggregator.py``
-during Phase 6 decomposition (ADR D-01).
+during the aggregator decomposition.
 """
 
 import asyncio

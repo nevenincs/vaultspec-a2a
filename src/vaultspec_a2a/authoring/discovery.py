@@ -1,4 +1,4 @@
-"""Engine discovery via the service.json contract (attach-never-own, ADR R8).
+"""Engine discovery via the service.json contract (attach-never-own).
 
 Resolves a live dashboard engine (base URL + machine bearer) from the engine's
 own discovery file, applying the reference discipline verbatim: a present file
@@ -8,7 +8,7 @@ never owned. Candidate order puts an explicit override
 (``VAULTSPEC_ENGINE_SERVICE_JSON``, which a ``--no-seat`` workspace-local serve
 writes) ahead of the machine-global ``~/.vaultspec/service.json``.
 
-The bearer is read out of the file and never logged (R7).
+The bearer is read out of the file and never logged.
 """
 
 from __future__ import annotations
@@ -33,7 +33,7 @@ __all__ = [
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
 
 # Consumer staleness window: a heartbeat older than this is treated as a crash,
-# not as an available service (mirrors the engine's HEARTBEAT_STALE_MS, ADR R8).
+# not as an available service (mirrors the engine's HEARTBEAT_STALE_MS).
 HEARTBEAT_STALE_MS = 120_000
 _STALE_MS = HEARTBEAT_STALE_MS
 
@@ -41,7 +41,7 @@ _STALE_MS = HEARTBEAT_STALE_MS
 def read_service_json(path: Path) -> dict | None:
     """Read and parse a service.json, or ``None`` if unreadable or not an object.
 
-    The shared reader half of the R8 discovery contract: it never raises, so both
+    The shared reader half of the discovery contract: it never raises, so both
     the engine consumer here and the resident-gateway producer's own boot check
     can classify a candidate without guarding every failure mode.
     """
@@ -73,7 +73,7 @@ class EngineEndpoint:
     bearer_token: str
 
     def __repr__(self) -> str:
-        """Redacted representation - never leaks the bearer token (R7)."""
+        """Redacted representation - never leaks the bearer token."""
         return f"EngineEndpoint(base_url={self.base_url!r}, bearer_token=<set>)"
 
 

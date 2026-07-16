@@ -1,7 +1,7 @@
 """Unit tests for security-critical ACP RPC handler paths.
 
 Tests sandbox path validation and terminal creation security without
-requiring a live ACP subprocess (PROV-M6).
+requiring a live ACP subprocess.
 """
 
 import asyncio
@@ -45,7 +45,7 @@ def _make_config(workspace_root: str | None = None) -> _AcpModelConfig:
 
 
 # ---------------------------------------------------------------------------
-# sandbox_path — path traversal prevention (PROV-M6)
+# sandbox_path — path traversal prevention
 # ---------------------------------------------------------------------------
 
 
@@ -176,7 +176,7 @@ class TestShellMetacharPattern:
 
 
 class TestEnvNamePattern:
-    """Tests for the env variable name validation pattern (PROV-M3)."""
+    """Tests for the env variable name validation pattern."""
 
     @pytest.mark.parametrize(
         "name",

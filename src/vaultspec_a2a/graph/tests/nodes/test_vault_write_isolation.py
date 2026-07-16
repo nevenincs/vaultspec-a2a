@@ -1,4 +1,4 @@
-"""Observed-negative proof: the queue path performs zero .vault writes (ADR R5, S14).
+"""Observed-negative proof: the queue path performs zero .vault writes.
 
 Real file-backed aiosqlite, no mocks. A continuous filesystem watcher runs across
 the whole exercise while the database-backed queue is injected (mount node reads
@@ -175,7 +175,7 @@ async def test_db_queue_functions_with_zero_vault_writes(
         assert "| Q-2 | pending | Second |" in context
 
         # 2. The worker loop advances the queue via the mark-complete tool; the
-        #    Command update carries the next task pointer (ADR-021 revised).
+        #    Command update carries the next task pointer (revised contract).
         command = await tool.ainvoke(
             {
                 "name": "mark_task_complete",

@@ -166,7 +166,7 @@ def _check_phase_prerequisites(
     target_phase: str,
     vault_index: dict[str, list[str]],
 ) -> _GateResult:
-    """Check phase prerequisite per ADR-023 gate table.
+    """Check phase prerequisite per the gate table.
 
     Returns a _GateResult indicating whether to block, warn, or pass.
     Workers without a mapping in _PHASE_PREREQUISITES are always passed.
@@ -310,7 +310,7 @@ def _build_supervisor_messages(
         # The supervisor is not a document-authoring role: it compiles the whole
         # WORKSPACE corpus (role=None) and does NOT receive the bundled defaults -
         # the bundled dir is gated on document roles so the roles:-tagged
-        # conventions never leak into a non-document turn (reviewer HIGH-1).
+        # conventions never leak into a non-document turn.
         rules = RuleManager(Path(workspace_root)).compile(None)
         if rules:
             messages.append(
@@ -338,7 +338,7 @@ def create_plan_approval_node(
     workers: list[str],
     worker_phase_map: dict[str, str] | None = None,
 ) -> SupervisorNode:
-    """Create the dedicated plan-approval interrupt node (ADR-024, revised).
+    """Create the dedicated plan-approval interrupt node.
 
     A resumed LangGraph node re-runs from its start, so everything before the
     ``interrupt()`` call must be deterministic and side-effect free. This node
@@ -421,7 +421,7 @@ def create_supervisor_node(
         system_prompt:    The system prompt defining the supervisor's behavior.
         workers:          A list of available worker names to route to.
         worker_phase_map: Optional mapping of worker_id -> pipeline phase for
-                          ADR-023 phase artifact prerequisite gates. Workers
+                          phase artifact prerequisite gates. Workers
                           absent from the map are exempt from gating.
         autonomous:       When True, skip plan approval interrupt (headless
                           MCP-launched runs -- no human present to approve).
@@ -485,7 +485,7 @@ def create_supervisor_node(
             }
 
         if decision.plan_approval_request is not None:
-            # ADR-024 (revised): the supervisor never calls interrupt() itself —
+            # The supervisor never calls interrupt() itself —
             # a resumed node re-runs from its start, so the routing LLM call
             # would replay non-deterministically and could drop the human's
             # verdict. Mark the approval as pending; the dedicated

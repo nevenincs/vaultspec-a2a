@@ -1,9 +1,9 @@
-"""Integration tests for ADR-014 Thread Metadata & Context Injection.
+"""Integration tests for Thread Metadata & Context Injection.
 
 Uses FastAPI TestClient with a real in-memory SQLite database and real
 fixtures. No mocks, no monkeypatching.
 
-ADR-019: uses shared make_app() from conftest.py which overrides
+Uses shared make_app() from conftest.py which overrides
 get_checkpointer and get_worker_client so tests never touch vaultspec.db.
 """
 
@@ -29,7 +29,7 @@ def _make_app(session_factory, checkpointer, aggregator=None):
 
 
 class TestCreateThreadWithMetadata:
-    """Tests for POST /api/threads with metadata (ADR-014)."""
+    """Tests for POST /api/threads with metadata."""
 
     def test_create_thread_with_metadata_stores_in_db(
         self, session_factory, checkpointer
@@ -152,7 +152,7 @@ class TestCreateThreadWithMetadata:
 
 
 class TestListThreadsWithMetadata:
-    """Tests for GET /api/threads with ADR-014 metadata fields."""
+    """Tests for GET /api/threads with metadata fields."""
 
     def test_list_threads_includes_metadata_fields(
         self, session_factory, checkpointer

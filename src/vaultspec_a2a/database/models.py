@@ -3,11 +3,6 @@
 Defines the core data models for threads, artifacts, permission logs,
 and cost tracking. Uses ``DeclarativeBase`` with ``Mapped`` / ``mapped_column``
 for full type-safety.
-
-References:
-    - ADR-007: SQLite WAL mode, aiosqlite
-    - ADR-009: Module hierarchy (``src/vaultspec_a2a/database/``)
-    - ADR-011: Wire contract (data model context)
 """
 
 from datetime import UTC, datetime
@@ -284,7 +279,7 @@ class ThreadExecutionStateModel(Base):
 
 
 class AuthoringEventCursorModel(Base):
-    """Durable cursor into the engine authoring lifecycle stream (ADR R3, P03.S07).
+    """Durable cursor into the engine authoring lifecycle stream.
 
     One row per subscriber records the last outbox sequence the verdict
     subscriber has durably processed from ``GET /authoring/v1/events``. A gateway
@@ -336,13 +331,13 @@ class CostTrackingModel(Base):
 
 
 class TaskQueueEntryModel(Base):
-    """A single worker task-queue row, owned by a thread (ADR R5).
+    """A single worker task-queue row, owned by a thread.
 
     Orchestration state that used to live in a ``.vault/plan`` markdown table.
     ``position`` is the sole ordering authority; ``task_key`` is the stable
     per-thread identity the mark-complete tool addresses.  ``plan_changeset_id``
-    and ``plan_step_key`` are references to the engine plan proposal (D5
-    references, never content).
+    and ``plan_step_key`` are references to the engine plan proposal (references,
+    never content).
     """
 
     __tablename__ = "task_queue_entries"

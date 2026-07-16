@@ -1,8 +1,8 @@
-"""Unit tests for AuthoringSession pure logic and guards (ADR R3).
+"""Unit tests for AuthoringSession pure logic and guards.
 
 No mocks and no network: id generation, run-local id derivation, reference
 accumulation, and the pre-flight guards all execute before any HTTP call. The
-verbs' live wire behaviour is covered by the S17 integration tests.
+verbs' live wire behaviour is covered by the live integration tests.
 """
 
 import pytest

@@ -1,4 +1,4 @@
-"""WebSocket dispatch handler factories (ADR-019).
+"""WebSocket dispatch handler factories.
 
 Creates the message and control handlers that bridge WebSocket commands
 to the service layer.  These are protocol translation functions: they map
@@ -175,7 +175,7 @@ def create_dispatch_message_handler(
     creation, repair-state transitions, and dispatch.  This handler maps
     the service result to WS-specific error semantics.
 
-    WS-G01: On unreachable/rejected failures the service marks the thread
+    On unreachable/rejected failures the service marks the thread
     FAILED; we additionally broadcast a ``thread_terminal`` WS event so
     UI clients see the failure immediately.
     """

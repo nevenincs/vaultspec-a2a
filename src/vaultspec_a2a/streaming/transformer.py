@@ -1,8 +1,8 @@
 """LangGraph event transformation — maps raw astream_events to domain events.
 
 Contains the ``process_langgraph_event`` function and the interrupt detection
-logic.  Extracted from the monolithic ``aggregator.py`` during Phase 6
-decomposition (ADR D-01).
+logic.  Extracted from the monolithic ``aggregator.py`` during the aggregator
+decomposition.
 
 These functions are *logically* stateless — they receive emitter/buffering
 references to perform side effects but hold no state of their own.
@@ -32,7 +32,7 @@ from .types import (
     map_acp_option_kind,
 )
 
-# M6: import GraphInterrupt for isinstance check vs string comparison.
+# Import GraphInterrupt for isinstance check vs string comparison.
 try:
     from langgraph.errors import GraphInterrupt as _GraphInterrupt_cls
 

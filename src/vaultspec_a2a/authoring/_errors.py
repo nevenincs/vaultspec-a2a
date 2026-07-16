@@ -1,4 +1,4 @@
-"""Typed transport and identity failures for the authoring edge (ADR R3).
+"""Typed transport and identity failures for the authoring edge.
 
 Transport and identity failures ARE typed HTTP errors (unlike in-domain
 business denials, which are 200 values — see :mod:`._envelope`). The engine

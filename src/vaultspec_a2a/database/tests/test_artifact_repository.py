@@ -8,7 +8,7 @@ from ..artifact_repository import _validate_artifact_path
 
 
 class TestValidateArtifactPath:
-    """REVIEW-081: artifact path must be relative with no traversal."""
+    """Artifact path must be relative with no traversal."""
 
     def test_simple_relative_path(self) -> None:
         assert _validate_artifact_path("outputs/report.md") == "outputs/report.md"

@@ -1,15 +1,15 @@
-"""Tests for the REST endpoints (ADR-019 refactored).
+"""Tests for the REST endpoints.
 
 Uses FastAPI TestClient with a real in-memory SQLite database and a real
 EventAggregator (no mocks).  Dispatch requests to the worker are captured
 by a real in-process FastAPI ASGI app (ASGITransport) — no MockTransport,
 no unittest.mock.
 
-ADR-019: Graph compilation and ingest no longer run in the gateway.
+Graph compilation and ingest no longer run in the gateway.
 All work is dispatched to the worker via HTTP POST to /dispatch.  Tests
 verify that the correct dispatch requests are sent.
 
-API-C1: all injected test dependencies are applied via the shared `make_app()`
+All injected test dependencies are applied via the shared `make_app()`
 helper in `conftest.py` so tests never touch the production `vaultspec.db`.
 """
 

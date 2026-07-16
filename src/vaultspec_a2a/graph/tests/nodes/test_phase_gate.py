@@ -1,4 +1,4 @@
-"""Tests for the generalized phase-gate node (adr-authoring-orchestration S05).
+"""Tests for the generalized phase-gate node.
 
 The gate is exercised over a real ``StateGraph`` with an ``InMemorySaver``
 checkpointer so the interrupt/resume and the replay-on-resume are real, not
@@ -69,7 +69,7 @@ def _base_state() -> TeamState:
 def _gate_graph(submitter: DocumentProposalSubmitter) -> Any:
     """Build START -> submit -> gate -> {approved_end | revise_end} -> END.
 
-    The gate is split (P04.S10): a submit node commits the proposal id before the
+    The gate is split: a submit node commits the proposal id before the
     pure gate node parks at its interrupt, so the correlation id is durable in the
     checkpoint while parked.
     """
@@ -218,7 +218,7 @@ async def test_gate_unknown_verdict_fails_closed_to_revision() -> None:
 
 @pytest.mark.asyncio
 async def test_submit_commits_ids_before_parking_and_no_resubmit_on_resume() -> None:
-    """The split gate commits the proposal id BEFORE the run parks (P04.S10).
+    """The split gate commits the proposal id BEFORE the run parks.
 
     The submit node commits ``authoring_proposal_ids`` as its own superstep, so
     the correlation id is durable in the checkpoint WHILE the gate node is parked

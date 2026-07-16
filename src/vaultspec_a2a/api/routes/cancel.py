@@ -1,4 +1,4 @@
-"""POST /threads/{thread_id}/cancel -- Cancel a running thread (MCP-R3)."""
+"""POST /threads/{thread_id}/cancel -- Cancel a running thread."""
 
 import logging
 from typing import Any

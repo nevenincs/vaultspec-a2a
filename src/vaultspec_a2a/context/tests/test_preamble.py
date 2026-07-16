@@ -1,4 +1,4 @@
-"""Tests for the context preamble builder (ADR-014 §2.3)."""
+"""Tests for the context preamble builder."""
 
 from langchain_core.messages import SystemMessage
 

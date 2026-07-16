@@ -2,7 +2,7 @@
 
 Manages per-thread sequence counters, pending permissions, agent lifecycle
 states, tool call state cache, and all ``emit_*`` methods.  Extracted from
-the monolithic ``aggregator.py`` during Phase 6 decomposition (ADR D-01).
+the monolithic ``aggregator.py`` during the aggregator decomposition.
 """
 
 import json
@@ -60,13 +60,13 @@ class EventEmitters:
         # Per-thread monotonic sequence counters (start at 0, first event = 1)
         self._sequences: dict[str, int] = defaultdict(int)
 
-        # MCP-R5: track pending permission requests per thread.
+        # Track pending permission requests per thread.
         self._pending_permissions: dict[str, tuple[PermissionRequest, float]] = {}
 
-        # P8-02: track agent lifecycle states for team status endpoint.
+        # Track agent lifecycle states for team status endpoint.
         self._agent_states: dict[str, AgentLifecycleState] = {}
 
-        # F-38: track tool call state for REST snapshot enrichment.
+        # Track tool call state for REST snapshot enrichment.
         self._tool_call_states: dict[tuple[str, str], dict[str, str]] = {}
 
     # ------------------------------------------------------------------
@@ -103,7 +103,7 @@ class EventEmitters:
         return len(stale)
 
     # ------------------------------------------------------------------
-    # Tool call state management (F-38)
+    # Tool call state management
     # ------------------------------------------------------------------
 
     def _prune_completed_tool_calls(self, thread_id: str, cap: int = 50) -> None:
@@ -119,7 +119,7 @@ class EventEmitters:
                 self._tool_call_states.pop(key, None)
 
     def get_tool_call_states(self, thread_id: str) -> dict[str, dict[str, str]]:
-        """Return tool call state dicts for *thread_id* (F-38)."""
+        """Return tool call state dicts for *thread_id*."""
         return {
             tc_id: dict(state)
             for (tid, tc_id), state in self._tool_call_states.items()
@@ -127,7 +127,7 @@ class EventEmitters:
         }
 
     # ------------------------------------------------------------------
-    # Permission management (MCP-R5)
+    # Permission management
     # ------------------------------------------------------------------
 
     def resolve_permission(self, request_id: str) -> None:
@@ -194,7 +194,7 @@ class EventEmitters:
             self._tool_call_states.pop(key, None)
 
     # ------------------------------------------------------------------
-    # Agent state management (P8-02)
+    # Agent state management
     # ------------------------------------------------------------------
 
     def get_agent_states(self) -> dict[str, AgentLifecycleState]:
@@ -318,7 +318,7 @@ class EventEmitters:
         title: str | None = None,
         content: list[dict[str, str | None]] | None = None,
     ) -> None:
-        """Emit a tool call update event (debounced per ADR-011 §5)."""
+        """Emit a tool call update event (debounced)."""
         now = time.monotonic()
         key = (thread_id, tool_call_id)
 
@@ -417,7 +417,7 @@ class EventEmitters:
         append: bool = False,
         last_chunk: bool = True,
     ) -> None:
-        """Emit an artifact update event (BE-29)."""
+        """Emit an artifact update event."""
         seq = self.next_sequence(thread_id)
         event = ArtifactUpdate(
             thread_id=thread_id,
@@ -436,7 +436,7 @@ class EventEmitters:
         thread_id: str,
         entries: list[dict[str, str]],
     ) -> None:
-        """Emit a plan update event (debounced, BE-28)."""
+        """Emit a plan update event (debounced)."""
         seq = self.next_sequence(thread_id)
         event = PlanUpdate(
             thread_id=thread_id,
@@ -498,7 +498,7 @@ class EventEmitters:
         agents: list[dict[str, Any]],
         active_thread_ids: list[str] | None = None,
     ) -> None:
-        """Emit a team status event (on transitions only, per ADR-011 §5)."""
+        """Emit a team status event (on transitions only)."""
         node_metadata = self._subscribers.get_node_metadata()
         agent_summaries: list[dict[str, str]] = []
         for agent_data in agents:
@@ -525,7 +525,7 @@ class EventEmitters:
         await self._subscribers.broadcast(SequencedEvent(event=event, sequence=seq))
 
     # ------------------------------------------------------------------
-    # Worker event sync (P8-01)
+    # Worker event sync
     # ------------------------------------------------------------------
 
     def sync_worker_event(

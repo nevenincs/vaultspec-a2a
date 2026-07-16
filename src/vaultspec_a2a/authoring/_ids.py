@@ -1,4 +1,4 @@
-"""Identifier validation and idempotency-key derivation (ADR R3).
+"""Identifier validation and idempotency-key derivation.
 
 The engine validates every id and token with one macro
 (`authoring/model.rs`): non-empty after trim, at most 160 bytes, no

@@ -25,7 +25,7 @@ __all__ = [
 class SubscribeCommand(ClientCommand):
     """Subscribe to real-time events for one or more threads.
 
-    M15: thread_ids are validated as exact IDs (max 50 per command) to
+    thread_ids are validated as exact IDs (max 50 per command) to
     prevent subscription abuse. IDs are treated as opaque strings — the
     aggregator uses exact-match comparison, never prefix matching.
     """

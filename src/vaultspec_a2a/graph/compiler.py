@@ -1,7 +1,7 @@
 """LangGraph orchestration engine for agent teams.
 
 Compiles a ``StateGraph`` from a ``TeamConfig`` and resolved ``AgentConfig``
-map.  Three topology types are supported (ADR-013 S2.5):
+map.  Three topology types are supported:
 
 - ``star``:          supervisor routes dynamically; workers report back to
                      the supervisor.
@@ -58,7 +58,7 @@ logger = logging.getLogger(__name__)
 # the historical ``graph.compiler.build_initial_vault_index`` import surface.
 __all__ = ["build_initial_vault_index", "compile_team_graph"]
 
-# ADR-023: maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
+# Maps AgentConfig.role -> pipeline phase for worker_phase_map derivation.
 # Roles not in this map are exempt from phase prerequisite gating.
 _ROLE_TO_PHASE: dict[str, str] = {
     "researcher": PipelinePhase.RESEARCH,
@@ -123,7 +123,7 @@ def _resolve_model_for_worker(
     provider_factory: ProviderFactoryProtocol,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> BaseChatModel:
-    """Resolve provider + capability following ADR-013 S2.3 precedence.
+    """Resolve provider + capability following the standard precedence.
 
     When a ``frozen_assignment`` names this worker, its provider/capability/
     fallback are used verbatim (model-profiles ADR: restart reproduces the exact
@@ -174,7 +174,7 @@ def _resolve_worker_model_preferences(
     team_config: Any,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> tuple[Provider, Model | None, list[Provider]]:
-    """Resolve provider + capability following ADR-013 S2.3 precedence.
+    """Resolve provider + capability following the standard precedence.
 
     A ``frozen_assignment`` entry for this worker wins outright and is applied
     verbatim (model-profiles ADR: the run's frozen effective assignment is
@@ -257,7 +257,7 @@ def _wire_diverge_stage(
     specs: list[dict[str, Any]],
     make_researcher: Callable[[dict[str, Any]], WorkerNode],
 ) -> str:
-    """Wire a Send-based diverge stage into ``builder`` (S04).
+    """Wire a Send-based diverge stage into ``builder``.
 
     Adds the dispatch node, one researcher node per thread spec (named via
     ``researcher_node_name``), and a static edge from each researcher into
@@ -297,9 +297,9 @@ def _build_supervisor_prompt(
     """Inject the agent roster (and optional team directive) into the supervisor prompt.
 
     Replaces ``{{AGENT_ROSTER}}`` placeholder if present, otherwise appends
-    the roster to the base prompt (ADR-013 S2.6).  If a team-level directive
+    the roster to the base prompt.  If a team-level directive
     is supplied (from ``[team.persona] directive`` in the preset TOML), it is
-    appended after the roster section (TOML-05).
+    appended after the roster section.
     """
     roster = "\n".join(
         f"- {cfg.display_name} ({cfg.id}): {cfg.description.strip()}"
@@ -338,7 +338,7 @@ def compile_team_graph(
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
 
-    Supports four topology types (ADR-013 S2.5, adr-authoring-orchestration):
+    Supports four topology types:
 
     - ``star``:          Dynamic supervisor routing.
     - ``pipeline``:      Fixed sequential chain (no supervisor).
@@ -354,18 +354,16 @@ def compile_team_graph(
                                  persistence.
         supervisor_agent_config: Optional AgentConfig for the supervisor node.
                                  Only used for star/pipeline_loop topologies.
-        workspace_root:          Optional workspace root for ACP CWD scoping
-                                 (ADR-014 S2.7).
+        workspace_root:          Optional workspace root for ACP CWD scoping.
         autonomous:              When True, skip permission_callback wiring so
                                  ACP models auto-approve tool calls (headless
                                  MCP-launched runs).
         step_timeout:            Per-step timeout in seconds.  When None the
                                  team TOML ``step_timeout_seconds`` value is
-                                 used as fallback (TOML-05).
-        feature_tag:             Optional feature tag for task-queue scoping
-                                 (ADR R5).
+                                 used as fallback.
+        feature_tag:             Optional feature tag for task-queue scoping.
         task_queue_port:         Optional database-backed task-queue port
-                                 injected into worker and mount nodes (ADR R5).
+                                 injected into worker and mount nodes.
         provider_factory:        Provider factory for model creation.
 
     Returns:
@@ -388,8 +386,7 @@ def compile_team_graph(
             f"Expected one of: {[t.value for t in TopologyType]}"
         )
 
-    # interrupt_before disabled: approval flows via interrupt() inside the node only
-    # (ADR-013 S2.7 superseded by plan 2026-28-02).
+    # interrupt_before disabled: approval flows via interrupt() inside the node only.
     interrupt_nodes: list[str] = []
 
     if topology.type == TopologyType.STAR:
@@ -452,7 +449,7 @@ def compile_team_graph(
         interrupt_before=interrupt_nodes,
     )
 
-    # TOML-05: apply per-preset graph settings.
+    # Apply per-preset graph settings.
     # step_timeout: explicit caller param wins; fall back to team TOML value.
     effective_timeout = (
         step_timeout
@@ -484,10 +481,7 @@ def _compile_star(
     task_queue_port: TaskQueuePort | None = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
-    """Wire up a star topology: supervisor -> workers -> supervisor -> END.
-
-    ADR-013 S2.5 star spec.
-    """
+    """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
     worker_ids: list[str] = [w.agent_id for w in team_config.workers]
     resolved_agents = [agent_configs[wid] for wid in worker_ids if wid in agent_configs]
 
@@ -532,7 +526,7 @@ def _compile_star(
             "description": "Routes tasks to the appropriate specialist.",
         }
 
-    # ADR-023: derive worker_phase_map from agent roles for phase prerequisite gates.
+    # Derive worker_phase_map from agent roles for phase prerequisite gates.
     worker_phase_map: dict[str, str] = {
         cfg.id: _ROLE_TO_PHASE[cfg.role]
         for cfg in resolved_agents
@@ -590,7 +584,7 @@ def _compile_star(
             retry_policy=_NODE_RETRY_POLICY,
         )
         builder.add_edge(agent_cfg.id, "supervisor")
-        # ADR-020: insert mount node between supervisor routing and worker invocation.
+        # Insert mount node between supervisor routing and worker invocation.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
         builder.add_node(f"mount_{agent_cfg.id}", mount_fn)
         builder.add_edge(f"mount_{agent_cfg.id}", agent_cfg.id)
@@ -604,7 +598,7 @@ def _compile_star(
             "All worker AgentConfigs are missing or unresolvable."
         )
 
-    # ADR-024 (revised): the dedicated approval node owns the plan-approval
+    # The dedicated approval node owns the plan-approval
     # interrupt; the supervisor only marks approval_status="pending". The node
     # is replay-safe because nothing before its interrupt() has side effects.
     approval_node = create_plan_approval_node(
@@ -620,7 +614,7 @@ def _compile_star(
         },
     )
 
-    # ADR-020: supervisor routes to mount_{wid} which then edges to wid.
+    # Supervisor routes to mount_{wid} which then edges to wid.
     route_map: dict[str, str] = {wid: f"mount_{wid}" for wid in compiled_worker_ids}
     route_map["FINISH"] = END
 
@@ -657,7 +651,7 @@ def _compile_pipeline(
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
 
-    ADR-013 S2.5 pipeline spec. No supervisor node.
+    No supervisor node.
     """
     order = team_config.topology.order
 
@@ -720,7 +714,7 @@ def _compile_pipeline(
             task_queue_port=task_queue_port,
             role=agent_cfg.role,
         )
-        # ADR-020: insert mount node between pipeline stages.
+        # Insert mount node between pipeline stages.
         mount_fn = create_mount_node(workspace_root, task_queue_port)
         mount_id = f"mount_{agent_cfg.id}"
         builder.add_node(mount_id, mount_fn)
@@ -803,7 +797,7 @@ def _wrap_loop_node(worker_node: WorkerNode) -> WorkerNode:
 
     The plain worker returns ``{"messages": [...]}``.  This wrapper merges in
     the updated counter so ``_loop_router`` sees a monotonically increasing
-    value and can enforce ``max_loops`` (ADR-013 S5).
+    value and can enforce ``max_loops``.
     """
 
     @functools.wraps(worker_node)
@@ -833,7 +827,6 @@ def _compile_pipeline_loop(
 ) -> None:
     """Wire up a pipeline_loop topology.
 
-    ADR-013 S2.5 pipeline_loop spec:
     - pre_loop nodes run sequentially, wired via explicit add_edge calls.
     - loop_node gets a conditional edge: revise -> last pre-loop node | FINISH -> END.
     - max_loops guard uses TeamState.loop_count.
@@ -879,7 +872,7 @@ def _compile_pipeline_loop(
         if agent_id == loop_node_id:
             worker_node = _wrap_loop_node(worker_node)
 
-        # ADR-020: insert mount node before each worker.
+        # Insert mount node before each worker.
         mount_id = f"mount_{agent_cfg.id}"
         mount_fn = create_mount_node(workspace_root, task_queue_port)
         builder.add_node(mount_id, mount_fn)
@@ -929,7 +922,7 @@ def _compile_pipeline_loop(
 
 
 # ---------------------------------------------------------------------------
-# research_adr topology (adr-authoring-orchestration)
+# research_adr topology
 # ---------------------------------------------------------------------------
 
 # Structural node names for the document phase machine. Fixed rather than
@@ -1005,10 +998,10 @@ def _make_research_producer(
 
     The researcher is the fourth research_adr document persona, so its turn
     receives the role-scoped document-authoring conventions the worker path
-    already injects (graph-agent-framework-harness P04 follow-on to the S09 flag):
-    ``create_researcher_node`` is a lightweight producer node that never routed
-    through ``_build_worker_messages``, so a conventions-blind researcher would
-    author findings the synthesist then folds into a non-conformant document.
+    already injects: ``create_researcher_node`` is a lightweight producer node
+    that never routed through ``_build_worker_messages``, so a
+    conventions-blind researcher would author findings the synthesist then
+    folds into a non-conformant document.
     """
 
     async def producer(state: TeamState, spec: dict[str, Any]) -> dict[str, Any]:
@@ -1106,9 +1099,9 @@ def _compile_research_adr(
     Each gate is a submit node (commits the proposal id before parking) plus a
     pure gate node (interrupt + verdict routing).
 
-    The diverge stage (S04) fans out to one researcher branch per configured
+    The diverge stage fans out to one researcher branch per configured
     thread spec; each document phase is guarded by the generalized phase gate
-    (S05) whose propose-and-submit runs through the injected
+    whose propose-and-submit runs through the injected
     ``proposal_submitter``. The inner doc-review loop enforces the prose quality
     bar before each human gate.
     """
@@ -1195,7 +1188,7 @@ def _compile_research_adr(
     # Each gate is split into a submit node (commits the proposal id to the
     # checkpoint) and a pure gate node (interrupt + verdict routing), so the
     # out-of-run verdict subscriber can correlate a verdict to the parked run via
-    # the committed ``authoring_proposal_ids`` (P04.S10). The inner review loop
+    # the committed ``authoring_proposal_ids``. The inner review loop
     # routes into the SUBMIT node; the submit node routes on into its gate.
     builder.add_node(
         _RA_RESEARCH_SUBMIT,

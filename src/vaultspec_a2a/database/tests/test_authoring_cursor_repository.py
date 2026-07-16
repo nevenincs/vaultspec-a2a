@@ -1,4 +1,4 @@
-"""Tests for the authoring lifecycle-cursor repository (ADR R3, P03.S07).
+"""Tests for the authoring lifecycle-cursor repository.
 
 Real in-memory aiosqlite, no mocks. Covers the unset-cursor default, first
 write creating the singleton row, monotonic advance, and rejection of a

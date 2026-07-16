@@ -1,4 +1,4 @@
-"""Versioning and bounding of SSE progress frames (ADR R6)."""
+"""Versioning and bounding of SSE progress frames."""
 
 from __future__ import annotations
 
@@ -58,7 +58,7 @@ def test_within_bound_frame_passes_through_verbatim() -> None:
 
 
 # ---------------------------------------------------------------------------
-# Semantic phase stamping (a2a-edge-conformance P02.S05)
+# Semantic phase stamping
 # ---------------------------------------------------------------------------
 
 

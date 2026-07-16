@@ -1,6 +1,6 @@
 """Graph lifecycle management -- compilation, caching, and registration.
 
-Extracted from ``executor.py`` (D-09) to isolate graph compilation,
+Extracted from ``executor.py`` to isolate graph compilation,
 LRU cache management, and graph-input construction from the dispatch
 orchestration logic in ``Executor``.
 """
@@ -35,7 +35,7 @@ __all__ = ["GraphCompilationError", "GraphLifecycleManager"]
 
 
 class GraphCompilationError(RuntimeError):
-    """Raised when a team graph fails to compile (WRK-K03)."""
+    """Raised when a team graph fails to compile."""
 
 
 logger = logging.getLogger(__name__)
@@ -72,11 +72,11 @@ class GraphLifecycleManager:
         self._checkpointer = checkpointer
         self._bridge = bridge
         self._aggregator = aggregator
-        # ADR PW2: the worker lifecycle is the single site that constructs the
+        # The worker lifecycle is the single site that constructs the
         # production authoring submitter, fed the run's per-role tokens from here.
         self._token_store = token_store
         self._provider_factory = ProviderFactory()
-        # ADR R5: the worker reaches the app database (task_queue_entries) via
+        # The worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
         self._task_queue_port = SqlTaskQueuePort(get_session_factory())
         self._graph_cache: OrderedDict[_CacheKey, CompiledStateGraph] = OrderedDict()
@@ -171,7 +171,7 @@ class GraphLifecycleManager:
         self._graph_cache[new_key] = graph
         self._thread_to_cache_key[req.thread_id] = new_key
         self._aggregator.register_graph(cast("StreamableGraph", graph))
-        # BE-12: relay node metadata to the control-surface aggregator so
+        # Relay node metadata to the control-surface aggregator so
         # REST /team-status and WS team_status events include role/display_name.
         await self._send_graph_registered(req.thread_id, graph)
         return graph
@@ -183,7 +183,7 @@ class GraphLifecycleManager:
 
         The control-surface aggregator uses this to populate its
         ``_node_metadata`` cache so that ``emit_team_status`` and the REST
-        ``/team-status`` endpoint include role/display_name/description (BE-12).
+        ``/team-status`` endpoint include role/display_name/description.
         """
         nodes: dict[str, dict[str, str]] = {}
         for node_name, node_spec in getattr(graph, "nodes", {}).items():
@@ -208,7 +208,7 @@ class GraphLifecycleManager:
         """Load team/agent configs and compile a LangGraph ``StateGraph``.
 
         Uses the same two-level config discovery order as the monolith:
-        workspace override then bundled preset (ADR-012 section 2.8).
+        workspace override then bundled preset.
         """
         ws_root = Path(req.workspace_root).resolve() if req.workspace_root else None
 
@@ -254,7 +254,7 @@ class GraphLifecycleManager:
                     },
                 )
 
-        # ADR PW2: document-phase topologies author through the engine; build the
+        # Document-phase topologies author through the engine; build the
         # production submitter here, the single construction site, and fail closed
         # at build time when the run cannot author (so it never starts vague).
         proposal_submitter = None
@@ -270,18 +270,18 @@ class GraphLifecycleManager:
             autonomous=req.autonomous,
             # Let compile_team_graph use team_config.graph.step_timeout_seconds
             step_timeout=None,
-            # MED-05: thread feature_tag so vault indexing works in worker
+            # Thread feature_tag so vault indexing works in worker
             feature_tag=req.active_feature,
             task_queue_port=self._task_queue_port,
             provider_factory=self._provider_factory,
             proposal_submitter=proposal_submitter,
-            # model-profiles ADR: compile against the run's frozen effective
-            # assignment so a restart reproduces the exact launched models.
+            # Compile against the run's frozen effective assignment so a
+            # restart reproduces the exact launched models.
             model_assignment=req.model_assignment,
         )
 
     def _build_proposal_submitter(self) -> DocumentProposalSubmitter:
-        """Construct the production authoring submitter for a research_adr run (PW2).
+        """Construct the production authoring submitter for a research_adr run.
 
         Fails closed at build time: a research_adr run whose engine origin cannot
         be resolved never starts vaguely — the typed error propagates as a
@@ -294,7 +294,7 @@ class GraphLifecycleManager:
         (``synthesis``/``adr_author``, the ``_RA_*`` node names in the compiler)
         and to the role whose actor token authors it. The role key is the worker
         ``agent_id`` (``vaultspec-synthesist``/``vaultspec-adr-author``), matching
-        the actor-token bundle keying (ADR R7) the run-start eligibility policy
+        the actor-token bundle keying the run-start eligibility policy
         enforces — not the short persona role.
         """
         from ..authoring import (
@@ -346,7 +346,7 @@ class GraphLifecycleManager:
         ``current_plan=[]`` would trigger the ``_replace_plan`` reducer's
         "clear" sentinel and wipe the supervisor's execution plan).
 
-        SDD blackboard fields (ADR-019 MED-01) are passed through on the
+        SDD blackboard fields are passed through on the
         first ingest only and only when non-empty.
 
         Args:
@@ -378,7 +378,7 @@ class GraphLifecycleManager:
                     "token_usage": {},
                 }
             )
-            # ADR-019 SDD blackboard fields (MED-01): pass through to TeamState
+            # SDD blackboard fields: pass through to TeamState
             # so vault context reaches the graph on initial thread creation.
             if req.active_feature:
                 graph_input["active_feature"] = req.active_feature

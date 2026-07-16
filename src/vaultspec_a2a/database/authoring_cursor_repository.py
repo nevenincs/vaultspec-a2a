@@ -1,4 +1,4 @@
-"""Persistence for the engine authoring lifecycle-stream cursor (ADR R3, P03.S07).
+"""Persistence for the engine authoring lifecycle-stream cursor.
 
 The verdict subscriber reads ``get_authoring_cursor`` before opening the engine
 SSE stream and calls ``set_authoring_cursor`` after durably processing each

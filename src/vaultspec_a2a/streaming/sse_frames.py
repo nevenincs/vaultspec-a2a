@@ -1,4 +1,4 @@
-"""Versioned, bounded Server-Sent Event frame encoding (ADR R6).
+"""Versioned, bounded Server-Sent Event frame encoding.
 
 SSE progress frames are non-authoritative and droppable by contract: a client or
 the engine reconciles run state from the ``run-status`` verb, never from a relay

@@ -1,4 +1,4 @@
-"""FastAPI application factory -- the gateway entry point (ADR-019).
+"""FastAPI application factory -- the gateway entry point.
 
 Creates the ASGI application with:
 - Lifespan management (init/close DB, EventAggregator, telemetry)
@@ -9,11 +9,7 @@ Creates the ASGI application with:
 
 The gateway NO LONGER runs agent execution locally.  All graph
 compilation and ``aggregator.ingest()`` calls are dispatched to the
-worker process via HTTP POST to ``/dispatch`` (ADR-019 service separation).
-
-See: ADR-007 (FastAPI serving, SPA)
-     ADR-011 (Frontend-Backend Wire Contract)
-     ADR-019 (Service Separation)
+worker process via HTTP POST to ``/dispatch`` (service separation).
 """
 
 import asyncio  # Gateway uses asyncio directly — no structured concurrency needed.
@@ -81,7 +77,7 @@ logger = logging.getLogger(__name__)
 async def _discovery_heartbeat(
     path: Any, port: int, pid: int, service_token: str | None
 ) -> None:
-    """Refresh the machine-global discovery heartbeat every cadence (ADR R8).
+    """Refresh the machine-global discovery heartbeat every cadence.
 
     Non-fatal: a transient write failure is logged and retried on the next tick
     so a full disk or race never crashes the gateway.
@@ -107,7 +103,7 @@ async def _discovery_heartbeat(
 async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     """Application lifespan: startup and shutdown hooks.
 
-    ADR-019: The gateway no longer runs agent execution.  All
+    The gateway no longer runs agent execution.  All
     graph compilation and ingest calls are dispatched to the worker
     process.  The lifespan sets up:
     1. Database (SQLAlchemy)
@@ -117,7 +113,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
     5. Telemetry
     6. httpx.AsyncClient for worker dispatch
     """
-    logger.info("Starting gateway lifespan (ADR-019)")
+    logger.info("Starting gateway lifespan")
     settings.validate_postgres_requirement()
 
     engine = await init_db(settings.database_url)
@@ -225,7 +221,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
             )
         )
 
-        # ADR R8: publish and heartbeat the machine-global discovery file so the
+        # Publish and heartbeat the machine-global discovery file so the
         # engine can attach-never-own. A crashed/stale prior record is reclaimed;
         # a live resident is only warned about (the OS port bind is the real
         # single-instance guard) so tests and intentional restarts are not broken.
@@ -288,7 +284,7 @@ async def _lifespan(app: FastAPI) -> AsyncGenerator[None]:
         reconcile_task.cancel()
         await asyncio.gather(reconcile_task, return_exceptions=True)
 
-        # ADR R8: stop heartbeating and drop our own discovery record so the next
+        # Stop heartbeating and drop our own discovery record so the next
         # start sees Absent, not a stale record it must treat as Crashed.
         discovery_task.cancel()
         await asyncio.gather(discovery_task, return_exceptions=True)
@@ -326,7 +322,7 @@ def main() -> None:
     """Launch the vaultspec-a2a server.
 
     Entry point for the ``vaultspec`` CLI command defined in
-    ``[project.scripts]`` (ADR-015).
+    ``[project.scripts]``.
     """
     configure_asyncio_runtime()
     uvicorn.run(
@@ -388,7 +384,7 @@ def create_app(
             "status": "ok",
             "service": "gateway",
             "ready": ready,
-            # ADR R8: the ungated health endpoint reports the live pid so a
+            # The ungated health endpoint reports the live pid so a
             # lifecycle caller can confirm the discovery record's owner is alive.
             "pid": os.getpid(),
             **shared,

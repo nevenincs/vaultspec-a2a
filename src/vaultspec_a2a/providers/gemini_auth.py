@@ -64,7 +64,7 @@ _CREDS_FILE_NAME = "oauth_creds.json"
 _HTTP_OK = 200
 
 # Serialises concurrent refresh attempts so two graph executions that both
-# detect expired credentials do not race on the credentials file (PROV-M8).
+# detect expired credentials do not race on the credentials file.
 _refresh_lock = asyncio.Lock()
 
 
@@ -158,7 +158,7 @@ async def refresh_gemini_token(
         )
 
     async with _refresh_lock:
-        # PROV-H1: offload blocking read_text via to_thread
+        # Offload blocking read_text via to_thread
         raw = await asyncio.to_thread(creds_path.read_text, encoding="utf-8")
         creds: dict = json.loads(raw)
 
@@ -208,11 +208,11 @@ async def refresh_gemini_token(
 
         # Atomic write: write to .tmp, fsync, then rename to avoid partial reads.
         tmp = creds_path.with_suffix(".json.tmp")
-        # PROV-H2: offload blocking write_text via to_thread
+        # Offload blocking write_text via to_thread
         await asyncio.to_thread(
             tmp.write_text, json.dumps(creds, indent=2), encoding="utf-8"
         )
-        # PROV-L4: fsync via to_thread so blocking syscall doesn't stall event loop.
+        # fsync via to_thread so blocking syscall doesn't stall event loop.
         # M16: fsync before rename so data is durable even on power failure.
         await asyncio.to_thread(_fsync_file, tmp)
         await asyncio.to_thread(tmp.replace, creds_path)

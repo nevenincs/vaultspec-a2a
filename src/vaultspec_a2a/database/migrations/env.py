@@ -1,11 +1,10 @@
-"""Alembic async migration environment for SQLite + aiosqlite (ADR-029).
+"""Alembic async migration environment for SQLite + aiosqlite.
 
 Uses the canonical async pattern: ``async_engine_from_config`` with
 ``run_sync`` bridge.  LangGraph checkpoint tables are excluded via
 ``include_name`` allowlist keyed to ``Base.metadata``.
 
 References:
-    - ADR-029: Database Migration Framework
     - Alembic async template: https://alembic.sqlalchemy.org/en/latest/cookbook.html
 """
 

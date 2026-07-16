@@ -1,4 +1,4 @@
-"""Add authoring lifecycle-stream cursor table (ADR R3, P03.S07).
+"""Add authoring lifecycle-stream cursor table.
 
 Persists the last outbox sequence the verdict subscriber has processed from
 the engine's ``GET /authoring/v1/events`` stream, so a gateway restart resumes

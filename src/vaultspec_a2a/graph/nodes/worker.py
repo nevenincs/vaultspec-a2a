@@ -32,7 +32,7 @@ __all__ = ["create_worker_node"]
 
 # The research_adr document-authoring roles whose rule set is role-SCOPED: they
 # receive only the document-authoring conventions opted in to their role, not the
-# whole rule corpus (graph-agent-framework-harness P02). Every other role (coders,
+# whole rule corpus. Every other role (coders,
 # etc.) passes role=None and keeps the unchanged whole-corpus-plus-bundled behavior,
 # so scoping never strips a coder's rules.
 _DOCUMENT_AUTHORING_ROLES = frozenset(
@@ -63,8 +63,8 @@ def _build_worker_messages(
     other role (coders, etc.) compiles the whole WORKSPACE corpus (role=None) and
     does NOT receive the bundled defaults - the bundled dir is gated on document
     roles, so the ``roles:``-tagged conventions never leak into a coder turn
-    (compile(None) disables the role filter, which would otherwise re-admit them -
-    reviewer HIGH-1). A coder's own workspace rules are never stripped (P02/P04).
+    (compile(None) disables the role filter, which would otherwise re-admit them).
+    A coder's own workspace rules are never stripped.
     """
     working_state = (
         compact_context(state, domain_config.context_limit_tokens)
@@ -130,7 +130,7 @@ def _attach_authoring_tools(
     *,
     autonomous: bool,
 ) -> BaseChatModel:
-    """Surface the run's bridged authoring tools to an ACP session model (R4).
+    """Surface the run's bridged authoring tools to an ACP session model.
 
     When a binding is present and the model exposes an ACP ``mcp_servers``
     surface, return a copy whose ``session/new`` advertises the run's authoring
@@ -138,9 +138,9 @@ def _attach_authoring_tools(
     chosen from the binding: the stdio bridge (spawned subprocess) is preferred
     because the pinned CLI surfaces stdio MCP tools reliably while it connects to
     but does not surface loopback HTTP MCP tools; the HTTP bridge is used when
-    the binding carries only that transport (ADR R4 amendment). Models without an
+    the binding carries only that transport. Models without an
     MCP surface (mock, hosted APIs) are returned unchanged. The binding lives
-    only in this worker closure — never in graph state or a checkpoint (R7).
+    only in this worker closure — never in graph state or a checkpoint.
 
     In autonomous (headless) mode ONLY, the exact bridged tool names are
     auto-permitted so the CLI can invoke them without a local prompt — a
@@ -197,7 +197,7 @@ async def _apply_queue_tool_calls(
 ) -> tuple[BaseMessage, dict[str, Any]]:
     """Dispatch mark_task_complete tool calls, propagating their Command update.
 
-    ADR-021 (revised) replaces the side-channel drain with a ``Command``-
+    The revised contract replaces the side-channel drain with a ``Command``-
     returning tool. This worker uses direct ``model.ainvoke`` rather than a
     ``ToolNode``, so it dispatches the queue tool the same way the permission
     gate handles ``session_request_permission``: it inspects the model's emitted
@@ -448,15 +448,15 @@ def create_worker_node(
         name:              The name of the worker, added to the generated message.
         autonomous:        When True, skip permission_callback wiring (headless).
         workspace_root:    Optional workspace root for RuleManager scoping.
-        feature_tag:       Optional feature tag gating task-queue wiring (ADR R5).
+        feature_tag:       Optional feature tag gating task-queue wiring.
         task_queue_port:   Optional database-backed queue port; when present the
                            mark-task-complete tool is bound per invocation to the
-                           running thread (ADR R5).
+                           running thread.
         authoring_binding: Optional per-run binding of the engine's bridged
                            authoring tools; when present and the model exposes an
                            ACP MCP surface, the spawned CLI session advertises the
                            loopback authoring MCP server so the agent sees the
-                           propose/read tools and no vault-write path (ADR R4).
+                           propose/read tools and no vault-write path.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -464,10 +464,10 @@ def create_worker_node(
 
     async def worker_node(state: TeamState) -> dict[str, Any]:
         """Execute the worker's task and return the generated message."""
-        # ADR R5: the task queue is thread-scoped, so build the mark-complete
+        # The task queue is thread-scoped, so build the mark-complete
         # tool per invocation using the thread_id carried in graph state — the
         # compiled graph is shared across threads and cannot close over it. The
-        # tool returns a Command (ADR-021 revised); its update is propagated
+        # tool returns a Command (revised contract); its update is propagated
         # through this node's return, not a side-channel drain.
         queue_tool: BaseTool | None = None
         if task_queue_port is not None and feature_tag is not None:

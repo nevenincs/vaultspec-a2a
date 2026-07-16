@@ -1,10 +1,10 @@
 """Git worktree lifecycle management for multi-agent isolation.
 
 Provides async git operations with a global mutex to prevent `.git`
-database corruption when multiple agents run concurrently (ADR-001).
+database corruption when multiple agents run concurrently.
 
 All git commands are executed via ``asyncio.create_subprocess_exec``
-to avoid blocking the Uvicorn event loop (ADR-008).
+to avoid blocking the Uvicorn event loop.
 """
 
 import asyncio
@@ -38,8 +38,8 @@ __all__ = [
 
 log = logging.getLogger(__name__)
 
-# Global mutex serializing destructive repo-wide git operations (ADR-001 §2).
-# M37/L22: asyncio.Lock() at module level is safe in Python 3.10+ (PEP 641);
+# Global mutex serializing destructive repo-wide git operations.
+# asyncio.Lock() at module level is safe in Python 3.10+ (PEP 641);
 # the deprecation warning was removed before Python 3.13.  No cross-loop risk
 # since the orchestrator runs a single-process uvicorn event loop.
 _git_mutex = asyncio.Lock()
@@ -146,7 +146,7 @@ class GitManager:
     ) -> Path:
         """Create an isolated git worktree for an agent.
 
-        Branch naming convention: ``agent/{agent_id}`` (ADR-001).
+        Branch naming convention: ``agent/{agent_id}``.
         The worktree directory is placed under ``agent/`` relative to
         the repository root.
 
@@ -197,7 +197,7 @@ class GitManager:
         """Remove a worktree and prune its tracking metadata.
 
         This is a **manual** operation — never called automatically
-        (ADR-001: preserve forensic state).
+        (preserve forensic state).
 
         The global mutex is held to prevent concurrent prune/remove
         from corrupting the ``.git/worktrees/`` registry.
@@ -205,7 +205,7 @@ class GitManager:
         Raises:
             ValueError: If *worktree_path* is not under the repository root.
         """
-        # H12: validate that worktree_path is confined to the repo root to
+        # validate that worktree_path is confined to the repo root to
         # prevent path traversal (e.g. "../../../etc") or git flag injection
         # (e.g. "--force").
         resolved = worktree_path.resolve()
@@ -225,7 +225,7 @@ class GitManager:
 
         ``git worktree list --porcelain`` always lists the main worktree first.
         The main worktree is identified by:
-        - Being the first entry in the output (H20 fix: most reliable heuristic)
+        - Being the first entry in the output (most reliable heuristic)
         - OR having the ``bare`` attribute (bare clones only)
         """
         raw = await self._run_git("worktree", "list", "--porcelain")
@@ -276,7 +276,7 @@ class GitManager:
             elif line == "bare":
                 is_bare = True
 
-        # WS-L3/WS-M2: Flush the last parsed entry.
+        # Flush the last parsed entry.
         # entry_index is the count of entries whose "worktree " header line we
         # have seen so far.  When we flush the last entry, entry_index holds
         # the 1-based index of that entry in the porcelain output.
@@ -304,8 +304,7 @@ class GitManager:
         """Validate and resolve *worktree_path* for use in git operations.
 
         Ensures the path is absolute, resolves to a real directory, and is
-        confined under the repository root to prevent path traversal attacks
-        (WS-HIGH-001).
+        confined under the repository root to prevent path traversal attacks.
 
         Returns the resolved absolute path.
         Raises ``WorkspaceError`` if any constraint is violated.
@@ -334,19 +333,18 @@ class GitManager:
         Uses ``git merge-tree`` (available since Git 2.38) for a
         zero-side-effect simulation of merging into *target_branch*.
 
-        M30: Callers must hold ``_git_mutex`` to prevent TOCTOU races
+        Callers must hold ``_git_mutex`` to prevent TOCTOU races
         between the three ``rev-parse`` calls and any concurrent repo
         mutations.  ``merge_worktree`` acquires the mutex before calling
-        this method (H21 fix).
+        this method.
 
         Raises ``WorkspaceError`` if *target_branch* or *worktree_path* is
-        invalid to prevent git flag injection and path traversal (WS-C3,
-        WS-HIGH-001).
+        invalid to prevent git flag injection and path traversal.
         """
-        # WS-HIGH-001: validate worktree_path before using as cwd
+        # validate worktree_path before using as cwd
         worktree_path = self._validate_worktree_path(worktree_path)
 
-        # WS-C3: validate target_branch before it touches any git command
+        # validate target_branch before it touches any git command
         if not _BRANCH_NAME_RE.match(target_branch):
             msg = (
                 f"target_branch {target_branch!r} is invalid. "
@@ -390,10 +388,10 @@ class GitManager:
         The global mutex is held for the entire merge to prevent
         concurrent merges from corrupting the branch state.
         """
-        # WS-HIGH-001: validate worktree_path before using as cwd
+        # validate worktree_path before using as cwd
         worktree_path = self._validate_worktree_path(worktree_path)
 
-        # WS-C3: validate target_branch before it touches any git command
+        # validate target_branch before it touches any git command
         if not _BRANCH_NAME_RE.match(target_branch):
             msg = (
                 f"target_branch {target_branch!r} is invalid. "
@@ -404,7 +402,7 @@ class GitManager:
         wt_branch = await self._run_git(
             "rev-parse", "--abbrev-ref", "HEAD", cwd=worktree_path
         )
-        # M22: handle detached HEAD — git returns literal "HEAD" for detached state
+        # handle detached HEAD — git returns literal "HEAD" for detached state
         if wt_branch == "HEAD":
             raise ValueError(
                 f"Worktree at {worktree_path} is in detached HEAD state. "
@@ -412,7 +410,7 @@ class GitManager:
             )
 
         async with _git_mutex:
-            # H21: move the pre-flight conflict check inside the mutex to prevent
+            # move the pre-flight conflict check inside the mutex to prevent
             # a TOCTOU race where another task modifies the repo between the
             # has_conflicts() check and the actual merge operation.
             if await self.has_conflicts(worktree_path, target_branch):
@@ -429,7 +427,7 @@ class GitManager:
             if strategy == MergeStrategy.FAST_FORWARD:
                 await asyncio.shield(self._run_git("merge", "--ff-only", wt_branch))
             elif strategy == MergeStrategy.REBASE:
-                # WS-H7: correct rebase semantics for merging a worktree branch
+                # correct rebase semantics for merging a worktree branch
                 # back into target_branch.
                 #
                 # The worktree's branch is already checked out in worktree_path,

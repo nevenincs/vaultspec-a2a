@@ -222,7 +222,7 @@ class TestCompactContext:
     def test_preserves_context_preamble_system_message(self) -> None:
         """Regression: compact_context must preserve a leading context preamble.
 
-        ADR-014 §2.3 injects a SystemMessage context preamble as the first
+        A SystemMessage context preamble is injected as the first
         message in graph_input. The compaction algorithm preserves all leading
         SystemMessages before the first non-system message, so the preamble
         must survive compaction alongside the core system prompt.
@@ -337,7 +337,7 @@ class TestCompactContext:
 
 
 class TestPrepareHandoff:
-    """Tests for the clean handoff builder (ADR-002)."""
+    """Tests for the clean handoff builder."""
 
     @pytest.fixture
     def full_state(self) -> TeamState:

@@ -1,4 +1,4 @@
-"""Graph execution engine -- manages LangGraph run lifecycle (ADR-031).
+"""Graph execution engine -- manages LangGraph run lifecycle.
 
 Dispatch orchestration: routes ingest/resume/cancel requests, manages
 concurrency gating.  Delegates graph compilation to ``GraphLifecycleManager``
@@ -34,7 +34,7 @@ __all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
 
 
 class ConcurrentCapError(RuntimeError):
-    """Raised when the worker concurrent thread cap is reached (WPA-001)."""
+    """Raised when the worker concurrent thread cap is reached."""
 
 
 logger = logging.getLogger(__name__)
@@ -57,7 +57,7 @@ class Executor:
         self._bridge = bridge
         self._aggregator = EventAggregator()
 
-        # ADR R7: worker-scoped holder of per-run actor tokens. Registered when a
+        # Worker-scoped holder of per-run actor tokens. Registered when a
         # run's active window opens and dropped when it closes, so tokens live
         # only inside the owning worker for the run and never touch a checkpoint.
         self._token_store = RunTokenStore()
@@ -76,7 +76,7 @@ class Executor:
         )
 
         # Wire bridge relay: every broadcast event is forwarded to the control
-        # surface via HTTP (ADR-031).  Closure captures bridge reference.
+        # surface via HTTP.  Closure captures bridge reference.
         _bridge_ref = bridge
 
         async def _relay_event(sequenced: SequencedEvent) -> None:
@@ -96,7 +96,7 @@ class Executor:
 
     @property
     def token_store(self) -> RunTokenStore:
-        """Return the worker-scoped actor token store (ADR R7).
+        """Return the worker-scoped actor token store.
 
         The per-run authoring binding reads each worker's own token from here
         when it assembles that worker's tool surface; the store holds a run's
@@ -162,20 +162,20 @@ class Executor:
             return True
 
     async def _mark_ingest_done(self, thread_id: str, outcome: str) -> None:
-        """Release the ingest slot, untrack thread, prune aggregator (WRK-K02).
+        """Release the ingest slot, untrack thread, prune aggregator.
 
         Drops the run's actor tokens only on a TERMINAL *outcome*. An
         ``"interrupted"`` ingest means the run parked at a gate and will resume -
         a later document gate (the ADR gate) authors again through the submitter,
         which reads the run's bearer/actor tokens from the store at call time - so
         the tokens must survive park->resume and are dropped only when the run
-        truly terminates (P04.S10; ADR R7 window closes at termination, not at an
+        truly terminates (the token window closes at termination, not at an
         interrupt-park).
         """
         async with self._ingest_lock:
             self._active_ingests.discard(thread_id)
             active_snapshot = set(self._active_ingests)
-        # ADR R7: drop the run's actor tokens when its active window truly closes,
+        # Drop the run's actor tokens when its active window truly closes,
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
             self._token_store.drop(thread_id)
@@ -200,7 +200,7 @@ class Executor:
                         await self._handle_resume(req)
                     case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
-                        # ADR R7: cancellation ends the run — drop any held tokens.
+                        # Cancellation ends the run — drop any held tokens.
                         self._token_store.drop(req.thread_id)
                         self._aggregator.cancel_thread(req.thread_id)
                         # Emit terminal if no active ingest (TOCTOU safe:
@@ -351,7 +351,7 @@ class Executor:
                 return
 
             self._bridge.track_thread(req.thread_id)
-            # ADR R7: hold the run's per-role tokens for this active window only.
+            # Hold the run's per-role tokens for this active window only.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
             graph_input = GraphLifecycleManager.build_graph_input(
@@ -400,7 +400,7 @@ class Executor:
     async def _handle_resume(self, req: DispatchRequest) -> None:
         """Resume a graph from a LangGraph interrupt via ``Command(resume=...)``."""
         async with ws_span("executor.resume", thread_id=req.thread_id) as span:
-            # ADR-010: record resume option (cast to str for span attribute)
+            # Record resume option (cast to str for span attribute)
             val = str(req.option_id) if req.option_id else "none"
             span.set_attribute("option_id", val)
             try:
@@ -452,7 +452,7 @@ class Executor:
                 return
 
             self._bridge.track_thread(req.thread_id)
-            # ADR R7: a resumed turn re-provisions the run's tokens for its window.
+            # A resumed turn re-provisions the run's tokens for its window.
             self._token_store.register(req.thread_id, req.actor_tokens)
 
             # Resolve recursion_limit: explicit request > team TOML > global default.

@@ -1,4 +1,4 @@
-"""The versioned five-verb gateway surface (ADR R6).
+"""The versioned five-verb gateway surface.
 
 Mounts ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
 ``service-state`` under ``/v1`` as the engine-facing edge. Each verb reshapes an
@@ -151,7 +151,7 @@ async def run_start_endpoint(
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
 
-    # model-profiles ADR: validate the selected profile belongs to the preset and
+    # model-profiles: validate the selected profile belongs to the preset and
     # is runnable, then freeze its effective per-role assignment. The frozen record
     # is threaded to the worker (compilation consumes it verbatim) and persisted in
     # metadata so restart reproduces it. Never silently falls back to team-defaults.
@@ -364,10 +364,10 @@ def _raise_for_dispatch_failure(
 
 
 def _active_role(next_nodes: list[str], agents: list[Any]) -> str | None:
-    """Active position in product ROLE vocabulary, never a node name (PW4).
+    """Active position in product ROLE vocabulary, never a node name.
 
     Maps the checkpoint's active node to the role of the matching agent (its
-    node is named by its agent id, minus the ADR-020 ``mount_`` prefix). Internal
+    node is named by its agent id, minus the ``mount_`` prefix). Internal
     orchestration and gate nodes have no matching agent, so they surface as
     ``None`` rather than leaking an internal LangGraph node name into the product
     status contract; per-role ``state`` and ``pause_cause`` carry the rest.
@@ -389,7 +389,7 @@ async def run_status_endpoint(
     aggregator: EventAggregator = Depends(get_aggregator),
     checkpointer: Checkpointer = Depends(get_checkpointer),
 ) -> RunStatusResponse:
-    """Return the authoritative recovery snapshot for a run (ADR R6)."""
+    """Return the authoritative recovery snapshot for a run."""
     snapshot = await build_thread_state(
         db, thread_id=run_id, aggregator=aggregator, checkpointer=checkpointer
     )
@@ -405,7 +405,7 @@ async def run_status_endpoint(
         next_nodes=snapshot.next_nodes,
         repair_status=snapshot.repair_status,
     )
-    # model-profiles ADR: disclose the run's frozen profile + effective assignment,
+    # model-profiles: disclose the run's frozen profile + effective assignment,
     # reproduced verbatim from run metadata (never re-resolved).
     frozen = _read_persisted_frozen(
         thread.thread_metadata if thread is not None else None
@@ -614,7 +614,7 @@ def _summarize_profiles(
     Uses the shared model-profile resolver + eligibility service so the served
     assignments are the exact ones launch would freeze. Provider readiness is
     probed once and shared across profiles; the acceptance gate stays open
-    (reported honestly as an unavailable reason) until P04.S10.
+    (reported honestly as an unavailable reason).
     """
     from ...graph.enums import Provider
     from ...providers.model_profiles import (

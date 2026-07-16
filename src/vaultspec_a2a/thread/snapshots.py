@@ -53,7 +53,7 @@ __all__ = [
 # Verdict-style approval-gate pause causes (as opposed to tool permission pauses):
 # the FSM treats these as an approval whose resolution carries an approval_status
 # and whose resume value is a verdict, not a tool option. Both the execution
-# plan-approval gate and the document phase gates (adr-authoring-orchestration)
+# plan-approval gate and the document phase gates
 # park with this shape, so the document gate is classified here too.
 PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     {
@@ -63,7 +63,7 @@ PLAN_APPROVAL_PAUSE_CAUSES: frozenset[str] = frozenset(
     }
 )
 
-# DB-CRIT-01: map aggregator outcome strings to ThreadStatus enum values.
+# Map aggregator outcome strings to ThreadStatus enum values.
 TERMINAL_STATUS_MAP: dict[str, str] = {
     ThreadStatus.COMPLETED: ThreadStatus.COMPLETED,
     ThreadStatus.FAILED: ThreadStatus.FAILED,
@@ -172,7 +172,7 @@ class ExecutionStateProjection:
 
 
 # ---------------------------------------------------------------------------
-# D-12: Layer 1 snapshot dataclasses mirroring api/schemas/snapshots Pydantic
+# Layer 1 snapshot dataclasses mirroring api/schemas/snapshots Pydantic
 # ---------------------------------------------------------------------------
 
 

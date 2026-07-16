@@ -34,7 +34,7 @@ def get_aggregator(request: Request) -> EventAggregator:
 
 
 def get_checkpointer(request: Request) -> Checkpointer:
-    """FastAPI dependency for the LangGraph checkpointer (read-only, ADR-019)."""
+    """FastAPI dependency for the LangGraph checkpointer (read-only)."""
     checkpointer: Checkpointer | None = getattr(request.app.state, "checkpointer", None)
     if checkpointer is None:
         raise RuntimeError("LangGraph checkpointer not initialised in app state")
@@ -50,7 +50,7 @@ def get_worker_client(request: Request) -> httpx.AsyncClient:
 
 
 def get_circuit_breaker(request: Request) -> Any:
-    """FastAPI dependency for the WorkerCircuitBreaker (PROD-028)."""
+    """FastAPI dependency for the WorkerCircuitBreaker."""
     cb = getattr(request.app.state, "circuit_breaker", None)
     if cb is None:
         raise RuntimeError("WorkerCircuitBreaker not initialised in app state")
@@ -73,7 +73,7 @@ async def get_services(
 ) -> tuple[AsyncSession, EventAggregator, Checkpointer, httpx.AsyncClient]:
     """Dependency for bundling all required services into a single injection point.
 
-    ADR-019: No longer includes GraphRegistry or TaskGroup -- the worker owns
+    No longer includes GraphRegistry or TaskGroup -- the worker owns
     graph lifecycle, and the gateway does not run background agent tasks.
     """
     return db, aggregator, checkpointer, worker_client

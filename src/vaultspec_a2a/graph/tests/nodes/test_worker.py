@@ -156,6 +156,6 @@ def test_build_worker_messages_scopes_document_role_not_coder(tmp_path) -> None:
     coder = _rules_text("standard-executor")
     assert "CODER ONLY GUIDANCE" in coder
     # ...and the bundled document-authoring conventions do NOT leak into a coder
-    # turn (the bundled dir is gated on document roles - reviewer HIGH-1). A
+    # turn (the bundled dir is gated on document roles). A
     # one-sided "coder rules present" assertion would pass the leak green.
     assert "Tag taxonomy" not in coder

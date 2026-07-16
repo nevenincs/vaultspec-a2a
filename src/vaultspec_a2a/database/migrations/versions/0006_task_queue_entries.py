@@ -1,4 +1,4 @@
-"""Add worker task-queue entries table (ADR R5).
+"""Add worker task-queue entries table.
 
 Relocates the worker task queue out of the ``.vault/plan`` markdown table
 into A2A's own database alongside threads and checkpoints.

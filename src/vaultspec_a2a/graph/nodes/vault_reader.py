@@ -1,8 +1,8 @@
-"""Blackboard content mounting node (ADR-020, ADR R5).
+"""Blackboard content mounting node.
 
 The mount node also owns the canonical ``build_initial_vault_index`` scan so the
 same glob logic seeds the index at compile time and refreshes it on every mount
-pass (ADR authoring-orchestration S01). ``compiler`` re-exports the function to
+pass. ``compiler`` re-exports the function to
 preserve the historical ``graph.compiler.build_initial_vault_index`` surface.
 """
 
@@ -113,7 +113,7 @@ def create_mount_node(
 
     The cache is scoped to this factory call -- one cache per compiled graph,
     not shared across threads or sessions.  When a ``task_queue_port`` is
-    injected, the database-backed queue view (ADR R5) is appended as a
+    injected, the database-backed queue view is appended as a
     mounted block during the plan and exec phases, replacing the former
     ``.vault/plan`` markdown interception.
     """
@@ -169,7 +169,7 @@ def create_mount_node(
         """Preprocessing node: read .vault/ documents and assemble mounted_context.
 
         Each pass re-derives the active feature's vault index from disk so gates
-        and mounts observe documents produced earlier in the same run (S01). The
+        and mounts observe documents produced earlier in the same run. The
         refresh is add-only: it discovers newly written documents and returns
         them through the ``_merge_vault_index`` reducer; removals are out of
         scope for the merge reducer and are not reflected here.

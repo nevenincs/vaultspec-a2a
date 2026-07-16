@@ -223,7 +223,7 @@ async def test_worker_turn_clears_consumed_approval_residue() -> None:
 class MarkCompleteEmittingModel(BaseChatModel):
     """Model that emits a mark_task_complete call, then a final message.
 
-    Exercises the worker's ADR-021-revised Command dispatch: the first turn
+    Exercises the worker's revised Command dispatch: the first turn
     emits the queue tool call, the follow-up turn (after the ToolMessage is
     threaded back) returns the completed message.
     """

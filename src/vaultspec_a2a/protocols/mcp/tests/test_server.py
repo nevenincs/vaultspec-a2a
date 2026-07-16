@@ -8,7 +8,7 @@ Per CLAUDE.md: no mocks, no monkeypatching.  The TestClient path runs
 the full lifespan using real in-memory SQLite and a real AsyncSqliteSaver
 checkpointer so the production vaultspec.db is never created.
 
-ADR-019: GraphRegistry has moved to the worker process.  The gateway
+GraphRegistry has moved to the worker process.  The gateway
 test app uses a real in-process FastAPI ASGI app (via ASGITransport)
 for worker dispatch — no MockTransport, no fake responses.
 
@@ -168,7 +168,7 @@ def _make_test_client(
 ) -> TestClient:
     """Create a TestClient with the real lifespan bypassed.
 
-    ADR-019: wires a real in-process dispatch receiver (ASGITransport over a
+    Wires a real in-process dispatch receiver (ASGITransport over a
     minimal FastAPI app) for the worker client, and injects the real
     AsyncSqliteSaver checkpointer from the calling fixture.
 
@@ -444,7 +444,7 @@ class TestCreateThreadViaApp:
 
 
 # ---------------------------------------------------------------------------
-# Tool function error-path tests (MCP-HIGH-01)
+# Tool function error-path tests
 #
 # These tests verify error-handling behaviour when the server is unavailable.
 # The success path is covered by TestCreateThreadViaApp above.
@@ -456,7 +456,7 @@ class TestCreateThreadViaApp:
 async def test_start_thread_raises_when_server_unavailable() -> None:
     """start_thread with a valid preset raises when the server is not running.
 
-    MCP-HIGH-01: verifies the tool raises an exception (FastMCP signals
+    Verifies the tool raises an exception (FastMCP signals
     isError=true) rather than returning a silent error string.
     """
     with pytest.raises(ToolError) as exc_info:
@@ -480,7 +480,7 @@ async def test_start_thread_raises_when_server_unavailable() -> None:
 async def test_get_thread_status_raises_when_server_unavailable() -> None:
     """get_thread_status raises when the server is not running.
 
-    MCP-HIGH-01: verifies exception-based error signaling.
+    Verifies exception-based error signaling.
     """
     with pytest.raises(ToolError) as exc_info:
         await get_thread_status(thread_id="some-thread-id")
@@ -539,7 +539,7 @@ async def test_get_thread_status_reports_repair_and_readiness(
 async def test_send_message_raises_when_server_unavailable() -> None:
     """send_message raises when the server is not running.
 
-    MCP-HIGH-01: verifies exception-based error signaling.
+    Verifies exception-based error signaling.
     """
     with pytest.raises(ToolError) as exc_info:
         await send_message(thread_id="some-thread-id", message="hello")
@@ -598,7 +598,7 @@ async def test_send_message_raises_tool_error_for_repair_needed_thread(
 
 
 # ---------------------------------------------------------------------------
-# _ws_url_from_api_base unit tests (MCP-MEDIUM-01)
+# _ws_url_from_api_base unit tests
 # ---------------------------------------------------------------------------
 
 
@@ -639,7 +639,7 @@ def test_ws_url_no_port_omits_colon() -> None:
 
 
 # ---------------------------------------------------------------------------
-# list_threads tests (MCP-R1)
+# list_threads tests
 # ---------------------------------------------------------------------------
 
 
@@ -1131,7 +1131,7 @@ class TestListThreadsViaApp:
 
 
 # ---------------------------------------------------------------------------
-# respond_to_permission tests (MCP-R4)
+# respond_to_permission tests
 # ---------------------------------------------------------------------------
 
 
@@ -1277,7 +1277,7 @@ class TestRespondToPermissionViaApp:
 
 
 # ---------------------------------------------------------------------------
-# get_team_status tests (MCP-R6)
+# get_team_status tests
 # ---------------------------------------------------------------------------
 
 
@@ -1306,7 +1306,7 @@ class TestGetTeamStatusViaApp:
 
 
 # ---------------------------------------------------------------------------
-# get_pending_permissions tests (MCP-R5)
+# get_pending_permissions tests
 # ---------------------------------------------------------------------------
 
 
@@ -1552,7 +1552,7 @@ class TestGetPendingPermissionsViaApp:
 
 
 # ---------------------------------------------------------------------------
-# list_team_presets tests (MCP-R2)
+# list_team_presets tests
 # ---------------------------------------------------------------------------
 
 
@@ -1594,7 +1594,7 @@ class TestListTeamPresetsViaApp:
 
 
 # ---------------------------------------------------------------------------
-# cancel_thread tests (MCP-R3)
+# cancel_thread tests
 # ---------------------------------------------------------------------------
 
 

@@ -110,7 +110,7 @@ async def start_thread(
                          file operations to this directory. If omitted, agents
                          run without project context.
     """
-    # MCP-01: reject oversized payloads before making any HTTP call.
+    # reject oversized payloads before making any HTTP call.
     if len(initial_message) > settings.mcp_max_initial_message_chars:
         raise ToolError(
             f"initial_message too long ({len(initial_message)} chars). "

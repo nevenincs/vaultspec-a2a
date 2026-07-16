@@ -1,6 +1,6 @@
 """ACP session lifecycle RPCs: initialize, setup, and prompt.
 
-Extracted from the original monolithic ``_acp_session.py`` (D-04).
+Extracted from the original monolithic ``_acp_session.py``.
 Data carriers live in ``_acp_types``, auth logic in ``_acp_auth``.
 """
 
@@ -63,7 +63,7 @@ async def initialize_session(
                     if config.agent_config is not None
                     else False
                 ),
-                # ACP-AUTH-002: signal support for terminal-based auth and
+                # Signal support for terminal-based auth and
                 # terminal output to claude-agent-acp >=0.20.2.  Without
                 # these flags the agent refuses to authenticate via the
                 # subprocess stdin/stdout channel (gateway auth check added
@@ -137,7 +137,7 @@ async def setup_session(
     method = "session/new"
     params: dict[str, object] = {"cwd": working_dir, "mcpServers": config.mcp_servers}
     if config.allowed_tools:
-        # ADR R4 (headless): auto-permit exactly the bridged authoring tools so
+        # Headless: auto-permit exactly the bridged authoring tools so
         # the CLI can invoke them without a local prompt. This is a recorded
         # approval policy, not a bypass — the real human gate is the engine
         # review lane, and the .vault deny policy still blocks fs writes.

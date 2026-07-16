@@ -56,7 +56,7 @@ _CHANGESET_ID_FIELD = "authoring_changeset_ids"
 _ACTIVE_FEATURE_FIELD = "active_feature"
 _AUTHORING_SESSION_FIELD = "authoring_session_id"
 
-# --- Semantic authoring-phase projection (a2a-edge-conformance P02.S04) -------
+# --- Semantic authoring-phase projection -------
 
 # Terminal thread statuses map straight to a product-safe semantic phase.
 _SEMANTIC_TERMINAL: dict[str, str] = {

@@ -45,7 +45,7 @@ async def send_message_endpoint(
     """Send a user message into an existing thread.
 
     Returns 202 Accepted immediately; the message is dispatched to the
-    worker process for graph execution (ADR-019).
+    worker process for graph execution.
     """
     agent_id = body.agent_id or DEFAULT_SUPERVISOR_ID
 

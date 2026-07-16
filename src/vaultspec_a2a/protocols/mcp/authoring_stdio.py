@@ -1,4 +1,4 @@
-"""Per-run stdio MCP bridge for the engine authoring tools (ADR R4 amendment).
+"""Per-run stdio MCP bridge for the engine authoring tools.
 
 Spawned by the CLI as ``python -m vaultspec_a2a.protocols.mcp.authoring_stdio``.
 The process reconstructs the run's engine dispatch from its environment and
@@ -9,7 +9,7 @@ engine edge is unchanged: this process still speaks to the engine over loopback
 HTTP via :class:`AuthoringClient` under the calling role's actor token, so it is
 an orchestration-internal transport swap, not an engine-contract change.
 
-Token hygiene (ADR R7): the machine bearer and actor token arrive by environment,
+Token hygiene: the machine bearer and actor token arrive by environment,
 are held only for this process's lifetime, and are NEVER written to stdout (the
 MCP JSON-RPC channel) or stderr. stdout carries only MCP protocol frames; the
 only stderr output is a value-free diagnostic when required env is absent.

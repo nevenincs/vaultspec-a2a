@@ -1,4 +1,4 @@
-"""Pure run-start eligibility policy for the v1 gateway (a2a-edge-conformance).
+"""Pure run-start eligibility policy for the v1 gateway.
 
 The ``run-start`` verb refuses a run before dispatch when the request cannot
 produce a valid run: a document-authoring preset with no target feature, or an
@@ -60,7 +60,7 @@ def is_document_authoring_preset(team_config: TeamConfig) -> bool:
 def required_role_ids(team_config: TeamConfig) -> list[str]:
     """Return the role identifiers a run's token bundle must cover.
 
-    Tokens are keyed by the worker ``agent_id`` (ADR R7), so the required roles
+    Tokens are keyed by the worker ``agent_id``, so the required roles
     are the preset's worker agent ids in declaration order.
     """
     return [worker.agent_id for worker in team_config.workers]

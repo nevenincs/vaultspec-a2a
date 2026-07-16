@@ -164,7 +164,7 @@ async def test_plan_approval_request_is_persisted_as_durable_pending_permission(
 async def test_document_approval_request_is_persisted_as_durable_pending_permission(
     session_factory,
 ) -> None:
-    """Document phase-gate interrupts must become durable pending rows (P04.S10).
+    """Document phase-gate interrupts must become durable pending rows.
 
     The research_adr phase gate parks with a ``document_approval_request``
     interrupt; the relay must record it as a verdict-style approval so the thread

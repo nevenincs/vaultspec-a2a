@@ -1,6 +1,6 @@
 """ACP authentication helpers and RPCs.
 
-Extracted from ``_acp_session.py`` (D-04) to isolate auth logic from
+Extracted from ``_acp_session.py`` to isolate auth logic from
 session lifecycle RPCs and data carriers.
 """
 

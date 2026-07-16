@@ -1,6 +1,6 @@
 """Live proof: a real claude-agent-acp session connects to the authoring MCP bridge.
 
-No mocks. Serves the S19 authoring MCP server over streamable HTTP, spawns the
+No mocks. Serves the authoring MCP server over streamable HTTP, spawns the
 real ``claude-agent-acp`` subprocess via the production spawn path, and drives
 ``initialize`` + ``session/new`` with the authoring server in ``mcpServers``.
 Asserts the real agent ACCEPTS the config and CONNECTS to our authoring server

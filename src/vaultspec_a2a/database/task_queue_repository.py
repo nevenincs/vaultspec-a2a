@@ -1,4 +1,4 @@
-"""Worker task-queue repository — database-backed queue entries (ADR R5).
+"""Worker task-queue repository — database-backed queue entries.
 
 Replaces the bespoke ``.vault/plan`` markdown table with rows owned by a
 thread.  ``position`` is the sole ordering authority; ``task_key`` is the
@@ -10,7 +10,7 @@ into graph nodes lives in the worker composition layer.
 
 Interim population is internal-only: ``seed_task_queue`` is used by tests and
 future gateway/planner internals.  No agent-reachable population path exists,
-preserving the R2 vault-write closure.
+preserving the vault-write closure.
 """
 
 from __future__ import annotations

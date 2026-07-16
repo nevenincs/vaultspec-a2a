@@ -1,4 +1,4 @@
-"""Authoring session lifecycle and proposal verbs (ADR R3).
+"""Authoring session lifecycle and proposal verbs.
 
 A thin, typed layer over :class:`AuthoringClient` that owns one authoring
 session per run. The session generates its own engine-valid ids (session and
@@ -40,7 +40,7 @@ async def mint_actor_token(
     ``POST /authoring/v1/actor-tokens`` is the sole non-enveloped mutating
     route: it takes ``{actor: {id, kind}, lifetime_ms?}`` and needs no per-actor
     token yet. The raw token is returned once, in the response ``data`` — the
-    caller stores it in worker-scoped runtime state and never logs it (R7).
+    caller stores it in worker-scoped runtime state and never logs it.
     """
     validate_id(actor_id, field="actor.id")
     payload: dict[str, Any] = {"actor": {"id": actor_id, "kind": kind}}
@@ -228,7 +228,11 @@ class AuthoringSession:
     ) -> AuthoringResponse | Denial:
         """Append operations to an existing draft (``append_draft``)."""
         return await self._draft_mutation(
-            "append", changeset_id, expected_revision, summary, operations,
+            "append",
+            changeset_id,
+            expected_revision,
+            summary,
+            operations,
             idempotency_key,
         )
 
@@ -243,7 +247,11 @@ class AuthoringSession:
     ) -> AuthoringResponse | Denial:
         """Replace a draft's operations (``replace_draft``)."""
         return await self._draft_mutation(
-            "replace", changeset_id, expected_revision, summary, operations,
+            "replace",
+            changeset_id,
+            expected_revision,
+            summary,
+            operations,
             idempotency_key,
         )
 

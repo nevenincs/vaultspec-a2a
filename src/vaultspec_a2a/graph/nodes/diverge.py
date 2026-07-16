@@ -1,14 +1,14 @@
 """Send-based diverge stage for the document phase machine.
 
 The diverge stage fans a single research request out into N parallel researcher
-branches and joins them at a synthesis node (adr-authoring-orchestration S04).
+branches and joins them at a synthesis node.
 LangGraph's ``Send`` is the framework-native map-reduce primitive: the dispatch
 node returns ``Command(goto=[Send(researcher, state), ...])`` to launch one
 branch per research thread, each researcher appends its finding through the
 ``research_findings`` reducer, and a static edge from every researcher into the
 synthesis node forms the join.
 
-These are reusable primitives: the ``research_adr`` topology (S06) composes them
+These are reusable primitives: the ``research_adr`` topology composes them
 with real model-backed producers, and the curation family reuses the same
 fan-out. The researcher's actual work is injected as a
 :class:`ResearchFindingProducer` so the structure is testable without a model

@@ -1,7 +1,7 @@
 """Telemetry sub-module: OpenTelemetry + LangSmith instrumentation.
 
 Facade exposing the public telemetry API. Consumers should import from here
-rather than from sub-modules directly (ADR-009 facade pattern).
+rather than from sub-modules directly (facade pattern).
 
 Usage:
     ```python

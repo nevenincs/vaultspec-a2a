@@ -1,6 +1,6 @@
-"""S15: product run-status speaks role vocabulary, never internal node names.
+"""Product run-status speaks role vocabulary, never internal node names.
 
-Real assertions for the PW4 discipline: the gateway run-status contract must not
+Real assertions that the gateway run-status contract must not
 leak internal LangGraph node names. ``active_agent`` is mapped to the role of the
 active worker, orchestration and gate nodes surface as ``None`` rather than their
 node name, and the raw ``next_nodes`` projection is absent from the product
@@ -47,7 +47,7 @@ def test_active_role_empty_next_nodes_is_none() -> None:
 
 
 def test_product_topology_has_no_next_nodes_field() -> None:
-    # PW4 + S15: the product topology contract carries no internal-node-name
+    # The product topology contract carries no internal-node-name
     # field. next_nodes was dropped from v1; active_agent stays as the role.
     assert "next_nodes" not in TopologyPosition.model_fields
     assert "active_agent" in TopologyPosition.model_fields

@@ -1,6 +1,6 @@
 """ACP JSON-RPC protocol dispatch loop.
 
-Extracted from ``acp_chat_model.py`` (ADR D-05).  Contains the stdout
+Extracted from ``acp_chat_model.py``.  Contains the stdout
 readline loop, packet dispatcher, client response handler, server RPC
 handler, and session update notification handler.
 

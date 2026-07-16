@@ -20,7 +20,7 @@ from ..utils.enums import Environment, LogLevel
 # Defaults for path-override fields.  Computed once at module import relative to
 # this file: control/config.py → control → vaultspec_a2a → src → project-root.
 _DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.parent
-# Machine-global A2A home for runtime state (ADR R8).  Kept outside the repo and
+# Machine-global A2A home for runtime state.  Kept outside the repo and
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
 
@@ -42,7 +42,7 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_DATABASE_BACKEND",
         description=(
             "Primary application database backend.  SQLite is the local/dev "
-            "default (ADR-035).  Production deployments set 'postgres' via env."
+            "default.  Production deployments set 'postgres' via env."
         ),
     )
     checkpoint_backend: Literal["sqlite", "postgres"] = Field(
@@ -103,7 +103,7 @@ class InfraConfig(BaseSettings):
         description=(
             "Machine-global A2A home for runtime state (process logs, graph "
             "cache, queues, tmp) and the service discovery file.  Defaults to "
-            "~/.vaultspec-a2a (ADR R8).  Relocated out of .vault/ because "
+            "~/.vaultspec-a2a.  Relocated out of .vault/ because "
             "vaultspec firmware rejects foreign directories inside the vault."
         ),
     )
@@ -165,7 +165,7 @@ class InfraConfig(BaseSettings):
         validation_alias="CLAUDE_CODE_OAUTH_TOKEN",
     )
     # Z.ai routes through the Claude ACP path against an Anthropic-Messages-
-    # compatible endpoint (multi-provider-execution ADR). The base URL defaults to
+    # compatible endpoint. The base URL defaults to
     # Z.ai's documented Anthropic gateway; only the auth token must be supplied.
     zai_base_url: str = Field(
         default="https://api.z.ai/api/anthropic",
@@ -229,7 +229,7 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    # Worker process settings (ADR-031)
+    # Worker process settings
     worker_port: int = Field(
         default=8001,
         description="Internal worker HTTP port",
@@ -257,9 +257,7 @@ class InfraConfig(BaseSettings):
     )
     auto_spawn_worker: bool = Field(
         default=True,
-        description=(
-            "Auto-spawn worker as child process on gateway startup (ADR-031 §2.4)."
-        ),
+        description=("Auto-spawn worker as child process on gateway startup."),
         alias="VAULTSPEC_AUTO_SPAWN_WORKER",
     )
     repair_on_startup: bool = Field(
@@ -273,7 +271,7 @@ class InfraConfig(BaseSettings):
         alias="VAULTSPEC_REPAIR_STRATEGY",
     )
 
-    # Authoring verdict subscriber (ADR R3, P03.S07)
+    # Authoring verdict subscriber
     authoring_subscriber_enabled: bool = Field(
         default=False,
         alias="VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED",
@@ -306,13 +304,13 @@ class InfraConfig(BaseSettings):
         description="Maximum back-off (seconds) between subscriber reconnect attempts.",
     )
 
-    # ACP backend selection (ADR-002 §5.1)
+    # ACP backend selection
     acp_backend: Literal["node", "binary"] = Field(
         default="node",
         description=(
             "ACP gateway backend: 'node' uses the npm-installed index.js, "
             "'binary' uses the precompiled Bun executable in src/vaultspec_a2a/bin/. "
-            "ADR-002 §5.1 mandates node as default; binary mode is experimental."
+            "node is the default; binary mode is experimental."
         ),
         alias="VAULTSPEC_ACP_BACKEND",
     )
@@ -339,7 +337,7 @@ class InfraConfig(BaseSettings):
         validation_alias="LANGSMITH_ENDPOINT",
     )
 
-    # Worker gateway — heartbeat & circuit-breaker (D-10, D-11)
+    # Worker gateway — heartbeat & circuit-breaker
     worker_heartbeat_timeout_seconds: float = Field(
         default=90.0,
         alias="VAULTSPEC_WORKER_HEARTBEAT_TIMEOUT_SECONDS",
@@ -358,7 +356,7 @@ class InfraConfig(BaseSettings):
         description="Seconds before a OPEN circuit breaker probes the worker again.",
     )
 
-    # Worker health-poll adaptive back-off (D-12)
+    # Worker health-poll adaptive back-off
     worker_poll_initial_interval_seconds: float = Field(
         default=0.1,
         alias="VAULTSPEC_WORKER_POLL_INITIAL_INTERVAL_SECONDS",
@@ -382,7 +380,7 @@ class InfraConfig(BaseSettings):
         description="Seconds between 'still waiting for worker' log messages.",
     )
 
-    # Worker watchdog (D-13)
+    # Worker watchdog
     watchdog_poll_interval_seconds: float = Field(
         default=5.0,
         alias="VAULTSPEC_WATCHDOG_POLL_INTERVAL_SECONDS",
@@ -401,26 +399,26 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    # WebSocket (D-14)
+    # WebSocket
     ws_heartbeat_interval_seconds: float = Field(
         default=30.0,
         alias="VAULTSPEC_WS_HEARTBEAT_INTERVAL_SECONDS",
-        description="ADR-011 §5: WebSocket heartbeat cadence (seconds).",
+        description="WebSocket heartbeat cadence (seconds).",
     )
     ws_dead_client_timeout_seconds: float = Field(
         default=90.0,
         alias="VAULTSPEC_WS_DEAD_CLIENT_TIMEOUT_SECONDS",
-        description="ADR-011 §5: disconnect WebSocket clients silent for this long.",
+        description="Disconnect WebSocket clients silent for this long.",
     )
     ws_max_message_bytes: int = Field(
         default=1_048_576,
         alias="VAULTSPEC_WS_MAX_MESSAGE_BYTES",
         description=(
-            "M14: maximum WebSocket frame size (bytes) to prevent memory exhaustion."
+            "Maximum WebSocket frame size (bytes) to prevent memory exhaustion."
         ),
     )
 
-    # Internal IPC frame/body limits (D-15)
+    # Internal IPC frame/body limits
     internal_max_frame_bytes: int = Field(
         default=1_048_576,
         alias="VAULTSPEC_INTERNAL_MAX_FRAME_BYTES",
@@ -434,32 +432,31 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    # Worker IPC bridge (D-19)
+    # Worker IPC bridge
     ipc_flush_interval_seconds: float = Field(
         default=0.05,
         alias="VAULTSPEC_IPC_FLUSH_INTERVAL_SECONDS",
-        description="CRIT-02: batch flush cadence for the worker→gateway event bridge.",
+        description="Batch flush cadence for the worker→gateway event bridge.",
     )
     ipc_max_flush_retries: int = Field(
         default=3,
         alias="VAULTSPEC_IPC_MAX_FLUSH_RETRIES",
-        description="IPC-03: maximum relay retry attempts per event batch.",
+        description="Maximum relay retry attempts per event batch.",
     )
     ipc_retry_backoff_base_seconds: float = Field(
         default=0.1,
         alias="VAULTSPEC_IPC_RETRY_BACKOFF_BASE_SECONDS",
         description=(
-            "IPC-03: back-off base (seconds) between relay retries"
-            " (doubles each attempt)."
+            "Back-off base (seconds) between relay retries (doubles each attempt)."
         ),
     )
     ipc_max_event_buffer: int = Field(
         default=10_000,
         alias="VAULTSPEC_IPC_MAX_EVENT_BUFFER",
-        description="IPC-03: drop-oldest cap on the in-memory event buffer.",
+        description="Drop-oldest cap on the in-memory event buffer.",
     )
 
-    # ACP provider (D-23, D-24)
+    # ACP provider
     acp_startup_timeout_seconds: float = Field(
         default=300.0,
         alias="VAULTSPEC_ACP_STARTUP_TIMEOUT_SECONDS",
@@ -496,14 +493,14 @@ class InfraConfig(BaseSettings):
         ),
     )
 
-    # Gemini OAuth (D-25)
+    # Gemini OAuth
     oauth_expiry_buffer_seconds: int = Field(
         default=120,
         alias="VAULTSPEC_OAUTH_EXPIRY_BUFFER_SECONDS",
         description="Seconds before OAuth token expiry to trigger a proactive refresh.",
     )
 
-    # MCP server (D-26)
+    # MCP server
     mcp_create_timeout_seconds: float = Field(
         default=30.0,
         alias="VAULTSPEC_MCP_CREATE_TIMEOUT_SECONDS",

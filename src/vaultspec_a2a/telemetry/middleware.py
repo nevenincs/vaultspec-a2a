@@ -1,6 +1,6 @@
 """FastAPI and WebSocket trace context injection middleware.
 
-ADR-010: OpenTelemetry instrumentation from day one. This module provides:
+OpenTelemetry instrumentation from day one. This module provides:
 
 - ``TelemetryMiddleware``: Starlette/FastAPI middleware that starts an OTel span
   for every HTTP request, propagates W3C ``traceparent`` / ``tracestate`` headers,
@@ -13,9 +13,9 @@ ADR-010: OpenTelemetry instrumentation from day one. This module provides:
 
 - ``inject_trace_context``: Injects the current trace context into a dict (e.g.
   a WebSocket JSON frame) so downstream consumers can reconstruct the trace.
-  Per ADR-010 §5: context propagation over WebSockets requires manual injection.
+  Context propagation over WebSockets requires manual injection.
 
-Credential safety (ADR-002): no secrets are read, logged, or emitted as span
+Credential safety: no secrets are read, logged, or emitted as span
 attributes by this module.
 """
 
@@ -47,7 +47,7 @@ __all__ = [
 
 logger = logging.getLogger(__name__)
 
-# TEL-H5: _tracer is initialised lazily on first use via _get_tracer() to
+# _tracer is initialised lazily on first use via _get_tracer() to
 # ensure it is created after configure_telemetry() has run and the real
 # TracerProvider is installed.  A module-level tracer would bind to the
 # no-op provider if this module is imported before configure_telemetry().
@@ -131,7 +131,7 @@ class TelemetryMiddleware(BaseHTTPMiddleware):
                 kind=SpanKind.SERVER,
                 context=ctx,
             ) as span:
-                # H22: use OTel semantic conventions v1.23+ attribute names.
+                # use OTel semantic conventions v1.23+ attribute names.
                 span.set_attribute("http.request.method", request.method)
                 span.set_attribute("url.full", str(request.url))
                 span.set_attribute("http.route", request.url.path)
@@ -183,7 +183,7 @@ async def ws_span(
             aggregator.subscribe(tid, send_fn)
         ```
     """
-    # TEL-M1: when the OTel SDK is explicitly disabled, skip real span creation
+    # when the OTel SDK is explicitly disabled, skip real span creation
     # and yield a no-op span to avoid unnecessary overhead.
     if _SDK_DISABLED:
         yield trace.NonRecordingSpan(trace.INVALID_SPAN_CONTEXT)
@@ -213,8 +213,8 @@ def inject_trace_context(carrier: dict[str, Any]) -> None:
     trace. The injected keys follow the W3C TraceContext format
     (``traceparent``, ``tracestate``).
 
-    Per ADR-010 §5: "Injecting OTel Trace IDs into WebSocket frames requires
-    careful manual context propagation."
+    Injecting OTel Trace IDs into WebSocket frames requires
+    careful manual context propagation.
 
     Args:
         carrier: The mutable dict to inject into (e.g. a WS event payload's

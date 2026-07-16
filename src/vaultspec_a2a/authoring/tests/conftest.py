@@ -2,7 +2,7 @@
 
 The unit-level tests here exercise pure decoders and header/URL assembly with
 no I/O, so they earn both ``middleware`` (package default) and ``unit``. The
-live engine integration tests (S17) declare their own ``service`` marker.
+live engine integration tests declare their own ``service`` marker.
 """
 
 from pathlib import Path

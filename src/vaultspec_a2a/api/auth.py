@@ -1,7 +1,7 @@
-"""API authentication module — ADR-009 §2.2 module hierarchy requirement.
+"""API authentication module — module hierarchy requirement.
 
 Authentication is not yet implemented. This module provides the module
-structure and stub function required by ADR-009. When authentication is
+structure and stub function required by the module hierarchy. When authentication is
 implemented, this module will provide request verification, token validation,
 and principal extraction.
 
@@ -9,8 +9,6 @@ Future implementation will likely support:
 - Bearer token validation (JWT or opaque tokens)
 - API key authentication for local IDE clients
 - Optional — the local-first design means auth may remain no-op for v1
-
-See ADR-009 §2.2 for the module hierarchy mandate.
 """
 
 from fastapi import Request

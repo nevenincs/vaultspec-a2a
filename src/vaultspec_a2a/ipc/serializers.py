@@ -1,4 +1,4 @@
-"""IPC serialization helpers shared between gateway and worker (D-01)."""
+"""IPC serialization helpers shared between gateway and worker."""
 
 from __future__ import annotations
 

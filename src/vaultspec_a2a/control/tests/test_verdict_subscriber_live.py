@@ -1,4 +1,4 @@
-"""Live verdict-round-trip proof for the subscriber (P03.S08, HIGH-2 addendum).
+"""Live verdict-round-trip proof for the subscriber.
 
 No mocks: exercises the real ``AuthoringClient`` lifecycle stream against a live
 dashboard engine on loopback, resolved through the same discovery contract the
@@ -9,7 +9,7 @@ runbook pointer (an infrastructure gate, not a masked failure). Point
 ``--no-seat`` workspace-local serve.
 
 What this proves live against the review-outbox engine build
-(dashboard ``a7ad6f3``, verified 2026-07-15): a real proposal's full review
+(verified 2026-07-15): a real proposal's full review
 round-trip - ``submit_for_review`` publishes ``approval.requested`` (a
 non-verdict parking event), and a human decision publishes the verdict event.
 Both approve and request-changes ride ``approval.resolved`` (disambiguated only
@@ -358,8 +358,8 @@ async def test_live_verdict_round_trip_parks_and_resumes(
         assert len(requested) >= 3, "each submit must park via approval.requested"
         assert all(verdict_from_event(f) is None for f in requested)
 
-        # (b) each decision frame carries the pinned verdict + notes, rides the
-        #     a7ad6f3 event kind, and correlates to the run seeded for that
+        # (b) each decision frame carries the pinned verdict + notes, rides its
+        #     expected event kind, and correlates to the run seeded for that
         #     proposal. Approve and request-changes both ride approval.resolved
         #     (decision-field disambiguated); reject rides proposal.rejected.
         expected = {
@@ -407,7 +407,7 @@ async def _seed_parked_gate(
     and a durable ``document_approval_request`` permission row records the pause.
 
     ``status`` defaults to ``INPUT_REQUIRED`` (the healthy parked posture); pass
-    ``RUNNING`` to model the P04.S10 clobber, where a prior gate's verdict resume
+    ``RUNNING`` to model the clobber, where a prior gate's verdict resume
     left the run mis-statused RUNNING even though its checkpoint is parked at the
     gate - the case the reconcile must still recover by checkpoint truth.
     """
@@ -445,7 +445,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 ) -> None:
     """A HUMAN reject consumed BEFORE the run parks is recovered by the reconcile.
 
-    The P04.S10 stall reproduced end to end with no mocks: a real proposal is
+    The stall reproduced end to end with no mocks: a real proposal is
     submitted and a human ``edit`` (request_changes) decision is applied, which
     returns the changeset to ``draft`` - so the changeset status carries no verdict
     and only the resolved approval record holds ``decision=request_changes``. The
@@ -560,7 +560,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
 
-        # The resume landed: the answered gate row is resolved (GAP D) and the run
+        # The resume landed: the answered gate row is resolved and the run
         # left INPUT_REQUIRED for RUNNING, back into its revision loop.
         async with session_factory() as db:
             gate_row = await get_permission_request(db, f"{thread_id}:adr-gate")
@@ -578,7 +578,7 @@ async def test_live_missed_reject_is_recovered_by_parked_reconcile(
 async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcile(
     client: AuthoringClient, engine: tuple[str, str], tmp_path
 ) -> None:
-    """A run parked at a gate but mis-statused RUNNING is still recovered (P04.S10).
+    """A run parked at a gate but mis-statused RUNNING is still recovered.
 
     The recovery_required wedge: a run's checkpoint is parked at a gate awaiting a
     verdict, but its thread status is RUNNING rather than INPUT_REQUIRED - because a
@@ -703,9 +703,9 @@ async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
 ) -> None:
     """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
 
-    Guard for P04.S10: including RUNNING threads in the reconcile candidate set must
+    Guard: including RUNNING threads in the reconcile candidate set must
     not double-drive a run whose resume is legitimately already in flight. The
-    durable resume claim (``_resume_with_verdict``, the d899030 lease) is the
+    durable resume claim (``_resume_with_verdict``) is the
     observable proof-of-in-flight: a RUNNING run parked at a gate WITH a decided
     verdict on the engine AND a FRESH claim on that exact gate is a run whose resume
     was just dispatched and has not yet advanced the checkpoint - re-dispatching

@@ -1,6 +1,6 @@
 """WebSocket connection manager and message router.
 
-Implements the multiplexed WebSocket protocol from ADR-004 and ADR-011:
+Implements the multiplexed WebSocket protocol:
 - Single WebSocket per client
 - Client subscription management (subscribe/unsubscribe per thread)
 - Heartbeat every 30 seconds
@@ -45,7 +45,7 @@ from .schemas.events import ConnectedEvent, ErrorEvent, HeartbeatEvent
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
-# OTel instrumentation (ADR-010)
+# OTel instrumentation
 # ---------------------------------------------------------------------------
 _tracer = get_tracer(__name__)
 _meter = get_meter(__name__)
@@ -115,7 +115,7 @@ class ConnectionManager:
         self._message_handler: MessageHandler | None = None
         # Callback for AGENT_CONTROL: (thread_id, agent_id, action) -> None
         self._agent_control_handler: AgentControlHandler | None = None
-        # Per-connection error sequence counters (API-H2: sequences start at 1)
+        # Per-connection error sequence counters (sequences start at 1)
         self._error_sequences: dict[str, int] = {}
 
     def set_message_handler(self, handler: MessageHandler) -> None:
@@ -154,7 +154,7 @@ class ConnectionManager:
             queue = self._aggregator.add_subscriber(client_id)
 
             # Send ConnectedEvent
-            # BE-35: source active threads from worker heartbeat data, not
+            # Source active threads from worker heartbeat data, not
             # WS subscriber list (which is empty on reconnect).  Fall back
             # to aggregator subscriber list if heartbeat hasn't arrived yet.
             worker_threads: list[str] = getattr(
@@ -174,7 +174,7 @@ class ConnectionManager:
 
             # Start the unified writer loop (handles both events and heartbeats).
             #
-            # Policy exception (API-H3): asyncio.create_task() is used here
+            # Policy exception: asyncio.create_task() is used here
             # instead of anyio because this task must outlive connect().
             # An anyio.TaskGroup blocks until children complete, which would
             # prevent returning control to the listen() read loop.  The WS
@@ -193,7 +193,7 @@ class ConnectionManager:
     async def disconnect(self, client_id: str) -> None:
         """Clean up a disconnected client."""
         async with ws_span("ws.disconnect", client_id=client_id):
-            # Cancel writer task and await it to prevent shutdown race (WS-G03)
+            # Cancel writer task and await it to prevent shutdown race
             writer_task = self._writer_tasks.pop(client_id, None)
             if writer_task is not None:
                 writer_task.cancel()
@@ -223,7 +223,7 @@ class ConnectionManager:
         This should be called from the WebSocket endpoint handler.
         Disconnects unresponsive clients after
         ``settings.ws_dead_client_timeout_seconds`` of silence
-        (ADR-011 §5: 3 missed heartbeats).
+        (3 missed heartbeats).
         """
         websocket = self._connections.get(client_id)
         if websocket is None:
@@ -232,8 +232,8 @@ class ConnectionManager:
         try:
             while True:
                 try:
-                    # M14: receive as text first to validate size before parsing.
-                    # Policy exception (API-H4): asyncio.wait_for is used here
+                    # Receive as text first to validate size before parsing.
+                    # Policy exception: asyncio.wait_for is used here
                     # because Starlette's receive_text() returns an asyncio
                     # coroutine and the anyio equivalent (fail_after) expects
                     # an async callable, not an awaitable.
@@ -253,7 +253,7 @@ class ConnectionManager:
                         },
                     )
                     break
-                # M14: reject oversized messages to prevent memory exhaustion
+                # Reject oversized messages to prevent memory exhaustion
                 msg_bytes = len(raw_text.encode())
                 if msg_bytes > settings.ws_max_message_bytes:
                     logger.warning(
@@ -570,14 +570,13 @@ class ConnectionManager:
     ) -> None:
         """Drain the event queue and write to the WebSocket.
 
-        WS-ORD-01: heartbeats are sent inline when the queue is idle for
+        Heartbeats are sent inline when the queue is idle for
         ``settings.ws_heartbeat_interval_seconds``, preventing interleaving between
         a separate heartbeat task and the event writer.
 
         Each outgoing frame is enriched with a ``_trace`` dict containing
         W3C TraceContext (``traceparent`` / ``tracestate``) so that
-        downstream consumers can reconstruct the distributed trace
-        (ADR-010 §5).
+        downstream consumers can reconstruct the distributed trace.
         """
         websocket = self._connections.get(client_id)
         if websocket is None:
@@ -625,7 +624,7 @@ class ConnectionManager:
                         if hasattr(wire_event, "model_dump")
                         else wire_event
                     )
-                    # ADR-010 §5: inject trace context into WS frames
+                    # Inject trace context into WS frames
                     trace_carrier: dict[str, str] = {}
                     inject_trace_context(trace_carrier)
                     if trace_carrier:
@@ -644,7 +643,7 @@ class ConnectionManager:
             pass
 
     # ------------------------------------------------------------------
-    # Direct broadcast (internal relay path — ADR-019)
+    # Direct broadcast (internal relay path)
     # ------------------------------------------------------------------
 
     async def broadcast_to_thread(
@@ -656,7 +655,7 @@ class ConnectionManager:
 
         Used by the internal WebSocket relay (``vaultspec_a2a.api.internal``) to forward
         worker events to browser clients.  Events are routed through per-client
-        queues (WS-MULTI-03) so a slow client cannot stall the relay for others.
+        queues so a slow client cannot stall the relay for others.
         Drop-oldest backpressure is applied when a client queue is full.
 
         Clients without a registered queue are silently skipped.

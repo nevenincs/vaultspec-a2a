@@ -1,6 +1,6 @@
-"""Model-profiles handover evidence battery (model-profiles P03.S05).
+"""Model-profiles handover evidence battery.
 
-Live, mock-free evidence for the tmp3 verification list that the P02 gateway
+Live, mock-free evidence for the verification list that the gateway
 tests do not already cover. The already-covered items (bundled + workspace
 discovery, mock-preset marking, one-invalid-preset isolation, heterogeneous
 team-defaults disclosure, unknown-profile rejection) are exercised by
@@ -19,9 +19,8 @@ team-defaults disclosure, unknown-profile rejection) are exercised by
 - An eligible declared fallback makes an otherwise-unready role eligible, using
   the real readiness probe over real (scrubbed) settings.
 
-The real Research -> ADR run on the served assignments is driven separately as
-P04.S10 by another executor with its own engine instance; it is referenced in
-the step record rather than duplicated here.
+The real Research -> ADR run on the served assignments is driven separately
+by another executor with its own engine instance and is not duplicated here.
 """
 
 from __future__ import annotations
@@ -102,7 +101,7 @@ def _ws_metadata(root: Path) -> dict:
 async def test_frozen_assignment_survives_real_gateway_restart(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """A frozen assignment persists across a real gateway restart (P03.S05).
+    """A frozen assignment persists across a real gateway restart.
 
     Evidence: restart durably reproduces the frozen effective assignment and does
     not re-dispatch. A first app freezes and persists the ``fast`` profile; a
@@ -161,7 +160,7 @@ async def test_frozen_assignment_survives_real_gateway_restart(
 async def test_workspace_drift_after_launch_does_not_mutate_run(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """Editing the workspace profile after launch does not change a live run (P03.S05).
+    """Editing the workspace profile after launch does not change a live run.
 
     Evidence: the run's models are frozen at launch. After freezing ``fast`` at
     ``low`` capability, the workspace TOML is rewritten to ``high``; run-status
@@ -207,7 +206,7 @@ async def test_workspace_drift_after_launch_does_not_mutate_run(
 async def test_discovery_and_launch_resolve_through_one_function(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """Discovery and launch disclose byte-identical effective assignments (P03.S05).
+    """Discovery and launch disclose byte-identical effective assignments.
 
     Evidence that the picker's truth cannot drift from execution's: the presets
     discovery path and the run-start launch path resolve the same team + profile
@@ -265,7 +264,7 @@ async def test_discovery_and_launch_resolve_through_one_function(
 async def test_run_start_persists_no_secrets_in_db_row(
     session_factory, checkpointer, tmp_path
 ) -> None:
-    """Actor tokens never land in the persisted run metadata DB row (P03.S05).
+    """Actor tokens never land in the persisted run metadata DB row.
 
     Evidence: run-start receives a real actor-token bundle but must persist only
     the safe frozen assignment. The thread's ``thread_metadata`` DB column is read
@@ -394,7 +393,7 @@ def _scrubbed_env() -> dict[str, str]:
 
 
 def test_missing_credential_yields_unavailable_with_safe_reason(tmp_path) -> None:
-    """A scrubbed credential env yields an unavailable provider + safe reason (P03.S05).
+    """A scrubbed credential env yields an unavailable provider + safe reason.
 
     Evidence: with every provider credential removed from the spawned process env,
     the real ``probe_provider_readiness`` reports Zhipu unready with a reason that
@@ -409,7 +408,7 @@ def test_missing_credential_yields_unavailable_with_safe_reason(tmp_path) -> Non
 
 
 def test_present_credential_flips_readiness(tmp_path) -> None:
-    """A credential present in the spawned env flips readiness ready (P03.S05).
+    """A credential present in the spawned env flips readiness ready.
 
     Evidence that the probe reads the REAL process settings (not a monkeypatch):
     injecting a Zhipu key into the same scrubbed env flips readiness to ready, and
@@ -423,7 +422,7 @@ def test_present_credential_flips_readiness(tmp_path) -> None:
 
 
 def test_eligible_fallback_makes_role_eligible(tmp_path) -> None:
-    """A ready declared fallback makes an unready-primary role eligible (P03.S05).
+    """A ready declared fallback makes an unready-primary role eligible.
 
     Evidence over real (scrubbed) settings: with Zhipu deterministically unready,
     a role that declares a ready mock fallback is eligible, while an otherwise

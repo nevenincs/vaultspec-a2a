@@ -1,4 +1,4 @@
-"""Loopback httpx client for the dashboard engine authoring plane (ADR R3).
+"""Loopback httpx client for the dashboard engine authoring plane.
 
 The single seam through which this repo speaks to the engine. Every authoring
 call carries two layers of auth in distinct headers: the machine bearer
@@ -7,7 +7,7 @@ commands, the per-actor principal (``x-authoring-actor-token``). Mutating
 commands are wrapped in a :class:`CommandEnvelope` with the idempotency key as
 a body field; the bare actor-token bootstrap route is the sole exception.
 
-Token hygiene (ADR R7): tokens are never logged and never rendered in
+Token hygiene: tokens are never logged and never rendered in
 ``repr`` — no bearer, actor token, or request payload is emitted to a log.
 """
 
@@ -135,7 +135,7 @@ class AuthoringClient:
         await self.aclose()
 
     def __repr__(self) -> str:
-        """Redacted representation — never leaks tokens (ADR R7)."""
+        """Redacted representation — never leaks tokens."""
         actor = "set" if self._actor_token else "none"
         return f"AuthoringClient(base_url={self._base_url!r}, actor_token=<{actor}>)"
 

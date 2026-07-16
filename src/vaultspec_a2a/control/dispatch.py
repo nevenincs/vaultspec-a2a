@@ -1,4 +1,4 @@
-"""Consolidated dispatch-to-worker orchestration (D-03).
+"""Consolidated dispatch-to-worker orchestration.
 
 Single entry point for all gateway-to-worker dispatch calls.  Handles
 the common core: ensure worker is spawned, circuit breaker check,
@@ -211,7 +211,7 @@ async def redispatch_reconciling_threads(
     *,
     trace_headers_fn: Any = None,
 ) -> None:
-    """Re-dispatch RECONCILING threads after the worker is ready (F-36).
+    """Re-dispatch RECONCILING threads after the worker is ready.
 
     ``reconcile_threads_on_startup`` marks threads as RECONCILING but does
     not dispatch them.  This function runs as a background task during

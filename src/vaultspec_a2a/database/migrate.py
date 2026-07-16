@@ -1,11 +1,8 @@
-"""Programmatic Alembic migration runner (ADR-029).
+"""Programmatic Alembic migration runner.
 
 Provides ``run_migrations()`` for applying pending schema upgrades at
 application startup.  Uses ``asyncio.to_thread`` to avoid blocking the
 event loop — Alembic's ``command.upgrade`` is synchronous internally.
-
-References:
-    - ADR-029: Database Migration Framework
 """
 
 import asyncio

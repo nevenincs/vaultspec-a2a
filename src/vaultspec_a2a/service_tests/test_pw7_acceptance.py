@@ -1,10 +1,10 @@
-"""PW7 headless acceptance harness for the document-authoring loop (P04.S10).
+"""Headless acceptance harness for the document-authoring loop.
 
 The STANDING acceptance driver for the research-to-ADR phase machine, built as a
 reusable, parameterized harness rather than a one-off so the successor document
 workloads (curation, plan-authoring) reuse it. Given a prompt it drives one run
 end to end against the live loopback stack and asserts that N markdown documents
-materialize under ``.vault/`` - the PW7 contract's document-materialization
+materialize under ``.vault/`` - this contract's document-materialization
 assertion single-homed here.
 
 The loop it exercises, all live and mock-free, across three verdict lanes:
@@ -32,8 +32,8 @@ The loop it exercises, all live and mock-free, across three verdict lanes:
 * the verdict subscriber resumes the parked run across gates;
 * assert the expected documents materialized on disk with the expected stems.
 
-Orthogonal to the verdict lane is the PROVIDER axis (multi-provider-execution
-P03.S16): a case selects a model profile at run-start, so the same MIXED contract
+Orthogonal to the verdict lane is the PROVIDER axis: a case selects a model
+profile at run-start, so the same MIXED contract
 runs under different providers. ``live-mixed`` is real Claude; ``codex`` overlays a
 mixed codex/claude profile (the research and authoring roles on the ``codex
 app-server`` provider, the inner doc-reviewer on Claude); ``zai`` overlays a Z.ai
@@ -43,7 +43,7 @@ naming the missing credential, never a faked pass.
 Gate detection keys on the ENGINE surface (a queued proposal / an applied-under-
 policy marker scoped to this run's changeset id ``cs:<run_id>:<phase>-r<cycle>``),
 not the a2a semantic phase, so it is robust to the reconciler masking the semantic
-phase after a subscriber resume (P04.S10 GAP D).
+phase after a subscriber resume.
 
 Wire shapes are grounded in the engine Rust source (read-only), not this brief's
 prose: ``ReviewDecisionRequest`` (``decision`` enum ``approve|reject|edit|respond``,
@@ -55,7 +55,7 @@ projection lane carrying ``system_actor`` / ``mode`` / ``policy_id``.
 
 Infrastructure gate, not a masked failure: the test skips with a runbook pointer
 when no loopback engine is reachable (resolved through the discovery contract) or
-the a2a gateway is not up. Boot the stack per the P04.S10 runbook - a workspace-
+the a2a gateway is not up. Boot the stack per the runbook - a workspace-
 local ``vaultspec serve --no-seat`` engine plus the a2a gateway/worker with
 ``VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true`` - then select ``-m service``.
 """
@@ -122,16 +122,15 @@ _DECISION_COMMAND: dict[str, str] = {
 _SYSTEM_AUTO_APPROVER_ID = "system:operation-modes"
 _MODE_POLICY_ID = "authoring.operation_modes"
 
-# The two research_adr driver presets. DETERMINISTIC is opus-6's in-process
-# Provider.DETERMINISTIC device (commits 4a66cb2 + 49772bc): the fast,
-# provider-agnostic Option A lane run on every dispatch. LIVE is the parallel
-# session's original real-Claude preset (6deb9a8): the Option C real-provider
+# The two research_adr driver presets. DETERMINISTIC is the in-process
+# Provider.DETERMINISTIC device: the fast, provider-agnostic Option A lane run
+# on every dispatch. LIVE is the real-Claude preset: the Option C real-provider
 # proof, run once after the Option A lanes are green, select it with `-k live`.
 _PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
 _PRESET_LIVE = "vaultspec-adr-research"
 
-# Provider-axis profiles overlaid on the live preset (multi-provider-execution
-# P03.S16). `codex` routes the three research/authoring roles to the codex
+# Provider-axis profiles overlaid on the live preset. `codex` routes the
+# three research/authoring roles to the codex
 # app-server provider (doc-reviewer stays claude); `zai` routes them to Z.ai. The
 # Z.ai lane is credential-gated - the env var the harness skips on when absent.
 _PROFILE_CODEX = "codex"
@@ -141,7 +140,7 @@ _ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCase:
-    """A parameterized PW7 acceptance case.
+    """A parameterized acceptance case.
 
     Parameters
     ----------
@@ -224,7 +223,7 @@ CASE_LIVE_MIXED = _research_adr_case(
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
 )
-# The provider-axis lanes (P03.S16). Both use the live preset with a mixed-provider
+# The provider-axis lanes. Both use the live preset with a mixed-provider
 # profile overlay and the same MIXED gate shape as live-mixed - the same acceptance
 # contract, a different provider under the authoring roles. `codex` runs live
 # (file-based ChatGPT-session auth, no env token). `zai` is credential-gated: it
@@ -339,7 +338,7 @@ class _ResilientAuthoringClient(AuthoringClient):
 
 @dataclass(slots=True)
 class AcceptanceHarness:
-    """Drives one PW7 acceptance case against the live loopback stack."""
+    """Drives one acceptance case against the live loopback stack."""
 
     case: AcceptanceCase
     engine_base_url: str
@@ -531,7 +530,7 @@ class AcceptanceHarness:
                 "approval_id": approval_id,
                 "decision": decision,
                 "reviewed_revision": reviewed_revision,
-                "comment": f"{gate} gate {decision} (PW7 harness)",
+                "comment": f"{gate} gate {decision} (acceptance harness)",
             },
             idempotency_key=self._idk(f"decide-{gate}-{decision}"),
             actor_token=reviewer_token,
@@ -568,7 +567,7 @@ class AcceptanceHarness:
                     "approval_id": approval_id,
                     "decision": _DECISION_APPROVE,
                     "reviewed_revision": "blob:pw7stalefence0000",
-                    "comment": f"{gate} stale-revision fence probe (PW7 harness)",
+                    "comment": f"{gate} stale-revision fence probe (harness)",
                 },
                 idempotency_key=self._idk(f"fence-{gate}"),
                 actor_token=reviewer_token,
@@ -905,8 +904,8 @@ async def test_pw7_research_adr_materializes_two_documents(
 ) -> None:
     """The research_adr loop materializes exactly the expected document set.
 
-    Drives the standing PW7 acceptance case end to end and asserts a research and
-    an ADR document materialize under the engine workspace ``.vault/`` - the PW7
+    Drives the standing acceptance case end to end and asserts a research and
+    an ADR document materialize under the engine workspace ``.vault/`` - the
     document-materialization contract for ``research_adr`` (N = 2) - across the
     three verdict lanes (HUMAN reject-with-notes -> revision -> approve; AUTO
     operation-modes system approval; MIXED per-gate). Verdicts are driven
@@ -924,7 +923,7 @@ async def test_pw7_research_adr_materializes_two_documents(
         pytest.skip(
             "no reachable loopback stack; boot a workspace-local `vaultspec serve "
             "--no-seat` engine plus the a2a gateway/worker with "
-            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (P04.S10 runbook), then "
+            "VAULTSPEC_AUTHORING_SUBSCRIBER_ENABLED=true (runbook), then "
             "set VAULTSPEC_ENGINE_SERVICE_JSON and select -m service"
         )
     engine_base_url, engine_bearer, vault_root = stack

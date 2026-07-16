@@ -1,4 +1,4 @@
-"""Dependency-injection protocols for the graph orchestration layer (ADR D-02, D-04).
+"""Dependency-injection protocols for the graph orchestration layer.
 
 These protocols decouple the graph compiler from concrete infrastructure
 implementations (provider factories, telemetry backends).  The graph layer
@@ -55,7 +55,7 @@ class MarkCompleteOutcome:
 
 @runtime_checkable
 class TaskQueuePort(Protocol):
-    """Protocol for the database-backed worker task queue (ADR R5).
+    """Protocol for the database-backed worker task queue.
 
     Decouples the graph layer from the persistence layer: graph nodes depend
     only on this abstract interface and receive a concrete adapter injected at
@@ -101,7 +101,7 @@ class ProviderFactoryProtocol(Protocol):
 
 @runtime_checkable
 class TelemetryHook(Protocol):
-    """Protocol for pluggable telemetry instrumentation (ADR D-04).
+    """Protocol for pluggable telemetry instrumentation.
 
     The aggregator and graph compiler accept an optional ``TelemetryHook``
     at construction time.  Core ships with :class:`NullTelemetryHook` as

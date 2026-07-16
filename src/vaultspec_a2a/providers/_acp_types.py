@@ -1,6 +1,6 @@
 """ACP data carriers: config, context, and result types.
 
-Extracted from ``_acp_session.py`` (D-04) to isolate pure data definitions
+Extracted from ``_acp_session.py`` to isolate pure data definitions
 from auth logic and session lifecycle RPCs.
 """
 
@@ -34,7 +34,7 @@ class _AcpModelConfig:
     cwd: str | None
     command: list[str]
     # repr=False keeps injected auth tokens out of the frozen config's default
-    # dataclass repr (multi-provider-execution env_vars redaction audit).
+    # dataclass repr (env_vars redaction audit).
     env_vars: dict[str, str] = field(repr=False)
     session_id: str | None
     mcp_servers: list[dict[str, Any]]
@@ -48,8 +48,8 @@ class _AcpModelConfig:
     command_target: str | None
     auth_mode: str | None
     # Exact tool names (mcp__<server>__<tool>) auto-permitted for a headless run
-    # so the CLI can invoke the bridged authoring tools without a local prompt
-    # (ADR R4). Empty for human-in-loop runs, which keep the default prompt.
+    # so the CLI can invoke the bridged authoring tools without a local prompt.
+    # Empty for human-in-loop runs, which keep the default prompt.
     # Defaulted (trailing) so existing config constructions need no change.
     allowed_tools: list[str] = field(default_factory=list)
 

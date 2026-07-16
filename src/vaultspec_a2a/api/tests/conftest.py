@@ -4,7 +4,7 @@ Centralises engine, session_factory, session, checkpointer, and make_app so
 that all test modules use the same isolated file-backed SQLite setup and
 app-state injection.
 
-ADR-019: The gateway no longer runs agent execution locally.  Tests wire a
+The gateway no longer runs agent execution locally.  Tests wire a
 real in-process dispatch receiver (a minimal FastAPI ASGI app served via
 ``httpx.ASGITransport``) so that HTTP serialisation and routing are exercised
 without a live worker process.  No ``MockTransport``, no ``unittest.mock``.
@@ -179,7 +179,7 @@ def make_app(
 ) -> tuple:
     """Create a test FastAPI app with explicit app-state injection.
 
-    ADR-019: wires a real in-process dispatch receiver (ASGITransport over a
+    Wires a real in-process dispatch receiver (ASGITransport over a
     minimal FastAPI app) for the worker client, and injects the real
     AsyncSqliteSaver checkpointer from the calling fixture.
 
@@ -205,7 +205,7 @@ def make_app(
     # In-process worker client — real ASGI, no mock
     app.state.worker_client = worker.client
 
-    # PROD-028: circuit breaker for dispatch calls
+    # circuit breaker for dispatch calls
     cb = WorkerCircuitBreaker(
         failure_threshold=settings.cb_failure_threshold,
         recovery_timeout=settings.cb_recovery_timeout_seconds,

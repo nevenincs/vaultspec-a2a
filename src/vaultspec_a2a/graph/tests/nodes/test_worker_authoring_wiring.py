@@ -1,4 +1,4 @@
-"""Real-subprocess proof that the worker wires bridged authoring tools (R4).
+"""Real-subprocess proof that the worker wires bridged authoring tools.
 
 No mocks: the worker node drives a real ACP subprocess (the protocol simulator)
 through ``AcpChatModel``. When a run's :class:`AuthoringToolBinding` is attached,
@@ -124,7 +124,7 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
     assert headers[_BEARER_HEADER] == "Bearer machine-bearer-xyz"
     assert headers[ACTOR_TOKEN_HEADER] == "actor-token-abc"
 
-    # ADR R4: the headless run auto-permits EXACTLY the bridged tool names so
+    # The headless run auto-permits EXACTLY the bridged tool names so
     # the CLI can invoke them, and nothing else.
     allowed = params["_meta"]["claudeCode"]["options"]["allowedTools"]
     assert allowed == [

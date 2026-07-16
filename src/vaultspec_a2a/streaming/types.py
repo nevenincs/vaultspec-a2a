@@ -1,7 +1,7 @@
 """Streaming types, protocols, and stateless classification helpers.
 
-Extracted from the monolithic ``aggregator.py`` during the Phase 6
-decomposition (ADR D-01).  Contains no mutable state — pure data definitions
+Extracted from the monolithic ``aggregator.py`` during the aggregator
+decomposition.  Contains no mutable state — pure data definitions
 and lookup tables only.
 """
 
@@ -25,7 +25,7 @@ __all__ = [
 class SequencedEvent:
     """Pairs a domain event with its per-thread monotonic sequence number.
 
-    The sequence is a wire-protocol concern (ADR-011 §5) and does not belong
+    The sequence is a wire-protocol concern and does not belong
     on the domain event itself.  This lightweight wrapper carries both values
     through the subscriber queue so the API boundary can translate to wire
     format via ``api.event_adapter.domain_to_wire()``.
@@ -55,7 +55,7 @@ class StreamableGraph(Protocol):
 
 
 # ---------------------------------------------------------------------------
-# Tool name → ToolKind classification (BE-04, BE-30)
+# Tool name → ToolKind classification
 # ---------------------------------------------------------------------------
 _TOOL_KIND_MAP: dict[str, ToolKind] = {
     # Read / inspect

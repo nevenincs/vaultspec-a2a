@@ -4,7 +4,7 @@
 ``mock_chat_model.py`` precedent) that returns fixed, role-keyed research/ADR
 content with no live model spend and no external service. Unlike ``MockChatModel``
 (which proxies to the VidaiMock HTTP tape server), this provider runs entirely
-in-process, so the standing PW7 acceptance harness can drive the full
+in-process, so the standing acceptance harness can drive the full
 Research -> ADR contract without Docker or provider credentials.
 
 The content is keyed by the worker ``AgentConfig.id`` so each research_adr role

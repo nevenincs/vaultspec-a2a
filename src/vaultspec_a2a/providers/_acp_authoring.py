@@ -70,14 +70,14 @@ AUTHORING_MCP_SERVER_NAME = "vaultspec-authoring"
 
 # The stdio bridge entry module, spawned by the CLI as `python -m <module>`. The
 # subprocess reconstructs the run's dispatch against the engine and serves the
-# bridged tools over stdio (the surfacing-reliable transport, ADR R4 amendment).
+# bridged tools over stdio (the surfacing-reliable transport).
 AUTHORING_STDIO_MODULE = "vaultspec_a2a.protocols.mcp.authoring_stdio"
 
 # Env var names the spawned stdio bridge reads are imported from the bridge
 # module itself (single source of truth: the reader owns the names; STDIO_ENV_*
 # above alias them so the config writer and the reader can never diverge).
 
-# Hosts the loopback edge permits; anything else is refused (R4, no remote edge).
+# Hosts the loopback edge permits; anything else is refused (no remote edge).
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 # Substrings that mark a raw filesystem-write tool. The engine catalog surfaces
@@ -109,7 +109,7 @@ class AuthoringToolBinding:
     the HTTP bridge (``server_url``, when the orchestrator stands up a loopback
     MCP server) or the stdio bridge (``engine_base_url`` + ``run_id``, when the
     CLI spawns our per-run stdio bridge subprocess). At least one transport's
-    fields must be present; both may coexist. The ADR R4 amendment blesses both,
+    fields must be present; both may coexist. Both transports are supported,
     with stdio preferred while the CLI defers HTTP MCP tool surfacing.
 
     Parameters
@@ -118,10 +118,10 @@ class AuthoringToolBinding:
         The per-run catalog snapshot whose tools are surfaced to the agent.
     bearer_token:
         The machine bearer minted at engine boot, forwarded so the bridge can
-        reach the engine. Redacted from ``repr`` (R7).
+        reach the engine. Redacted from ``repr``.
     actor_token:
         The calling role's per-actor token, forwarded so execution routes under
-        that principal. Redacted from ``repr`` (R7).
+        that principal. Redacted from ``repr``.
     server_url:
         Loopback URL of the HTTP MCP server serving the bridged tools. Set for
         the HTTP transport; must be a loopback host.
@@ -176,7 +176,7 @@ class AuthoringToolBinding:
         return self.snapshot.tool_names()
 
     def __repr__(self) -> str:
-        """Redacted representation — never leaks tokens (R7)."""
+        """Redacted representation — never leaks tokens."""
         return (
             f"AuthoringToolBinding(server_url={self.server_url!r}, "
             f"engine_base_url={self.engine_base_url!r}, run_id={self.run_id!r}, "
@@ -186,7 +186,7 @@ class AuthoringToolBinding:
 
 
 def authoring_allowed_tool_names(binding: AuthoringToolBinding) -> list[str]:
-    """Return the exact CLI tool names to auto-permit for the run (ADR R4).
+    """Return the exact CLI tool names to auto-permit for the run.
 
     Claude Code names an MCP tool ``mcp__<server-name>__<tool-name>``. This
     returns exactly the run's bridged tool names under the authoring server —

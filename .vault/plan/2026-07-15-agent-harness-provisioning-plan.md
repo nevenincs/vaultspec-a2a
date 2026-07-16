@@ -3,19 +3,30 @@ tags:
   - '#plan'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 tier: L2
 related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'
   - '[[2026-07-15-agent-harness-provisioning-research]]'
 ---
+
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `agent-harness-provisioning` plan
 
 ### Phase `P01` - Harness contract and verification
 
 The harness verifier, the harness_ready eligibility term, and the team.harness declaration schema.
 
-- [ ] `P01.S01` - Build the harness verifier (rules corpus non-empty, required templates present, declared skills present, vaultspec-core CLI resolvable in the agent environment) and feed a harness_ready term with safe reasons into the shared eligibility service consumed by discovery and run-start; `src/vaultspec_a2a/context/, src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/control/`.
+- [x] `P01.S01` - Build the harness verifier (rules corpus non-empty, required templates present, declared skills present, vaultspec-core CLI resolvable in the agent environment) and feed a harness_ready term with safe reasons into the shared eligibility service consumed by discovery and run-start; `src/vaultspec_a2a/context/, src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/control/`.
 - [ ] `P01.S02` - Add the team.harness declaration schema (required surfaces, role skills lists, MCP server names) with the default authoring harness when absent, and make RuleManager absence a surfaced ineligibility for authoring presets instead of a silent None; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/context/rules.py`.
 
 ### Phase `P02` - Provision verb and adoption

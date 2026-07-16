@@ -35,6 +35,7 @@ first.
 
 from __future__ import annotations
 
+import time
 import uuid
 from typing import Any
 
@@ -60,13 +61,18 @@ from vaultspec_a2a.authoring import (
     verdict_from_event,
 )
 from vaultspec_a2a.control.circuit_breaker import WorkerCircuitBreaker
-from vaultspec_a2a.control.verdict_subscriber import VerdictSubscriber
+from vaultspec_a2a.control.verdict_subscriber import (
+    _RESUME_CLAIM_TTL_SECONDS,
+    VerdictSubscriber,
+    _with_resume_claim,
+)
 from vaultspec_a2a.control.worker_management import LazyWorkerSpawner
 from vaultspec_a2a.database import (
     create_thread,
     get_permission_request,
     get_thread,
     record_permission_request,
+    update_thread_metadata,
     update_thread_status,
 )
 from vaultspec_a2a.database.models import Base
@@ -686,5 +692,121 @@ async def test_live_running_clobbered_parked_run_is_recovered_by_parked_reconcil
         assert dispatch["action"] == "resume"
         assert dispatch["thread_id"] == thread_id
         assert dispatch["option_id"] == {"verdict": "request_changes", "notes": None}
+
+    await db_engine.dispose()
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_live_running_with_fresh_resume_claim_is_not_re_driven(
+    client: AuthoringClient, engine: tuple[str, str], tmp_path
+) -> None:
+    """The broadened RUNNING candidacy does NOT false-re-drive an in-flight resume.
+
+    Guard for P04.S10: including RUNNING threads in the reconcile candidate set must
+    not double-drive a run whose resume is legitimately already in flight. The
+    durable resume claim (``_resume_with_verdict``, the d899030 lease) is the
+    observable proof-of-in-flight: a RUNNING run parked at a gate WITH a decided
+    verdict on the engine AND a FRESH claim on that exact gate is a run whose resume
+    was just dispatched and has not yet advanced the checkpoint - re-dispatching
+    would be the false re-drive. The reconcile must correlate it (RUNNING is now a
+    candidate) yet dispatch NOTHING, because the fresh claim short-circuits the
+    per-thread resume.
+
+    Same real round-trip as the recovery tests (real engine decision, real DB, real
+    checkpointer, real recording worker), differing only in the seeded fresh claim
+    and the zero-dispatch assertion. A STALE claim is exercised by the sibling
+    recovery tests and the non-live ``test_stale_resume_claim_is_redriven``.
+    """
+    from starlette.applications import Starlette
+    from starlette.responses import JSONResponse
+    from starlette.routing import Route
+
+    base_url, bearer = engine
+
+    run_id = f"fc-{uuid.uuid4().hex[:8]}"
+    minted = await mint_actor_token(client, actor_id=f"agent:{run_id}", kind="agent")
+    assert isinstance(minted, AuthoringResponse)
+    client._actor_token = minted.data["raw_token"]
+
+    session = AuthoringSession(client, run_id)
+    await session.create_session(scope="repo", title=run_id)
+    reviewer = await mint_actor_token(client, actor_id=f"human:{run_id}", kind="human")
+    assert isinstance(reviewer, AuthoringResponse)
+    reviewer_token = reviewer.data["raw_token"]
+
+    info = await _submit_proposal(session, run_id, "adr")
+    await _decide(
+        client, reviewer_token, info, "edit", "tighten the rationale", run_id, "adr"
+    )
+
+    db_file = tmp_path / "fc.db"
+    db_engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with db_engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(
+        db_engine, class_=AsyncSession, expire_on_commit=False
+    )
+    checkpoints = tmp_path / "fc-cp.db"
+    thread_id = f"thread-{run_id}"
+
+    recorded: list[dict[str, Any]] = []
+
+    async def _accept_dispatch(request: Any) -> JSONResponse:
+        recorded.append(await request.json())
+        return JSONResponse({"status": "dispatched"})
+
+    worker_app = Starlette(
+        routes=[Route("/dispatch", _accept_dispatch, methods=["POST"])]
+    )
+
+    async with (
+        AsyncSqliteSaver.from_conn_string(str(checkpoints)) as checkpointer,
+        httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=worker_app),
+            base_url="http://worker",
+        ) as worker_client,
+    ):
+        await checkpointer.setup()
+        await _seed_parked_gate(
+            session_factory,
+            checkpointer,
+            thread_id=thread_id,
+            proposal_id=info["proposal_id"],
+            changeset_id=info["changeset_id"],
+            status=ThreadStatus.RUNNING,
+        )
+        # A FRESH claim on the exact current gate: a resume is already in flight.
+        async with session_factory() as db:
+            await update_thread_metadata(
+                db,
+                thread_id,
+                _with_resume_claim(None, info["proposal_id"], time.time()),
+            )
+            await db.commit()
+        # Sanity: the claim is well within its TTL (in flight, not stale).
+        assert _RESUME_CLAIM_TTL_SECONDS > 5.0
+
+        subscriber = VerdictSubscriber(
+            session_factory=session_factory,
+            checkpointer=checkpointer,
+            worker_client=worker_client,
+            circuit_breaker=WorkerCircuitBreaker(
+                failure_threshold=3, recovery_timeout=30.0
+            ),
+            worker_spawner=LazyWorkerSpawner(
+                worker_url="http://worker", worker_port=1, auto_spawn=False
+            ),
+            endpoint_provider=lambda: EngineEndpoint(
+                base_url=base_url, bearer_token=bearer
+            ),
+            recursion_limit=25,
+        )
+
+        endpoint = EngineEndpoint(base_url=base_url, bearer_token=bearer)
+        await subscriber._reconcile_parked_runs(endpoint)
+
+        # The fresh claim short-circuited the resume: NO false re-drive.
+        assert recorded == [], f"in-flight resume was falsely re-driven: {recorded}"
 
     await db_engine.dispose()

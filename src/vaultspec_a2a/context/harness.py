@@ -148,8 +148,18 @@ def _rule_content_resolves(root: Path) -> bool:
     therefore carries rules with no ``.vaultspec/rules`` on disk, so the surface
     is satisfied whenever compilation over that union yields content. ``compile``
     reads files and writes nothing, preserving this module's read-only contract.
+
+    A compilation failure degrades to "not resolved" (a served reason) rather
+    than propagating: this is a readiness probe wired to a 422 refusal gate, so a
+    future rule-file parse error must become an eligibility reason, never a crash
+    on the run-start path.
     """
-    resolved = RuleManager(root, bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR).compile()
+    try:
+        resolved = RuleManager(
+            root, bundled_rules_dir=DEFAULT_BUNDLED_RULES_DIR
+        ).compile()
+    except Exception:
+        return False
     return bool(resolved)
 
 

@@ -16,6 +16,7 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
   - '[[2026-07-15-graph-agent-framework-harness-research]]'
+  - '[[2026-07-16-graph-agent-framework-harness-batch2-3-review-audit]]'
 ---
 
 # `graph-agent-framework-harness` feature index
@@ -27,6 +28,10 @@ Auto-generated index of all documents tagged with `#graph-agent-framework-harnes
 ### adr
 
 - `2026-07-15-graph-agent-framework-harness-adr` - `graph-agent-framework-harness` adr: `closing the framework-harness gap for graph-executed document-authoring agents` | (**status:** `accepted`)
+
+### audit
+
+- `2026-07-16-graph-agent-framework-harness-batch2-3-review-audit` - `graph-agent-framework-harness` audit: `batch-2 and batch-3 reviewer verdict: bundled rule wiring, role-leak fix, and context-graph cycle break`
 
 ### exec
 

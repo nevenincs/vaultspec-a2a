@@ -112,3 +112,51 @@ capability = "low"
 
 [team.profiles.fast.roles.vaultspec-doc-reviewer]
 capability = "low"
+
+# `codex` is the mixed-provider PW7 provider-axis lane (multi-provider-execution
+# P03.S16): the three research/authoring roles run on `codex` (the `codex
+# app-server` JSON-RPC provider, file-based ChatGPT-session auth) while the inner
+# doc-reviewer keeps the team default (claude), so a single run exercises a
+# genuinely mixed codex/claude collaboration and BOTH materialized documents are
+# codex-authored. The overlay only sets `provider` per role; capability/fallback
+# fall through the normal precedence chain unchanged.
+[team.profiles.codex]
+display_name = "Codex (mixed)"
+description  = """
+Mixed-provider provider-axis lane: the researcher fan-out, the research-document
+synthesist, and the ADR author run on the codex app-server provider; the inner
+doc-reviewer keeps the team default (claude). Proves cross-provider collaboration
+authors real documents end to end. Codex auth is the file-based persisted ChatGPT
+session in the Codex home; no credential env is injected.
+"""
+
+[team.profiles.codex.roles.vaultspec-researcher]
+provider = "codex"
+
+[team.profiles.codex.roles.vaultspec-synthesist]
+provider = "codex"
+
+[team.profiles.codex.roles.vaultspec-adr-author]
+provider = "codex"
+
+# `zai` is the Z.ai provider-axis lane. Credential-gated on ZAI_AUTH_TOKEN: the
+# PW7 harness skips this lane loudly (naming the missing token) when the token is
+# absent from the environment, and never fakes it. The three research/authoring
+# roles run on `zai` while the doc-reviewer keeps the team default (claude).
+[team.profiles.zai]
+display_name = "Z.ai (mixed)"
+description  = """
+Mixed-provider provider-axis lane routing the researcher fan-out, the synthesist,
+and the ADR author to the Z.ai provider; the inner doc-reviewer keeps the team
+default (claude). Requires a configured Z.ai auth token; the PW7 harness skips
+this lane with a truthful reason when the credential is absent.
+"""
+
+[team.profiles.zai.roles.vaultspec-researcher]
+provider = "zai"
+
+[team.profiles.zai.roles.vaultspec-synthesist]
+provider = "zai"
+
+[team.profiles.zai.roles.vaultspec-adr-author]
+provider = "zai"

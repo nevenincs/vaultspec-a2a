@@ -32,6 +32,14 @@ The loop it exercises, all live and mock-free, across three verdict lanes:
 * the verdict subscriber resumes the parked run across gates;
 * assert the expected documents materialized on disk with the expected stems.
 
+Orthogonal to the verdict lane is the PROVIDER axis (multi-provider-execution
+P03.S16): a case selects a model profile at run-start, so the same MIXED contract
+runs under different providers. ``live-mixed`` is real Claude; ``codex`` overlays a
+mixed codex/claude profile (the research and authoring roles on the ``codex
+app-server`` provider, the inner doc-reviewer on Claude); ``zai`` overlays a Z.ai
+profile and is credential-gated - an absent ``ZAI_AUTH_TOKEN`` is a truthful skip
+naming the missing credential, never a faked pass.
+
 Gate detection keys on the ENGINE surface (a queued proposal / an applied-under-
 policy marker scoped to this run's changeset id ``cs:<run_id>:<phase>-r<cycle>``),
 not the a2a semantic phase, so it is robust to the reconciler masking the semantic
@@ -122,6 +130,14 @@ _MODE_POLICY_ID = "authoring.operation_modes"
 _PRESET_DETERMINISTIC = "vaultspec-adr-research-deterministic"
 _PRESET_LIVE = "vaultspec-adr-research"
 
+# Provider-axis profiles overlaid on the live preset (multi-provider-execution
+# P03.S16). `codex` routes the three research/authoring roles to the codex
+# app-server provider (doc-reviewer stays claude); `zai` routes them to Z.ai. The
+# Z.ai lane is credential-gated - the env var the harness skips on when absent.
+_PROFILE_CODEX = "codex"
+_PROFILE_ZAI = "zai"
+_ZAI_CREDENTIAL_ENV = "ZAI_AUTH_TOKEN"
+
 
 @dataclass(frozen=True, slots=True)
 class AcceptanceCase:
@@ -141,6 +157,14 @@ class AcceptanceCase:
                        operation-modes auto-approval) or :data:`POLICY_HUMAN`
                        (human reject-with-notes -> revision -> approve -> apply) -
                        keyed by gate ordinal name, in gate order.
+    profile_id:        The model profile selected at run-start (the provider axis).
+                       ``team-defaults`` (the implicit empty overlay) keeps the
+                       preset's own per-role providers; a named profile
+                       (e.g. ``codex``) overlays per-role providers on top, so one
+                       preset drives several provider lanes.
+    required_env:      Environment variables that MUST be present for the lane to
+                       run. A missing one is an honest skip-with-reason naming the
+                       variable (a credential-gated lane), never a faked pass.
     """
 
     label: str
@@ -150,6 +174,8 @@ class AcceptanceCase:
     roles: tuple[str, ...]
     expected_doc_kinds: tuple[str, ...]
     gate_policy: dict[str, str] = field(default_factory=dict)
+    profile_id: str = "team-defaults"
+    required_env: tuple[str, ...] = ()
 
 
 def _research_adr_case(
@@ -158,6 +184,8 @@ def _research_adr_case(
     gate_policy: dict[str, str],
     *,
     preset: str = _PRESET_DETERMINISTIC,
+    profile_id: str = "team-defaults",
+    required_env: tuple[str, ...] = (),
 ) -> AcceptanceCase:
     return AcceptanceCase(
         label=label,
@@ -170,6 +198,8 @@ def _research_adr_case(
         roles=_RESEARCH_ADR_ROLES,
         expected_doc_kinds=("research", "adr"),
         gate_policy=gate_policy,
+        profile_id=profile_id,
+        required_env=required_env,
     )
 
 
@@ -194,8 +224,29 @@ CASE_LIVE_MIXED = _research_adr_case(
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
 )
+# The provider-axis lanes (P03.S16). Both use the live preset with a mixed-provider
+# profile overlay and the same MIXED gate shape as live-mixed - the same acceptance
+# contract, a different provider under the authoring roles. `codex` runs live
+# (file-based ChatGPT-session auth, no env token). `zai` is credential-gated: it
+# skips loudly naming ZAI_AUTH_TOKEN when absent rather than faking a pass. Each
+# carries its provider name in its id so `-k codex` / `-k zai` selects it alone.
+CASE_CODEX = _research_adr_case(
+    "codex",
+    "pw7-acceptance-codex",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_CODEX,
+)
+CASE_ZAI = _research_adr_case(
+    "zai",
+    "pw7-acceptance-zai",
+    {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
+    preset=_PRESET_LIVE,
+    profile_id=_PROFILE_ZAI,
+    required_env=(_ZAI_CREDENTIAL_ENV,),
+)
 
-_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED)
+_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED, CASE_CODEX, CASE_ZAI)
 
 
 def _dig(item: dict, field_name: str) -> str | None:
@@ -342,7 +393,7 @@ class AcceptanceHarness:
             "team_preset": self.case.preset,
             "message": self.case.prompt,
             "run_id": run_id,
-            "profile_id": "team-defaults",
+            "profile_id": self.case.profile_id,
             "actor_tokens": {"tokens": tokens, "engine_bearer": self.engine_bearer},
             "metadata": meta,
         }
@@ -861,6 +912,13 @@ async def test_pw7_research_adr_materializes_two_documents(
     operation-modes system approval; MIXED per-gate). Verdicts are driven
     programmatically over the engine surface.
     """
+    missing = [name for name in case.required_env if not os.environ.get(name)]
+    if missing:
+        pytest.skip(
+            f"{case.label} lane is credential-gated: missing {', '.join(missing)} "
+            "in the environment. This is a truthful skip, not a masked failure - "
+            "set the credential to run the lane against its real provider."
+        )
     stack = _reachable_stack()
     if stack is None:
         pytest.skip(

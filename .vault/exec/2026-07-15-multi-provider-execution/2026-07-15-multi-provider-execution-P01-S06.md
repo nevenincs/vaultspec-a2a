@@ -25,7 +25,33 @@ related:
 
 ## Outcome
 
-BLOCKED-ON-CREDENTIALS. No Z.ai token is present in the environment (checked `ZAI_AUTH_TOKEN`, `ZAI_API_KEY`, `ANTHROPIC_AUTH_TOKEN`, `GLM_API_KEY`, `ZHIPU_API_KEY`; all absent), so the probe cannot execute and the ADR's Z.ai-fidelity unknown remains open. The probe is written, lint/type clean, and deselected-by-default (`-m "not service"`), so the default suite is unaffected. No profile may mark Z.ai eligible until this passes.
+BLOCKED-ON-BALANCE (2026-07-16, first live attempt). The owner delivered a Z.ai
+token (`ZAI_AUTH_TOKEN`, resolved through `settings`), and both probe tests ran
+live against the real gateway but FAILED - NOT on fidelity and NOT on auth. Both
+turns returned the same gateway error:
+
+    HTTP 429 rate_limit_error, code "1113": "Insufficient balance or no resource
+    package. Please recharge." (Z.ai request_id present)
+
+surfaced as `AcpPromptError [-32603]` from the ACP path. What this establishes and
+leaves open:
+
+- The token AUTHENTICATES: the request reached the Z.ai Anthropic-Messages
+  gateway and received a structured Z.ai API error with a request_id - a 429
+  balance error, not a 401/403 rejection. Base URL correct
+  (`settings.zai_base_url` = the Z.ai Anthropic endpoint); env injection verified
+  (`ANTHROPIC_BASE_URL` + `ANTHROPIC_AUTH_TOKEN` present in the model env; the
+  token value is never surfaced).
+- NO FIDELITY VERDICT is possible: the account has no balance/resource package, so
+  the endpoint never produced a turn to judge the streaming shape or tool-calling
+  schema against. Neither green nor a fidelity-red - the ADR's Z.ai-fidelity
+  unknown stays open.
+- Each test failed clean at ~220s (the timeout-hardened retry window did its job -
+  no hang). The default suite is unaffected (`-m "not service"`).
+
+Checkbox stays UNCHECKED. No profile may mark Z.ai eligible until a green fidelity
+run, which requires the owner to fund the Z.ai account (recharge / add a resource
+package) - an account-billing action, not a code, auth, base-URL, or fidelity fix.
 
 ## Notes
 

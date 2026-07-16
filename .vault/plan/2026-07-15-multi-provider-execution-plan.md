@@ -11,6 +11,16 @@ related:
   - '[[2026-07-15-multi-provider-execution-reference]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `multi-provider-execution` plan
 
 ### Phase `P01` - Z.ai provider
@@ -24,7 +34,7 @@ Land Z.ai as a config variant of the existing Claude ACP path: new provider enum
 - [x] `P01.S03` - Add _build_zai_env mirroring _build_gemini_env and a factory dispatch branch mirroring the Claude ACP branch, reusing AcpChatModel unchanged; `src/vaultspec_a2a/providers/factory.py`.
 - [x] `P01.S04` - Confirm workspace/environment.py's scrub list does not strip ANTHROPIC_BASE_URL or ANTHROPIC_AUTH_TOKEN, and add a regression test pinning that; `src/vaultspec_a2a/workspace/environment.py, src/vaultspec_a2a/workspace/tests/`.
 - [x] `P01.S05` - Add a Provider.ZAI branch to probe_provider_readiness and classify_provider_command, never emitting a secret; `src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P01.S06` - Live-probe the real Z.ai endpoint for Anthropic Messages API fidelity (tool-calling schema, streaming chunk shape) through claude-agent-acp before marking any profile eligible. PARKED blocked-on-credentials: probe written (2 service-marked tests, deselected by default), lint/type clean, no Z.ai token in env. Evidence: step record P01-S06. Re-arm one command: ZAI_AUTH_TOKEN=<token> uv run --no-sync pytest -m service src/vaultspec_a2a/providers/tests/test_zai_fidelity.py (override gateway with ZAI_BASE_URL) — on green, set record Outcome PASS and check this row, since no profile may mark Z.ai eligible until then; `src/vaultspec_a2a/providers/tests/test_zai_fidelity.py, src/vaultspec_a2a/service_tests/`.
+- [ ] `P01.S06` - Live-probe the real Z.ai endpoint for Anthropic Messages API fidelity (tool-calling schema, streaming chunk shape) through claude-agent-acp before marking any profile eligible. PARKED blocked-on-balance (was blocked-on-credentials). The owner delivered a token that AUTHENTICATES through settings, but the first live attempt (2026-07-16) hit HTTP 429 code 1113 'Insufficient balance or no resource package', so no fidelity verdict is possible yet. Probe written (2 service-marked tests, deselected by default), lint and type clean. Evidence in step record P01-S06. Re-arm one command once the account is funded, uv run --no-sync pytest -m service src/vaultspec_a2a/providers/tests/test_zai_fidelity.py (token via settings/.env, override gateway with ZAI_BASE_URL). On green, set record Outcome PASS and check this row, since no profile may mark Z.ai eligible until then; `src/vaultspec_a2a/providers/tests/test_zai_fidelity.py, src/vaultspec_a2a/service_tests/`.
 - [x] `P01.S07` - Unit and live-probe tests for the Z.ai env-injection path, readiness branch, and factory dispatch; `src/vaultspec_a2a/providers/tests/test_factory.py, src/vaultspec_a2a/providers/tests/test_model_profiles.py`.
 
 ### Phase `P02` - Codex provider

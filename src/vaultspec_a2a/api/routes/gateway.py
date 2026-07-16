@@ -147,6 +147,7 @@ async def run_start_endpoint(
         team_config,
         feature_tag=effective_feature or None,
         actor_tokens=body.actor_tokens,
+        harness=_probe_harness(team_config, ws_root),
     )
     if not eligibility.eligible:
         raise HTTPException(status_code=422, detail=eligibility.reason)
@@ -241,6 +242,26 @@ def _load_preset_or_refuse(team_preset: str, ws_root: Path | None) -> Any:
             status_code=422,
             detail=f"Team preset {team_preset!r} failed to load: {exc}",
         ) from exc
+
+
+def _probe_harness(team_config: Any, ws_root: Path | None) -> Any:
+    """Probe the agent harness for a document-authoring preset, else ``None``.
+
+    Returns the harness verdict only when the preset declares (or defaults to) an
+    authoring harness AND a workspace root is resolved - the discovery-serves /
+    run-start-refuses binding for the agent-harness contract (agent-harness-
+    provisioning ADR). A non-authoring preset or a run with no workspace carries
+    no harness signal, so ``None`` composes nothing into eligibility and the
+    pre-existing refusals are unchanged. Read-only: no write, no CLI spawn.
+    """
+    from ...providers.model_profiles import probe_harness_ready
+
+    harness_decl = team_config.effective_harness()
+    if harness_decl is None or ws_root is None:
+        return None
+    return probe_harness_ready(
+        ws_root, required_skills=harness_decl.all_required_skills()
+    )
 
 
 def _resolve_and_freeze_profile_or_refuse(
@@ -631,6 +652,11 @@ def _summarize_profiles(
             readiness[provider] = probe_provider_readiness(provider)
         return readiness[provider]
 
+    # Probe the harness once per preset (workspace-level, profile-independent) so
+    # discovery SERVES the harness reason on an unprovisioned authoring preset -
+    # the discovery half of the agent-harness contract.
+    harness = _probe_harness(tc, ws_root)
+
     summaries: list[ProfileSummary] = []
     profiles = tc.effective_profiles()
     for profile_id, profile in profiles.items():
@@ -640,6 +666,7 @@ def _summarize_profiles(
             readiness=readiness,
             engine_reachable=engine_reachable,
             acceptance_gate_passed=False,
+            harness=harness,
         )
         assignments = [
             RoleAssignmentSummary(

@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import sys
+from pathlib import Path
 from typing import Any
 
 import click
@@ -139,6 +140,49 @@ def run_cancel(run_id: str, url: str | None) -> None:
         "POST", f"{_base_url(url)}/v1/runs/{run_id}/cancel", timeout=_CONNECT_TIMEOUT
     )
     _emit(resp)
+
+
+@main.group()
+def workspace() -> None:
+    """Provision and verify a run workspace's agent harness."""
+
+
+@workspace.command("provision")
+@click.argument(
+    "path",
+    type=click.Path(file_okay=False, path_type=Path),
+    default=".",
+    required=False,
+)
+@click.option(
+    "--verify-only",
+    is_flag=True,
+    help="Verify an already-provisioned workspace; skip vaultspec-core install.",
+)
+def workspace_provision(path: Path, verify_only: bool) -> None:
+    """Install the vaultspec framework into PATH and verify its agent harness.
+
+    Wraps ``vaultspec-core install`` plus the harness verifier and reports the
+    verdict, any version skew, and each missing surface. Exits non-zero when the
+    harness is incomplete so a caller can gate on provisioning.
+    """
+    from .provision import ProvisionError, provision_workspace
+
+    try:
+        result = provision_workspace(path, install=not verify_only)
+    except ProvisionError as exc:
+        raise click.ClickException(str(exc)) from exc
+
+    click.echo(result.install_summary)
+    if result.version_skew is not None:
+        click.echo(f"WARNING: {result.version_skew}")
+    if result.harness.ready:
+        click.echo(f"harness ready: {path}")
+    else:
+        click.echo(f"harness INCOMPLETE: {path}")
+        for reason in result.harness.reasons:
+            click.echo(f"  - {reason}")
+        sys.exit(1)
 
 
 @main.group()

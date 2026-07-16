@@ -30,6 +30,7 @@ related:
   - '[[2026-07-14-adr-authoring-orchestration-research]]'
   - '[[2026-07-15-adr-authoring-orchestration-handover-reference]]'
   - '[[2026-07-15-adr-authoring-orchestration-reference]]'
+  - '[[2026-07-16-adr-authoring-orchestration-batch1-recovery-race-review-audit]]'
 ---
 
 # `adr-authoring-orchestration` feature index
@@ -45,6 +46,7 @@ Auto-generated index of all documents tagged with `#adr-authoring-orchestration`
 ### audit
 
 - `2026-07-14-adr-authoring-orchestration-audit` - `adr-authoring-orchestration` audit: `P01-P04 partial code review`
+- `2026-07-16-adr-authoring-orchestration-batch1-recovery-race-review-audit` - `adr-authoring-orchestration` audit: `batch-1 reviewer verdict: P04.S10 recovery-race fixes`
 
 ### exec
 

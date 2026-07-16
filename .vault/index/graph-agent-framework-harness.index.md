@@ -6,6 +6,7 @@ tags:
 date: '2026-07-16'
 modified: '2026-07-16'
 related:
+  - '[[2026-07-15-graph-agent-framework-harness-P01-summary]]'
   - '[[2026-07-15-graph-agent-framework-harness-P02-S13]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
@@ -24,6 +25,7 @@ Auto-generated index of all documents tagged with `#graph-agent-framework-harnes
 
 ### exec
 
+- `2026-07-15-graph-agent-framework-harness-P01-summary` - `graph-agent-framework-harness` `P01` summary
 - `2026-07-15-graph-agent-framework-harness-P02-S13` - Fix the RuleManager path-misalignment defect: align _RULES_SUBDIR to the current flat vaultspec-core 0.1.42 schema (rules live directly under .vaultspec/rules/*.md, confirmed by spec rules status) rather than the nonexistent nested rules/rules/ directory, with no dual-read legacy fallback per the owner's no-compat-shims directive
 
 ### plan

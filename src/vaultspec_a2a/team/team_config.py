@@ -39,6 +39,7 @@ _SAFE_AGENT_ID_RE = re.compile(r"^[a-zA-Z_][a-zA-Z0-9_\-]{0,62}$")
 
 
 __all__ = [
+    "DEFAULT_AUTHORING_SURFACES",
     "DEFAULT_PROFILE_DESCRIPTION",
     "DEFAULT_PROFILE_DISPLAY_NAME",
     "DEFAULT_PROFILE_ID",
@@ -54,6 +55,7 @@ __all__ = [
     "TeamConfigNotFoundError",
     "TeamDefaultsConfig",
     "TeamGraphConfig",
+    "TeamHarnessConfig",
     "TeamPermissionsConfig",
     "TeamPersonaConfig",
     "TeamProfileConfig",
@@ -78,6 +80,20 @@ DEFAULT_PROFILE_ID = "team-defaults"
 DEFAULT_PROFILE_DISPLAY_NAME = "Team defaults"
 DEFAULT_PROFILE_DESCRIPTION = (
     "Use the team's normal model resolution chain with no profile overlays."
+)
+
+# The five agent-harness surfaces a document-authoring run's workspace must
+# carry (agent-harness-provisioning ADR): personas (runtime + workspace depth),
+# rules (the compiled + on-disk corpus), skills (procedure documents), templates
+# (canonical placeholder shapes), and tools (the vaultspec-core CLI, MCP servers,
+# provider web tooling). Absence of a ``[team.harness]`` block means all five are
+# required for an authoring preset's writer roles.
+DEFAULT_AUTHORING_SURFACES: tuple[str, ...] = (
+    "personas",
+    "rules",
+    "skills",
+    "templates",
+    "tools",
 )
 
 
@@ -316,6 +332,52 @@ class TeamProfileConfig(BaseModel):
     roles: dict[str, TeamProfileRoleConfig] = Field(default_factory=dict)
 
 
+class TeamHarnessConfig(BaseModel):
+    """Declared agent-harness composition for a team preset (agent-harness ADR).
+
+    Declared as ``[team.harness]`` in team TOML. ``required_surfaces`` names the
+    harness surfaces a run's workspace must carry (a subset of
+    :data:`DEFAULT_AUTHORING_SURFACES`); ``role_skills`` maps a worker
+    ``agent_id`` to the skills that role must have provisioned; ``mcp_servers``
+    names the MCP servers injected into the run's agent sessions. An omitted
+    ``required_surfaces`` defaults to all five surfaces, so a bare
+    ``[team.harness]`` block is the full authoring harness plus any declared
+    skills and MCP servers. Absence of the block entirely is handled by
+    :meth:`TeamConfig.effective_harness`.
+    """
+
+    required_surfaces: list[str] = Field(
+        default_factory=lambda: list(DEFAULT_AUTHORING_SURFACES)
+    )
+    role_skills: dict[str, list[str]] = Field(default_factory=dict)
+    mcp_servers: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def validate_surfaces(self) -> "TeamHarnessConfig":
+        """Reject any surface name outside the known five (typo-proofing)."""
+        unknown = [
+            s for s in self.required_surfaces if s not in DEFAULT_AUTHORING_SURFACES
+        ]
+        if unknown:
+            raise ConfigError(
+                f"Unknown harness surface(s) {sorted(unknown)!r}; valid surfaces "
+                f"are {list(DEFAULT_AUTHORING_SURFACES)!r}."
+            )
+        return self
+
+    def skills_for(self, agent_id: str) -> list[str]:
+        """Return the skills declared for one worker role (empty when none)."""
+        return list(self.role_skills.get(agent_id, ()))
+
+    def all_required_skills(self) -> list[str]:
+        """Return every declared role skill, de-duplicated in first-seen order."""
+        seen: dict[str, None] = {}
+        for skills in self.role_skills.values():
+            for skill in skills:
+                seen.setdefault(skill, None)
+        return list(seen)
+
+
 class ResearchThreadSpec(BaseModel):
     """A single research thread for the ``research_adr`` diverge stage.
 
@@ -428,6 +490,7 @@ class TeamConfig(BaseModel):
     persona: TeamPersonaConfig = Field(default_factory=TeamPersonaConfig)
     graph: TeamGraphConfig = Field(default_factory=TeamGraphConfig)
     profiles: dict[str, TeamProfileConfig] = Field(default_factory=dict)
+    harness: TeamHarnessConfig | None = None
 
     @model_validator(mode="after")
     def validate_topology_order_subset(self) -> "TeamConfig":
@@ -473,10 +536,55 @@ class TeamConfig(BaseModel):
                     )
         return self
 
+    @model_validator(mode="after")
+    def validate_harness(self) -> "TeamConfig":
+        """Every ``[team.harness].role_skills`` key must be a declared worker.
+
+        Mirrors ``validate_profiles``: a role-skills key naming an agent the team
+        does not run is a first-class config failure, not a silently ignored map
+        entry (agent-harness-provisioning ADR: declared composition is enforced).
+        """
+        if self.harness is None:
+            return self
+        worker_ids = {w.agent_id for w in self.workers}
+        for role_key in self.harness.role_skills:
+            if role_key not in worker_ids:
+                raise ConfigError(
+                    f"Harness in team {self.id!r} declares skills for unknown "
+                    f"role {role_key!r}; declared team workers are "
+                    f"{sorted(worker_ids)!r}."
+                )
+        return self
+
     @property
     def default_profile_id(self) -> str:
         """The default model profile id (always the implicit team-defaults)."""
         return DEFAULT_PROFILE_ID
+
+    @property
+    def is_document_authoring(self) -> bool:
+        """Whether this preset authors vault documents through engine proposals.
+
+        The ``research_adr`` topology is the sole document-authoring topology
+        today; the agent-harness contract applies to its writer roles.
+        """
+        return self.topology.type == TopologyType.RESEARCH_ADR
+
+    def effective_harness(self) -> TeamHarnessConfig | None:
+        """Return the run's agent harness, defaulting authoring presets when absent.
+
+        A declared ``[team.harness]`` block is returned verbatim. When no block is
+        declared, a document-authoring preset gets the DEFAULT authoring harness
+        (all five surfaces required, no extra skills or MCP servers), while a
+        non-authoring preset has no harness requirement and returns ``None``
+        (agent-harness-provisioning ADR: absence means the default authoring
+        harness for writer roles).
+        """
+        if self.harness is not None:
+            return self.harness
+        if self.is_document_authoring:
+            return TeamHarnessConfig()
+        return None
 
     def effective_profiles(self) -> dict[str, TeamProfileConfig]:
         """Return declared profiles plus the implicit ``team-defaults`` profile.

@@ -97,7 +97,7 @@ markers = [
   "core: marks Layer 1 + Layer 1.5 tests — pure domain, zero infrastructure (run with '-m core')",
   "middleware: marks middleware-layer tests — protocol adapters + infra services, no orchestration deps (run with '-m middleware')",
   "unit: marks pure unit tests across all layers — no I/O, no database, no HTTP (run with '-m unit')",
-  "service: marks Layer 3 tests — require Docker compose services. Run with pytest -m service.",
+  "service: marks Layer 3 certification tests — most require Docker compose services, though some members are engine-free and run fully in-process. Run with pytest -m service.",
 ]
 
 [tool.ruff]

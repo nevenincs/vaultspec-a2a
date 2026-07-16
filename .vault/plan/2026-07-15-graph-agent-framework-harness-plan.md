@@ -38,7 +38,7 @@ Rewrite each of the four research_adr document personas' TOML system prompts aga
 
 - [ ] `P03.S05` - Rewrite the researcher persona's discovery-rag prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
 - [ ] `P03.S06` - Rewrite the synthesist persona's document-scaffold CLI prompt instructions per the P01 finding; `src/vaultspec_a2a/team/presets/agents/vaultspec-synthesist.toml`.
-- [x] `P03.S07` - Confirm the adr-author persona carries no residual scaffold or amend-vs-supersede rag-search instructions - both were excised upstream by 9c2e9dc and verified by the P01 probe (416b7f0), reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
+- [x] `P03.S07` - Confirm the adr-author persona carries no residual scaffold or amend-vs-supersede rag-search instructions - both were excised upstream by 9c2e9dc and verified by the P01 probe (416b7f0), reducing this step from a rewrite to a doc-consistency confirmation per architect ruling; `src/vaultspec_a2a/team/presets/agents/vaultspec-adr-author.toml`.
 - [ ] `P03.S08` - Reconcile the doc-reviewer persona's prompt instructions per the P01 finding for consistency across all four personas; `src/vaultspec_a2a/team/presets/agents/vaultspec-doc-reviewer.toml`.
 
 ### Phase `P04` - wire role-scoped propagation at the graph entry points

@@ -3,7 +3,7 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-07-15'
+modified: '2026-07-16'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
@@ -40,6 +40,16 @@ Agents authored non-conformant documents because their execution environment car
 - **Declared composition**: a `[team.harness]` block in team presets names required surfaces and any role-specific additions (skills lists, MCP servers). Absence of the block means the default authoring harness (all five surfaces required for writer roles).
 - **Verification, not hope**: a harness verifier checks the workspace before dispatch - rules dir non-empty, required templates present, skills present when declared, CLI resolvable in the agent env - and feeds a `harness_ready` term into the shared eligibility service. For authoring presets, RuleManager returning None is a harness violation surfaced as ineligibility with a safe reason; discovery serves it, run-start refuses on it (same discovery-vs-launch binding as the acceptance gate: operator override possible, silent degradation never).
 - **Provision verb**: `vaultspec-a2a workspace provision <path>` wraps vaultspec-core install/sync plus the verifier - one command yielding a harness-ready workspace (what the ws5 driver did by hand); the PW7 acceptance harness and service fixtures call it.
+
+Refinement (2026-07-15, live S10 evidence): declared composition is ENFORCED, not advisory. The live acceptance run proved a run agent inherited the operator's user-global vaultspec MCP server (writable create/edit verbs) through the pinned CLI's own config loading and scaffolded directly into the run workspace's `.vault/` - bypassing the ACP filesystem-RPC deny chokepoint entirely, because MCP tool execution happens inside the CLI process. Persona guidance ("do not scaffold with vault add") did not stop it. Binding rule: the spawned agent's MCP surface is an ALLOWLIST equal to the declared harness servers and nothing else - the ACP spawn must suppress user-global/inherited MCP configuration (strict MCP-config mode on the CLI/adapter), and in headless runs the tool-permission layer denies any tool outside the declared allowlist rather than merely not-pre-permitting it. A writable vault MCP is never part of an authoring run's declared harness; agents author through the graph submitter alone. Secondary engine finding: a provisional-create apply that collides with a pre-existing file must be a typed conflict, never a silent keep-the-existing-scaffold.
+
+Refinement (2026-07-15, S10 live-run security finding): the agent's MCP tool surface is EXCLUSIVE and propose-only. A live Claude run scaffolded a document directly into `.vault/` through a user-global WRITABLE vaultspec MCP surfaced to the pinned CLI - a second write path beside the sanctioned graph-submitter, bypassing the W02 `.vault/**` deny policy (which guards only the ACP fs-RPC chokepoint, not an MCP-tool path to the same filesystem). Binding invariants:
+
+- The spawned authoring agent's MCP surface is EXACTLY the injected set (the propose-only authoring bridge); it MUST NOT inherit user-global or workspace MCP servers. The worker isolates the ACP agent's config home so no ambient MCP - especially any writable vaultspec/vault MCP - is loaded; only the per-session `mcpServers` the worker injects are visible.
+- The `.vault/**` write deny must cover EVERY agent-reachable write path to the vault, not only the ACP fs RPC: an MCP tool that shells `vaultspec-core vault add`/`set-body` into the run workspace is an agent write and is denied at the same policy strength. Defense in depth: deny at the surface (don't hand the tool) AND at the sink (engine/adapter refuses an agent-origin direct vault mutation).
+- Persona directives ('do not scaffold with vault add') are guidance, not enforcement - a capable agent ignored them live. Enforcement is the controlled surface, per the declared-composition principle: what an agent CAN do is the injected harness, not what a prompt asks it not to do.
+
+This makes battery item 3 (zero agent `.vault` writes) enforceable by construction rather than by hope.
 
 ## Rationale
 

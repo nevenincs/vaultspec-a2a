@@ -5,6 +5,9 @@ for orchestration threads.
 """
 
 from .anchoring import build_anchoring_context as build_anchoring_context
+from .harness import DEFAULT_REQUIRED_TEMPLATES as DEFAULT_REQUIRED_TEMPLATES
+from .harness import HarnessReadiness as HarnessReadiness
+from .harness import verify_harness as verify_harness
 from .metadata import ContextRef as ContextRef
 from .metadata import ThreadMetadata as ThreadMetadata
 from .metadata import discover_context_refs as discover_context_refs
@@ -19,8 +22,10 @@ from .token_budget import prepare_handoff as prepare_handoff
 from .token_budget import should_compact as should_compact
 
 __all__ = [
+    "DEFAULT_REQUIRED_TEMPLATES",
     "PHASE_ORDER",
     "ContextRef",
+    "HarnessReadiness",
     "RuleManager",
     "ThreadMetadata",
     "build_anchoring_context",
@@ -32,4 +37,5 @@ __all__ = [
     "infer_phase_from_vault_index",
     "prepare_handoff",
     "should_compact",
+    "verify_harness",
 ]

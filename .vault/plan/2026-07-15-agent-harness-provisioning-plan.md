@@ -27,7 +27,7 @@ related:
 The harness verifier, the harness_ready eligibility term, and the team.harness declaration schema.
 
 - [x] `P01.S01` - Build the harness verifier (rules corpus non-empty, required templates present, declared skills present, vaultspec-core CLI resolvable in the agent environment) and feed a harness_ready term with safe reasons into the shared eligibility service consumed by discovery and run-start; `src/vaultspec_a2a/context/, src/vaultspec_a2a/providers/model_profiles.py, src/vaultspec_a2a/control/`.
-- [ ] `P01.S02` - Add the team.harness declaration schema (required surfaces, role skills lists, MCP server names) with the default authoring harness when absent, and make RuleManager absence a surfaced ineligibility for authoring presets instead of a silent None; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/context/rules.py`.
+- [x] `P01.S02` - Add the team.harness declaration schema (required surfaces, role skills lists, MCP server names) with the default authoring harness when absent, and make RuleManager absence a surfaced ineligibility for authoring presets instead of a silent None; `src/vaultspec_a2a/team/team_config.py, src/vaultspec_a2a/context/rules.py`.
 
 ### Phase `P02` - Provision verb and adoption
 

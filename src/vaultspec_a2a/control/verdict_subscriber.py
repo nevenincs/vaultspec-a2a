@@ -650,6 +650,12 @@ class VerdictSubscriber:
                 _RESUME_CLAIM_TTL_SECONDS,
             )
             return
+        # This whole-blob read-modify-write (merge the claim into the
+        # ``thread_metadata`` read at the top of dispatch, write it all back) is
+        # lost-update-safe ONLY because the verdict subscriber is the sole writer
+        # of ``thread_metadata`` after thread creation. A second concurrent writer
+        # elsewhere would silently clobber this claim, reopening the
+        # claim->resume race the lease exists to close.
         async with self._session_factory() as db:
             await update_thread_metadata(
                 db, thread_id, _with_resume_claim(thread_metadata, current_gate, now)

@@ -437,6 +437,7 @@ def create_worker_node(
     task_queue_port: TaskQueuePort | None = None,
     authoring_binding: "AuthoringToolBinding | None" = None,
     role: str | None = None,
+    harness_mcp_servers: list[str] | None = None,
 ) -> WorkerNode:
     """Create a LangGraph worker node with a specific role and model.
 
@@ -455,6 +456,10 @@ def create_worker_node(
                            ACP MCP surface, the spawned CLI session advertises the
                            loopback authoring MCP server so the agent sees the
                            propose/read tools and no vault-write path.
+        harness_mcp_servers: Declared team-harness MCP server names composed into
+                           the ACP session (ADD-only, unioned with any authoring
+                           servers) so the spawned CLI's session/new advertises
+                           them; ignored by non-ACP models.
 
     Returns:
         An async function that conforms to the LangGraph node signature.
@@ -487,6 +492,12 @@ def create_worker_node(
         effective_model = _attach_authoring_tools(
             effective_model, authoring_binding, autonomous=autonomous
         )
+        if harness_mcp_servers:
+            from vaultspec_a2a.providers._acp_mcp import compose_harness_mcp_servers
+
+            effective_model = compose_harness_mcp_servers(
+                effective_model, harness_mcp_servers
+            )
 
         model_type = type(effective_model).__name__
         _logger.debug(

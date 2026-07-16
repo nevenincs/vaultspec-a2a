@@ -987,6 +987,7 @@ def _make_research_producer(
     model: BaseChatModel,
     system_prompt: str,
     workspace_root: Path | None = None,
+    harness_mcp_servers: list[str] | None = None,
 ) -> ResearchFindingProducer:
     """Bridge a researcher model into a ResearchFindingProducer.
 
@@ -1034,7 +1035,12 @@ def _make_research_producer(
             )
         )
         messages.extend(state.get("messages", []))
-        response = await model.ainvoke(messages)
+        effective_model = model
+        if harness_mcp_servers:
+            from vaultspec_a2a.providers._acp_mcp import compose_harness_mcp_servers
+
+            effective_model = compose_harness_mcp_servers(model, harness_mcp_servers)
+        response = await effective_model.ainvoke(messages)
         return {
             "claim": str(response.content),
             "locators": [],
@@ -1118,6 +1124,12 @@ def _compile_research_adr(
         frozen_assignment=frozen_assignment,
     )
 
+    # The team-harness MCP servers are a flat, team-level declaration composed
+    # into every document-role model's ACP session (there is no per-role field
+    # on the harness schema today). Empty when no harness is declared.
+    harness = team_config.effective_harness()
+    harness_mcp_servers = list(harness.mcp_servers) if harness is not None else []
+
     specs: list[dict[str, Any]] = [
         spec.model_dump() for spec in team_config.topology.research_threads
     ] or [{"thread_id": "primary", "topic": "", "instructions": ""}]
@@ -1126,6 +1138,7 @@ def _compile_research_adr(
         models["researcher"],
         _agent_system_prompt(team_config, agent_configs, "researcher"),
         workspace_root=workspace_root,
+        harness_mcp_servers=harness_mcp_servers,
     )
 
     _wire_diverge_stage(
@@ -1145,6 +1158,7 @@ def _compile_research_adr(
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="synthesist",
+            harness_mcp_servers=harness_mcp_servers,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1157,6 +1171,7 @@ def _compile_research_adr(
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="doc-reviewer",
+            harness_mcp_servers=harness_mcp_servers,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1169,6 +1184,7 @@ def _compile_research_adr(
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="adr-author",
+            harness_mcp_servers=harness_mcp_servers,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )
@@ -1181,6 +1197,7 @@ def _compile_research_adr(
             autonomous=autonomous,
             workspace_root=workspace_root,
             role="doc-reviewer",
+            harness_mcp_servers=harness_mcp_servers,
         ),
         retry_policy=_NODE_RETRY_POLICY,
     )

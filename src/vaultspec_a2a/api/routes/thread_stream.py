@@ -105,16 +105,25 @@ async def _stream_thread_events(
         aggregator.remove_subscriber(client_id)
 
 
-@router.get("/threads/{thread_id}/stream")
-async def stream_thread_events(
+async def build_thread_stream_response(
+    *,
+    db: AsyncSession,
+    aggregator: EventAggregator,
     thread_id: str,
-    db: AsyncSession = Depends(get_db),
-    aggregator: EventAggregator = Depends(get_aggregator),
+    not_found_detail: str = "Thread not found",
 ) -> StreamingResponse:
-    """Stream thread events over SSE for clients that do not use WebSockets."""
+    """Build the SSE ``StreamingResponse`` for a thread, or raise a 404.
+
+    The single code path behind both the internal ``/api/threads/{id}/stream``
+    route and the versioned ``/v1/runs/{run_id}/stream`` gateway verb: the run
+    surface reuses this verbatim (a run id is the thread id), so the public edge
+    re-serves the same bounded, versioned v1 progress frames without a second
+    implementation. Callers pass ``not_found_detail`` to speak their own resource
+    vocabulary in the 404.
+    """
     thread = await get_thread(db, thread_id)
     if thread is None:
-        raise HTTPException(status_code=404, detail="Thread not found")
+        raise HTTPException(status_code=404, detail=not_found_detail)
 
     return StreamingResponse(
         _stream_thread_events(
@@ -128,4 +137,16 @@ async def stream_thread_events(
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
         },
+    )
+
+
+@router.get("/threads/{thread_id}/stream")
+async def stream_thread_events(
+    thread_id: str,
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+) -> StreamingResponse:
+    """Stream thread events over SSE for clients that do not use WebSockets."""
+    return await build_thread_stream_response(
+        db=db, aggregator=aggregator, thread_id=thread_id
     )

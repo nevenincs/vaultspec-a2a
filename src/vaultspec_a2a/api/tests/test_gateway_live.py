@@ -622,6 +622,85 @@ async def test_sse_carries_semantic_phase_and_bounds_document_bodies(
         assert terminal["status"] == "completed"
 
 
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_stream_verb_reserves_versioned_frames(
+    session_factory, checkpointer
+) -> None:
+    """GET /v1/runs/{run_id}/stream re-serves the bounded, versioned v1 frames.
+
+    The public run surface is the streaming companion to run-status: it delegates
+    to the same stream builder the internal /api route uses, so the engine-facing
+    edge sees the identical api_version stamp, mid-stream delivery, and
+    terminal-replay-then-close semantics - no second code path.
+    """
+    from ...database.thread_repository import create_thread
+    from ...thread.enums import ThreadStatus
+
+    aggregator = EventAggregator()
+    app, agg, _worker, _cp = make_app(session_factory, checkpointer, aggregator)
+
+    async with session_factory() as session:
+        thread = await create_thread(session, status=ThreadStatus.RUNNING, title="run")
+        await session.commit()
+        run_id = thread.id
+
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+        client.stream("GET", f"/v1/runs/{run_id}/stream") as resp,
+    ):
+        assert resp.status_code == 200
+        assert resp.headers["content-type"].startswith("text/event-stream")
+        lines = resp.aiter_lines()
+
+        for _ in range(200):
+            if agg.subscriber_count() > 0:
+                break
+            await asyncio.sleep(0.01)
+        assert agg.subscriber_count() > 0, "run-stream subscriber never registered"
+
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "progress",
+                "event_type": "progress",
+                "thread_id": run_id,
+                "step": 1,
+            },
+        )
+        progress = await _read_event(lines, wanted="progress")
+        assert progress["api_version"] == "v1"
+        assert progress["type"] == "progress"
+        assert progress["step"] == 1
+
+        # A terminal event closes the run stream.
+        agg.relay_payload(
+            run_id,
+            {
+                "type": "thread_terminal",
+                "event_type": "thread_terminal",
+                "thread_id": run_id,
+                "status": "completed",
+            },
+        )
+        terminal = await _read_event(lines, wanted="thread_terminal")
+        assert terminal["api_version"] == "v1"
+        assert terminal["status"] == "completed"
+
+
+@pytest.mark.asyncio(loop_scope="function")
+async def test_run_stream_unknown_run_is_404(session_factory, checkpointer) -> None:
+    """Streaming an unknown run id is a clean 404 in run vocabulary."""
+    app, _agg, _worker, _cp = make_app(session_factory, checkpointer)
+    async with (
+        _live_server(app) as base,
+        httpx.AsyncClient(base_url=base, timeout=10.0) as client,
+    ):
+        resp = await client.get("/v1/runs/does-not-exist/stream")
+        assert resp.status_code == 404
+        assert resp.json()["detail"] == "Run not found"
+
+
 async def _read_event(
     lines: AsyncIterator[str], *, wanted: str, timeout: float = 5.0
 ) -> dict:

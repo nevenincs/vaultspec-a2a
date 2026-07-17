@@ -1,9 +1,11 @@
 """The versioned five-verb gateway surface.
 
 Mounts ``run-start``, ``run-status``, ``run-cancel``, ``presets-list``, and
-``service-state`` under ``/v1`` as the engine-facing edge. Each verb reshapes an
-existing service rather than reinventing it, so there is a single code path: the
-richer internal ``/api`` surface and these verbs call the same services beneath.
+``service-state`` under ``/v1`` as the engine-facing edge, plus ``run-stream``
+(GET ``/runs/{run_id}/stream``) - the droppable SSE progress companion to the
+authoritative ``run-status`` snapshot. Each verb reshapes an existing service
+rather than reinventing it, so there is a single code path: the richer internal
+``/api`` surface and these verbs call the same services beneath.
 """
 
 import asyncio
@@ -14,6 +16,7 @@ from typing import Any
 
 import httpx
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -63,6 +66,7 @@ from ..schemas.gateway import (
     ServiceStateResponse,
     TopologyPosition,
 )
+from .thread_stream import build_thread_stream_response
 
 router = APIRouter(prefix="/v1")
 logger = logging.getLogger(__name__)
@@ -471,6 +475,35 @@ async def run_status_endpoint(
         degraded_reasons=snapshot.degraded_reasons,
         profile_id=frozen.profile_id if frozen is not None else None,
         assignments=_frozen_disclosure(frozen) if frozen is not None else [],
+    )
+
+
+# ---------------------------------------------------------------------------
+# run-stream
+# ---------------------------------------------------------------------------
+
+
+@router.get("/runs/{run_id}/stream")
+async def run_stream_endpoint(
+    run_id: str,
+    db: AsyncSession = Depends(get_db),
+    aggregator: EventAggregator = Depends(get_aggregator),
+) -> StreamingResponse:
+    """Re-serve the run's bounded, versioned v1 SSE progress frames.
+
+    The public streaming companion to run-status: run-status is the authoritative
+    recovery snapshot, this is the droppable live progress relay. A run id is the
+    thread id, so this delegates to the same stream builder the internal
+    ``/api/threads/{id}/stream`` route uses - one code path, the same versioned
+    256 KiB-bounded frames, the same terminal-replay-then-close semantics. Frames
+    are non-authoritative by contract: a consumer reconciles run state from
+    run-status, never from a relay frame.
+    """
+    return await build_thread_stream_response(
+        db=db,
+        aggregator=aggregator,
+        thread_id=run_id,
+        not_found_detail="Run not found",
     )
 
 

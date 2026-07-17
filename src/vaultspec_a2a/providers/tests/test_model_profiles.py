@@ -195,6 +195,41 @@ class TestReadiness:
         elif r.reason is not None:
             assert token not in r.reason
 
+    def test_kimi_readiness_reason_is_safe_and_credential_gated(self) -> None:
+        """Kimi readiness gates on KIMI_API_KEY and never leaks the SecretStr.
+
+        With no key configured the verdict is not-ready with the safe reason;
+        with a key it proceeds to command resolvability. Either way the reason is
+        credential-free (the key is a SecretStr; its value is never surfaced).
+        """
+        key = (
+            settings.kimi_api_key.get_secret_value() if settings.kimi_api_key else ""
+        ).strip()
+        r = probe_provider_readiness(Provider.KIMI)
+        assert r.provider == Provider.KIMI
+        if not key:
+            assert r.ready is False
+            assert r.reason == "no Kimi API key configured"
+        elif r.reason is not None:
+            assert key not in r.reason
+
+    def test_kimi_command_readiness_covers_binary_and_git_bash(self) -> None:
+        """The key-present branch delegates to command readiness, which covers the
+        `kimi` binary AND the Git-Bash prerequisite via classify_provider_command."""
+        import shutil
+
+        from ..model_profiles import _command_readiness
+
+        r = _command_readiness(Provider.KIMI)
+        assert r.provider == Provider.KIMI
+        if shutil.which("kimi") is not None:
+            # Git for Windows is a host prerequisite here, so both resolve.
+            assert r.ready is True
+        else:
+            assert r.ready is False
+            # Path-free by construction; no secret and no filesystem path.
+            assert "sk-" not in (r.reason or "")
+
 
 def _mock_assignment() -> ProfileAssignment:
     """A two-role assignment on the deterministic mock provider."""

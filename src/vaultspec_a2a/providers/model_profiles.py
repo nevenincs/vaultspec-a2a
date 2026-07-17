@@ -383,6 +383,26 @@ def probe_provider_readiness(provider: Provider) -> ProviderReadiness:
             )
         return ProviderReadiness(provider=provider, ready=True)
 
+    if provider == Provider.KIMI:
+        # Kimi authenticates via the CLI-native KIMI_API_KEY (a SecretStr):
+        # presence is checked by extracting the value into a bool, never surfacing
+        # it in the reason. Command readiness additionally covers the `kimi` binary
+        # AND the Git-Bash prerequisite (classify_provider_command raises for
+        # either), so a ready result means the key is configured and the lane can
+        # actually launch.
+        key = (
+            settings.kimi_api_key.get_secret_value()
+            if settings.kimi_api_key
+            else None
+        )
+        if not _has_text(key):
+            return ProviderReadiness(
+                provider=provider,
+                ready=False,
+                reason="no Kimi API key configured",
+            )
+        return _command_readiness(provider)
+
     return ProviderReadiness(
         provider=provider, ready=False, reason=f"unsupported provider {provider.value}"
     )

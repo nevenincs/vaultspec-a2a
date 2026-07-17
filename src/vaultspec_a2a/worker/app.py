@@ -38,8 +38,8 @@ from ..database.checkpoints import open_checkpointer
 from ..ipc.schemas import DispatchRequest, DispatchResponse
 from ..lifecycle.registration import deregister_serve, register_serve
 from ..telemetry import TelemetryMiddleware, configure_telemetry
+from ..utils import BearerVerdict, verify_internal_bearer
 from ..utils.asyncio_compat import configure_asyncio_runtime
-from ..utils.enums import Environment
 from .executor import Executor
 from .ipc import WorkerBridge
 
@@ -55,22 +55,22 @@ WorkerApp = FastAPI
 async def _verify_dispatch_token(
     authorization: str | None = Header(None),
 ) -> None:
-    """Verify bearer token for gateway->worker dispatch requests."""
-    token = settings.internal_token
-    if token is None:
-        if settings.environment != Environment.DEVELOPMENT:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "VAULTSPEC_INTERNAL_TOKEN required in "
-                    f"{settings.environment.value} environment"
-                ),
-            )
-        return
-    if authorization != f"Bearer {token}":
+    """Verify bearer token for gateway->worker dispatch requests.
+
+    Delegates the rule to the shared IPC bearer verifier; the worker keeps its
+    ``WWW-Authenticate`` header on the 401.
+    """
+    verdict, detail = verify_internal_bearer(
+        authorization,
+        token=settings.internal_token,
+        environment=settings.environment,
+    )
+    if verdict is BearerVerdict.MISCONFIGURED:
+        raise HTTPException(status_code=500, detail=detail)
+    if verdict is BearerVerdict.UNAUTHORIZED:
         raise HTTPException(
             status_code=401,
-            detail="Invalid internal token",
+            detail=detail,
             headers={"WWW-Authenticate": "Bearer"},
         )
 

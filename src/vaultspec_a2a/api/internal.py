@@ -33,6 +33,7 @@ from ..control.event_handlers import (
     _handle_execution_state_event,
     relay_event,
 )
+from ..utils import BearerVerdict, verify_internal_bearer
 
 __all__ = ["internal_router"]
 
@@ -72,23 +73,17 @@ async def _verify_internal_token(
 
     Skipped when settings.internal_token is None **and** the environment
     is DEVELOPMENT.  In production/staging/testing, a missing token is a
-    configuration error.
+    configuration error. Delegates the rule to the shared IPC bearer verifier.
     """
-    from ..utils.enums import Environment
-
-    token = settings.internal_token
-    if token is None:
-        if settings.environment != Environment.DEVELOPMENT:
-            raise HTTPException(
-                status_code=500,
-                detail=(
-                    "VAULTSPEC_INTERNAL_TOKEN required in "
-                    f"{settings.environment.value} environment"
-                ),
-            )
-        return  # Auth disabled in dev mode
-    if authorization != f"Bearer {token}":
-        raise HTTPException(status_code=401, detail="Invalid internal token")
+    verdict, detail = verify_internal_bearer(
+        authorization,
+        token=settings.internal_token,
+        environment=settings.environment,
+    )
+    if verdict is BearerVerdict.MISCONFIGURED:
+        raise HTTPException(status_code=500, detail=detail)
+    if verdict is BearerVerdict.UNAUTHORIZED:
+        raise HTTPException(status_code=401, detail=detail)
 
 
 internal_router = APIRouter(

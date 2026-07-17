@@ -19,6 +19,7 @@ _INFRA_FILES = frozenset(
         "test_manager.py",
         "test_registration.py",
         "test_live_concurrency.py",
+        "test_engine_serve.py",
     }
 )
 

@@ -3,7 +3,7 @@ tags:
   - '#exec'
   - '#agent-harness-provisioning'
 date: '2026-07-16'
-modified: '2026-07-16'
+modified: '2026-07-17'
 step_id: 'S04'
 related:
   - "[[2026-07-15-agent-harness-provisioning-plan]]"

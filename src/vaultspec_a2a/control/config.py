@@ -398,6 +398,15 @@ class InfraConfig(BaseSettings):
             "Exponential back-off base (seconds) between watchdog restart attempts."
         ),
     )
+    watchdog_restart_cooldown_seconds: float = Field(
+        default=30.0,
+        alias="VAULTSPEC_WATCHDOG_RESTART_COOLDOWN_SECONDS",
+        description=(
+            "Minimum seconds between watchdog restart CYCLES (not attempts within a "
+            "cycle). Rate-limits a persistent crash signal so the watchdog cannot "
+            "spin restart cycles when the underlying condition has not cleared."
+        ),
+    )
 
     # WebSocket
     ws_heartbeat_interval_seconds: float = Field(

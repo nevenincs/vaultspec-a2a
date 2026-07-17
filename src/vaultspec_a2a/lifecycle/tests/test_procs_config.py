@@ -30,6 +30,13 @@ def test_committed_procs_toml_matches_the_adr_bands() -> None:
     assert engine.heartbeat is True
     assert engine.staleness_ms == 120000
     assert engine.serve and "{port}" in engine.serve
+    # The engine seats its data store relative to cwd, so the serve template must
+    # thread {workspace} through to the wrapper's explicit, validated data seat, and
+    # the role must require an explicit repo so it never serves from the project root.
+    assert "{workspace}" in engine.serve
+    assert engine.require_repo is True
+    # Roles that do not seat data from cwd stay opt-out.
+    assert config.roles["gateway-dev"].require_repo is False
 
     # Serve templates resolve the interpreter via {python}, never a bare `python`.
     for role in ("engine-dev", "gateway-dev", "worker-dev"):
@@ -126,4 +133,31 @@ def test_non_string_env_value_is_rejected(tmp_path) -> None:
         "[roles.a]\nband = [100, 200]\nenv = { VAULTSPEC_PORT = 8000 }\n",
     )
     with pytest.raises(ProcsConfigError, match="env must be a table of string"):
+        load_procs_config(path)
+
+
+def test_require_repo_is_parsed_and_defaults_false(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "\n".join(
+            [
+                "[roles.seated]",
+                "band = [100, 200]",
+                "require_repo = true",
+                "[roles.plain]",
+                "band = [300, 400]",
+            ]
+        ),
+    )
+    config = load_procs_config(path)
+    assert config.roles["seated"].require_repo is True
+    assert config.roles["plain"].require_repo is False
+
+
+def test_non_bool_require_repo_is_rejected(tmp_path) -> None:
+    path = _write(
+        tmp_path,
+        "[roles.a]\nband = [100, 200]\nrequire_repo = 'yes'\n",
+    )
+    with pytest.raises(ProcsConfigError, match="require_repo must be a bool"):
         load_procs_config(path)

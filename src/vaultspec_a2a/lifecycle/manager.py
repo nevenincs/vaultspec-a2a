@@ -19,15 +19,16 @@ from __future__ import annotations
 
 import contextlib
 import os
-import socket
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
+    NAME_ENV,
     PortReservation,
     ProcRecord,
     StalenessState,
@@ -70,7 +71,6 @@ __all__ = [
 ]
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
-_NAME_ENV = "VAULTSPEC_PROCS_NAME"
 _KILL_POLL_INTERVAL = 0.1
 
 
@@ -384,6 +384,10 @@ def rerun(
     record = resolve(name, home=home)
     resolved_config = config if config is not None else load_procs_config()
     role = resolved_config.role(record.role)
+    # Refuse a data-seating role with no explicit repo BEFORE any side effect, so a
+    # rerun cannot kill the running process and then decline to restart it - serve_up
+    # and resume both guard before acting, and rerun must match that ordering.
+    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     tree_kill(record.pid)
     if role.build:
         cwd = _build_cwd_for(record)
@@ -420,7 +424,13 @@ def reap(
 
 
 def _serve_env(
-    role_cfg: RoleConfig, *, port: int, workspace: str, name: str, owner: str
+    role_cfg: RoleConfig,
+    *,
+    port: int,
+    workspace: str,
+    name: str,
+    owner: str,
+    engine_service_json: str = "",
 ) -> dict[str, str]:
     """The env overlay for a boot: the role's rendered port/config vars plus identity.
 
@@ -428,10 +438,18 @@ def _serve_env(
     self-registers (a gateway/worker booted on a band port) converges onto THIS
     record - same ``(role, name)`` and owner - and refreshes it, instead of writing
     a second, foreign-owned record that the owner-check would then refuse.
+
+    A recorded *engine_service_json* is injected under
+    :data:`_ENGINE_SERVICE_JSON_ENV` so the worker's engine discovery no longer
+    depends on the booting shell having exported it - the reseat-strands-worker gap.
+    An empty value injects nothing (discovery then falls back to its default
+    candidate), matching the prior behaviour for records that predate this field.
     """
     env = render_env(role_cfg.env, port=port, workspace=workspace)
-    env[_NAME_ENV] = name
+    env[NAME_ENV] = name
     env[_OWNER_ENV] = owner
+    if engine_service_json:
+        env[_ENGINE_SERVICE_JSON_ENV] = engine_service_json
     return env
 
 
@@ -442,6 +460,7 @@ def serve_up(
     workspace: str = "",
     repo: str = "",
     build_repo: str = "",
+    engine_service_json: str = "",
     owner: str | None = None,
     log_path: str | None = None,
     ready_timeout: float = 20.0,
@@ -466,6 +485,7 @@ def serve_up(
     role_cfg = resolved_config.role(role)
     if not role_cfg.serve:
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
+    _ensure_explicit_repo(role_cfg, repo, f"{role}-{name}")
     owner_label = owner if owner is not None else default_owner()
     cwd = _Path(repo) if repo else _default_repo()
     # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
@@ -488,6 +508,7 @@ def serve_up(
                 workspace=workspace,
                 name=name,
                 owner=owner_label,
+                engine_service_json=engine_service_json,
             )
             process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
             if _await_listener(reservation.port, process, timeout=ready_timeout):
@@ -506,6 +527,7 @@ def serve_up(
                     last_seen_ms=stamp,
                     log_path=log_path,
                     owner=owner_label,
+                    engine_service_json=engine_service_json,
                 )
                 commit_reservation(reservation, record, home=home)
                 held.remove(reservation)
@@ -541,6 +563,23 @@ def _default_repo() -> Path:
     from ..control.config import settings
 
     return settings.project_root
+
+
+def _ensure_explicit_repo(role_cfg: RoleConfig, repo: str, label: str) -> None:
+    """Refuse to serve a data-seating role from an implicit default cwd.
+
+    A role that declares ``require_repo`` (engine-dev seats its data store from its
+    serve cwd) must be booted and resumed with an explicit repo, never defaulted to
+    the project root - defaulting there once seated a dev engine's store on top of
+    the resident engine's live store. Raises :class:`LifecycleError` when no repo is
+    given, so the silent-root fallback is impossible rather than merely discouraged.
+    """
+    if role_cfg.require_repo and not repo:
+        raise LifecycleError(
+            f"role {role_cfg.name!r} requires an explicit repo (it seats data from "
+            f"its serve cwd); {label} carries none - pass an explicit repo rather "
+            "than defaulting to the project root"
+        )
 
 
 def _serve_cwd_for(record: ProcRecord) -> Path:
@@ -582,6 +621,7 @@ def _start_from_record(
         raise LifecycleError(
             f"role {record.role!r} declares no serve command in procs.toml"
         )
+    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     command = render_command(role.serve, port=record.port, workspace=record.workspace)
     child_env = _serve_env(
         role,
@@ -589,6 +629,7 @@ def _start_from_record(
         workspace=record.workspace,
         name=record.name,
         owner=record.owner or default_owner(),
+        engine_service_json=record.engine_service_json,
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)
@@ -611,8 +652,9 @@ def _port_is_bound(port: int, *, timeout: float = 1.0) -> bool:
     A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
     socket bind a port another is already listening on, so a bind cannot tell a
     held port from a free one. A successful loopback connect proves a live
-    listener - exactly what ``attach`` must verify.
+    listener - exactly what ``attach`` must verify. Delegates to the shared
+    :func:`~vaultspec_a2a.lifecycle.discovery.port_has_listener` primitive.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(timeout)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
+    from .discovery import port_has_listener
+
+    return port_has_listener(port, timeout=timeout)

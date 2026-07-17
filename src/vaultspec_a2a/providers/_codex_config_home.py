@@ -61,13 +61,21 @@ def render_codex_config_toml(specs: Sequence[dict[str, Any]]) -> str:
 
     Emits one ``[mcp_servers.<name>]`` block per spec with ``command`` and
     ``args``, plus an ``[mcp_servers.<name>.env]`` sub-table when the spec carries
-    env. Deterministic and stdlib-``tomllib``-parseable.
+    env. The read-verb constraint (P04.S19) names the server's read ``tools`` in
+    ``enabled_tools`` (an exact allowlist, so no write verb the server also exposes
+    can be invoked) and sets ``default_tools_approval_mode = "auto"`` so those
+    reads run without a prompt under the headless ``approval_policy = "never"``
+    plus ``sandbox = "read-only"`` composition. Deterministic and stdlib-
+    ``tomllib``-parseable.
     """
     blocks: list[str] = []
     for spec in specs:
         key = _table_key(spec["name"])
         lines = [f"[mcp_servers.{key}]", f"command = {_toml_str(spec['command'])}"]
         lines.append(f"args = {_toml_str_array(spec.get('args', ()))}")
+        # Read-verb allowlist: exactly the registry's read tools, auto-approved.
+        lines.append(f"enabled_tools = {_toml_str_array(spec.get('tools', ()))}")
+        lines.append('default_tools_approval_mode = "auto"')
         env = spec.get("env") or {}
         block = "\n".join(lines)
         if env:

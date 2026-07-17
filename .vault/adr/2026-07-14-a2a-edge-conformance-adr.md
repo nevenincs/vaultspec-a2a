@@ -4,14 +4,15 @@ tags:
   - "#a2a-edge-conformance"
 date: '2026-07-14'
 related:
-  - "[[2026-07-14-a2a-edge-conformance-reference]]"
-  - "[[2026-07-14-a2a-edge-conformance-research]]"
-  - "[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]"
+  - '[[2026-07-14-a2a-edge-conformance-reference]]'
+  - '[[2026-07-14-a2a-edge-conformance-research]]'
+  - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
+  - '[[2026-07-17-tool-cores-adr]]'
 supersedes:
   - '2026-02-28-react-tailwind-figma-migration-adr'
   - '2026-02-26-frontend-backend-contract-adr'
   - '2026-04-05-contract-validation-adr'
-modified: '2026-07-15'
+modified: '2026-07-17'
 ---
 # `a2a-edge-conformance` adr: `adopting the dashboard edge contract under a salvage-and-verify posture` | (**status:** `accepted`)
 
@@ -210,7 +211,7 @@ restated):
   SUBSTANCE of the brief's first acceptance criterion; the S20
   solo-coder MCP-bridge proof narrows from program-blocking gate to
   upstream watch item (re-run the matrix probe on CLI/adapter releases;
-  close S20 when surfacing lands).
+  close S20 when surfacing lands). **Update (2026-07-17, tool-cores):** the matrix was re-probed on the migrated adapter `@agentclientprotocol/claude-agent-acp@0.59.0` / SDK `0.3.207` and the gate HELD - session-injected MCP still does not surface (tool-cores `P02.S09`, commit `d977c28`). Grounding was instead delivered by the tool-cores isolated-config-home decision (`2026-07-17-tool-cores-adr`, live-verified SURFACES at `P03.S14`, commit `8e15441`), so the S20 watch no longer blocks grounding; it remains only as the optional upstream re-arm for retiring the config-home indirection if a future release surfaces session injection.
 - **R5 - Task queue leaves the vault.** The worker task queue is
   orchestration state (dashboard D5: ours), so its storage moves from the
   bespoke markdown table under `.vault/plan/` into A2A's own database

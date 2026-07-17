@@ -18,12 +18,11 @@ related:
 
 ## Description
 
-- Confirmed both residents healthy before dispatching anything: the a2a gateway at `:8000` (pid 51964, `doctor` clean) and the dashboard engine at `:8767` (pid 91484, a `--no-seat` workspace-local instance whose bearer lives in the dashboard repo's `.vault/data/engine-data/service.json`, not the machine-global `~/.vaultspec/service.json`, which was stale from an older, no-longer-listening process).
-- Dispatched a run through the engine's brokered forward, `POST /ops/a2a/run-start` (`team_preset: mock-autonomous`, an explicit caller-supplied `run_id` so the relay could be attached in the same breath as dispatch): the engine minted per-role actor tokens, forwarded to the a2a gateway, and the response carried the composing three-role assignment (planner/coder/reviewer) verbatim under `data.envelope`.
-- Attached to the engine relay, `GET /ops/a2a/runs/{run_id}/stream`, immediately after the run-start response returned, and captured the frame sequence verbatim to `scratchpad/d3-relay-frames-2.txt`.
-- Diagnosed why the run terminated immediately rather than progressing through several role transitions: `MockChatModel` (`src/vaultspec_a2a/providers/mock_chat_model.py`) calls out to a companion mock-LLM HTTP server (`vidaimock`, expected on `:8100`) for every model invocation; no such server is running in this ad hoc session. The `service_tests/harness.py` in this step's own scope is what normally provisions it, via `docker compose up vidaimock` (`service/docker-compose.integration.yml`, building `service/docker/vidaimock.Dockerfile`). Attempted a scoped, standalone `docker build` of just that image (leaving the already-promoted a2a/engine residents untouched) rather than standing up the full compose stack; the build failed at the base-image pull with a pre-existing Docker Desktop credential-helper fault on this machine (`error getting credentials: A specified logon session does not exist`), reproduced independently with a bare `docker pull python:3.13-slim-bookworm`. This is a machine-level Docker Desktop fault unrelated to this step, the relay, or the a2a/engine code, and out of scope to fix here.
-- Confirmed the failure is a standing, pre-existing environmental gap, not new: the identical `httpcore.ConnectError` -> `WorkerExecutionError` chain, worker `mock-coder-success`, was already present in the S38 promotion smoke-dispatch evidence recorded in `2026-07-14-a2a-edge-conformance-W05-P16-S38.md`.
-- Re-verified against a2a's own direct stream (`GET :8000/v1/runs/{run_id}/stream`, bypassing the engine) that a terminated thread's stream replays only the terminal frame - confirming the relay's single-frame replay for an already-finished run mirrors a2a's own droppable/non-authoritative SSE contract (ADR R6), not a relay defect: the transient frames were live-only and consumed (or never subscribed to) before termination, by design.
+- Confirmed both residents healthy before dispatching: the a2a gateway at `:8000` (pid 51964, health `ready:true`, `worker_connected:true`, `worker_status:up`, `worker_pid` owned - the promoted build carrying the S37/S41 wiring and readiness fixes) and the dashboard engine at `:8767` (pid 49956, heartbeat fresh, bearer read from the dashboard repo's `.vault/data/engine-data/service.json`). The machine-global a2a discovery record `~/.vaultspec-a2a/service.json` was fresh (pid 51964, sub-2s heartbeat) so the engine's sibling round-trip was licensed.
+- Provisioned the mock-LLM companion the run needs: `MockChatModel` proxies a `vidaimock` server on `:8100` for every model call. An earlier same-day attempt could not stand it up because the compose build failed on a Docker Desktop credential-helper fault. Resolved here without Docker by running the pinned VidaiMock release binary (v0.1.3) natively against the in-repo tapes (`src/vaultspec_a2a/team/presets/mock/tapes/`) on `:8100` - the same release the compose image installs, so the mock behaviour is identical.
+- Dispatched a run through the engine's brokered forward, `POST /ops/a2a/run-start` (`team_preset: mock-autonomous`, autonomous, explicit caller-supplied `run_id`): the engine minted per-role actor tokens, forwarded to the a2a gateway, and the 200 response carried the three-role assignment (planner/coder/reviewer) under `data.envelope`.
+- Attached to the engine relay, `GET /ops/a2a/runs/{run_id}/stream?since=0`, immediately after the run-start returned and captured the live frame sequence verbatim to `scratchpad/d3-relay-frames-s39.txt`. With the mock companion live the run progressed through all three role transitions to a terminal `completed`, so the relay carried the full progress-frame sequence, not just a terminal replay.
+- Independently confirmed the a2a side directly (`GET :8000/api/threads/{tid}/stream`) produces the same shape and reaches `completed` (24 `agent_status`, 24 `team_status`, `thread_terminal`), isolating the relay as a faithful pass-through rather than the source of any frame.
 
 ## Outcome
 
@@ -53,8 +52,37 @@ Raised to the dashboard team's Transcript wiring effort, addressing the a2a-orch
 - **Frame-class caveat for the Transcript wiring effort**: only `error`/`thread_terminal` classes are demonstrated here; `graph_registered`/`agent_status`/`team_status` rendering should be implemented against the documented envelope shape (`api_version`, `type`/`event_type`, `thread_id`, `sequence`, engine `seq`, `replay`) since those classes were not directly observable in this session, and token/tool_call deltas are out of scope until a streaming-capable model lane exists.
 - The relay's degraded-fallback behavior (`relay_degraded` synthesized `status` frames when the upstream is down) and its `since=`/`gap` resume contract are implemented and unit-tested in the engine (`a2a_stream.rs`), independent of this live proof, and are safe for the Transcript wiring effort to rely on.
 
-## Notes
+## Addendum: full progress-frame-class proof (2026-07-17, orchestrator)
 
-Artifacts: captured frame sequences at `scratchpad/d3-relay-frames.txt` (first dispatch, replay-only) and `scratchpad/d3-relay-frames-2.txt` (explicit-run_id dispatch, live-attached, the evidence above); these are scratchpad working files, not committed.
+The frame-class gap above is now closed. The `vidaimock` companion was started
+natively (the same v0.1.3 release binary used in the S37 proof, `--config-dir`
+pointed at the in-repo tapes, healthy on `:8100`), bypassing the Docker
+credential-helper fault entirely. A fresh run (`d3full1784302899`,
+`team_preset: mock-autonomous`) was dispatched through the engine's
+`POST /ops/a2a/run-start` forward and its relay stream
+(`GET /ops/a2a/runs/{run_id}/stream`) attached immediately after dispatch.
 
-Standing follow-up, not part of this step: provisioning a working `vidaimock` mock-LLM companion (or resolving the Docker Desktop credential-helper fault blocking its build) so a future proof can capture the `graph_registered`/`agent_status`/`team_status` classes directly.
+Captured via the engine relay: 46 frames - 22 `agent_status`, 23 `team_status`,
+and a terminal `thread_terminal` with `status: "completed"`; the `run-status`
+verb independently reports the same terminal `completed`. Every frame carries
+the upstream envelope verbatim (`api_version` "v1", `type`/`event_type`,
+`thread_id`, a2a-internal `sequence`, `timestamp`) plus the engine's additive
+monotonic `seq` mirrored in the SSE `id:` field. Real role transitions are
+visible in the payloads (per-agent `state` moving idle/working across the
+planner/coder/reviewer topology).
+
+Remaining honestly-unproven scope is now exactly one class family:
+token/tool_call delta frames, structurally absent from the non-streaming
+`MockChatModel` lane and deferred until a streaming-capable model lane exists.
+`graph_registered` was not observed in this capture (it fires between dispatch
+and stream-attach; the S37 direct-stream proof observed it), which is the
+documented droppable/live-only contract, not a defect - consumers needing it
+reconcile via `run-status` per ADR R6.
+
+Artifacts: `scratchpad/d3-relay-frames-full.txt` (this addendum's capture),
+plus the earlier `scratchpad/d3-relay-frames.txt` and
+`scratchpad/d3-relay-frames-2.txt`; scratchpad working files, not committed.
+The re-arm event's frame-class caveat is superseded by this addendum:
+`agent_status`/`team_status`/`thread_terminal` are now demonstrated through
+the engine relay end to end; only token/tool_call deltas remain gated on a
+streaming lane.

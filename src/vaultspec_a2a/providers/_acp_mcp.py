@@ -21,6 +21,7 @@ if TYPE_CHECKING:
     from langchain_core.language_models import BaseChatModel
 
 __all__ = [
+    "codex_mcp_server_specs",
     "compose_harness_mcp_servers",
     "config_home_mcp_servers",
     "harness_allowed_tool_names",
@@ -133,14 +134,7 @@ def config_home_mcp_servers(
         name = spec.get("name")
         if name not in _KNOWN_MCP_SERVERS:
             continue
-        # Trust-root guard: refuse to write any server not explicitly marked
-        # read-only into the surfacing config home, fail-loud so registry drift
-        # (a write-capable entry) can never be silently surfaced.
-        if not _KNOWN_MCP_SERVERS[name].get("read_only"):
-            raise ConfigError(
-                f"refusing to surface non-read-only harness server {name!r} in the "
-                "isolated config home; only read-only servers may be composed"
-            )
+        _require_read_only(name)
         entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
         if spec.get("args"):
             entry["args"] = list(spec["args"])
@@ -148,6 +142,56 @@ def config_home_mcp_servers(
             entry["env"] = dict(spec["env"])
         home[name] = entry
     return home
+
+
+def _require_read_only(name: str) -> None:
+    """Fail loud unless the registry entry is explicitly marked read-only.
+
+    The single trust-root guard shared by both delivery shapes (Claude config
+    home and Codex config.toml): registry drift toward a write-capable entry can
+    never be silently composed into a surfacing config, on either transport.
+    """
+    if not _KNOWN_MCP_SERVERS[name].get("read_only"):
+        raise ConfigError(
+            f"refusing to compose non-read-only harness server {name!r} into a "
+            "surfacing config; only read-only servers may be composed"
+        )
+
+
+def codex_mcp_server_specs(names: Sequence[str]) -> list[dict[str, Any]]:
+    """Resolve declared harness names to full read-only registry specs for Codex.
+
+    The registry's second serialization consumer (Codex ``config.toml`` vs the
+    Claude ACP session): returns, per declared server, the fields the Codex
+    ``[mcp_servers.<name>]`` block needs - ``name``, ``command``, ``args``,
+    ``env``, and the read ``tools`` (for the ``enabled_tools`` allowlist). Applies
+    the same fail-loud guards as the ACP path: an unknown name and a non-read-only
+    entry both raise :class:`ConfigError`, so one registry stays the single trust
+    root across both transports.
+    """
+    specs: list[dict[str, Any]] = []
+    unknown: list[str] = []
+    for name in names:
+        entry = _KNOWN_MCP_SERVERS.get(name)
+        if entry is None:
+            unknown.append(name)
+            continue
+        _require_read_only(name)
+        specs.append(
+            {
+                "name": name,
+                "command": entry["command"],
+                "args": list(entry.get("args", ())),
+                "env": dict(entry.get("env", {})),
+                "tools": list(entry.get("tools", ())),
+            }
+        )
+    if unknown:
+        raise ConfigError(
+            f"unknown harness MCP server(s) {unknown}; known servers are "
+            f"{sorted(_KNOWN_MCP_SERVERS)}"
+        )
+    return specs
 
 
 def compose_harness_mcp_servers(

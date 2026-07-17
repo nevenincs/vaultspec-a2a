@@ -502,6 +502,7 @@ class TestGraphInputBuilding:
             content="Hello",
             team_preset="vaultspec-solo-coder",
             active_feature="auth-flow",
+            feedback_batch_id="feedback-batch:deadbeef",
             pipeline_phase="implement",
             vault_index={"specs": ["auth.md"]},
             validation_errors=["missing tests"],
@@ -510,6 +511,8 @@ class TestGraphInputBuilding:
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
         assert inp["active_feature"] == "auth-flow"
+        # feedback-loop: the opaque batch id rides the SDD blackboard the same way.
+        assert inp["feedback_batch_id"] == "feedback-batch:deadbeef"
         assert inp["pipeline_phase"] == "implement"
         assert inp["vault_index"] == {"specs": ["auth.md"]}
         assert inp["validation_errors"] == ["missing tests"]
@@ -526,6 +529,7 @@ class TestGraphInputBuilding:
         inp = GraphLifecycleManager.build_graph_input(req, is_first_ingest=True)
 
         assert "active_feature" not in inp
+        assert "feedback_batch_id" not in inp
         assert "pipeline_phase" not in inp
         assert "vault_index" not in inp
         assert "validation_errors" not in inp

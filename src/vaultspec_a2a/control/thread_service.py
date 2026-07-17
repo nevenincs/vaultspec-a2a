@@ -431,6 +431,11 @@ async def create_and_dispatch_thread(
 
     # -- Build vault index -----------------------------------------------------
     feature_tag = req.metadata.feature_tag if req.metadata else None
+    # feedback-loop: the opaque batch id rides to the worker the same way as the
+    # active feature; empty metadata means a non-feedback run (None).
+    feedback_batch_id = (
+        (req.metadata.feedback_batch_id or None) if req.metadata else None
+    )
     vault_index = (
         build_initial_vault_index(req.workspace_root, req.metadata.feature_tag)
         if (req.metadata and req.metadata.feature_tag)
@@ -449,6 +454,7 @@ async def create_and_dispatch_thread(
         context_preamble=context_preamble,
         recursion_limit=recursion_limit,
         active_feature=feature_tag,
+        feedback_batch_id=feedback_batch_id,
         pipeline_phase=None,
         vault_index=vault_index,
         validation_errors=[],

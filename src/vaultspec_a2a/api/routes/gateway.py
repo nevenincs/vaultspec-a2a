@@ -135,6 +135,13 @@ async def run_start_endpoint(
     metadata = body.metadata
     if body.feature_tag and metadata is not None:
         metadata = metadata.model_copy(update={"feature_tag": body.feature_tag})
+    # Thread the opaque feedback-batch id onto the metadata the same way, so it
+    # reaches dispatch (and persists for restart). a2a never parses it - the
+    # worker retrieves the authoritative batch from the engine read route.
+    if body.feedback_batch_id and metadata is not None:
+        metadata = metadata.model_copy(
+            update={"feedback_batch_id": body.feedback_batch_id}
+        )
 
     try:
         ws_root, nickname, metadata_json = process_metadata(

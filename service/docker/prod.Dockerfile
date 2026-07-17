@@ -1,15 +1,21 @@
 # Production multi-stage build (ADR-019: service separation).
 # A2A is headless — there is no frontend to build (dashboard ADR D7).
-# Stage 1: Install root node_modules (ACP runtime deps — pure JS).
+# Stage 1: Install root node_modules (ACP runtime deps — glibc native binaries).
 # Stage 2a: Python base -- shared deps layer.
 # Stage 2b: Gateway (control surface).
 # Stage 2c: Worker (agent executor) with ACP Node.js runtime.
 
-# ── Stage 1: ACP runtime node deps (pure JS, portable) ──────────────────────
-FROM node:22-alpine AS node-deps
+# ── Stage 1: ACP runtime node deps (glibc, worker-libc-matched) ─────────────
+# MUST match the worker's libc: @agentclientprotocol/claude-agent-acp bundles
+# @anthropic-ai/claude-agent-sdk, whose 0.3.x line ships libc-SPECIFIC native
+# binaries as optionalDependencies (…-linux-x64 for glibc, …-linux-x64-musl for
+# musl). npm installs only the variant matching the build host's libc, so this
+# stage MUST be glibc (Debian) to produce a binary the glibc worker can load —
+# building on Alpine (musl) yields a musl binary that will not load in the
+# bookworm worker. node:22-slim is Debian/bookworm-based, matching the worker.
+FROM node:22-slim AS node-deps
 
 # Install root node_modules (contains @agentclientprotocol/claude-agent-acp).
-# node_modules are pure JavaScript — portable from Alpine to any OS.
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev
@@ -61,7 +67,10 @@ FROM python-base AS worker
 # PROV-O01: ACP runtime — Claude/Gemini providers spawn claude-agent-acp as a
 # Node.js subprocess.  The worker needs a glibc-compatible node binary.
 # node:22-slim is Debian/bookworm-based, compatible with python:3.13-slim-bookworm.
-# node_modules are pure JavaScript from the Alpine node-deps stage — portable.
+# node_modules carry the claude-agent-sdk glibc native binary, built in the
+# glibc node-deps stage above so it loads under this glibc node (the adapter
+# falls back to the vendored SDK when no system claude is present, so the native
+# binary IS on the Docker Claude path).
 COPY --from=node:22-slim /usr/local/bin/node /usr/local/bin/node
 COPY --from=node-deps /app/node_modules ./node_modules/
 # PROV-DOCKER-01: Gemini CLI is the official ACP entry point for Gemini. Install

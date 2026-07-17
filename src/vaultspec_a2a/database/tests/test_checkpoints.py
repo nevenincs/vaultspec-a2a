@@ -9,6 +9,7 @@ busy_timeout.
 from __future__ import annotations
 
 import pytest
+from langgraph.checkpoint.sqlite.aio import AsyncSqliteSaver
 
 from ...control.config import settings
 from ..checkpoints import open_checkpointer
@@ -39,16 +40,17 @@ async def test_sqlite_checkpointer_enables_wal_and_busy_timeout(tmp_path) -> Non
         checkpoint_database_url=f"sqlite+aiosqlite:///{db_file}",
     ):
         async with open_checkpointer() as checkpointer:
-            journal_mode = (
-                await (
-                    await checkpointer.conn.execute("PRAGMA journal_mode")
-                ).fetchone()
-            )[0]
-            busy_timeout = (
-                await (
-                    await checkpointer.conn.execute("PRAGMA busy_timeout")
-                ).fetchone()
-            )[0]
+            # Narrows the broad Checkpointer alias to the concrete saver AND asserts
+            # the sqlite branch actually yielded it, so .conn is well-typed and real.
+            assert isinstance(checkpointer, AsyncSqliteSaver)
+            journal_row = await (
+                await checkpointer.conn.execute("PRAGMA journal_mode")
+            ).fetchone()
+            busy_row = await (
+                await checkpointer.conn.execute("PRAGMA busy_timeout")
+            ).fetchone()
 
-    assert journal_mode == "wal"
-    assert busy_timeout == 5000
+    assert journal_row is not None
+    assert busy_row is not None
+    assert journal_row[0] == "wal"
+    assert busy_row[0] == 5000

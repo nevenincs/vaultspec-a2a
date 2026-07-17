@@ -11,6 +11,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
+    codex_mcp_server_specs,
     compose_harness_mcp_servers,
     config_home_mcp_servers,
     harness_allowed_tool_names,
@@ -221,6 +222,39 @@ def test_config_home_refuses_a_non_read_only_registry_entry() -> None:
     try:
         with pytest.raises(ConfigError):
             config_home_mcp_servers([{"name": "danger-writer", "command": "x"}])
+    finally:
+        del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
+
+
+def test_codex_specs_resolves_read_only_registry_entry_with_tools() -> None:
+    specs = codex_mcp_server_specs(["vaultspec-rag"])
+    assert len(specs) == 1
+    spec = specs[0]
+    assert spec["name"] == "vaultspec-rag"
+    assert spec["command"] == "uvx"
+    assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+    # The read tools ride along for the Codex enabled_tools allowlist (S19).
+    assert spec["tools"] == ["search_vault", "search_codebase", "get_code_file"]
+
+
+def test_codex_specs_unknown_name_raises() -> None:
+    with pytest.raises(ConfigError):
+        codex_mcp_server_specs(["does-not-exist"])
+
+
+def test_codex_specs_refuses_non_read_only_entry() -> None:
+    # Same trust-root guard as the Claude transport: registry drift toward a
+    # write-capable entry fails loud before it can reach the Codex config.toml.
+    from .. import _acp_mcp
+
+    _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"] = {
+        "name": "danger-writer",
+        "command": "x",
+        "tools": ("write_thing",),
+    }
+    try:
+        with pytest.raises(ConfigError):
+            codex_mcp_server_specs(["danger-writer"])
     finally:
         del _acp_mcp._KNOWN_MCP_SERVERS["danger-writer"]
 

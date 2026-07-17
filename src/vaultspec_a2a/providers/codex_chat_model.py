@@ -42,6 +42,8 @@ from pydantic import Field, PrivateAttr
 from ..control.config import settings
 from ..team.team_config import AgentConfig
 from ..workspace.environment import resolve_env_vars
+from ._acp_mcp import codex_mcp_server_specs
+from ._codex_config_home import build_codex_config_home, cleanup_codex_config_home
 from ._subprocess import kill_process_tree, spawn_acp_process
 
 logger = logging.getLogger(__name__)
@@ -235,6 +237,7 @@ class CodexChatModel(BaseChatModel):
     cwd: str | None = None
     workspace_root: str | None = None
     codex_home: str | None = None
+    harness_mcp_servers: list[str] = Field(default_factory=list)
     approval_policy: str = "never"
     sandbox: str = "read-only"
     timeout: float = 300.0
@@ -321,6 +324,18 @@ class CodexChatModel(BaseChatModel):
 
         cwd = str(Path(self.workspace_root or self.cwd or str(Path.cwd())))
         env = self._build_env()
+        # Per-run isolated CODEX_HOME: when harness servers are declared, emit a
+        # worker-owned config.toml carrying exactly those read-only servers and
+        # redirect CODEX_HOME to it, suppressing the operator's ambient
+        # [mcp_servers.*] config. Auth (auth.json) is copied from the base home.
+        # Cleaned up in the finally once the subprocess is reaped.
+        codex_config_home: Path | None = None
+        if self.harness_mcp_servers:
+            specs = codex_mcp_server_specs(self.harness_mcp_servers)
+            base = self.codex_home or settings.codex_home
+            base_home = Path(base) if base else Path.home() / ".codex"
+            codex_config_home = build_codex_config_home(specs, base_home)
+            env["CODEX_HOME"] = str(codex_config_home)
         metadata = {
             "provider": self.provider,
             "command_executable": self.command_executable,
@@ -381,6 +396,7 @@ class CodexChatModel(BaseChatModel):
                 yield chunk
         finally:
             await client.aclose()
+            cleanup_codex_config_home(codex_config_home)
 
     async def _consume_turn(
         self, client: _CodexAppServerClient, thread_id: str

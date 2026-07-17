@@ -49,7 +49,7 @@ declared via `--mcp-config-file <path>` (JSON, standard `mcpServers` root;
 stdio `command`+`args` or HTTP `url`+`headers`) at process launch — the same
 config-file family as our per-run Codex `CODEX_HOME` `config.toml`
 generation. Windows is supported via PowerShell but requires Git for Windows
-(bundled Git Bash is the CLI's shell; `KIMI_SHELL_PATH` overrides) — git
+(bundled Git Bash is the CLI's shell; `KIMI_SHELL_PATH` (corrected to `KIMI_CLI_GIT_BASH_PATH`, see `kimi-provider-adr` correction) overrides) — git
 2.54.0 already present. Auth as DOCUMENTED is interactive-only: `/login`
 (Kimi Code OAuth or Moonshot platform API key) persisted to
 `~/.kimi/config.toml`; no `MOONSHOT_API_KEY`-style env auth documented — the
@@ -156,7 +156,7 @@ ACP handshake) resolved four of the five unknowns:
   `session/new`, not `initialize`, so the handshake is drivable keyless.
 - CLI surface: subcommands login/logout/term/acp/info/export/mcp/plugin/vis/
   web; `kimi acp` takes global flags only. Git Bash auto-found;
-  `KIMI_SHELL_PATH` honored. Install footprint: uv tool venv +
+  `KIMI_SHELL_PATH` (corrected to `KIMI_CLI_GIT_BASH_PATH`, see `kimi-provider-adr` correction) honored. Install footprint: uv tool venv +
   `~/.local/bin/kimi`.
 
 ### Remaining open unknown

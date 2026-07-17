@@ -30,6 +30,7 @@ related:
   - '[[2026-07-17-tool-cores-P05-S22]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-audit]]'
+  - '[[2026-07-17-tool-cores-dedup-audit]]'
   - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
 ---
@@ -46,7 +47,8 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 
 ### audit
 
-- `2026-07-17-tool-cores-audit` - `tool-cores` audit: `P05.S23 vault dedup sweep — decision-vs-decision, decision-vs-code, and cross-plan reconciliation`
+- `2026-07-17-tool-cores-audit` - `tool-cores` audit: `S24 holistic safety and intent gate`
+- `2026-07-17-tool-cores-dedup-audit` - `tool-cores` audit: `P05.S23 vault dedup sweep — decision-vs-decision, decision-vs-code, and cross-plan reconciliation`
 
 ### exec
 

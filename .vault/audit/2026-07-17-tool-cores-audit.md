@@ -5,126 +5,101 @@ tags:
 date: '2026-07-17'
 modified: '2026-07-17'
 related:
-  - '[[2026-07-17-tool-cores-adr]]'
-  - '[[2026-07-17-tool-cores-research]]'
-  - '[[2026-07-17-tool-cores-plan]]'
-  - '[[2026-07-15-agent-harness-provisioning-adr]]'
-  - '[[2026-07-15-graph-agent-framework-harness-plan]]'
-  - '[[2026-07-14-a2a-edge-conformance-adr]]'
+  - "[[2026-07-17-tool-cores-adr]]"
+  - "[[2026-07-17-tool-cores-plan]]"
+  - "[[2026-07-17-tool-cores-dedup-audit]]"
 ---
-# `tool-cores` audit: `P05.S23 vault dedup sweep — decision-vs-decision, decision-vs-code, and cross-plan reconciliation`
+
+# `tool-cores` audit: `S24 holistic safety and intent gate`
 
 ## Scope
 
-Semantic sweep of the vault for duplicate or overlapping `tool-cores` records, run per
-the reconciliation playbook (Ground -> Reconcile -> Act -> Verify), covering: (1)
-decision-vs-decision clusters on the MCP-surfacing / grounding-delivery topic across
-`tool-cores`, `agent-harness-provisioning`, `graph-agent-framework-harness`, and
-`a2a-edge-conformance`; (2) decision-vs-code for the `tool-cores-adr`'s three delivery
-legs (floor, Claude/Z.ai semantic tier, Codex semantic tier); (3) document-boundary
-conformance between the `tool-cores` research and ADR; (4) the three known intentional
-overlap points named in the assignment: the S20 surfacing finding, `graph-agent-framework-harness-plan`
-row `P03.S05` claimed by `tool-cores` step `P01.S02`, and the `agent-harness-provisioning-adr`
-amendment. Method: `vaultspec-rag search --type vault --doc-type adr,research`,
-`vault graph --feature tool-cores`, `vault list adr --json`, whole-file reads of the
-`tool-cores` ADR/research/plan, the `agent-harness-provisioning-adr`, the
-`graph-agent-framework-harness-plan`, the `vaultspec-researcher.toml` persona, and the
-`a2a-edge-conformance-adr`'s S20-adjacent passage.
+The mandatory P05.S24 review gate over ALL landed tool-cores changes on main
+(commit range `e50b88e..8b83f77`, tool-cores commits): P01-P05 implementation,
+the P04 credential-cleanup fix, the codexwire harness-wiring defect fix, both
+provider config-home modules, the registry/compose seam, the worker composition
+site, presets and personas, and the exec/audit records — verified against
+current file state on main, not only the per-branch diffs previously PASSed.
+Reviewed by the team's dedicated code-review persona; verdict returned
+2026-07-17 and persisted here verbatim in substance.
 
 ## Findings
 
-### feature-index-drift | low | `tool-cores` feature index was stale (14 links vs 21 documents)
+**STATUS: PASS** — with the usage-gated live re-arms (`P01.S05`/`P03.S16`
+Claude ~2026-07-20, `P04.S20`/`P04.S21` Codex ~2026-07-23) as honestly
+recorded opens, and `P05.S25` reconciliation owed after this gate. No CRITICAL
+or HIGH findings.
 
-`vaultspec-core vault check all --fix` reported the `tool-cores` feature index
-`related:` list carried 14 wiki-links against 21 tagged documents — the eight later
-exec records (`P03-S11`, `P03-S12`, `P03-S14`, `P04-S18`, `P04-S19`, `P05-S22`, plus
-the audit scaffold itself) were missing. Mechanical, status-drift class per the
-taxonomy. Actioned directly (see Recommendations/Actions below).
+### Safety — read-only boundary, credential hygiene, isolation (clean)
 
-### researcher-persona-conforms | none | decision-vs-code confirmed clean for the researcher persona re-expression
+- No write verb is composable on either lane: the registry holds exactly one
+  entry (`vaultspec-rag`, `read_only: True`, three read tools); the
+  write-capable vaultspec-core MCP and the rag `reindex_*` verbs are omitted
+  by construction. The `_require_read_only` trust-root guard fires on BOTH
+  transports (`src/vaultspec_a2a/providers/_acp_mcp.py:137` Claude home,
+  `:179` Codex specs) so registry drift fails loud. Codex `enabled_tools` is
+  an exact read-tool allowlist.
+- The `.vault` write-deny is untouched; every live proof asserts zero
+  agent-origin document-dir writes.
+- Credential hygiene: the Claude isolated home is ZERO-credential (only
+  `.claude.json`; auth rides env); the Codex home copies file-based
+  `auth.json` owner-only (0o700 dir, 0o600 file) with single-turn lifetime,
+  and the HIGH-1 fix places the home build INSIDE the streaming try
+  (`src/vaultspec_a2a/providers/codex_chat_model.py:366`) with cleanup in the
+  finally (`:429`) plus builder self-clean — every catchable failure reclaims
+  the credential copy; only bounded, owner-only, prefix-tagged SIGKILL residue
+  remains, honestly recorded.
+- Isolation: both lanes redirect to a worker-owned config dir
+  (`CLAUDE_CONFIG_DIR` / `CODEX_HOME`) carrying exactly the declared read-only
+  servers; ambient operator MCP suppressed; no leak-back; cleanup on both
+  paths.
 
-The `tool-cores-adr`'s "Shared leg" prose states the researcher persona is re-expressed
-to name only `mcp__vaultspec-rag__*` tools and native Read/Grep/Glob, dropping
-`terminal=false`-unexecutable CLI invocations. Read `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`
-whole: the persona names exactly `mcp__vaultspec-rag__search_vault`,
-`mcp__vaultspec-rag__search_codebase`, `mcp__vaultspec-rag__get_code_file`, and
-Read/Grep/Glob, with `terminal = false` and no `vaultspec-core`/`vaultspec-rag` shell
-invocation anywhere in the prompt. Decision and code agree; no drift.
+### Intent — ADR decisions to landed code (no drift)
 
-### adr-cross-links-conform | none | `tool-cores-adr` <-> `agent-harness-provisioning-adr` amendment is correctly bidirectional and non-duplicative
+Every ADR decision has landed code or an honest open: the native read floor;
+the mandatory adapter migration (deprecated pin retired) with regression
+verification and the S20 re-probe; the ambient-suppression home built
+regardless of the re-probe; the allowlist union closing the attach-combined
+gap; preset opt-in and persona truth; the surfacing contingency correctly
+triggered on the NOT-SURFACED verdict and live-verified SURFACES; the Codex
+leg over the same registry; the vaultspec-core MCP correctly omitted. The
+three unplanned commits each trace to an ADR-sanctioned path: the Docker
+cross-libc fix serves the mandated migration, the harness-provisioning ADR
+amendment is the ADR's own conditional clause firing, and the codexwire fix
+completes the Codex leg after `P04.S21` discovered the production threading
+was structurally dead (the direct-field tests had masked it — the masking
+lesson is recorded in the `P04.S18` exec record).
 
-The `agent-harness-provisioning-adr`'s "Amendment (2026-07-17, tool-cores-adr)" section
-cites the tool-cores decision gate outcome (NOT SURFACED), the exact exec-record
-evidence (`P02.S09` commit `d977c28`, `P03.S14` commit `8e15441`), and refines the
-harness's ambient-MCP-suppression invariant text without restating the `tool-cores-adr`'s
-own Rationale or Considered-options content — it cites, it does not duplicate. The
-`tool-cores-adr` `related:` frontmatter lists `agent-harness-provisioning-adr` and vice
-versa; the edge is intact both directions. No sibling `accepted` ADR was found deciding
-the same MCP-delivery-mechanism scope: rag searches for "MCP server surfacing
-registration scope gate", "isolated CLI config home ambient MCP suppression allowlist",
-and "Codex per-run CODEX_HOME config.toml MCP server read-only" against
-`--type vault --doc-type adr,research` all resolved to this single amendment passage as
-top hit, with no competing `accepted` record. No duplication or contradiction.
+### Completeness — opens are honest
 
-### boundary-conforms | none | `tool-cores-research` correctly grounds only; no displaced decision found
+Nineteen implementation and hygiene steps closed on reviewer-PASSed landed
+evidence. The six opens at gate time were all honestly gated, none reported
+as passing: `P01.S05` + `P03.S16` armed as parameter swaps of the green Z.ai
+harness, blocked on the Claude weekly usage window; `P04.S20` + `P04.S21`
+blocked on the Codex usage window (the wiring fix that must precede `S21` is
+landed), each with a one-command re-arm; `S24` is this gate; `S25` follows.
 
-Read `2026-07-17-tool-cores-research.md` whole against the lifecycle boundary. Every
-finding is phrased as evidence ("the differentiator... is grounded to a live failure
-and its provisioned counterfactual", "Evidence: `...S20.md:31`...") and the document's
-own framing states its purpose is "so the tool-cores ADR can decide the delivery
-mechanism" — no "we will" / settled-option language appears. The ADR's Implementation
-and Rationale sections cite the research's findings (surfacing gate, existing
-composition seam, allowlist gap, per-provider matrix) rather than re-deriving them from
-scratch, and do not contradict the research's evidence. Restated-grounding and
-displaced-decision classes: both clean.
+### Evidence chain (spot-checked)
 
-### cross-plan-row-stale | medium | `graph-agent-framework-harness-plan` row `P03.S05` is unchecked and textually stale against a completed claim
+`P02.S09` NOT SURFACED is dispositive with a positive control; `P03.S14`
+SURFACES is corroborated by the live `P03.S17` green (run `pw7-1784282060`)
+whose server-side rag-daemon `POST /search` access-log evidence (400 then 200,
+`service.search event=completed`, in-window) cannot be fabricated by native
+tools; zero document writes across proofs.
 
-`tool-cores` plan step `P01.S02` (checked `[x]`, complete) explicitly claims ownership
-of `P03.S05` of `2026-07-15-graph-agent-framework-harness-plan`: "Re-express the
-researcher persona to name the native Read, Grep, and Glob grounding tools and remove
-the terminal-false-unexecutable vaultspec-core and rag CLI invocations, claiming
-`P03.S05`... with the rag MCP tool names added later once surfacing is confirmed." The
-persona file confirms this work is done (see `researcher-persona-conforms` above), and
-`tool-cores` step `P03.S15` (also checked) confirms the "added later once surfacing is
-confirmed" follow-on landed too. However, `graph-agent-framework-harness-plan` row
-`P03.S05` itself (line 39 of that plan) remains unchecked (`- [ ]`) and its row text
-still reads "BLOCKED solely on the upstream Claude CLI surfacing gate... once the S15
-composition wiring lands" — describing the pre-tool-cores blocked state, not the
-completed outcome. This is a legitimate completed cross-plan claim whose owning plan
-document was never updated to reflect completion: not a duplicate decision and not
-mine to hand-edit (the row belongs to the `graph-agent-framework-harness-plan`'s
-owning executor per the assignment's cross-plan-row constraint). Reported to
-team-lead; not actioned here.
+### Residual unknown (correctly open)
 
-### edge-conformance-note-outdated | low | `a2a-edge-conformance-adr`'s S20 forward note is now stale but not contradicted
-
-`2026-07-14-a2a-edge-conformance-adr.md:210-213` narrows the S20 MCP-bridge surfacing
-proof from "program-blocking gate" to an "upstream watch item (re-run the matrix probe
-on CLI/adapter releases; close S20 when surfacing lands)". `tool-cores` has since
-re-run that exact matrix (`P02.S09`, still NOT SURFACED for session-injection) and
-closed the surfacing gap via the isolated-config-home fallback (`P03.S14`, SURFACES,
-commit `8e15441`). The edge-conformance note is not contradicted — its own "re-run the
-matrix... close S20 when surfacing lands" framing is honored by what actually
-happened — but it has not been updated to record that the watch item resolved. This is
-a cross-feature advisory (decision-vs-code drift adjacent, on a document outside
-`tool-cores`); reported to team-lead as belonging to the `a2a-edge-conformance` plan's
-S18/S20/S31 row owner, not actioned here.
+Whether Codex ADMITS an MCP call at runtime under `approval_policy: "never"` +
+`sandbox: "read-only"` + per-tool `approval_mode: "auto"` (the undocumented
+axis composition) is held open under `P04.S21`, not asserted.
 
 ## Recommendations
 
-- **Actioned directly (mechanical, no approval needed):** regenerated the `tool-cores`
-  feature index via `vaultspec-core vault feature index -f tool-cores`, bringing its
-  `related:` list to all 21 tagged documents.
-- **Recommend to the `graph-agent-framework-harness-plan` owner:** check row `P03.S05`
-  and rewrite its text to record the actual outcome (re-expressed via `tool-cores`
-  `P01.S02`/`P03.S15`, evidenced by the current `vaultspec-researcher.toml`), rather
-  than leaving it describing the pre-migration blocked state. Cross-plan row; not
-  edited here per the assignment's ownership boundary.
-- **Recommend to the `a2a-edge-conformance` plan owner (S18/S20/S31 rows):** annotate
-  the ADR's S20 watch-item note, or the corresponding plan row, with the closure
-  evidence now on record in `tool-cores` (`P02.S09` re-probe, `P03.S14` isolated-home
-  surfacing). No decision content changes — this is a status-closure annotation, not an
-  architectural change, so it does not itself require a follow-on ADR.
-- No contradiction, duplication, or fragmented decision was found across the
-  `tool-cores` cluster; no follow-on ADR is recommended.
+Proceed to `P05.S25` reconciliation; execute the four usage-gated proofs when
+the provider windows reset (Claude ~2026-07-20 08:00, Codex ~2026-07-23
+06:15) using the one-command re-arms in their exec records; keep
+`P01.S05`/`P03.S16`/`P04.S20`/`P04.S21` open until their green runs exist.
+Carry forward the corroboration posture for semantic proofs (daemon-log
+evidence recorded in exec records, disclosed as a non-test surface) and the
+masking-gap lesson (never prove wiring by constructing states production
+cannot reach).

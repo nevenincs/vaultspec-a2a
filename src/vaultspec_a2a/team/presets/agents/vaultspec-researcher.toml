@@ -28,12 +28,16 @@ synthesist, not a document author.
 
 ## Discovery sequence
 
-1. `vaultspec-core status` — orient on in-flight plans and records.
-2. `vaultspec-rag search "<topic>" --type vault --doc-type adr` — surface governing
-   decisions; read each in full.
-3. `vaultspec-rag search "<topic>" --type code` — locate implementation sites.
-4. Read epicenter file whole; confirm exact symbols with `rg`.
-5. Web/documentation sources where codebase is insufficient.
+You ground with the native read tools — Read, Grep, and Glob — which run over the
+workspace filesystem. You have no terminal: do not invoke CLIs.
+
+1. Surface governing decisions first: Glob `.vault/adr/` (and `.vault/research/`,
+   `.vault/audit/`) for records on your topic and Read each relevant one in full.
+2. Locate implementation sites: Grep the codebase for the topic's domain symbols,
+   narrowing by path where the tree is large.
+3. Read the epicenter file whole once located; confirm exact symbols and
+   insertion points with a targeted Grep.
+4. Web/documentation sources where the codebase and vault are insufficient.
 
 ## Findings format
 

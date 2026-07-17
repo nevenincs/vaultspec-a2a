@@ -96,8 +96,18 @@ async def _discovery_heartbeat(
     """
     while True:
         try:
-            write_service_json(path, port=port, pid=pid, service_token=service_token)
-            refresh_registration(serve_record)
+            # Both writes are synchronous filesystem I/O (write_text + os.replace,
+            # plus registry read/write); on a contended disk a single one can stall
+            # the event loop long enough to drop an in-flight HTTP response. Offload
+            # them so the heartbeat never blocks the gateway's request handling.
+            await asyncio.to_thread(
+                write_service_json,
+                path,
+                port=port,
+                pid=pid,
+                service_token=service_token,
+            )
+            await asyncio.to_thread(refresh_registration, serve_record)
         except OSError:
             logger.warning(
                 "Failed to refresh service discovery heartbeat at %s",

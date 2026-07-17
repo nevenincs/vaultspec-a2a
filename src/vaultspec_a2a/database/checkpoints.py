@@ -239,6 +239,12 @@ async def open_checkpointer() -> AsyncIterator[Checkpointer]:
             settings.checkpoint_connection_string
         ) as checkpointer:
             await checkpointer.setup()
+            # WAL lets the gateway's status reads run concurrently with the worker's
+            # checkpoint writes on the shared file, instead of blocking on a writer's
+            # lock (the recurring checkpoint_unavailable/missing degradations);
+            # busy_timeout bounds any residual lock wait rather than failing fast.
+            await checkpointer.conn.execute("PRAGMA journal_mode=WAL")
+            await checkpointer.conn.execute("PRAGMA busy_timeout=5000")
             yield checkpointer
         return
 

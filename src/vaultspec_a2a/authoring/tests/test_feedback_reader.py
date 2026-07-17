@@ -1,9 +1,11 @@
 """Unit tests for the feedback-batch grounding renderer.
 
 No mocks: ``render_feedback_batch`` is a pure transform from a served engine
-batch snapshot to the grounding text a worker mounts. Live retrieval behaviour
-(the ``FeedbackContextReader`` HTTP path) is covered by the live integration
-tests against a running engine.
+batch RECORD to the grounding text a worker mounts. The engine read route serves
+the record nested under ``data.batch`` (the canonical receipt-vs-record split);
+the renderer targets exactly that shape. Live retrieval behaviour (the
+``FeedbackContextReader`` HTTP path) is covered by the live integration tests
+against a running engine.
 """
 
 from __future__ import annotations
@@ -19,47 +21,64 @@ def _item(comment_id: str, body: str, heading_path: list[str]) -> dict:
     }
 
 
+def _read(batch: dict) -> dict:
+    """Wrap a batch record in the served read envelope shape (``data.batch``)."""
+    return {"batch": batch}
+
+
 class TestRenderFeedbackBatch:
     def test_renders_items_with_heading_anchor_and_body(self) -> None:
-        data = {
-            "batch_id": "feedback-batch:abc",
-            "items": [
-                _item("c1", "tighten the scope", ["Overview"]),
-                _item("c2", "add a fallback", ["Design", "Risks"]),
-            ],
-        }
+        data = _read(
+            {
+                "feedback_batch_id": "feedback-batch:abc",
+                "items": [
+                    _item("c1", "tighten the scope", ["Overview"]),
+                    _item("c2", "add a fallback", ["Design", "Risks"]),
+                ],
+            }
+        )
         rendered = render_feedback_batch(data)
         assert rendered == (
             "- Overview: tighten the scope\n- Design > Risks: add a fallback"
         )
 
     def test_prepends_the_whole_batch_instruction_when_present(self) -> None:
-        data = {
-            "instruction": "Address every comment before resubmitting.",
-            "items": [_item("c1", "clarify", ["Intro"])],
-        }
+        data = _read(
+            {
+                "instruction": "Address every comment before resubmitting.",
+                "items": [_item("c1", "clarify", ["Intro"])],
+            }
+        )
         rendered = render_feedback_batch(data)
         assert rendered == (
             "Address every comment before resubmitting.\n- Intro: clarify"
         )
 
     def test_renders_a_bare_body_when_no_heading_path(self) -> None:
-        data = {"items": [{"comment_id": "c1", "body": "general note", "anchor": {}}]}
+        data = _read(
+            {"items": [{"comment_id": "c1", "body": "general note", "anchor": {}}]}
+        )
         assert render_feedback_batch(data) == "- general note"
 
     def test_skips_items_without_a_usable_body(self) -> None:
-        data = {
-            "items": [
-                _item("c1", "   ", ["Intro"]),
-                {"comment_id": "c2", "anchor": {"heading_path": ["X"]}},
-                _item("c3", "real note", ["Scope"]),
-            ],
-        }
+        data = _read(
+            {
+                "items": [
+                    _item("c1", "   ", ["Intro"]),
+                    {"comment_id": "c2", "anchor": {"heading_path": ["X"]}},
+                    _item("c3", "real note", ["Scope"]),
+                ],
+            }
+        )
         assert render_feedback_batch(data) == "- Scope: real note"
 
-    def test_returns_none_for_an_empty_or_malformed_batch(self) -> None:
-        assert render_feedback_batch({"items": []}) is None
-        assert render_feedback_batch({"items": [{"comment_id": "c1"}]}) is None
+    def test_returns_none_for_an_empty_malformed_or_flat_payload(self) -> None:
+        # Canonical shape only: the batch record lives under "batch". An empty
+        # batch, a flat payload (no "batch" nesting), or a non-dict yields None.
+        assert render_feedback_batch(_read({"items": []})) is None
+        assert render_feedback_batch(_read({"items": [{"comment_id": "c1"}]})) is None
         assert render_feedback_batch({}) is None
+        # A flat (un-nested) payload is NOT the served shape - no grounding.
+        assert render_feedback_batch({"items": [_item("c1", "x", ["H"])]}) is None
         assert render_feedback_batch(None) is None
         assert render_feedback_batch("not-a-dict") is None

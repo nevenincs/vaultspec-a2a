@@ -319,6 +319,23 @@ def procs_reap() -> None:
     "resume/rerun so an engine reseat cannot strand the worker.",
 )
 @click.option(
+    "--internal-token-file",
+    "internal_token_file",
+    default="",
+    help="Path to a file holding the internal-IPC token. Recorded per process (the "
+    "PATH, never the token) and read at boot to inject VAULTSPEC_INTERNAL_TOKEN, so "
+    "a procs-managed gateway-dev and worker-dev share one token. Boot fails loudly "
+    "if the file is missing or empty.",
+)
+@click.option(
+    "--gateway-url",
+    "gateway_url",
+    default="",
+    help="Paired gateway base URL (VAULTSPEC_GATEWAY_URL) a worker heartbeats to. "
+    "Recorded per process so the worker targets the dev gateway rather than "
+    "auto-deriving the owner's resident gateway.",
+)
+@click.option(
     "--log", "log_path", default=None, help="Append process output to this file."
 )
 def procs_up(
@@ -328,6 +345,8 @@ def procs_up(
     repo: str,
     build_repo: str,
     engine_service_json: str,
+    internal_token_file: str,
+    gateway_url: str,
     log_path: str | None,
 ) -> None:
     """Allocate a band port, boot the role's serve command, and register it.
@@ -339,6 +358,8 @@ def procs_up(
     record so rebuild/rerun run cargo where the workspace actually lives.
     ``--engine-service-json`` pins a worker's engine discovery file into the
     record so resume/rerun reproduce it rather than leaning on shell state.
+    ``--internal-token-file`` and ``--gateway-url`` pin the worker<->gateway
+    pairing (shared IPC token and target gateway) into the record so both agree.
     """
     from ..lifecycle.manager import endpoint_for, serve_up
 
@@ -350,6 +371,8 @@ def procs_up(
             repo=repo,
             build_repo=build_repo,
             engine_service_json=engine_service_json,
+            internal_token_file=internal_token_file,
+            gateway_url=gateway_url,
             log_path=log_path,
         )
     except Exception as exc:

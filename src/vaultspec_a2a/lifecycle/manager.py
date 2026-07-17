@@ -26,6 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
+from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -423,6 +424,28 @@ def reap(
     return reaped
 
 
+def _read_internal_token(token_file: str, *, label: str) -> str:
+    """Read the internal-IPC token from *token_file*, failing loudly on a bad file.
+
+    The record carries only the PATH (never the secret), so the token is read at
+    boot. A role that declares a token file but whose file is missing, unreadable,
+    or empty is refused with :class:`LifecycleError` rather than silently booting
+    with no token - a silent empty-token fallback would reintroduce the invisible
+    gateway/worker mismatch this pairing exists to close.
+    """
+    from pathlib import Path as _Path
+
+    try:
+        token = _Path(token_file).read_text(encoding="utf-8").strip()
+    except OSError as exc:
+        raise LifecycleError(
+            f"{label}: internal token file {token_file!r} is unreadable: {exc}"
+        ) from exc
+    if not token:
+        raise LifecycleError(f"{label}: internal token file {token_file!r} is empty")
+    return token
+
+
 def _serve_env(
     role_cfg: RoleConfig,
     *,
@@ -431,6 +454,8 @@ def _serve_env(
     name: str,
     owner: str,
     engine_service_json: str = "",
+    internal_token_file: str = "",
+    gateway_url: str = "",
 ) -> dict[str, str]:
     """The env overlay for a boot: the role's rendered port/config vars plus identity.
 
@@ -442,14 +467,22 @@ def _serve_env(
     A recorded *engine_service_json* is injected under
     :data:`_ENGINE_SERVICE_JSON_ENV` so the worker's engine discovery no longer
     depends on the booting shell having exported it - the reseat-strands-worker gap.
-    An empty value injects nothing (discovery then falls back to its default
-    candidate), matching the prior behaviour for records that predate this field.
+    *internal_token_file* (a PATH, read here) is injected as the internal-IPC token
+    and *gateway_url* as the paired gateway URL, so a procs-managed gateway-dev and
+    worker-dev agree on both instead of leaning on shell state. Empty values inject
+    nothing, matching the prior behaviour for records that predate these fields.
     """
     env = render_env(role_cfg.env, port=port, workspace=workspace)
     env[NAME_ENV] = name
     env[_OWNER_ENV] = owner
     if engine_service_json:
         env[_ENGINE_SERVICE_JSON_ENV] = engine_service_json
+    if internal_token_file:
+        env[INTERNAL_TOKEN_ENV] = _read_internal_token(
+            internal_token_file, label=f"{role_cfg.name}-{name}"
+        )
+    if gateway_url:
+        env[GATEWAY_URL_ENV] = gateway_url
     return env
 
 
@@ -461,6 +494,8 @@ def serve_up(
     repo: str = "",
     build_repo: str = "",
     engine_service_json: str = "",
+    internal_token_file: str = "",
+    gateway_url: str = "",
     owner: str | None = None,
     log_path: str | None = None,
     ready_timeout: float = 20.0,
@@ -509,6 +544,8 @@ def serve_up(
                 name=name,
                 owner=owner_label,
                 engine_service_json=engine_service_json,
+                internal_token_file=internal_token_file,
+                gateway_url=gateway_url,
             )
             process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
             if _await_listener(reservation.port, process, timeout=ready_timeout):
@@ -528,6 +565,8 @@ def serve_up(
                     log_path=log_path,
                     owner=owner_label,
                     engine_service_json=engine_service_json,
+                    internal_token_file=internal_token_file,
+                    gateway_url=gateway_url,
                 )
                 commit_reservation(reservation, record, home=home)
                 held.remove(reservation)
@@ -630,6 +669,8 @@ def _start_from_record(
         name=record.name,
         owner=record.owner or default_owner(),
         engine_service_json=record.engine_service_json,
+        internal_token_file=record.internal_token_file,
+        gateway_url=record.gateway_url,
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)

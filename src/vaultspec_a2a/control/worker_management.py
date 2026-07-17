@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 from ..utils import kill_pid_tree_async
-from .config import settings
+from .config import INTERNAL_TOKEN_ENV, settings
 
 __all__ = [
     "LazyWorkerSpawner",
@@ -189,7 +189,7 @@ async def _spawn_worker(
     spawn_env["VAULTSPEC_WORKER_PORT"] = str(settings.worker_port)
     spawn_env["VAULTSPEC_WORKER_HOST"] = settings.worker_host
     if settings.internal_token is not None:
-        spawn_env["VAULTSPEC_INTERNAL_TOKEN"] = settings.internal_token
+        spawn_env[INTERNAL_TOKEN_ENV] = settings.internal_token
 
     stderr_log_path = _worker_stderr_log_path(worker_port)
     stderr_log_path.parent.mkdir(parents=True, exist_ok=True)

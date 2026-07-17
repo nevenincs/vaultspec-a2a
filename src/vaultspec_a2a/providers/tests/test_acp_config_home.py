@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import json
 
+from ...authoring import AgentTool, CatalogSnapshot
+from .._acp_authoring import (
+    AuthoringToolBinding,
+    build_authoring_stdio_mcp_servers,
+    config_home_authoring_entry,
+)
 from .._acp_config_home import (
     cleanup_isolated_config_home,
     create_isolated_config_home,
     should_isolate_config_home,
 )
+from .._acp_mcp import config_home_mcp_servers
 
 _CLAUDE_NODE_CMD = [
     "node",
@@ -82,6 +89,66 @@ def test_created_home_surfaces_given_servers() -> None:
         assert cfg["mcpServers"] == servers
         # Security contract holds even when populated: no credential file, and
         # the home is EXACTLY the config file.
+        assert not (home / ".credentials.json").exists()
+        assert {p.name for p in home.iterdir()} == {".claude.json"}
+    finally:
+        cleanup_isolated_config_home(home)
+
+
+def _stdio_bridge_specs(*, bearer: str, actor: str) -> list[dict]:
+    """Real authoring stdio bridge specs via the production builder seam."""
+    binding = AuthoringToolBinding(
+        snapshot=CatalogSnapshot(
+            schema_version="authoring.semantic_tools.v1",
+            tools=(
+                AgentTool(
+                    name="read_context",
+                    description="read",
+                    input_schema={"type": "object"},
+                    risk_tier="read_only",
+                    permission_requirement="auto_permitted",
+                    idempotency_required=False,
+                    commands=("read_context",),
+                ),
+            ),
+        ),
+        engine_base_url="http://127.0.0.1:8767",
+        run_id="run-zero-secret",
+        bearer_token=bearer,
+        actor_token=actor,
+    )
+    return build_authoring_stdio_mcp_servers(binding)
+
+
+def test_authoring_bridge_home_is_placeholder_only_no_secret_on_disk() -> None:
+    """The composed home surfaces the bridge with ${VAR} placeholders, no tokens.
+
+    Mirrors the exact composition ``AcpChatModel`` performs at the spawn seam:
+    ``config_home_mcp_servers`` unioned with ``config_home_authoring_entry``,
+    written by ``create_isolated_config_home``. Asserts the zero-secret-on-disk
+    contract: the placeholder literals are present, the real bearer/actor values
+    are absent, and the home is EXACTLY ``.claude.json``.
+    """
+    bearer = "TOTALLY-SECRET-BEARER"
+    actor = "TOTALLY-SECRET-ACTOR"
+    specs = _stdio_bridge_specs(bearer=bearer, actor=actor)
+
+    surfacing = config_home_mcp_servers(specs)
+    bridge_entry, bridge_env = config_home_authoring_entry(specs)
+    surfacing.update(bridge_entry)
+
+    home = create_isolated_config_home(surfacing)
+    try:
+        text = (home / ".claude.json").read_text(encoding="utf-8")
+        # Placeholders present on disk.
+        assert "${VAULTSPEC_AUTHORING_BEARER}" in text
+        assert "${VAULTSPEC_AUTHORING_ACTOR_TOKEN}" in text
+        # Real token values NEVER on disk - they ride the spawn env only.
+        assert bearer not in text
+        assert actor not in text
+        assert bridge_env["VAULTSPEC_AUTHORING_BEARER"] == bearer
+        assert bridge_env["VAULTSPEC_AUTHORING_ACTOR_TOKEN"] == actor
+        # Home is exactly the config file: no credential/ambient leak.
         assert not (home / ".credentials.json").exists()
         assert {p.name for p in home.iterdir()} == {".claude.json"}
     finally:

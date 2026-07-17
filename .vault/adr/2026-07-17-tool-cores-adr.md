@@ -232,3 +232,28 @@ engine catalog tools both fail the deny-at-the-surface rule or the engine-owners
   consumption (S15).
 - Opens: a read-only vaultspec-core MCP for structured vault queries, gated on an upstream read-only
   launch mode; true per-role harness composition when a real need arises.
+
+## Amendment - authoring-bridge admission channel (2026-07-17, a2a-edge-conformance W03.P07.S18)
+
+The isolated config home gains a SECOND, explicitly separate admission channel: the per-run
+authoring bridge (`2026-07-14-a2a-edge-conformance-adr`, R4). This does not weaken the
+registry trust root - `_KNOWN_MCP_SERVERS` and `_require_read_only` are unchanged and never
+see the bridge - and it does not reopen the write leak: the bridge's safety case is its
+construction-time invariants (`_acp_authoring.py` - loopback-only engine edge, no
+filesystem-write tool names, engine-side `human_approval_required` gating on every mutation),
+audited independently of the registry's read-only flag. Admission is guarded by shape: only
+the spec named `vaultspec-authoring` whose args are exactly `["-m", <AUTHORING_STDIO_MODULE>]`
+is admitted (`config_home_authoring_entry`), so nothing can ride the channel that was not
+built by `build_authoring_stdio_mcp_servers` from a validated `AuthoringToolBinding`.
+
+Token hygiene (R7) is preserved via the CLI's user-scope env-variable expansion, verified in
+the installed pinned binary (SDK 0.3.207 `claude.exe`: user-scope mcpServers parse with
+`expandVars: true`; stdio `env` values expand `${VAR}` from the CLI process environment; stdio
+children inherit only the MCP-SDK whitelist plus declared env, so inheritance alone cannot
+deliver tokens). The home's `.claude.json` therefore carries ONLY `${VAULTSPEC_AUTHORING_*}`
+placeholder strings; the real bearer/actor values ride the CLI spawn environment in memory,
+hoisted by the same function that writes the placeholders, and the zero-secret-on-disk
+contract is asserted by test. This amendment rescopes the surfacing invariant from "the home
+surfaces exactly the declared read-only harness set" to "the home surfaces exactly the
+declared read-only harness set PLUS at most the run's own authoring bridge, admitted through
+its guarded channel"; the session-injected copy remains the upstream re-arm channel (P05.S22).

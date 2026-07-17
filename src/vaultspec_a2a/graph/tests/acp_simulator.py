@@ -7,7 +7,34 @@ subprocess to verify the full protocol lifecycle without hitting a live LLM.
 
 import argparse
 import json
+import os
 import sys
+
+
+def _record_config_home(path: str) -> None:
+    """Dump the spawned subprocess's isolated CLI home and authoring env.
+
+    Written for the S18 real-seam composition test: the subprocess reads its OWN
+    ``CLAUDE_CONFIG_DIR`` (what ``AcpChatModel`` actually wrote to disk) and its
+    OWN environment (what the model hoisted into the spawn env), so a test can
+    assert the placeholders live on disk while the real tokens live only in the
+    process environment.
+    """
+    home = os.environ.get("CLAUDE_CONFIG_DIR")
+    payload: dict[str, object] = {
+        "config_home": home,
+        "claude_json": None,
+        "authoring_env": {
+            k: v for k, v in os.environ.items() if k.startswith("VAULTSPEC_AUTHORING_")
+        },
+    }
+    if home:
+        cfg = os.path.join(home, ".claude.json")
+        if os.path.exists(cfg):
+            with open(cfg, encoding="utf-8") as fh:
+                payload["claude_json"] = fh.read()
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh)
 
 
 def main() -> None:
@@ -30,6 +57,11 @@ def main() -> None:
         "--record-initialize",
         help="If set, write the received initialize params to this JSON file",
     )
+    parser.add_argument(
+        "--record-config-home",
+        help="If set, dump the subprocess CLAUDE_CONFIG_DIR/.claude.json and "
+        "authoring env to this JSON file on initialize",
+    )
     args = parser.parse_args()
 
     for line in sys.stdin:
@@ -50,6 +82,8 @@ def main() -> None:
             if args.record_initialize:
                 with open(args.record_initialize, "w", encoding="utf-8") as fh:
                     json.dump(req.get("params", {}), fh)
+            if args.record_config_home:
+                _record_config_home(args.record_config_home)
             resp = {
                 "jsonrpc": "2.0",
                 "id": msg_id,

@@ -147,14 +147,15 @@ def _attach_authoring_tools(
     MCP server so the spawned CLI sees the propose/read tools. The transport is
     chosen from the binding fields present: the stdio bridge (spawned subprocess)
     when the binding carries the engine transport (``engine_base_url`` +
-    ``run_id``), otherwise the HTTP bridge. On the pinned stack, session-injected
-    MCP servers do not surface to the model regardless of transport — the S20
-    registration-scope matrix found only user-global home-config servers surface;
-    session-injected and workspace-config servers connect and serve but never
-    surface, over both stdio and HTTP — so transport choice is not a surfacing
-    lever. Models without an MCP surface (mock, hosted APIs) are returned
-    unchanged. The binding lives only in this worker closure — never in graph
-    state or a checkpoint.
+    ``run_id``), otherwise the HTTP bridge. Session INJECTION of this spec does
+    not surface it on the pinned stack — the S20 registration-scope matrix found
+    only user-global home-config servers surface — so the stdio bridge reaches the
+    model by a second step: its spec is admitted into the isolated config home as
+    user-global config (S18, ``config_home_authoring_entry`` at the spawn seam),
+    which does surface. That makes the transport choice load-bearing: only the
+    stdio shape rides the home channel. Models without an MCP surface (mock,
+    hosted APIs) are returned unchanged. The binding lives only in this worker
+    closure — never in graph state or a checkpoint.
 
     In autonomous (headless) mode ONLY, the exact bridged tool names are
     auto-permitted so the CLI can invoke them without a local prompt — a

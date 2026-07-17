@@ -209,6 +209,62 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     assert allowed == authoring_allowed_tool_names(_stdio_binding())
 
 
+@pytest.mark.asyncio
+async def test_stdio_binding_surfaces_bridge_into_isolated_home(
+    tmp_path: Path,
+) -> None:
+    """The real spawn writes the bridge into the isolated home as placeholders (S18).
+
+    Drives ``AcpChatModel`` through a real subprocess with env-carried auth, so the
+    ``should_isolate_config_home`` branch composes the authoring bridge into the
+    per-run ``CLAUDE_CONFIG_DIR``. The subprocess reports its OWN home file and
+    OWN environment: the ``.claude.json`` must surface the bridge with ${VAR}
+    placeholders and carry NO real token, while the real bearer must be present in
+    the spawn env (proving ``config_home_authoring_entry`` is wired live, not dead).
+    """
+    from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
+
+    record_file = tmp_path / "config_home.json"
+    model = AcpChatModel(
+        command=[
+            PYTHON_EXE,
+            str(SIMULATOR_PATH),
+            "--response",
+            "authored",
+            "--record-config-home",
+            str(record_file),
+        ],
+        env_vars={"ANTHROPIC_AUTH_TOKEN": "env-auth-token"},
+        workspace_root=str(tmp_path),
+    )
+    node = create_worker_node(
+        model=model,
+        system_prompt="You are a coder.",
+        name="coder",
+        autonomous=True,
+        authoring_binding=_stdio_binding(),
+    )
+
+    await node(_make_state())
+
+    recorded = json.loads(record_file.read_text(encoding="utf-8"))
+    claude_json = recorded["claude_json"]
+    assert claude_json is not None, "subprocess saw no CLAUDE_CONFIG_DIR/.claude.json"
+    cfg = json.loads(claude_json)
+    bridge = cfg["mcpServers"]["vaultspec-authoring"]
+    assert bridge["type"] == "stdio"
+    assert bridge["args"] == ["-m", "vaultspec_a2a.protocols.mcp.authoring_stdio"]
+    # On-disk env is placeholders only.
+    home_env = bridge["env"]
+    assert home_env["VAULTSPEC_AUTHORING_BEARER"] == "${VAULTSPEC_AUTHORING_BEARER}"
+    # The real bearer NEVER appears on disk...
+    assert "machine-bearer-xyz" not in claude_json
+    # ...but IS hoisted into the subprocess spawn env for the CLI to expand.
+    spawn_env = recorded["authoring_env"]
+    assert spawn_env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
+    assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:xyz"
+
+
 class TestAuthoringAllowlist:
     """The auto-permit allowlist is exact, catalog-derived, and autonomous-only."""
 

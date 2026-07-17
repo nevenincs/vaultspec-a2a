@@ -45,6 +45,11 @@ __all__ = [
 # asserted fail-loud at :func:`config_home_mcp_servers` build time so a future
 # drifted or write-capable entry cannot be silently surfaced. The default is
 # unsafe-by-omission (a missing/false flag fails), never silently permissive.
+# WARNING: the config home is written with user-scope env expansion, so a literal
+# ``${...}`` placed in a future registry ``env`` value would be expanded by the
+# CLI from its process environment at parse time (the same mechanism the
+# authoring bridge relies on) — registry env values must be literals, never
+# accidental ``${...}`` strings.
 _LAUNCH_SPEC_KEYS = ("name", "command", "args", "env")
 _KNOWN_MCP_SERVERS: dict[str, dict[str, Any]] = {
     "vaultspec-rag": {
@@ -125,9 +130,11 @@ def config_home_mcp_servers(
     authoring bridge), keep ONLY those whose name is a known harness server and
     transform each ACP launch spec into the CLI user-global config shape keyed by
     name: ``{"<name>": {"type": "stdio", "command": ..., "args": [...], "env": ...}}``.
-    Servers not in the registry (e.g. the authoring bridge) are excluded, so the
-    isolated config home surfaces exactly the declared read-only harness servers.
-    Returns an empty mapping when none match.
+    Servers not in the registry (e.g. the per-run authoring bridge) are excluded
+    here: the bridge is admitted into the same isolated home through its own
+    guarded channel (``config_home_authoring_entry``), so together the home
+    surfaces exactly the declared read-only harness servers PLUS at most the run's
+    own authoring bridge. Returns an empty mapping when none match.
     """
     home: dict[str, dict[str, Any]] = {}
     for spec in mcp_servers:

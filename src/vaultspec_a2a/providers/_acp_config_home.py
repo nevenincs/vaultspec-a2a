@@ -77,10 +77,14 @@ def create_isolated_config_home(
     The home always carries the onboarding flags. When *mcp_servers* is provided
     (P03.S14) they are written as the home's user-global ``mcpServers`` so the CLI
     SURFACES them to the model - the fallback the P02 re-probe made unconditional,
-    since session-injected servers do not surface. Empty/None writes no servers, so
-    the home performs suppression only. The caller sets ``CLAUDE_CONFIG_DIR`` to the
-    returned path and MUST call :func:`cleanup_isolated_config_home` after the
-    subprocess is reaped.
+    since session-injected servers do not surface. The caller composes that mapping
+    from the declared read-only harness servers plus, for a bridged run, the run's
+    own authoring bridge entry (S18, ``config_home_authoring_entry``); a server's
+    ``env`` value may be a ``${VAR}`` placeholder the CLI expands from its process
+    environment at parse time, which is how the bridge keeps its real tokens off
+    disk. Empty/None writes no servers, so the home performs suppression only. The
+    caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
+    :func:`cleanup_isolated_config_home` after the subprocess is reaped.
     """
     home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-"))
     _write_config(home, mcp_servers=mcp_servers)
@@ -97,9 +101,7 @@ def _write_config(home: Path, mcp_servers: dict[str, dict[str, object]] | None) 
     config: dict[str, object] = dict(_ONBOARDING_FLAGS)
     if mcp_servers:
         config["mcpServers"] = mcp_servers
-    (home / ".claude.json").write_text(
-        json.dumps(config, indent=2), encoding="utf-8"
-    )
+    (home / ".claude.json").write_text(json.dumps(config, indent=2), encoding="utf-8")
 
 
 def cleanup_isolated_config_home(home: Path | None) -> None:

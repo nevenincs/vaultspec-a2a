@@ -10,6 +10,7 @@ related:
   - '[[2026-07-17-tool-cores-P01-S02]]'
   - '[[2026-07-17-tool-cores-P01-S03]]'
   - '[[2026-07-17-tool-cores-P01-S04]]'
+  - '[[2026-07-17-tool-cores-P01-S05]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
@@ -31,6 +32,7 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 - `2026-07-17-tool-cores-P01-S02` - Re-express the researcher persona to name the native Read, Grep, and Glob grounding tools and remove the terminal-false-unexecutable vaultspec-core and rag CLI invocations, claiming P03.S05 of the graph-agent-framework-harness plan
 - `2026-07-17-tool-cores-P01-S03` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core)
 - `2026-07-17-tool-cores-P01-S04` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core)
+- `2026-07-17-tool-cores-P01-S05` - Prove live on the Claude lane that a document agent reads a named .vault ADR mid-turn and cites it, real run against the live engine with no mocks and zero .vault writes (executor-service)
 
 ### plan
 

@@ -9,8 +9,11 @@ from __future__ import annotations
 
 import os
 import stat
+import sys
 import tomllib
 from typing import TYPE_CHECKING
+
+import pytest
 
 from .._acp_mcp import codex_mcp_server_specs
 from .._codex_config_home import (
@@ -122,3 +125,53 @@ def test_cleanup_is_none_safe_and_idempotent(tmp_path: Path) -> None:
     cleanup_codex_config_home(home)
     assert not home.exists()
     cleanup_codex_config_home(home)
+
+
+def test_build_self_cleans_on_copy_failure(tmp_path: Path) -> None:
+    # If the credential copy fails mid-build, the partially-built home (which may
+    # already hold a credential) must not leak: the builder removes its own dir.
+    import glob
+    import tempfile
+
+    base = tmp_path / "base"
+    base.mkdir()
+    # auth.json is a DIRECTORY, so shutil.copy2 raises inside build.
+    (base / "auth.json").mkdir()
+    pattern = os.path.join(tempfile.gettempdir(), "vaultspec-codex-home-*")
+    before = set(glob.glob(pattern))
+    with pytest.raises(OSError):
+        build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)
+    assert set(glob.glob(pattern)) <= before  # no new home leaked
+
+
+@pytest.mark.asyncio
+async def test_turn_failure_after_build_cleans_credential_home(
+    tmp_path: Path,
+) -> None:
+    # A failure AFTER the credential home is built (here the codex subprocess
+    # exits immediately, so the handshake fails) must still clean the home - the
+    # credential copy cannot outlive the failed turn.
+    import glob
+    import tempfile
+
+    from langchain_core.messages import HumanMessage
+
+    from ..codex_chat_model import CodexChatModel
+
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    model = CodexChatModel(
+        command=[sys.executable, "-c", "import sys; sys.exit(1)"],
+        harness_mcp_servers=["vaultspec-rag"],
+        codex_home=str(base),
+        timeout=10.0,
+    )
+    pattern = os.path.join(tempfile.gettempdir(), "vaultspec-codex-home-*")
+    before = set(glob.glob(pattern))
+    # The codex handshake against an immediately-exited subprocess raises
+    # _CodexProtocolError (a RuntimeError).
+    with pytest.raises(RuntimeError):
+        async for _ in model.astream([HumanMessage(content="hi")]):
+            pass
+    assert set(glob.glob(pattern)) <= before  # credential home cleaned

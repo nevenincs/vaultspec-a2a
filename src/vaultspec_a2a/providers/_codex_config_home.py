@@ -110,19 +110,25 @@ def build_codex_config_home(
     # mkdtemp creates an owner-only (0700) directory, so the copied credential is
     # traversal-protected by the dir even before the file's own mode is set.
     home = Path(tempfile.mkdtemp(prefix="vaultspec-codex-home-"))
-    _restrict(home)
-    if base_home is not None:
-        auth = base_home / "auth.json"
-        if auth.exists():
-            dest = home / "auth.json"
-            shutil.copy2(auth, dest)
-            # Defensive: pin the credential copy to owner-only regardless of the
-            # source's mode (POSIX-effective; a no-op on Windows, where the temp
-            # tree is already user-scoped).
-            _restrict(dest)
-    (home / "config.toml").write_text(
-        render_codex_config_toml(specs), encoding="utf-8"
-    )
+    try:
+        _restrict(home)
+        if base_home is not None:
+            auth = base_home / "auth.json"
+            if auth.exists():
+                dest = home / "auth.json"
+                shutil.copy2(auth, dest)
+                # Defensive: pin the credential copy to owner-only regardless of
+                # the source's mode (POSIX-effective; a no-op on Windows, where
+                # the temp tree is already user-scoped).
+                _restrict(dest)
+        (home / "config.toml").write_text(
+            render_codex_config_toml(specs), encoding="utf-8"
+        )
+    except BaseException:
+        # A mid-build failure (e.g. copy error) must not leak the dir with a
+        # partial credential copy; remove it before re-raising.
+        cleanup_codex_config_home(home)
+        raise
     logger.debug(
         "Codex isolated config home created at %s (%d server(s))", home, len(specs)
     )

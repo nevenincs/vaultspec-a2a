@@ -328,29 +328,32 @@ class CodexChatModel(BaseChatModel):
         # worker-owned config.toml carrying exactly those read-only servers and
         # redirect CODEX_HOME to it, suppressing the operator's ambient
         # [mcp_servers.*] config. Auth (auth.json) is copied from the base home.
-        # Cleaned up in the finally once the subprocess is reaped.
+        # The home is built INSIDE the try so a spawn failure cannot leak the
+        # copied credential; it is cleaned up in the finally regardless of where
+        # the turn fails.
         codex_config_home: Path | None = None
-        if self.harness_mcp_servers:
-            specs = codex_mcp_server_specs(self.harness_mcp_servers)
-            base = self.codex_home or settings.codex_home
-            base_home = Path(base) if base else Path.home() / ".codex"
-            codex_config_home = build_codex_config_home(specs, base_home)
-            env["CODEX_HOME"] = str(codex_config_home)
-        metadata = {
-            "provider": self.provider,
-            "command_executable": self.command_executable,
-            "command_target": self.command_target,
-        }
-
-        process = await spawn_acp_process(
-            self.command,
-            env,
-            cwd,
-            use_exec=False,
-            metadata=metadata,
-        )
-        client = _CodexAppServerClient(process, metadata=metadata)
+        client: _CodexAppServerClient | None = None
         try:
+            if self.harness_mcp_servers:
+                specs = codex_mcp_server_specs(self.harness_mcp_servers)
+                base = self.codex_home or settings.codex_home
+                base_home = Path(base) if base else Path.home() / ".codex"
+                codex_config_home = build_codex_config_home(specs, base_home)
+                env["CODEX_HOME"] = str(codex_config_home)
+            metadata = {
+                "provider": self.provider,
+                "command_executable": self.command_executable,
+                "command_target": self.command_target,
+            }
+
+            process = await spawn_acp_process(
+                self.command,
+                env,
+                cwd,
+                use_exec=False,
+                metadata=metadata,
+            )
+            client = _CodexAppServerClient(process, metadata=metadata)
             await asyncio.wait_for(
                 client.request(
                     "initialize",
@@ -395,7 +398,8 @@ class CodexChatModel(BaseChatModel):
             async for chunk in self._consume_turn(client, thread_id):
                 yield chunk
         finally:
-            await client.aclose()
+            if client is not None:
+                await client.aclose()
             cleanup_codex_config_home(codex_config_home)
 
     async def _consume_turn(

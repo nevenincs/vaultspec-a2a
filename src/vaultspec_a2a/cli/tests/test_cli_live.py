@@ -193,7 +193,9 @@ def test_doctor_flags_a_resident_missing_a_route(tmp_path: Any) -> None:
         try:
             with _ThreadedServer(gw.app) as srv:
                 doctor = _run_cli("doctor", "--url", srv.base)
-                assert doctor.returncode == 0, doctor.stderr
+                # A distinct non-zero exit (not the generic transport-error 1)
+                # so automation catches a stale resident without parsing JSON.
+                assert doctor.returncode == 3, doctor.stderr
                 body = json.loads(doctor.stdout)
                 assert body["stale_resident"] is True
                 assert f"GET {stream_path}" in body["missing_routes"]

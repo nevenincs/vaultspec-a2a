@@ -27,6 +27,10 @@ __all__ = ["main"]
 
 _CONNECT_TIMEOUT = 10.0
 _RUN_START_TIMEOUT = 30.0
+# Distinct from the generic transport/HTTP-error exit (1, see _emit) and from
+# click's own usage-error exit (2), so automation can tell "gateway answered
+# but is a stale resident" apart from "gateway unreachable" or "bad CLI args".
+_EXIT_STALE_RESIDENT = 3
 
 
 def _base_url(url: str | None) -> str:
@@ -94,6 +98,10 @@ def doctor(url: str | None) -> None:
     adds ``stale_resident``/``missing_routes`` to the reported body. A
     resident that predates this diagnostic itself (no ``routes`` key at all)
     is reported stale outright.
+
+    Exit code carries the diagnosis, not just the JSON body, so automation
+    catches a silent stale resident without parsing the response: 0 healthy,
+    1 unreachable/HTTP error (see ``_emit``), 3 reachable but stale.
     """
     resp = _request("GET", f"{_base_url(url)}/v1/service", timeout=_CONNECT_TIMEOUT)
     try:
@@ -101,17 +109,21 @@ def doctor(url: str | None) -> None:
     except ValueError:
         body = None
 
+    stale_resident = False
     if isinstance(body, dict):
         expected = set(_expected_route_signature())
         live = set(body["routes"]) if "routes" in body else set()
         missing = sorted(expected - live) if "routes" in body else sorted(expected)
-        body["stale_resident"] = bool(missing)
+        stale_resident = bool(missing)
+        body["stale_resident"] = stale_resident
         body["missing_routes"] = missing
         click.echo(json.dumps(body, indent=2, sort_keys=True))
     else:
         click.echo(resp.text)
     if resp.is_error:
         sys.exit(1)
+    if stale_resident:
+        sys.exit(_EXIT_STALE_RESIDENT)
 
 
 @main.command()

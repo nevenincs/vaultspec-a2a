@@ -17,9 +17,10 @@ the run's public v1 SSE progress stream (``GET /v1/runs/{run_id}/stream``) to wi
 the mid-turn read and citation, then cancels the run before any gate applies. Zero
 writes is enforced by a before/after snapshot of the engine workspace ``.vault``.
 
-Observation surface - empirically validated, not guessed. A live Z.ai-lane run of this
-exact harness (run id ``pw7-1784273382``, 2026-07-17, all-roles-Z.ai profile) showed
-the read does NOT surface as a ``tool_call_start`` frame; it surfaces in the agent's
+Observation surface - empirically validated, not guessed. A green Z.ai-lane run of this
+exact harness (run id ``pw7-1784274009``, 2026-07-17, all-roles-Z.ai profile; the raw
+frame capture that fixed the assumptions was ``pw7-1784273382``) showed the read does
+NOT surface as a ``tool_call_start`` frame; it surfaces in the agent's
 ``message_chunk`` content, where the agent narrates the native discover-then-read
 sequence (tried ``.vault``, found the file under ``.vault/adr/``, read it) and then
 reproduces the ADR's own interior text. So the proof keys on message content:
@@ -28,7 +29,8 @@ reproduces the ADR's own interior text. So the proof keys on message content:
   citation; and
 * at least one DISTINCTIVE interior token of the ADR body (an identifier / version /
   path present in the file but NOT in the prompt - e.g. ``@agentclientprotocol/
-  claude-agent-acp``, ``0.2.83``, ``_KNOWN_MCP_SERVERS``) appears in that stream. A
+  claude-agent-acp``, ``@anthropic-ai/claude-agent-sdk``, ``_KNOWN_MCP_SERVERS``)
+  appears in that stream. A
   token the prompt never carried can only reach the output by the agent reading the
   file, so this is the load-bearing, hallucination-resistant read evidence; and
 * zero created/modified/deleted files under the engine ``.vault`` across the run.

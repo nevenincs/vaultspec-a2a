@@ -9,6 +9,7 @@ production serve paths are inert.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 
 from ..procs_config import PortBand, ProcsConfig, RoleConfig
 from ..registration import deregister_serve, refresh_registration, register_serve
@@ -118,6 +119,56 @@ def test_register_serve_convergence_without_command_keeps_existing(tmp_path) -> 
     # No command passed -> the existing command is preserved, not blanked.
     assert converged.command == ["keep", "me"]
     assert converged.log_path == "L:/x.log"
+
+
+def test_refresh_registration_preserves_a_record_that_landed_after_it(tmp_path) -> None:
+    # The self-registering process's in-memory record (built during the boot race,
+    # before serve_up committed) carries defaults only.
+    stale = ProcRecord(
+        name="g", role="gateway-dev", pid=os.getpid(), port=18100, owner="o"
+    )
+    write_record(stale, home=tmp_path)
+    # serve_up then commits the richer operator-supplied record on the same key.
+    full = replace(
+        stale,
+        log_path="L:/gw.log",
+        internal_token_file="T:/tok",
+        gateway_url="http://x:18100",
+    )
+    write_record(full, home=tmp_path)
+
+    # A heartbeat must re-read the live record, NOT re-clobber it with the stale copy.
+    refresh_registration(stale, home=tmp_path)
+
+    after = read_record(record_path("gateway-dev", "g", home=tmp_path))
+    assert after is not None
+    assert after.internal_token_file == "T:/tok"
+    assert after.log_path == "L:/gw.log"
+    assert after.gateway_url == "http://x:18100"
+    assert after.last_seen_ms >= full.last_seen_ms
+
+
+def test_register_serve_refuses_convergence_under_foreign_live_owner(tmp_path) -> None:
+    # A live foreign-owned record (this test's pid, a different owner) must not be
+    # rewritten by a converging registration under a different owner.
+    foreign = ProcRecord(
+        name="fg",
+        role="gateway-dev",
+        pid=os.getpid(),
+        port=18100,
+        owner="other-session",
+        log_path="L:/keep.log",
+    )
+    write_record(foreign, home=tmp_path)
+
+    result = register_serve(
+        "gateway-dev", 18100, name="fg", owner="me", home=tmp_path, config=_config()
+    )
+    assert result is None
+    on_disk = read_record(record_path("gateway-dev", "fg", home=tmp_path))
+    assert on_disk is not None
+    assert on_disk.owner == "other-session"
+    assert on_disk.log_path == "L:/keep.log"
 
 
 def test_register_serve_ignores_a_resident_out_of_band_port(tmp_path) -> None:

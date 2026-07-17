@@ -136,9 +136,21 @@ def register_serve(
 def refresh_registration(
     record: ProcRecord | None, *, home: Path | None = None
 ) -> None:
-    """Advance a registered record's heartbeat; a no-op when nothing was registered."""
-    if record is not None:
-        refresh_last_seen(record, home=home)
+    """Advance a registered record's heartbeat; a no-op when nothing was registered.
+
+    Re-reads the CURRENT on-disk record before bumping the heartbeat, so a richer
+    record that landed AFTER this process's own registration is preserved rather
+    than overwritten by this process's staler in-memory copy on every cadence.
+    During boot a self-registering gateway/worker calls ``register_serve`` before
+    ``serve_up`` commits the full operator-supplied record (the reservation race),
+    so its in-memory ``record`` can be a defaults-only one; heartbeating that copy
+    is what silently blanked log_path and the pairing fields mid-run. Reading the
+    live record first makes the heartbeat non-destructive.
+    """
+    if record is None:
+        return
+    current = read_record(record_path(record.role, record.name, home=home))
+    refresh_last_seen(current if current is not None else record, home=home)
 
 
 def deregister_serve(record: ProcRecord | None, *, home: Path | None = None) -> None:

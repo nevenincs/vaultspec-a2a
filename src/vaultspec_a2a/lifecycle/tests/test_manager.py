@@ -396,6 +396,24 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(tmp_path) ->
     assert GATEWAY_URL_ENV not in bare
 
 
+def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _serve_config(serve, band=(18990, 18992))
+    # The token-file read happens after reserve_port but before spawn; the refusal
+    # must leave no record, no reservation marker, and nothing spawned.
+    with pytest.raises(LifecycleError, match="unreadable"):
+        serve_up(
+            "scratch",
+            "w",
+            home=tmp_path,
+            config=config,
+            internal_token_file=str(tmp_path / "does-not-exist"),
+            ready_timeout=5.0,
+        )
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))
+
+
 def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path) -> None:
     with pytest.raises(LifecycleError, match="unreadable"):
         _serve_env(

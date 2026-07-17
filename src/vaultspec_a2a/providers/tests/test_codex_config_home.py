@@ -7,6 +7,8 @@ step; these pin the config.toml content, the auth copy, and the home lifecycle.
 
 from __future__ import annotations
 
+import os
+import stat
 import tomllib
 from typing import TYPE_CHECKING
 
@@ -81,6 +83,24 @@ def test_build_home_writes_config_and_copies_auth(tmp_path: Path) -> None:
     finally:
         cleanup_codex_config_home(home)
         assert not home.exists()
+
+
+def test_copied_credential_is_owner_only_on_posix(tmp_path: Path) -> None:
+    # The credential copy must not widen access. On POSIX the file is pinned to
+    # 0o600 and the home to 0o700; on Windows chmod is a no-op and the per-user
+    # temp tree is ACL-scoped, so we only assert the copy exists there.
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "auth.json").write_text("{}", encoding="utf-8")
+    home = build_codex_config_home(codex_mcp_server_specs(["vaultspec-rag"]), base)
+    try:
+        auth = home / "auth.json"
+        assert auth.exists()
+        if os.name == "posix":
+            assert stat.S_IMODE(auth.stat().st_mode) == 0o600
+            assert stat.S_IMODE(home.stat().st_mode) == 0o700
+    finally:
+        cleanup_codex_config_home(home)
 
 
 def test_build_home_tolerates_absent_auth(tmp_path: Path) -> None:

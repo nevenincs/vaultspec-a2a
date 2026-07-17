@@ -24,6 +24,7 @@ import logging
 import re
 import shutil
 import tempfile
+from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -54,6 +55,16 @@ def _toml_str_array(values: Sequence[str]) -> str:
 
 def _table_key(name: str) -> str:
     return name if _BARE_KEY.match(name) else _toml_str(name)
+
+
+def _restrict(path: Path) -> None:
+    """Best-effort owner-only permissions on a path; never raises.
+
+    POSIX-effective (0o700 for the dir, applied to the credential copy too);
+    a no-op on Windows, where the per-user temp tree is already ACL-scoped.
+    """
+    with suppress(OSError):
+        path.chmod(0o700 if path.is_dir() else 0o600)
 
 
 def render_codex_config_toml(specs: Sequence[dict[str, Any]]) -> str:
@@ -96,11 +107,19 @@ def build_codex_config_home(
     ``[mcp_servers.<name>]`` blocks. The caller sets ``CODEX_HOME`` to the
     returned path and MUST call :func:`cleanup_codex_config_home` after reap.
     """
+    # mkdtemp creates an owner-only (0700) directory, so the copied credential is
+    # traversal-protected by the dir even before the file's own mode is set.
     home = Path(tempfile.mkdtemp(prefix="vaultspec-codex-home-"))
+    _restrict(home)
     if base_home is not None:
         auth = base_home / "auth.json"
         if auth.exists():
-            shutil.copy2(auth, home / "auth.json")
+            dest = home / "auth.json"
+            shutil.copy2(auth, dest)
+            # Defensive: pin the credential copy to owner-only regardless of the
+            # source's mode (POSIX-effective; a no-op on Windows, where the temp
+            # tree is already user-scoped).
+            _restrict(dest)
     (home / "config.toml").write_text(
         render_codex_config_toml(specs), encoding="utf-8"
     )

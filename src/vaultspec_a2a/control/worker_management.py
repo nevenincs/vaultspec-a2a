@@ -204,17 +204,29 @@ async def _evict_stale_worker(
     *,
     timeout: float = 10.0,
 ) -> bool:
-    """Ask a stale worker to shut down and wait for the port to free.
+    """Terminate a stale worker and wait for the port to free.
 
-    Posts the worker's ``/admin/shutdown`` (graceful ``SIGTERM``) and polls the
-    TCP port until it stops accepting connections. Returns ``True`` once the port
-    is free, ``False`` if it is still bound after *timeout* seconds.
+    Posts the worker's bearer-authenticated ``/admin/shutdown`` (an
+    ``os.kill(SIGTERM)`` that is an immediate ``TerminateProcess`` on Windows, not
+    a graceful run-draining stop) and polls the TCP port until it stops accepting
+    connections. Only ever aimed at a foreign-gateway orphan, never at a worker
+    serving this gateway's runs, so the abrupt stop cannot drop live work of ours.
+    Returns ``True`` once the port is free, ``False`` if it is still bound after
+    *timeout* seconds. The internal token is presented so the shutdown is accepted
+    only when this gateway is the worker's paired owner.
     """
     import httpx
 
+    headers = (
+        {"Authorization": f"Bearer {settings.internal_token}"}
+        if settings.internal_token is not None
+        else None
+    )
     with contextlib.suppress(Exception):
         async with httpx.AsyncClient() as client:
-            await client.post(f"{worker_url}/admin/shutdown", timeout=2.0)
+            await client.post(
+                f"{worker_url}/admin/shutdown", headers=headers, timeout=2.0
+            )
 
     deadline = asyncio.get_event_loop().time() + timeout
     while asyncio.get_event_loop().time() < deadline:

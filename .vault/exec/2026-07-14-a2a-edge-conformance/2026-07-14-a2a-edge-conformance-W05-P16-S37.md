@@ -90,3 +90,14 @@ worker/gateway/streaming path without Docker. Token and tool-call delta frames a
 an ACP-transformer surface the non-streaming `MockChatModel` does not exercise;
 the mock tapes still drive real tool calls through the graph (VidaiMock returns a
 `run_command` tool call), observed as the agent working-state transitions.
+
+Review revision (audit `w05-p16 review`, findings admin-shutdown-unauthenticated
+HIGH and sigterm-hard-kill-on-windows MEDIUM): the worker `/admin/shutdown`
+endpoint is now bearer-authenticated with the same internal token as `/dispatch`,
+and the evictor presents that token, so the eviction-path kill can no longer be
+triggered by an unauthenticated loopback process. The endpoint and evictor
+docstrings now state the Windows hard-kill reality (`os.kill(SIGTERM)` is
+`TerminateProcess`, no run draining) and note that eviction only targets a
+foreign-gateway orphan, never this gateway's own runs. Proven live: a tokenless
+`/admin/shutdown` returns 401 and the worker survives, while the token-presenting
+evictor evicts the orphan and a fresh, correctly-wired worker takes the port.

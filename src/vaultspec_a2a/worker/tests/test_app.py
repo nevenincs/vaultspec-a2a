@@ -100,3 +100,40 @@ def test_dispatch_rejects_invalid_internal_token() -> None:
 
     assert resp.status_code == 401
     assert resp.json()["detail"] == "Invalid internal token"
+
+
+def test_admin_shutdown_rejects_missing_internal_token() -> None:
+    """The eviction-path kill endpoint must not be callable without the token.
+
+    A 401 is raised by the auth dependency BEFORE the handler runs, so the
+    ``os.kill`` never fires - the endpoint is safe to probe here.
+    """
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.TESTING, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post("/admin/shutdown")
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid internal token"
+
+
+def test_admin_shutdown_rejects_invalid_internal_token() -> None:
+    """The eviction-path kill endpoint must reject a wrong bearer token."""
+    app = _make_app_without_lifespan()
+    with (
+        _SettingsOverride(
+            environment=Environment.DEVELOPMENT, internal_token="secret-token"
+        ),
+        TestClient(app, raise_server_exceptions=False) as client,
+    ):
+        resp = client.post(
+            "/admin/shutdown",
+            headers={"Authorization": "Bearer wrong-token"},
+        )
+
+    assert resp.status_code == 401
+    assert resp.json()["detail"] == "Invalid internal token"

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
+from vaultspec_a2a.control.config import settings
 from vaultspec_a2a.control.worker_management import (
     _evict_stale_worker,
     _fetch_worker_health,
@@ -29,9 +30,26 @@ if TYPE_CHECKING:
     from collections.abc import Iterator
 
 
+@contextmanager
+def _internal_token(value: str | None) -> Iterator[None]:
+    """Set ``settings.internal_token`` for the evictor's token-presenting path.
+
+    Mirrors the sanctioned ``_SettingsOverride`` seam used across the worker
+    suite - a real attribute swap on the live settings object, restored on exit,
+    not a mock.
+    """
+    original = settings.internal_token
+    settings.internal_token = value
+    try:
+        yield
+    finally:
+        settings.internal_token = original
+
+
 def _make_handler(
     body: dict[str, object] | None,
     shutdown_flag: dict[str, bool],
+    expected_token: str | None,
 ) -> type[http.server.BaseHTTPRequestHandler]:
     class _Handler(http.server.BaseHTTPRequestHandler):
         def do_GET(self) -> None:
@@ -48,13 +66,20 @@ def _make_handler(
             self.wfile.write(payload)
 
         def do_POST(self) -> None:
-            if self.path == "/admin/shutdown":
-                shutdown_flag["called"] = True
-                self.send_response(202)
+            if self.path != "/admin/shutdown":
+                self.send_response(404)
                 self.send_header("Content-Length", "0")
                 self.end_headers()
                 return
-            self.send_response(404)
+            if expected_token is not None:
+                got = self.headers.get("Authorization")
+                if got != f"Bearer {expected_token}":
+                    self.send_response(401)
+                    self.send_header("Content-Length", "0")
+                    self.end_headers()
+                    return
+            shutdown_flag["called"] = True
+            self.send_response(202)
             self.send_header("Content-Length", "0")
             self.end_headers()
 
@@ -67,10 +92,12 @@ def _make_handler(
 @contextmanager
 def _worker_like(
     body: dict[str, object] | None,
+    *,
+    expected_token: str | None = None,
 ) -> Iterator[tuple[str, int, dict[str, bool]]]:
     shutdown_flag: dict[str, bool] = {"called": False}
     server = http.server.ThreadingHTTPServer(
-        ("127.0.0.1", 0), _make_handler(body, shutdown_flag)
+        ("127.0.0.1", 0), _make_handler(body, shutdown_flag, expected_token)
     )
     port = server.server_address[1]
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -125,3 +152,29 @@ async def test_evict_stale_worker_posts_shutdown_and_waits_for_port_free() -> No
         assert freed is False
     # Once the server is torn down the port is free; a fresh call confirms release.
     assert await _evict_stale_worker(url, port, timeout=1.0) is True
+
+
+@pytest.mark.asyncio
+async def test_evict_presents_internal_token_and_is_accepted() -> None:
+    """The evictor must present the internal bearer so an authenticated worker
+    accepts the shutdown (the eviction path is now behind auth)."""
+    body: dict[str, object] = {"status": "ok", "gateway_url": "http://127.0.0.1:1"}
+    with (
+        _internal_token("evict-secret"),
+        _worker_like(body, expected_token="evict-secret") as (url, port, flag),
+    ):
+        await _evict_stale_worker(url, port, timeout=1.0)
+        assert flag["called"] is True
+
+
+@pytest.mark.asyncio
+async def test_tokenless_shutdown_is_rejected_by_authenticated_worker() -> None:
+    """A worker that requires the bearer must reject an evictor with no token,
+    leaving the process alive (no shutdown recorded)."""
+    body: dict[str, object] = {"status": "ok", "gateway_url": "http://127.0.0.1:1"}
+    with (
+        _internal_token(None),
+        _worker_like(body, expected_token="evict-secret") as (url, port, flag),
+    ):
+        await _evict_stale_worker(url, port, timeout=1.0)
+        assert flag["called"] is False

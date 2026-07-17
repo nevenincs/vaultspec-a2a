@@ -250,9 +250,20 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
             "postgres_required": settings.postgres_required,
         }
 
-    @app.post("/admin/shutdown", status_code=202)
+    @app.post(
+        "/admin/shutdown",
+        status_code=202,
+        dependencies=[Depends(_verify_dispatch_token)],
+    )
     async def shutdown_endpoint() -> dict[str, str]:
-        """Initiate graceful worker shutdown."""
+        """Terminate this worker process.
+
+        Bearer-authenticated with the same internal token as ``/dispatch``: this
+        endpoint is load-bearing in the gateway's stale-orphan eviction path, so an
+        unauthenticated loopback process must not be able to hard-kill the worker.
+        ``os.kill(SIGTERM)`` maps to ``TerminateProcess`` on Windows - an immediate
+        stop with no run draining, not a graceful drain.
+        """
         os.kill(os.getpid(), signal.SIGTERM)
         return {"detail": "shutdown initiated"}
 

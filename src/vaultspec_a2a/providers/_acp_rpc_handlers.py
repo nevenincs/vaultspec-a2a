@@ -124,6 +124,70 @@ def _vault_write_denial(rpc_id: int | str, path: str) -> dict[str, object]:
     }
 
 
+# Kimi's native READ-ONLY tools, enumerated from the installed kimi-cli 1.49.0
+# source (tools/file/__init__.py: ReadFile/Grep/Glob/ReadMediaFile; the exact
+# `name` attrs on each CallableTool). The write tools WriteFile/StrReplaceFile,
+# the bash/shell exec tool, and every plan/dmail/agent/todo mutator are NOT
+# listed and are therefore rejected in autonomous mode. The web tools
+# FetchURL/SearchWeb are deliberately EXCLUDED: they are read-only but add
+# network egress, which is not part of the workspace/.vault grounding floor -
+# excluding them is the more conservative read-only posture.
+_KIMI_NATIVE_READ_TOOLS: frozenset[str] = frozenset(
+    {"ReadFile", "Grep", "Glob", "ReadMediaFile"}
+)
+
+
+def _strip_mcp_prefix(tool_name: str) -> str:
+    """Reduce a Claude-form ``mcp__<server>__<tool>`` allowlist entry to the raw
+    tool name Kimi exposes. Kimi registers MCP tools by their RAW ``mcp_tool.name``
+    (kimi-cli ``soul/toolset.py`` ``MCPTool.name = mcp_tool.name``), so its
+    permission title carries ``search_vault``, not ``mcp__vaultspec-rag__search_vault``.
+    """
+    if tool_name.startswith("mcp__"):
+        return tool_name.split("__", 2)[-1]
+    return tool_name
+
+
+def _kimi_autonomous_option_id(
+    name: str, config: _AcpModelConfig, options: list
+) -> str:
+    """Return the option id for a Kimi autonomous permission decision.
+
+    Read-only enforcement re-expressed at our RPC layer for a lane whose CLI
+    carries no config allowlist: auto-approve EXACTLY the composed read tools
+    (raw MCP tool names from ``config.allowed_tools``) plus Kimi's native read
+    tools; reject every other request. The tool identity is the prefix of Kimi's
+    ``get_title()`` (``"ToolName: subtitle"`` or ``"ToolName"``).
+    """
+    canonical = name.split(": ", 1)[0]
+    allowed = {_strip_mcp_prefix(t) for t in config.allowed_tools} | (
+        _KIMI_NATIVE_READ_TOOLS
+    )
+    if canonical in allowed:
+        return next(
+            (
+                o["optionId"]
+                for o in options
+                if isinstance(o, dict)
+                and o.get("kind") in ("allow_once", "allow_always")
+            ),
+            options[0]["optionId"] if options else "approve",
+        )
+    return next(
+        (
+            o["optionId"]
+            for o in options
+            if isinstance(o, dict)
+            and (
+                o.get("kind") in ("reject_once", "reject_always")
+                or "reject" in o.get("optionId", "").lower()
+                or "deny" in o.get("optionId", "").lower()
+            )
+        ),
+        options[-1]["optionId"] if options else "reject",
+    )
+
+
 async def on_request_permission(
     rpc_id: int | str,
     params: dict,
@@ -191,6 +255,14 @@ async def on_request_permission(
                 "id": rpc_id,
                 "result": {"outcome": {"optionId": deny_id, "outcome": "selected"}},
             }
+    elif config.acp_family == "kimi":
+        # Autonomous (no permission_callback) Kimi lane: enforce read-only as an
+        # exact-name auto-approve set at our RPC handler, because Kimi's CLI has
+        # no config allowlist. Auto-approve exactly the composed read tools plus
+        # Kimi's native read tools; reject everything else. Blanket approve is
+        # NOT used - a read-only-only compose still leaves Kimi's native write
+        # and shell tools reachable, so the enforcement is what the agent CAN do.
+        option_id = _kimi_autonomous_option_id(name, config, options)
     elif options and isinstance(options[0], dict) and "optionId" in options[0]:
         # M14: guard against malformed option dicts lacking optionId
         option_id = options[0]["optionId"]

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import shutil
@@ -17,6 +18,7 @@ from typing import TYPE_CHECKING, Any, cast
 import httpx
 
 from ..control.config import settings
+from ..lifecycle.manager import tree_kill
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -297,15 +299,13 @@ class ServiceStack:
         self._gateway_log = log_file
 
     def _stop_process(self, proc: subprocess.Popen[str] | None) -> None:
-        if proc is None:
+        if proc is None or proc.poll() is not None:
             return
-        if proc.poll() is None:
-            try:
-                proc.terminate()
-                proc.wait(timeout=30.0)
-            except Exception:
-                proc.kill()
-                proc.wait(timeout=30.0)
+        # Reuse the lifecycle tree-kill: a bare terminate/kill orphans grandchildren
+        # on Windows (no taskkill /T), stranding e.g. an engine the process spawned.
+        tree_kill(proc.pid, timeout=30.0)
+        with contextlib.suppress(Exception):
+            proc.wait(timeout=30.0)
 
     def _wait_for_process_health(
         self,

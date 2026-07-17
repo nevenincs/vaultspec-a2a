@@ -27,9 +27,12 @@ gateway = 8000
 band = [18760, 18769]
 build = ["cargo", "build", "--release", "-p", "vaultspec-cli"]
 heartbeat = true
-# {workspace} is the engine's explicit data seat: the wrapper launches the engine
-# with its cwd there so the cwd-relative data store never lands in the a2a project
-# root shared with the resident engine. It is required - an unset seat is refused.
+# require_repo: engine-dev seats its data store from the serve cwd, so the lifecycle
+# verbs refuse to boot/resume it without an explicit repo rather than defaulting to
+# the a2a project root (which once seated a dev engine on the resident engine's
+# store). {workspace} is the explicit data seat threaded to the wrapper, which
+# launches the engine with cwd there; an unset seat is refused.
+require_repo = true
 serve = ["{python}", "scripts/engine_serve.py", "--port", "{port}", "--workspace", "{workspace}"]
 staleness_ms = 120000
 

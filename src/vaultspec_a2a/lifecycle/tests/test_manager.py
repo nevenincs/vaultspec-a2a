@@ -411,6 +411,62 @@ def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(tmp_path) -
     assert not (serve_dir / "where.txt").exists()
 
 
+def _require_repo_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
+    role = RoleConfig(
+        name="scratch",
+        band=PortBand(*band),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=serve,
+        require_repo=True,
+    )
+    return ProcsConfig(resident={}, roles={"scratch": role})
+
+
+def test_serve_up_refuses_require_repo_role_without_repo(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _require_repo_config(serve, band=(18990, 18992))
+    # No repo passed: a data-seating role must refuse rather than default to the
+    # project root (the silent fallback that seated a dev engine on the resident's
+    # store). The refusal happens before any port reservation or spawn.
+    with pytest.raises(LifecycleError, match="requires an explicit repo"):
+        serve_up("scratch", "eng", home=tmp_path, config=config, ready_timeout=5.0)
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))
+
+
+def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _require_repo_config(serve, band=(18990, 18992))
+    record = serve_up(
+        "scratch",
+        "eng",
+        home=tmp_path,
+        config=config,
+        repo=str(tmp_path),
+        ready_timeout=15.0,
+    )
+    try:
+        assert record.repo == str(tmp_path)
+    finally:
+        tree_kill(record.pid)
+
+
+def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(tmp_path) -> None:
+    config = _require_repo_config(
+        [sys.executable, "-c", "import time; time.sleep(60)"], band=(18990, 18992)
+    )
+    # A died record whose repo is empty: resume must refuse rather than re-seat data
+    # implicitly at the project root.
+    write_record(
+        _record(name="revive", role="scratch", pid=_dead_pid(), port=18990, repo=""),
+        home=tmp_path,
+    )
+    with pytest.raises(LifecycleError, match="requires an explicit repo"):
+        resume("revive", home=tmp_path, config=config)
+
+
 def test_serve_up_captures_build_repo_into_the_record(tmp_path) -> None:
     serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
     config = _serve_config(serve, band=(18990, 18992))

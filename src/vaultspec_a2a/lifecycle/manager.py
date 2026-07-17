@@ -466,6 +466,7 @@ def serve_up(
     role_cfg = resolved_config.role(role)
     if not role_cfg.serve:
         raise LifecycleError(f"role {role!r} declares no serve command in procs.toml")
+    _ensure_explicit_repo(role_cfg, repo, f"{role}-{name}")
     owner_label = owner if owner is not None else default_owner()
     cwd = _Path(repo) if repo else _default_repo()
     # The build tree captured for rebuild/rerun; the boot build_sha reflects it, not
@@ -543,6 +544,23 @@ def _default_repo() -> Path:
     return settings.project_root
 
 
+def _ensure_explicit_repo(role_cfg: RoleConfig, repo: str, label: str) -> None:
+    """Refuse to serve a data-seating role from an implicit default cwd.
+
+    A role that declares ``require_repo`` (engine-dev seats its data store from its
+    serve cwd) must be booted and resumed with an explicit repo, never defaulted to
+    the project root - defaulting there once seated a dev engine's store on top of
+    the resident engine's live store. Raises :class:`LifecycleError` when no repo is
+    given, so the silent-root fallback is impossible rather than merely discouraged.
+    """
+    if role_cfg.require_repo and not repo:
+        raise LifecycleError(
+            f"role {role_cfg.name!r} requires an explicit repo (it seats data from "
+            f"its serve cwd); {label} carries none - pass an explicit repo rather "
+            "than defaulting to the project root"
+        )
+
+
 def _serve_cwd_for(record: ProcRecord) -> Path:
     """The dir a role's SERVE command runs in: the record's repo, else the root."""
     from pathlib import Path as _Path
@@ -582,6 +600,7 @@ def _start_from_record(
         raise LifecycleError(
             f"role {record.role!r} declares no serve command in procs.toml"
         )
+    _ensure_explicit_repo(role, record.repo, f"{record.role}-{record.name}")
     command = render_command(role.serve, port=record.port, workspace=record.workspace)
     child_env = _serve_env(
         role,

@@ -133,12 +133,16 @@ def _attach_authoring_tools(
     When a binding is present and the model exposes an ACP ``mcp_servers``
     surface, return a copy whose ``session/new`` advertises the run's authoring
     MCP server so the spawned CLI sees the propose/read tools. The transport is
-    chosen from the binding: the stdio bridge (spawned subprocess) is preferred
-    because the pinned CLI surfaces stdio MCP tools reliably while it connects to
-    but does not surface loopback HTTP MCP tools; the HTTP bridge is used when
-    the binding carries only that transport. Models without an
-    MCP surface (mock, hosted APIs) are returned unchanged. The binding lives
-    only in this worker closure — never in graph state or a checkpoint.
+    chosen from the binding fields present: the stdio bridge (spawned subprocess)
+    when the binding carries the engine transport (``engine_base_url`` +
+    ``run_id``), otherwise the HTTP bridge. On the pinned stack, session-injected
+    MCP servers do not surface to the model regardless of transport — the S20
+    registration-scope matrix found only user-global home-config servers surface;
+    session-injected and workspace-config servers connect and serve but never
+    surface, over both stdio and HTTP — so transport choice is not a surfacing
+    lever. Models without an MCP surface (mock, hosted APIs) are returned
+    unchanged. The binding lives only in this worker closure — never in graph
+    state or a checkpoint.
 
     In autonomous (headless) mode ONLY, the exact bridged tool names are
     auto-permitted so the CLI can invoke them without a local prompt — a
@@ -163,6 +167,46 @@ def _attach_authoring_tools(
     else:
         mcp_servers = build_authoring_mcp_servers(binding)
     return attach(mcp_servers, allowed_tools)
+
+
+# The spawned CLI's own built-in read tools. These execute agent-side over the
+# workspace fs (no MCP, no registration-scope surfacing gate) and give document
+# roles their deterministic grounding floor: read a named .vault document, grep
+# code, discover files. They are added by exact name — never a wildcard — so a
+# document role in autonomous mode can invoke them without a local prompt while
+# every write/exec built-in stays gated (the .vault deny remains write-only).
+NATIVE_READ_TOOL_NAMES: tuple[str, ...] = ("Read", "Grep", "Glob")
+
+
+def _compose_native_read_tools(
+    model: BaseChatModel,
+    *,
+    autonomous: bool,
+    role: str | None,
+) -> BaseChatModel:
+    """Permit the native read built-ins for autonomous document-authoring roles.
+
+    In autonomous (headless) mode ONLY, and for a document-authoring role ONLY,
+    union the CLI's native Read/Grep/Glob into the session's exact-name
+    ``allowedTools`` so the floor grounding is invocable without a local prompt.
+    The existing allowlist (e.g. the bridged authoring tools) and the advertised
+    MCP servers are preserved unchanged; the read names are added by exact name,
+    never a wildcard, and never for human-in-loop runs, which keep their prompts.
+    Models with no ACP allowlist surface (mock, hosted APIs) are returned
+    unchanged.
+    """
+    if not autonomous or not is_document_authoring_role(role):
+        return model
+    attach = getattr(model, "with_mcp_servers", None)
+    if attach is None:
+        return model
+    existing = list(getattr(model, "allowed_tools", []) or [])
+    combined = existing + [
+        name for name in NATIVE_READ_TOOL_NAMES if name not in existing
+    ]
+    if combined == existing:
+        return model
+    return attach(list(getattr(model, "mcp_servers", []) or []), combined)
 
 
 def _wrap_worker_exception(
@@ -498,6 +542,9 @@ def create_worker_node(
             effective_model = compose_harness_mcp_servers(
                 effective_model, harness_mcp_servers
             )
+        effective_model = _compose_native_read_tools(
+            effective_model, autonomous=autonomous, role=role
+        )
 
         model_type = type(effective_model).__name__
         _logger.debug(

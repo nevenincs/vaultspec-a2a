@@ -21,10 +21,10 @@ Land native read-tool grounding on every lane, the persona and docstring truth, 
 Deliver read-only grounding to graph document agents across the Claude, Codex, and Z.ai
 lanes, executing the accepted `2026-07-17-tool-cores-adr`.
 
-- [ ] `P01.S01` - Permit the native read built-ins Read, Grep, and Glob in autonomous mode for document-authoring roles so deterministic grounding is invocable without a local prompt (executor-core); `src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P01.S02` - Re-express the researcher persona to name the native Read, Grep, and Glob grounding tools and remove the terminal-false-unexecutable vaultspec-core and rag CLI invocations, claiming P03.S05 of the graph-agent-framework-harness plan, with the rag MCP tool names added later once surfacing is confirmed (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
-- [ ] `P01.S03` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `P01.S04` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/providers/_acp_authoring.py`.
+- [x] `P01.S01` - Permit the native read built-ins Read, Grep, and Glob in autonomous mode for document-authoring roles so deterministic grounding is invocable without a local prompt (executor-core); `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P01.S02` - Re-express the researcher persona to name the native Read, Grep, and Glob grounding tools and remove the terminal-false-unexecutable vaultspec-core and rag CLI invocations, claiming P03.S05 of the graph-agent-framework-harness plan, with the rag MCP tool names added later once surfacing is confirmed (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
+- [x] `P01.S03` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/graph/nodes/worker.py`.
+- [x] `P01.S04` - Correct the falsified stdio-surfaces-reliably docstring to the S20 registration-scope truth (executor-core); `src/vaultspec_a2a/providers/_acp_authoring.py`.
 - [ ] `P01.S05` - Prove live on the Claude lane that a document agent reads a named .vault ADR mid-turn and cites it, real run against the live engine with no mocks and zero .vault writes (executor-service); `src/vaultspec_a2a/service_tests/`.
 
 ### Phase `P02` - Adapter migration and surfacing re-probe

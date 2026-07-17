@@ -3,7 +3,7 @@ tags:
   - '#plan'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-07-16'
+modified: '2026-07-17'
 tier: L2
 related:
   - '[[2026-07-15-agent-harness-provisioning-adr]]'

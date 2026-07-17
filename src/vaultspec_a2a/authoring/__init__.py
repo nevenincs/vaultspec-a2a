@@ -29,6 +29,7 @@ from .client import AuthoringClient as AuthoringClient
 from .discovery import SERVICE_JSON_ENV as SERVICE_JSON_ENV
 from .discovery import EngineEndpoint as EngineEndpoint
 from .discovery import resolve_engine as resolve_engine
+from .discovery import resolve_engine_with_retry as resolve_engine_with_retry
 from .lifecycle import VERDICT_APPROVED as VERDICT_APPROVED
 from .lifecycle import VERDICT_REJECTED as VERDICT_REJECTED
 from .lifecycle import VERDICT_REQUEST_CHANGES as VERDICT_REQUEST_CHANGES
@@ -93,6 +94,7 @@ __all__ = [
     "mint_actor_token",
     "parse_sse_frame",
     "resolve_engine",
+    "resolve_engine_with_retry",
     "validate_id",
     "verdict_from_event",
 ]

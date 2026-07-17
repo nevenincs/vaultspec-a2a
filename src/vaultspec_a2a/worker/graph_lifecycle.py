@@ -301,14 +301,20 @@ class GraphLifecycleManager:
             DocumentProposalSubmitter,
             EngineUnavailableError,
             PhaseAuthoringSpec,
-            resolve_engine,
+            resolve_engine_with_retry,
         )
 
-        engine = resolve_engine()
+        # Bounded poll, not a one-shot probe: the engine has measured multi-
+        # second stall windows (scope-watcher rebuilds) during which a single
+        # 3s /health probe misses a healthy engine and would truthfully fail a
+        # run that succeeds seconds later. Blocking is acceptable here - this
+        # path already blocks for the heavy graph compile itself.
+        engine = resolve_engine_with_retry()
         if engine is None:
             raise EngineUnavailableError(
                 "research_adr run requires a reachable authoring engine to submit "
-                "document proposals; none was discoverable at run start"
+                "document proposals; none was discoverable at run start "
+                "(retried across the engine's stall window)"
             )
         return DocumentProposalSubmitter(
             engine_base_url=engine.base_url,

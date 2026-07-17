@@ -28,6 +28,7 @@ __all__ = [
     "heartbeat_is_fresh",
     "read_service_json",
     "resolve_engine",
+    "resolve_engine_with_retry",
 ]
 
 SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
@@ -109,4 +110,32 @@ def resolve_engine(*, liveness_timeout: float = 3.0) -> EngineEndpoint | None:
             continue
         if resp.status_code == 200:
             return EngineEndpoint(base_url=base_url, bearer_token=token)
+    return None
+
+
+def resolve_engine_with_retry(
+    *,
+    attempts: int = 4,
+    delay_seconds: float = 2.0,
+    liveness_timeout: float = 3.0,
+) -> EngineEndpoint | None:
+    """Resolve the engine, riding out its transient stall windows.
+
+    The engine periodically stops answering ``/health`` for several seconds
+    (measured live: ~4-6s windows while its scope watcher rebuilds), so a
+    single :func:`resolve_engine` probe at a decision point - the worker's
+    run-start submitter build - can miss a healthy engine and truthfully fail
+    a run that would have succeeded moments later. This is the single home of
+    the bounded poll the ``resolve_engine`` docstring anticipates: up to
+    *attempts* probes spaced *delay_seconds* apart, returning on the first
+    success, ``None`` only when the engine stayed unreachable across the whole
+    window. Blocking (sleep + probe); callers on an event loop should offload
+    or accept the bounded stall as they do for the surrounding work.
+    """
+    for attempt in range(1, attempts + 1):
+        endpoint = resolve_engine(liveness_timeout=liveness_timeout)
+        if endpoint is not None:
+            return endpoint
+        if attempt < attempts:
+            time.sleep(delay_seconds)
     return None

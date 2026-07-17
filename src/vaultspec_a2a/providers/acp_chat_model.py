@@ -53,6 +53,7 @@ from ._acp_config_home import (
     create_isolated_config_home,
     should_isolate_config_home,
 )
+from ._acp_mcp import config_home_mcp_servers
 from ._acp_protocol import RpcHandlerMap, process_stdout_loop
 from ._acp_rpc_handlers import (
     on_fs_read_text_file,
@@ -298,7 +299,11 @@ class AcpChatModel(BaseChatModel):
         # finally once the subprocess is reaped.
         config_home: Path | None = None
         if should_isolate_config_home(self.command, env):
-            config_home = create_isolated_config_home()
+            # P03.S14: the P02 re-probe recorded session-injected servers do NOT
+            # surface, so the declared read-only harness servers are ALSO written
+            # into the isolated home as user-global config, which does surface.
+            surfacing_servers = config_home_mcp_servers(self._config.mcp_servers)
+            config_home = create_isolated_config_home(surfacing_servers)
             env["CLAUDE_CONFIG_DIR"] = str(config_home)
 
         if self.command and Path(self.command[0]).stem.lower() == "gemini":

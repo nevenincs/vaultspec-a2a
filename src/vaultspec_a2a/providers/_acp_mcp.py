@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "compose_harness_mcp_servers",
+    "config_home_mcp_servers",
     "harness_allowed_tool_names",
     "resolve_harness_mcp_servers",
 ]
@@ -106,6 +107,33 @@ def harness_allowed_tool_names(names: Sequence[str]) -> list[str]:
             f"{sorted(_KNOWN_MCP_SERVERS)}"
         )
     return tool_names
+
+
+def config_home_mcp_servers(
+    mcp_servers: Sequence[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    """Select the registry-known harness servers and shape them for ``.claude.json``.
+
+    Given the session's advertised ``mcp_servers`` (which may also carry the per-run
+    authoring bridge), keep ONLY those whose name is a known harness server and
+    transform each ACP launch spec into the CLI user-global config shape keyed by
+    name: ``{"<name>": {"type": "stdio", "command": ..., "args": [...], "env": ...}}``.
+    Servers not in the registry (e.g. the authoring bridge) are excluded, so the
+    isolated config home surfaces exactly the declared read-only harness servers.
+    Returns an empty mapping when none match.
+    """
+    home: dict[str, dict[str, Any]] = {}
+    for spec in mcp_servers:
+        name = spec.get("name")
+        if name not in _KNOWN_MCP_SERVERS:
+            continue
+        entry: dict[str, Any] = {"type": "stdio", "command": spec["command"]}
+        if spec.get("args"):
+            entry["args"] = list(spec["args"])
+        if spec.get("env"):
+            entry["env"] = dict(spec["env"])
+        home[name] = entry
+    return home
 
 
 def compose_harness_mcp_servers(

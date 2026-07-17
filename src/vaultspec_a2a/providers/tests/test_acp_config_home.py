@@ -62,6 +62,24 @@ def test_created_home_carries_onboarding_flags_and_no_servers() -> None:
         assert not home.exists()
 
 
+def test_created_home_surfaces_given_servers() -> None:
+    servers = {
+        "vaultspec-rag": {
+            "type": "stdio",
+            "command": "uvx",
+            "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+        }
+    }
+    home = create_isolated_config_home(servers)
+    try:
+        cfg = json.loads((home / ".claude.json").read_text(encoding="utf-8"))
+        # Onboarding flags AND the declared server, so it surfaces as user-global.
+        assert cfg["hasCompletedOnboarding"] is True
+        assert cfg["mcpServers"] == servers
+    finally:
+        cleanup_isolated_config_home(home)
+
+
 def test_cleanup_is_idempotent_and_none_safe() -> None:
     cleanup_isolated_config_home(None)  # no raise
     home = create_isolated_config_home()

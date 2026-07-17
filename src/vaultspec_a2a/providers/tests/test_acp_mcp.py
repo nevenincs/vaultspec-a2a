@@ -12,6 +12,7 @@ from langchain_core.language_models.fake_chat_models import FakeListChatModel
 from ...thread.errors import ConfigError
 from .._acp_mcp import (
     compose_harness_mcp_servers,
+    config_home_mcp_servers,
     harness_allowed_tool_names,
     resolve_harness_mcp_servers,
 )
@@ -164,6 +165,37 @@ def test_compose_allowlist_union_does_not_duplicate() -> None:
         "mcp__vaultspec-rag__search_codebase",
         "mcp__vaultspec-rag__get_code_file",
     ]
+
+
+def test_config_home_servers_selects_registry_known_shapes_for_claude_json() -> None:
+    # From a mixed session set (authoring bridge + harness rag), only the
+    # registry-known harness server is selected and shaped for .claude.json.
+    session = [
+        {"name": "vaultspec-authoring", "command": "node", "args": ["bridge.js"]},
+        {"name": "vaultspec-rag", "command": "uvx",
+         "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"]},
+    ]
+    home = config_home_mcp_servers(session)
+    assert set(home) == {"vaultspec-rag"}
+    assert home["vaultspec-rag"] == {
+        "type": "stdio",
+        "command": "uvx",
+        "args": ["--from", "vaultspec-rag", "vaultspec-search-mcp"],
+    }
+
+
+def test_config_home_servers_preserves_env_when_present() -> None:
+    session = [
+        {"name": "vaultspec-rag", "command": "uvx", "args": ["x"],
+         "env": {"K": "V"}},
+    ]
+    home = config_home_mcp_servers(session)
+    assert home["vaultspec-rag"]["env"] == {"K": "V"}
+
+
+def test_config_home_servers_empty_when_none_registry_known() -> None:
+    session = [{"name": "vaultspec-authoring", "command": "node"}]
+    assert config_home_mcp_servers(session) == {}
 
 
 def test_compose_unknown_name_raises() -> None:

@@ -69,15 +69,26 @@ def should_isolate_config_home(command: list[str], env: dict[str, str]) -> bool:
     return any(env.get(key, "").strip() for key in _ENV_AUTH_KEYS)
 
 
-def create_isolated_config_home() -> Path:
-    """Create and return a fresh per-run ``CLAUDE_CONFIG_DIR`` carrying only flags.
+def create_isolated_config_home(
+    mcp_servers: dict[str, dict[str, object]] | None = None,
+) -> Path:
+    """Create and return a fresh per-run ``CLAUDE_CONFIG_DIR``.
 
-    The caller sets ``CLAUDE_CONFIG_DIR`` to the returned path and MUST call
-    :func:`cleanup_isolated_config_home` when the subprocess has been reaped.
+    The home always carries the onboarding flags. When *mcp_servers* is provided
+    (P03.S14) they are written as the home's user-global ``mcpServers`` so the CLI
+    SURFACES them to the model - the fallback the P02 re-probe made unconditional,
+    since session-injected servers do not surface. Empty/None writes no servers, so
+    the home performs suppression only. The caller sets ``CLAUDE_CONFIG_DIR`` to the
+    returned path and MUST call :func:`cleanup_isolated_config_home` after the
+    subprocess is reaped.
     """
     home = Path(tempfile.mkdtemp(prefix="vaultspec-acp-home-"))
-    _write_config(home, mcp_servers=None)
-    logger.debug("ACP isolated config home created at %s", home)
+    _write_config(home, mcp_servers=mcp_servers)
+    logger.debug(
+        "ACP isolated config home created at %s (surfacing %d server(s))",
+        home,
+        len(mcp_servers or {}),
+    )
     return home
 
 

@@ -33,6 +33,7 @@ __all__ = [
     "expire_pending_permission_requests",
     "get_control_action_by_idempotency_key",
     "get_latest_control_action",
+    "get_or_create_control_action",
     "get_pending_permission_requests",
     "get_permission_request",
     "mark_control_action_applied",
@@ -241,6 +242,49 @@ async def create_control_action(
         result_status=_coerce_control_result(result_status).value,
     )
     return await save_model(session, model)
+
+
+async def get_or_create_control_action(
+    session: AsyncSession,
+    *,
+    thread_id: str,
+    action_type: ControlActionType | str,
+    idempotency_key: str,
+    request_id: str | None = None,
+    payload: dict[str, object] | None = None,
+    worker_generation: int = 0,
+    result_status: ControlActionResultStatus | str = (
+        ControlActionResultStatus.ACCEPTED_NOT_APPLIED
+    ),
+) -> tuple[ControlActionModel, bool]:
+    """Return the journal record for ``(thread_id, idempotency_key)``, inserting it
+    only when absent.
+
+    Idempotency-key inserts must replay as a no-op, never crash: a duplicate key is
+    the SUCCESS signal of an already-applied action, so racing a UNIQUE violation on
+    it contradicts the key's whole purpose. Startup reconciliation re-derives the
+    same key across boots for a thread that has not advanced its epoch (e.g. rows
+    written before the epoch-increment fix), and the app must not die on the second
+    boot. Returns ``(action, created)`` where ``created`` is ``False`` for a replay.
+    """
+    existing = await get_control_action_by_idempotency_key(
+        session,
+        thread_id=thread_id,
+        idempotency_key=idempotency_key,
+    )
+    if existing is not None:
+        return existing, False
+    created = await create_control_action(
+        session,
+        thread_id=thread_id,
+        action_type=action_type,
+        idempotency_key=idempotency_key,
+        request_id=request_id,
+        payload=payload,
+        worker_generation=worker_generation,
+        result_status=result_status,
+    )
+    return created, True
 
 
 async def get_control_action_by_idempotency_key(

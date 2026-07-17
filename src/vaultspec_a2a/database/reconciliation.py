@@ -27,7 +27,7 @@ from ..thread.enums import (
     ThreadStatus,
 )
 from .permission_repository import (
-    create_control_action,
+    get_or_create_control_action,
     get_pending_permission_requests,
 )
 from .thread_repository import (
@@ -89,7 +89,7 @@ async def execute_reconciliation(
         tid = action.thread_id
         epoch = thread_epochs.get(tid, 0)
 
-        repair_action = await create_control_action(
+        repair_action, _created = await get_or_create_control_action(
             session,
             thread_id=tid,
             action_type=ControlActionType.REPAIR_STARTED,
@@ -123,7 +123,7 @@ async def execute_reconciliation(
         repair_action.result_status = ControlActionResultStatus.APPLIED.value
         repair_action.applied_at = None  # filled by caller/commit
 
-        await create_control_action(
+        await get_or_create_control_action(
             session,
             thread_id=tid,
             action_type=ControlActionType.REPAIR_FINISHED,

@@ -88,6 +88,13 @@ def compute_reconciliation_actions(
                     last_applied_action=(
                         ControlActionType.PERMISSION_REQUEST_CREATED.value
                     ),
+                    # Advance the recovery epoch like every other applied outcome:
+                    # it seeds the startup-repair idempotency key, so leaving it at
+                    # the prior value made the next boot re-derive the SAME key and
+                    # crash on the control_actions UNIQUE constraint. Generation is
+                    # deliberately NOT bumped here - a paused_resumable thread must
+                    # resume its pending permission from the existing checkpoint.
+                    increment_recovery_epoch=True,
                 ),
             )
         elif thread.status == ThreadStatus.CANCELLING.value and checkpoint_available:

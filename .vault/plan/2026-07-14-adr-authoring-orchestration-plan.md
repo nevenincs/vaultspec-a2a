@@ -102,6 +102,20 @@ truthful typed unavailable or failure state with no token leakage.
 Revision routing (reject and request-changes verdicts re-entering the
 writer with reviewer notes) must be exercised live at both gates.
 
+Gate standard for the finale (owner directive, 2026-07-15): acceptance
+evidence is a LANE MATRIX, and each lane's evidence must be id, receipt,
+or ledger grade - never narrative. Lanes: (1) EXPLICIT AUTH - per-role
+token provenance on each proposal, plus the negative cases (422 refusal
+matrix, 401 on missing or wrong actor token); (2) EXPLICIT HUMAN
+APPROVAL - including the reject or request-changes path routing reviewer
+notes into the revision loop and then approving the revised document,
+evidenced at the ADR gate; (3) AUTO - a system-class actor approving ON
+the ledger per recorded policy; (4) MIXED - the split run (differing
+policies across the two gates). The real-provider run must re-evidence
+the lanes with real agents, not only the mock-model pass. The review
+gate answers the owner's acceptance sentence directly: evidence that all
+lanes are built out for explicit auth, approval, and auto modes.
+
 Honesty limits: all evidence runs against the loopback engine and native
 probes (Docker unavailable, standing precedent); the docker-compose
 suite runs when infrastructure allows. Testing rules are absolute: no

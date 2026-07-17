@@ -13,16 +13,6 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-worktree-reconciliation-audit]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 # `a2a-edge-conformance` plan
 
 ## Wave `W01` - Salvage verification and hygiene
@@ -161,7 +151,7 @@ Run a multi-role team preset through the engine pass-through and verify every ac
 Close the two dashboard-reported blockers for Transcript live-frame wiring: the stale resident gateway at the :8000 discovery point lacking the run-stream route, and the broken worker-gateway-authoring wiring that kills every run at ingest before progress frames are emitted. Ends with a cross-repo evidence handoff proving contract-correct token, tool_call, and agent_status frames reach the engine relay.
 
 - [x] `W05.P16.S37` - Diagnose and fix the worker-gateway-authoring wiring defect where workers heartbeat a dead gateway port and authoring_backend_reachable is false, causing WorkerExecutionError at graph ingest (httpx.ConnectError) and INGEST_ERROR terminal frames on every run. Ground rag-first in worker_management spawn-env propagation, lifecycle manager env overlay, and registry ProcRecord re-injection. Prove with a live mock-autonomous run that reaches terminal completed while emitting token, tool_call, and agent_status frames; `src/vaultspec_a2a/control/worker_management.py, src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/streaming/, src/vaultspec_a2a/graph/nodes/worker.py`.
-- [ ] `W05.P16.S38` - Promote the current build to the machine-global :8000 discovery point (restart the resident gateway so its OpenAPI serves the run-stream route) and add a doctor staleness check that detects a resident serving an older route set than the installed source, so a stale resident is diagnosable instead of silently 404ing the engine relay; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/cli/, src/vaultspec_a2a/api/`.
+- [x] `W05.P16.S38` - Promote the current build to the machine-global :8000 discovery point (restart the resident gateway so its OpenAPI serves the run-stream route) and add a doctor staleness check that detects a resident serving an older route set than the installed source, so a stale resident is diagnosable instead of silently 404ing the engine relay; `src/vaultspec_a2a/lifecycle/, src/vaultspec_a2a/cli/, src/vaultspec_a2a/api/`.
 - [ ] `W05.P16.S39` - Run the end-to-end D3 relay proof through the engine pass-through stream against the healthy resident stack, capture contract-correct frame evidence (envelope fields, sequence, replay) in the step record, and raise the cross-repo re-arm event to the dashboard team mirroring the S32 pattern; `src/vaultspec_a2a/service_tests/, .vault/exec/`.
 - [x] `W05.P16.S40` - Fix the startup-reconciliation recovery-epoch bug: the paused_resumable repair outcome path never increments threads.recovery_epoch (unlike checkpoint_unavailable), so any subsequent boot re-derives the same startup-repair idempotency key and crashes the whole app with an IntegrityError on the control_actions insert. Increment the epoch on every applied repair outcome and make the idempotency-key insert conflict-tolerant (an already-applied repair replays as a no-op, honoring idempotency semantics instead of crashing). Prove with a live boot-reboot cycle over a thread in paused_resumable state; `src/vaultspec_a2a/database/reconciliation.py, src/vaultspec_a2a/database/tests/`.
 

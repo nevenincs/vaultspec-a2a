@@ -27,8 +27,28 @@ related:
 
 ## Outcome
 
-Doctor now detects a resident gateway serving an older route set than the installed source, without depending on a version string that editable installs do not bump per commit. Verified live against the actual stale `:8000` process. Promotion of `:8000` (restart) is coordinated with the concurrent `exec-s37` worker-wiring fix so the promoted resident carries both changes; see Notes.
+Doctor now detects a resident gateway serving an older route set than the installed source, without depending on a version string that editable installs do not bump per commit. Verified live against the actual stale `:8000` process. Promotion of `:8000` (restart) was sequenced after `exec-s37`'s worker->gateway wiring fix landed (`ee2cdc5`), and is now complete.
+
+Promotion steps performed, in order:
+
+- Confirmed `main` at `ee2cdc5` (exec-s37's fix) locally before restarting anything.
+- Backed up the shared sqlite database (`vaultspec.db`, `-wal`, `-shm`) to sibling `*.bak-2026-07-17-pre-epoch-repair` files before any write, per team-lead's precondition.
+- Applied a scoped, two-row DB repair: `UPDATE threads SET recovery_epoch = 1 WHERE id IN ('pw7-1784286176', 'pw7-1784286557') AND recovery_epoch = 0`. Justification: both threads already carried an applied `repair_started:1` control action (idempotency key `startup-repair:{thread_id}:1`) from an earlier successful reconciliation pass, but `recovery_epoch` was never actually incremented to match, so every subsequent boot re-derived the same idempotency key and crashed on the `control_actions` UNIQUE constraint. Setting `recovery_epoch = 1` brings the row in line with the control action already recorded for it - no other columns or threads touched. The underlying code defect (the `paused_resumable` reconciliation outcome not setting `increment_recovery_epoch`) is out of this step's scope; team-lead has folded it into the plan as `W05.P16.S40` for `exec-s37`.
+- Gracefully stopped the stale resident (`POST /api/admin/shutdown` against pid 45724), confirmed the process exited and the port was free.
+- Booted a fresh resident (`vaultspec-a2a serve`) on `:8000` from current `main`; it came up clean (no repeat of the `IntegrityError`).
+- The pre-existing worker process on `:8001` (pid 35724) was itself stale (its `/health` response lacked the `gateway_url` provenance field `ee2cdc5` added, since it predated that change) and the new gateway had adopted it as externally-managed rather than evicting it (no gateway/worker URL mismatch to trigger eviction - it really was this resident's own worker, just old code). Stopped it via its own `POST /admin/shutdown` and started a fresh `python -m vaultspec_a2a.worker` on `:8001` to complete the promotion end to end.
+- Ran a real smoke dispatch (`run start` with the `mock-success-single` preset) through the promoted gateway to prove the gateway->worker HTTP dispatch path; the run reached the worker and executed (it failed inside graph execution with an unrelated `httpcore.ConnectError`, consistent with a missing companion mock-model service in this ad hoc environment rather than any wiring regression - `worker_ready`/`can_accept_run` on `/v1/service` were `true` throughout).
 
 ## Notes
 
-Restart-promotion of the `:8000` resident is sequenced after `exec-s37`'s worker->gateway wiring fix lands, per task instructions, so the promoted process carries the newest source from both steps. This record will be updated with promotion evidence once that coordination clears.
+Promotion evidence:
+
+- `GET :8000/health` → `200`, `{"status":"ok","service":"gateway","pid":45112,...}`.
+- `GET :8000/openapi.json` → `"paths"` includes `/v1/runs/{run_id}/stream`.
+- `~/.vaultspec-a2a/service.json` → `{"port": 8000, "pid": 45112, "last_heartbeat": <fresh>}` (new pid, matches the current resident; the old pid 45724 record is gone).
+- `doctor --url http://127.0.0.1:8000` → `"stale_resident": false`, `"missing_routes": []`, full `"routes"` list present.
+- `GET :8001/health` (fresh worker) → `{"status":"ok","service":"worker","gateway_url":"http://127.0.0.1:8000",...}` - the live gateway URL provenance field from `ee2cdc5`.
+
+One residual observation, not a regression: the top-level `/health` endpoint's `worker_status` field stayed `"down"` even after the fresh worker connected and successfully executed a dispatch, while `worker_connected` was `true` and `/v1/service`'s `worker_ready`/`can_accept_run` were `true` throughout. This looks like the watchdog's `WorkerState` string not being reconciled for an externally-adopted (not gateway-spawned) worker, distinct from the heartbeat-driven `worker_connected` and probe-backed `/v1/service` readiness fields. Flagging for awareness, not filing as a new bug against this step's scope.
+
+DB backups (untracked, left on disk, not committed): `vaultspec.db.bak-2026-07-17-pre-epoch-repair`, `vaultspec.db-wal.bak-2026-07-17-pre-epoch-repair`, `vaultspec.db-shm.bak-2026-07-17-pre-epoch-repair` in the repo root.

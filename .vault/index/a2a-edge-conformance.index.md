@@ -42,7 +42,9 @@ related:
   - '[[2026-07-14-a2a-edge-conformance-W05-P13-S30]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P14-S31]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P14-S32]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S37]]'
   - '[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S40]]'
   - '[[2026-07-14-a2a-edge-conformance-adr]]'
   - '[[2026-07-14-a2a-edge-conformance-deletion-manifest-reference]]'
   - '[[2026-07-14-a2a-edge-conformance-engine-wire-shapes-reference]]'
@@ -67,6 +69,7 @@ related:
   - '[[2026-07-15-a2a-edge-conformance-w03-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w04-review-audit]]'
   - '[[2026-07-15-a2a-edge-conformance-w05-review-audit]]'
+  - '[[2026-07-17-a2a-edge-conformance-audit]]'
 ---
 
 # `a2a-edge-conformance` feature index
@@ -89,6 +92,7 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-w03-review-audit` - `a2a-edge-conformance` audit: `W03 code review: authoring client and solo-coder proof`
 - `2026-07-15-a2a-edge-conformance-w04-review-audit` - `a2a-edge-conformance` audit: `W04 code review: actor tokens and the five-verb gateway`
 - `2026-07-15-a2a-edge-conformance-w05-review-audit` - `a2a-edge-conformance` audit: `W05 code review and program verdict`
+- `2026-07-17-a2a-edge-conformance-audit` - `a2a-edge-conformance` audit: `w05-p16 review`
 
 ### exec
 
@@ -137,7 +141,9 @@ Auto-generated index of all documents tagged with `#a2a-edge-conformance`.
 - `2026-07-15-a2a-edge-conformance-P02-summary` - `a2a-edge-conformance` `P02` summary
 - `2026-07-15-a2a-edge-conformance-P03-S06` - Run the handover live evidence battery (refusal matrix, idempotent retry same-run, restart recovery, degraded service-state under dependency failures, SSE reconnect, engine pass-through) and document the verb-to-legacy-service mapping with an explicit legacy-route retirement path
 - `2026-07-15-a2a-edge-conformance-P03-summary` - `a2a-edge-conformance` `P03` summary
+- `2026-07-14-a2a-edge-conformance-W05-P16-S37` - Diagnose and fix the worker-gateway-authoring wiring defect where workers heartbeat a dead gateway port and authoring_backend_reachable is false, causing WorkerExecutionError at graph ingest (httpx.ConnectError) and INGEST_ERROR terminal frames on every run. Ground rag-first in worker_management spawn-env propagation, lifecycle manager env overlay, and registry ProcRecord re-injection. Prove with a live mock-autonomous run that reaches terminal completed while emitting token, tool_call, and agent_status frames
 - `2026-07-14-a2a-edge-conformance-W05-P16-S38` - Promote the current build to the machine-global :8000 discovery point (restart the resident gateway so its OpenAPI serves the run-stream route) and add a doctor staleness check that detects a resident serving an older route set than the installed source, so a stale resident is diagnosable instead of silently 404ing the engine relay
+- `2026-07-14-a2a-edge-conformance-W05-P16-S40` - Fix the startup-reconciliation recovery-epoch bug: the paused_resumable repair outcome path never increments threads.recovery_epoch (unlike checkpoint_unavailable), so any subsequent boot re-derives the same startup-repair idempotency key and crashes the whole app with an IntegrityError on the control_actions insert. Increment the epoch on every applied repair outcome and make the idempotency-key insert conflict-tolerant (an already-applied repair replays as a no-op, honoring idempotency semantics instead of crashing). Prove with a live boot-reboot cycle over a thread in paused_resumable state
 
 ### plan
 

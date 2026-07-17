@@ -11,16 +11,6 @@ related:
   - '[[2026-07-17-tool-cores-adr]]'
 ---
 
-<!-- LINK RULES:
-     - [[wiki-links]] are ONLY for .vault/ documents in the
-       related: field above.
-     - The related: field carries the AUTHORISING documents
-       (ADR, research, reference, prior plan) for every Step in
-       this plan. Steps inherit this chain; per-row reference
-       footers do not exist.
-     - NEVER use [[wiki-links]] or markdown links in the
-       document body. -->
-
 # `kimi-provider` plan
 
 ### Phase `P01` - Provider plumbing
@@ -74,7 +64,7 @@ Key-gated: arm the floor and semantic proofs on the Kimi lane to the established
 Dead-code and dedup sweep, mandatory review gate, and plan-exec reconciliation.
 
 - [x] `P06.S19` - Sweep the codebase and vault via rag for dead or duplicate kimi-lane paths and reconcile any found (executor-service); `src/vaultspec_a2a/`.
-- [ ] `P06.S20` - Run the mandatory code-review gate over all landed kimi-provider changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer); `.vault/audit/`.
+- [x] `P06.S20` - Run the mandatory code-review gate over all landed kimi-provider changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer); `.vault/audit/`.
 - [ ] `P06.S21` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service); `.vault/exec/`.
 
 ## Description

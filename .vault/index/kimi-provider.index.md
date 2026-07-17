@@ -22,6 +22,7 @@ related:
   - '[[2026-07-17-kimi-provider-P04-S14]]'
   - '[[2026-07-17-kimi-provider-P04-S15]]'
   - '[[2026-07-17-kimi-provider-adr]]'
+  - '[[2026-07-17-kimi-provider-audit]]'
   - '[[2026-07-17-kimi-provider-dedup-audit]]'
   - '[[2026-07-17-kimi-provider-plan]]'
   - '[[2026-07-17-kimi-provider-research]]'
@@ -39,6 +40,7 @@ Auto-generated index of all documents tagged with `#kimi-provider`.
 
 ### audit
 
+- `2026-07-17-kimi-provider-audit` - `kimi-provider` audit: `S20 holistic safety and intent gate`
 - `2026-07-17-kimi-provider-dedup-audit` - `kimi-provider` audit: `P06.S19 vault dedup sweep — decision-vs-decision, decision-vs-code, and grounding-staleness reconciliation`
 
 ### exec

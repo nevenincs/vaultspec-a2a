@@ -160,6 +160,34 @@ async def test_external_healthy_worker_stale_heartbeat_is_not_restarted() -> Non
 
 
 @pytest.mark.asyncio
+async def test_adopted_worker_recovers_from_transient_down_to_up() -> None:
+    """An adopted worker stuck at "down" must reconcile back to "up" from the live
+    probe. We hold no process handle, so there is no restart path to flip it - the
+    owned-worker state machine's "down stays down until a real recovery" guard would
+    freeze a healthy adopted worker at "down" and make plain /health readiness lie.
+    """
+    with _health_server() as port:
+        # auto_spawn True with no owned process is the same-gateway adoption shape.
+        spawner = LazyWorkerSpawner(f"http://127.0.0.1:{port}", port, auto_spawn=True)
+        spawner.replace_process(None)
+        app_state = _stale_app_state(
+            circuit_breaker=WorkerCircuitBreaker(3, 30.0),
+            worker_spawner=spawner,
+            # Simulate a prior transient dip that latched the worker "down".
+            worker_state=WorkerState(worker_status="down"),
+        )
+        watchdog = _watchdog(spawner, app_state)
+
+        await watchdog._tick()
+
+        ws = app_state.worker_state
+        assert ws.worker_status == "up"
+        # Still never restarted or breaker-forced - it is not ours to restart.
+        assert ws.worker_restart_count == 0
+        assert app_state.circuit_breaker.state == "closed"
+
+
+@pytest.mark.asyncio
 async def test_unowned_down_worker_is_reported_not_restarted() -> None:
     # No listener → worker unreachable; auto_spawn False → external (not ours).
     port = _free_port()

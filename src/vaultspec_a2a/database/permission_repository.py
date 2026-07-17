@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -274,16 +275,32 @@ async def get_or_create_control_action(
     )
     if existing is not None:
         return existing, False
-    created = await create_control_action(
-        session,
-        thread_id=thread_id,
-        action_type=action_type,
-        idempotency_key=idempotency_key,
-        request_id=request_id,
-        payload=payload,
-        worker_generation=worker_generation,
-        result_status=result_status,
-    )
+    # Atomic insert: wrap the INSERT in a SAVEPOINT so a concurrent boot that wins
+    # the race raises IntegrityError on the UNIQUE key, rolls back only the nested
+    # savepoint (leaving the outer transaction usable), and is then resolved by
+    # re-reading the row the winner committed. This closes the lookup-then-insert
+    # time-of-check/time-of-use window so the name matches the guarantee.
+    try:
+        async with session.begin_nested():
+            created = await create_control_action(
+                session,
+                thread_id=thread_id,
+                action_type=action_type,
+                idempotency_key=idempotency_key,
+                request_id=request_id,
+                payload=payload,
+                worker_generation=worker_generation,
+                result_status=result_status,
+            )
+    except IntegrityError:
+        conflicting = await get_control_action_by_idempotency_key(
+            session,
+            thread_id=thread_id,
+            idempotency_key=idempotency_key,
+        )
+        if conflicting is None:
+            raise
+        return conflicting, False
     return created, True
 
 

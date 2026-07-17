@@ -25,6 +25,7 @@ from vaultspec_a2a.database.models import Base
 from vaultspec_a2a.database.permission_repository import (
     create_control_action,
     get_control_action_by_idempotency_key,
+    get_or_create_control_action,
 )
 from vaultspec_a2a.database.reconciliation import reconcile_threads_on_startup
 from vaultspec_a2a.thread.enums import ControlActionType
@@ -148,5 +149,62 @@ async def test_historical_stuck_row_self_heals_without_crashing(runtime_dir) -> 
     assert healed is not None
     # The stuck epoch advanced, so the NEXT boot will derive a fresh, uncollided key.
     assert healed.recovery_epoch == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_get_or_create_control_action_is_idempotent_across_sessions(
+    runtime_dir,
+) -> None:
+    """Two separate sessions requesting the same key yield one row, no duplicate.
+
+    The atomic get-or-create must return the already-committed row on the second
+    call (``created=False``) rather than inserting a duplicate that would violate the
+    UNIQUE constraint - the guarantee its name makes under concurrent boots.
+    """
+    tid = "thread-idempotent-key"
+    key = f"startup-repair:{tid}:1"
+    db_file = runtime_dir / "reconciliation-idempotent.db"
+    engine = create_async_engine(f"sqlite+aiosqlite:///{db_file}")
+    async with engine.begin() as conn:
+        await conn.run_sync(Base.metadata.create_all)
+    session_factory = async_sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+
+    async with session_factory() as session:
+        await create_thread(session, thread_id=tid, status="running")
+        await session.commit()
+
+    async with session_factory() as session_a:
+        row_a, created_a = await get_or_create_control_action(
+            session_a,
+            thread_id=tid,
+            action_type=ControlActionType.REPAIR_STARTED,
+            idempotency_key=key,
+        )
+        await session_a.commit()
+
+    async with session_factory() as session_b:
+        row_b, created_b = await get_or_create_control_action(
+            session_b,
+            thread_id=tid,
+            action_type=ControlActionType.REPAIR_STARTED,
+            idempotency_key=key,
+        )
+        await session_b.commit()
+
+    assert created_a is True
+    assert created_b is False
+    assert row_a.id == row_b.id
+
+    # Exactly one journal row exists for the key.
+    async with session_factory() as session:
+        found = await get_control_action_by_idempotency_key(
+            session, thread_id=tid, idempotency_key=key
+        )
+    assert found is not None
+    assert found.id == row_a.id
 
     await engine.dispose()

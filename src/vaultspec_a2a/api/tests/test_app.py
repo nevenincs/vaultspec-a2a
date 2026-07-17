@@ -128,6 +128,37 @@ async def test_api_health_reports_worker_stderr_log_path(
     assert body["worker_last_restart_detail"] == "returncode=9; stderr_log=example.log"
 
 
+@pytest.mark.asyncio
+async def test_health_ready_for_adopted_worker_without_heartbeat(
+    session_factory,
+    checkpointer,
+) -> None:
+    """A healthy adopted worker with no heartbeat push must report /health ready.
+
+    ``make_app`` wires the adoption shape: a spawner marked spawned with no owned
+    process (``worker_pid`` None) and no ``worker_last_heartbeat_ts`` (so
+    ``worker_connected`` is False). The heartbeat-push gate is authoritative only for
+    an owned worker; for an externally-managed one the probe-driven ``worker_status``
+    governs, so readiness must be True. Before the fix the
+    ``worker_spawned and not worker_connected`` term flipped this to not-ready.
+    """
+    app, _aggregator, _worker, _checkpointer = make_app(session_factory, checkpointer)
+    app.state.worker_state = WorkerState(worker_status="up")
+
+    async with httpx.AsyncClient(
+        transport=ASGITransport(app=app),
+        base_url="http://test",
+    ) as client:
+        resp = await client.get("/health")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["worker_spawned"] is True
+    assert body["worker_pid"] is None
+    assert body["worker_connected"] is False
+    assert body["ready"] is True
+
+
 def test_build_sqlite_fallback_diagnostics_reports_wal_state(tmp_path: Path) -> None:
     """SQLite fallback diagnostics should inspect real file-backed journal mode."""
     case_dir = tmp_path / "api-test-sqlite-health"

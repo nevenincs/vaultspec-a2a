@@ -430,10 +430,17 @@ def create_app(
         dependency readiness is exposed separately via `/api/health`.
         """
         shared = assemble_health_status(app_state=app.state)
+        # The heartbeat-push freshness gate (worker_connected) is authoritative only
+        # for a worker this gateway OWNS (holds the process handle). An adopted /
+        # externally-managed worker (spawned but no owned pid) legitimately may not
+        # push heartbeats this gateway accepts; its liveness is the probe-driven
+        # worker_status, which the watchdog reconciles every tick. Gating readiness on
+        # worker_connected for it would report a healthy adopted worker as not-ready.
+        worker_owned = shared["worker_spawned"] and shared["worker_pid"] is not None
         ready = not (
             shared["circuit_breaker"] == "open"
             or shared["worker_status"] in {"down", "restarting"}
-            or (shared["worker_spawned"] and not shared["worker_connected"])
+            or (worker_owned and not shared["worker_connected"])
         )
         return {
             "status": "ok",

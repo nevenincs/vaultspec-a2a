@@ -656,6 +656,18 @@ class WorkerWatchdog:
             crashed=crashed, stale=stale, http_ready=http_ready
         )
 
+        # --- Adopted / externally-managed worker: reconcile purely from the probe ---
+        # We hold no process handle (same-gateway adoption returns None, or the worker
+        # is owned by the dev-process registry), so there is no restart path that could
+        # ever flip a stuck "down" back up. The owned-worker state machine below keeps a
+        # "down" worker down until a real restart recovers it - correct for a worker we
+        # can restart, but for an adopted one it would freeze a healthy worker's status
+        # at "down"/"pending" and make plain /health readiness lie. Track the live HTTP
+        # probe every tick instead, so an adopted healthy worker reaches "up".
+        if self._spawner.process is None:
+            self._worker_state.worker_status = "up" if http_ready else "down"
+            return
+
         # Promote to "up" only after a positive worker health probe.
         if self._worker_state.worker_status == "pending":
             if http_ready and not needs_recovery:

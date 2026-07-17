@@ -5,9 +5,10 @@ tags:
 date: '2026-07-17'
 modified: '2026-07-17'
 related:
-  - "[[2026-07-14-a2a-edge-conformance-plan]]"
-  - "[[2026-07-14-a2a-edge-conformance-W05-P16-S37]]"
-  - "[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]"
+  - '[[2026-07-14-a2a-edge-conformance-plan]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S37]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S38]]'
+  - '[[2026-07-14-a2a-edge-conformance-W05-P16-S40]]'
 ---
 
 # `a2a-edge-conformance` audit: `w05-p16 review`
@@ -98,6 +99,99 @@ real subprocess workers, and the CLI test mutates the real router around a
 real server with correct restore-on-failure ordering. Plan intent alignment:
 S37 matches its row; e47c882 correctly scopes itself as the S38 code half with
 the operational promotion tracked separately.
+
+### admin-shutdown-unauthenticated-resolved | resolved | Shutdown endpoint now bearer-gated and evictor presents the token
+
+Verified closed in 9556117. The worker shutdown endpoint now carries the same
+internal-bearer dependency as dispatch (shared verifier, so no new asymmetry),
+rejecting unauthenticated loopback callers before the kill handler runs; the
+evictor presents the configured internal token. Tests are real: 401 for
+missing and invalid tokens (before-handler, so the kill never fires), the
+evictor's token accepted by a token-requiring loopback worker, and a tokenless
+evictor rejected leaving the worker alive. Environment nuance recorded: with
+no internal token configured, the verifier intentionally passes in
+DEVELOPMENT — the dev bypass extending to the kill endpoint is
+acceptable-inherited (identical posture to dispatch), hard-fail outside
+DEVELOPMENT.
+
+### sigterm-hard-kill-on-windows-resolved | resolved | Docstrings corrected to the Windows hard-kill reality
+
+Verified closed in 9556117. Both the shutdown endpoint and evictor docstrings
+now state the Windows TerminateProcess reality (immediate, no run draining)
+and that eviction only ever targets a foreign-gateway orphan, so the abrupt
+stop cannot drop this gateway's live work.
+
+### doctor-exit-code-silent-resolved | resolved | Stale resident now carries a distinct exit code
+
+Verified closed in 7a6975c. The doctor exits 3 for a reachable-but-stale
+resident, distinct from transport-error 1 and usage-error 2, evaluated only on
+a successful response; the live test asserts return code 3 alongside the
+positive detection. Automation can key on exit status without parsing JSON.
+
+### legacy-worker-adoption-compat-hole-operationally-closed | resolved | Legacy no-provenance worker reaped during promotion
+
+The operational half is done: the final restart-promotion reaped the
+previously adopted legacy worker, so a gateway-owned worker emitting health
+provenance now holds the port. The compat fallback remains in code by design,
+but no legacy no-provenance resident remains at the discovery point.
+
+### s40-recovery-epoch-increment | resolved | Paused-resumable repair now advances the epoch, matching the resumable sibling branch
+
+Reviewed fresh (7e308cf). The paused-resumable outcome now increments the
+recovery epoch, consistent with every other applied branch: resumable
+branches bump epoch only, checkpoint-lost branches bump generation and epoch.
+Leaving generation unbumped is correct — generation identifies the checkpoint
+and worker incarnation so the pending permission resumes from the existing
+checkpoint, while the epoch is the reconciliation-attempt counter seeding the
+startup-repair idempotency key. Before the fix this was the only applied
+outcome incrementing neither, so the next boot re-derived the same key and
+crashed the unique insert.
+
+### s40-get-or-create-toctou | low | The conflict-tolerant helper is lookup-then-insert, not atomic, under concurrent boots
+
+`get_or_create_control_action` fully solves the targeted sequential-reboot
+replay, but two genuinely concurrent boots against the same database could
+still race the unique violation between lookup and insert. Not reachable in
+practice: startup reconciliation is serial within a boot and concurrent
+same-database residents are prevented by the discovery-point liveness guard.
+Defense-in-depth recommendation, non-blocking: an on-conflict-do-nothing
+insert or savepoint so the helper's name matches its guarantee.
+
+### s40-test-integrity | low | S40 tests are real database plus real checkpointer and reproduce the exact crash state
+
+Real SQLite engine and real checkpointer, no mocks. The boot-reboot test
+drives two real reconciliation passes asserting the epoch sequence and
+per-boot idempotency keys; the self-heal test seeds the precise pre-fix stuck
+state and proves the boot replays the duplicate key as a no-op and advances
+the stuck epoch instead of crashing. Expected values derive from the
+specification, not captured output.
+
+### adopted-worker-status-not-reconciled | medium | Watchdog spawned-gate leaves an adopted worker's status stale, flipping plain health ready to false
+
+Disposition of the promotion observation: a REAL pre-existing defect, not a
+telemetry gap. The plain health ready formula disqualifies on a down or
+restarting worker status, so a healthy adopted worker reads not-ready and can
+mislead external probes. Root cause: the watchdog tick early-returns when this
+gateway spawned no worker, and an adopted worker is never spawned by this
+gateway, so the non-owned reconciliation branch is never reached and the
+status never lifts off its initial value. Not introduced by the reviewed
+commits — the adoption early-return and the spawned-gate both predate S37,
+which changed only the adoption decision, not worker-state reconciliation.
+Does not block PASS: out of the reviewed diff scope, pre-existing, and the
+adopted path is currently unexercised at the promoted resident (the final
+promotion reaped and respawned, so the worker is gateway-owned). Tracked as a
+follow-up plan step.
+
+## Re-review status (2026-07-17)
+
+**Status: PASS.** The high-severity finding and both medium corrections are
+verified closed in 9556117 and 7a6975c with real auth-rejection and exit-code
+tests; the legacy-adoption compat hole is operationally closed by the
+promotion reap. S40 is reviewed fresh and clean. Two non-blocking follow-ups
+remain: the get-or-create conflict-tolerance hardening (low) and the
+adopted-worker status reconciliation (medium, pre-existing, currently
+unexercised at the promoted resident). No critical, no open high — the
+W05.P16 commit set (ee2cdc5, 9556117, 7e308cf, e47c882, 7a6975c) is clear.
 
 ## Recommendations
 

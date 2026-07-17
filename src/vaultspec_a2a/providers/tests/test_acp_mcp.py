@@ -10,7 +10,11 @@ import pytest
 from langchain_core.language_models.fake_chat_models import FakeListChatModel
 
 from ...thread.errors import ConfigError
-from .._acp_mcp import compose_harness_mcp_servers, resolve_harness_mcp_servers
+from .._acp_mcp import (
+    compose_harness_mcp_servers,
+    harness_allowed_tool_names,
+    resolve_harness_mcp_servers,
+)
 from ..acp_chat_model import AcpChatModel
 
 
@@ -22,6 +26,36 @@ def test_resolve_known_server_returns_stdio_spec() -> None:
     assert spec["command"] == "uvx"
     # uvx invokes the published package's console script, cwd-independent.
     assert spec["args"] == ["--from", "vaultspec-rag", "vaultspec-search-mcp"]
+
+
+def test_resolve_launch_spec_excludes_registry_only_tools_metadata() -> None:
+    # ``tools`` is allowlist metadata, not part of the ACP session/new mcpServer
+    # shape; it must never leak into the launch spec advertised to the CLI.
+    spec = resolve_harness_mcp_servers(["vaultspec-rag"])[0]
+    assert "tools" not in spec
+    assert set(spec) <= {"name", "command", "args", "env"}
+
+
+def test_harness_allowed_tool_names_expands_read_tools_to_flat_allowlist() -> None:
+    names = harness_allowed_tool_names(["vaultspec-rag"])
+    # Exactly the read-only tools, in the CLI's flat mcp__<server>__<tool> form.
+    assert names == [
+        "mcp__vaultspec-rag__search_vault",
+        "mcp__vaultspec-rag__search_codebase",
+        "mcp__vaultspec-rag__get_code_file",
+    ]
+    # The rag server's write verbs are never auto-permitted.
+    assert not any("reindex" in n for n in names)
+
+
+def test_harness_allowed_tool_names_empty_is_empty() -> None:
+    assert harness_allowed_tool_names([]) == []
+
+
+def test_harness_allowed_tool_names_unknown_raises_naming_it() -> None:
+    with pytest.raises(ConfigError) as excinfo:
+        harness_allowed_tool_names(["does-not-exist"])
+    assert "does-not-exist" in str(excinfo.value)
 
 
 def test_resolve_unknown_server_raises_naming_it_and_the_known_set() -> None:
@@ -76,6 +110,60 @@ def test_compose_does_not_duplicate_an_already_present_server() -> None:
     twice = compose_harness_mcp_servers(once, ["vaultspec-rag"])
     assert isinstance(twice, AcpChatModel)
     assert [s["name"] for s in twice.mcp_servers] == ["vaultspec-rag"]
+
+
+def test_compose_without_allowlist_leaves_allowed_tools_unchanged() -> None:
+    # The prior behavior: composing servers with no allowlist preserves whatever
+    # allowed_tools the model already carried (e.g. authoring names), and adds
+    # none of the composed servers' tool names.
+    model = AcpChatModel(
+        command=["echo"], env_vars={}, allowed_tools=["mcp__vaultspec-authoring__x"]
+    )
+    composed = compose_harness_mcp_servers(model, ["vaultspec-rag"])
+    assert isinstance(composed, AcpChatModel)
+    assert composed.allowed_tools == ["mcp__vaultspec-authoring__x"]
+
+
+def test_compose_unions_allowlist_with_existing_allowed_tools() -> None:
+    # Closing the attach(combined) gap: the composed server's tool names JOIN the
+    # autonomous allowlist, unioned with (never replacing) the existing authoring
+    # names the worker's authoring-attach step set.
+    model = AcpChatModel(
+        command=["echo"], env_vars={}, allowed_tools=["mcp__vaultspec-authoring__x"]
+    )
+    composed = compose_harness_mcp_servers(
+        model,
+        ["vaultspec-rag"],
+        allowed_tools=harness_allowed_tool_names(["vaultspec-rag"]),
+    )
+    assert isinstance(composed, AcpChatModel)
+    assert composed.allowed_tools == [
+        "mcp__vaultspec-authoring__x",
+        "mcp__vaultspec-rag__search_vault",
+        "mcp__vaultspec-rag__search_codebase",
+        "mcp__vaultspec-rag__get_code_file",
+    ]
+
+
+def test_compose_allowlist_union_does_not_duplicate() -> None:
+    # An allowlist name already present is not appended twice.
+    model = AcpChatModel(
+        command=["echo"],
+        env_vars={},
+        allowed_tools=["mcp__vaultspec-rag__search_vault"],
+    )
+    composed = compose_harness_mcp_servers(
+        model,
+        ["vaultspec-rag"],
+        allowed_tools=harness_allowed_tool_names(["vaultspec-rag"]),
+    )
+    assert isinstance(composed, AcpChatModel)
+    assert composed.allowed_tools.count("mcp__vaultspec-rag__search_vault") == 1
+    assert composed.allowed_tools == [
+        "mcp__vaultspec-rag__search_vault",
+        "mcp__vaultspec-rag__search_codebase",
+        "mcp__vaultspec-rag__get_code_file",
+    ]
 
 
 def test_compose_unknown_name_raises() -> None:

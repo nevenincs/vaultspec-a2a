@@ -20,36 +20,36 @@ Ground the seams, then land the Kimi provider enum, passthrough settings, factor
 Add Kimi (Moonshot AI) as a fourth provider lane on the native-ACP shape, executing the accepted
 `2026-07-17-kimi-provider-adr` with full tool-cores conformance.
 
-- [ ] `P01.S01` - Grounding and dedup gate - via vaultspec-rag semantically ground every seam this plan touches (provider enum, factory dispatch, config settings, ACP session meta sites, request_permission handler, compose_harness_mcp_servers, readiness probe, preset profiles) and confirm no Kimi lane already exists before any coding begins (executor-core); `src/vaultspec_a2a/`.
-- [ ] `P01.S02` - Add Provider.KIMI to the provider enum with its MODEL_MAP and PROVIDER_DEFAULT_MODELS entries, additive and never renaming existing members (executor-core); `src/vaultspec_a2a/graph/enums.py`.
-- [ ] `P01.S03` - Add passthrough Pydantic settings kimi_api_key as SecretStr, kimi_base_url, and kimi_model_name that inject into the subprocess as the CLI native KIMI_API_KEY, KIMI_BASE_URL, and KIMI_MODEL_NAME (executor-core); `src/vaultspec_a2a/control/config.py`.
-- [ ] `P01.S04` - Add the factory KIMI dispatch branch that builds an AcpChatModel on the kimi acp command with the backend discriminator set to the kimi family and Kimi env injected (executor-core); `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P01.S05` - Record the kimi-cli 1.49.0 pin as a named constant co-located with the factory binary-resolution code and surface it in the install hint mirroring the _classify_acp_command pattern, verifying the Git-Bash prerequisite and honoring KIMI_SHELL_PATH (executor-core); `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P01.S06` - Add a probe_provider_readiness KIMI branch that verifies the kimi binary presence and never emits a secret, with unit coverage for the key-present and key-absent branches (executor-service); `src/vaultspec_a2a/providers/model_profiles.py`.
+- [x] `P01.S01` - Grounding and dedup gate - via vaultspec-rag semantically ground every seam this plan touches (provider enum, factory dispatch, config settings, ACP session meta sites, request_permission handler, compose_harness_mcp_servers, readiness probe, preset profiles) and confirm no Kimi lane already exists before any coding begins (executor-core); `src/vaultspec_a2a/`.
+- [x] `P01.S02` - Add Provider.KIMI to the provider enum with its MODEL_MAP and PROVIDER_DEFAULT_MODELS entries, additive and never renaming existing members (executor-core); `src/vaultspec_a2a/graph/enums.py`.
+- [x] `P01.S03` - Add passthrough Pydantic settings kimi_api_key as SecretStr, kimi_base_url, and kimi_model_name that inject into the subprocess as the CLI native KIMI_API_KEY, KIMI_BASE_URL, and KIMI_MODEL_NAME (executor-core); `src/vaultspec_a2a/control/config.py`.
+- [x] `P01.S04` - Add the factory KIMI dispatch branch that builds an AcpChatModel on the kimi acp command with the backend discriminator set to the kimi family and Kimi env injected (executor-core); `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P01.S05` - Record the kimi-cli 1.49.0 pin as a named constant co-located with the factory binary-resolution code and surface it in the install hint mirroring the _classify_acp_command pattern, verifying the Git-Bash prerequisite and honoring KIMI_SHELL_PATH (executor-core); `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P01.S06` - Add a probe_provider_readiness KIMI branch that verifies the kimi binary presence and never emits a secret, with unit coverage for the key-present and key-absent branches (executor-service); `src/vaultspec_a2a/providers/model_profiles.py`.
 
 ### Phase `P02` - ACP conditioning
 
 Condition the Claude-only allowedTools meta behind the backend discriminator so Kimi omits it while the terminal-auth handshake stays unconditional, verified deterministically and against the real installed kimi acp.
 
-- [ ] `P02.S07` - Gate the session-new meta.claudeCode.options.allowedTools emission to the claude family via the backend discriminator so the Kimi lane omits it (executor-core); `src/vaultspec_a2a/providers/_acp_session.py`.
-- [ ] `P02.S08` - Keep the clientCapabilities meta.terminal-auth handshake unconditional and add a deterministic test that the claude and zai families keep the allowedTools meta while kimi omits it (executor-service); `src/vaultspec_a2a/providers/tests/`.
-- [ ] `P02.S09` - Add a real-subprocess keyless handshake test that drives initialize against the installed kimi acp and asserts protocolVersion 1 and the terminal-auth meta family (executor-service); `src/vaultspec_a2a/providers/tests/`.
+- [x] `P02.S07` - Gate the session-new meta.claudeCode.options.allowedTools emission to the claude family via the backend discriminator so the Kimi lane omits it (executor-core); `src/vaultspec_a2a/providers/_acp_session.py`.
+- [x] `P02.S08` - Keep the clientCapabilities meta.terminal-auth handshake unconditional and add a deterministic test that the claude and zai families keep the allowedTools meta while kimi omits it (executor-service); `src/vaultspec_a2a/providers/tests/`.
+- [x] `P02.S09` - Add a real-subprocess keyless handshake test that drives initialize against the installed kimi acp and asserts protocolVersion 1 and the terminal-auth meta family (executor-service); `src/vaultspec_a2a/providers/tests/`.
 
 ### Phase `P03` - Read-only permission layer
 
 Enforce read-only discipline at the request_permission handler as an exact-name auto-approve set, isolate the per-run config from the ambient home, and prove harness composition rides the existing ACP branch through the real compose seam.
 
-- [ ] `P03.S10` - Extend the on_request_permission handler to auto-approve exactly the composed read-tool names plus the enumerated Kimi native read tools in autonomous mode and reject every other request (executor-core); `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
-- [ ] `P03.S11` - Keep supervised-mode prompting unchanged and add deterministic tests for both the autonomous auto-approve-exact branch and the reject-by-default branch (executor-service); `src/vaultspec_a2a/providers/tests/`.
-- [ ] `P03.S12` - Launch kimi acp with a per-run config-file that excludes the ambient home config so ambient Kimi MCP is suppressed (executor-core); `src/vaultspec_a2a/providers/factory.py`.
-- [ ] `P03.S13` - Verify Kimi harness composition rides the existing with_mcp_servers branch by testing through the real compose_harness_mcp_servers seam rather than a direct-field assertion (executor-service); `src/vaultspec_a2a/providers/tests/`.
+- [x] `P03.S10` - Extend the on_request_permission handler to auto-approve exactly the composed read-tool names plus the enumerated Kimi native read tools in autonomous mode and reject every other request (executor-core); `src/vaultspec_a2a/providers/_acp_rpc_handlers.py`.
+- [x] `P03.S11` - Keep supervised-mode prompting unchanged and add deterministic tests for both the autonomous auto-approve-exact branch and the reject-by-default branch (executor-service); `src/vaultspec_a2a/providers/tests/`.
+- [x] `P03.S12` - Launch kimi acp with a per-run config-file that excludes the ambient home config so ambient Kimi MCP is suppressed (executor-core); `src/vaultspec_a2a/providers/factory.py`.
+- [x] `P03.S13` - Verify Kimi harness composition rides the existing with_mcp_servers branch by testing through the real compose_harness_mcp_servers seam rather than a direct-field assertion (executor-service); `src/vaultspec_a2a/providers/tests/`.
 
 ### Phase `P04` - Team surface
 
 Add the skip-loudly Kimi profile overlay and verify persona tool naming against Kimi native read tools.
 
-- [ ] `P04.S14` - Add a team.profiles.kimi overlay to the live document-authoring preset that skips loudly when the key is absent, mirroring the zai profile precedent (executor-service); `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`.
-- [ ] `P04.S15` - Verify the document personas name the composed rag tools and native read tools against Kimi native read tool names and add a lane note only if the wording requires it (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
+- [x] `P04.S14` - Add a team.profiles.kimi overlay to the live document-authoring preset that skips loudly when the key is absent, mirroring the zai profile precedent (executor-service); `src/vaultspec_a2a/team/presets/teams/vaultspec-adr-research.toml`.
+- [x] `P04.S15` - Verify the document personas name the composed rag tools and native read tools against Kimi native read tool names and add a lane note only if the wording requires it (executor-service); `src/vaultspec_a2a/team/presets/agents/vaultspec-researcher.toml`.
 
 ### Phase `P05` - Live proofs
 

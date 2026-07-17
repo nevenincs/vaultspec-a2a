@@ -118,17 +118,53 @@ Zero repository/vault/knowledge mentions of Kimi or Moonshot — genuinely new
 ground; the only prior art is the ZAI/ZHIPU dual-shape precedent and the
 tool-cores contract.
 
-### Open unknowns (probe items before the ADR fixes the shape)
+### Live probe results (kimi-cli 1.49.0 installed via uv tool, 2026-07-17)
 
-1. Does `kimi acp` `session/new` honor inline `mcpServers` (vs only the
-   `--mcp-config-file` flag)?
-2. Does ANY Kimi tool-allowlist/approval-mode mechanism exist?
-3. Is there a non-interactive auth path (env var, or a reusable
-   `~/.kimi/config.toml` under a home-dir override à la `CODEX_HOME`)?
-4. Does the Claude CLI genuinely hold fidelity against Moonshot's
-   Anthropic-compat endpoint (shape a)?
-5. Kimi ACP handshake `_meta`/version quirks (analogue of the
-   claude-agent-acp >=0.20.2 terminal-auth special case)?
+A local install-and-interrogate probe (installed-source reads + a live keyless
+ACP handshake) resolved four of the five unknowns:
+
+- **Session-level `mcpServers`: HONORED.** `acp/mcp.py:13`
+  (`acp_mcp_servers_to_mcp_config`) converts ACP `session/new` `mcpServers`
+  (stdio command/args/env; HTTP url/headers) into Kimi's internal MCP config.
+  Live-confirmed: `session/new` with inline `mcpServers` was accepted at the
+  param level and advanced to the auth check (`-32000 Authentication
+  required` on a dummy key — an auth gate, not a schema rejection). This is
+  the decisive contrast with the Claude lane's registration-scope surfacing
+  gate: Kimi needs NO isolated-config-home workaround for MCP delivery.
+  Full connect-and-surface confirmation still needs a real key.
+- **Allowlist/approval: no pre-declared per-tool allowlist** (no
+  `allowedTools`/`enabled_tools` analogue). Read-only discipline rides (a)
+  the standard ACP `session/request_permission` RPC (`acp/session.py:470`)
+  with approve / approve_for_session / reject — client-side gating our
+  `AcpChatModel` already implements — and (b) blanket `--yolo`/`default_yolo`
+  (`config.py:68`) for headless auto-approval, combined with composing ONLY
+  read-only servers.
+- **Non-interactive auth EXISTS** (contra the doc-inferred risk):
+  `KIMI_API_KEY` (`app.py:722`), `KIMI_BASE_URL` (`:714`, retargets to
+  Moonshot endpoints), `KIMI_MODEL_NAME` (`:738`); `MOONSHOT_API_KEY` is NOT
+  read. Config-direct auth: `LLMProvider.api_key: SecretStr` in config
+  (`config.py:40`), and `resolve_api_key` falls back to the static key
+  (`auth/oauth.py:848`). Per-run isolation: no `KIMI_HOME`, but `--config
+  <inline TOML/JSON>` loads a complete per-run config with NO file
+  (`config.py:63`) and `--config-file <path>` overrides the default
+  `~/.kimi/config.toml` — cleaner isolation than the CODEX_HOME redirect.
+- **Handshake:** `protocolVersion: 1`; agentInfo Kimi Code CLI 1.49.0;
+  `agentCapabilities` incl. `loadSession`, `mcpCapabilities {http: true,
+  sse: false}`; `authMethods[0]._meta.terminal-auth` — the SAME `_meta`
+  family as the claude-agent-acp >=0.20.2 terminal-auth case our client
+  already handles (`_acp_session.py:48`). The auth gate fires at
+  `session/new`, not `initialize`, so the handshake is drivable keyless.
+- CLI surface: subcommands login/logout/term/acp/info/export/mcp/plugin/vis/
+  web; `kimi acp` takes global flags only. Git Bash auto-found;
+  `KIMI_SHELL_PATH` honored. Install footprint: uv tool venv +
+  `~/.local/bin/kimi`.
+
+### Remaining open unknown
+
+4. Claude-CLI fidelity against Moonshot's Anthropic-compat endpoint (shape
+   a) — needs a Moonshot API key; only relevant if the ADR keeps shape (a)
+   as anything more than a rejected alternative. Likewise Kimi's full
+   MCP connect-and-surface behavior post-auth is key-gated.
 
 ## Sources
 

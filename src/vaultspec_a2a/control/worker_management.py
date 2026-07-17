@@ -161,6 +161,69 @@ async def _check_worker_health(
         return False
 
 
+async def _fetch_worker_health(
+    url: str,
+    timeout: float = 2.0,
+) -> dict[str, Any] | None:
+    """Return the worker's ``GET /health`` JSON body, or ``None`` if unhealthy.
+
+    Unlike :func:`_check_worker_health` this hands back the decoded body so the
+    spawn path can read the worker's declared heartbeat target (``gateway_url``)
+    and decide whether the live worker belongs to *this* gateway or is a stale
+    orphan squatting the port.
+    """
+    import httpx
+
+    try:
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{url}/health", timeout=timeout)
+            if resp.status_code != 200:
+                return None
+            body = resp.json()
+    except Exception:
+        return None
+    return body if isinstance(body, dict) else None
+
+
+def _same_gateway(worker_target: object, our_gateway: str) -> bool:
+    """Whether a worker's declared heartbeat target is *this* gateway.
+
+    A missing/blank target (an older worker whose ``/health`` predates the
+    ``gateway_url`` field) is treated as a match so the fix never regresses a
+    correctly-wired legacy worker into a needless eviction; only a present,
+    differing target marks a stale orphan.
+    """
+    if not isinstance(worker_target, str) or not worker_target:
+        return True
+    return worker_target.rstrip("/") == our_gateway.rstrip("/")
+
+
+async def _evict_stale_worker(
+    worker_url: str,
+    worker_port: int,
+    *,
+    timeout: float = 10.0,
+) -> bool:
+    """Ask a stale worker to shut down and wait for the port to free.
+
+    Posts the worker's ``/admin/shutdown`` (graceful ``SIGTERM``) and polls the
+    TCP port until it stops accepting connections. Returns ``True`` once the port
+    is free, ``False`` if it is still bound after *timeout* seconds.
+    """
+    import httpx
+
+    with contextlib.suppress(Exception):
+        async with httpx.AsyncClient() as client:
+            await client.post(f"{worker_url}/admin/shutdown", timeout=2.0)
+
+    deadline = asyncio.get_event_loop().time() + timeout
+    while asyncio.get_event_loop().time() < deadline:
+        if not await _tcp_port_ready("127.0.0.1", worker_port):
+            return True
+        await asyncio.sleep(0.25)
+    return not await _tcp_port_ready("127.0.0.1", worker_port)
+
+
 async def _spawn_worker(
     worker_url: str,
     worker_port: int,
@@ -170,12 +233,33 @@ async def _spawn_worker(
     Returns the ``Process`` handle on success, or ``None`` if the worker
     was already running or failed to start within 30 seconds.
     """
-    if await _check_worker_health(worker_url):
-        logger.info(
-            "Worker already running at %s — skipping auto-spawn",
+    existing = await _fetch_worker_health(worker_url)
+    if existing is not None:
+        if _same_gateway(existing.get("gateway_url"), settings.gateway_url):
+            logger.info(
+                "Worker already running at %s targeting this gateway (%s)"
+                " — skipping auto-spawn",
+                worker_url,
+                settings.gateway_url,
+            )
+            return None
+        # A stale orphan from a dead dev-band gateway is squatting the worker
+        # port: it heartbeats a gateway that no longer exists and would never be
+        # re-pointed. Evict it and spawn a fresh worker wired to THIS gateway.
+        logger.warning(
+            "Worker at %s targets a foreign gateway (%s != %s) — evicting the"
+            " stale orphan before spawning a fresh worker",
             worker_url,
+            existing.get("gateway_url"),
+            settings.gateway_url,
         )
-        return None
+        if not await _evict_stale_worker(worker_url, worker_port):
+            logger.error(
+                "Stale worker at %s did not release port %d — new spawn will"
+                " likely fail to bind; manual reap may be required",
+                worker_url,
+                worker_port,
+            )
 
     logger.info(
         "Auto-spawning worker on port %d",

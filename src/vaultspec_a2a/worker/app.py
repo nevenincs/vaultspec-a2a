@@ -232,10 +232,19 @@ def create_worker_app(lifespan: Any | None = None) -> FastAPI:
 
     @app.get("/health")
     async def health_endpoint() -> dict[str, object]:
-        """Worker health check."""
+        """Worker health check.
+
+        Reports the worker's configured heartbeat target (``gateway_url``) so
+        a spawning gateway can tell a worker that points at *this* gateway apart
+        from a stale orphan still pointing at a dead dev-band gateway. Without
+        this provenance the spawn path would blindly adopt the orphan and it
+        would heartbeat a dead port forever.
+        """
         return {
             "status": "ok",
             "service": "worker",
+            "gateway_url": settings.gateway_url,
+            "worker_port": settings.worker_port,
             "database_backend": settings.resolved_database_backend,
             "checkpoint_backend": settings.resolved_checkpoint_backend,
             "postgres_required": settings.postgres_required,

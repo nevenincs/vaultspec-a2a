@@ -346,6 +346,78 @@ async def test_get_feedback_batch_unknown_id_faults(client: AuthoringClient) -> 
 
 @pytest.mark.service
 @pytest.mark.asyncio
+async def test_close_session_transitions_active_to_closed(
+    client: AuthoringClient,
+) -> None:
+    """The a2a submit-success caller closes its authoring session benignly (S13).
+
+    a2a-driven work leaves an Active session with no run (it proposes directly,
+    never starts a run). At run-settle SUCCESS the worker closes it via
+    ``close_authoring_session`` -> Active becomes Closed, and the active-run guard
+    never fires because a2a creates no run. Idempotent by contract.
+    """
+    from .. import close_authoring_session
+    from .._ids import derive_idempotency_key
+
+    run_id = f"s13-{uuid.uuid4().hex[:8]}"
+    session = await _authenticated_session(client, run_id)
+    assert session.session_id is not None
+
+    result = await close_authoring_session(
+        client,
+        session.session_id,
+        idempotency_key=derive_idempotency_key(run_id, "close_session"),
+    )
+    assert isinstance(result, AuthoringResponse)
+    assert isinstance(result.data, dict)
+    assert result.data["status"] == "closed"
+    assert result.data["snapshot"]["session"]["status"] == "closed"
+
+    # Idempotent: a re-close (different key) is a 200 no-op, still closed.
+    again = await close_authoring_session(
+        client,
+        session.session_id,
+        idempotency_key=derive_idempotency_key(run_id, "close_session_again"),
+    )
+    assert isinstance(again, AuthoringResponse)
+    assert again.data["status"] == "closed"
+
+    # The durable snapshot reads back closed.
+    snap = await client.get(f"/v1/sessions/{session.session_id}")
+    assert snap.data["session"]["status"] == "closed"
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
+async def test_close_session_is_a_benign_noop_on_a_cancelled_session(
+    client: AuthoringClient,
+) -> None:
+    """Close never overwrites a cancelled terminal (benign no-op, stays cancelled)."""
+    from .. import close_authoring_session
+    from .._ids import derive_idempotency_key
+
+    run_id = f"s13c-{uuid.uuid4().hex[:8]}"
+    session = await _authenticated_session(client, run_id)
+    assert session.session_id is not None
+    # Cancel the session first (session-wide cancel), then attempt a benign close.
+    await client.post_command(
+        f"/v1/sessions/{session.session_id}/cancel",
+        "cancel_session",
+        {"reason": "benign-close test setup"},
+        idempotency_key=derive_idempotency_key(run_id, "cancel_session"),
+    )
+    closed = await close_authoring_session(
+        client,
+        session.session_id,
+        idempotency_key=derive_idempotency_key(run_id, "close_after_cancel"),
+    )
+    assert isinstance(closed, AuthoringResponse)
+    # Close on an already-cancelled session leaves it cancelled (no overwrite).
+    assert closed.data["snapshot"]["session"]["status"] == "cancelled"
+
+
+@pytest.mark.service
+@pytest.mark.asyncio
 async def test_unknown_actor_token_is_typed_401(client: AuthoringClient) -> None:
     run_id = f"s17-{uuid.uuid4().hex[:8]}"
     with pytest.raises(AuthoringTransportError) as exc:

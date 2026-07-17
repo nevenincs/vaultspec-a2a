@@ -32,6 +32,12 @@ if TYPE_CHECKING:
 
 __all__ = ["ConcurrentCapError", "Executor", "GraphCompilationError"]
 
+# The document-authoring role whose actor token closes the run's engine session.
+# It is the session's owner: the submitter's constant create_session key opens the
+# session once, in the research phase, under this role. The benign close is
+# dual-auth (ResolvedCommand principal), so the owner token is the right principal.
+_CLOSE_SESSION_ROLE = "vaultspec-synthesist"
+
 
 class ConcurrentCapError(RuntimeError):
     """Raised when the worker concurrent thread cap is reached."""
@@ -184,6 +190,72 @@ class Executor:
         self._aggregator.prune_sequences(active_snapshot)
         # Prune permissions older than 5 minutes regardless of thread state.
         self._aggregator.prune_stale_permissions()
+
+    async def _close_authoring_session_best_effort(
+        self, thread_id: str, graph: StreamableGraph, config: dict[str, Any]
+    ) -> None:
+        """Close the run's engine authoring session on a SUCCESSFUL settle.
+
+        An a2a document-authoring run opens an engine session (``create_session``
+        -> Active) and never closes it: it proposes directly and never starts a
+        run, so the engine's run lifecycle never reaps the session. On the run's
+        terminal SUCCESS this closes it benignly (``session.closed``). Called AFTER
+        the run's own terminal status has landed, so a slow or failing close can
+        neither delay nor contaminate the run's settle.
+
+        Best-effort by contract: a missing session id (non-authoring run), missing
+        credentials, an unreachable engine, or a close fault all degrade to a
+        logged no-op - a completion-time housekeeping call must NEVER fail an
+        already-succeeded run. Idempotent per the route; the route's active-run
+        guard never fires because a2a-driven work creates no engine run. Runs the
+        state read before the token store is dropped (this is invoked ahead of
+        ``_mark_ingest_done``), so the session owner's actor token is still held.
+        """
+        from ..authoring import (
+            AuthoringClient,
+            close_authoring_session,
+            resolve_engine,
+        )
+        from ..authoring._ids import derive_idempotency_key
+
+        try:
+            snapshot = await asyncio.wait_for(
+                graph.aget_state(config),
+                timeout=domain_config.aget_state_timeout_seconds,
+            )
+            values = getattr(snapshot, "values", None)
+            session_id = (
+                values.get("authoring_session_id") if isinstance(values, dict) else None
+            )
+            if not isinstance(session_id, str) or not session_id:
+                return  # non-authoring run — no engine session to close
+            bearer = self._token_store.engine_bearer(thread_id)
+            actor_token = self._token_store.actor_token(
+                thread_id, _CLOSE_SESSION_ROLE
+            )
+            engine = resolve_engine()
+            if not bearer or not actor_token or engine is None:
+                return  # no credentials or no reachable engine — degrade silently
+            async with AuthoringClient(
+                engine.base_url,
+                bearer,
+                actor_token=actor_token,
+                bearer_resolver=resolve_engine,
+            ) as client:
+                await close_authoring_session(
+                    client,
+                    session_id,
+                    idempotency_key=derive_idempotency_key(thread_id, "close_session"),
+                )
+        except Exception:
+            # Best-effort housekeeping AFTER a successful settle: never propagate.
+            # A benign session close is not run-lifecycle-critical (the engine's
+            # session retention is the backstop), so any fault degrades to a log.
+            logger.warning(
+                "best-effort close of the authoring session for run %s failed",
+                thread_id,
+                exc_info=True,
+            )
 
     async def handle_dispatch(self, req: DispatchRequest) -> None:
         """Route a ``DispatchRequest``; top-level guard protects the task group."""
@@ -395,6 +467,16 @@ class Executor:
                     config,
                 )
                 await self._state_projector.emit_terminal_status(req.thread_id, outcome)
+                # Benign session close on SUCCESS only, AFTER the run's terminal
+                # status has landed and BEFORE _mark_ingest_done drops the run's
+                # tokens (the close needs the session owner's token). Cancel/fail
+                # outcomes emit their own terminal above and never reach this arm.
+                # Both the ingest and resume settles reach here: a gated research_adr
+                # run completes on the FINAL gate resume, so the close must cover it.
+                if outcome == ThreadStatus.COMPLETED:
+                    await self._close_authoring_session_best_effort(
+                        req.thread_id, cast("StreamableGraph", graph), config
+                    )
                 await self._mark_ingest_done(req.thread_id, outcome)
 
     async def _handle_resume(self, req: DispatchRequest) -> None:
@@ -520,6 +602,16 @@ class Executor:
                     config,
                 )
                 await self._state_projector.emit_terminal_status(req.thread_id, outcome)
+                # Benign session close on SUCCESS only, AFTER the run's terminal
+                # status has landed and BEFORE _mark_ingest_done drops the run's
+                # tokens (the close needs the session owner's token). Cancel/fail
+                # outcomes emit their own terminal above and never reach this arm.
+                # Both the ingest and resume settles reach here: a gated research_adr
+                # run completes on the FINAL gate resume, so the close must cover it.
+                if outcome == ThreadStatus.COMPLETED:
+                    await self._close_authoring_session_best_effort(
+                        req.thread_id, cast("StreamableGraph", graph), config
+                    )
                 await self._mark_ingest_done(req.thread_id, outcome)
 
     async def shutdown(self) -> None:

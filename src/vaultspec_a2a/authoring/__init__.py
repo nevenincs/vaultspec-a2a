@@ -44,6 +44,7 @@ from .lifecycle import changeset_status_verdict as changeset_status_verdict
 from .lifecycle import parse_sse_frame as parse_sse_frame
 from .lifecycle import verdict_from_event as verdict_from_event
 from .session import AuthoringSession as AuthoringSession
+from .session import close_authoring_session as close_authoring_session
 from .session import mint_actor_token as mint_actor_token
 from .submitter import CredentialsMissingError as CredentialsMissingError
 from .submitter import DocumentConformanceError as DocumentConformanceError
@@ -90,6 +91,7 @@ __all__ = [
     "SubmitterError",
     "approval_decision_verdict",
     "changeset_status_verdict",
+    "close_authoring_session",
     "derive_idempotency_key",
     "execute_agent_tool",
     "fetch_catalog",

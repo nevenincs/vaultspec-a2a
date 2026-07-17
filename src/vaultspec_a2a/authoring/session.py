@@ -15,6 +15,7 @@ append_draft, replace_draft, submit_for_review, rebase. Reads
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
+from urllib.parse import quote
 
 from ._envelope import AuthoringResponse
 from ._ids import derive_idempotency_key, validate_id
@@ -23,9 +24,37 @@ if TYPE_CHECKING:
     from ._envelope import Denial
     from .client import AuthoringClient
 
-__all__ = ["AuthoringSession", "mint_actor_token"]
+__all__ = ["AuthoringSession", "close_authoring_session", "mint_actor_token"]
 
 _ACTOR_TOKENS_PATH = "/v1/actor-tokens"
+
+
+async def close_authoring_session(
+    client: AuthoringClient,
+    session_id: str,
+    *,
+    idempotency_key: str,
+    reason: str | None = None,
+) -> AuthoringResponse | Denial:
+    """Close an engine authoring session benignly (``close_session``).
+
+    ``POST /authoring/v1/sessions/{session_id}/close`` transitions the session
+    ``Active -> Closed`` (stamps ``closed_at_ms``, emits ``session.closed`` on the
+    durable feed) without tearing down its authoring work - the benign terminal a
+    run's owner calls once its work has SUCCEEDED, distinct from ``cancel_session``.
+    Idempotent by the route's contract (re-close or an already-cancelled session is
+    a 200 no-op). The route REFUSES (422) while a run is genuinely active on the
+    session; a2a-driven work creates no runs, so that guard never fires here.
+
+    Takes the engine ``session_id`` string directly (the caller holds it from run
+    state, not a bound :class:`AuthoringSession`). Dual-auth: the client's machine
+    bearer plus its per-actor token.
+    """
+    path = f"/v1/sessions/{quote(session_id, safe='')}/close"
+    payload: dict[str, Any] = {} if reason is None else {"reason": reason}
+    return await client.post_command(
+        path, command="close_session", payload=payload, idempotency_key=idempotency_key
+    )
 
 
 async def mint_actor_token(

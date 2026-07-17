@@ -97,6 +97,11 @@ class ProcRecord:
     last_seen_ms: int = 0
     log_path: str | None = None
     owner: str = ""
+    # The explicit engine discovery file (VAULTSPEC_ENGINE_SERVICE_JSON) the worker
+    # needs to find its engine. Recorded here - not committed to procs.toml, it is a
+    # machine path - and re-injected on every boot/resume so an engine reseat can no
+    # longer strand the worker via invisible shell-inherited env. Empty means unset.
+    engine_service_json: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -181,6 +186,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         last_seen_ms=_opt_int("last_seen_ms"),
         log_path=_opt_str_or_none("log_path"),
         owner=_opt_str("owner"),
+        engine_service_json=_opt_str("engine_service_json"),
     )
 
 

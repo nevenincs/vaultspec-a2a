@@ -21,6 +21,7 @@ import pytest
 
 from ..discovery import is_pid_alive
 from ..manager import (
+    _ENGINE_SERVICE_JSON_ENV,
     LifecycleError,
     _build_cwd_for,
     _serve_cwd_for,
@@ -333,6 +334,105 @@ def test_serve_env_carries_identity_and_rendered_role_env() -> None:
     assert env["VAULTSPEC_PORT"] == "18103"
     assert env["VAULTSPEC_PROCS_NAME"] == "g1"
     assert env["VAULTSPEC_PROCS_OWNER"] == "sess-a"
+
+
+def test_serve_env_injects_engine_service_json_only_when_set() -> None:
+    role = RoleConfig(
+        name="worker-dev",
+        band=PortBand(18110, 18119),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=["x"],
+        env={"VAULTSPEC_WORKER_PORT": "{port}"},
+    )
+    with_seat = _serve_env(
+        role,
+        port=18110,
+        workspace="ws",
+        name="w1",
+        owner="s",
+        engine_service_json="C:/seat/service.json",
+    )
+    assert with_seat[_ENGINE_SERVICE_JSON_ENV] == "C:/seat/service.json"
+    assert with_seat["VAULTSPEC_WORKER_PORT"] == "18110"
+    # An unset seat injects nothing (records predating the field keep prior behaviour).
+    without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
+    assert _ENGINE_SERVICE_JSON_ENV not in without
+
+
+def test_engine_service_json_env_name_matches_the_discovery_contract() -> None:
+    # The lifecycle constant mirrors authoring.discovery.SERVICE_JSON_ENV across an
+    # intentional import boundary (lifecycle must not import the engine client); this
+    # sync test pins them equal so the two literals cannot drift.
+    from ...authoring.discovery import SERVICE_JSON_ENV
+
+    assert _ENGINE_SERVICE_JSON_ENV == SERVICE_JSON_ENV
+
+
+# A serve command that records the injected engine-discovery env var into a file,
+# then binds the port so serve_up sees a live listener - proving the var reached the
+# child process environment end to end.
+_ENV_PROBE_SERVE = (
+    "import socket,os,sys,time,pathlib;"
+    "pathlib.Path(sys.argv[2]).write_text("
+    "os.environ.get('VAULTSPEC_ENGINE_SERVICE_JSON',''));"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
+)
+
+
+def test_serve_up_records_and_injects_engine_service_json(tmp_path) -> None:
+    sentinel = tmp_path / "seen-env.txt"
+    seat = str(tmp_path / "engine-service.json")
+    serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
+    config = _serve_config(serve, band=(18990, 18992))
+    record = serve_up(
+        "scratch",
+        "w",
+        home=tmp_path,
+        config=config,
+        engine_service_json=seat,
+        ready_timeout=15.0,
+    )
+    try:
+        assert record.engine_service_json == seat
+        persisted = read_record(record_path("scratch", "w", home=tmp_path))
+        assert persisted is not None
+        assert persisted.engine_service_json == seat
+        # The listener implies the child already wrote the sentinel (write precedes
+        # bind in the probe), so the var demonstrably reached the child env.
+        assert sentinel.read_text() == seat
+    finally:
+        tree_kill(record.pid)
+
+
+def test_resume_reproduces_recorded_engine_service_json(tmp_path) -> None:
+    sentinel = tmp_path / "resume-env.txt"
+    seat = str(tmp_path / "engine-service.json")
+    serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
+    config = _serve_config(serve, band=(18990, 18992))
+    # A died record carrying an engine seat: resume must re-inject it from the record,
+    # not depend on the resuming shell - the whole point of recording it.
+    write_record(
+        _record(
+            name="rev",
+            role="scratch",
+            pid=_dead_pid(),
+            port=18990,
+            engine_service_json=seat,
+        ),
+        home=tmp_path,
+    )
+    updated = resume("rev", home=tmp_path, config=config)
+    try:
+        assert updated.engine_service_json == seat
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not sentinel.exists():
+            time.sleep(0.05)
+        assert sentinel.read_text() == seat
+    finally:
+        tree_kill(updated.pid)
 
 
 def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:

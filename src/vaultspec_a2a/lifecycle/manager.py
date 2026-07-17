@@ -71,6 +71,10 @@ __all__ = [
 
 _OWNER_ENV = "VAULTSPEC_PROCS_OWNER"
 _NAME_ENV = "VAULTSPEC_PROCS_NAME"
+# Mirrors authoring.discovery.SERVICE_JSON_ENV. Held as a local literal rather than
+# imported to keep lifecycle free of an authoring (engine-client) import edge; a
+# sync test pins the two equal so they cannot drift.
+_ENGINE_SERVICE_JSON_ENV = "VAULTSPEC_ENGINE_SERVICE_JSON"
 _KILL_POLL_INTERVAL = 0.1
 
 
@@ -420,7 +424,13 @@ def reap(
 
 
 def _serve_env(
-    role_cfg: RoleConfig, *, port: int, workspace: str, name: str, owner: str
+    role_cfg: RoleConfig,
+    *,
+    port: int,
+    workspace: str,
+    name: str,
+    owner: str,
+    engine_service_json: str = "",
 ) -> dict[str, str]:
     """The env overlay for a boot: the role's rendered port/config vars plus identity.
 
@@ -428,10 +438,18 @@ def _serve_env(
     self-registers (a gateway/worker booted on a band port) converges onto THIS
     record - same ``(role, name)`` and owner - and refreshes it, instead of writing
     a second, foreign-owned record that the owner-check would then refuse.
+
+    A recorded *engine_service_json* is injected under
+    :data:`_ENGINE_SERVICE_JSON_ENV` so the worker's engine discovery no longer
+    depends on the booting shell having exported it - the reseat-strands-worker gap.
+    An empty value injects nothing (discovery then falls back to its default
+    candidate), matching the prior behaviour for records that predate this field.
     """
     env = render_env(role_cfg.env, port=port, workspace=workspace)
     env[_NAME_ENV] = name
     env[_OWNER_ENV] = owner
+    if engine_service_json:
+        env[_ENGINE_SERVICE_JSON_ENV] = engine_service_json
     return env
 
 
@@ -442,6 +460,7 @@ def serve_up(
     workspace: str = "",
     repo: str = "",
     build_repo: str = "",
+    engine_service_json: str = "",
     owner: str | None = None,
     log_path: str | None = None,
     ready_timeout: float = 20.0,
@@ -489,6 +508,7 @@ def serve_up(
                 workspace=workspace,
                 name=name,
                 owner=owner_label,
+                engine_service_json=engine_service_json,
             )
             process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
             if _await_listener(reservation.port, process, timeout=ready_timeout):
@@ -507,6 +527,7 @@ def serve_up(
                     last_seen_ms=stamp,
                     log_path=log_path,
                     owner=owner_label,
+                    engine_service_json=engine_service_json,
                 )
                 commit_reservation(reservation, record, home=home)
                 held.remove(reservation)
@@ -608,6 +629,7 @@ def _start_from_record(
         workspace=record.workspace,
         name=record.name,
         owner=record.owner or default_owner(),
+        engine_service_json=record.engine_service_json,
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)

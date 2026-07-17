@@ -311,6 +311,14 @@ def procs_reap() -> None:
     "cargo workspace). Recorded per process; defaults to --repo.",
 )
 @click.option(
+    "--engine-service-json",
+    "engine_service_json",
+    default="",
+    help="Path to the engine's service.json (VAULTSPEC_ENGINE_SERVICE_JSON) for a "
+    "worker's engine discovery. Recorded per process and re-injected on "
+    "resume/rerun so an engine reseat cannot strand the worker.",
+)
+@click.option(
     "--log", "log_path", default=None, help="Append process output to this file."
 )
 def procs_up(
@@ -319,6 +327,7 @@ def procs_up(
     workspace: str,
     repo: str,
     build_repo: str,
+    engine_service_json: str,
     log_path: str | None,
 ) -> None:
     """Allocate a band port, boot the role's serve command, and register it.
@@ -328,6 +337,8 @@ def procs_up(
     concurrent same-band boots can never collide on a port. ``--build-repo``
     captures a build tree distinct from the serve tree (engine-dev) into the
     record so rebuild/rerun run cargo where the workspace actually lives.
+    ``--engine-service-json`` pins a worker's engine discovery file into the
+    record so resume/rerun reproduce it rather than leaning on shell state.
     """
     from ..lifecycle.manager import endpoint_for, serve_up
 
@@ -338,6 +349,7 @@ def procs_up(
             workspace=workspace,
             repo=repo,
             build_repo=build_repo,
+            engine_service_json=engine_service_json,
             log_path=log_path,
         )
     except Exception as exc:

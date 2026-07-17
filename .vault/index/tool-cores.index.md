@@ -28,6 +28,9 @@ related:
   - '[[2026-07-17-tool-cores-P04-S20]]'
   - '[[2026-07-17-tool-cores-P04-S21]]'
   - '[[2026-07-17-tool-cores-P05-S22]]'
+  - '[[2026-07-17-tool-cores-P05-S23]]'
+  - '[[2026-07-17-tool-cores-P05-S24]]'
+  - '[[2026-07-17-tool-cores-P05-S25]]'
   - '[[2026-07-17-tool-cores-adr]]'
   - '[[2026-07-17-tool-cores-audit]]'
   - '[[2026-07-17-tool-cores-dedup-audit]]'
@@ -74,6 +77,9 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 - `2026-07-17-tool-cores-P04-S20` - Prove live on the Codex lane that a document agent reads a named .vault ADR via read-only sandbox filesystem access mid-turn and cites it, real run with no mocks and zero .vault writes (executor-service)
 - `2026-07-17-tool-cores-P04-S21` - Prove live that a Codex document agent invokes vaultspec-rag search mid-turn under approval-policy never and sandbox read-only, capturing the tool-call trace and confirming citations resolve, real run with no mocks (executor-service)
 - `2026-07-17-tool-cores-P05-S22` - Remove the superseded allowlist-less attach-combined path and any other code the landed composition mechanism supersedes (executor-core)
+- `2026-07-17-tool-cores-P05-S23` - Sweep the vault via rag semantic search for duplicate or overlapping tool-cores records and reconcile any found, keeping one record per decision (executor-service)
+- `2026-07-17-tool-cores-P05-S24` - Run the mandatory code-review gate over all landed tool-cores changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer)
+- `2026-07-17-tool-cores-P05-S25` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service)
 
 ### plan
 

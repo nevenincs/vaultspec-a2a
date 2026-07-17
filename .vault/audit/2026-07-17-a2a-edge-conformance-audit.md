@@ -182,6 +182,32 @@ adopted path is currently unexercised at the promoted resident (the final
 promotion reaped and respawned, so the worker is gateway-owned). Tracked as a
 follow-up plan step.
 
+### admin-shutdown-auth-closure-scope | resolved | Code-level closure is real and fail-closed outside development
+
+Clarifies admin-shutdown-unauthenticated-resolved. The dependency wiring in
+9556117 is a genuine closure, not env-cosmetic: whenever the internal token is
+set the shutdown endpoint enforces an exact bearer match (401 otherwise), and
+when the token is unset it hard-fails with 500 (misconfigured) in every
+environment except DEVELOPMENT — the kill handler is unreachable in staging
+or production without a configured token. Auth is closed and fail-safe in
+every deployed non-dev posture. The only residual exposure is the DEVELOPMENT
+tokenless bypass, dispositioned separately below.
+
+### admin-shutdown-dev-bypass-inherited | low | The shutdown endpoint inherits the project-wide DEVELOPMENT auth bypass
+
+In DEVELOPMENT with the internal token unset, the verifier returns OK for a
+tokenless caller by design, so the newly-guarded shutdown endpoint accepts
+tokenless kills on a dev box — the same bypass the dispatch endpoint already
+rides. Assessed acceptable-inherited, not a reopening of the high finding:
+it is the sanctioned project-wide IPC posture applied uniformly with no
+shutdown-specific asymmetry, it fails closed outside DEVELOPMENT, and the
+dev-box threat model already grants any local process far more than a worker
+kill (the worker is trivially re-spawned on the next dispatch, which is the
+eviction path's premise). Optional non-blocking defense-in-depth: the
+shutdown endpoint could opt out of the DEVELOPMENT bypass and require a token
+even in dev, since a kill is more destructive than a dispatch. Recorded so a
+future reader sees the sharper edge was considered and consciously accepted.
+
 ## Re-review status (2026-07-17)
 
 **Status: PASS.** The high-severity finding and both medium corrections are

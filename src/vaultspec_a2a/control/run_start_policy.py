@@ -61,6 +61,21 @@ def required_role_ids(team_config: TeamConfig) -> list[str]:
     return [worker.agent_id for worker in team_config.workers]
 
 
+def _missing_role_tokens(
+    team_config: TeamConfig, actor_tokens: ActorTokenBundle | None
+) -> list[str]:
+    """Return required roles whose actor token is absent from *actor_tokens*.
+
+    Coverage is per-role by explicit presence, never shared: a role must carry
+    its own token so one role's bridge or submitter can never route under
+    another's principal.
+    """
+    provided_roles = set(actor_tokens.tokens) if actor_tokens is not None else set()
+    return [
+        role for role in required_role_ids(team_config) if role not in provided_roles
+    ]
+
+
 def evaluate_run_start_eligibility(
     team_config: TeamConfig,
     *,
@@ -76,10 +91,27 @@ def evaluate_run_start_eligibility(
     so coverage is checked by explicit per-role presence. Run-start REFUSES on an
     incomplete harness (the discovery-vs-launch binding: discovery serves the
     reason, launch refuses), unlike the acceptance gate which only certifies at
-    discovery. Non-authoring presets carry none of these requirements here. The
+    discovery. A CODING preset that arms the engine authoring bridge
+    (``[team.harness] authoring_bridge = true``) also requires per-role token
+    coverage - each worker's bridge routes engine tool execution under that role's
+    actor token - so the engine role-key gap becomes a cheap run-start refusal
+    here rather than an opaque mid-run failure; it needs no feature tag or harness
+    surfaces. Other non-authoring presets carry none of these requirements. The
     reason string is safe to surface.
     """
     if not is_document_authoring_preset(team_config):
+        harness_cfg = team_config.effective_harness()
+        if harness_cfg is not None and harness_cfg.authoring_bridge:
+            missing = _missing_role_tokens(team_config, actor_tokens)
+            if missing:
+                return RunStartEligibility(
+                    eligible=False,
+                    reason=(
+                        "authoring_bridge preset "
+                        f"{team_config.id!r} is missing an actor token for "
+                        f"role(s): {missing}"
+                    ),
+                )
         return RunStartEligibility(eligible=True)
 
     if not feature_tag:
@@ -91,10 +123,7 @@ def evaluate_run_start_eligibility(
             ),
         )
 
-    provided_roles = set(actor_tokens.tokens) if actor_tokens is not None else set()
-    missing = [
-        role for role in required_role_ids(team_config) if role not in provided_roles
-    ]
+    missing = _missing_role_tokens(team_config, actor_tokens)
     if missing:
         return RunStartEligibility(
             eligible=False,

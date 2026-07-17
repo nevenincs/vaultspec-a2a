@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from vaultspec_a2a.authoring import FeedbackContextReader
     from vaultspec_a2a.providers._acp_authoring import AuthoringToolBinding
+    from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
 
 _logger = logging.getLogger(__name__)
 
@@ -492,7 +493,7 @@ def create_worker_node(
     workspace_root: Path | None = None,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
-    authoring_binding: "AuthoringToolBinding | None" = None,
+    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     role: str | None = None,
     harness_mcp_servers: list[str] | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
@@ -509,11 +510,14 @@ def create_worker_node(
         task_queue_port:   Optional database-backed queue port; when present the
                            mark-task-complete tool is bound per invocation to the
                            running thread.
-        authoring_binding: Optional per-run binding of the engine's bridged
-                           authoring tools; when present and the model exposes an
-                           ACP MCP surface, the spawned CLI session advertises the
-                           loopback authoring MCP server so the agent sees the
-                           propose/read tools and no vault-write path.
+        authoring_binding_provider: Optional per-run builder of the engine's
+                           bridged authoring binding; when present, each invocation
+                           resolves this role's binding for the running thread and,
+                           if the model exposes an ACP MCP surface, the spawned CLI
+                           session advertises the authoring MCP server so the agent
+                           sees the propose/read tools and no vault-write path. The
+                           binding is built per invoke (never closed over) so the
+                           shared compiled graph carries no run-scoped tokens.
         harness_mcp_servers: Declared team-harness MCP server names composed into
                            the ACP session (ADD-only, unioned with any authoring
                            servers) so the spawned CLI's session/new advertises
@@ -560,6 +564,17 @@ def create_worker_node(
             model=model,
             autonomous=autonomous,
         )
+        # Build this role's authoring binding per invoke from the run's thread_id
+        # and this worker's agent_id (``name``) - never closed over, so the shared
+        # compiled graph holds no run-scoped tokens (R7). Absent provider or
+        # coverage yields no binding, leaving the session's MCP surface unchanged.
+        authoring_binding = None
+        if authoring_binding_provider is not None:
+            thread_id = state.get("thread_id")
+            if isinstance(thread_id, str) and thread_id:
+                authoring_binding = await authoring_binding_provider.binding_for(
+                    thread_id, name
+                )
         effective_model = _attach_authoring_tools(
             effective_model, authoring_binding, autonomous=autonomous
         )

@@ -26,7 +26,7 @@ from ...nodes.worker import (
     _compose_native_read_tools,
     create_worker_node,
 )
-from .test_worker_authoring_wiring import _binding
+from .test_worker_authoring_wiring import _binding, _stdio_provider
 
 if TYPE_CHECKING:
     from vaultspec_a2a.thread.state import TeamState
@@ -104,7 +104,9 @@ async def test_native_read_tools_union_with_authoring_allowlist(
         name="researcher",
         autonomous=True,
         role="researcher",
-        authoring_binding=_binding(),
+        authoring_binding_provider=_stdio_provider(
+            thread_id="test-thread-native-read", agent_id="researcher"
+        ),
     )
 
     await node(_make_state())
@@ -186,9 +188,7 @@ class TestComposeNativeReadTools:
         from vaultspec_a2a.providers.acp_chat_model import AcpChatModel
 
         model = self._fresh_model()
-        wired = _compose_native_read_tools(
-            model, autonomous=False, role="researcher"
-        )
+        wired = _compose_native_read_tools(model, autonomous=False, role="researcher")
         assert isinstance(wired, AcpChatModel)
         assert wired.allowed_tools == []
 
@@ -198,9 +198,7 @@ class TestComposeNativeReadTools:
         model = self._fresh_model().model_copy(
             update={"allowed_tools": ["mcp__x__y", "Read"]}
         )
-        wired = _compose_native_read_tools(
-            model, autonomous=True, role="synthesist"
-        )
+        wired = _compose_native_read_tools(model, autonomous=True, role="synthesist")
         assert isinstance(wired, AcpChatModel)
         # Pre-existing entries kept in place; only the missing read names appended.
         assert wired.allowed_tools == ["mcp__x__y", "Read", "Grep", "Glob"]

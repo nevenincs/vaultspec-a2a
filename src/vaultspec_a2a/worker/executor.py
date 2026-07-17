@@ -21,6 +21,7 @@ from ..team.team_config import load_team_config
 from ..telemetry import ws_span
 from ..thread.constants import DEFAULT_SUPERVISOR_ID
 from ..thread.enums import TERMINAL_STATUSES, ControlActionType, ThreadStatus
+from .catalog_store import RunCatalogStore
 from .graph_lifecycle import GraphCompilationError, GraphLifecycleManager
 from .state_projection import StateProjector
 from .token_store import RunTokenStore
@@ -68,12 +69,18 @@ class Executor:
         # only inside the owning worker for the run and never touch a checkpoint.
         self._token_store = RunTokenStore()
 
+        # Worker-scoped cache of per-run engine catalog snapshots, dropped on the
+        # same terminal boundary as the token store so a snapshot never outlives a
+        # run. Shared with the graph lifecycle's authoring-bridge provider.
+        self._catalog_store = RunCatalogStore()
+
         # Delegates
         self._graph_lifecycle = GraphLifecycleManager(
             checkpointer=checkpointer,
             bridge=bridge,
             aggregator=self._aggregator,
             token_store=self._token_store,
+            catalog_store=self._catalog_store,
         )
         self._state_projector = StateProjector(
             checkpointer=checkpointer,
@@ -185,6 +192,7 @@ class Executor:
         # i.e. a terminal outcome - never on an interrupt-park that will resume.
         if outcome in TERMINAL_STATUSES:
             self._token_store.drop(thread_id)
+            self._catalog_store.drop(thread_id)
         self._bridge.untrack_thread(thread_id)
         # Prune sequences for threads that are no longer actively executing.
         self._aggregator.prune_sequences(active_snapshot)
@@ -230,9 +238,7 @@ class Executor:
             if not isinstance(session_id, str) or not session_id:
                 return  # non-authoring run — no engine session to close
             bearer = self._token_store.engine_bearer(thread_id)
-            actor_token = self._token_store.actor_token(
-                thread_id, _CLOSE_SESSION_ROLE
-            )
+            actor_token = self._token_store.actor_token(thread_id, _CLOSE_SESSION_ROLE)
             engine = resolve_engine()
             if not bearer or not actor_token or engine is None:
                 return  # no credentials or no reachable engine — degrade silently
@@ -272,8 +278,10 @@ class Executor:
                         await self._handle_resume(req)
                     case ControlActionType.CANCEL:
                         span.add_event("thread_cancelled")
-                        # Cancellation ends the run — drop any held tokens.
+                        # Cancellation ends the run — drop any held tokens and the
+                        # run's cached engine catalog snapshot.
                         self._token_store.drop(req.thread_id)
+                        self._catalog_store.drop(req.thread_id)
                         self._aggregator.cancel_thread(req.thread_id)
                         # Emit terminal if no active ingest (TOCTOU safe:
                         # cancel flag set before check; DB rejects duplicates).

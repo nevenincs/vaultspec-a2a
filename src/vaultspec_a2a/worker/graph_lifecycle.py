@@ -28,6 +28,8 @@ if TYPE_CHECKING:
     from ..database.checkpoints import Checkpointer
     from ..ipc.schemas import DispatchRequest
     from ..streaming.aggregator import EventAggregator, StreamableGraph
+    from .authoring_binding import AuthoringBindingProvider
+    from .catalog_store import RunCatalogStore
     from .ipc import WorkerBridge
     from .token_store import RunTokenStore
 
@@ -63,6 +65,7 @@ class GraphLifecycleManager:
         bridge: WorkerBridge,
         aggregator: EventAggregator,
         token_store: RunTokenStore,
+        catalog_store: RunCatalogStore,
     ) -> None:
         from vaultspec_a2a.providers.factory import ProviderFactory
 
@@ -75,6 +78,9 @@ class GraphLifecycleManager:
         # The worker lifecycle is the single site that constructs the
         # production authoring submitter, fed the run's per-role tokens from here.
         self._token_store = token_store
+        # Per-run engine catalog cache, shared with the authoring-bridge provider
+        # so the run fetches its catalog once regardless of worker count.
+        self._catalog_store = catalog_store
         self._provider_factory = ProviderFactory()
         # The worker reaches the app database (task_queue_entries) via
         # the shared session factory; migrations are owned by the gateway.
@@ -265,6 +271,16 @@ class GraphLifecycleManager:
             proposal_submitter = self._build_proposal_submitter()
             feedback_reader = self._build_feedback_reader()
 
+        # CLI-coder presets that arm the engine authoring bridge get a per-run
+        # binding provider, built here behind the same fail-closed contract as the
+        # submitter: a run that cannot reach the engine to fetch its catalog never
+        # starts vague. Only a coding topology can arm this (the config validator
+        # rejects authoring_bridge on document-authoring presets).
+        authoring_binding_provider = None
+        harness = team_config.effective_harness()
+        if harness is not None and harness.authoring_bridge:
+            authoring_binding_provider = self._build_authoring_binding_provider()
+
         return compile_team_graph(
             team_config=team_config,
             agent_configs=agent_configs,
@@ -280,6 +296,7 @@ class GraphLifecycleManager:
             provider_factory=self._provider_factory,
             proposal_submitter=proposal_submitter,
             feedback_reader=feedback_reader,
+            authoring_binding_provider=authoring_binding_provider,
             # Compile against the run's frozen effective assignment so a
             # restart reproduces the exact launched models.
             model_assignment=req.model_assignment,
@@ -338,6 +355,33 @@ class GraphLifecycleManager:
                     completion_sentinel="ADR READY",
                 ),
             },
+        )
+
+    def _build_authoring_binding_provider(self) -> AuthoringBindingProvider:
+        """Construct the per-run authoring-bridge binding provider for a coding run.
+
+        Fails closed at build time exactly like the submitter: a bridged run whose
+        engine origin cannot be resolved never starts vaguely - the typed
+        ``EngineUnavailableError`` is wrapped into a ``GraphCompilationError`` by
+        the compile guard. The provider reads the run's per-role tokens from this
+        worker's :class:`RunTokenStore` at binding time and caches the engine
+        catalog once per run in the shared :class:`RunCatalogStore`, so every
+        worker in the run shares one fetch.
+        """
+        from ..authoring import EngineUnavailableError, resolve_engine_with_retry
+        from .authoring_binding import AuthoringBindingProvider
+
+        engine = resolve_engine_with_retry()
+        if engine is None:
+            raise EngineUnavailableError(
+                "authoring_bridge run requires a reachable engine to fetch the "
+                "agent-tool catalog and route tool execution; none was discoverable "
+                "at run start (retried across the engine's stall window)"
+            )
+        return AuthoringBindingProvider(
+            engine_base_url=engine.base_url,
+            token_store=self._token_store,
+            catalog_store=self._catalog_store,
         )
 
     def _build_feedback_reader(self) -> FeedbackContextReader | None:

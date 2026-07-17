@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from collections.abc import Hashable
 
     from vaultspec_a2a.authoring import FeedbackContextReader
+    from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
 
 from langchain_core.language_models import BaseChatModel
 from langgraph.checkpoint.base import BaseCheckpointSaver
@@ -338,6 +339,7 @@ def compile_team_graph(
     task_queue_port: TaskQueuePort | None = None,
     proposal_submitter: DocumentProposalSubmitter | None = None,
     feedback_reader: "FeedbackContextReader | None" = None,
+    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     model_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> CompiledStateGraph:
     """Compile the LangGraph orchestration engine from a TeamConfig.
@@ -404,6 +406,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.PIPELINE:
@@ -416,6 +419,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.PIPELINE_LOOP:
@@ -429,6 +433,7 @@ def compile_team_graph(
             autonomous=autonomous,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             frozen_assignment=model_assignment,
         )
     elif topology.type == TopologyType.RESEARCH_ADR:
@@ -484,6 +489,7 @@ def _compile_star(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a star topology: supervisor -> workers -> supervisor -> END."""
@@ -576,6 +582,7 @@ def _compile_star(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
         builder.add_node(
@@ -652,6 +659,7 @@ def _compile_pipeline(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline topology: START -> node[0] -> node[1] -> ... -> END.
@@ -717,6 +725,7 @@ def _compile_pipeline(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
         # Insert mount node between pipeline stages.
@@ -828,6 +837,7 @@ def _compile_pipeline_loop(
     autonomous: bool = False,
     feature_tag: str | None = None,
     task_queue_port: TaskQueuePort | None = None,
+    authoring_binding_provider: "AuthoringBindingProvider | None" = None,
     frozen_assignment: dict[str, dict[str, Any]] | None = None,
 ) -> None:
     """Wire up a pipeline_loop topology.
@@ -872,6 +882,7 @@ def _compile_pipeline_loop(
             workspace_root=workspace_root,
             feature_tag=feature_tag,
             task_queue_port=task_queue_port,
+            authoring_binding_provider=authoring_binding_provider,
             role=agent_cfg.role,
         )
         if agent_id == loop_node_id:

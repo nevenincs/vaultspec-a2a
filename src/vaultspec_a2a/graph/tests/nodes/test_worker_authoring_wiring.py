@@ -20,14 +20,14 @@ from langchain_core.messages import HumanMessage
 
 from vaultspec_a2a.authoring import AgentTool, CatalogSnapshot
 from vaultspec_a2a.providers._acp_authoring import (
-    ACTOR_TOKEN_HEADER,
     AUTHORING_MCP_SERVER_NAME,
     AuthoringToolBinding,
     authoring_allowed_tool_names,
 )
-from vaultspec_a2a.providers._acp_authoring import (
-    BEARER_HEADER as _BEARER_HEADER,
-)
+from vaultspec_a2a.thread.actor_tokens import ActorTokenBundle
+from vaultspec_a2a.worker.authoring_binding import AuthoringBindingProvider
+from vaultspec_a2a.worker.catalog_store import RunCatalogStore
+from vaultspec_a2a.worker.token_store import RunTokenStore
 
 from ...nodes.worker import _attach_authoring_tools, create_worker_node
 
@@ -36,6 +36,41 @@ if TYPE_CHECKING:
 
 SIMULATOR_PATH = Path(__file__).parent.parent / "acp_simulator.py"
 PYTHON_EXE = sys.executable
+
+# The thread id _make_state carries; the provider keys tokens/catalog by it and
+# the built binding's run_id is the thread_id.
+_THREAD_ID = "test-thread-authoring"
+_ENGINE_URL = "http://127.0.0.1:8767"
+
+
+def _stdio_provider(
+    *,
+    engine_base_url: str = _ENGINE_URL,
+    thread_id: str = _THREAD_ID,
+    agent_id: str = "coder",
+) -> AuthoringBindingProvider:
+    """A real binding provider whose stores are pre-populated (no engine I/O).
+
+    Registers *agent_id*'s token bundle and the run's catalog snapshot so
+    ``binding_for`` builds a stdio binding without a live engine fetch - the real
+    production seam (``AuthoringBindingProvider`` over ``RunTokenStore`` +
+    ``RunCatalogStore``), exercised deterministically.
+    """
+    token_store = RunTokenStore()
+    token_store.register(
+        thread_id,
+        ActorTokenBundle(
+            tokens={agent_id: "actor-token-abc"},
+            engine_bearer="machine-bearer-xyz",
+        ),
+    )
+    catalog_store = RunCatalogStore()
+    catalog_store.register(thread_id, _binding().snapshot)
+    return AuthoringBindingProvider(
+        engine_base_url=engine_base_url,
+        token_store=token_store,
+        catalog_store=catalog_store,
+    )
 
 
 def _make_state() -> TeamState:
@@ -107,7 +142,7 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding=_binding(),
+        authoring_binding_provider=_stdio_provider(),
     )
 
     result = await node(_make_state())
@@ -117,12 +152,12 @@ async def test_binding_surfaces_authoring_server_to_real_subprocess(
     servers = params["mcpServers"]
     assert len(servers) == 1
     entry = servers[0]
+    # The provider builds a stdio binding, so session/new advertises the
+    # spawn-a-bridge stdio entry (command + args), not an HTTP url.
     assert entry["name"] == AUTHORING_MCP_SERVER_NAME
-    assert entry["type"] == "http"
-    assert entry["url"] == "http://127.0.0.1:8200/mcp"
-    headers = {h["name"]: h["value"] for h in entry["headers"]}
-    assert headers[_BEARER_HEADER] == "Bearer machine-bearer-xyz"
-    assert headers[ACTOR_TOKEN_HEADER] == "actor-token-abc"
+    assert "url" not in entry
+    assert entry["args"][0] == "-m"
+    assert entry["args"][1].endswith("authoring_stdio")
 
     # The headless run auto-permits EXACTLY the bridged tool names so
     # the CLI can invoke them, and nothing else.
@@ -183,7 +218,7 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding=_stdio_binding(),
+        authoring_binding_provider=_stdio_provider(),
     )
 
     await node(_make_state())
@@ -199,8 +234,9 @@ async def test_stdio_binding_wires_stdio_server_to_real_subprocess(
     assert entry["args"][0] == "-m"
     assert entry["args"][1].endswith("authoring_stdio")
     env = {item["name"]: item["value"] for item in entry["env"]}
-    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == "http://127.0.0.1:8767"
-    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:xyz"
+    assert env["VAULTSPEC_AUTHORING_BASE_URL"] == _ENGINE_URL
+    # The provider sets run_id to the run's thread_id.
+    assert env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
     assert env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
 
     # The exact allowlist is still threaded so the CLI can invoke the bridged
@@ -242,7 +278,7 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
         system_prompt="You are a coder.",
         name="coder",
         autonomous=True,
-        authoring_binding=_stdio_binding(),
+        authoring_binding_provider=_stdio_provider(),
     )
 
     await node(_make_state())
@@ -262,7 +298,7 @@ async def test_stdio_binding_surfaces_bridge_into_isolated_home(
     # ...but IS hoisted into the subprocess spawn env for the CLI to expand.
     spawn_env = recorded["authoring_env"]
     assert spawn_env["VAULTSPEC_AUTHORING_BEARER"] == "machine-bearer-xyz"
-    assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == "run:xyz"
+    assert spawn_env["VAULTSPEC_AUTHORING_RUN_ID"] == _THREAD_ID
 
 
 class TestAuthoringAllowlist:

@@ -268,6 +268,12 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
     # Kimi drives its own agent, NOT the claude-agent-acp wrapper.
     assert model.command[-1] == "acp"
     assert "kimi" in model.command[0].lower()
+    # Per-run isolation (P03.S12): the inline --config global flag replaces the
+    # ambient ~/.kimi/config.toml, suppressing any ambient Kimi MCP.
+    assert "--config" in model.command
+    cfg_idx = model.command.index("--config")
+    assert "mcpServers" in model.command[cfg_idx + 1]
+    assert cfg_idx < model.command.index("acp")  # global flag before subcommand
     assert model.provider == Provider.KIMI.value
     # The backend family discriminator: kimi omits the Claude allowedTools _meta.
     assert model.acp_family == "kimi"

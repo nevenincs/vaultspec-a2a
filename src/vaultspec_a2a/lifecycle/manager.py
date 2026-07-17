@@ -26,7 +26,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..authoring.discovery import SERVICE_JSON_ENV as _ENGINE_SERVICE_JSON_ENV
-from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
+from ..control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from .procs_config import ProcsConfig, ProcsConfigError, load_procs_config
 from .registry import (
     NAME_ENV,
@@ -456,6 +456,7 @@ def _serve_env(
     engine_service_json: str = "",
     internal_token_file: str = "",
     gateway_url: str = "",
+    worker_url: str = "",
 ) -> dict[str, str]:
     """The env overlay for a boot: the role's rendered port/config vars plus identity.
 
@@ -467,10 +468,11 @@ def _serve_env(
     A recorded *engine_service_json* is injected under
     :data:`_ENGINE_SERVICE_JSON_ENV` so the worker's engine discovery no longer
     depends on the booting shell having exported it - the reseat-strands-worker gap.
-    *internal_token_file* (a PATH, read here) is injected as the internal-IPC token
-    and *gateway_url* as the paired gateway URL, so a procs-managed gateway-dev and
-    worker-dev agree on both instead of leaning on shell state. Empty values inject
-    nothing, matching the prior behaviour for records that predate these fields.
+    *internal_token_file* (a PATH, read here) is injected as the internal-IPC token,
+    *gateway_url* as the paired gateway URL (worker -> gateway), and *worker_url* as
+    the paired worker URL (gateway -> worker dispatch), so a procs-managed gateway-dev
+    and worker-dev agree on all of them instead of leaning on shell state. Empty
+    values inject nothing, matching the prior behaviour for records predating them.
     """
     env = render_env(role_cfg.env, port=port, workspace=workspace)
     env[NAME_ENV] = name
@@ -483,6 +485,8 @@ def _serve_env(
         )
     if gateway_url:
         env[GATEWAY_URL_ENV] = gateway_url
+    if worker_url:
+        env[WORKER_URL_ENV] = worker_url
     return env
 
 
@@ -496,6 +500,7 @@ def serve_up(
     engine_service_json: str = "",
     internal_token_file: str = "",
     gateway_url: str = "",
+    worker_url: str = "",
     owner: str | None = None,
     log_path: str | None = None,
     ready_timeout: float = 20.0,
@@ -546,6 +551,7 @@ def serve_up(
                 engine_service_json=engine_service_json,
                 internal_token_file=internal_token_file,
                 gateway_url=gateway_url,
+                worker_url=worker_url,
             )
             process = spawn(command, cwd=cwd, log_path=log_path, env=child_env)
             if _await_listener(reservation.port, process, timeout=ready_timeout):
@@ -567,6 +573,7 @@ def serve_up(
                     engine_service_json=engine_service_json,
                     internal_token_file=internal_token_file,
                     gateway_url=gateway_url,
+                    worker_url=worker_url,
                 )
                 commit_reservation(reservation, record, home=home)
                 held.remove(reservation)
@@ -671,6 +678,7 @@ def _start_from_record(
         engine_service_json=record.engine_service_json,
         internal_token_file=record.internal_token_file,
         gateway_url=record.gateway_url,
+        worker_url=record.worker_url,
     )
     cwd = _serve_cwd_for(record)
     process = spawn(command, cwd=cwd, log_path=record.log_path or None, env=child_env)

@@ -29,6 +29,7 @@ _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
 # environment, so the name lives in exactly one place (never a mirrored literal).
 INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
 GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
+WORKER_URL_ENV = "VAULTSPEC_WORKER_URL"
 
 
 class InfraConfig(BaseSettings):
@@ -252,7 +253,7 @@ class InfraConfig(BaseSettings):
             "Worker base URL for dispatch calls. "
             "Auto-derived from worker_host + worker_port."
         ),
-        alias="VAULTSPEC_WORKER_URL",
+        alias=WORKER_URL_ENV,
     )
     internal_token: str | None = Field(
         default=None,

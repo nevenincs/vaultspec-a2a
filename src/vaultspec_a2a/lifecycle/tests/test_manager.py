@@ -19,7 +19,7 @@ from typing import Any
 
 import pytest
 
-from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
+from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, WORKER_URL_ENV
 from ..discovery import is_pid_alive
 from ..manager import (
     _ENGINE_SERVICE_JSON_ENV,
@@ -386,14 +386,17 @@ def test_serve_env_injects_gateway_url_and_reads_the_internal_token(tmp_path) ->
         owner="o",
         internal_token_file=str(token_file),
         gateway_url="http://127.0.0.1:18100",
+        worker_url="http://127.0.0.1:18110",
     )
     # The record carried only the PATH; the token is read here and injected.
     assert env[INTERNAL_TOKEN_ENV] == "s3cr3t"
     assert env[GATEWAY_URL_ENV] == "http://127.0.0.1:18100"
+    assert env[WORKER_URL_ENV] == "http://127.0.0.1:18110"
     # Unset pairing injects nothing.
     bare = _serve_env(_pairing_role(), port=18110, workspace="", name="w", owner="o")
     assert INTERNAL_TOKEN_ENV not in bare
     assert GATEWAY_URL_ENV not in bare
+    assert WORKER_URL_ENV not in bare
 
 
 def test_serve_up_refuses_a_missing_token_file_with_no_residue(tmp_path) -> None:
@@ -444,7 +447,8 @@ _PAIRING_PROBE_SERVE = (
     "import socket,os,sys,time,pathlib;"
     "pathlib.Path(sys.argv[2]).write_text("
     "os.environ.get('VAULTSPEC_INTERNAL_TOKEN','')+'|'"
-    "+os.environ.get('VAULTSPEC_GATEWAY_URL',''));"
+    "+os.environ.get('VAULTSPEC_GATEWAY_URL','')+'|'"
+    "+os.environ.get('VAULTSPEC_WORKER_URL',''));"
     "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
     "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
 )
@@ -463,17 +467,24 @@ def test_serve_up_records_and_injects_the_worker_gateway_pairing(tmp_path) -> No
         config=config,
         internal_token_file=str(token_file),
         gateway_url="http://127.0.0.1:18100",
+        worker_url="http://127.0.0.1:18110",
         ready_timeout=15.0,
     )
     try:
         assert record.internal_token_file == str(token_file)
         assert record.gateway_url == "http://127.0.0.1:18100"
+        assert record.worker_url == "http://127.0.0.1:18110"
         persisted = read_record(record_path("scratch", "w", home=tmp_path))
         assert persisted is not None
         assert persisted.internal_token_file == str(token_file)
         assert persisted.gateway_url == "http://127.0.0.1:18100"
-        # The token was read from its file (stripped) and both vars reached the child.
-        assert sentinel.read_text() == "tok-abc|http://127.0.0.1:18100"
+        assert persisted.worker_url == "http://127.0.0.1:18110"
+        # The token was read from its file (stripped) and all three vars reached the
+        # child's environment end to end.
+        assert (
+            sentinel.read_text()
+            == "tok-abc|http://127.0.0.1:18100|http://127.0.0.1:18110"
+        )
     finally:
         tree_kill(record.pid)
 

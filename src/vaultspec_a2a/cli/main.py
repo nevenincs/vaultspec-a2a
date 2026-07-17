@@ -336,6 +336,14 @@ def procs_reap() -> None:
     "auto-deriving the owner's resident gateway.",
 )
 @click.option(
+    "--worker-url",
+    "worker_url",
+    default="",
+    help="Paired worker base URL (VAULTSPEC_WORKER_URL) a gateway dispatches to. "
+    "Recorded per process so the gateway targets the dev worker rather than "
+    "auto-deriving the owner's resident worker (port 8001).",
+)
+@click.option(
     "--log", "log_path", default=None, help="Append process output to this file."
 )
 def procs_up(
@@ -347,6 +355,7 @@ def procs_up(
     engine_service_json: str,
     internal_token_file: str,
     gateway_url: str,
+    worker_url: str,
     log_path: str | None,
 ) -> None:
     """Allocate a band port, boot the role's serve command, and register it.
@@ -373,6 +382,7 @@ def procs_up(
             engine_service_json=engine_service_json,
             internal_token_file=internal_token_file,
             gateway_url=gateway_url,
+            worker_url=worker_url,
             log_path=log_path,
         )
     except Exception as exc:

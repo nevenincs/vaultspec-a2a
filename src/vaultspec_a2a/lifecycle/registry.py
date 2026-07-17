@@ -117,6 +117,11 @@ class ProcRecord:
     # plain URL, not a secret; recorded so a procs-managed worker targets the dev
     # gateway rather than auto-deriving the owner's resident gateway (port 8000).
     gateway_url: str = ""
+    # The paired worker base URL (VAULTSPEC_WORKER_URL) a gateway DISPATCHES to. A
+    # plain URL; recorded so a procs-managed gateway targets the dev worker rather
+    # than auto-deriving the owner's resident worker (port 8001) - the campaign's
+    # master bug, where dispatch silently ran to a foreign worker.
+    worker_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -204,6 +209,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         engine_service_json=_opt_str("engine_service_json"),
         internal_token_file=_opt_str("internal_token_file"),
         gateway_url=_opt_str("gateway_url"),
+        worker_url=_opt_str("worker_url"),
     )
 
 

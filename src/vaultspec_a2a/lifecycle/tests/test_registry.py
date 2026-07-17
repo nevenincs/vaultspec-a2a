@@ -98,6 +98,7 @@ def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path) -> None:
     record = _record(
         internal_token_file="C:/machine/internal-token",
         gateway_url="http://127.0.0.1:18100",
+        worker_url="http://127.0.0.1:18110",
     )
     path = write_record(record, home=tmp_path)
     back = read_record(path)
@@ -105,6 +106,7 @@ def test_pairing_fields_roundtrip_through_the_record_schema(tmp_path) -> None:
     assert back is not None
     assert back.internal_token_file == "C:/machine/internal-token"
     assert back.gateway_url == "http://127.0.0.1:18100"
+    assert back.worker_url == "http://127.0.0.1:18110"
 
 
 def test_list_enumerates_valid_and_skips_malformed(tmp_path) -> None:

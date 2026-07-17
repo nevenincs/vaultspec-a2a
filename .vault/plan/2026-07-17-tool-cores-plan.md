@@ -12,6 +12,16 @@ related:
   - '[[2026-07-15-graph-agent-framework-harness-plan]]'
 ---
 
+<!-- LINK RULES:
+     - [[wiki-links]] are ONLY for .vault/ documents in the
+       related: field above.
+     - The related: field carries the AUTHORISING documents
+       (ADR, research, reference, prior plan) for every Step in
+       this plan. Steps inherit this chain; per-row reference
+       footers do not exist.
+     - NEVER use [[wiki-links]] or markdown links in the
+       document body. -->
+
 # `tool-cores` plan
 
 ### Phase `P01` - Deterministic floor and persona truth
@@ -63,7 +73,7 @@ Deliver vaultspec-rag to Codex through a per-run CODEX_HOME config.toml built fr
 Remove superseded code, sweep the vault for duplication via rag, pass the mandatory review gate, and reconcile the plan and exec records.
 
 - [x] `P05.S22` - Remove the superseded allowlist-less attach-combined path and any other code the landed composition mechanism supersedes (executor-core); `src/vaultspec_a2a/providers/_acp_mcp.py`.
-- [ ] `P05.S23` - Sweep the vault via rag semantic search for duplicate or overlapping tool-cores records and reconcile any found, keeping one record per decision (executor-service); `.vault/`.
+- [x] `P05.S23` - Sweep the vault via rag semantic search for duplicate or overlapping tool-cores records and reconcile any found, keeping one record per decision (executor-service); `.vault/`.
 - [ ] `P05.S24` - Run the mandatory code-review gate over all landed tool-cores changes for safety and intent, which must return PASS before close-out (vaultspec-code-reviewer); `.vault/audit/`.
 - [ ] `P05.S25` - Reconcile the plan and exec records against what actually landed, ensuring every Step has its exec record and the Verification criteria are honestly closed (executor-service); `.vault/exec/`.
 

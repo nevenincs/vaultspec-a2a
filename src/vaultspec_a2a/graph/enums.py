@@ -132,6 +132,7 @@ class Provider(StrEnum):
     CODEX = "codex"
     DETERMINISTIC = "deterministic"
     GEMINI = "gemini"
+    KIMI = "kimi"
     MOCK = "mock"
     OPENAI = "openai"
     ZAI = "zai"
@@ -209,6 +210,17 @@ MODEL_MAP: dict[Provider, dict[Model, str]] = {
         Model.HIGH: "glm-5",
         Model.MAX: "glm-5",
     },
+    # Kimi (Moonshot AI) drives its own `kimi acp` agent; KIMI_MODEL_NAME
+    # selects the model. The names are the kimi-k2 family the installed
+    # kimi-cli 1.49.0 recognizes (source guards on `startswith("kimi-k2")`),
+    # with the thinking variant at the higher tiers. The account's exact
+    # available ids are confirmed only on KIMI_API_KEY arrival (P05).
+    Provider.KIMI: {
+        Model.LOW: "kimi-k2",
+        Model.MID: "kimi-k2",
+        Model.HIGH: "kimi-k2-thinking",
+        Model.MAX: "kimi-k2-thinking",
+    },
 }
 
 
@@ -218,6 +230,7 @@ PROVIDER_DEFAULT_MODELS: dict[Provider, Model] = {
     Provider.CODEX: Model.HIGH,
     Provider.DETERMINISTIC: Model.MID,
     Provider.GEMINI: Model.MID,
+    Provider.KIMI: Model.MID,
     Provider.MOCK: Model.MID,
     Provider.OPENAI: Model.HIGH,
     Provider.ZAI: Model.MID,

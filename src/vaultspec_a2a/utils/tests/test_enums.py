@@ -69,6 +69,7 @@ class TestProvider:
             "codex",
             "deterministic",
             "gemini",
+            "kimi",
             "mock",
             "openai",
             "zai",

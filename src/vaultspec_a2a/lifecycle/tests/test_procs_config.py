@@ -45,7 +45,12 @@ def test_committed_procs_toml_matches_the_adr_bands() -> None:
     # Roles whose serve reads its port from the environment declare it via `env`
     # (the CLI `serve` has no --port; the worker main ignores argv), so the serve
     # templates carry NO --port flag.
-    assert config.roles["gateway-dev"].env == {"VAULTSPEC_PORT": "{port}"}
+    # gateway-dev disables its lazy worker spawn so a procs-managed gateway attaches
+    # to the separately procs-managed worker instead of restart-thrashing its own.
+    assert config.roles["gateway-dev"].env == {
+        "VAULTSPEC_PORT": "{port}",
+        "VAULTSPEC_AUTO_SPAWN_WORKER": "false",
+    }
     assert config.roles["worker-dev"].env == {"VAULTSPEC_WORKER_PORT": "{port}"}
     assert "--port" not in config.roles["gateway-dev"].serve
     assert "--port" not in config.roles["worker-dev"].serve

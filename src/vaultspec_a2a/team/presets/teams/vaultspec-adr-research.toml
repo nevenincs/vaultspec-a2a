@@ -93,6 +93,16 @@ agent_id = "vaultspec-adr-author"
 [[team.workers]]
 agent_id = "vaultspec-doc-reviewer"
 
+# Agent harness. Opts every document-authoring worker into the read-only
+# vaultspec-rag grounding server (the sole `_KNOWN_MCP_SERVERS` entry): its
+# composed tool names join the autonomous allowedTools and its stdio server is
+# advertised in `session/new`, delivering semantic recall of code and the vault
+# alongside the native Read/Grep/Glob floor. Read-only by construction - no
+# write verb is composed. `required_surfaces` defaults to all five authoring
+# surfaces, so this only WIDENS the harness by the grounding server.
+[team.harness]
+mcp_servers = ["vaultspec-rag"]
+
 # Model profiles. `team-defaults` is implicit (the empty overlay) and is the
 # default profile; it is not declared here. `fast` drops the two high-volume
 # roles (parallel research fan-out and the inner review loop) to the low

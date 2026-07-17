@@ -24,6 +24,12 @@ _DEFAULT_PROJECT_ROOT: Path = Path(__file__).resolve().parent.parent.parent.pare
 # outside .vault/ — vaultspec firmware rejects foreign directories inside the vault.
 _DEFAULT_A2A_HOME: Path = Path.home() / ".vaultspec-a2a"
 
+# Canonical env-var names for the worker<->gateway pairing. Defined here (the owner
+# of these settings) and imported wherever the value is written into a child
+# environment, so the name lives in exactly one place (never a mirrored literal).
+INTERNAL_TOKEN_ENV = "VAULTSPEC_INTERNAL_TOKEN"
+GATEWAY_URL_ENV = "VAULTSPEC_GATEWAY_URL"
+
 
 class InfraConfig(BaseSettings):
     """Infrastructure fields — ports, hosts, URLs, keys, filesystem paths."""
@@ -197,7 +203,7 @@ class InfraConfig(BaseSettings):
     gateway_url: str = Field(
         default="",
         validation_alias=AliasChoices(
-            "VAULTSPEC_GATEWAY_URL",
+            GATEWAY_URL_ENV,
             "VAULTSPEC_MCP_API_BASE_URL",
         ),
         description=(
@@ -250,7 +256,7 @@ class InfraConfig(BaseSettings):
     )
     internal_token: str | None = Field(
         default=None,
-        alias="VAULTSPEC_INTERNAL_TOKEN",
+        alias=INTERNAL_TOKEN_ENV,
         description=(
             "Bearer token for worker<->control IPC. None disables auth (dev mode)."
         ),

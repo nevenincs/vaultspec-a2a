@@ -108,6 +108,15 @@ class ProcRecord:
     # machine path - and re-injected on every boot/resume so an engine reseat can no
     # longer strand the worker via invisible shell-inherited env. Empty means unset.
     engine_service_json: str = ""
+    # The internal-IPC token FILE path (never the token itself - this record must
+    # not carry a secret). Read at boot/resume and injected as
+    # VAULTSPEC_INTERNAL_TOKEN so a procs-managed gateway-dev and worker-dev share
+    # one token and the worker's heartbeats authenticate. Empty means unset.
+    internal_token_file: str = ""
+    # The paired gateway base URL (VAULTSPEC_GATEWAY_URL) a worker heartbeats to. A
+    # plain URL, not a secret; recorded so a procs-managed worker targets the dev
+    # gateway rather than auto-deriving the owner's resident gateway (port 8000).
+    gateway_url: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -193,6 +202,8 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         log_path=_opt_str_or_none("log_path"),
         owner=_opt_str("owner"),
         engine_service_json=_opt_str("engine_service_json"),
+        internal_token_file=_opt_str("internal_token_file"),
+        gateway_url=_opt_str("gateway_url"),
     )
 
 

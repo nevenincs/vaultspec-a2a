@@ -894,6 +894,22 @@ class TestAdrResearchTeamPreset:
         assert cfg.topology.type == TopologyType.RESEARCH_ADR  # type: ignore[attr-defined]
         assert len(cfg.workers) == 4
 
+    def test_adr_research_harness_opts_into_vaultspec_rag(self) -> None:
+        """The live preset's effective harness declares the vaultspec-rag server.
+
+        The ``[team.harness]`` opt-in (P03.S12) is what makes the landed grounding
+        composition effective for this preset's document-authoring workers: the
+        loaded preset's effective harness must name ``vaultspec-rag`` in
+        ``mcp_servers`` - and ONLY that server (read-only by construction; no
+        write-capable server is composed) - while the default five authoring
+        surfaces stay intact (the opt-in only widens the harness).
+        """
+        cfg = load_team_config("vaultspec-adr-research")
+        harness = cfg.effective_harness()
+        assert harness is not None
+        assert harness.mcp_servers == ["vaultspec-rag"]
+        assert tuple(harness.required_surfaces) == DEFAULT_AUTHORING_SURFACES
+
 
 class TestModelProfiles:
     """team.profiles schema, validation, and the implicit team-defaults profile.

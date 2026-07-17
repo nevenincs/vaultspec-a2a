@@ -19,6 +19,7 @@ from typing import Any
 
 import pytest
 
+from ...control.config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV
 from ..discovery import is_pid_alive
 from ..manager import (
     _ENGINE_SERVICE_JSON_ENV,
@@ -360,6 +361,103 @@ def test_serve_env_injects_engine_service_json_only_when_set() -> None:
     # An unset seat injects nothing (records predating the field keep prior behaviour).
     without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
     assert _ENGINE_SERVICE_JSON_ENV not in without
+
+
+def _pairing_role() -> RoleConfig:
+    return RoleConfig(
+        name="worker-dev",
+        band=PortBand(18110, 18119),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=["x"],
+        env={},
+    )
+
+
+def test_serve_env_injects_gateway_url_and_reads_the_internal_token(tmp_path) -> None:
+    token_file = tmp_path / "tok"
+    token_file.write_text("s3cr3t\n")  # trailing newline must be stripped
+    env = _serve_env(
+        _pairing_role(),
+        port=18110,
+        workspace="",
+        name="w",
+        owner="o",
+        internal_token_file=str(token_file),
+        gateway_url="http://127.0.0.1:18100",
+    )
+    # The record carried only the PATH; the token is read here and injected.
+    assert env[INTERNAL_TOKEN_ENV] == "s3cr3t"
+    assert env[GATEWAY_URL_ENV] == "http://127.0.0.1:18100"
+    # Unset pairing injects nothing.
+    bare = _serve_env(_pairing_role(), port=18110, workspace="", name="w", owner="o")
+    assert INTERNAL_TOKEN_ENV not in bare
+    assert GATEWAY_URL_ENV not in bare
+
+
+def test_serve_env_fails_loud_on_a_missing_or_empty_token_file(tmp_path) -> None:
+    with pytest.raises(LifecycleError, match="unreadable"):
+        _serve_env(
+            _pairing_role(),
+            port=18110,
+            workspace="",
+            name="w",
+            owner="o",
+            internal_token_file=str(tmp_path / "does-not-exist"),
+        )
+    empty = tmp_path / "empty"
+    empty.write_text("   \n")
+    with pytest.raises(LifecycleError, match="empty"):
+        _serve_env(
+            _pairing_role(),
+            port=18110,
+            workspace="",
+            name="w",
+            owner="o",
+            internal_token_file=str(empty),
+        )
+
+
+# A serve probe that records the injected pairing env vars, then binds the port so
+# serve_up sees a live listener - proving the token (read from its file) and gateway
+# url reached the child environment end to end.
+_PAIRING_PROBE_SERVE = (
+    "import socket,os,sys,time,pathlib;"
+    "pathlib.Path(sys.argv[2]).write_text("
+    "os.environ.get('VAULTSPEC_INTERNAL_TOKEN','')+'|'"
+    "+os.environ.get('VAULTSPEC_GATEWAY_URL',''));"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
+)
+
+
+def test_serve_up_records_and_injects_the_worker_gateway_pairing(tmp_path) -> None:
+    sentinel = tmp_path / "pairing.txt"
+    token_file = tmp_path / "tok"
+    token_file.write_text("tok-abc\n")
+    serve = [sys.executable, "-c", _PAIRING_PROBE_SERVE, "{port}", str(sentinel)]
+    config = _serve_config(serve, band=(18990, 18992))
+    record = serve_up(
+        "scratch",
+        "w",
+        home=tmp_path,
+        config=config,
+        internal_token_file=str(token_file),
+        gateway_url="http://127.0.0.1:18100",
+        ready_timeout=15.0,
+    )
+    try:
+        assert record.internal_token_file == str(token_file)
+        assert record.gateway_url == "http://127.0.0.1:18100"
+        persisted = read_record(record_path("scratch", "w", home=tmp_path))
+        assert persisted is not None
+        assert persisted.internal_token_file == str(token_file)
+        assert persisted.gateway_url == "http://127.0.0.1:18100"
+        # The token was read from its file (stripped) and both vars reached the child.
+        assert sentinel.read_text() == "tok-abc|http://127.0.0.1:18100"
+    finally:
+        tree_kill(record.pid)
 
 
 # A serve command that records the injected engine-discovery env var into a file,

@@ -3,12 +3,13 @@ tags:
   - '#adr'
   - '#agent-harness-provisioning'
 date: '2026-07-15'
-modified: '2026-07-16'
+modified: '2026-07-17'
 related:
   - '[[2026-07-14-adr-authoring-orchestration-adr]]'
   - '[[2026-07-15-model-profiles-adr]]'
   - '[[2026-07-15-agent-harness-provisioning-research]]'
   - '[[2026-07-15-graph-agent-framework-harness-adr]]'
+  - '[[2026-07-17-tool-cores-adr]]'
 ---
 # `agent-harness-provisioning` adr: `the agent harness contract: skills, personas, rules, templates, and tools provisioned and verified per run` | (**status:** `accepted`)
 
@@ -69,3 +70,15 @@ Two concrete findings from the narrower, code-verified `graph-agent-framework-ha
 - **`include_builtin=False` at both `RuleManager` call sites (`src/vaultspec_a2a/graph/nodes/worker.py:60`, `src/vaultspec_a2a/graph/nodes/supervisor.py:310`):** even once the path defect above is fixed, the four `.builtin.md` files (core mandates, discovery sequence, CLI reference, rag syntax) remain excluded from every compiled rule set by default, while every OTHER role's persona-guidance file is included indiscriminately (`RuleManager.discover()` has no role-targeting). This is a scoping decision this ADR's `rules` surface description does not currently name; `graph-agent-framework-harness-plan` designs a role-scoped propagation shape as its own fix rather than a blanket `include_builtin=True` toggle.
 
 Both findings are tracked and fixed by `graph-agent-framework-harness-plan`, not by a plan against this ADR - this amendment keeps this system-wide contract's `rules` surface description current without duplicating the tracking. This ADR's `Opens` item ("per-role MCP composition (vaultspec-rag for researchers)") remains the open dependency for the companion ADR's third finding (persona prompts instructing rag-search CLI invocations the runtime cannot execute) - not resolved by this amendment, tracked forward unchanged.
+
+## Amendment (2026-07-17, tool-cores-adr)
+
+The `2026-07-17-tool-cores-adr` decision gate resolved NOT SURFACED. On the migrated adapter `@agentclientprotocol/claude-agent-acp@0.59.0` with SDK `0.3.207`, session-injected stdio MCP servers still do not reach the model: the SDK emits a shadowed-tools warning naming the rag tools while the model replies `NO_SUCH_TOOL`, and a positive control confirmed native tools surface. Evidence: tool-cores plan `P02.S09` exec record (commit `d977c28`). The migration did not lift the registration-scope gate first recorded at `2026-07-14-a2a-edge-conformance-W03-P08-S20`, so grounding cannot be delivered through per-session `mcpServers` injection and the surfacing path must be carried by the config-home isolation itself.
+
+This refines the suppression invariant stated in the 2026-07-15 refinements above. That formulation held that "the worker isolates the ACP agent's config home so no ambient MCP ... is loaded; only the per-session `mcpServers` the worker injects are visible" - but the second clause is falsified: the per-session injection never surfaces to the model. The invariant is refined to:
+
+> The worker owns an isolated CLI config home containing EXACTLY the declared read-only harness servers; ambient and operator user-global MCP are suppressed by that isolation; no write-capable server is ever composed or written into the home.
+
+The isolation now does double duty: it suppresses the operator's ambient writable MCP (the S10 write-leak vector, unchanged) AND surfaces the declared read-only grounding servers, which the CLI reads as its user-global configuration - the only registration scope that reaches the model. The security intent is preserved, not weakened: the leak that motivated the suppression was a WRITE path, and the carve-out admits only read-only servers over a read-clean vault (the `.vault/**` deny is write-only). No write-capable server is ever composed or written into the isolated home; the graph submitter and the engine review lane remain the only write paths.
+
+Scope note: the ambient-MCP suppression (the isolated home excluding operator user-global MCP) is required regardless of the surfacing outcome, because the write-leak vector is independent of surfacing; the NOT SURFACED verdict additionally makes the read-only-server population of that home load-bearing for grounding. The `P03.S13` suppression and `P03.S14` surfacing population are tracked by the tool-cores plan, not by a plan against this ADR. The surfacing population is live-verified SURFACES (`P03.S14` exec record, commit `8e15441`): through the production `AcpChatModel` path on the migrated stack the model listed all five `mcp__vaultspec-rag__*` tools and invoked `search_codebase` mid-turn while operator connectors were suppressed, confirming the empirical home resolution - `CLAUDE_CONFIG_DIR ?? ~/.claude`, with user-global `mcpServers` read from `<dir>/.claude.json`.

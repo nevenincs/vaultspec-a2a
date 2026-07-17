@@ -284,6 +284,41 @@ def test_provider_factory_kimi_creates_acp_on_kimi_agent() -> None:
         assert model.auth_mode == "none_detected"
 
 
+def test_kimi_pin_and_install_hint_are_colocated() -> None:
+    """The kimi-cli pin lives as one named constant and rides the install hint."""
+    from ..factory import _KIMI_CLI_PIN, _KIMI_INSTALL_HINT
+
+    assert _KIMI_CLI_PIN == "1.49.0"
+    assert f"kimi-cli=={_KIMI_CLI_PIN}" in _KIMI_INSTALL_HINT
+    assert _KIMI_INSTALL_HINT.startswith("uv tool install")
+
+
+def test_classify_provider_command_kimi_resolves_or_hints_install() -> None:
+    """KIMI classifies to the kimi acp agent meta, or raises the pinned hint."""
+    import shutil
+
+    from ..factory import _KIMI_CLI_PIN, classify_provider_command
+
+    if shutil.which("kimi") is None:
+        with pytest.raises(ValueError, match=f"kimi-cli=={_KIMI_CLI_PIN}"):
+            classify_provider_command(Provider.KIMI)
+        return
+    meta = classify_provider_command(Provider.KIMI)
+    assert meta["command_kind"] == "kimi_cli"
+    assert meta["command_origin"] == "system_path_executable"
+
+
+def test_kimi_git_bash_prerequisite_helper() -> None:
+    """The Git-Bash prerequisite helper honors the CLI's own env override name."""
+    from ..factory import _KIMI_GIT_BASH_ENV, _kimi_git_bash_resolvable
+
+    # The override name matches the installed CLI source, not the ADR's inferred
+    # KIMI_SHELL_PATH (grounding correction).
+    assert _KIMI_GIT_BASH_ENV == "KIMI_CLI_GIT_BASH_PATH"
+    # Git for Windows is a host prerequisite here, so this resolves True.
+    assert _kimi_git_bash_resolvable() is True
+
+
 def test_classify_provider_command_zai_returns_acp_meta() -> None:
     """Z.ai classifies to the same ACP wrapper command metadata as Claude."""
     if not _CLAUDE_ACP_JS.exists():

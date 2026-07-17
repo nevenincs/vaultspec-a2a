@@ -303,6 +303,35 @@ def _classify_codex_command() -> tuple[list[str], dict[str, str]]:
     }
 
 
+# Single recorded home for the Kimi CLI pin (a Python `uv tool install` axis,
+# distinct from the Node package.json adapter pin). Surfaced in the install hint
+# below, mirroring the _classify_acp_command "Run 'npm install' ..." pattern.
+_KIMI_CLI_PIN = "1.49.0"
+_KIMI_INSTALL_HINT = f"uv tool install kimi-cli=={_KIMI_CLI_PIN}"
+# The Kimi CLI's Windows shell backend is Git Bash; it resolves bash.exe via the
+# KIMI_CLI_GIT_BASH_PATH env override, then `git` on PATH, then standard install
+# paths, and exits at startup if none resolve (kimi-cli 1.49.0 CHANGELOG). NOTE:
+# grounding the installed source corrected the env name from the ADR's inferred
+# "KIMI_SHELL_PATH" to the actual "KIMI_CLI_GIT_BASH_PATH".
+_KIMI_GIT_BASH_ENV = "KIMI_CLI_GIT_BASH_PATH"
+
+
+def _kimi_git_bash_resolvable() -> bool:
+    """Return whether the Kimi CLI's required Git-Bash shell is resolvable.
+
+    Mirrors the CLI's own resolution order so the readiness probe fails for the
+    same reason the CLI would exit at startup: the ``KIMI_CLI_GIT_BASH_PATH``
+    override (validated to exist), else ``git`` on PATH (Git for Windows ships
+    bash.exe beside it), else a standard install path.
+    """
+    override = os.environ.get(_KIMI_GIT_BASH_ENV)
+    if override and Path(override).exists():
+        return True
+    if shutil.which("git") is not None or shutil.which("bash") is not None:
+        return True
+    return Path(r"C:\Program Files\Git\bin\bash.exe").exists()
+
+
 def _classify_kimi_command() -> tuple[list[str], dict[str, str]]:
     """Return the ``kimi acp`` command plus bounded runtime metadata.
 
@@ -372,7 +401,16 @@ def classify_provider_command(
     if provider == Provider.KIMI:
         _, meta = _classify_kimi_command()
         if meta.get("command_origin") == "fallback_cli_name":
-            raise ValueError("Kimi CLI not resolvable: 'kimi' not found on PATH.")
+            raise ValueError(
+                f"Kimi CLI not resolvable: 'kimi' not found on PATH. "
+                f"Install with '{_KIMI_INSTALL_HINT}'."
+            )
+        if not _kimi_git_bash_resolvable():
+            raise ValueError(
+                "Kimi CLI prerequisite missing: Git for Windows (Git Bash) is "
+                "required as the CLI's shell. Install Git for Windows, or set "
+                f"{_KIMI_GIT_BASH_ENV} to your bash.exe."
+            )
         return meta
     raise ValueError(f"provider {provider.value} has no subprocess command to classify")
 

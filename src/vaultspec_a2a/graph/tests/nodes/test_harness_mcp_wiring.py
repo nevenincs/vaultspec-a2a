@@ -65,6 +65,16 @@ def _server_names(record_file: Path) -> list[str]:
     return [s["name"] for s in params["mcpServers"]]
 
 
+def _allowed_tools(record_file: Path) -> list[str]:
+    params = json.loads(record_file.read_text(encoding="utf-8"))
+    return (
+        params.get("_meta", {})
+        .get("claudeCode", {})
+        .get("options", {})
+        .get("allowedTools", [])
+    )
+
+
 @pytest.mark.asyncio
 async def test_worker_node_advertises_declared_harness_server(tmp_path: Path) -> None:
     """A document worker turn advertises its declared harness MCP server."""
@@ -104,6 +114,105 @@ async def test_researcher_producer_advertises_declared_harness_server(
     )
     assert finding["source_thread"] == "t1"
     assert "vaultspec-rag" in _server_names(record_file)
+
+
+@pytest.mark.asyncio
+async def test_autonomous_worker_auto_permits_composed_rag_read_tools(
+    tmp_path: Path,
+) -> None:
+    """A headless worker turn joins the composed rag read tools to allowedTools.
+
+    Closes the attach(combined) gap end to end: with the harness server declared
+    and the run headless, the session the CLI is handed auto-permits exactly the
+    three read tool names, so a surfaced rag tool is not blocked by a prompt.
+    """
+    record_file = tmp_path / "autonomous_session_new.json"
+    node = create_worker_node(
+        model=_recording_model(record_file, tmp_path),
+        system_prompt="You are the synthesist.",
+        name="synthesis",
+        role="synthesist",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=True,
+    )
+
+    await node(_state())
+    allowed = _allowed_tools(record_file)
+    assert "mcp__vaultspec-rag__search_vault" in allowed
+    assert "mcp__vaultspec-rag__search_codebase" in allowed
+    assert "mcp__vaultspec-rag__get_code_file" in allowed
+    # The read-only boundary holds at the allowlist too: no write verb.
+    assert not any("reindex" in t for t in allowed)
+
+
+@pytest.mark.asyncio
+async def test_supervised_worker_does_not_auto_permit_harness_tools(
+    tmp_path: Path,
+) -> None:
+    """A supervised (non-headless) worker turn keeps the permission prompt.
+
+    Auto-permission is headless-only: without ``autonomous`` the composed server
+    is still advertised, but its tools are NOT joined to allowedTools, so the
+    human permission gate stays in force.
+    """
+    record_file = tmp_path / "supervised_session_new.json"
+    node = create_worker_node(
+        model=_recording_model(record_file, tmp_path),
+        system_prompt="You are the synthesist.",
+        name="synthesis",
+        role="synthesist",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=False,
+    )
+
+    await node(_state())
+    assert "vaultspec-rag" in _server_names(record_file)
+    assert not any("vaultspec-rag" in t for t in _allowed_tools(record_file))
+
+
+@pytest.mark.asyncio
+async def test_autonomous_researcher_producer_auto_permits_rag_read_tools(
+    tmp_path: Path,
+) -> None:
+    """The researcher producer path auto-permits the composed rag read tools too.
+
+    Wiring parity with the worker: the researcher is the primary target of the
+    grounding feature, so its headless composition must join the same three read
+    tool names to allowedTools - otherwise a surfaced rag tool would stall on a
+    permission prompt exactly where the feature is meant to work.
+    """
+    record_file = tmp_path / "researcher_autonomous_session_new.json"
+    producer = _make_research_producer(
+        _recording_model(record_file, tmp_path),
+        "You are the researcher.",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=True,
+    )
+
+    await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
+    allowed = _allowed_tools(record_file)
+    assert "mcp__vaultspec-rag__search_vault" in allowed
+    assert "mcp__vaultspec-rag__search_codebase" in allowed
+    assert "mcp__vaultspec-rag__get_code_file" in allowed
+    assert not any("reindex" in t for t in allowed)
+
+
+@pytest.mark.asyncio
+async def test_supervised_researcher_producer_does_not_auto_permit(
+    tmp_path: Path,
+) -> None:
+    """Without autonomous, the researcher producer keeps the permission prompt."""
+    record_file = tmp_path / "researcher_supervised_session_new.json"
+    producer = _make_research_producer(
+        _recording_model(record_file, tmp_path),
+        "You are the researcher.",
+        harness_mcp_servers=["vaultspec-rag"],
+        autonomous=False,
+    )
+
+    await producer(_state(), {"thread_id": "t1", "topic": "x", "instructions": ""})
+    assert "vaultspec-rag" in _server_names(record_file)
+    assert not any("vaultspec-rag" in t for t in _allowed_tools(record_file))
 
 
 @pytest.mark.asyncio

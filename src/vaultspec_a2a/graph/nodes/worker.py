@@ -537,10 +537,21 @@ def create_worker_node(
             effective_model, authoring_binding, autonomous=autonomous
         )
         if harness_mcp_servers:
-            from vaultspec_a2a.providers._acp_mcp import compose_harness_mcp_servers
+            from vaultspec_a2a.providers._acp_mcp import (
+                compose_harness_mcp_servers,
+                harness_allowed_tool_names,
+            )
 
+            # Headless only: auto-permit exactly the composed servers' read tools
+            # so a surfaced rag tool is not blocked by a permission prompt. Unioned
+            # (in compose) with the authoring names the attach step already set;
+            # supervised runs keep their prompts. Parallel to the authoring-attach
+            # allowlist above.
+            harness_allowed = (
+                harness_allowed_tool_names(harness_mcp_servers) if autonomous else None
+            )
             effective_model = compose_harness_mcp_servers(
-                effective_model, harness_mcp_servers
+                effective_model, harness_mcp_servers, allowed_tools=harness_allowed
             )
         effective_model = _compose_native_read_tools(
             effective_model, autonomous=autonomous, role=role

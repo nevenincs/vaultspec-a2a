@@ -290,12 +290,16 @@ async def build_full_health(
     checks["checkpoint"] = checkpoint_check
 
     # --- Worker HTTP probe ---
-    try:
-        resp = await worker_client.get("/health", timeout=5.0)
-        resp.raise_for_status()
+    # The single worker-health primitive, reusing the pooled client; "healthy" is an
+    # exact 200 for both this endpoint and the watchdog, so they cannot disagree.
+    from .worker_management import _check_worker_health
+
+    if await _check_worker_health(
+        settings.worker_url, timeout=5.0, client=worker_client
+    ):
         checks["worker"] = {"status": "ok"}
-    except Exception:
-        logger.exception("Health check: worker probe failed")
+    else:
+        logger.warning("Health check: worker probe failed")
         checks["worker"] = {"status": "error", "detail": "worker probe failed"}
 
     # --- Circuit breaker & spawner ---

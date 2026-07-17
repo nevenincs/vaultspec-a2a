@@ -22,8 +22,10 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from pathlib import Path
 
+    import httpx
+
 from ..utils import kill_pid_tree_async
-from .config import INTERNAL_TOKEN_ENV, settings
+from .config import GATEWAY_URL_ENV, INTERNAL_TOKEN_ENV, settings
 
 __all__ = [
     "LazyWorkerSpawner",
@@ -132,17 +134,29 @@ async def _tcp_port_ready(host: str, port: int) -> bool:
 async def _check_worker_health(
     url: str,
     timeout: float = 2.0,
+    *,
+    client: httpx.AsyncClient | None = None,
 ) -> bool:
-    """Check if the worker is already running by probing /health."""
+    """Probe the worker's ``GET /health``; ``True`` only on an exact ``200``.
+
+    The single worker-health primitive for every caller - the boot/spawn paths,
+    the watchdog's authoritative crash check, and ``/api/health``. Request-path
+    callers pass the app-pooled *client* to reuse its connection pool; the watchdog
+    and boot paths pass none and get a self-contained one-shot client. "Healthy" is
+    an exact ``200`` for all of them, so ``/api/health`` can never silently disagree
+    with the watchdog's restart decision (a ``204`` fails both, not one).
+    """
     import httpx
 
+    async def _probe(active: httpx.AsyncClient) -> bool:
+        resp = await active.get(f"{url}/health", timeout=timeout)
+        return resp.status_code == 200
+
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(
-                f"{url}/health",
-                timeout=timeout,
-            )
-            return resp.status_code == 200
+        if client is not None:
+            return await _probe(client)
+        async with httpx.AsyncClient() as owned:
+            return await _probe(owned)
     except Exception:
         return False
 
@@ -184,7 +198,7 @@ async def _spawn_worker(
     # Injecting VAULTSPEC_GATEWAY_URL ensures the worker always points at
     # the correct gateway regardless of how it was started.
     spawn_env = os.environ.copy()
-    spawn_env["VAULTSPEC_GATEWAY_URL"] = settings.gateway_url
+    spawn_env[GATEWAY_URL_ENV] = settings.gateway_url
     spawn_env["VAULTSPEC_PORT"] = str(settings.port)
     spawn_env["VAULTSPEC_WORKER_PORT"] = str(settings.worker_port)
     spawn_env["VAULTSPEC_WORKER_HOST"] = settings.worker_host

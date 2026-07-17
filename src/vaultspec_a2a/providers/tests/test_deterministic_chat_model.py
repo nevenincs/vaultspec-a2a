@@ -6,9 +6,14 @@ import pytest
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import AIMessage, HumanMessage
 
+from ...authoring.contract import DOCUMENT_AUTHORING_ROLE_SET, DOCUMENT_AUTHORING_ROLES
 from ...graph.enums import MODEL_MAP, PROVIDER_DEFAULT_MODELS, Provider
 from ...team.team_config import AgentConfig, AgentPersonaConfig
-from ..deterministic_chat_model import DeterministicResearchAdrChatModel
+from ..deterministic_chat_model import (
+    _ROLE_DISPATCH_KEYS,
+    DeterministicResearchAdrChatModel,
+    _role_of,
+)
 from ..factory import ProviderFactory
 
 
@@ -113,3 +118,19 @@ def test_sync_generate_unsupported() -> None:
     """Synchronous generation is explicitly unsupported (async-only)."""
     with pytest.raises(NotImplementedError, match="async"):
         _model("vaultspec-researcher").invoke([HumanMessage(content="x")])
+
+
+def test_role_dispatch_keys_match_authoring_contract() -> None:
+    """The provider's role dispatch keys stay in sync with the authoring contract.
+
+    Guards authoring-contract ADR binding (b): the deterministic provider keeps a
+    private copy of the role names, so this asserts it never diverges from the
+    code-truth DOCUMENT_AUTHORING_ROLE_SET.
+    """
+    assert frozenset(_ROLE_DISPATCH_KEYS) == DOCUMENT_AUTHORING_ROLE_SET
+
+
+def test_role_of_resolves_every_contract_role() -> None:
+    """Every contract role resolves from its namespaced agent id via _role_of."""
+    for role in DOCUMENT_AUTHORING_ROLES:
+        assert _role_of(f"vaultspec-{role}") == role

@@ -38,11 +38,23 @@ __all__ = ["DeterministicResearchAdrChatModel"]
 # DOCUMENT_AUTHORING_ROLES), matched as a suffix of the AgentConfig id so both bare
 # ("researcher") and namespaced ("vaultspec-researcher") agent ids resolve to the
 # same role content. Kept as individual per-role content-dispatch keys here rather
-# than the contract tuple; a data-sync guard could fold them - see task #35.
+# than importing the contract tuple (the leaf provider stays free of a graph/team
+# runtime edge); a contract-sync test asserts these never diverge from
+# DOCUMENT_AUTHORING_ROLE_SET (authoring-contract ADR binding (b)).
 _ROLE_RESEARCHER = "researcher"
 _ROLE_SYNTHESIST = "synthesist"
 _ROLE_ADR_AUTHOR = "adr-author"
 _ROLE_DOC_REVIEWER = "doc-reviewer"
+
+# The role dispatch keys as an introspectable collection, ordered so a namespaced
+# agent id resolves against every candidate suffix. This is the module's single
+# source for the resolver loop and the contract-sync guard.
+_ROLE_DISPATCH_KEYS: tuple[str, ...] = (
+    _ROLE_ADR_AUTHOR,
+    _ROLE_DOC_REVIEWER,
+    _ROLE_SYNTHESIST,
+    _ROLE_RESEARCHER,
+)
 
 # The reviewer sentinel the research_adr inner-review router advances on (the
 # REVISION path is driven by the gate verdict, not this provider).
@@ -91,12 +103,7 @@ def _role_of(agent_id: str | None) -> str | None:
     """Resolve the research_adr role from a (possibly namespaced) agent id."""
     if not agent_id:
         return None
-    for role in (
-        _ROLE_ADR_AUTHOR,
-        _ROLE_DOC_REVIEWER,
-        _ROLE_SYNTHESIST,
-        _ROLE_RESEARCHER,
-    ):
+    for role in _ROLE_DISPATCH_KEYS:
         if agent_id == role or agent_id.endswith(role):
             return role
     return None

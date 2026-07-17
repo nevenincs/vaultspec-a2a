@@ -83,7 +83,7 @@ if TYPE_CHECKING:
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
-from ..authoring.discovery import resolve_engine
+from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
 _RESEARCH_ADR_ROLES = (
@@ -576,6 +576,77 @@ async def test_engine_client_fails_loud_on_transient_exhaustion() -> None:
             await client._call_resilient(always_stalls)
     assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
     assert "transient class exhausted" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_engine_client_reresolves_bearer_once_on_401(
+    tmp_path: Path,
+) -> None:
+    """A 401 re-resolves the bearer from discovery once, then the call succeeds.
+
+    Uses a REAL loopback /health listener plus a real service.json so
+    ``resolve_engine`` genuinely resolves the fresh bearer - no doubles. This
+    is the one retry path the other tests cannot reach (it needs a resolvable
+    engine), pinning that the ``before_retry`` hook actually rotates the
+    credential and retries immediately.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _Health(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    service_json = tmp_path / "service.json"
+    service_json.write_text(
+        json.dumps(
+            {
+                "port": server.server_address[1],
+                "service_token": "rotated-tok",
+                "pid": os.getpid(),
+                "last_heartbeat": int(time.time() * 1000),
+            }
+        ),
+        encoding="utf-8",
+    )
+    prior = os.environ.get(SERVICE_JSON_ENV)
+    os.environ[SERVICE_JSON_ENV] = str(service_json)
+    calls = 0
+    try:
+
+        async def denied_once(_self: AuthoringClient) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise AuthoringTransportError(
+                    status_code=401,
+                    message="machine bearer expired",
+                    error_kind="authoring_unauthorized",
+                )
+            return "ok"
+
+        client = _ResilientAuthoringClient("http://127.0.0.1:1", "stale-tok")
+        async with client:
+            result = await client._call_resilient(denied_once)
+            assert result == "ok"
+            assert calls == 2  # 401 consumed one attempt, immediate retry
+            assert client._bearer_token == "rotated-tok"  # rotation really ran
+    finally:
+        if prior is None:
+            os.environ.pop(SERVICE_JSON_ENV, None)
+        else:
+            os.environ[SERVICE_JSON_ENV] = prior
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
 
 
 # The gateway status poll rides the same shared retry loop; these pin its

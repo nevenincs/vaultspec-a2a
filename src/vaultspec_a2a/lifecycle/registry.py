@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from .discovery import is_pid_alive
+from .discovery import is_pid_alive, port_has_listener
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -315,11 +315,12 @@ def _port_is_free(port: int) -> bool:
       exists to prevent.
     - Then a bind probe (no ``SO_REUSEADDR``): catches a port bound but not yet
       listening, which the connect probe would miss.
+
+    The connect probe is the shared ``discovery.port_has_listener`` primitive; the
+    connect-FIRST-then-bind order is load-bearing and must not change.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(0.5)
-        if probe.connect_ex(("127.0.0.1", port)) == 0:
-            return False
+    if port_has_listener(port, timeout=0.5):
+        return False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             sock.bind(("127.0.0.1", port))

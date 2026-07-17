@@ -19,7 +19,6 @@ from __future__ import annotations
 
 import contextlib
 import os
-import socket
 import subprocess
 import sys
 import time
@@ -652,8 +651,9 @@ def _port_is_bound(port: int, *, timeout: float = 1.0) -> bool:
     A connect probe, not a bind probe: on Windows ``SO_REUSEADDR`` lets a second
     socket bind a port another is already listening on, so a bind cannot tell a
     held port from a free one. A successful loopback connect proves a live
-    listener - exactly what ``attach`` must verify.
+    listener - exactly what ``attach`` must verify. Delegates to the shared
+    :func:`~vaultspec_a2a.lifecycle.discovery.port_has_listener` primitive.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.settimeout(timeout)
-        return sock.connect_ex(("127.0.0.1", port)) == 0
+    from .discovery import port_has_listener
+
+    return port_has_listener(port, timeout=timeout)

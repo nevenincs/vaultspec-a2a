@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import sys
 import time
 from dataclasses import dataclass
@@ -49,6 +50,7 @@ __all__ = [
     "another_resident_is_live",
     "classify_discovery",
     "is_pid_alive",
+    "port_has_listener",
     "probe_health",
     "read_resident_service",
     "remove_service_json_if_owned",
@@ -181,6 +183,23 @@ def is_pid_alive(pid: int | None) -> bool:
     except PermissionError:
         return True
     return True
+
+
+def port_has_listener(port: int, *, timeout: float) -> bool:
+    """Return ``True`` when a loopback ``connect`` to *port* is accepted.
+
+    The single connect-probe primitive for the lifecycle package: a successful
+    ``connect_ex`` to ``127.0.0.1:port`` proves a live listener is accepting there.
+    It is the ONLY reliable "is this port taken" signal on Windows, where a plain
+    ``bind`` succeeds even when another process already serves the port (no
+    ``SO_EXCLUSIVEADDRUSE``); a caller that must also catch a bound-but-not-yet-
+    listening port pairs this with a bind-probe. *timeout* is required rather than
+    defaulted because a readiness poll (fast) and a liveness check (patient) want
+    different budgets.
+    """
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.settimeout(timeout)
+        return sock.connect_ex(("127.0.0.1", port)) == 0
 
 
 def write_service_json(

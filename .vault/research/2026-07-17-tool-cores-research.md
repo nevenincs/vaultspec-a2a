@@ -150,15 +150,64 @@ tools as "further servers by declaration" via the ACP `mcpServers` mechanism,
 alongside — not inside — the engine-owned authoring bridge/catalog. This is
 argued from the ADR text; the out-of-tree engine repository was not searched.
 
+### Upstream re-arm probe: the pin is deprecated, the gate likely fixed upstream
+
+The adapter pin `@zed-industries/claude-agent-acp@0.23.1` (`package.json:7`) is
+DEPRECATED — the package was renamed to `@agentclientprotocol/claude-agent-acp`
+(latest `0.59.0`, 36 releases past the frozen pin); all upstream fixes land
+under the new name this repo does not depend on. The adapter exact-pins
+`@anthropic-ai/claude-agent-sdk@0.2.83` (`package-lock.json:23`), ~129 releases
+behind latest (`0.3.212`). The SDK changelog between the pin and latest
+carries entries directly on the S20 axis: `0.3.166` "Fixed MCP resource tools
+not being injected for servers added at runtime via the mcp_set_servers
+control request", `0.2.113` (background MCP connection timing), `0.2.69`
+(session-injected vs project/user-level scope distinction). The S20 result has
+not moved because the pin cannot move, not because upstream has not.
+Provenance note: no standalone claude-code CLI exists in the tree
+(`src/vaultspec_a2a/providers/factory.py:206` spawns only the adapter's node
+entry); the vault's "CLI 2.1.210" figures do not map to the locked packages
+(the vendored SDK self-reports `2.1.83`) — treat 2.1.210 citations as
+ambient-package provenance, not this repo's pin. A meaningful re-probe of the
+S20 matrix requires migrating to `@agentclientprotocol/claude-agent-acp@0.59.0`
+first; re-probing the current pin reproduces the known-stale result.
+
+### Per-provider mechanism matrix (Codex, Z.ai)
+
+Codex has zero MCP wiring today: `CodexChatModel`
+(`src/vaultspec_a2a/providers/codex_chat_model.py:222`) is a from-scratch
+BaseChatModel speaking codex app-server JSON-RPC, with no `with_mcp_servers`
+and no MCP field in `initialize`/`thread/start`/`turn/start` params
+(`codex_chat_model.py:340-375`); both `_attach_authoring_tools`
+(`worker.py:151`) and `compose_harness_mcp_servers` (`_acp_mcp.py:81`)
+feature-detect `with_mcp_servers` and silently no-op for Codex, so Codex
+agents get neither the authoring bridge nor grounding tools via the current
+mechanism. Codex app-server supports MCP servers through `config.toml` (or
+repeated `-c mcp_servers.<name>.command=...` launch flags, plus a
+`config/mcpServer/reload` RPC) — a config-file shape, not a session parameter,
+so a Codex-lane composition is new work; the per-run `CODEX_HOME` already
+threaded at `codex_chat_model.py:304` is the architecturally clean seam for a
+per-run `config.toml`. Codex headless permissioning is blanket
+(`approval_policy: "never"`, `sandbox: "read-only"`,
+`codex_chat_model.py:354`) — the read-only sandbox aligns with the read-only
+mandate; whether a per-tool allowlist analogue exists is an open verification
+item, not asserted absent. Sources:
+https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md,
+https://developers.openai.com/codex/mcp.
+
+Z.ai is the Claude ACP path by construction: same `AcpChatModel`, same spawned
+command; only env differs (`_build_zai_env`, `factory.py:69`, injecting
+`ANTHROPIC_BASE_URL`/`ANTHROPIC_AUTH_TOKEN`; comment `factory.py:488`).
+Identical surfacing behavior and pin; it re-arms exactly when Claude does.
+
 ### Not investigated
 
 The untracked `.qdrant-initialized`, `scratchpad/`, and
-`vaultspec-adr-research-mock.toml`; exhaustive Codex/Z.ai provider allowlist
-search beyond `_acp_authoring.py`/`_acp_mcp.py`/`_acp_session.py`; live
-verification of native-tool fs behavior; the engine repository itself. An
-upstream version re-arm probe (latest CLI/adapter versus pinned
-`2.1.210`/`0.23.1`) is running as a follow-up and should be read by the ADR
-author.
+`vaultspec-adr-research-mock.toml`; live verification of native-tool fs
+behavior; the engine repository itself; a dedicated source check for a
+Codex per-tool allowlist mechanism; live compatibility of our ACP layer
+against `@agentclientprotocol/claude-agent-acp@0.59.0` (36-release jump —
+session/new shape, permission modes, mcp_servers key, capability flags all
+need regression verification before any migration lands).
 
 ## Sources
 
@@ -177,6 +226,19 @@ author.
 - `.vault/exec/2026-07-14-a2a-edge-conformance/2026-07-14-a2a-edge-conformance-W03-P08-S20.md:31`
 - `.vault/exec/2026-07-15-graph-agent-framework-harness/2026-07-15-graph-agent-framework-harness-P04-S15.md:75`
 - `.vault/exec/2026-07-14-a2a-edge-conformance/2026-07-14-a2a-edge-conformance-W05-P14-S31.md:26`
+- `package.json:7`
+- `package-lock.json:23`
+- `src/vaultspec_a2a/providers/factory.py:69`
+- `src/vaultspec_a2a/providers/factory.py:206`
+- `src/vaultspec_a2a/providers/factory.py:488`
+- `src/vaultspec_a2a/providers/codex_chat_model.py:222`
+- `src/vaultspec_a2a/providers/codex_chat_model.py:304`
+- `src/vaultspec_a2a/providers/codex_chat_model.py:340`
+- `src/vaultspec_a2a/providers/codex_chat_model.py:354`
+- `src/vaultspec_a2a/graph/nodes/worker.py:151`
 - commit `357d87a`
 - https://github.com/anthropics/claude-code/issues/40314
 - https://github.com/anthropics/claude-code/issues/57033
+- https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md
+- https://github.com/openai/codex/blob/main/codex-rs/app-server/README.md
+- https://developers.openai.com/codex/mcp

@@ -28,15 +28,23 @@ synthesist, not a document author.
 
 ## Discovery sequence
 
-You ground with the native read tools — Read, Grep, and Glob — which run over the
-workspace filesystem. You have no terminal: do not invoke CLIs.
+You ground with two tool families, both invocable mid-turn: the semantic search
+tools `mcp__vaultspec-rag__search_vault` (governing decisions in the vault) and
+`mcp__vaultspec-rag__search_codebase` / `mcp__vaultspec-rag__get_code_file` (code by
+meaning), and the native read tools Read, Grep, and Glob over the workspace
+filesystem. You have no terminal: do not invoke CLIs — never a `vaultspec-core` or
+`vaultspec-rag` shell command; use these tools instead. Lead by MEANING, then
+confirm with the exact-match tools.
 
-1. Surface governing decisions first: Glob `.vault/adr/` (and `.vault/research/`,
-   `.vault/audit/`) for records on your topic and Read each relevant one in full.
-2. Locate implementation sites: Grep the codebase for the topic's domain symbols,
-   narrowing by path where the tree is large.
-3. Read the epicenter file whole once located; confirm exact symbols and
-   insertion points with a targeted Grep.
+1. Surface governing decisions first: `mcp__vaultspec-rag__search_vault` for the ADRs
+   and research on your topic, then Read each relevant record in full. Round out with
+   a Glob of `.vault/adr/` (and `.vault/research/`, `.vault/audit/`) so a lower-ranked
+   or opaquely-named record is not missed.
+2. Locate implementation sites: `mcp__vaultspec-rag__search_codebase` with the topic's
+   behaviour plus its domain nouns; fetch a located file with
+   `mcp__vaultspec-rag__get_code_file` or Read it whole.
+3. Confirm exact symbols and insertion points with a targeted Grep — sharper than
+   semantic search at exact-name lookup.
 4. Web/documentation sources where the codebase and vault are insufficient.
 
 ## Findings format

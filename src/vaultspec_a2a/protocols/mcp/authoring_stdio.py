@@ -20,19 +20,25 @@ only stderr output is a value-free diagnostic when required env is absent.
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 import sys
 
 from mcp.server.stdio import stdio_server
 
 from ...authoring import AuthoringClient
-from ...authoring.catalog import fetch_catalog, make_tool_dispatch
+from ...authoring.catalog import (
+    fetch_catalog,
+    make_tool_dispatch,
+    parse_catalog,
+)
 from .tools.authoring_bridge import build_authoring_mcp_server
 
 __all__ = [
     "ENV_ACTOR_TOKEN",
     "ENV_BASE_URL",
     "ENV_BEARER",
+    "ENV_CATALOG_JSON",
     "ENV_RUN_ID",
     "ENV_SERVER_NAME",
     "main",
@@ -45,6 +51,11 @@ ENV_BEARER = "VAULTSPEC_AUTHORING_BEARER"
 ENV_ACTOR_TOKEN = "VAULTSPEC_AUTHORING_ACTOR_TOKEN"
 ENV_RUN_ID = "VAULTSPEC_AUTHORING_RUN_ID"
 ENV_SERVER_NAME = "VAULTSPEC_AUTHORING_SERVER_NAME"
+# The worker hands its already-fetched catalog snapshot (JSON) so the bridge
+# serves list_tools immediately without its own engine round-trip at spawn, and
+# so both sides serve the SAME snapshot (closing the independent-re-fetch drift
+# window). Carries only tool schemas, no secret. Absent = fall back to fetching.
+ENV_CATALOG_JSON = "VAULTSPEC_AUTHORING_CATALOG_JSON"
 # Debug-only: if set to a writable path, the bridge appends a value-free startup
 # line so an orchestrator can confirm the CLI actually spawned it. Never carries
 # tokens (R7); off unless explicitly enabled.
@@ -80,8 +91,15 @@ async def _amain() -> int:
         )
         return 2
 
+    handed = os.environ.get(ENV_CATALOG_JSON)
     async with AuthoringClient(base_url, bearer, actor_token=actor_token) as client:
-        snapshot = await fetch_catalog(client)
+        # Serve list_tools from the worker's handed snapshot when present (no
+        # engine round-trip at spawn); the engine is reached only at execute time
+        # via the dispatch. Fall back to fetching when no snapshot was handed.
+        if handed:
+            snapshot = parse_catalog(json.loads(handed))
+        else:
+            snapshot = await fetch_catalog(client)
         dispatch = make_tool_dispatch(
             client, run_id=run_id, actor_token=actor_token, snapshot=snapshot
         )

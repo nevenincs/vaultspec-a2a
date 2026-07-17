@@ -9,6 +9,10 @@ Consumers import from this facade rather than the private sub-modules::
     from vaultspec_a2a.authoring import AuthoringClient, Denial
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Any
+
 from ._envelope import AuthoringResponse as AuthoringResponse
 from ._envelope import CommandEnvelope as CommandEnvelope
 from ._envelope import Denial as Denial
@@ -46,15 +50,67 @@ from .lifecycle import verdict_from_event as verdict_from_event
 from .session import AuthoringSession as AuthoringSession
 from .session import close_authoring_session as close_authoring_session
 from .session import mint_actor_token as mint_actor_token
-from .submitter import CredentialsMissingError as CredentialsMissingError
-from .submitter import DocumentConformanceError as DocumentConformanceError
-from .submitter import DocumentProposalSubmitter as DocumentProposalSubmitter
-from .submitter import DocumentUnavailableError as DocumentUnavailableError
-from .submitter import EngineUnavailableError as EngineUnavailableError
-from .submitter import PhaseAuthoringSpec as PhaseAuthoringSpec
-from .submitter import ProposalDeniedError as ProposalDeniedError
-from .submitter import RoleConfigInvalidError as RoleConfigInvalidError
-from .submitter import SubmitterError as SubmitterError
+
+# The submitter pulls the graph -> langchain -> transformers stack (~6s of import
+# time). The per-run stdio authoring bridge (``protocols/mcp/authoring_stdio``)
+# only needs the light client/catalog surface and must NOT pay that cost to serve
+# ``list_tools`` at spawn — the cold-start that kept the bridge's tools from
+# reaching the model in time (a2a-edge-conformance S18). So the submitter exports
+# are resolved lazily via PEP 562: ``from vaultspec_a2a.authoring import
+# DocumentProposalSubmitter`` still works for the worker that authors documents,
+# while a bridge importing the package pays only for the light modules above.
+if TYPE_CHECKING:
+    from .submitter import (
+        CredentialsMissingError as CredentialsMissingError,
+    )
+    from .submitter import (
+        DocumentConformanceError as DocumentConformanceError,
+    )
+    from .submitter import (
+        DocumentProposalSubmitter as DocumentProposalSubmitter,
+    )
+    from .submitter import (
+        DocumentUnavailableError as DocumentUnavailableError,
+    )
+    from .submitter import (
+        EngineUnavailableError as EngineUnavailableError,
+    )
+    from .submitter import (
+        PhaseAuthoringSpec as PhaseAuthoringSpec,
+    )
+    from .submitter import (
+        ProposalDeniedError as ProposalDeniedError,
+    )
+    from .submitter import (
+        RoleConfigInvalidError as RoleConfigInvalidError,
+    )
+    from .submitter import (
+        SubmitterError as SubmitterError,
+    )
+
+_SUBMITTER_EXPORTS = frozenset(
+    {
+        "CredentialsMissingError",
+        "DocumentConformanceError",
+        "DocumentProposalSubmitter",
+        "DocumentUnavailableError",
+        "EngineUnavailableError",
+        "PhaseAuthoringSpec",
+        "ProposalDeniedError",
+        "RoleConfigInvalidError",
+        "SubmitterError",
+    }
+)
+
+
+def __getattr__(name: str) -> Any:
+    """Lazily resolve the submitter exports (PEP 562), deferring its heavy import."""
+    if name in _SUBMITTER_EXPORTS:
+        from . import submitter
+
+        return getattr(submitter, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+
 
 __all__ = [
     "ACTOR_TOKEN_HEADER",

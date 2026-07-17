@@ -25,6 +25,7 @@ state or a checkpoint.
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 from dataclasses import dataclass
@@ -32,6 +33,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
 from ..authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER
+from ..authoring.catalog import snapshot_to_catalog_payload
 from ..protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN as STDIO_ENV_ACTOR_TOKEN,
 )
@@ -40,6 +42,9 @@ from ..protocols.mcp.authoring_stdio import (
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_BEARER as STDIO_ENV_BEARER,
+)
+from ..protocols.mcp.authoring_stdio import (
+    ENV_CATALOG_JSON as STDIO_ENV_CATALOG_JSON,
 )
 from ..protocols.mcp.authoring_stdio import (
     ENV_DEBUG_MARKER as STDIO_ENV_DEBUG_MARKER,
@@ -273,6 +278,14 @@ def build_authoring_stdio_mcp_servers(
         {"name": STDIO_ENV_ACTOR_TOKEN, "value": binding.actor_token},
         {"name": STDIO_ENV_RUN_ID, "value": binding.run_id},
         {"name": STDIO_ENV_SERVER_NAME, "value": AUTHORING_MCP_SERVER_NAME},
+        # Hand the run's already-fetched catalog snapshot so the bridge serves
+        # list_tools immediately without an engine round-trip at spawn, and both
+        # sides serve the same snapshot (closes the re-fetch drift window). Carries
+        # only tool schemas, no secret.
+        {
+            "name": STDIO_ENV_CATALOG_JSON,
+            "value": json.dumps(snapshot_to_catalog_payload(binding.snapshot)),
+        },
     ]
     # Forward the debug startup marker to the subprocess when enabled (the MCP
     # SDK filters arbitrary parent env, so it must ride the explicit env list).
@@ -334,8 +347,7 @@ def config_home_authoring_entry(
                 f"authoring bridge (args must be ['-m', {AUTHORING_STDIO_MODULE!r}] "
                 f"as built by build_authoring_stdio_mcp_servers)"
             )
-        command = spec.get("command")
-        if not command:
+        if not spec.get("command"):
             raise ConfigError(
                 f"authoring bridge spec {AUTHORING_MCP_SERVER_NAME!r} is missing a "
                 f"command; cannot admit it into the isolated config home"
@@ -352,9 +364,14 @@ def config_home_authoring_entry(
             var = item["name"]
             home_env[var] = f"${{{var}}}"
             spawn_env[var] = item["value"]
+        # Pin the emitted command to THIS worker's interpreter rather than
+        # passing the spec's value through: the bridge is `python -m <module>` in
+        # the worker's own venv, and sys.executable is the trusted interpreter that
+        # carries the installed package. The spec's command is validated present
+        # above (shape integrity) but never trusted as the launched binary.
         home[AUTHORING_MCP_SERVER_NAME] = {
             "type": "stdio",
-            "command": command,
+            "command": sys.executable,
             "args": ["-m", AUTHORING_STDIO_MODULE],
             "env": home_env,
         }

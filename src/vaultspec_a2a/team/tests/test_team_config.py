@@ -1144,3 +1144,21 @@ class TestTeamHarness:
             TeamConfig.model_validate(
                 self._authoring_dict({"role_skills": {"ghost": ["vaultspec-adr"]}})
             )
+
+    def test_authoring_bridge_on_document_topology_raises_config_error(self) -> None:
+        # research_adr authors via the in-process submitter, not the agent bridge;
+        # arming the bridge on it is a contradiction refused at config time.
+        with pytest.raises(ConfigError, match="authoring_bridge"):
+            TeamConfig.model_validate(self._authoring_dict({"authoring_bridge": True}))
+
+    def test_authoring_bridge_defaults_false(self) -> None:
+        cfg = TeamConfig.model_validate(self._authoring_dict({}))
+        assert cfg.harness is not None
+        assert cfg.harness.authoring_bridge is False
+
+    def test_solo_coder_preset_arms_authoring_bridge(self) -> None:
+        # The bundled CLI-coder preset opts in through real TOML load.
+        cfg = load_team_config("vaultspec-solo-coder")
+        assert cfg.harness is not None
+        assert cfg.harness.authoring_bridge is True
+        assert cfg.is_document_authoring is False

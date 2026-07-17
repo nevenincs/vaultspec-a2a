@@ -13,10 +13,12 @@ from typing import TYPE_CHECKING, cast
 import pytest
 
 from ...authoring import ACTOR_TOKEN_HEADER, BEARER_HEADER, AgentTool, CatalogSnapshot
+from ...authoring.catalog import parse_catalog, snapshot_to_catalog_payload
 from ...protocols.mcp.authoring_stdio import (
     ENV_ACTOR_TOKEN,
     ENV_BASE_URL,
     ENV_BEARER,
+    ENV_CATALOG_JSON,
     ENV_RUN_ID,
     ENV_SERVER_NAME,
 )
@@ -226,17 +228,27 @@ class TestConfigHomeAuthoringEntry:
         for name, value in home_env.items():
             assert value == f"${{{name}}}"
 
-        # All five bridge env names carry placeholders, and the spawn env carries
-        # the matching real values that the CLI expands the placeholders from.
+        # Each bridge env name carries a placeholder, and the spawn env carries the
+        # matching real value the CLI expands the placeholder from - including the
+        # handed catalog snapshot (JSON) that lets the bridge serve list_tools
+        # without an engine fetch at spawn.
         expected_values = {
             ENV_BASE_URL: _ENGINE_URL,
             ENV_BEARER: "SECRET-BEARER",
             ENV_ACTOR_TOKEN: "SECRET-ACTOR",
             ENV_RUN_ID: "run-777",
             ENV_SERVER_NAME: AUTHORING_MCP_SERVER_NAME,
+            ENV_CATALOG_JSON: json.dumps(
+                snapshot_to_catalog_payload(binding.snapshot)
+            ),
         }
         assert set(home_env) == set(expected_values)
         assert spawn_env == expected_values
+        # The handed catalog round-trips back to the run's snapshot.
+        assert (
+            parse_catalog(json.loads(spawn_env[ENV_CATALOG_JSON])).tool_names()
+            == binding.snapshot.tool_names()
+        )
 
         # No secret ever appears in the on-disk placeholder mapping.
         assert "SECRET-BEARER" not in json.dumps(home_env)

@@ -36,6 +36,7 @@ __all__ = [
     "fetch_catalog",
     "make_tool_dispatch",
     "resolve_tool_command",
+    "snapshot_to_catalog_payload",
 ]
 
 CATALOG_SCHEMA_VERSION = "authoring.semantic_tools.v1"
@@ -136,6 +137,32 @@ async def fetch_catalog(client: AuthoringClient) -> CatalogSnapshot:
     if not isinstance(response.data, dict):
         raise ValueError("catalog response data is not an object")
     return parse_catalog(response.data)
+
+
+def snapshot_to_catalog_payload(snapshot: CatalogSnapshot) -> dict[str, Any]:
+    """Serialize a snapshot back into the engine catalog wire shape.
+
+    The inverse of :func:`parse_catalog`: a JSON-round-trippable ``dict`` the
+    worker hands to the stdio bridge (via env) so the bridge serves ``list_tools``
+    from the run's already-fetched snapshot immediately, without its own engine
+    round-trip at spawn. ``parse_catalog`` reads exactly this shape back, so the
+    two stay a matched pair.
+    """
+    return {
+        "schema_version": snapshot.schema_version,
+        "tools": [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+                "risk_tier": tool.risk_tier,
+                "permission_requirement": tool.permission_requirement,
+                "idempotency_required": tool.idempotency_required,
+                "commands": list(tool.commands),
+            }
+            for tool in snapshot.tools
+        ],
+    }
 
 
 async def execute_agent_tool(

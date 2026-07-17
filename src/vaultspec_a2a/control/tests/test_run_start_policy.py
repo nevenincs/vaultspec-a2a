@@ -135,3 +135,36 @@ def test_harness_is_not_enforced_on_non_authoring_presets() -> None:
         harness=HarnessReadiness(ready=False, reasons=["rules corpus absent"]),
     )
     assert result.eligible is True
+
+
+_BRIDGE = "vaultspec-solo-coder"
+
+
+def test_authoring_bridge_preset_refuses_without_role_token_coverage() -> None:
+    """An armed CLI-coder preset needs per-role tokens; a missing one is refused.
+
+    This is the cheap run-start catch for the engine role-key gap: without the
+    coder's actor token the bridge could not route tool execution, so the run is
+    refused here rather than failing opaquely mid-run. No feature tag is required.
+    """
+    result = evaluate_run_start_eligibility(
+        load_team_config(_BRIDGE),
+        feature_tag=None,
+        actor_tokens=None,
+    )
+    assert result.eligible is False
+    assert "authoring_bridge" in (result.reason or "")
+    assert "vaultspec-coder" in (result.reason or "")
+
+
+def test_authoring_bridge_preset_eligible_with_role_token() -> None:
+    """Coverage present -> eligible, with no feature-tag or harness requirement."""
+    result = evaluate_run_start_eligibility(
+        load_team_config(_BRIDGE),
+        feature_tag=None,
+        actor_tokens=ActorTokenBundle(
+            tokens={"vaultspec-coder": "tok"}, engine_bearer="b"
+        ),
+    )
+    assert result.eligible is True
+    assert result.reason is None

@@ -83,7 +83,7 @@ if TYPE_CHECKING:
 from ..authoring import AuthoringClient, mint_actor_token
 from ..authoring._envelope import AuthoringResponse, Denial
 from ..authoring._errors import AuthoringTransportError
-from ..authoring.discovery import resolve_engine
+from ..authoring.discovery import SERVICE_JSON_ENV, resolve_engine
 
 _GATEWAY_URL = os.environ.get("VAULTSPEC_GATEWAY_URL", "http://127.0.0.1:18100")
 _RESEARCH_ADR_ROLES = (
@@ -350,12 +350,15 @@ class Materialization:
     result_stem: str | None = None
 
 
-# Standard-practice transient-retry policy for the harness's engine client,
-# mirroring LangGraph's RetryPolicy shape
+# Standard-practice transient-retry policy for BOTH harness clients - the engine
+# authoring client and the gateway status polls - mirroring LangGraph's
+# RetryPolicy shape
 # (docs.langchain.com/oss/python/langgraph/fault-tolerance#retries) and the
 # transient-error taxonomy in thinking-in-langgraph (network/timeout/5xx are the
 # canonical transient class, retried with exponential backoff + jitter; a 4xx is
-# terminal and never retried). ``max_attempts`` counts the first try.
+# terminal and never retried). ``max_attempts`` counts the first try. The loop
+# itself lives in exactly one place, :func:`_retry_transient`; the per-client
+# pieces are only the transient-vs-terminal classifiers.
 _ENGINE_RETRY_MAX_ATTEMPTS = 3
 _ENGINE_RETRY_INITIAL_INTERVAL = 0.5
 _ENGINE_RETRY_BACKOFF_FACTOR = 2.0
@@ -364,6 +367,58 @@ _ENGINE_RETRY_MAX_INTERVAL = 8.0
 # (same docs) - so a hung socket fails fast into the next attempt instead of
 # stalling the whole poll on one dead read.
 _ENGINE_RETRY_PER_ATTEMPT_TIMEOUT = 20.0
+
+
+async def _retry_transient(
+    op: Callable[[], Awaitable[Any]],
+    *,
+    name: str,
+    is_transient: Callable[[BaseException], bool],
+    before_retry: Callable[[BaseException], Awaitable[bool]] | None = None,
+) -> Any:
+    """Run ``op`` under the harness's bounded transient-retry policy.
+
+    The single home of the retry loop for both harness clients. A failure that
+    ``before_retry`` consumes (returns ``True``) retries immediately with no
+    backoff and no attempt-classification - the credential-rotation hook. A
+    failure ``is_transient`` accepts is retried with exponential backoff +
+    jitter up to ``_ENGINE_RETRY_MAX_ATTEMPTS``; anything else re-raises
+    immediately as terminal. Exhaustion fails loud rather than hanging.
+    """
+    interval = _ENGINE_RETRY_INITIAL_INTERVAL
+    last_exc: BaseException | None = None
+    for attempt in range(1, _ENGINE_RETRY_MAX_ATTEMPTS + 1):
+        try:
+            return await asyncio.wait_for(op(), _ENGINE_RETRY_PER_ATTEMPT_TIMEOUT)
+        except Exception as exc:
+            if before_retry is not None and await before_retry(exc):
+                continue  # consumed (e.g. one-shot bearer refresh) - retry now
+            if not is_transient(exc):
+                raise  # terminal class - never retried
+            last_exc = exc
+        if attempt < _ENGINE_RETRY_MAX_ATTEMPTS:
+            await asyncio.sleep(interval + random.uniform(0.0, interval))
+            interval = min(
+                interval * _ENGINE_RETRY_BACKOFF_FACTOR, _ENGINE_RETRY_MAX_INTERVAL
+            )
+    raise AssertionError(
+        f"{name} failed after "
+        f"{_ENGINE_RETRY_MAX_ATTEMPTS} attempts (transient class exhausted)"
+    ) from last_exc
+
+
+def _gateway_is_transient(exc: BaseException) -> bool:
+    """The gateway status-poll transient classifier: network/timeout/5xx only.
+
+    A 4xx from the gateway (``raise_for_status`` -> ``httpx.HTTPStatusError``)
+    is a real denial/identity/routing error and must surface immediately; a
+    dropped connection (``httpx.TransportError`` covers ``RemoteProtocolError``
+    and read/connect timeouts), the per-attempt ``TimeoutError`` cap, or a 5xx
+    are the textbook transient class a 5s poll loop must absorb.
+    """
+    if isinstance(exc, httpx.HTTPStatusError):
+        return exc.response.status_code >= 500
+    return isinstance(exc, (httpx.TransportError, TimeoutError))
 
 
 class _ResilientAuthoringClient(AuthoringClient):
@@ -416,36 +471,34 @@ class _ResilientAuthoringClient(AuthoringClient):
         errors - or the per-attempt ``TimeoutError``) or a 5xx is retried with
         exponential backoff + jitter up to ``max_attempts``. Any other 4xx is a
         terminal identity/denial error, re-raised immediately. Exhaustion fails
-        loud rather than returning a partial or hanging.
+        loud rather than returning a partial or hanging. The loop itself is the
+        shared :func:`_retry_transient`; only the classification is engine-side.
         """
-        interval = _ENGINE_RETRY_INITIAL_INTERVAL
         reresolved = False
-        last_exc: BaseException | None = None
-        for attempt in range(1, _ENGINE_RETRY_MAX_ATTEMPTS + 1):
-            try:
-                return await asyncio.wait_for(
-                    method(self, *args, **kwargs),
-                    _ENGINE_RETRY_PER_ATTEMPT_TIMEOUT,
-                )
-            except AuthoringTransportError as exc:
-                if exc.status_code == 401 and not reresolved:
-                    await self._reresolve_bearer()
-                    reresolved = True
-                    continue  # immediate retry on the fresh bearer, no backoff
-                if exc.status_code < 500:
-                    raise  # terminal 4xx (real denial/identity error) - never retried
-                last_exc = exc  # 5xx: transient server error
-            except (httpx.TransportError, TimeoutError) as exc:
-                last_exc = exc  # network stall / connect error / per-attempt cap
-            if attempt < _ENGINE_RETRY_MAX_ATTEMPTS:
-                await asyncio.sleep(interval + random.uniform(0.0, interval))
-                interval = min(
-                    interval * _ENGINE_RETRY_BACKOFF_FACTOR, _ENGINE_RETRY_MAX_INTERVAL
-                )
-        raise AssertionError(
-            f"engine call {getattr(method, '__name__', method)!r} failed after "
-            f"{_ENGINE_RETRY_MAX_ATTEMPTS} attempts (transient class exhausted)"
-        ) from last_exc
+
+        async def before_retry(exc: BaseException) -> bool:
+            nonlocal reresolved
+            if (
+                isinstance(exc, AuthoringTransportError)
+                and exc.status_code == 401
+                and not reresolved
+            ):
+                await self._reresolve_bearer()
+                reresolved = True
+                return True  # immediate retry on the fresh bearer, no backoff
+            return False
+
+        def is_transient(exc: BaseException) -> bool:
+            if isinstance(exc, AuthoringTransportError):
+                return exc.status_code >= 500  # 5xx transient; other 4xx terminal
+            return isinstance(exc, (httpx.TransportError, TimeoutError))
+
+        return await _retry_transient(
+            lambda: method(self, *args, **kwargs),
+            name=f"engine call {getattr(method, '__name__', method)!r}",
+            is_transient=is_transient,
+            before_retry=before_retry,
+        )
 
     async def get(self, *args: Any, **kwargs: Any) -> AuthoringResponse:
         return await self._call_resilient(AuthoringClient.get, *args, **kwargs)
@@ -525,6 +578,156 @@ async def test_engine_client_fails_loud_on_transient_exhaustion() -> None:
     assert "transient class exhausted" in str(excinfo.value)
 
 
+@pytest.mark.asyncio
+async def test_engine_client_reresolves_bearer_once_on_401(
+    tmp_path: Path,
+) -> None:
+    """A 401 re-resolves the bearer from discovery once, then the call succeeds.
+
+    Uses a REAL loopback /health listener plus a real service.json so
+    ``resolve_engine`` genuinely resolves the fresh bearer - no doubles. This
+    is the one retry path the other tests cannot reach (it needs a resolvable
+    engine), pinning that the ``before_retry`` hook actually rotates the
+    credential and retries immediately.
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+    class _Health(BaseHTTPRequestHandler):
+        def do_GET(self) -> None:
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, format: str, *args: Any) -> None:
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), _Health)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    service_json = tmp_path / "service.json"
+    service_json.write_text(
+        json.dumps(
+            {
+                "port": server.server_address[1],
+                "service_token": "rotated-tok",
+                "pid": os.getpid(),
+                "last_heartbeat": int(time.time() * 1000),
+            }
+        ),
+        encoding="utf-8",
+    )
+    prior = os.environ.get(SERVICE_JSON_ENV)
+    os.environ[SERVICE_JSON_ENV] = str(service_json)
+    calls = 0
+    try:
+
+        async def denied_once(_self: AuthoringClient) -> str:
+            nonlocal calls
+            calls += 1
+            if calls == 1:
+                raise AuthoringTransportError(
+                    status_code=401,
+                    message="machine bearer expired",
+                    error_kind="authoring_unauthorized",
+                )
+            return "ok"
+
+        client = _ResilientAuthoringClient("http://127.0.0.1:1", "stale-tok")
+        async with client:
+            result = await client._call_resilient(denied_once)
+            assert result == "ok"
+            assert calls == 2  # 401 consumed one attempt, immediate retry
+            assert client._bearer_token == "rotated-tok"  # rotation really ran
+    finally:
+        if prior is None:
+            os.environ.pop(SERVICE_JSON_ENV, None)
+        else:
+            os.environ[SERVICE_JSON_ENV] = prior
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5.0)
+
+
+# The gateway status poll rides the same shared retry loop; these pin its
+# transient-vs-terminal classification and the loop's behaviour through the
+# gateway classifier with deterministic exception sources (pure control flow,
+# no service double) - the same device as the engine-client tests above.
+
+
+def _http_status_error(status_code: int) -> httpx.HTTPStatusError:
+    """A real ``HTTPStatusError`` as ``raise_for_status`` would raise it."""
+    request = httpx.Request("GET", "http://127.0.0.1:1/v1/runs/pw7-test")
+    response = httpx.Response(status_code, request=request)
+    return httpx.HTTPStatusError(
+        f"status {status_code}", request=request, response=response
+    )
+
+
+@pytest.mark.asyncio
+async def test_gateway_poll_retries_dropped_connection_then_succeeds() -> None:
+    """A dropped connection then a read timeout are absorbed; the poll succeeds."""
+    calls = 0
+    transients: list[Exception] = [
+        httpx.RemoteProtocolError("server disconnected"),
+        httpx.ReadTimeout("gateway stalled"),
+    ]
+
+    async def flaky() -> dict:
+        nonlocal calls
+        calls += 1
+        if transients:
+            raise transients.pop(0)
+        return {"status": "running"}
+
+    result = await _retry_transient(
+        flaky, name="gateway status poll 'pw7-test'", is_transient=_gateway_is_transient
+    )
+    assert result == {"status": "running"}
+    assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
+
+
+@pytest.mark.asyncio
+async def test_gateway_poll_does_not_retry_terminal_4xx() -> None:
+    """A 4xx from the gateway is a real denial/routing error - never retried."""
+    calls = 0
+
+    async def not_found() -> dict:
+        nonlocal calls
+        calls += 1
+        raise _http_status_error(404)
+
+    with pytest.raises(httpx.HTTPStatusError) as excinfo:
+        await _retry_transient(
+            not_found,
+            name="gateway status poll 'pw7-test'",
+            is_transient=_gateway_is_transient,
+        )
+    assert excinfo.value.response.status_code == 404
+    assert calls == 1
+
+
+@pytest.mark.asyncio
+async def test_gateway_poll_retries_5xx_and_fails_loud_on_exhaustion() -> None:
+    """5xx is transient; persistent 5xx exhausts the budget and fails loud."""
+    calls = 0
+
+    async def always_500() -> dict:
+        nonlocal calls
+        calls += 1
+        raise _http_status_error(500)
+
+    with pytest.raises(AssertionError) as excinfo:
+        await _retry_transient(
+            always_500,
+            name="gateway status poll 'pw7-test'",
+            is_transient=_gateway_is_transient,
+        )
+    assert calls == _ENGINE_RETRY_MAX_ATTEMPTS
+    assert "gateway status poll" in str(excinfo.value)
+    assert "transient class exhausted" in str(excinfo.value)
+
+
 @dataclass(slots=True)
 class AcceptanceHarness:
     """Drives one acceptance case against the live loopback stack."""
@@ -594,9 +797,27 @@ class AcceptanceHarness:
         return resp
 
     async def _run_status(self, hc: httpx.AsyncClient) -> dict:
-        resp = await hc.get(f"{self.gateway_url}/v1/runs/{self.run_id}", timeout=30.0)
-        resp.raise_for_status()
-        return resp.json()
+        """Poll the run record under the shared bounded transient-retry policy.
+
+        A single dropped connection or read timeout on the gateway during a
+        long-lived poll loop is transient (observed live: a healthy run killed
+        at 118s by one ``RemoteProtocolError`` + ``ReadTimeout``); the same
+        policy the engine client uses absorbs it, while a 4xx still surfaces
+        immediately as a real routing/identity error.
+        """
+
+        async def attempt() -> dict:
+            resp = await hc.get(
+                f"{self.gateway_url}/v1/runs/{self.run_id}", timeout=30.0
+            )
+            resp.raise_for_status()
+            return resp.json()
+
+        return await _retry_transient(
+            attempt,
+            name=f"gateway status poll {self.run_id!r}",
+            is_transient=_gateway_is_transient,
+        )
 
     async def _assert_not_terminal(self, hc: httpx.AsyncClient) -> None:
         status = await self._run_status(hc)

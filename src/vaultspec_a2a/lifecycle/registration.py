@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import logging
 import os
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 from .procs_config import ProcsConfigError, load_procs_config
@@ -26,6 +27,8 @@ from .registry import (
     ProcRecord,
     RegistryOwnershipError,
     now_ms,
+    read_record,
+    record_path,
     refresh_last_seen,
     remove_record_if_owned,
     write_record,
@@ -81,19 +84,37 @@ def register_serve(
     from .manager import default_owner
 
     resolved_name = name or os.environ.get(NAME_ENV) or str(port)
+    resolved_owner = owner if owner is not None else default_owner()
     stamp = now_ms()
-    record = ProcRecord(
-        name=resolved_name,
-        role=role,
-        pid=os.getpid(),
-        port=port,
-        repo=repo,
-        workspace=workspace,
-        command=list(command or []),
-        started_at_ms=stamp,
-        last_seen_ms=stamp,
-        owner=owner if owner is not None else default_owner(),
-    )
+    existing = read_record(record_path(role, resolved_name, home=home))
+    if existing is not None:
+        # Convergence: a self-registering child (booted by serve_up) meets the
+        # record serve_up already committed. Self-registration owns only the runtime
+        # identity - pid, command, owner, heartbeat - so every operator-supplied
+        # field (log_path, repo, build_repo, workspace, build_sha,
+        # engine_service_json, internal_token_file, gateway_url, started_at_ms) is
+        # PRESERVED, never reset to a default. Clobbering log_path here once left
+        # gateway/worker logs dead mid-incident.
+        record = replace(
+            existing,
+            pid=os.getpid(),
+            command=list(command) if command else existing.command,
+            owner=resolved_owner,
+            last_seen_ms=stamp,
+        )
+    else:
+        record = ProcRecord(
+            name=resolved_name,
+            role=role,
+            pid=os.getpid(),
+            port=port,
+            repo=repo,
+            workspace=workspace,
+            command=list(command or []),
+            started_at_ms=stamp,
+            last_seen_ms=stamp,
+            owner=resolved_owner,
+        )
     # Registration is best-effort adoption, never a boot dependency: a registry
     # hiccup (a live foreign-owned record on the band port, a full disk) must not
     # take down a serving gateway/worker, so it degrades to "unregistered" - the

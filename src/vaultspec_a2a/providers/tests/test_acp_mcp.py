@@ -193,6 +193,47 @@ def test_config_home_servers_preserves_env_when_present() -> None:
     assert home["vaultspec-rag"]["env"] == {"K": "V"}
 
 
+def test_live_preset_harness_drives_read_only_rag_composition() -> None:
+    """The live preset's declared harness composes exactly the read-only rag surface.
+
+    End-to-end proof of the P03.S12 activation: the real ``vaultspec-adr-research``
+    preset's ``[team.harness]`` declaration flows through ``effective_harness`` into
+    the composition, so the opt-in makes rag grounding LIVE for its document roles.
+    Walks the full chain preset harness -> effective_harness -> harness allowlist ->
+    compose, and asserts the composed session advertises the vaultspec-rag stdio
+    server while exactly its READ tools join the autonomous allowlist - no write
+    verb anywhere, and no registry-only metadata leaking into the session payload.
+    """
+    from ...team.team_config import load_team_config
+
+    cfg = load_team_config("vaultspec-adr-research")
+    harness = cfg.effective_harness()
+    assert harness is not None
+    names = harness.mcp_servers
+    assert names == ["vaultspec-rag"]
+
+    allow = harness_allowed_tool_names(names)
+    assert allow == [
+        "mcp__vaultspec-rag__search_vault",
+        "mcp__vaultspec-rag__search_codebase",
+        "mcp__vaultspec-rag__get_code_file",
+    ]
+    # Read-only boundary: the rag server's write verbs never reach the allowlist.
+    assert not any("reindex" in name for name in allow)
+
+    model = AcpChatModel(command=["echo"], env_vars={})
+    composed = compose_harness_mcp_servers(model, names, allowed_tools=allow)
+    assert isinstance(composed, AcpChatModel)
+    advertised = {s.get("name") for s in composed.mcp_servers}
+    assert "vaultspec-rag" in advertised
+    rag_spec = next(s for s in composed.mcp_servers if s.get("name") == "vaultspec-rag")
+    assert rag_spec["command"] == "uvx"
+    # Registry-only ``tools`` metadata is stripped from the session launch spec.
+    assert "tools" not in rag_spec
+    # Exactly the composed read tools are auto-permitted (autonomous-only surface).
+    assert composed.allowed_tools == allow
+
+
 def test_config_home_servers_empty_when_none_registry_known() -> None:
     session = [{"name": "vaultspec-authoring", "command": "node"}]
     assert config_home_mcp_servers(session) == {}

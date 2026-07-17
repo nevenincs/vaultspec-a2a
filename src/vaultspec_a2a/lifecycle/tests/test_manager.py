@@ -21,6 +21,7 @@ import pytest
 
 from ..discovery import is_pid_alive
 from ..manager import (
+    _ENGINE_SERVICE_JSON_ENV,
     LifecycleError,
     _build_cwd_for,
     _serve_cwd_for,
@@ -31,6 +32,7 @@ from ..manager import (
     rebuild,
     render_command,
     render_env,
+    rerun,
     resolve,
     resume,
     serve_up,
@@ -335,6 +337,96 @@ def test_serve_env_carries_identity_and_rendered_role_env() -> None:
     assert env["VAULTSPEC_PROCS_OWNER"] == "sess-a"
 
 
+def test_serve_env_injects_engine_service_json_only_when_set() -> None:
+    role = RoleConfig(
+        name="worker-dev",
+        band=PortBand(18110, 18119),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=["x"],
+        env={"VAULTSPEC_WORKER_PORT": "{port}"},
+    )
+    with_seat = _serve_env(
+        role,
+        port=18110,
+        workspace="ws",
+        name="w1",
+        owner="s",
+        engine_service_json="C:/seat/service.json",
+    )
+    assert with_seat[_ENGINE_SERVICE_JSON_ENV] == "C:/seat/service.json"
+    assert with_seat["VAULTSPEC_WORKER_PORT"] == "18110"
+    # An unset seat injects nothing (records predating the field keep prior behaviour).
+    without = _serve_env(role, port=18110, workspace="ws", name="w1", owner="s")
+    assert _ENGINE_SERVICE_JSON_ENV not in without
+
+
+# A serve command that records the injected engine-discovery env var into a file,
+# then binds the port so serve_up sees a live listener - proving the var reached the
+# child process environment end to end.
+_ENV_PROBE_SERVE = (
+    "import socket,os,sys,time,pathlib;"
+    "pathlib.Path(sys.argv[2]).write_text("
+    "os.environ.get('VAULTSPEC_ENGINE_SERVICE_JSON',''));"
+    "s=socket.socket(socket.AF_INET,socket.SOCK_STREAM);"
+    "s.bind(('127.0.0.1',int(sys.argv[1])));s.listen();time.sleep(60)"
+)
+
+
+def test_serve_up_records_and_injects_engine_service_json(tmp_path) -> None:
+    sentinel = tmp_path / "seen-env.txt"
+    seat = str(tmp_path / "engine-service.json")
+    serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
+    config = _serve_config(serve, band=(18990, 18992))
+    record = serve_up(
+        "scratch",
+        "w",
+        home=tmp_path,
+        config=config,
+        engine_service_json=seat,
+        ready_timeout=15.0,
+    )
+    try:
+        assert record.engine_service_json == seat
+        persisted = read_record(record_path("scratch", "w", home=tmp_path))
+        assert persisted is not None
+        assert persisted.engine_service_json == seat
+        # The listener implies the child already wrote the sentinel (write precedes
+        # bind in the probe), so the var demonstrably reached the child env.
+        assert sentinel.read_text() == seat
+    finally:
+        tree_kill(record.pid)
+
+
+def test_resume_reproduces_recorded_engine_service_json(tmp_path) -> None:
+    sentinel = tmp_path / "resume-env.txt"
+    seat = str(tmp_path / "engine-service.json")
+    serve = [sys.executable, "-c", _ENV_PROBE_SERVE, "{port}", str(sentinel)]
+    config = _serve_config(serve, band=(18990, 18992))
+    # A died record carrying an engine seat: resume must re-inject it from the record,
+    # not depend on the resuming shell - the whole point of recording it.
+    write_record(
+        _record(
+            name="rev",
+            role="scratch",
+            pid=_dead_pid(),
+            port=18990,
+            engine_service_json=seat,
+        ),
+        home=tmp_path,
+    )
+    updated = resume("rev", home=tmp_path, config=config)
+    try:
+        assert updated.engine_service_json == seat
+        deadline = time.monotonic() + 10
+        while time.monotonic() < deadline and not sentinel.exists():
+            time.sleep(0.05)
+        assert sentinel.read_text() == seat
+    finally:
+        tree_kill(updated.pid)
+
+
 def test_serve_up_injects_the_port_into_the_child_env(tmp_path) -> None:
     # The child binds a port it learns ONLY from the injected env var (never argv),
     # so a live listener proves serve_up wired render_env into the child environment.
@@ -409,6 +501,83 @@ def test_rebuild_runs_the_build_in_the_build_repo_not_the_serve_repo(tmp_path) -
     assert sentinel.is_file()
     assert Path(sentinel.read_text()).resolve() == build_dir.resolve()
     assert not (serve_dir / "where.txt").exists()
+
+
+def _require_repo_config(serve: list[str], band: tuple[int, int]) -> ProcsConfig:
+    role = RoleConfig(
+        name="scratch",
+        band=PortBand(*band),
+        heartbeat=False,
+        staleness_ms=120000,
+        build=[],
+        serve=serve,
+        require_repo=True,
+    )
+    return ProcsConfig(resident={}, roles={"scratch": role})
+
+
+def test_serve_up_refuses_require_repo_role_without_repo(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _require_repo_config(serve, band=(18990, 18992))
+    # No repo passed: a data-seating role must refuse rather than default to the
+    # project root (the silent fallback that seated a dev engine on the resident's
+    # store). The refusal happens before any port reservation or spawn.
+    with pytest.raises(LifecycleError, match="requires an explicit repo"):
+        serve_up("scratch", "eng", home=tmp_path, config=config, ready_timeout=5.0)
+    assert list_records(tmp_path) == []
+    assert not list(tmp_path.glob("*.reserved"))
+
+
+def test_serve_up_allows_a_require_repo_role_with_an_explicit_repo(tmp_path) -> None:
+    serve = [sys.executable, "-c", _BIND_SERVE, "{port}"]
+    config = _require_repo_config(serve, band=(18990, 18992))
+    record = serve_up(
+        "scratch",
+        "eng",
+        home=tmp_path,
+        config=config,
+        repo=str(tmp_path),
+        ready_timeout=15.0,
+    )
+    try:
+        assert record.repo == str(tmp_path)
+    finally:
+        tree_kill(record.pid)
+
+
+def test_rerun_refuses_require_repo_role_before_killing(tmp_path) -> None:
+    # A real live process behind a require_repo record with an empty repo: rerun must
+    # refuse at entry (like serve_up/resume) WITHOUT first killing it - a lifecycle
+    # verb that fells the process and then declines to restart it is the bug.
+    child = _sleeper()
+    try:
+        config = _require_repo_config(
+            [sys.executable, "-c", "import time; time.sleep(60)"], band=(18990, 18992)
+        )
+        write_record(
+            _record(name="rr", role="scratch", pid=child.pid, port=18990, repo=""),
+            home=tmp_path,
+        )
+        with pytest.raises(LifecycleError, match="requires an explicit repo"):
+            rerun("rr", home=tmp_path, config=config)
+        # The refusal happened before tree_kill: the process is still alive.
+        assert is_pid_alive(child.pid)
+    finally:
+        tree_kill(child.pid)
+
+
+def test_resume_refuses_a_require_repo_role_without_an_explicit_repo(tmp_path) -> None:
+    config = _require_repo_config(
+        [sys.executable, "-c", "import time; time.sleep(60)"], band=(18990, 18992)
+    )
+    # A died record whose repo is empty: resume must refuse rather than re-seat data
+    # implicitly at the project root.
+    write_record(
+        _record(name="revive", role="scratch", pid=_dead_pid(), port=18990, repo=""),
+        home=tmp_path,
+    )
+    with pytest.raises(LifecycleError, match="requires an explicit repo"):
+        resume("revive", home=tmp_path, config=config)
 
 
 def test_serve_up_captures_build_repo_into_the_record(tmp_path) -> None:

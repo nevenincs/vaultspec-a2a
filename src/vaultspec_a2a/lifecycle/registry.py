@@ -25,7 +25,7 @@ from dataclasses import asdict, dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
-from .discovery import is_pid_alive
+from .discovery import is_pid_alive, port_has_listener
 
 if TYPE_CHECKING:
     from pathlib import Path
@@ -33,6 +33,7 @@ if TYPE_CHECKING:
     from .procs_config import ProcsConfig, RoleConfig
 
 __all__ = [
+    "NAME_ENV",
     "PortReservation",
     "ProcRecord",
     "RegistryOwnershipError",
@@ -62,6 +63,11 @@ RESERVATION_TTL_MS = 300_000
 _RESERVATION_SUFFIX = ".reserved"
 
 _PROCS_HOME_ENV = "VAULTSPEC_PROCS_HOME"
+# The managed-process name env var: written into a self-registering child's
+# environment by the lifecycle serve path and read back by the registration path.
+# Single home here (both modules already import from registry) so writer and reader
+# never drift.
+NAME_ENV = "VAULTSPEC_PROCS_NAME"
 
 
 class RegistryOwnershipError(RuntimeError):
@@ -97,6 +103,11 @@ class ProcRecord:
     last_seen_ms: int = 0
     log_path: str | None = None
     owner: str = ""
+    # The explicit engine discovery file (VAULTSPEC_ENGINE_SERVICE_JSON) the worker
+    # needs to find its engine. Recorded here - not committed to procs.toml, it is a
+    # machine path - and re-injected on every boot/resume so an engine reseat can no
+    # longer strand the worker via invisible shell-inherited env. Empty means unset.
+    engine_service_json: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -181,6 +192,7 @@ def _record_from_dict(data: dict[str, Any]) -> ProcRecord | None:
         last_seen_ms=_opt_int("last_seen_ms"),
         log_path=_opt_str_or_none("log_path"),
         owner=_opt_str("owner"),
+        engine_service_json=_opt_str("engine_service_json"),
     )
 
 
@@ -309,11 +321,12 @@ def _port_is_free(port: int) -> bool:
       exists to prevent.
     - Then a bind probe (no ``SO_REUSEADDR``): catches a port bound but not yet
       listening, which the connect probe would miss.
+
+    The connect probe is the shared ``discovery.port_has_listener`` primitive; the
+    connect-FIRST-then-bind order is load-bearing and must not change.
     """
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as probe:
-        probe.settimeout(0.5)
-        if probe.connect_ex(("127.0.0.1", port)) == 0:
-            return False
+    if port_has_listener(port, timeout=0.5):
+        return False
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         try:
             sock.bind(("127.0.0.1", port))

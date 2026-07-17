@@ -72,6 +72,11 @@ class RoleConfig:
     build: list[str]
     serve: list[str]
     env: dict[str, str] = field(default_factory=dict)
+    # A data-seating role (engine-dev seats its data store from the serve cwd) sets
+    # this so the lifecycle verbs refuse to serve it from an implicit default cwd -
+    # the silent project-root fallback once seated a dev engine's store on top of
+    # the resident engine's. An explicit repo is then mandatory at boot/resume.
+    require_repo: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -172,6 +177,9 @@ def _parse_role(name: str, raw: object) -> RoleConfig:
     staleness_ms = raw.get("staleness_ms", 120000)
     if not isinstance(staleness_ms, int) or isinstance(staleness_ms, bool):
         raise ProcsConfigError(f"role {name!r} staleness_ms must be an int")
+    require_repo = raw.get("require_repo", False)
+    if not isinstance(require_repo, bool):
+        raise ProcsConfigError(f"role {name!r} require_repo must be a bool")
     return RoleConfig(
         name=name,
         band=band,
@@ -180,6 +188,7 @@ def _parse_role(name: str, raw: object) -> RoleConfig:
         build=_parse_command(name, "build", raw.get("build")),
         serve=_parse_command(name, "serve", raw.get("serve")),
         env=_parse_env(name, raw.get("env")),
+        require_repo=require_repo,
     )
 
 

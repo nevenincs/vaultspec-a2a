@@ -170,6 +170,11 @@ class AcceptanceCase:
     required_env:      Environment variables that MUST be present for the lane to
                        run. A missing one is an honest skip-with-reason naming the
                        variable (a credential-gated lane), never a faked pass.
+    autonomous:        Dispatch the run with ``autonomous=True``, the headless
+                       target mode: the worker skips permission-callback wiring
+                       entirely (``worker.py`` autonomy branch), so a live model's
+                       read-only tool use (web search) proceeds without parking
+                       the run on a permission interrupt nothing answers.
     """
 
     label: str
@@ -181,6 +186,7 @@ class AcceptanceCase:
     gate_policy: dict[str, str] = field(default_factory=dict)
     profile_id: str = "team-defaults"
     required_env: tuple[str, ...] = ()
+    autonomous: bool = False
 
 
 def _research_adr_case(
@@ -191,6 +197,7 @@ def _research_adr_case(
     preset: str = _PRESET_DETERMINISTIC,
     profile_id: str = "team-defaults",
     required_env: tuple[str, ...] = (),
+    autonomous: bool = False,
 ) -> AcceptanceCase:
     return AcceptanceCase(
         label=label,
@@ -205,6 +212,7 @@ def _research_adr_case(
         gate_policy=gate_policy,
         profile_id=profile_id,
         required_env=required_env,
+        autonomous=autonomous,
     )
 
 
@@ -229,6 +237,17 @@ CASE_LIVE_MIXED = _research_adr_case(
     {"research": POLICY_AUTO, "adr": POLICY_HUMAN},
     preset=_PRESET_LIVE,
 )
+# The headless-autonomous live lane: AUTO at both gates AND autonomous dispatch,
+# so the worker never wires the permission-interrupt callback and a live model's
+# read-only tool use (web search) proceeds unattended. This is the product's
+# target headless mode; live-mixed keeps the interrupt-driven HUMAN coverage.
+CASE_LIVE_AUTO = _research_adr_case(
+    "live-auto",
+    "pw7-acceptance-liveauto",
+    {"research": POLICY_AUTO, "adr": POLICY_AUTO},
+    preset=_PRESET_LIVE,
+    autonomous=True,
+)
 # The provider-axis lanes. Both use the live preset with a mixed-provider
 # profile overlay and the same MIXED gate shape as live-mixed - the same acceptance
 # contract, a different provider under the authoring roles. `codex` runs live
@@ -251,7 +270,15 @@ CASE_ZAI = _research_adr_case(
     required_env=(_ZAI_CREDENTIAL_ENV,),
 )
 
-_ALL_CASES = (CASE_AUTO, CASE_HUMAN, CASE_MIXED, CASE_LIVE_MIXED, CASE_CODEX, CASE_ZAI)
+_ALL_CASES = (
+    CASE_AUTO,
+    CASE_HUMAN,
+    CASE_MIXED,
+    CASE_LIVE_MIXED,
+    CASE_LIVE_AUTO,
+    CASE_CODEX,
+    CASE_ZAI,
+)
 
 
 def _is_live_lane(case: AcceptanceCase) -> bool:
@@ -815,6 +842,8 @@ class AcceptanceHarness:
         }
         if feature is not None:
             body["feature_tag"] = feature
+        if self.case.autonomous:
+            body["autonomous"] = True
         resp = await hc.post(f"{self.gateway_url}/v1/runs", json=body, timeout=60.0)
         assert resp.status_code == expect, (
             f"run-start expected {expect}, got {resp.status_code}: {resp.text}"

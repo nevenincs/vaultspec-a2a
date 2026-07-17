@@ -30,6 +30,8 @@ from .discovery import SERVICE_JSON_ENV as SERVICE_JSON_ENV
 from .discovery import EngineEndpoint as EngineEndpoint
 from .discovery import resolve_engine as resolve_engine
 from .discovery import resolve_engine_with_retry as resolve_engine_with_retry
+from .feedback_reader import FeedbackContextReader as FeedbackContextReader
+from .feedback_reader import render_feedback_batch as render_feedback_batch
 from .lifecycle import VERDICT_APPROVED as VERDICT_APPROVED
 from .lifecycle import VERDICT_REJECTED as VERDICT_REJECTED
 from .lifecycle import VERDICT_REQUEST_CHANGES as VERDICT_REQUEST_CHANGES
@@ -77,6 +79,7 @@ __all__ = [
     "DocumentUnavailableError",
     "EngineEndpoint",
     "EngineUnavailableError",
+    "FeedbackContextReader",
     "GapSignal",
     "LifecycleEvent",
     "PhaseAuthoringSpec",
@@ -93,6 +96,7 @@ __all__ = [
     "is_valid_id",
     "mint_actor_token",
     "parse_sse_frame",
+    "render_feedback_batch",
     "resolve_engine",
     "resolve_engine_with_retry",
     "validate_id",

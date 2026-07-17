@@ -7,6 +7,7 @@ date: '2026-07-17'
 modified: '2026-07-17'
 related:
   - '[[2026-07-17-tool-cores-adr]]'
+  - '[[2026-07-17-tool-cores-plan]]'
   - '[[2026-07-17-tool-cores-research]]'
 ---
 
@@ -19,6 +20,10 @@ Auto-generated index of all documents tagged with `#tool-cores`.
 ### adr
 
 - `2026-07-17-tool-cores-adr` - `tool-cores` adr: `read-only grounding tools for graph document agents` | (**status:** `accepted`)
+
+### plan
+
+- `2026-07-17-tool-cores-plan` - `tool-cores` plan
 
 ### research
 

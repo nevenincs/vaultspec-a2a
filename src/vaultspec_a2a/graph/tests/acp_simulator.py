@@ -26,6 +26,10 @@ def main() -> None:
         "--record-session-new",
         help="If set, write the received session/new params to this JSON file",
     )
+    parser.add_argument(
+        "--record-initialize",
+        help="If set, write the received initialize params to this JSON file",
+    )
     args = parser.parse_args()
 
     for line in sys.stdin:
@@ -43,6 +47,9 @@ def main() -> None:
             continue
 
         if method == "initialize":
+            if args.record_initialize:
+                with open(args.record_initialize, "w", encoding="utf-8") as fh:
+                    json.dump(req.get("params", {}), fh)
             resp = {
                 "jsonrpc": "2.0",
                 "id": msg_id,
